@@ -430,7 +430,7 @@ function addAnnotations(
       if (a.opacity !== undefined && a.opacity < 1) annot.set(PDFName.of('CA'), context.obj(a.opacity));
       if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
     } else if (a.kind === 'measure') {
-      // A REAL dimension annotation (the king's class): /Line //PolyLine
+      // A dimension annotation uses /Line, /PolyLine, or /Polygon
       // //Polygon with /IT + /Measure, so other tools can RE-MEASURE it —
       // the value in /Contents is a convenience, the geometry + /Measure /C
       // factors are the contract. The AP mirrors ink's stroke look.
@@ -518,8 +518,8 @@ function addAnnotations(
       const extra: [string, unknown][] = [];
       const endings = a.lineEndings ?? (a.shapeType === 'arrow' ? ['None', 'OpenArrow'] : null);
       // An arrowhead at `at`, pointing away from `from`. Open = two strokes;
-      // Closed = a filled triangle (interior takes the fill colour, else the
-      // stroke colour — Acrobat's look).
+      // Closed uses a filled triangle; its interior uses the fill color or,
+      // when absent, the stroke color.
       const arrowhead = (at: [number, number], from: [number, number], style: string): string => {
         if (style === 'None') return '';
         const dx = at[0] - from[0];
@@ -916,8 +916,8 @@ function addAnnotations(
       if (a.symbolId) annot.set(PDFName.of('SpectraSymbol'), PDFName.of(a.symbolId));
       annot.set(PDFName.of('SpectraSymbolParts'), PDFHexString.fromText(partsToJson(parts)));
     } else if (a.kind === 'stamp' && a.imageData && stampImages.get(a.imageData)) {
-      // A custom IMAGE stamp: the appearance draws the pre-embedded raster —
-      // no border, no fill, the king's look. /Contents keeps the display name.
+      // A custom image stamp draws the pre-embedded raster without a border or
+      // fill. /Contents keeps the display name.
       const img = stampImages.get(a.imageData)!;
       const ap = context.register(
         context.stream(`q ${dispW} 0 0 ${dispH} 0 0 cm /Im0 Do Q`, {
@@ -1011,7 +1011,7 @@ function addAnnotations(
           rotation,
         );
         pdfQuads.push([qx0, qy0, qx1, qy1]);
-        // /QuadPoints in the widely-used Acrobat order: UL, UR, LL, LR.
+        // /QuadPoints in the widely supported order: UL, UR, LL, LR.
         quadPoints.push(qx0, qy1, qx1, qy1, qx0, qy0, qx1, qy0);
       }
       let content: string;

@@ -22,8 +22,8 @@ import {
 // Group mode has no skew/crop — the single-selection overlay owns those.
 //
 // Hit model: member polygons are painted ON TOP of the frame and take the
-// pointer — a modifier click toggles that member out of the group, a plain
-// click (no drag) collapses the selection to it (the king's behavior), and
+// pointer: a modifier click toggles that member out of the group, a plain
+// click without dragging collapses the selection to it, and
 // a plain drag moves the whole group. The frame body catches drags in the
 // gaps between members.
 

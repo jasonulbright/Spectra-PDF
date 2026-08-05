@@ -213,8 +213,8 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                         # against (form-scoped when nested), + the invoker's
                         # resources as the fallback — the exact pair the
                         # FontCache used above. 9.B1's paragraph family
-                        # classification needs form scope: a form's `F1` can
-                        # differ from the page's `F1` (review-caught).
+                        # classification needs form scope because a form's `F1`
+                        # can differ from the page's `F1`.
                         "resources": resources,
                         "fallback": fallback,
                     }
@@ -376,9 +376,8 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                         # Td translations are RELATIVE to the previous line
                         # matrix, so the one adjustment propagates through
                         # the rest of the chain automatically — adjusting
-                        # every subsequent Td compounded the shift (word 3
-                        # moved 2Δ, word 4 moved 3Δ — proven live with a
-                        # three-word probe before the fix).
+                        # every subsequent Td compounds the shift: word 3 moves
+                        # 2Δ and word 4 moves 3Δ.
                         gts.feed(operator, operands)
                         kept.append(
                             _instruction([tx + edit.delta_scaled, ty], operator)
@@ -411,9 +410,8 @@ def _rewrite_runs(pdf, instructions, resources, depth, fallback, edit, fonts, co
                 # BOTH paths fail closed on an unusable run font — the
                 # builder path previously skipped the guard, so a direct
                 # convert_text_run call on a refused-font run mixed an
-                # ESTIMATED old width into Δ and misplaced followers
-                # (review-caught; the UI never reaches it, the contract
-                # must hold anyway).
+                # estimated width into Δ and misplace followers. The UI does
+                # not currently reach this path, but the contract still holds.
                 if cap is None:
                     raise ValueError("no font is active for this text run")
                 if not cap.editable:

@@ -36,7 +36,7 @@ const TIE_EPS = 0.5;
  * Same at the end: jumping to page 49 of 50 saturates at maxScroll, which is
  * also where "scrolled to the bottom" (page 50) lands. So a jump records what
  * it MEANT, and that wins until the user scrolls away from it — which is how
- * the page box stops snapping back (review-caught, twice: first the tie-break,
+ * the page box stops snapping back (regression, twice: first the tie-break,
  * then the boundary clamps that "fixed" it).
  *
  * DELIBERATELY BEST-EFFORT, and it fails SAFE: any reindex drops it. As shipped,
@@ -52,7 +52,7 @@ const TIE_EPS = 0.5;
  * `18-phase3-polish.md` weighed and declined.
  *
  * For the JS page-tier COMMIT it is a COST decision, not an impossibility — be
- * honest about which (review-caught: the first draft of this note conflated
+ * honest about which (regression: the first draft of this note conflated
  * them). `workspace-commit.ts` `planCommit` builds the new file FROM the
  * pre-commit `PageRef[]`, 1:1 and in order, so the app does know the old-id →
  * new-position mapping at that moment; `COMMIT_PAGE_EDITS` simply doesn't carry
@@ -77,7 +77,7 @@ export interface JumpAnchor {
    * the scroll offset untouched too (deleting the page at the top keeps
    * scrollTop 0). Layout and scroll therefore both still "match" while the page
    * under the viewport has silently become a different one, so the anchor also
-   * pins WHICH page it meant (review-caught: a jump to page 2 followed by
+   * pins WHICH page it meant (regression: a jump to page 2 followed by
    * deleting page 1 reported "2 / 49" while showing page 1).
    */
   pageId: string;
@@ -98,7 +98,7 @@ const ANCHOR_EPS = 1;
  * clamps the DOM and fires the corrective scroll event. EVERY consumer of
  * scrollTop must clamp, or it computes against a position that doesn't exist:
  * the readout named a page over a blank pane, and the virtualization window
- * produced `first > last` and rendered NOTHING (both review-caught, one round
+ * produced `first > last` and rendered NOTHING (both regression, one round
  * apart — the second because only the readout was fixed the first time).
  */
 export function clampScrollTop(scrollTop: number, contentHeight: number, viewportH: number): number {
@@ -128,7 +128,7 @@ export function anchorHolds(
   // it, deleting pages AFTER the anchored page (which leaves the anchor's slot
   // and identity intact) shrinks the content while the stale scrollTop still
   // matches `anchor.scrollTop` bit-for-bit — so the anchor wrongly HELD and
-  // reported a page the pane was no longer showing (review-caught: the third
+  // reported a page the pane was no longer showing (regression: the third
   // unclamped consumer, found two rounds after the first two were fixed).
   const scrollTop = clampScrollTop(m.scrollTop, m.contentHeight, m.viewportH);
   return (
@@ -140,12 +140,11 @@ export function anchorHolds(
 
 // The reading view's zoom range, shared by the stepper and the presets.
 //
-// Deliberately WIDE — roughly Acrobat's own 8%–6400% in spirit. It must be,
-// because a preset computes a MEANINGFUL target and clamping is what makes it
+// Deliberately wide: a preset computes a meaningful target, and clamping makes it
 // lie: the earlier [0.1, 6] range (sized for the +/- stepper around 1.0)
 // silently broke Fit Width on any pane wider than ~4459px (a maximized 5K /
 // ultrawide) and Actual Size on any page under 96pt — a 2×1in label or ID card
-// rendered at ~133% while the command claimed "Actual Size" (review-caught).
+// rendered at ~133% while the command claimed "Actual Size" (regression).
 // The stepper and the presets MUST share one range: a preset that could exceed
 // the stepper's ceiling would make the next Ctrl+= zoom *out*.
 //
@@ -168,7 +167,7 @@ export const READING_PAGE_GAP = 24;
  * ONE constant for the whole reading view: a held Ctrl+= arrives as an OS key
  * repeat, and both the detail raster and the text layer must rebuild on the SAME
  * beat — two cadences would mean two rebuild storms per burst, competing for the
- * one pdf.js worker (review-caught: the text layer had reached for `raster.ts`'s
+ * one pdf.js worker (regression: the text layer had reached for `raster.ts`'s
  * `REBLIT_QUIET_MS`, which governs a different mechanism — the post-commit
  * re-blit batcher — and silently landed 20ms off the view's own timer).
  */
@@ -183,7 +182,7 @@ export const ZOOM_SETTLE_MS = 140;
  * off it. Past the limit the element silently clamps, so the tail of
  * the document becomes unreachable by scrolling AND `centerOn` can't land there
  * — while the page box keeps reporting the page it *meant*, so it reads e.g.
- * "800 / 1000" over page ~532, durably (review-caught: the widened MAX_ZOOM
+ * "800 / 1000" over page ~532, durably (regression: the widened MAX_ZOOM
  * made this reachable at ~533 pages, where the old ceiling needed ~5,683 and so
  * hid it).
  */
@@ -245,7 +244,7 @@ export function maxZoomFor(pageCount: number, widestWidthAtZoom1 = 0): number {
     // a degenerate but spec-legal page (aspect ≳488:1, e.g. MediaBox
     // [0 0 14400 26]) overflows on WIDTH at max zoom, and its far edge becomes
     // unreachable by horizontal scroll — defeating exactly what M4.1f exists for
-    // (review-caught: the height bound never looks at aspect).
+    // (regression: the height bound never looks at aspect).
     // Width scales linearly with zoom (the widest page is `widestWidthAtZoom1 *
     // zoom` wide), so the bound is just the extent over it.
     bounds.push(SAFE_ELEMENT_EXTENT / widestWidthAtZoom1);
@@ -289,7 +288,7 @@ export function naturalDisplayHeight(page: PageGeometry): number {
 }
 
 /**
- * Zoom that renders the page at its true size — Acrobat's Actual Size (Ctrl+1).
+ * Zoom that renders the page at its true size — Actual Size (Ctrl+1).
  *
  * `zoom` here is relative to the reading view's own base page height, NOT to the
  * PDF's natural size, so 100% is not zoom 1: a US Letter page is 792pt tall
@@ -300,8 +299,8 @@ export function actualSizeZoom(page: PageGeometry, readingBaseHeight: number): n
 }
 
 /**
- * Zoom that fits the page's width to the available pane width — Acrobat's Fit
- * Width (Ctrl+2).
+ * Zoom that fits the page's width to the available pane width — Fit Width
+ * (Ctrl+2).
  *
  * `widthAtZoom1` is the page's rendered width at zoom 1 — i.e.
  * `displayWidthAt(page, READING_BASE_HEIGHT)`, the SAME basis `maxZoomFor` takes.
@@ -312,7 +311,7 @@ export function actualSizeZoom(page: PageGeometry, readingBaseHeight: number): n
  * base heights, and was exact only because the solve and the render happened to
  * use the same formula — so when the render switched to the true aspect
  * (`displayWidthAt`) the cancellation silently broke and Fit Width undershot the
- * pane by a growing margin (review-caught, ~8.6px on a 5K pane). One basis, no
+ * pane by a growing margin (regression, ~8.6px on a 5K pane). One basis, no
  * cancellation to break. Returns 0 for degenerate input so callers clamp rather
  * than divide by zero.
  */

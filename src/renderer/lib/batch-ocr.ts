@@ -35,7 +35,7 @@ export interface BatchFileResult {
   /** Why the file was skipped, or an honesty note on a copied/ocr file —
    * e.g. scanned pages where recognition found no text. A mixed file (some
    * scanned pages recognized, some blank) carries the shortfall here so
-   * "made searchable" never silently overstates (review-caught). */
+   * "made searchable" never silently overstates (regression). */
   reason?: string;
   /** Where the ORIGINAL was moved to, when a moved/error root was given
    * (Phase 12 requests 2/3). Absent means the source is where it always was. */

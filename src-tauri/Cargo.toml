@@ -15,7 +15,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [features]
-# TRIAL (2026-07-30): an in-app W3C WebDriver server, so e2e needs no
+# Optional in-app W3C WebDriver server, so e2e needs no
 # msedgedriver, no tauri-driver, and no WebView2 remote-debugging port -- which
 # is the only way past the v150 elevated-host hardening that keeps CI's e2e job
 # disabled (see .github/workflows/ci.yml and DECISIONS).

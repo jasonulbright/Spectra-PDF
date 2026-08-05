@@ -83,7 +83,7 @@ export function PageTextLayer({
         // constructor stamps on the container, and pdf.js's OWN stylesheet
         // rotates it (we carry those rules — see `.textLayer[data-main-rotation]`
         // in styles.css; without them the text sits unrotated over a rotated
-        // raster and selection grabs the wrong glyphs — review-caught).
+        // raster and selection grabs the wrong glyphs — regression).
         const spin = (page.rotate + rotation) % 360;
         const base = page.getViewport({ scale: 1, rotation: spin });
         // Uniform scale: the cell keeps the page's aspect, so either axis gives

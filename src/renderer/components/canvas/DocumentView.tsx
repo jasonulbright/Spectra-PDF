@@ -319,7 +319,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // which isn't mounted here. So after a zoom, bump this a beat later (debounced
   // — a burst of Ctrl+= re-details once) and fold it into the version handed to
   // each PageCell, so the visible page re-rasters crisp at the new size instead
-  // of staying a CSS-stretched (blurry) base raster (review-caught). Keyed on the
+  // of staying a CSS-stretched (blurry) base raster (regression). Keyed on the
   // EFFECTIVE zoom, so a re-derived clamp re-details too.
   const [zoomVersion, setZoomVersion] = useState(0);
   useEffect(() => {
@@ -348,7 +348,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // jitter as you scroll past a wide page.
   // Exact, NOT ceil'd: CSS takes fractional widths, and rounding UP can make the
   // spacer a fraction of a pixel wider than a pane the page genuinely fits,
-  // opening a scrollbar over nothing (review-caught — a ~0.2px band of pane
+  // opening a scrollbar over nothing (regression — a ~0.2px band of pane
   // widths, reachable under display scaling).
   const contentWidth = widestAtBase * (pageHeight / READING_BASE_HEIGHT);
 
@@ -368,7 +368,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // they fall through to the focused scroll region). But NEVER steal focus from
   // a field the user is editing — this mounts on every doc switch (keyed) and a
   // guard-exempt Ctrl+Tab can fire it while a nav-panel input or the page box
-  // has focus (review-caught). A button/body focus (e.g. the toggle pill) is
+  // has focus (regression). A button/body focus (e.g. the toggle pill) is
   // fine to take over from. preventScroll: taking focus mustn't jump the page.
   useEffect(() => {
     // Reuse the ONE canonical inline-edit guard (commands/keymap.ts) rather than
@@ -398,7 +398,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   // A page-layout switch remaps rows under a STATIONARY scrollTop — rowH and
   // viewportH both survive it, so anchorHolds' geometry checks cannot see the
   // change and a pre-switch anchor would keep reporting a page the pane no
-  // longer shows (review-caught HIGH: jump to 5, switch two-up → the box said
+  // longer shows (regression: jump to 5, switch two-up → the box said
   // "5" over pages 8-9, durably, and fitWidth sized the wrong spread). Treat a
   // layout change exactly like a resize: drop the anchor. Render-time ref
   // write, so it lands before the reporter effect (whose deps include the
@@ -409,8 +409,8 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     prevLayoutKeyRef.current = layoutKey;
     jumpAnchorRef.current = null;
   }
-  // The page the reader is on, mirrored for the zoom presets: Acrobat's Actual
-  // Size / Fit Width act on the CURRENT page (pages in one file can differ in
+  // The page the reader is on, mirrored for the zoom presets. Actual Size and
+  // Fit Width act on the current page because pages in one file can differ in
   // size and rotation), and the presets are imperative-handle calls, not
   // renders, so they need it off a ref rather than through the parent.
   const currentPageRef = useRef(1);
@@ -508,8 +508,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   );
 
   // Both presets act on the CURRENT page — pages within one file can differ in
-  // size and rotation, so "actual size" and "fit width" are per-page answers,
-  // exactly as they are in Acrobat.
+  // size and rotation, so "actual size" and "fit width" are per-page answers.
   // The EFFECTIVE pages — currentPage() feeds the zoom presets' sizing math,
   // which must see the rotation the display shows.
   const pagesRef = useRef(viewPages);
@@ -534,7 +533,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
 
   // Hand mode's drag-scroll (M6.2). Window-level move/up listeners — the
   // canvas pattern — with the full usePageDrag session hygiene, all
-  // review-caught: a `blur` teardown (release outside the window otherwise
+  // regression: a `blur` teardown (release outside the window otherwise
   // leaks the listeners), an unmount teardown (Ctrl+Tab mid-drag unmounts
   // this view with the listeners live), an Escape interceptor (the Escape
   // chain's first scope is "cancel the in-flight drag"), and a cancel when
@@ -567,7 +566,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       popEscape();
       handDragTeardown.current = null;
       // Back to the steady-state grab — '' would also clear React's own
-      // inline cursor until the next render (review-caught). The
+      // inline cursor until the next render (regression). The
       // tool-change effect above tears down BEFORE React re-renders the
       // style prop away, so 'grab' never outlives hand mode visibly.
       el.style.cursor = 'grab';
@@ -594,7 +593,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     const el = scrollRef.current;
     if (!page || !el) return;
     // clientWidth already excludes a vertical scrollbar; the gutter keeps the
-    // page off the pane's edges the way Acrobat's Fit Width does. In two-up the
+    // page off the pane's edges. In two-up the
     // unit being fitted is the current SPREAD (both widths + the inner gap).
     const available = el.clientWidth - FIT_WIDTH_GUTTER;
     const { pageLayout: lay, twoUpCover: cover } = layoutRef.current;
@@ -862,7 +861,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     // MUST be the same widths PageCell renders (exact aspect — `textLayer` is
     // set below). This row is what CENTRES its content, so a divergent formula
     // offsets it in the pane and over-reports the scrollable width — the
-    // round-2 drift, relocated one level up (review-caught). Two-up: the row
+    // round-2 drift, relocated one level up (regression). Two-up: the row
     // width is both cells + the inner gap; cells sit flex-side-by-side inside.
     const width =
       rowPageIdxs.reduce((acc, i) => acc + displayWidthAt(viewPages[i], pageHeight), 0) +

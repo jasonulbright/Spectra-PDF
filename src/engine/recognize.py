@@ -1,21 +1,16 @@
-"""Headless OCR recognition (Phase 12 step 3) -- the op that retires tesseract.js.
+"""Headless OCR recognition through the native engine.
 
-Recognition used to live in the WebView as tesseract.js WASM, which is why
-batch OCR had no CLI arm and why scheduling was impossible: a run with no window
-has nothing to host a WASM recognizer in. This module is that capability moved
-to the engine, and it is now the app's ONLY recognizer -- the GUI routes here
-too. Two recognizers that can disagree about the same page is a
-silent-degradation defect, not a migration convenience.
+This is the app's only recognizer, shared by GUI, CLI, batch, and scheduled
+runs. Keeping recognition in the engine supports headless operation and avoids
+multiple recognizers disagreeing about the same page.
 
 The pipeline is two vendored tools, both already required by the product:
 
     page -> Ghostscript raster (PNG, 300 dpi) -> tesseract TSV -> word boxes
 
 Coordinates: tesseract reports boxes in IMAGE PIXELS. This returns them
-NORMALISED to fractions of the rendered page (x, y, w, h in 0..1, y measured
-from the TOP), which is byte-for-byte the contract tesseract.js produced -- so
-every existing consumer (the search index, "Make searchable", the batch driver)
-keeps its own display->PDF conversion and nothing downstream had to change.
+normalized to fractions of the rendered page (x, y, w, h in 0..1, y measured
+from the top). Consumers retain responsibility for display-to-PDF conversion.
 Doing the PDF-space conversion here instead would have been a second geometry
 idiom for the same job; `lib/pdfx-build.displayRectToPdf` stays the one recipe.
 """

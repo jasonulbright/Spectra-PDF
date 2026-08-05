@@ -4,8 +4,7 @@ Same arm's-length-subprocess posture as compress/grayscale/PDF-A (the AGPL
 boundary is the process boundary). mswinpr2 renders through the installed
 Windows printer driver, so anything the driver can print, this can.
 
-The O2 contract (2026-07-31) widens the original {file, printer, gs_path,
-pages, copies, fit} to the full dialog: subset/reverse/collate, duplex,
+The operation supports the full print dialog: subset, reverse, collate, duplex,
 paper size, orientation, color, comments modes, print-as-image, and the
 layout modes (multiple-per-sheet, booklet, poster, custom scale). Two
 mechanism families implement it:
@@ -74,14 +73,14 @@ from .validate import validate_pdf
 # native resolution; generous, but not unbounded.
 JOB_TIMEOUT_S = 600
 
-# O4: was 99; Acrobat's own cap. Sequential jobs make large counts slow but
-# correct — the count is explicit user intent, never silently clamped.
+# Sequential jobs make large copy counts slow, but the count is explicit user
+# intent and must never be silently clamped below this documented limit.
 MAX_COPIES = 999
 
 # Scale-mode switches (§ 3.4's fit/actual). Both pin the media to the
 # printer's paper (-dFIXEDMEDIA); the PDF page-size request must never win
 # over the physical paper.
-#   fit    — scale the page to the paper (Acrobat's "Fit"). Probe-pinned
+#   fit    — scale the page to the paper. Probe-pinned
 #            bonus: FitPage also auto-rotates a landscape page onto portrait
 #            media, which is what makes orientation="auto" free here.
 #   actual — 1:1 at the printable origin; content larger than the paper
@@ -355,7 +354,7 @@ def print_pdf(
         paper: DMPAPER id from the printer's capability list; None = default.
         orientation: "auto" | "portrait" | "landscape".
         color: "printer" | "color" | "gray" (driver dmColor).
-        annots: "all" | "document" | "stamps" (Acrobat's Comments & Forms).
+        annots: "all" | "document" | "stamps".
         as_image / image_dpi: rasterize before spooling.
         layout: "single" | "nup" | "booklet" | "poster".
         sheet_width/height: PORTRAIT paper size in points — required for the

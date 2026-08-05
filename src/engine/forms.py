@@ -3,9 +3,9 @@
 The GUI fill is renderer-side pdf-lib, chosen because filling is really an
 appearance-stream problem: a set /V with no regenerated /AP renders blank in
 most viewers (docs/architecture/08-phase2f-forms.md). This module is the
-engine-side implementation that gives the CLI parity
-(docs/architecture/14-phase2l-gui-cli-parity.md). The parity target is
-pdf-lib's BEHAVIOR (what the GUI produces), not full Acrobat semantics:
+engine-side implementation that gives the CLI the same behavior as the GUI
+(docs/architecture/14-phase2l-gui-cli-parity.md). The target is pdf-lib's
+behavior, not every form variation found in arbitrary PDFs:
 
 - Checkboxes/radios need no appearance generation — their widgets already
   carry every state in /AP /N; filling sets /V to the on-state name and each
@@ -157,8 +157,8 @@ def _walk_fields(node, prefix: str, inherited: dict, depth: int, out: list) -> N
                 continue
     if kids is not None and has_field_kids:
         # Recurse ONLY into kids that are themselves named fields. A /T-less
-        # kid is a WIDGET of this node, never an independent field — even when
-        # it carries a stray /FT (review-caught: such kids each became a
+        # kid is a widget of this node, never an independent field, even when
+        # it carries a stray /FT. Treating it independently creates a
         # duplicate _Field under the parent's name, and the fill's name→field
         # dict silently dropped all but the last, leaving real widgets
         # unfillable). Mixed containers stay terminal for their widget kids.
@@ -274,7 +274,7 @@ def _radio_on_states(field: _Field) -> list[str]:
 
 
 def _radio_display_options(field: _Field) -> list[str]:
-    """User-facing radio options. With /Opt (the pdf-lib/Acrobat indexed
+    """User-facing radio options. With /Opt (the indexed-widget
     convention: widget on-states are indices, /Opt holds the display strings)
     the display strings; otherwise the raw on-state names."""
     opt = field.attr("/Opt")
@@ -380,8 +380,8 @@ def _page_index_maps(pdf) -> tuple[dict, dict]:
                     continue
                 if og in annot_map:
                     # The SAME widget object listed in ≥2 pages' /Annots is
-                    # malformed (reachable via arbitrary third-party input the
-                    # CLI reader must tolerate — gauntlet MEDIUM). Never silently
+                    # malformed and reachable through arbitrary input the CLI
+                    # reader must tolerate. Never silently
                     # pick a page: mark it ambiguous (None) so `_widget_geometry`
                     # falls back to the spec-authoritative /P, else reports
                     # unplaced — no silent misattribution.
@@ -576,9 +576,9 @@ def _dr_font(pdf: pikepdf.Pdf, font_name: str) -> tuple[str, "pikepdf.Object", b
 
     When the requested resource is MISSING from /DR, the fallback is a
     standard Helvetica registered under the name "Helv" in the appearance
-    stream's OWN /Resources only — never under the original name, and never
-    written into the shared /DR (review-caught: registering Helvetica as
-    e.g. "TiRo" in /DR silently rendered the wrong face while CLAIMING the
+    stream's own /Resources only, never under the original name or in shared
+    /DR. Registering Helvetica as e.g. "TiRo" in /DR renders the wrong face
+    while claiming the
     right one, for every field in the document that referenced that name).
     The substitution is honest (the stream both uses and names Helvetica)
     and reported to the caller via the `substituted` flag."""
@@ -763,9 +763,9 @@ def _text_appearance(
         # font`/`encode`/`width_1000` all reject a character not in that subset.
         # Layout-only control/separator chars are never glyphs; validation
         # excluded them from coverage, so flatten them AWAY of the glyph set
-        # here (LF kept for multiline wrapping) or a validated multi-paragraph
-        # value would crash inside the fill (gauntlet HIGH — broadened to all
-        # control chars, not just \n/\r/\t, matching S4).
+        # here (LF kept for multiline wrapping), or a validated multi-paragraph
+        # value can crash inside the fill. Normalize every layout control, not
+        # only newline, carriage return, and tab.
         layout_value = flatten_control_chars(value, keep_newline=True)
         # T25c: a right-to-left value shapes and reorders through the shared
         # builder; everything else keeps the shipped single-`Tj` emission
@@ -894,8 +894,7 @@ def _text_value_problem(name: str, text: str, da: str | None, font_dir: str) -> 
         )
     # Layout control chars (\t/\x0b/U+2028/…) are flattened to spaces before the
     # appearance embeds the font (below), so they must NOT count as "missing"
-    # here — else a value the king renders fine would be refused (S4 gauntlet's
-    # broad-control-char lesson, applied to the shared form path too).
+    # here, or a renderable value would be refused before normalization.
     missing = _face_missing(face, flatten_control_chars(text, keep_newline=True))
     if missing:
         pretty = " ".join(f"'{c}'" for c in sorted(set(missing)))
@@ -1019,9 +1018,8 @@ def fill_form_fields(
             if ftype == "text":
                 text = str(value)
                 # Encodability is part of validation, not a mutation-time
-                # surprise: the "list ALL problems" contract must include the
-                # appearance-encoding failures (review-caught: two bad fields
-                # reported one problem at a time across two attempts). FC1: a
+                # The "list all problems" contract includes every appearance
+                # encoding failure so multiple bad fields report together. A
                 # non-WinAnsi value is fillable via an embedded Unicode font
                 # when `font_dir` covers it, else refused here.
                 prob = _text_value_problem(name, text, _field_da(field, acro), font_dir)
@@ -1120,8 +1118,8 @@ def fill_form_fields(
                         # Each widget lights via ITS OWN on-state name —
                         # multi-widget checkboxes can legitimately use
                         # different names ("Yes"/"On") for the same logical
-                        # field (review-caught: gating on one cached name
-                        # left sibling widgets visually unchecked).
+                        # field. Gating on one cached name leaves sibling
+                        # widgets visually unchecked.
                         widget_on = _widget_on_state(widget) or on
                         widget["/AS"] = Name("/" + widget_on)
                     else:
@@ -1152,8 +1150,8 @@ def fill_form_fields(
                     # FC4 multi-select list box: value = [(export, /Opt index)].
                     exports = [e for e, _i in value]
                     indices = sorted(i for _e, i in value if i >= 0)
-                    # A multi-value /V REQUIRES the MultiSelect flag or the field
-                    # is spec-non-conformant (pdf-lib auto-promotes; gauntlet).
+                    # A multi-value /V requires the MultiSelect flag or the field
+                    # is non-conforming. pdf-lib promotes it automatically.
                     if len(exports) > 1 and not (field.flags & FF_MULTISELECT):
                         field.obj["/Ff"] = int(field.flags) | FF_MULTISELECT
                     field.obj["/V"] = pikepdf.Array([pikepdf.String(e) for e in exports])
@@ -1201,8 +1199,8 @@ def fill_form_fields(
 
     # O5b: filling a SIGNED document lands as an incremental append —
     # original bytes verbatim + one revision carrying the value/appearance
-    # updates — so existing signatures keep verifying (the fill-and-sign
-    # workflow the king supports). Flatten removes widgets, which the
+    # updates, so existing signatures keep verifying. Flatten removes widgets,
+    # which the
     # transplant refuses by design; that path keeps today's rewrite (a
     # flatten inherently destroys what the signature covers).
     from engine.incremental import finalize_preserving_signatures

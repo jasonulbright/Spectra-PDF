@@ -18,10 +18,8 @@ revision carrying the delta. The signed byte range is untouched by
 construction; the module asserts the prefix property before replacing
 anything.
 
-Scope — what may differ between original and modified (matching what the
-king itself permits on a signed document without invalidating, i.e. the
-DocMDP P=3 ceiling plus page addition, which ISO 32000 permits as an
-incremental update):
+Scope — what may differ between original and modified under the DocMDP P=3
+ceiling, plus page addition as permitted by ISO 32000 incremental updates:
 
   - per-page /Annots membership, order, and annotation content (add,
     modify, remove — appearance streams included),

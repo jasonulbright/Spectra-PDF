@@ -718,7 +718,7 @@ class TestWidthsGuardHardening:
     """9.B3 review round: the /Widths subset guard vs degenerate arrays."""
 
     def test_empty_widths_array_does_not_collapse_encodability(self):
-        # Review-caught HIGH: /Widths [] inverted the guard range and
+        # regression: /Widths [] inverted the guard range and
         # emptied the encode map while char_width fell to the default —
         # editable=True with nothing encodable and every advance wrong.
         import pikepdf
@@ -742,7 +742,7 @@ class TestWidthsGuardHardening:
         assert cap.char_width("A") == pytest.approx(600.0)
 
     def test_partial_widths_merge_keeps_program_advances(self):
-        # Review-caught: a partial /Widths discarded real hmtx advances
+        # regression: a partial /Widths discarded real hmtx advances
         # for uncovered codes (decoded_width fell to the 500 default).
         # Declared entries still win per-code; the rest keep hmtx truth.
         import pikepdf

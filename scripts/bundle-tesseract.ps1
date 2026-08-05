@@ -22,7 +22,7 @@ param(
 )
 
 # Pinned installer checksum -- update deliberately alongside $TessVersion.
-# Verified 2026-07-26 against the file actually served (50,175,248 bytes).
+# Verified against the served 50,175,248-byte installer.
 $ExpectedSha256 = "C885FFF6998E0608BA4BB8AB51436E1C6775C2BAFC2559A19B423E18678B60C9"
 
 $Url = "https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-$TessVersion.exe"
@@ -122,7 +122,7 @@ New-Item -ItemType Directory -Force $Work | Out-Null
 
 Write-Host "Downloading $Url..."
 # A User-Agent is REQUIRED: this host answers PowerShell's default UA with
-# 403 Forbidden (verified 2026-07-26 -- the same URL serves fine to curl). Do
+# 403 Forbidden while the same URL serves successfully to curl. Do
 # not "simplify" this away; the failure is a Forbidden that reads like the file
 # having moved.
 try {

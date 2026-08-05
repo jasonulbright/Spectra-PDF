@@ -110,10 +110,8 @@ describe('vertical paragraph reflow (Phase 9.B4b)', () => {
 
     // Editor: substitution restyles are LIVE for vertical text (9.T4 —
     // Noto Sans CJK carries `vert`/`vrt2` and `vmtx`, and the shaper can
-    // reach them). This assertion is the INVERSION of the shipped one:
-    // through 2026-08-04 the three controls were disabled with a reason
-    // ("the bundled faces are horizontal") that T4 had already made false,
-    // and this spec pinned that stale gate green. What stays unavailable
+    // reach them). The controls must remain enabled for capable fonts. What
+    // stays unavailable
     // is stated as the absence it is — the three BUNDLED families (all
     // horizontal; a column resolves the CJK face whichever is picked) and
     // the OpenType feature toggles (a vertical embed carries no feature

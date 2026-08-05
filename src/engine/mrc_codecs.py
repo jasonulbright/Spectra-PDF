@@ -1,12 +1,11 @@
-"""Layer codecs for the MRC pass (O8 slice B).
+"""Layer codecs for mixed-raster-content compression.
 
 MRC splits a scanned page into three layers — a 1-bit text STENCIL at source
 resolution, a low-resolution FOREGROUND carrying ink colour, and a
 low-resolution BACKGROUND carrying the paper. This module owns the encoding of
-each, and nothing else: segmentation and page assembly are `engine/mrc.py`
-(slice C).
+each, and nothing else; segmentation and page assembly are in `engine/mrc.py`.
 
-THE MASK CONVENTION, stated once because every function here depends on it:
+Mask convention:
 a mask is a Pillow mode-"1" image in which **0 is INK and 1 is PAPER**. That is
 what `Image.new("1", size, 1)` plus `fill=0` drawing produces, and what a
 threshold of the form `gray < threshold` produces after `.convert("1")`. It is
@@ -14,7 +13,7 @@ NOT negotiable per call site — a mask handed in the other polarity encodes to 
 perfectly valid stream of the negative image, and the failure renders as a
 solid black page that OCR still returns plausible words from.
 
-FOUR RULES, each of which was a live bug before it was a rule:
+Correctness constraints:
 
 1. **A Pillow group-4 TIFF is MULTI-STRIP by default and each strip RESTARTS
    the G4 reference line.** Pillow wrote 17 strips of 205 rows for a 3300-row
@@ -30,10 +29,8 @@ FOUR RULES, each of which was a live bug before it was a rule:
    were established by encoding, embedding and rendering with an independent
    decoder — `verify_mask_stream` is that check, kept as production code so it
    runs on every real mask and not only in a probe.
-3. **Refinement coding is never emitted.** jbig2enc's own README records that
-   `-r` crashes Acrobat. Refusing to write a stream that crashes the
-   industry-standard reader is correctness, not a boundary, so the flag has no
-   parameter to reach it.
+3. **Refinement coding is never emitted.** jbig2enc's README records reader
+   crashes with `-r`, so the flag has no parameter to reach it.
 4. **Symbol mode substitutes glyphs, and that is a user-visible property.**
    jbig2enc's `-s` matches visually similar shapes and stores one
    representative — the mechanism behind the well-known scanner

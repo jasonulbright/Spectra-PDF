@@ -86,8 +86,8 @@ export interface AppCommandHandlers {
   /** Insert another file's pages after the page being read (Ctrl+Shift+I,
    * § 9.2) — the native picker, then the same import machinery. */
   insertPagesFromFile(): Promise<void>;
-  /** Combine Files (2026-07-18): append picked PDFs' pages to the END of
-   * the active document — the menu-named path to what board drag-merging
+  /** Combine Files appends picked PDF pages to the end of the active document,
+   * providing a menu path to the same import machinery as board drag-merging
    * does (same import machinery, page-tier undoable). */
   combineFiles(): Promise<void>;
   /** Create PDF from PostScript (Phase 8): open the distill dialog. */
@@ -138,7 +138,7 @@ export interface CanvasServices {
    * document if needed) and land on the page — the PageInspector's
    * replacement. Uses the pending-jump slot, so it is safe to call from any
    * view mode; `jumpToPage` after a mode dispatch is NOT (stale-ref fast
-   * path — review-caught). */
+   * path — regression). */
   openPageForReading(pageId: string): void;
   /** The floating Find bar (2m). */
   find: {

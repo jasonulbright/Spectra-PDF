@@ -11,8 +11,7 @@ import { tChrome, tToolDescription, tToolTitle } from '../i18n';
 //
 // This replaces the rail's 21-item accordion of engine operations. The rail
 // asked "which operation do you want?"; the Tools Center asks "what are you
-// trying to do?" — which is the question a user actually arrives with, and the
-// one Acrobat's own Tools tab asks.
+// trying to do?" — the question a user actually arrives with.
 
 export interface ToolsCenterProps {
   onOpenTool: (id: ToolId) => void;

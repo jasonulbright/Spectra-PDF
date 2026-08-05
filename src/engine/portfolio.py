@@ -12,8 +12,8 @@ adds the portfolio-shaped surface:
   has at least one real page), a minimal `/Collection << /Type /Collection
   /View /D >>` (details view — the only portfolio presentation modern
   viewers still honour), and each source embedded. Duplicate basenames get
-  auto-suffixed "name (2).ext" (two same-named files from different folders
-  is ordinary; the king dedupes the same way).
+  auto-suffixed "name (2).ext" because different source folders commonly
+  contain files with the same name.
 - `make_portfolio`: convert an EXISTING document by adding `/Collection`;
   its attachments (if any) become the members.
 - `update_portfolio_member`: replace a member's bytes from a disk file,
@@ -24,8 +24,8 @@ adds the portfolio-shaped surface:
   open-member primitive (the renderer extracts then opens the real file
   through the one open funnel).
 
-The cover sheet is pure ASCII boilerplate (label + member count), like the
-king's own generated cover sheets — it never draws user text, so it needs no
+The cover sheet is pure ASCII boilerplate (label + member count). It never
+draws user text, so it needs no
 font machinery beyond standard-14 Helvetica. The user's title lands in the
 document Info `/Title` in full Unicode; the panel and viewers read it there.
 """
@@ -191,8 +191,10 @@ def _dedupe_name(name: str, used: set) -> str:
 
 
 def _draw_cover(pdf: "pikepdf.Pdf", member_count: int) -> None:
-    """One generated Letter cover page: ASCII boilerplate + member count only
-    (the king's cover sheets are boilerplate too; the title lives in /Title)."""
+    """Generate a Letter cover page containing boilerplate and a member count.
+
+    The user-supplied title lives in /Title rather than page content.
+    """
     page = pdf.add_blank_page(page_size=(_PAGE_W, _PAGE_H))
     plural = "file" if member_count == 1 else "files"
     lines = [

@@ -131,7 +131,7 @@ export function placementDocsCurrent(
 }
 
 // ---- fill-target resolution across the gate commit ------------------------
-// (review-caught HIGH) The fill's snapshot runs the commit gate, which can
+// (regression) The fill's snapshot runs the commit gate, which can
 // bake a PENDING IMPORT into the file — and the 2n.4(a) carry resolves
 // field-name collisions by renaming (name -> name+1). A pending value typed
 // against the target's own field, keyed by name alone, could then silently

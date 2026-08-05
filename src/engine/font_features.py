@@ -17,8 +17,8 @@ contextual features are deliberately NOT applied: they need a shaping engine,
 and a partial hand-rolled shaper would style some sequences and silently miss
 others (the § I.0 silent-partial class).
 
-SOURCE — a feature applies from WHATEVER font already carries it (the owner's
-"apply in place" rule): a document set in a font with `smcp` gets real small
+SOURCE — a feature applies from whichever font already carries it: a document
+set in a font with `smcp` gets real small
 caps from its own font. When the current font lacks the feature the caller
 requires an explicit switch to a bundled face that has it (Libertinus Serif).
 """

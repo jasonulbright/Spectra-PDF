@@ -1,38 +1,9 @@
-"""ONE invocation of the bundled LibreOffice — both directions (P22 slice B).
+"""Run bundled LibreOffice conversions in either direction.
 
-`office_export.py` (PDF → docx/rtf/odt/html) had the only soffice runner in the
-tree. P22 points LibreOffice the other way (Office → PDF), so the runner is
-extracted here and BOTH directions share it. That is not tidiness: three of the
-four things this module adds are defects the export direction has today and
-would otherwise keep.
-
-**1. The conversion is OFFLINE, and that is seeded, not assumed.** Headless
-soffice FETCHES a remote resource referenced by a converted document — a live
-local listener recorded the GET, user-agent `LibreOffice 26.2.1.2 …  Schannel`
-(brief 41 § 1.6). Feeding it arbitrary user-supplied Office and HTML — which is
-exactly what Create PDF does — makes an untrusted document able to make an
-outbound request from the user's machine, on open: a tracking-pixel / SSRF
-shape, unacceptable in an app whose whole posture is offline. The measured fix
-is a throwaway profile seeded with `BlockUntrustedRefererLinks = true`: **0
-hits, no added latency**. `LinkUpdateMode = 0` alone does NOT block (measured,
-and it is the setting one would reach for by name) — it is seeded anyway
-because it stops the link *refresh* path. A dead proxy also blocks but costs
-~2 s of connect timeout on its own; together with the block it costs nothing,
-so it rides along as belt-and-braces.
-
-**2. A zero exit code is not a success signal.** Measured: a ZERO-BYTE `.docx`
-converts with rc=0 into a plausible 1-page 6 459 B PDF. So the source is
-validated before the call and the output is READ after it.
-
-**3. The budget is derived, not fixed.** The old flat 240 s is the § 5.5 defect
-the Ghostscript family already fixed: a fixed wall clock fails on exactly the
-documents the feature exists for. The floor stays 240 s — the defect was never
-"too much time for a small file" — and large inputs get more.
-
-**4. Profiles are per-run and never shared.** A headless soffice refuses to
-start against a profile another soffice already holds and would silently hang;
-per-run throwaway profiles are also what makes concurrency work (three
-concurrent conversions measured at 1.8 s wall).
+Every run uses an isolated profile that blocks untrusted remote references,
+link refreshes, and unsigned macros. Inputs and outputs are validated because
+LibreOffice may return zero for an invalid conversion. Timeouts scale with
+input size, and profiles are never shared between concurrent conversions.
 """
 
 from __future__ import annotations
@@ -50,9 +21,7 @@ import pikepdf
 from engine import budget
 from engine.system_fonts import installed_families
 
-# The floor is the family's OWN old constant, deliberately: LibreOffice's cold
-# first-run profile build plus a bridged second launch fits inside it, and
-# lowering it would turn a slow-but-passing job into a new failure.
+# Allow for LibreOffice's cold profile build and a bridged second launch.
 _BASE_SECONDS = 240.0
 _PER_MB_SECONDS = 12.0
 
@@ -67,18 +36,15 @@ def _xcu_item(path: str, prop: str, typ: str, value: str) -> str:
 _SCRIPTING = "/org.openoffice.Office.Common/Security/Scripting"
 _INET = "/org.openoffice.Inet/Settings"
 
-# Every line here was measured against a live HTTP listener (probe 4).
+# Keep document conversion offline and disable active content.
 PROFILE_SETTINGS = (
-    # THE fix: 0 hits, no latency cost.
+    # Block remote resources referenced by untrusted documents.
     _xcu_item(_SCRIPTING, "BlockUntrustedRefererLinks", "boolean", "true")
-    # Does not block on its own — kept for the link-refresh path it does own.
+    # Disable the separate link-refresh path.
     + _xcu_item(_SCRIPTING, "LinkUpdateMode", "int", "0")
-    # 3 = Very High: unsigned macros never run. The vendored registry defaults
-    # to 2 (High), which already refuses them, but a default a future vendoring
-    # could move is not a guarantee — pin it.
+    # 3 = Very High: unsigned macros never run.
     + _xcu_item(_SCRIPTING, "MacroSecurityLevel", "int", "3")
-    # Belt-and-braces: a proxy that cannot answer. Free when the block is also
-    # on; ~2 s of connect timeout when it is the only thing standing.
+    # Use a proxy that cannot answer as a secondary outbound-request guard.
     + _xcu_item(_INET, "ooInetProxyType", "int", "1")
     + _xcu_item(_INET, "ooInetHTTPProxyName", "string", "127.0.0.1")
     + _xcu_item(_INET, "ooInetHTTPProxyPort", "int", "9")
@@ -496,9 +462,9 @@ def declared_faces(path: str | Path) -> set[str]:
 def substituted_faces(source: str | Path, produced_pdf: str | Path) -> list[str]:
     """Faces the source asked for that the converter did not have.
 
-    A contract that reflows because Calibri became DejaVu is the classic
-    Office-conversion complaint; the king's converter reports substitutions and
-    so does this. TWO independent acquittals, because each one can only REMOVE
+    A contract that reflows because Calibri became DejaVu is a common
+    Office-conversion failure, so substitutions are reported. Two independent
+    acquittals are used because each one can only remove
     an accusation and never add one: the face is in the produced PDF (so it was
     found, whatever else is true), or it is installed on this machine (so
     LibreOffice had it available, whether or not this document drew with it).

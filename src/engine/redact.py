@@ -8,14 +8,10 @@ Approach (per page, per requested region):
      (Tj/TJ/'/") and every directly-placed raster image (Do).
      Text is MEASURED THROUGH ITS FONT (`text_metrics.py`, shared with the
      text-run lister): real glyph advances plus TJ kerns, Tc, Tw and Tz, and
-     a vertical extent taken from the font's own descriptor. Until F15 slice A
-     this was a flat 0.5 em per BYTE guess, and the guess was a REDACTION
-     FALSE NEGATIVE — on Courier it covered 0.83× the real line, so the last
-     ~9 characters of every line sat outside the box the region was tested
-     against and survived, with `regions_applied: 1` reported as success.
-     Its mirror was over-removal: a 2-byte CID run estimated 2.00× too wide,
-     so a mark 10 pt clear of a CJK column deleted it. Both are measured in
-     `text_metrics.py`'s docstring. Where the font CANNOT measure a run
+     a vertical extent taken from the font's own descriptor. Flat per-byte
+     estimates under-cover single-byte fonts and over-cover multi-byte CID
+     fonts, causing false negatives or unrelated text removal. Where the font
+     cannot measure a run
      (no font resolvable, a refused capability, or a code whose advance is
      only a placeholder) the bbox falls WIDE — 1 em per code — because
      over-removal is the tolerable error for a redaction tool and a narrow

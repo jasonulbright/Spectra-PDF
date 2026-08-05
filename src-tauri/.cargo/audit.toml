@@ -24,7 +24,7 @@ ignore = [
     "RUSTSEC-2026-0195", # unbounded namespace-declaration allocation (memory DoS)
 
     # ── gtk-rs GTK3 bindings: unmaintained (informational) ──
-    # The Linux webkit2gtk UI stack. This product is Windows-only (see CLAUDE.md);
+    # The Linux webkit2gtk UI stack. This product is Windows-only;
     # these crates are transitive via Tauri's Linux targets and are never compiled
     # or shipped on Windows. No patched line exists (GTK3 bindings are EOL).
     "RUSTSEC-2024-0411", # gdkwayland-sys

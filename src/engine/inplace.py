@@ -3,14 +3,10 @@
 pikepdf cannot save over its own open input, and Ghostscript must never
 write the file it is still reading — so every op that accepts
 ``output == file`` stages the result BESIDE the output and renames over it
-at the end (the attachments ``_save`` discipline, shared). Staging in the
-output's own directory keeps the final move on one volume, so it is a
-rename, not a copy.
-
-Found the hard way (guided-actions slice 1, 2026-07-30): strip_metadata and
-the gs trio (compress/grayscale/pdfa) never had this — the GUI panels always
-save to NEW files, so the in-place arms of the CLI were silently broken and
-the sequence runner hit it on its second step.
+at the end. Staging in the output's own directory keeps the final move on one
+volume, so it is a rename rather than a copy. Every operation that permits
+in-place output must use this path; otherwise a multi-step sequence can
+overwrite an input while it is still being read.
 """
 
 import os

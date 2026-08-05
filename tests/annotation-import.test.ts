@@ -20,8 +20,8 @@ async function loadPdf(bytes: Uint8Array): Promise<PDFDocumentProxy> {
 }
 
 // Builds a source PDF with a /Square annotation authored directly via raw
-// pdf-lib context calls — deliberately NOT through our own addAnnotations, to
-// simulate an annotation created by some other tool (Acrobat, etc.) rather
+// pdf-lib context calls rather than our own addAnnotations, simulating a
+// foreign annotation rather
 // than round-tripping something Spectra itself wrote.
 async function makeForeignAnnotatedPdf(rotation: 0 | 90 | 180 | 270 = 0): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -427,7 +427,7 @@ async function makeMarkupPdf(
   const doc = await PDFDocument.create();
   const page = doc.addPage([300, 400]);
   const ctx = doc.context;
-  // Two quads (two lines of marked text), Acrobat order UL,UR,LL,LR.
+  // Two quads in the widely supported UL, UR, LL, LR order.
   const q1 = [50, 350, 150, 350, 50, 340, 150, 340];
   const q2 = [50, 330, 120, 330, 50, 320, 120, 320];
   const annot = ctx.obj({

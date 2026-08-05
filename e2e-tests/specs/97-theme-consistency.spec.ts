@@ -1,6 +1,5 @@
-// P21, theme-consistency half (owner-directed 2026-08-02, from a screenshot
-// of the sweep's light pass: the docked status bar and operations strip
-// stayed dark literals in a light app). The axe gate CANNOT see this class
+// Theme consistency catches fixed dark colors that remain in a light theme.
+// The axe gate cannot see this class
 // of bug — white-on-black passes a contrast check — so this audit flags it
 // structurally: under the LIGHT theme no visible element may keep an opaque
 // DARK background, and under HIGH CONTRAST none may keep an opaque LIGHT
@@ -62,8 +61,8 @@ async function auditTheme(theme: WalkTheme, surface: string): Promise<void> {
       const cls = el.className?.toString() ?? '';
       if (/bg-(blue|red|emerald|green|amber|yellow|purple|pink|orange|cyan|teal)-/.test(cls)) return true;
       if (el.closest('[data-theme-literal]')) return true;
-      // Document content is the DOCUMENT's presentation, not the theme's:
-      // pages are white in every theme (the king's dark mode too), and the
+      // Document content owns its presentation rather than inheriting the app
+      // theme. Pages remain white in every theme, and the
       // reading surround + thumbnail frames exist to stage them.
       if (el.closest('.docview-scroll')) return true;
       if (cls.includes('thumb-frame')) return true;

@@ -1,4 +1,4 @@
-"""O8 slice C — the MRC pass (ITU-T T.44 mixed raster content).
+"""ITU-T T.44 mixed-raster-content compression.
 
 A scanned page is a photograph OF text. Storing it as one continuous-tone
 image forces a single trade: keep the resolution and keep the size, or drop
@@ -14,29 +14,19 @@ with the codec it actually suits —
   * a small **background** carrying the paper, inpainted so the text leaves
     no ghost behind it.
 
-Measured on the recon fixture (brief 40 § 1.5): the 1146 KB source scan
-becomes 204 KB with a CCITT G4 mask and the text still at 300 dpi, where
-Ghostscript's `/ebook` reaches 301 KB only by dropping the text to 150 dpi
-and `/screen` reaches 120 KB by making it unreadable.
-
-WHAT MAKES THIS SURGERY AND NOT A REBUILD. The scan image's `Do` is replaced
+The scan image's `Do` is replaced
 in the page's own content stream by two `Do`s (`page_images.
 replace_placement_with_layers`). The page OBJECT survives, so /Annots,
 /AcroForm and its field tree, /StructTreeRoot and the marked-content ids the
 layers now sit inside, page labels and the outline all carry through with
-nothing to re-attach — unlike `compress`'s Ghostscript branch, which
-regenerates the page and has to transplant /AcroForm back afterwards (and
-cannot transplant the structure tree at all). It is also why the tool this
-brief did NOT adopt was rejected: its `recode_pdf` builds a new PDF out of
-page images, which destroys all of that by construction.
+nothing to reattach. This must remain an in-place content edit rather than a
+page-image rebuild, which would discard document structure.
 
-THE RULES EARNED HERE, each of which was a live bug in the recon probes:
+Correctness constraints:
 
 1. **The background must be averaged over PAPER pixels only.** Filling the
-   ink holes with a blur of the whole image leaves the text's own ghost
-   under the text and contrast collapses — the ghosted build read
-   `Thaiok heme fav jumns aver tap [a7y dpe` where the corrected build read
-   the line verbatim. The correct form is a masked box filter,
+   ink holes with a blur of the whole image leaves a text ghost and collapses
+   contrast. The correct form is a masked box filter,
    `blur(I·paper) / blur(paper)`, pyramided so a block with no paper in it
    still fills from a coarser level.
 2. **Segmentation is a MEASUREMENT of the page, not a constant.** The
@@ -49,8 +39,8 @@ THE RULES EARNED HERE, each of which was a live bug in the recon probes:
    continuous-tone photograph put there posterizes. Both are excluded and
    left to the background, and the background's resolution rises to carry
    them.
-4. **Every mask is decode-verified before it is embedded** (slice B's
-   `verify_mask_stream`, through Ghostscript — an INDEPENDENT decoder). A
+4. **Every mask is decode-verified before it is embedded.**
+   `verify_mask_stream` uses Ghostscript as an independent decoder. A
    multi-strip G4 stream renders as a plausibly eroded page and an inverted
    stencil renders solid black that OCR still returns words from, so a size
    check and a "does it render" check both pass over either. A page whose
@@ -96,7 +86,7 @@ from .validate import validate_pdf
 #: the smallest k — it keeps thin strokes, at the cost of keeping some paper
 #: texture with them.
 #:
-#: `verify_threshold` (slice E) is the floor `mrc_verify_text` reverts below,
+#: `verify_threshold` is the floor `mrc_verify_text` reverts below,
 #: and it is set to catch a SEGMENTATION FAILURE, not an OCR wobble. Measured
 #: over the matrix (`mrc-matrix.local.py`, six sources × three presets × three
 #: codecs): the WORST good page any preset produced scored 0.9781 (the

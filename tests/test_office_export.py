@@ -94,7 +94,7 @@ def test_same_file_guard(tmp_dir, soffice_path):
 
 
 def test_rejects_a_directory_destination(tmp_dir):
-    # Review-caught: shutil.move into an existing directory drops the file
+    # regression: shutil.move into an existing directory drops the file
     # INSIDE it under the wrong stem while reporting the directory as the output
     # (a silent misplace + false success). The guard is pre-soffice, so no
     # LibreOffice is needed to exercise it.

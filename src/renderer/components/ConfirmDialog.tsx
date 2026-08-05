@@ -77,7 +77,7 @@ export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title
               className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 rounded transition-colors"
               // 'unsaved': Save is the data-PRESERVING default. 'proceed':
               // Continue is the CONSEQUENTIAL choice — a reflexive Enter must
-              // not commit it, so focus starts on Cancel (review-caught).
+              // not commit it, so focus starts on Cancel (regression).
               autoFocus={kind !== 'proceed'}
             >
               {tChrome(kind === 'proceed' ? 'dialog.confirm.continue' : 'dialog.common.save')}

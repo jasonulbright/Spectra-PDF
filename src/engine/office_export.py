@@ -1,4 +1,4 @@
-"""Export a PDF to an editable Office / web format via LibreOffice headless (O1).
+"""Export a PDF to an editable Office or web format via LibreOffice.
 
 LibreOffice is bundled and invoked as an isolated subprocess (the Ghostscript
 model — unmodified upstream, redistributed under MPL-2.0; see
@@ -13,17 +13,8 @@ impl_store … 0xc10"). So Writer targets go through a two-step bridge: PDF → 
 the HTML and saves it out). The bridge preserves editable text — verified: a
 born-digital PDF's sentences come back as real ``<w:t>`` runs, not a page image.
 
-Each call uses a FRESH, throwaway user-profile directory: a headless soffice
-refuses to start a second instance against a profile another soffice (e.g. the
-user's open GUI copy) already holds, and would silently hang. The profile and any
-bridge temp are cleaned up in a finally.
-
-**The invocation itself lives in `engine/soffice.py` (P22 slice B)** — one
-runner for both directions. Export gained three things from that move it did
-not have on its own: the seeded OFFLINE profile (headless soffice fetched a
-remote resource referenced by a converted document — measured), a DERIVED time
-budget instead of a flat 240 s, and an output that is proven by reading it
-rather than by trusting the exit code.
+`engine.soffice` provides the isolated offline profile, size-derived timeout,
+and output validation used by conversions in both directions.
 """
 
 import os
@@ -68,9 +59,7 @@ def export_document(file: str, output: str, fmt: str, soffice_path: str) -> dict
     output_path = Path(output)
     if not input_path.is_file():
         raise ValueError(f"input file not found: {file}")
-    # Validate the SOURCE before any converter runs: soffice returns 0 on a
-    # zero-byte input and writes a plausible-looking output from nothing
-    # (measured, brief 41 § 1.7), so an empty source has to be caught here.
+    # A zero-byte input can still produce a zero exit code, so validate first.
     if input_path.stat().st_size == 0:
         raise ValueError(f"the input file is empty: {file}")
     # A directory destination would make shutil.move drop the file INSIDE it

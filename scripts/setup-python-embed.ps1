@@ -60,17 +60,13 @@ if ($LASTEXITCODE -ne 0) { throw "Hash-verified dependency install failed" }
 # and license texts (licenses/, LICENSE*, COPYING*, NOTICE*, AUTHORS*) must
 # ship with the runtime -- MIT/BSD-family licenses require their notice to
 # accompany redistributed copies, and these files are the only copy the
-# bundled runtime carries (2026-07-25 license audit; deleting them whole
-# shipped the packages with no notices at all).
+# bundled runtime carries; deleting them would ship packages without notices.
 Write-Host "Cleaning up..."
 & $DestDir\python.exe -m pip uninstall pip -y 2>&1 | Out-Null
 Get-ChildItem $DestDir -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recurse -Force
-# RECORD is NOT a licence file but it is REQUIRED: pip reads it to uninstall or
-# upgrade a package. Pruning it (as the first version of this cleanup did) makes
-# the runtime un-upgradable in place -- the next dependency bump dies with
-# "uninstall-no-record-file / The package's contents are unknown", and the only
-# recovery is wiping resources/python. Found the hard way on the pikepdf/pyHanko
-# bump that immediately followed the licence work.
+# RECORD is not a licence file but pip requires it to uninstall or upgrade a
+# package. Without it, dependency upgrades fail with uninstall-no-record-file
+# and the runtime must be rebuilt from scratch.
 $Keep = '^(METADATA|RECORD|LICENSE.*|COPYING.*|NOTICE.*|AUTHORS.*)$'
 foreach ($di in (Get-ChildItem $DestDir -Recurse -Directory -Filter "*.dist-info")) {
     foreach ($f in (Get-ChildItem $di.FullName -File)) {

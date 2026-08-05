@@ -392,7 +392,7 @@ class TestWrappedOps:
         from engine.xfdf import export_xfdf, import_xfdf
 
         # Author annotations on an UNSIGNED copy, export them, then import
-        # onto the signed document — the reviewer round-trip.
+        # onto the signed document.
         donor = os.path.join(tmp_dir, "donor.pdf")
         _base_pdf(donor, annots=2)
         xfdf_path = os.path.join(tmp_dir, "comments.xfdf")

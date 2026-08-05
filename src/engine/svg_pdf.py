@@ -1186,8 +1186,8 @@ class _Compiler:
 
         # The gradient fill (when any) was already painted above via
         # clip-then-`sh`; what remains is one paint pass for the plain fill
-        # and/or the stroke — never both a combined B and a second S (the
-        # double-stroke this branch structure replaced, review-caught).
+        # and/or stroke, never both a combined B and a second S that would
+        # double-stroke the path.
         plain_fill = wants_fill and fill_grad is None
         if plain_fill or wants_stroke:
             _emit_segs(out, segs)

@@ -413,7 +413,7 @@ class TestExistingTextFeatures:
         assert "Hamburg" in extract_text(out)["text"]
 
     # ------------------------------------------------------------------
-    # Round-42 gauntlet regressions (mutation-verified — revert the named
+    # regressions (mutation-verified — revert the named
     # fix and the assertion fails).
     # ------------------------------------------------------------------
 

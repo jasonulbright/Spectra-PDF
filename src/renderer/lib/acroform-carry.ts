@@ -27,22 +27,20 @@
 //      and removes the markers. No marked root anywhere -> no /AcroForm is
 //      added (a non-form rebuild stays byte-clean).
 //
-// Document-level form behavior (F11, 2026-08-01 — the old boundary that
-// dropped these is closed): /CO (calculation order) is RECONCILED, not
+// Document-level form behavior: /CO (calculation order) is reconciled, not
 // blind-carried — each entry resolves to its fully-qualified name
 // source-side, follows this module's own collision renames, and re-binds to
 // the copied output field; dead entries drop. The document catalog's /AA
 // rides catalog-carry.ts (own-source-only, like bookmarks). /XFA documents
 // never reach this module: the rebuild REFUSES them upfront
 // (sourceHasXfa + pdfx-build's guard) because a restructured page tree and
-// a carried-verbatim XFA packet describe two different documents — the
-// industry-standard editor refuses page operations on XFA forms for the
-// same reason. (Fill's pure-AcroForm posture — /XFA stripped, detected and
-// stated — is a separate, unchanged boundary.) Field-level keys (incl.
+// a carried-verbatim XFA packet describe two different documents, so page
+// operations refuse XFA forms. Filling strips and detects /XFA on a separate
+// path. Field-level keys (including
 // per-field /AA) travel with the field objects untouched. /SigFlags bit 1
 // (SignaturesExist) is recomputed from the kept fields; bit 2 (AppendOnly)
 // is dropped — correct here because a rebuild only runs when signatures are
-// already forfeit; the O5b incremental path preserves live-signature docs
+// already forfeit; the incremental path preserves live-signature documents
 // byte-for-byte, /SigFlags included (engine/incremental.py _ACRO_KEEP).
 import {
   PDFArray,
@@ -153,8 +151,7 @@ function isWidget(dict: PDFDict): boolean {
  * - A widget-less terminal (a pure-data field with no visual presence on any
  *   page) is kept: it loses nothing by the page edit, and dropping it would
  *   silently discard its /V.
- * - A root whose every widget sat on dropped pages is dropped with them —
- *   what-you-see-is-what-you-keep, same posture as Acrobat's page extract.
+ * - A root whose every widget sat on dropped pages is dropped with them.
  */
 export function prepareSourceForms(source: PDFDocument, keptIndices: number[]): boolean {
   const acro = acroFormOf(source);
@@ -277,7 +274,7 @@ function escapeRegExp(s: string): string {
 // Replace /oldName tokens in a /DA appearance string. A PDF name token ends
 // at whitespace or a delimiter, so "/Helv" must not rewrite "/HelvB".
 // ONE pass over the original string, all renames as a single alternation
-// with a replacer FUNCTION (review-caught, both verified live):
+// with a replacer FUNCTION (regression, both verified live):
 // (1) sequential per-rename .replace() passes feed each other — when a
 //     rename's TARGET equals another rename's OLD name (the natural shape of
 //     a document that already went through one merge, e.g. F1→F1_1 alongside
@@ -301,7 +298,7 @@ function rewriteDaFonts(da: string, renames: Map<string, string>): string {
 
 // Font subtypes that MAY be treated as interchangeable when everything else
 // agrees — the simple, metadata-describable kinds. An ALLOW-list, not a
-// deny-list (review-caught, round 2): rendering-defining data hides in
+// deny-list (regression): rendering-defining data hides in
 // subtype-specific places a top-level check can't see — Type0/CID fonts
 // carry /FontDescriptor nested under /DescendantFonts (two different
 // embedded CJK fonts deduped to one entry produce GARBLED index-based
@@ -320,7 +317,7 @@ const SIMPLE_FONT_SUBTYPES = new Set([
 // neither embeds a font program — the ubiquitous case of every source
 // defining /Helv as unembedded WinAnsi Helvetica. Anything else stays
 // "different" and gets renamed; claiming a wrong face — or a wrong glyph MAP
-// (review-caught: same-named Helvetica entries differing only in /Encoding,
+// (regression: same-named Helvetica entries differing only in /Encoding,
 // e.g. a custom /Differences remap, were deduplicated onto the first
 // source's encoding) — is the failure mode 2l's review flagged as HIGH.
 function fontsEquivalent(output: PDFDocument, a: unknown, b: unknown): boolean {

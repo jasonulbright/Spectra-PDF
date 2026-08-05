@@ -36,15 +36,13 @@ export interface SnapSettings {
   // ── slice B ──────────────────────────────────────────────────────────
   /** Shift's angle increment, in degrees. */
   angleDeg: number;
-  /** Draw the grid. It is a SNAP source whenever `types.grid` is on and a
-   * grid exists — the two are deliberately separate, because "snap to the
-   * grid without a screen full of lines" is a real way to work and the king
-   * separates them the same way (Show Grid vs Snap to Grid). */
+  /** Draw the grid. It remains a snap source whenever `types.grid` is on and a
+   * grid exists. Visibility and snapping are separate so a hidden grid can
+   * still guide drafting. */
   showGrid: boolean;
   grid: GridConfig;
-  /** Show the rulers along the canvas edges. Guides are dragged off them, so
-   * hiding the rulers does NOT hide the guides — they are separate toggles
-   * for the same reason the king's are. */
+  /** Show rulers along the canvas edges. Hiding rulers does not hide existing
+   * guides, so the two use separate toggles. */
   showRulers: boolean;
   showGuides: boolean;
 }
@@ -55,9 +53,8 @@ export const DEFAULT_SNAP_SETTINGS: SnapSettings = {
   // Every type on EXCEPT the grid, and that exception has a reason rather
   // than a preference behind it: the six geometric types only fire where
   // there is something to snap to, while a grid candidate exists at every
-  // point on the page — so leaving it on by default would mean every gesture
-  // in the product snapped somewhere, always. The king ships Snap to Grid off
-  // for the same reason (its Show Grid is a separate switch, and so is ours).
+  // point on the page, so leaving it on by default would make nearly every
+  // gesture snap somewhere. Grid visibility remains a separate setting.
   types: { ...ALL_SNAP_TYPES_ON, grid: false },
   angleDeg: DEFAULT_SNAP_ANGLE_DEG,
   showGrid: false,

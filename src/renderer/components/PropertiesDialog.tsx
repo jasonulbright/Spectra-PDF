@@ -8,15 +8,8 @@ import { tChrome, tChromeCount, tNumber } from '../i18n';
 import { runCommitGate } from '../lib/commit-gate';
 import type { PdfBuffer } from '../state/types';
 
-// File ▸ Properties… (Ctrl+D) — § 3.2's re-homing of the Metadata panel, the
-// PDF-version READ, and the encryption status into one dialog about THIS
-// document. Acrobat's Ctrl+D, and the natural home for "what is this file?":
-// they were three unrelated places to look before.
-//
-// The metadata form's logic is moved, not rewritten (§ 7: "their form bodies
-// live on inside task panes — the diff is chrome, not logic"), including its
-// save-to-a-new-file shape. Changing that to an in-place edit is a different
-// slice with the commit gate and undo in it.
+// File ▸ Properties combines metadata, PDF version, and encryption status in a
+// single dialog. Metadata changes retain their save-to-a-new-file behavior.
 
 const TABS = ['description', 'security', 'advanced'] as const;
 type PropTab = (typeof TABS)[number];
@@ -64,7 +57,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
       // without this a Properties opened right after deleting a page reports
       // the page as still there, disagreeing with the page counter a few pixels
       // away. This is the commit gate's stated job — "before anything READS or
-      // replaces file bytes" (CLAUDE.md) — and the reason these three reads are
+      // replaces file bytes, so these three reads are
       // INTERNAL_METHODS (individually ungated: a panel reading on mount must
       // not commit) is exactly why the gate has to be asked for here.
       try {

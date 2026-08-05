@@ -5,8 +5,8 @@
 // The reading view lays pages in uniform-height ROWS. Single layout: one page
 // per row (the shipped behavior — every function below is the identity for it,
 // so single mode cannot regress by construction). Two-up: two facing pages per
-// row, optionally with the FIRST page alone (the book convention — Acrobat's
-// "Show Cover Page in Two Page View"), so spreads pair as (2,3), (4,5)…
+// row, optionally with the first page alone to follow the bound-book convention,
+// so spreads pair as (2,3), (4,5)…
 // exactly like a bound book's verso/recto.
 
 export type PageLayout = 'single' | 'two';

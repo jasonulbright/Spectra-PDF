@@ -115,7 +115,7 @@ export function CombineDialog({
   // Ref, not state: the reentrancy window opens BEFORE any state update lands
   // (the whole native save-dialog round trip), so a second click reads a stale
   // busy=false closure and BOTH runs proceed — the convertingRef discipline,
-  // carried over verbatim from Create PDF because it was review-caught there.
+  // carried over verbatim from Create PDF because it was regression there.
   const combiningRef = useRef(false);
 
   // A drop that arrives while the dialog is already open must still land.

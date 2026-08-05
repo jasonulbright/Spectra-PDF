@@ -1,7 +1,7 @@
-"""Page number labels — the /PageLabels number tree (§ I.5 P5).
+"""Page number labels — the /PageLabels number tree.
 
-The king lets a document number its pages independently of their physical order
-— front matter as "i, ii, iii", the body as "1, 2, 3", an appendix as "A-1,
+PDF page labels number pages independently of their physical order — front
+matter as "i, ii, iii", the body as "1, 2, 3", an appendix as "A-1,
 A-2". That mapping lives in the catalog's /PageLabels number tree (ISO 32000
 §12.4.2): a /Nums array pairing a 0-based START page index with a label style
 dict ({/S style, /P prefix, /St first-number}). This module reads and writes it

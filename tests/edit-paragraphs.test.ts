@@ -942,7 +942,7 @@ describe('9.A5-tails-a — display seeds must NEVER leak into sent overrides (ro
   // "Plain " (0-6) and clicks Italic. Before the preserve/view split, the
   // whole composed view was written back as overrides, so the untouched
   // "bold" word was sent as a face override — and a face override
-  // SUBSTITUTES its range into a bundled Liberation face. The reviewer
+  // substitutes its range into a bundled Liberation face. This fixture
   // confirmed against the real engine that the untouched word came back
   // embedded as LiberationSans instead of Helvetica-Bold.
   const seed = [{ start: 6, end: 10, bold: true, italic: false }];

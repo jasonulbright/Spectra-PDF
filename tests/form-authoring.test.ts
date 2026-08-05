@@ -156,7 +156,7 @@ describe('addFormField', () => {
     ).rejects.toThrow(/cannot contain/);
   });
 
-  it('refuses a name held by a NON-TERMINAL hierarchy parent (review-caught)', async () => {
+  it('refuses a name held by a NON-TERMINAL hierarchy parent (regression)', async () => {
     // pdf-lib's getFields() is terminal-only and cannot see a pure hierarchy
     // node; the hand-rolled signature path has no pdf-lib duplicate backstop,
     // so before the raw top-level /T check it would have created a same-/T

@@ -61,7 +61,7 @@ export function NavPane(props: NavPaneProps): React.ReactElement {
         {NAV_PANEL_DEFS.map((def) => {
           // Highlight the panel actually SHOWN (activeDef, after the fallback),
           // not the raw persisted id — which may be a not-yet-built panel
-          // (review-caught: strip would show nothing pressed while pages shows).
+          // (regression: strip would show nothing pressed while pages shows).
           const isActive = open && activeDef.id === def.id;
           const title = tNavPanelTitle(def.id, def.title);
           return (

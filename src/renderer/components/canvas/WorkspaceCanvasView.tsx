@@ -469,12 +469,12 @@ export function WorkspaceCanvasView({
   const docViewMode = state.ui.docViewMode;
   const docViewModeRef = useRef(docViewMode);
   docViewModeRef.current = docViewMode;
-  // Split view (I.6, Window ▸ Split): a SECOND DocumentView over the same
+  // Split view uses a second DocumentView over the same
   // document, stacked under a draggable divider. Zoom and scroll are already
   // per-instance state in DocumentView, so the panes are independent for
   // free; what needs routing is (a) which pane camera commands address and
-  // (b) which pane drives the page readout — both keyed on the ACTIVE pane,
-  // set by pointerdown in a pane (the king's click-to-activate).
+  // (b) which pane drives the page readout. Both use the active pane selected
+  // by pointerdown.
   const documentViewRefB = useRef<CanvasHandle | null>(null);
   // The spreadsheet split's second row (quad mode): c = bottom-left,
   // d = bottom-right; a/b stay the top row.
@@ -489,8 +489,7 @@ export function WorkspaceCanvasView({
   const [activePane, setActivePane] = useState<'a' | 'b' | 'c' | 'd'>('a');
   const activePaneRef = useRef(activePane);
   activePaneRef.current = activePane;
-  // The divider ratios are deliberately LOCAL state (session-scoped, like the
-  // splitView flag itself — the king doesn't persist split): they survive
+  // Divider ratios are session-local state. They survive
   // toggling split off/on and doc switches, reset on restart. splitRatio is
   // the row ratio in both modes; quadCol is the quad's column ratio.
   const [splitRatio, setSplitRatio] = useState(0.5);
@@ -501,10 +500,9 @@ export function WorkspaceCanvasView({
   // reading view's scroller. EVERY camera caller (find navigation, the zoom
   // buttons, the registered canvasServices) must route through this: the
   // board-only `canvasRef` is null while the reading view is mounted, so a
-  // direct `canvasRef.current?.…` silently no-ops in Document mode
-  // (review-caught). Stable identity (reads refs). With split view up, the
-  // ACTIVE pane's handle answers — a bookmark/thumbnail/Find jump lands in
-  // the pane the user last touched, which is the king's behavior too.
+  // direct `canvasRef.current?.…` silently no-ops in Document mode. With split
+  // view active, a bookmark, thumbnail, or Find jump lands in the pane the user
+  // last touched. The callback has stable identity because it reads refs.
   const paneHandleOf = useCallback(
     (pane: 'a' | 'b' | 'c' | 'd'): CanvasHandle | null =>
       pane === 'a'
@@ -567,7 +565,7 @@ export function WorkspaceCanvasView({
   // The `d.path === activeFileId` clause is a STRUCTURAL guard, not redundancy:
   // it makes "the reading view shows a document of the active file" true by
   // construction, so no future action can strand it on another file's document
-  // by forgetting to clear the focus (review-caught via SET_ACTIVE_FILE, which
+  // by forgetting to clear the focus (regression via SET_ACTIVE_FILE, which
   // did exactly that — now also cleared, but the invariant no longer depends on
   // every writer remembering).
   const focusedDoc =
@@ -600,7 +598,7 @@ export function WorkspaceCanvasView({
   const pageBoxFocused = useRef(false);
   // Whether the box was actually EDITED since it gained focus — so a blur after
   // just focusing + wheel-scrolling (no typing) resyncs the readout instead of
-  // teleporting back to the frozen number (review-caught).
+  // teleporting back to the frozen number (regression).
   const pageBoxDirty = useRef(false);
   // P5 follow-on: the document's own page LABELS, so the readout counts the
   // way the printed thing does (i, ii, iii, then a body restarting at 1) and
@@ -614,7 +612,7 @@ export function WorkspaceCanvasView({
   }, [currentPage, pageLabels]);
   // Reset the readout when entering Read mode or switching the focused doc: a
   // fresh DocumentView starts at page 1, and until it reports back the box would
-  // otherwise show the previous doc's page (e.g. "40 / 3") (review-caught).
+  // otherwise show the previous doc's page (e.g. "40 / 3") (regression).
   // useLayoutEffect, not useEffect: `page-nav-total` reads the NEW doc's page
   // count in the same render, so a passive effect would paint one frame of a
   // stale numerator against the new total — the very "40 / 3" this closes.
@@ -805,12 +803,12 @@ export function WorkspaceCanvasView({
   // exactly ONE, so a match in another file (or another `.pdfx` partition) has
   // to bring that document to the front FIRST and centre once it has mounted —
   // otherwise `centerOn` finds no such page and returns silently while Find's
-  // "N of M" counter has already advanced (review-caught).
+  // "N of M" counter has already advanced (regression).
   //
   // This is THE jump entry point for every caller that can name a page in any
   // open document — Find/Search, the comments sidebar, and the Pages/Bookmarks
   // nav panels (which list every partition of the active file, so they hit the
-  // same blindness; review-caught: they were still calling `centerOn` directly
+  // same blindness; regression: they were still calling `centerOn` directly
   // and silently no-oped into a partition the reading view wasn't showing).
   // Only the reading view's own page box may bypass it — it is scoped to the
   // shown document by definition.
@@ -1454,7 +1452,7 @@ export function WorkspaceCanvasView({
       // are opaque; only workspace state knows the page). Resolution is
       // by SOURCE identity — a bookmark's number addresses the file's
       // on-disk order, so the jump lands on that physical page even
-      // while a reorder is pending (review-caught: array-order counting
+      // while a reorder is pending (regression: array-order counting
       // silently jumped to the wrong page).
       jumpToFilePage: (path, pageNumber) => {
         const id = pageIdAtSourceIndex(docsForJumpRef.current, path, pageNumber);
@@ -2012,9 +2010,9 @@ export function WorkspaceCanvasView({
     [],
   );
 
-  // ── Ruler guides (N11 slice B) ────────────────────────────────────────
-  // Per-document VIEW state, the redaction-mark lifetime exactly: never
-  // written into the file (the king's aren't either), invalidated on buffer
+  // ── Ruler guides ──────────────────────────────────────────────────────
+  // Per-document view state with the redaction-mark lifetime: never written
+  // into the file, invalidated on buffer
   // identity, and pruned to pages that still exist so a dead generation-tagged
   // id can never be offered to a gesture (§ F, the id-holder rule).
   const [guides, setGuides] = useState<PageGuide[]>(NO_GUIDES);
@@ -2441,7 +2439,7 @@ export function WorkspaceCanvasView({
   // focused document, or ITS buffer. `docs`/`state.files` are whole-
   // workspace identities that churn when ANY open file reindexes or
   // reloads; an unconditional clear on every rerun silently destroyed an
-  // in-progress edit because of an unrelated file's op (review-caught
+  // in-progress edit because of an unrelated file's op (regression
   // CRITICAL). Those reruns still refetch listings (ordering can shift);
   // they just stop closing the editor.
   const prevEditCtxRef = useRef<{ tool: unknown; docId: unknown; buffer: unknown; path: unknown }>(
@@ -2471,7 +2469,7 @@ export function WorkspaceCanvasView({
     // on buffer identity, not on doc id: a commit lands as TWO passes
     // here (bytes first with the old id, then the reindex's regenerated
     // id with the same bytes — instrumented, not assumed), so any rule
-    // keyed on those terms kills the stash mid-flight (e2e-caught, three
+    // keyed on those terms kills the stash mid-flight (e2e regression, three
     // designs deep — buffer term, docId term, then a bytes-vs-id
     // discriminator that the two-pass anatomy defeats). Path is the
     // durable file identity across generations (ids stay opaque — never
@@ -2503,7 +2501,7 @@ export function WorkspaceCanvasView({
     // everything that starts a selection reads them: a click on a
     // still-drawn box, the harness's pageIds(). The selection then holds an
     // id `workspacePageNumber` can no longer resolve, so the very next
-    // action refuses (e2e-caught, deterministic: a group delete issued right
+    // action refuses (e2e regression, deterministic: a group delete issued right
     // after an undo never applied). Prune to what still exists
     // SYNCHRONOUSLY, before the first await, so a dead id is never offered.
     // Prune, not adopt: a non-authored rebuild is precisely the case where
@@ -2559,7 +2557,7 @@ export function WorkspaceCanvasView({
       // round-trips each), during which an OPEN editor's page had no
       // listing — React unmounted the editor and re-seeded it from
       // pre-edit text, silently discarding the user's typing
-      // (review-caught CRITICAL; the ctxChanged guard alone only stopped
+      // (regression; the ctxChanged guard alone only stopped
       // the explicit clears). Stale-by-a-pass entries are safe here
       // precisely because ctxChanged=false means these bytes didn't
       // change; a REAL context change still starts empty (the 7.1
@@ -2684,13 +2682,13 @@ export function WorkspaceCanvasView({
   // A mutation's status line (neutral notice or red error) + in-flight flag.
   // Renderer-side failures (decode, IO) would otherwise vanish as unhandled
   // rejections with zero UI — engine failures already surface via the op
-  // queue, this covers the rest (review-caught).
+  // queue, this covers the rest (regression).
   const [editNotice, setEditNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [editBusy, setEditBusy] = useState(false);
   // Ref, not state: two commits in one tick (the unmount-blur refire when
   // React removes the focused input) both read a STALE editBusy closure —
   // the applyingRef/signingRef rule this file already follows everywhere
-  // else (review-caught). Declared here because the OPEN handlers gate on
+  // else (regression). Declared here because the OPEN handlers gate on
   // it too (no new editor while a commit is in flight).
   const committingTextRef = useRef(false);
 
@@ -2700,9 +2698,8 @@ export function WorkspaceCanvasView({
       setEditNotice(null);
       setEditingText(null);
       setEditSel((prev) => {
-        // P7: Shift/Ctrl-click grows/shrinks a same-page group. A different
-        // page (or no image selection) starts fresh — cross-page groups have
-        // no king precedent and no honest group frame.
+        // Shift/Ctrl-click grows or shrinks a same-page group. A different page
+        // starts fresh because a cross-page group has no coherent frame.
         if (additive && prev?.kind === 'image' && prev.pageId === pageId) {
           const has = prev.indexes.includes(index);
           const indexes = has
@@ -2716,8 +2713,8 @@ export function WorkspaceCanvasView({
             indexes,
           };
         }
-        // Plain click: toggle a lone selection off; collapse a group to the
-        // clicked member (the king's behavior — click focuses one).
+        // Plain click toggles a lone selection off or collapses a group to the
+        // clicked member.
         if (
           prev?.kind === 'image' &&
           prev.pageId === pageId &&
@@ -2856,7 +2853,7 @@ export function WorkspaceCanvasView({
       imageReselectRef.current = null; // a user pick owns selection now
       if (!run.editable) {
         // The refusal SELECTS the run too — the toolbar must reflect what
-        // was just clicked, not a previous image selection (review-caught).
+        // was just clicked, not a previous image selection (regression).
         setEditSel({ kind: 'text', pageId, index });
         setEditNotice({
           text: run.reason ?? tChrome('canvas.edit.textNotEditable'),
@@ -2886,7 +2883,7 @@ export function WorkspaceCanvasView({
     (pageId: string, index: number) => {
       // While a commit is in flight a NEW editor's Enter would be
       // silently swallowed by committingTextRef — refuse to open one
-      // instead (review-caught; the busy hint is already visible).
+      // instead (regression; the busy hint is already visible).
       if (editBusy || committingTextRef.current) return;
       const para = editTextByPage.get(pageId)?.paragraphs.find((p) => p.index === index);
       if (!para) return; // only editable paragraphs are listed
@@ -2902,8 +2899,8 @@ export function WorkspaceCanvasView({
 
   // Split view: per-pane page reporting + activation. Each pane always
   // records its own latest page (so activating a pane can refresh the
-  // readout instantly), but only the ACTIVE pane drives the toolbar box /
-  // ui.currentPageId — the inactive pane scrolls silently, like the king's.
+  // readout instantly), but only the active pane drives the toolbar box and
+  // ui.currentPageId; inactive panes scroll without changing global state.
   const lastPanePages = useRef<Record<'a' | 'b' | 'c' | 'd', number>>({ a: 1, b: 1, c: 1, d: 1 });
   const panePageChange = useCallback(
     (pane: 'a' | 'b' | 'c' | 'd') => (n: number) => {
@@ -3039,7 +3036,7 @@ export function WorkspaceCanvasView({
       // are about to change identity — drop them synchronously, but keep
       // the old value so a DECLINED signed-doc warning (no buffer change,
       // no refetch) can put it back instead of leaving the run invisibly
-      // gone (review-caught: indistinguishable from success).
+      // gone (regression: indistinguishable from success).
       const previousListing = editTextByPage.get(pageId);
       setEditTextByPage((prev) => {
         const next = new Map(prev);
@@ -3334,7 +3331,7 @@ export function WorkspaceCanvasView({
       if (kind !== 'extract') {
         // Indexes shift under a delete; the refetch is a per-page engine
         // round-trip away. Drop this page's stale boxes SYNCHRONOUSLY so a
-        // click in the window can't target the wrong image (review-caught:
+        // click in the window can't target the wrong image (regression:
         // delete index 0 of three, click the still-drawn old box for what
         // is now a different placement).
         setEditSel(null);
@@ -3364,7 +3361,7 @@ export function WorkspaceCanvasView({
           imageReselectRef.current = null;
           // Declined signed-doc warning: no buffer change, no refetch —
           // restore the synchronously-dropped placements and say so
-          // (review-caught: silence read as success).
+          // (regression: silence read as success).
           if (kind !== 'extract' && previousPlacements) {
             setEditImagesByPage((prev) => {
               const next = new Map(prev);
@@ -3401,11 +3398,10 @@ export function WorkspaceCanvasView({
     [editSel, focusedDoc, docs, onEditImage, onEditImagesGroup, editBusy, editImagesByPage],
   );
 
-  // The selected image's transform context (9.C1): its user-space matrix + the
+  // The selected image's transform context is its user-space matrix plus the
   // page geometry the gesture needs to convert pointer↔user space. Null unless
-  // EXACTLY ONE image is selected AND its page geometry is loaded — a group
-  // renders the group frame instead (no skew/crop on a group; stated P7
-  // boundary, matching the king).
+  // exactly one image is selected and its page geometry is loaded. A group
+  // renders a frame without skew or crop controls.
   const editImageTransform = useMemo(() => {
     if (!editSel || editSel.kind !== 'image' || editSel.indexes.length !== 1) return null;
     const placement = editImagesByPage
@@ -3554,10 +3550,9 @@ export function WorkspaceCanvasView({
     [focusedDoc, docs, onEditImagesGroup, editBusy],
   );
 
-  // P7: align/distribute the group — pure per-member translates committed
-  // through the same multi op. Boxes are user-space AABBs of each member's
-  // quad (rotation-honest); alignment references the group's own extents,
-  // the king's semantic.
+  // Align or distribute a group through per-member translations committed in
+  // one multi operation. Boxes are user-space AABBs of each member's transformed
+  // quad, and alignment references the group's extents.
   const alignImageGroup = useCallback(
     (
       mode: 'left' | 'centerh' | 'right' | 'top' | 'centerv' | 'bottom' | 'disth' | 'distv',
@@ -3655,11 +3650,9 @@ export function WorkspaceCanvasView({
     [runEditAction],
   );
 
-  // 9.C3: rotate-90 buttons — pure composition onto the committed matrix,
-  // committed through the SHIPPED transform op (zero new engine surface).
-  // P7: with a group selected, every member turns about the GROUP center
-  // (one user-space rotation D post-composed onto each matrix, one multi
-  // commit) — the arrangement turns as a unit, the king's semantic.
+  // Quarter-turn buttons compose onto the committed matrix. With a group
+  // selected, every member turns around the group center and the multi-image
+  // edit commits atomically, so the arrangement turns as a unit.
   const rotateImage90 = useCallback(
     (dir: 1 | -1): void => {
       if (editImageGroup && !editImageGroup.busy) {
@@ -3953,9 +3946,8 @@ export function WorkspaceCanvasView({
         // pending reorder cannot mis-address it (the physical page never
         // moves) and a pending rotation is applied by the same projection the
         // raster gets. Gating instead would flush the user's pending
-        // ANNOTATIONS to disk on every workspace change, which is what the
-        // first cut did (e2e-caught in specs 87/88); `list_page_geometry` is
-        // an INTERNAL_METHOD for that reason.
+        // annotations to disk on every workspace change. `list_page_geometry`
+        // is an internal method because it must bypass that commit path.
         const srcFile = state.files.get(page.sourceDocId);
         if (!srcFile?.buffer) continue;
         try {
@@ -4612,7 +4604,7 @@ export function WorkspaceCanvasView({
     const fieldTarget = sigFieldTarget;
     if ((!placement && !fieldTarget) || signingRef.current) return;
     // Synchronous validation only above this line. The reentrancy ref MUST be
-    // taken before the FIRST await (review-caught; same double-click class as
+    // taken before the FIRST await (regression; same double-click class as
     // the punchlist's applyMarks tripwire) — a second click during
     // buildSignatureAppearance or the native save dialog would otherwise
     // start an overlapping sign flow.
@@ -4695,7 +4687,7 @@ export function WorkspaceCanvasView({
       setSignError(err instanceof Error ? err.message : String(err));
     } finally {
       // Clear the secret from state on EVERY exit — success, failure, or a
-      // cancelled save dialog (review-caught: a cancel used to strand the
+      // cancelled save dialog (regression: a cancel used to strand the
       // typed password in state, pre-filling later unrelated attempts).
       setSigPassword('');
       signingRef.current = false;
@@ -4913,7 +4905,7 @@ export function WorkspaceCanvasView({
   // would read the STALE mode ref, take its synchronous same-view fast path,
   // center the about-to-unmount BOARD, and the fresh DocumentView would open
   // at page 1 — on the WRONG document when the page belongs to a non-active
-  // one (review-caught, HIGH). The pending-jump slot exists for exactly this:
+  // one (regression, HIGH). The pending-jump slot exists for exactly this:
   // park the target, flip the mode (and the owning doc if needed), and the
   // consuming effect centers once the new view's handle is live.
   const openPageForReading = useCallback(
@@ -6069,7 +6061,7 @@ export function WorkspaceCanvasView({
               step={1}
               // parseFloat + skip-on-NaN (NOT Number(), where '' → 0 → clamps
               // to 1 and fights a clear-and-retype: "125" instead of "25").
-              // Mirrors ParagraphEditor's size input — the review-caught fix.
+              // Mirrors ParagraphEditor's size input — the regression fix.
               value={Number.isFinite(atSize) ? Math.round(atSize) : ''}
               onChange={(e) => {
                 const v = parseFloat(e.target.value);

@@ -1,15 +1,14 @@
 """XFDF annotation interchange (rung 4 — ISO 19444-1's annots arm).
 
 Exports a document's markup annotations to XFDF and imports an XFDF file's
-annotations into a document — the format Acrobat, the rival, and every
-review tool speak. Geometry, colors, border width, opacity, author, dates,
+annotations into a document. Geometry, colors, border width, opacity, author, dates,
 subject, names, line endings, cloud intensity, callout leaders, quad points,
 ink gestures — and the REVIEW THREAD: /IRT reply chains and /State
 //StateModel (Accepted/Rejected/Completed/…) ride on `inreplyto`/`state`/
 `statemodel`, so a round trip preserves who replied what to whom.
 
-Imported annotations carry no appearance streams — viewers (ours included,
-via pdf.js) synthesize defaults, and Acrobat regenerates on load. That is
+Imported annotations carry no appearance streams. Viewers, including ours via
+pdf.js, synthesize defaults or regenerate them on load. That is
 the format's own convention, not a shortcut.
 """
 

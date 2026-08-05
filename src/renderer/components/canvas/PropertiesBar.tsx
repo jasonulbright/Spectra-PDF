@@ -18,7 +18,7 @@ const styleable = (a: PageAnnotation): boolean =>
   a.kind === 'shape' || a.kind === 'callout' || a.kind === 'ink';
 const fillable = (a: PageAnnotation): boolean => a.kind === 'shape' || a.kind === 'callout';
 
-// The Properties Bar (I.6 — Acrobat's Ctrl+E): a contextual strip under the
+// The Properties Bar is a contextual strip under the
 // secondary toolbar. With ONE annotation selected (click, Select tool) it
 // shows that annotation's properties with quick controls (recolor, delete,
 // z-order); with SEVERAL selected (ctrl-click / ctrl-marquee, rung 1) it

@@ -90,10 +90,9 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
         <div className="tool-dock-resize" data-testid="tool-dock-resize" onPointerDown={onResizeDown} title={tChrome('dock.resize')} />
       )}
       <div className="tool-dock-header">
-        {/* Inside a tool this is a BACK control, and says so: a bare grid glyph
-            left "how do I get back to the list?" to guesswork (owner-raised).
-            In the list it stays the compact toggle back to the open tool.
-            Same testid and same handler in both — only the affordance changes. */}
+        {/* Inside a tool this is a labeled back control. In the list it stays
+            the compact toggle back to the open tool. The test id and handler
+            stay the same; only the affordance changes. */}
         <button
           type="button"
           data-testid="tool-dock-grid"

@@ -194,7 +194,7 @@ def _axis_aligned(m) -> bool:
     return abs(b) <= lim and abs(c) <= lim and a > 0 and d > 0
 
 
-# ── writing orientation (9.T13, brief 39 § 2) ─────────────────────────────
+# ── writing orientation ──────────────────────────────────────────────────
 #
 # The writing mode is not a boolean but an ORIENTATION, and an orientation's
 # entire content is a SIGNED AXIS PERMUTATION T: the map sending a
@@ -292,9 +292,8 @@ def _orientation_of(m, vertical: bool, columns: str = COLUMNS_RTL) -> str | None
     """The member's orientation CANDIDATE, or None when nothing can admit it.
 
     The discriminator between an upright vertical glyph and a horizontal run
-    drawn at the same matrix is the FONT, never the matrix (they are
-    identical matrices — recon § 2): a vertical-writing member advances down
-    its own text space, a horizontal one advances along +x and gets its
+    drawn at the same matrix is the FONT, never the matrix: a vertical-writing
+    member advances down its own text space, a horizontal one advances along +x and gets its
     downward travel, if any, from the rotation. Anything skewed, mirrored or
     off-quarter answers None and stays on the 7.2 run-box surface.
 
@@ -652,8 +651,8 @@ def _members_from(runs: list[dict], detail: list[dict]) -> list[_Member]:
         # size share a transposed key and group as the one paragraph they
         # visually are.
         mem.lkey = _linear_key(transposed + (0.0, 0.0)) + (frame,)
-        # Stream-scoped resources for family classification (9.B1) — a
-        # nested form's font is not in page resources (review-caught).
+        # Family classification uses stream-scoped resources because a nested
+        # form's font is not in page resources.
         mem.resources = det.get("resources")
         mem.fallback = det.get("fallback")
         members.append(mem)
@@ -1226,7 +1225,7 @@ def _analyze(paras: list[list[_Line]], lkey: tuple) -> list[_Paragraph]:
             p.editable = False
             p.reason = "vertical text with raised characters does not reflow"
         elif any(m.clipped for m in p.members) and not all(m.clipped for m in p.members):
-            # 9-§I.0-S8 (gauntlet): a clip boundary cutting THROUGH a paragraph
+            # A clip boundary cutting through a paragraph
             # leaves some members visible and some clipped away. The whole-para
             # `clipped` flag (all-members) is False, so it would list as a
             # single editable paragraph whose `text`/`box` include the invisible
@@ -1536,8 +1535,7 @@ def _listing(paragraphs: list[_Paragraph], style_of=None) -> list[dict]:
         # The DOMINANT member: the widest on the first line — the SAME rule
         # _Emission uses to compute the leading scale, so the size the
         # editor shows is the size that scale is reasoned from (a first-by-
-        # index lead-in marker otherwise seeded a mismatched number —
-        # review-caught).
+        # index lead-in marker otherwise seeds a mismatched number.
         first = _widest(p.lines[0].members)
         # A3b seeds: the dominant member's own weight/slant, classified by
         # the caller (needs the pdf's font dicts — `style_of(member)` →
@@ -1757,8 +1755,8 @@ class _StyleRef:
             # recompute stroke (there's nothing to convert).
             if self.color_override != (None, None):
                 # Text painted via STROKE (Tr 1 = stroke, Tr 2 = fill+stroke)
-                # shows its stroke colour — recolour that too, or the swatch
-                # would be a silent no-op on outline text (review-caught).
+                # shows its stroke color, so recolor that too or the swatch is
+                # a silent no-op on outline text.
                 # The stroke colour uses the UPPERCASE op (rg→RG, g→G, k→K),
                 # so the fill override must be converted, not copied verbatim.
                 if s.get("render_mode") in (1, 2):
@@ -2885,9 +2883,8 @@ def _f(v: float) -> float:
 
 
 # Single-line paragraphs have no measured leading and their box is exactly
-# their own text — wrapping AT that width would tower one word per line,
-# and never wrapping ran a grown title off the page (review-caught
-# CRITICAL, reproduced at 1.8× page width). The rule: a single line
+# their own text. Wrapping at that width makes one word per line, while never
+# wrapping can run a grown title off the page. The rule: a single line
 # extends right to the page's SYMMETRIC margin (mirror the left inset)
 # before wrapping, and wrapped lines stack at standard single spacing.
 SINGLE_LINE_LEADING_EM = 1.2
@@ -3072,8 +3069,8 @@ class _Emission:
             box_edges = (body_left, body_left + body_measure)
         # A4 split: each block is its OWN paragraph (fresh first-line
         # indent, own justify-final-line), the second anchored below the
-        # first by a gap the re-listing grouping can NEVER join across.
-        # 2×leading alone was NOT that gap (review-caught HIGH, repro'd at
+        # first by a gap the re-listing grouping can never join across.
+        # Twice the leading is insufficient when
         # leading ≤ 0.8×eff): a single-line first block has no measured
         # deltas, so the join test uses the 1.6-em cap — condensed leading
         # made 2×leading clear the drift test but not the cap, and the
@@ -3472,7 +3469,7 @@ class _Emission:
             nonlocal raw
             if not buf:
                 return
-            # 9.B5 (review-caught HIGH): encode PER ENTRY, never a joined
+            # Encode per entry, never as a joined
             # buffer — cap.encode's greedy matcher on the join could form
             # a ligature ACROSS entry boundaries (two same-run singles
             # from adjacent spans), emitting the lig code where the width
@@ -4135,8 +4132,8 @@ def _prepare_styled(
     inplace_tounicode: dict[int, str] = {}
     inplace_widths: dict[int, float] = {}
     # A1 overrides: a size in points (clamped to a sane editing range —
-    # an unbounded value pushed most of the paragraph off the page on a
-    # typo, review-caught), an [r,g,b] fill colour.
+    # an unbounded value can push most of the paragraph off the page on a typo),
+    # and an [r,g,b] fill color.
     size_override = None
     if size is not None:
         try:
@@ -4210,12 +4207,8 @@ def _prepare_styled(
         if not font_path:
             raise ValueError("fallback font path is required to restyle")
         if isinstance(family_override, str) and os.path.isabs(family_override):
-            # Two absences, named apart (brief 39 § 3.1): a face with no
-            # `vmtx` makes no vertical statement at all — the § 1.5b class,
-            # where the shaper's synthesized advance made a Latin face look
-            # vertical — and a face WITH the machinery may still lack a
-            # vertical form for some character. A bug report can tell them
-            # apart only if the refusals do.
+            # Distinguish a face with no vertical metrics from one that has
+            # vertical machinery but lacks a form for a specific character.
             if not face_has_vertical_metrics(family_override):
                 raise ValueError(
                     "that font has no vertical metrics — pick one that does"
@@ -4471,8 +4464,8 @@ def _prepare_styled(
         if not font_path:
             raise ValueError("fallback font path is required to convert")
         # family=None keys resolve their face from the FIRST member's own
-        # font (form-scoped when nested — a form's `F1` can differ from
-        # the page's, review-caught): this is the B1 dominant face and
+        # font. When nested, a form's `F1` can differ from the page's. This is
+        # the dominant face and
         # reproduces the shipped whole-para style-only / convert resolve
         # exactly. family=serif|sans|mono keys bypass classification via
         # a synthetic /Flags dict (the A2 trick).
@@ -5056,9 +5049,8 @@ def merge_paragraph_with_previous(
             raise ValueError("the paragraphs are in different content streams and cannot merge")
         if prev.lkey != cur.lkey:
             # Different linear parts (CTM scale) — the emission would lay
-            # cur's text out at PREV's scale, silently resizing it
-            # (review-caught, repro'd: 2×-scaled text shrank to 1× with a
-            # success result). The same signal that kept these runs in
+            # cur's text out at the previous scale, silently resizing it. The
+            # same signal that kept these runs in
             # separate paragraphs at grouping time refuses the merge.
             raise ValueError("the paragraphs have different formatting and cannot merge")
         if [int(r) for r in expected_prev_runs] != prev.run_indexes or str(expected_prev_text) != prev.text:

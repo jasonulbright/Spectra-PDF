@@ -152,7 +152,7 @@ describe('shortcutForCommand', () => {
   });
 });
 
-describe('discoverability copy (2026-07-18, launch-thread feedback)', () => {
+describe('discoverability copy', () => {
   // A user could not FIND merge / text boxes / text editing even though all
   // existed — the tile copy under-named the verbs people search for. Pin the
   // load-bearing words so a future copy edit cannot silently regress the fix.

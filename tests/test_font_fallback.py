@@ -114,7 +114,7 @@ class TestFamilyClassification:
 
     def test_malformed_descendant_fonts_degrades_not_crashes(self):
         # A damaged Type0 whose /DescendantFonts holds a non-dict element
-        # must degrade to the name heuristic, never raise (review-caught:
+        # must degrade to the name heuristic, never raise (regression:
         # AttributeError escaped as a raw RPC error).
         pdf = pikepdf.new()
         from engine.font_fallback import classify_font_family
@@ -317,7 +317,7 @@ class TestConvertTextRun:
 
     def test_two_level_nesting_leaves_outer_original_untouched(self, tmp_dir):
         """Page→FormA→FormB→text: editing inside FormB must not add ANY
-        entry to FormA's ORIGINAL resources (review-caught by identity
+        entry to FormA's ORIGINAL resources (regression by identity
         trace: the staging rule — copies register into the CALLER'S copy)."""
         src = os.path.join(tmp_dir, "t.pdf")
         out = os.path.join(tmp_dir, "o.pdf")
@@ -403,7 +403,7 @@ class TestConvertTextRun:
     def test_convert_refuses_uneditable_run(self, tmp_dir):
         """convert_text_run is a registered engine command — it must fail
         CLOSED on a refused-font run like its sibling, never mix an
-        estimated old width into Δ (review-caught guard gap)."""
+        estimated old width into Δ (regression guard gap)."""
         pdf = pikepdf.new()
         t0 = pdf.make_indirect(
             Dictionary(
