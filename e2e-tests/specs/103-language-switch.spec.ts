@@ -42,12 +42,15 @@ describe('language switch (N12)', () => {
     await $('[data-testid="prefs-close"]').click();
   });
 
-  // Wave-1 locales fr/de/it. One known menu label each is the cheap proof the
+  // Every wave-1 locale. One known menu label each is the cheap proof the
   // catalog is BUNDLED and reachable from the Settings list — the parity,
   // placeholder and plural gates are vitest's job, and repeating them here
   // would buy nothing for the runtime cost. The anchor is View, not File:
   // Italian's File is spelled exactly like English's, so asserting on it
-  // would pass against a locale that never loaded.
+  // would pass against a locale that never loaded. Portuguese's "Exibir" is
+  // likewise chosen for being nothing like "View", and for ja/zh any CJK
+  // label is unmistakable. The two REGIONAL codes also prove the tag round
+  // trips verbatim: `<html lang>` must read `pt-BR` / `zh-CN`, not `pt`/`zh`.
   it('switches to each wave-1 locale and back to English', async () => {
     await waitForHarness();
     await browser.keys(['Control', 'k']);
@@ -59,6 +62,9 @@ describe('language switch (N12)', () => {
       ['fr', 'Affichage'],
       ['de', 'Ansicht'],
       ['it', 'Visualizza'],
+      ['pt-BR', 'Exibir'],
+      ['ja', '表示'],
+      ['zh-CN', '视图'],
     ] as const) {
       await $('[data-testid="prefs-language"]').selectByAttribute('value', code);
       await browser.waitUntil(
