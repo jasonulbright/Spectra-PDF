@@ -398,6 +398,88 @@ export async function symbolResetSets(): Promise<void> {
   });
 }
 
+async function editTextPageIdsRaw(): Promise<string[]> {
+  return await browser.execute<string[], []>(function () {
+    return (window as any).__SPECTRA_TEST__.editTextPageIds();
+  });
+}
+
+async function editParagraphCount(pageId: string): Promise<number> {
+  return await browser.execute<number, [string]>(function (p) {
+    return (window as any).__SPECTRA_TEST__.editParagraphs(p).length;
+  }, pageId);
+}
+
+/**
+ * Open the paragraph editor and require it to STAY open, re-resolving the page
+ * id on every attempt — the `openMenuItem` shape, applied to the editor.
+ *
+ * Two races live here and only the pair of them is a fix.
+ *
+ * (1) `editParagraphOpen` is fire-and-forget: it returns void whether or not
+ * the editor mounted, so `open(); waitForDisplayed()` is check-then-act. A
+ * reindex still in flight from a previous test's undo lands just after the open
+ * and re-renders the editor away, and the wait then burns its whole timeout on
+ * an editor that was opened once and closed.
+ *
+ * (2) **Page ids are generation-tagged, so a retry that reuses the caller's id
+ * can never recover.** That is not a theory: hardening (1) alone turned the
+ * v1.0.20 battery's opaque `edit-para-input still not displayed after 10000ms`
+ * into a reproducible `never stayed open for …pdf#g4#p0 paragraph 0` — twenty
+ * seconds of re-opening a RETIRED id. The reindex that fires between the
+ * caller's listing read and the open publishes generation g+1 and drops g, and
+ * by design a stale id can never re-bind (see CLAUDE.md, Phase 5 identity). So
+ * the id is re-read inside the predicate, exactly as spec 43's convert case had
+ * already learned to do locally.
+ *
+ * Living here means the ~30 call sites across specs
+ * 43/49/50/52/54/55/56/57/98/109/110 are covered rather than the one that
+ * happened to lose the race — the same reason `openMenuItem` exists.
+ */
+export async function openParagraphEditor(
+  pageId: string,
+  index: number,
+  timeoutMs = 30_000,
+): Promise<void> {
+  let lastId = pageId;
+  await browser.waitUntil(
+    async () => {
+      const ids = await editTextPageIdsRaw();
+      if (ids.length === 0) return false;
+      // Prefer the caller's page when it is still live. Falling back to the
+      // sole surviving id is safe precisely because it is SOLE — every caller
+      // today reads `editTextPageIds()[0]` off a single-page fixture. A
+      // multi-page caller whose id retired gets no guess, it gets a timeout.
+      const target = ids.includes(pageId) ? pageId : ids.length === 1 ? ids[0] : '';
+      if (!target) return false;
+      const count = await editParagraphCount(target);
+      if (count === 0 || index >= count) return false;
+      lastId = target;
+
+      await browser.execute<void, [string, number]>(
+        function (p, i) {
+          (window as any).__SPECTRA_TEST__.editParagraphOpen(p, i);
+        },
+        target,
+        index,
+      );
+      // Long enough for a reindex that is already in flight to land and take
+      // the editor back down, so a "displayed" answer means it stayed.
+      await browser.pause(400);
+      return await $('[data-testid="edit-para-input"]')
+        .isDisplayed()
+        .catch(() => false);
+    },
+    {
+      timeout: timeoutMs,
+      interval: 250,
+      timeoutMsg:
+        `the paragraph editor never stayed open for paragraph ${index} ` +
+        `(asked for ${pageId}, last live page id ${lastId})`,
+    },
+  );
+}
+
 export async function commitPendingEdits(): Promise<void> {
   const result = await browser.executeAsync<string | null, []>(function (done) {
     (window as any).__SPECTRA_TEST__.commitPendingEdits()

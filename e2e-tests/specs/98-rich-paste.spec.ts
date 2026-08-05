@@ -8,7 +8,13 @@ import { writeFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
-import { waitForHarness, openByPaths, getState, invokeAppCommand } from '../support/harness.js';
+import {
+  waitForHarness,
+  openByPaths,
+  getState,
+  invokeAppCommand,
+  openParagraphEditor,
+} from '../support/harness.js';
 
 async function editTextPageIds(): Promise<string[]> {
   return await browser.execute<string[], []>(function () {
@@ -65,13 +71,7 @@ describe('rich paste (T20)', () => {
     );
     const pageId = (await editTextPageIds())[0];
     const para = (await editParagraphs(pageId))[0];
-    await browser.execute<void, [string, number]>(
-      function (p, i) {
-        (window as any).__SPECTRA_TEST__.editParagraphOpen(p, i);
-      },
-      pageId,
-      para.index,
-    );
+    await openParagraphEditor(pageId, para.index);
     await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
 
     // The editor opens with everything selected, so the paste REPLACES the
