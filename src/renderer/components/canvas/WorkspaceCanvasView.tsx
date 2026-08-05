@@ -24,6 +24,11 @@ import { getDocumentProxy } from '../../lib/pdfDocCache';
 import { buildRedactionRegions } from '../../lib/redaction';
 import { displayRectToPdf, pdfRectToDisplay } from '../../lib/pdfx-build';
 import { sameRegion } from '../../lib/search-redact';
+import {
+  loadRedactionProperties,
+  propertiesFromPayload,
+  propertiesPayload,
+} from '../../lib/redaction-properties';
 import { buildLinkPayloads, type LinkSpec, type PageQuads } from '../../lib/text-selection-markup';
 import type { PageGeometry, RedactionMark, RedactionRegion } from '../../lib/redaction';
 import type { PageRef } from '../../state/types';
@@ -1985,7 +1990,18 @@ export function WorkspaceCanvasView({
       if (!doc) return;
       setMarks((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), path: doc.path, pageId, rect, rotationAtDraw },
+        {
+          id: crypto.randomUUID(),
+          path: doc.path,
+          pageId,
+          rect,
+          rotationAtDraw,
+          // F15 slice E: a band drawn by hand takes the SAME properties the
+          // Search & Redact panel's marks take, read at draw time. One
+          // setting, both producers — the properties are how the user works,
+          // not something a second surface gets its own copy of.
+          props: loadRedactionProperties(),
+        },
       ]);
     },
     [docs],
@@ -2130,7 +2146,10 @@ export function WorkspaceCanvasView({
   const marksFromFileRects = useCallback(
     async (
       path: string,
-      entries: { page: number; rect: [number, number, number, number] }[],
+      entries: (Record<string, unknown> & {
+        page: number;
+        rect: [number, number, number, number];
+      })[],
     ): Promise<{ marks: RedactionMark[]; orphaned: number }> => {
       const f = filesRef.current.get(path);
       if (!f?.buffer) return { marks: [], orphaned: entries.length };
@@ -2158,6 +2177,12 @@ export function WorkspaceCanvasView({
           pageId: pageRef.id,
           rect,
           rotationAtDraw: pageRef.rotation,
+          // F15 slice E: the entry's own properties when it HAS them (a mark
+          // seeded from the file carries the fill and overlay it was saved
+          // with), else the ones the user is currently working with (a mark
+          // the panel just made). `propertiesFromPayload` never invents a
+          // value the file did not state.
+          props: propertiesFromPayload(entry as Record<string, unknown>),
         });
       }
       return { marks, orphaned };
@@ -2174,7 +2199,16 @@ export function WorkspaceCanvasView({
       try {
         const listed = (await engineCallRaw('list_redact_annotations', {
           file: f.workingPath,
-        })) as unknown as { marks: { page: number; rect: [number, number, number, number] }[] };
+        })) as unknown as {
+          // F15 slice E widened the listing: a stored mark reports its
+          // REDACTION PROPERTIES beside its rect, and the seed carries them
+          // back onto the transient mark so a saved fill/overlay survives a
+          // reopen.
+          marks: (Record<string, unknown> & {
+            page: number;
+            rect: [number, number, number, number];
+          })[];
+        };
         if (seedSeqRef.current.get(path) !== seq) return; // superseded
         if (!listed.marks?.length) return;
         const { marks: seeded, orphaned } = await marksFromFileRects(path, listed.marks);
@@ -4486,7 +4520,15 @@ export function WorkspaceCanvasView({
       // "Mark checked" twice must not stack marks the user then has to
       // delete twice.
       const existing = await markedRects();
-      const byPath = new Map<string, { page: number; rect: [number, number, number, number] }[]>();
+      // F15 slice E: the panel's marks take the properties the user is
+      // currently working with, exactly as a hand-drawn band does. Merged in
+      // as the engine PAYLOAD so both producers travel the one conversion
+      // (`marksFromFileRects`) rather than two.
+      const current = propertiesPayload(loadRedactionProperties());
+      const byPath = new Map<
+        string,
+        (Record<string, unknown> & { page: number; rect: [number, number, number, number] })[]
+      >();
       let duplicates = 0;
       for (const request of requests) {
         const pending = byPath.get(request.path) ?? [];
@@ -4504,7 +4546,7 @@ export function WorkspaceCanvasView({
           duplicates += 1;
           continue;
         }
-        pending.push({ page: request.page, rect: request.rect });
+        pending.push({ page: request.page, rect: request.rect, ...current });
         byPath.set(request.path, pending);
       }
       const fresh: RedactionMark[] = [];

@@ -29,6 +29,7 @@ from pathlib import Path
 import pikepdf
 
 from .incremental import finalize_preserving_signatures
+from .redact import properties_of
 from .validate import validate_pdf
 
 
@@ -66,6 +67,80 @@ def _entry_kind(entry) -> str:
         return "unreadable"
 
 
+def _mark_properties(annot) -> dict:
+    """The mark's REDACTION PROPERTIES, in the format's own vocabulary (F15
+    slice E), read back so a round trip does not lose them.
+
+    Absent keys are absent from the result rather than defaulted here: the
+    applier's `properties_of` owns the defaults, and inventing them in the
+    READER would make "the file says black" and "the file says nothing"
+    indistinguishable — which is how a user's chosen fill silently becomes
+    someone else's default on the next save.
+    """
+    out: dict = {}
+    try:
+        ic = annot.get("/IC")
+        if ic is not None:
+            values = [float(v) for v in ic]
+            if len(values) == 3:
+                out["fill"] = values
+    except Exception:
+        pass
+    try:
+        text = annot.get("/OverlayText")
+        if text is not None:
+            out["overlay_text"] = str(text)
+    except Exception:
+        pass
+    try:
+        if annot.get("/Repeat") is not None:
+            out["repeat_overlay"] = bool(annot.get("/Repeat"))
+    except Exception:
+        pass
+    try:
+        q = annot.get("/Q")
+        if q is not None and int(q) in (0, 1, 2):
+            out["align"] = int(q)
+    except Exception:
+        pass
+    try:
+        da = annot.get("/DA")
+        if da is not None:
+            parsed = _parse_da(str(da))
+            out.update(parsed)
+    except Exception:
+        pass
+    return out
+
+
+def _parse_da(da: str) -> dict:
+    """`/DA` → {font_size, text_color}. The default-appearance string is a
+    content-stream fragment (`/Helv 12 Tf 1 1 1 rg`), so it is read by
+    LOOKING FOR ITS OPERATORS rather than by position — producers write the
+    operators in whatever order they like, and a positional read would
+    silently take a colour component for a size."""
+    out: dict = {}
+    tokens = da.split()
+    for i, token in enumerate(tokens):
+        if token == "Tf" and i >= 1:
+            try:
+                out["font_size"] = float(tokens[i - 1])
+            except ValueError:
+                pass
+        elif token == "rg" and i >= 3:
+            try:
+                out["text_color"] = [float(tokens[i - 3]), float(tokens[i - 2]), float(tokens[i - 1])]
+            except ValueError:
+                pass
+        elif token == "g" and i >= 1:
+            try:
+                grey = float(tokens[i - 1])
+                out["text_color"] = [grey, grey, grey]
+            except ValueError:
+                pass
+    return out
+
+
 def _mark_rect(annot) -> list[float] | None:
     """A mark's /Rect as four finite floats, or None when it will not read.
 
@@ -100,7 +175,7 @@ def _scan(pdf: pikepdf.Pdf) -> list[dict]:
                 if rect is None:
                     rec["unreadable"] += 1
                 else:
-                    rec["marks"].append(rect)
+                    rec["marks"].append({"rect": rect, "props": _mark_properties(entry)})
         pages.append(rec)
     return pages
 
@@ -180,6 +255,7 @@ def save_redaction_marks(file: str, output: str, regions: list) -> dict:
             if x1 - x0 <= 0 or y1 - y0 <= 0:
                 raise ValueError("rect must have a positive width and height")
             w, h = x1 - x0, y1 - y0
+            props = properties_of(spec)
             ap = pdf.make_stream(
                 f"1 0 0 RG 1.5 w 0.75 0.75 {w - 1.5:.2f} {h - 1.5:.2f} re S".encode("ascii")
             )
@@ -190,12 +266,31 @@ def save_redaction_marks(file: str, output: str, regions: list) -> dict:
                 Type=pikepdf.Name("/Annot"),
                 Subtype=pikepdf.Name("/Redact"),
                 Rect=pikepdf.Array([x0, y0, x1, y1]),
-                # /IC: the fill applied redactions get (the format's black).
-                IC=pikepdf.Array([0, 0, 0]),
+                # /IC: the fill applied redactions get. No longer hard-coded
+                # black — F15 slice E made it the user's choice, and the same
+                # value reaches `redact()` when the mark is applied.
+                IC=pikepdf.Array(list(props.fill)),
                 C=pikepdf.Array([1, 0, 0]),
                 F=0,  # visible on screen, never printed as if it were content
                 AP=pikepdf.Dictionary(N=ap),
             ))
+            # The overlay half, written only when there IS one: an empty
+            # /OverlayText is not the same claim as no /OverlayText, and a
+            # reader defaulting the absent key would turn "no overlay" into
+            # "an overlay of nothing" on the next round trip.
+            if props.overlay_text:
+                annot["/OverlayText"] = pikepdf.String(props.overlay_text)
+                annot["/Q"] = props.align
+                if props.repeat:
+                    annot["/Repeat"] = True
+                r, g, b = props.text_color
+                size = props.font_size if props.font_size > 0 else 0
+                # /DA is a content-stream fragment, and a size of 0 is the
+                # format's own "fit the box" — the same meaning `redact()`
+                # gives font_size 0, so the two agree without a second rule.
+                annot["/DA"] = pikepdf.String(
+                    f"/Helv {size:g} Tf {r:.6g} {g:.6g} {b:.6g} rg"
+                )
             page = pdf.pages[page_no - 1]
             existing = page.obj.get("/Annots")
             page.obj["/Annots"] = (
@@ -237,6 +332,6 @@ def list_redact_annotations(file: str) -> dict:
         scanned = _scan(pdf)
         _refuse_unreadable(scanned)
         for i, rec in enumerate(scanned):
-            for rect in rec["marks"]:
-                marks.append({"page": i + 1, "rect": rect})
+            for mark in rec["marks"]:
+                marks.append({"page": i + 1, "rect": mark["rect"], **mark["props"]})
     return {"marks": marks, "count": len(marks)}

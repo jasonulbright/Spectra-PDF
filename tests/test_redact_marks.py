@@ -51,7 +51,17 @@ class TestSaveAndList:
         assert r["removed_previous"] == 0
         listed = list_redact_annotations(src)
         assert listed["count"] == 2
-        assert listed["marks"][0] == {"page": 1, "rect": [20, 30, 120, 90]}
+        # F15 slice E widened the listing: a mark now reports its REDACTION
+        # PROPERTIES alongside its rect, so the canvas can re-seed the fill and
+        # the overlay the user chose. The exact-dict assertion this used to
+        # make would have pinned the listing to "rect only" forever — the
+        # claim it was making is that page and rect round-trip, and that is
+        # what it asserts now. `fill` is present because /IC has always been
+        # written (it was hard-coded black, it is now the user's choice).
+        assert listed["marks"][0]["page"] == 1
+        assert listed["marks"][0]["rect"] == [20, 30, 120, 90]
+        assert listed["marks"][0]["fill"] == [0.0, 0.0, 0.0]
+        assert "overlay_text" not in listed["marks"][0]
         assert listed["marks"][1]["page"] == 2
         # The mark never prints as if it were content, and carries the
         # format's applied-fill and a visible AP for other viewers.
