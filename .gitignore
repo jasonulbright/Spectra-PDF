@@ -75,8 +75,8 @@ project-manifest.json
 # pdfjs-dist package. Same class: vendored in the product, not in git.
 /public/pdfjs/
 
-# Internal dev record — local working files, NEVER committed (kept out of the
-# public repo; history was rewritten 2026-07-16 to remove them).
+# Internal dev record — local working files, NEVER committed. They must
+# never reach the public repo.
 CLAUDE.md
 docs/PUNCHLIST.md
 docs/architecture/

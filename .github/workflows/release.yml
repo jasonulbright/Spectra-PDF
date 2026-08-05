@@ -193,10 +193,10 @@ jobs:
         shell: pwsh
 
       - name: Build, sign, and publish release
-        # v1 evaluated 2026-07-31: none of its breaking changes touch this
-        # workflow (no renamed inputs used; Tauri 2 stable; Windows-only
-        # bundles; notify-only reads just latest.json's version field). The
-        # live proof is the next tag's release run.
+        # v1's breaking changes do not touch this workflow: no renamed
+        # inputs are used, Tauri 2 is stable, the bundles are Windows-only,
+        # and notify-only reads just latest.json's version field. The live
+        # proof is the next tag's release run.
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
