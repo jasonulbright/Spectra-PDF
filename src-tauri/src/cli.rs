@@ -1250,6 +1250,13 @@ pub struct DetectFieldsArgs {
     /// Pages to analyze, e.g. "1,3,5" or "all"
     #[arg(long, default_value = "all")]
     pub pages: String,
+    /// Scanned-page handling: auto (recognise a page with nothing readable on
+    /// it) | never (stay offline) | always (recognise every page)
+    #[arg(long, default_value = "auto")]
+    pub scan: String,
+    /// Recognition language for scanned pages; '+'-joined for several at once
+    #[arg(long, default_value = "eng")]
+    pub lang: String,
     /// Stop after this many candidates (the result reports the truncation)
     #[arg(long, default_value_t = 5000)]
     pub max_candidates: u32,
@@ -2913,6 +2920,10 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 json!({
                     "file": abs(&args.input).to_string_lossy(),
                     "pages": parse_pages(&args.pages),
+                    "scan": args.scan,
+                    "lang": args.lang,
+                    "tesseract_path": resolve_tesseract().to_string_lossy(),
+                    "gs_path": resolve_gs().to_string_lossy(),
                     "max_candidates": args.max_candidates,
                 }),
             )

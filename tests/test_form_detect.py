@@ -7,6 +7,10 @@ group's question as its own label, and one show operator can carry two labels.
 Restoring any of those naive versions must fail a test in this file.
 """
 
+import pathlib
+import subprocess
+import tempfile
+
 import pikepdf
 import pytest
 from pikepdf import Array, Dictionary, Name, String
@@ -16,6 +20,10 @@ from engine.form_detect_vocab import is_date_label, is_signature_label
 
 
 K = 0.5523  # the circle-from-Béziers control-point ratio
+
+_ROOT = pathlib.Path(__file__).resolve().parent.parent
+GS_EXE = _ROOT / "resources" / "ghostscript" / "gswin64c.exe"
+TESSERACT_EXE = _ROOT / "resources" / "tesseract" / "tesseract.exe"
 
 
 def _simple_font(doc):
@@ -457,3 +465,102 @@ def test_a_blank_page_reports_its_own_emptiness(tmp_path):
     result = detect_form_fields(path)
     assert result["candidates"] == []
     assert result["pages_by_source"] == {"1": "empty"}
+
+
+def test_an_unknown_scan_mode_refuses(ruled):
+    with pytest.raises(ValueError, match="scan must be"):
+        detect_form_fields(ruled, scan="sometimes")
+
+
+# ── the raster arm ────────────────────────────────────────────────────────
+
+
+def _scanned(source, target):
+    """`source` rendered at the recognition density and re-embedded as an image.
+
+    Written with Pillow's own PDF writer: Ghostscript's pdfwrite is a
+    PostScript/PDF interpreter and takes no raster input — fed a PNG it emits a
+    syntactically valid PDF with a BLANK page, which reads downstream as "OCR
+    found nothing".
+    """
+    from PIL import Image
+
+    from engine.recognize import OCR_DPI
+
+    with tempfile.TemporaryDirectory() as tmp:
+        png = pathlib.Path(tmp) / "page.png"
+        subprocess.run(
+            [
+                str(GS_EXE), "-sDEVICE=png16m", f"-r{OCR_DPI}", "-dNOPAUSE",
+                "-dBATCH", "-dQUIET", "-dSAFER", f"-sOutputFile={png}", str(source),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        with Image.open(png) as image:
+            image.convert("RGB").save(str(target), "PDF", resolution=float(OCR_DPI))
+    return str(target)
+
+
+@pytest.fixture
+def recognisers():
+    for exe in (GS_EXE, TESSERACT_EXE):
+        if not exe.is_file():
+            pytest.skip(f"{exe.name} not available")
+    return {"tesseract_path": str(TESSERACT_EXE), "gs_path": str(GS_EXE)}
+
+
+def test_a_scan_of_a_ruled_form_recovers_the_same_fields(tmp_path, ruled, recognisers):
+    scan = _scanned(ruled, tmp_path / "scan.pdf")
+    upright = detect_form_fields(ruled)["candidates"]
+    result = detect_form_fields(scan, **recognisers)
+    assert result["pages_by_source"] == {"1": "raster"}
+    assert [c["name"] for c in result["candidates"]] == [c["name"] for c in upright]
+    for recovered, drawn in zip(result["candidates"], upright):
+        for got, want in zip(recovered["rect"], drawn["rect"]):
+            assert abs(got - want) <= 1.0
+    assert all(c["evidence"].startswith("raster-") for c in result["candidates"])
+
+
+def test_a_scan_still_withholds_the_table_rules(tmp_path, ruled, recognisers):
+    scan = _scanned(ruled, tmp_path / "scan.pdf")
+    reasons = {
+        row["reason"]: row["count"] for row in detect_form_fields(scan, **recognisers)["unoffered"]
+    }
+    assert reasons["rule_without_label"] == 3
+
+
+def test_a_scan_of_a_boxed_form_recovers_boxes_and_options(tmp_path, boxed, recognisers):
+    scan = _scanned(boxed, tmp_path / "scan.pdf")
+    upright = detect_form_fields(boxed)["candidates"]
+    result = detect_form_fields(scan, **recognisers)
+    assert [c["name"] for c in result["candidates"]] == [c["name"] for c in upright]
+    assert [c["kind"] for c in result["candidates"]] == [c["kind"] for c in upright]
+    for recovered, drawn in zip(result["candidates"], upright):
+        for got, want in zip(recovered["rect"], drawn["rect"]):
+            assert abs(got - want) <= 1.0
+
+
+def test_scan_never_reports_the_page_as_an_image(tmp_path, ruled, recognisers):
+    scan = _scanned(ruled, tmp_path / "scan.pdf")
+    result = detect_form_fields(scan, scan="never")
+    assert result["candidates"] == []
+    assert result["pages_by_source"] == {"1": "image"}
+
+
+def test_a_scan_with_no_recogniser_refuses_by_name(tmp_path, ruled, recognisers):
+    scan = _scanned(ruled, tmp_path / "scan.pdf")
+    with pytest.raises(RuntimeError, match="OCR engine is not available"):
+        detect_form_fields(scan, gs_path=str(GS_EXE))
+
+
+def test_scan_always_recognises_a_born_digital_page(tmp_path, ruled, recognisers):
+    result = detect_form_fields(ruled, scan="always", **recognisers)
+    assert result["pages_by_source"] == {"1": "raster"}
+    assert [c["name"] for c in result["candidates"]] == [
+        "First_name",
+        "Last_name",
+        "Email_address",
+        "Telephone",
+        "Employer",
+    ]

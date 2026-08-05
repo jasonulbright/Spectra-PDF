@@ -1231,6 +1231,7 @@
   "engine.font_fallback.verticalFallbackFontCannot": "竖排后备字体无法表示 {{ch}}",
   "engine.form_detect.cannotNameDetectedField": "无法为检测到的字段 {{base}} 命名：已有过多字段使用该名称",
   "engine.form_detect.maxCandidatesMustPositive": "max_candidates 必须是正数",
+  "engine.form_detect.scanMustAutoNever": "scan 必须是 \"auto\"、\"never\" 或 \"always\"",
   "engine.forms.acroformFieldTreeNested": "AcroForm 字段树嵌套过深",
   "engine.forms.couldnTRegenerateAppearance": "无法重新生成 {{v0}} 的外观：{{exc}}",
   "engine.forms.valueContainsCharactersOutside": "该值含有表单字体编码（WinAnsi）之外的字符",
