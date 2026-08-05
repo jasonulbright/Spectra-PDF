@@ -35,7 +35,15 @@ const ENGINE_CREATE_PDF = readFileSync(
   'utf-8',
 );
 const ENGINE_SOFFICE = readFileSync(resolve(__dirname, '../src/engine/soffice.py'), 'utf-8');
-const RUST_COMMANDS = readFileSync(resolve(__dirname, '../src-tauri/src/commands.rs'), 'utf-8');
+// Rust's copy of the accepted set. It lives in its own module rather than
+// inside the picker command because TWO Rust surfaces need it — the native
+// source picker and `batch --operation create-pdf`'s folder walk — and two
+// copies inside one process would be a drift this cross-process test could
+// not even see.
+const RUST_SOURCES = readFileSync(
+  resolve(__dirname, '../src-tauri/src/create_pdf_sources.rs'),
+  'utf-8',
+);
 
 /** The suffix tuple a Python module declares, as a set. */
 function pythonSuffixes(source: string, name: string): Set<string> {
@@ -125,12 +133,30 @@ describe('the renderer and the engine agree on what is accepted', () => {
     );
   });
 
-  it("the native picker's filter offers every accepted suffix", () => {
+  it("Rust's accepted set offers every accepted suffix", () => {
     const offered = new Set(
-      [...RUST_COMMANDS.matchAll(/"([a-z0-9]{1,5})"/g)].map((m) => `.${m[1]}`),
+      [...RUST_SOURCES.matchAll(/"([a-z0-9]{1,5})"/g)].map((m) => `.${m[1]}`),
     );
     for (const suffix of ACCEPTED_SUFFIXES) {
-      expect(offered.has(suffix), `${suffix} missing from pick_create_pdf_sources`).toBe(true);
+      expect(offered.has(suffix), `${suffix} missing from create_pdf_sources.rs`).toBe(true);
+    }
+  });
+
+  it('the picker and the batch walk read that ONE Rust set', () => {
+    // The drift this stops is inside a single process, so no cross-process
+    // assertion can see it: a second hard-coded list in the picker or in the
+    // CLI would pass every test above while accepting a different set.
+    const commands = readFileSync(resolve(__dirname, '../src-tauri/src/commands.rs'), 'utf-8');
+    const cli = readFileSync(resolve(__dirname, '../src-tauri/src/cli.rs'), 'utf-8');
+    expect(commands).toContain('create_pdf_sources::');
+    expect(cli).toContain('create_pdf_sources::accepts');
+    // Probed with suffixes that belong to NO other feature — `docx` would
+    // false-positive on `export --format docx`, which is a different set
+    // entirely.
+    for (const source of [commands, cli]) {
+      for (const marker of ['"heic"', '"fodp"', '"jpx"']) {
+        expect(source, marker).not.toContain(marker);
+      }
     }
   });
 

@@ -12,8 +12,10 @@ import {
   actionFileJson,
   askedParamKeys,
   buildStepParams,
+  inPlaceBlocker,
   loadGuidedActions,
   newStep,
+  openDocumentBlocker,
   parseActionFile,
   saveGuidedActions,
   stepDefFor,
@@ -155,6 +157,11 @@ export function GuidedActionsPanel(): React.ReactElement {
   const runAction = useCallback(
     (action: GuidedAction) => {
       if (!activeFile || running) return;
+      // An action that CREATES its document has nothing to create from when
+      // it is pointed at one that already exists. The button is disabled and
+      // says why, so this is belt-and-braces at the one place a keyboard or a
+      // stale render could still reach.
+      if (openDocumentBlocker(action) !== null) return;
       const anyAsked = action.steps.some((s) => askedParamKeys(s).length > 0);
       if (anyAsked) {
         setView({ kind: 'prerun', action, values: {}, error: null });
@@ -197,6 +204,9 @@ export function GuidedActionsPanel(): React.ReactElement {
           action_name: action.name,
           gs_path: await ensureGsPath(),
           tesseract_path: await app.getTesseractPath(),
+          // P22 slice E: a folder run may START with a create_pdf step, so
+          // the LibreOffice arm has to be reachable from here too.
+          soffice_path: await app.getSofficePath(),
           font_dir: await app.getEditFontPath(),
           log_dir: logDir,
           write_log: settings.batchLogEnabled,
@@ -236,6 +246,9 @@ export function GuidedActionsPanel(): React.ReactElement {
   const runActionInPlace = useCallback(
     async (action: GuidedAction) => {
       if (running) return;
+      // The engine refuses this too; refusing here means no folder picker
+      // opens for a run that cannot happen.
+      if (inPlaceBlocker(action) !== null) return;
       const source = await dialog.pickFolder(tChrome('panel.ga.pickInPlace'));
       if (!source) return;
       const anyAsked = action.steps.some((s) => askedParamKeys(s).length > 0);
@@ -791,7 +804,14 @@ export function GuidedActionsPanel(): React.ReactElement {
         </p>
       ) : (
         <div className="flex flex-col gap-1" data-testid="actions-list">
-          {actions.map((a) => (
+          {actions.map((a) => {
+            // An action that CREATES its document is a folder run by
+            // construction — the two buttons that would point it at existing
+            // files are disabled and say why, rather than failing at the
+            // engine after a folder picker.
+            const openBlocked = openDocumentBlocker(a);
+            const inPlaceBlocked = inPlaceBlocker(a);
+            return (
             <div
               key={a.id}
               data-testid={`action-item-${a.id}`}
@@ -806,7 +826,8 @@ export function GuidedActionsPanel(): React.ReactElement {
               <button
                 type="button"
                 data-testid={`action-run-${a.id}`}
-                disabled={!activeFile || running}
+                disabled={!activeFile || running || openBlocked !== null}
+                title={openBlocked ?? undefined}
                 onClick={() => void runAction(a)}
                 className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
               >
@@ -851,8 +872,8 @@ export function GuidedActionsPanel(): React.ReactElement {
                 <button
                   type="button"
                   data-testid={`action-inplace-${a.id}`}
-                  disabled={running}
-                  title={tChrome('panel.ga.inPlaceTitle')}
+                  disabled={running || inPlaceBlocked !== null}
+                  title={inPlaceBlocked ?? tChrome('panel.ga.inPlaceTitle')}
                   onClick={() => setConfirmInPlace(a.id)}
                   className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
                 >
@@ -905,7 +926,8 @@ export function GuidedActionsPanel(): React.ReactElement {
                 {tChrome('panel.ga.delete')}
               </button>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
       {!activeFile && (

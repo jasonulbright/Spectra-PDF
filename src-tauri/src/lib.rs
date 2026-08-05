@@ -1,5 +1,6 @@
 pub mod cli;
 mod commands;
+pub mod create_pdf_sources;
 mod print_to_pdf;
 mod scheduler;
 mod send_to;

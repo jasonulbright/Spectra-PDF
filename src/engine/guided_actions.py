@@ -16,6 +16,14 @@ Each file is copied to its mirror path first and the steps run IN-PLACE on
 the copy — the engine-wide in-place support (engine/inplace.py) makes every
 step atomic per write, and a failed step deletes the partial copy so the
 mirror never holds half-processed files.
+
+**One step breaks that shape deliberately: `create_pdf` (P22 slice E).** It
+PRODUCES the mirrored document instead of transforming a copy of the source,
+so an action can start "convert every Office file that lands in this folder"
+and then compress, stamp and OCR the result. Because it produces rather than
+transforms it is only valid FIRST (`validate_steps` refuses it anywhere else,
+by name), it is incompatible with in-place mode, and its presence widens what
+the run walks from PDFs to the whole Create PDF accepted set.
 """
 
 from datetime import datetime
@@ -35,6 +43,8 @@ from engine.batch_ocr import (
     ocr_file,
 )
 from engine.compress import compress
+from engine.create_pdf import accepted_suffixes as create_pdf_suffixes
+from engine.create_pdf import create_pdf
 from engine.encrypt import encrypt
 from engine.grayscale import grayscale
 from engine.headers import add_header_footer
@@ -96,7 +106,36 @@ _STEPS: dict = {
     ),
     "ocr_file": (ocr_file, frozenset({"language"}), frozenset({"gs_path", "tesseract_path"})),
     "encrypt": (encrypt, frozenset({"user_password", "owner_password", "permissions"}), frozenset()),
+    # P22 slice E. The one step that PRODUCES the document instead of
+    # transforming it, which is why it is handled by `run_action` directly
+    # rather than by `_apply_steps`: every other step is `fn(file=p,
+    # output=p)`, and `create_pdf` refuses to write over its own source (the
+    # identity guard). Its presence also widens what the run WALKS — a folder
+    # of .docx files is the whole point of the step.
+    "create_pdf": (
+        create_pdf,
+        frozenset(
+            {
+                "page_size",
+                "orientation",
+                "margin_pt",
+                "image_dpi_default",
+                "distill_preset",
+            }
+        ),
+        frozenset({"gs_path", "soffice_path"}),
+    ),
 }
+
+# Everything a create_pdf-led run walks BEYOND the PDFs `_list_sources`
+# always takes. Derived from the engine's own accepted set, never re-listed —
+# a suffix added to one arm must not need remembering here.
+CREATE_PDF_EXTRA_SUFFIXES = tuple(s for s in create_pdf_suffixes() if s != ".pdf")
+
+
+def creates_its_own_source(steps) -> bool:
+    """Does this (validated) step list START by creating the document?"""
+    return bool(steps) and steps[0]["op"] == "create_pdf"
 
 
 def validate_steps(steps) -> list[dict]:
@@ -139,6 +178,15 @@ def validate_steps(steps) -> list[dict]:
                     "MRC compression must come after OCR — OCR reads the page image, "
                     "and MRC replaces it"
                 )
+        if op == "create_pdf" and i != 0:
+            # ORDER, enforced rather than documented (the MRC-after-OCR
+            # precedent): create_pdf PRODUCES the document the rest of the
+            # action operates on, so anywhere but first it would convert a
+            # file the earlier steps had already rewritten.
+            raise ValueError(
+                "create_pdf must be the first step — it produces the document "
+                "the rest of the action works on"
+            )
         if op == "encrypt":
             if i != len(steps) - 1:
                 raise ValueError("encrypt must be the last step")
@@ -181,6 +229,7 @@ def run_action(
     action_name: str = "",
     gs_path: str = "",
     tesseract_path: str = "",
+    soffice_path: str = "",
     font_dir: str = "",
     log_dir: str = "",
     write_log: bool = True,
@@ -226,25 +275,60 @@ def run_action(
                 "The processed-originals folder must be outside the destination folder."
             )
     clean_steps = validate_steps(steps)
-    tool_paths = {"gs_path": gs_path, "tesseract_path": tesseract_path, "font_dir": font_dir}
+    creates = creates_its_own_source(clean_steps)
+    if creates and in_place:
+        # The converted document is a NEW file — replacing `report.docx` with
+        # a PDF that is still called `report.docx` is not an in-place edit,
+        # it is a destroyed source with a misleading name.
+        raise ValueError(
+            "In-place mode cannot start with create_pdf -- the converted document is a "
+            "new file, not a replacement for its source."
+        )
+    tool_paths = {
+        "gs_path": gs_path,
+        "tesseract_path": tesseract_path,
+        "soffice_path": soffice_path,
+        "font_dir": font_dir,
+    }
 
     started_at = datetime.now()
     # Guided actions run PDF steps; image sources are the batch-OCR
-    # sweep's own option (P3) and would have nothing to run against here.
-    entries, skipped_dirs = _list_sources(source_path, False)
+    # sweep's own option (P3) and would have nothing to run against here —
+    # UNLESS the action starts by CREATING the document, which is exactly the
+    # "convert every Office file that lands in this folder" run.
+    entries, skipped_dirs = _list_sources(
+        source_path, False, CREATE_PDF_EXTRA_SUFFIXES if creates else ()
+    )
     results: list[dict] = []
     for index, (abs_path, rel) in enumerate(entries):
         if progress:
             print(f"[{index + 1}/{len(entries)}] {rel}", flush=True)
         # In place: stage beside the original, verify, then swap atomically —
         # a failed step or a bad write can never leave a broken original.
-        out_path = (
-            abs_path.parent / f".{abs_path.name}.inplace.tmp" if in_place else dest_path / rel
-        )
+        if in_place:
+            out_path = abs_path.parent / f".{abs_path.name}.inplace.tmp"
+        elif creates and not rel.lower().endswith(".pdf"):
+            # The mirrored name GAINS `.pdf` rather than replacing the
+            # extension — `invoice.docx` and `invoice.pdf` in one folder must
+            # not collide, and the original name stays legible (the P3
+            # image-source rule, met at a second surface).
+            out_path = dest_path / f"{rel}.pdf"
+        else:
+            out_path = dest_path / rel
         try:
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(abs_path, out_path)
-            applied = _apply_steps(str(out_path), clean_steps, tool_paths)
+            if creates:
+                create_pdf(
+                    [{"path": str(abs_path)}],
+                    str(out_path),
+                    gs_path=gs_path or "gs",
+                    soffice_path=soffice_path,
+                    **clean_steps[0]["params"],
+                )
+                applied = 1 + _apply_steps(str(out_path), clean_steps[1:], tool_paths)
+            else:
+                shutil.copy2(abs_path, out_path)
+                applied = _apply_steps(str(out_path), clean_steps, tool_paths)
             if in_place:
                 if not _readable_output(out_path):
                     raise ValueError(
