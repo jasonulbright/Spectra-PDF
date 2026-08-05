@@ -75,6 +75,15 @@ export const REFUSAL_STRINGS = {
   'refusal.field.needsOption': 'This field type needs at least one option.',
   'refusal.field.optionsUnique': 'Options must be unique.',
   'refusal.field.nameExists': 'A field named "{{name}}" already exists.',
+  'refusal.field.optionRectsPartial':
+    'Either every option carries its own rectangle, or none of them do.',
+  'refusal.field.combNeedsMaxLength':
+    'A comb field needs a character count to divide its box into.',
+  'refusal.field.combNotMultiline': 'A comb field holds one line, so it cannot be multiline.',
+  'refusal.field.maxLengthPositive': 'The character limit must be at least 1.',
+  // A batch reports every problem at once, so each one says which field it is
+  // about; the parts stay separate keys because only the wrapper is a sentence.
+  'refusal.field.inField': '{{field}}: {{problem}}',
 
   // ── Workspace / file handlers ────────────────────────────────────────
   'refusal.commit.sourceClosed':

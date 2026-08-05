@@ -67,7 +67,7 @@ import { setCommitGate, runCommitGate } from './lib/commit-gate';
 import { readFormFields } from './lib/forms';
 import type { FormFieldValue } from './lib/forms';
 import { resolveFillTargets } from './lib/form-overlay';
-import { addFormField } from './lib/form-authoring';
+import { addFormFields } from './lib/form-authoring';
 import type { NewFieldSpec } from './lib/form-authoring';
 import { DropZone } from './components/DropZone';
 import { OperationsProvider } from './hooks/useOperations';
@@ -930,14 +930,17 @@ function AppContent(): React.ReactElement {
     [state.files, reloadFile, dispatch, call],
   );
 
-  const handleAddFormField = useCallback(
-    async (path: string, spec: NewFieldSpec) => {
+  // One snapshot, one write, one reload — so N accepted fields are ONE undo
+  // entry rather than N. The single-field placement path calls it with one
+  // spec; there is no second creation path.
+  const handleAddFormFields = useCallback(
+    async (path: string, specs: readonly NewFieldSpec[]) => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       const snapshotPath = await file.snapshot(f.workingPath);
       const bytes = await file.readBuffer(f.workingPath);
-      const withField = await addFormField(bytes, spec);
-      await file.writeBuffer(f.workingPath, withField);
+      const withFields = await addFormFields(bytes, specs);
+      await file.writeBuffer(f.workingPath, withFields);
       const result = await reloadFile(path);
       if (!result) throw new Error(tChrome('refusal.file.noLongerOpen'));
       dispatch({
@@ -949,6 +952,11 @@ function AppContent(): React.ReactElement {
       });
     },
     [state.files, reloadFile, dispatch],
+  );
+
+  const handleAddFormField = useCallback(
+    async (path: string, spec: NewFieldSpec) => handleAddFormFields(path, [spec]),
+    [handleAddFormFields],
   );
 
   const handleApplyOcrLayer = useCallback(
@@ -2110,7 +2118,7 @@ function AppContent(): React.ReactElement {
   }, [focusedTab, activeOp, state.ui.tool, state.ui.activeToolId, state.files, state.activeFileId, activeFile?.dirty, activeFile?.pageCount]);
 
   return (
-    <OperationsProvider performOperation={performOperation}>
+    <OperationsProvider performOperation={performOperation} addFormFields={handleAddFormFields}>
     <DropZone onFilesDropped={handleFilesDropped}>
     <div className="app-shell h-screen bg-neutral-900 text-neutral-100 flex flex-col overflow-hidden">
       <MenuBar />
