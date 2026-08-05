@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.18 — Vertical writing, and scans that shrink
+## 1.0.18 — Vertical writing, scans that shrink, and seven languages
 
 Text set in columns finishes the job it started. Mongolian — and the Todo,
 Sibe and Manchu that share its alphabet — reads and edits the way it is
@@ -110,6 +110,8 @@ before it was offered.
 - **Regional systems find their language.** A PC set to Portuguese or
   Chinese in any regional spelling opens in Portuguese or Chinese rather
   than falling back to English.
+
+## 1.0.17 — Drafting tools, long documents, and an interface that speaks Spanish
 
 Markup lands where you aim it: snapping to the drawing's own geometry,
 rulers, a grid in real-world units, and guides you drag off the rulers.
