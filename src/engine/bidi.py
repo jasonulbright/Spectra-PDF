@@ -1,6 +1,6 @@
 """The Unicode Bidirectional Algorithm (UAX #9), through rule L2.
 
-Why our own rather than a dependency (9.T3): the paragraph reflow needs the
+Why our own rather than a dependency: the paragraph reflow needs the
 REORDERING PERMUTATION, not a reordered string — every character of an edited
 paragraph carries a style reference and a source-run attribution that has to
 travel with it — and no available binding exposes the resolved levels. The
@@ -102,7 +102,7 @@ def bidi_class(ch: str) -> str:
 
 def has_strong_rtl(text: str) -> bool:
     """Any strong right-to-left character — the reflow's own trigger, and
-    deliberately the SAME test the pre-T3 refusal used."""
+    deliberately the SAME test the earlier refusal used."""
     return any(bidi_class(ch) in ("R", "AL") for ch in text)
 
 
