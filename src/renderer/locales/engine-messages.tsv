@@ -100,7 +100,7 @@ inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 links.linkIndexOutRange	pattern	links	link index {{index}} is out of range (page has {{v1}})
 links.linksAdd	exact	links	no links to add
-links.pageOutRange	pattern	links,page_images,page_vectors,redact_marks,text_authoring,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
+links.pageOutRange	pattern	links,page_images,page_vectors,redact_marks,search_regions,text_authoring,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
 links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive width and height
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
 links.urlMustEmpty	exact	links	url must not be empty
@@ -263,6 +263,10 @@ redact_marks.redactionMarkSDocument	pattern	redact_marks	{{count}} redaction mar
 repair.pdfEncryptedDecryptBefore	exact	repair	PDF is encrypted -- decrypt before repairing
 repair.pdfTooDamagedTier	pattern	repair	PDF is too damaged for Tier 1 repair: {{e2}}. Try 'rebuild' (Tier 2) or 'recover' (Tier 3).
 rtl_text.textContainsDirectionalFormatting	exact	rtl_text	text contains directional formatting characters that cannot be laid out
+search_regions.expandMustMatchWord	exact	search_regions	expand must be "match", "word" or "line"
+search_regions.giveSearchTermWord	exact	search_regions	give a search term, a word list or a built-in pattern — searching for nothing would mark every page
+search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a positive number
+search_regions.pagesMustListPage	exact	search_regions	pages must be a list of page numbers or "all"
 shaping.fontSVerticalForm	pattern	shaping	this font's vertical form of {{name}} has no advance
 shaping.shapingFontCannotExpress	pattern	shaping	the shaping font cannot express {{text}}
 signatures.certificatesFoundTrustRoot	pattern	signatures	no certificates found in trust root: {{p}}
@@ -321,6 +325,7 @@ text_authoring.spanSizeOutRange	exact	text_authoring	span size out of range
 text_authoring.spansMustAscendingNon	exact	text_authoring	spans must be ascending and non-overlapping
 text_authoring.styleChangeInsideJoined	exact	text_authoring	a style change inside a joined word cannot be drawn — style whole words in this script
 text_authoring.textAdd	exact	text_authoring	no text to add
+text_match.unknownPatternBuiltPatterns	pattern	text_match	unknown pattern {{pattern_id}} — the built-in patterns are: {{known}}
 text_paragraphs.boxLeftMustFinite	exact	text_paragraphs	box left must be a finite number
 text_paragraphs.boxLeftMustNumber	exact	text_paragraphs	box left must be a number
 text_paragraphs.boxLeftRequiresBox	exact	text_paragraphs	box left requires a box width
