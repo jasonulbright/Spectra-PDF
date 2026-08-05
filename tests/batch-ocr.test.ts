@@ -58,6 +58,8 @@ interface IoOpts {
   repairFails?: string[];
   /** Source paths whose repaired-bytes copy-back throws. */
   copyFails?: string[];
+  /** Mirror outputs whose MRC pass refuses (e.g. nothing to separate). */
+  mrcFails?: string[];
 }
 
 function makeIo(specs: Record<string, FakeSpec>, opts: IoOpts = {}) {
@@ -68,6 +70,7 @@ function makeIo(specs: Record<string, FakeSpec>, opts: IoOpts = {}) {
   const moves: [string, string][] = [];
   const verified: [string, number][] = [];
   const discarded: string[] = [];
+  const compressed: [string, string, boolean][] = [];
   const io: BatchIo = {
     load: async (abs) => {
       const spec = specs[abs];
@@ -94,6 +97,11 @@ function makeIo(specs: Record<string, FakeSpec>, opts: IoOpts = {}) {
       verified.push([path, expectedPages]);
       return !opts.verifyFails?.includes(path);
     },
+    compressMrc: async (path, preset, verifyText) => {
+      compressed.push([path, preset, verifyText]);
+      if (opts.mrcFails?.includes(path)) throw new Error('nothing to separate');
+      return `MRC compressed 2 page(s), 900 -> 100 bytes`;
+    },
     repairToScratch: async (src) => {
       if (opts.repairFails?.includes(src)) throw new Error('too damaged');
       const scratch = opts.repairProduces?.[src];
@@ -104,14 +112,17 @@ function makeIo(specs: Record<string, FakeSpec>, opts: IoOpts = {}) {
       discarded.push(path);
     },
   };
-  return { io, destroyed, copies, applied, ensured, moves, verified, discarded };
+  return { io, destroyed, copies, applied, ensured, moves, verified, discarded, compressed };
 }
 
 /** The four filing primitives, stubbed to explode. Tests using the inline `io`
  * literals below do not opt into moved/error folders or repair, so the driver
  * must never reach these — a throwing stub says that, where a silent no-op
  * would hide a driver that moved files nobody asked it to move. */
-function noFiling(): Pick<BatchIo, 'moveFile' | 'verifyOutput' | 'repairToScratch' | 'discardScratch'> {
+function noFiling(): Pick<
+  BatchIo,
+  'moveFile' | 'verifyOutput' | 'repairToScratch' | 'discardScratch' | 'compressMrc'
+> {
   const nope = (name: string) => () => {
     throw new Error(`${name} must not run without the matching opt-in`);
   };
@@ -120,6 +131,7 @@ function noFiling(): Pick<BatchIo, 'moveFile' | 'verifyOutput' | 'repairToScratc
     verifyOutput: nope('verifyOutput') as unknown as BatchIo['verifyOutput'],
     repairToScratch: nope('repairToScratch') as unknown as BatchIo['repairToScratch'],
     discardScratch: nope('discardScratch') as unknown as BatchIo['discardScratch'],
+    compressMrc: nope('compressMrc') as unknown as BatchIo['compressMrc'],
   };
 }
 
@@ -619,5 +631,91 @@ describe('runBatchOcr — auto-repair', () => {
     };
     await runBatchOcr([entry('bad.pdf')], 'C:\\out', [], io, { repairDamaged: true });
     expect(discarded).toEqual(['T:\\scratch-0.pdf']);
+  });
+});
+
+describe('runBatchOcr — MRC (O8)', () => {
+  it('compresses the MIRROR OUTPUT, never the source, and only when asked', async () => {
+    const { io, compressed } = makeIo({
+      'C:\\src\\scan.pdf': { pages: [true] },
+      'C:\\src\\born.pdf': { pages: [false] },
+    });
+    const off = await runBatchOcr([entry('scan.pdf')], 'C:\\out', [], io);
+    expect(compressed).toEqual([]);
+    expect(off.results[0].mrc).toBeUndefined();
+
+    const report = await runBatchOcr(
+      [entry('scan.pdf'), entry('born.pdf')],
+      'C:\\out',
+      [],
+      io,
+      { mrc: { preset: 'smallest', verifyText: true } },
+    );
+    // The recognised output is the input — which is what makes the
+    // recognize-then-MRC order structural rather than documented.
+    expect(compressed).toEqual([
+      ['C:\\out\\scan.pdf', 'smallest', true],
+      ['C:\\out\\born.pdf', 'smallest', true],
+    ]);
+    expect(report.results[0].mrc).toContain('MRC compressed');
+    expect(report.results[0].status).toBe('ocr');
+  });
+
+  it('a refusal is a NOTE, never a file failure', async () => {
+    // MRC declining is the ordinary case for a mixed folder: the searchable
+    // copy is the deliverable the user asked for and it is already written.
+    const { io } = makeIo(
+      { 'C:\\src\\typed.pdf': { pages: [false] } },
+      { mrcFails: ['C:\\out\\typed.pdf'] },
+    );
+    const report = await runBatchOcr([entry('typed.pdf')], 'C:\\out', [], io, {
+      mrc: { preset: 'balanced', verifyText: false },
+    });
+    expect(report.results[0].status).toBe('copied');
+    expect(report.results[0].mrc).toContain('nothing to separate');
+    expect(summarize(report)).toEqual({ ocrd: 0, copied: 1, skipped: 0 });
+  });
+
+  it('a skipped file is never compressed', async () => {
+    const { io, compressed } = makeIo({
+      'C:\\src\\broken.pdf': { pages: [], loadError: new Error('bad XRef') },
+    });
+    const report = await runBatchOcr([entry('broken.pdf')], 'C:\\out', [], io, {
+      mrc: { preset: 'balanced', verifyText: false },
+    });
+    expect(report.results[0].status).toBe('skipped');
+    expect(compressed).toEqual([]);
+  });
+
+  it('runs BEFORE the verification that lets an original move', async () => {
+    // Verifying bytes that are about to be replaced would verify the wrong
+    // file — and the source moves on the strength of that verification.
+    const order: string[] = [];
+    const { io } = makeIo({ 'C:\\src\\scan.pdf': { pages: [true] } });
+    const realCompress = io.compressMrc;
+    io.compressMrc = async (path, preset, verify) => {
+      order.push('mrc');
+      return realCompress(path, preset, verify);
+    };
+    const realVerify = io.verifyOutput;
+    io.verifyOutput = async (path, pages) => {
+      order.push('verify');
+      return realVerify(path, pages);
+    };
+    await runBatchOcr([entry('scan.pdf')], 'C:\\out', [], io, {
+      movedRoot: 'C:\\done',
+      mrc: { preset: 'balanced', verifyText: false },
+    });
+    expect(order).toEqual(['mrc', 'verify']);
+  });
+
+  it('reports a compressing phase so a long MRC pass is not silence', async () => {
+    const phases: string[] = [];
+    const { io } = makeIo({ 'C:\\src\\scan.pdf': { pages: [true] } });
+    await runBatchOcr([entry('scan.pdf')], 'C:\\out', [], io, {
+      mrc: { preset: 'balanced', verifyText: false },
+      onProgress: (p) => phases.push(p.phase),
+    });
+    expect(phases).toContain('compressing');
   });
 });

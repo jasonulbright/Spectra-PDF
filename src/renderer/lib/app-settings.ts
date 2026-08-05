@@ -10,6 +10,11 @@ export interface Settings {
   gsSource: 'builtin' | 'external';
   defaultOutputDir: string;
   compressionQuality: string;
+  /** O8: which MRC preset the Compress panel opens on, for a user whose
+   * corpus is scans. Separate from `compressionQuality` because the two are
+   * independent axes — a user can default to `mrc` and still choose which of
+   * the three promises it makes, and choosing `ebook` must not forget it. */
+  mrcPreset: string;
   theme: string;
   minimizeToTray: boolean;
   startMinimized: boolean;
@@ -57,6 +62,7 @@ export const DEFAULTS: Settings = {
   gsSource: 'builtin',
   defaultOutputDir: '',
   compressionQuality: 'ebook',
+  mrcPreset: 'balanced',
   theme: 'system',
   minimizeToTray: false,
   startMinimized: false,

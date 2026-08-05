@@ -40,7 +40,10 @@ def compress(
     mrc_bg_div: int | None = None,
     mrc_fg_div: int | None = None,
     mrc_pdfa_safe: bool = False,
+    mrc_verify_text: bool = False,
+    mrc_lang: str = "eng",
     jbig2_path: str = "",
+    tesseract_path: str = "",
 ) -> dict:
     """Compress a PDF using Ghostscript, or MRC-layer its scanned pages.
 
@@ -56,7 +59,12 @@ def compress(
         mrc_bg_div: background downsample divisor override (mrc only).
         mrc_fg_div: foreground downsample divisor override (mrc only).
         mrc_pdfa_safe: keep every filter inside PDF/A-1's set (mrc only).
+        mrc_verify_text: recognise the source page and the MRC page and revert
+            any page whose text did not survive (mrc only).
+        mrc_lang: recognition language for that check (mrc only).
         jbig2_path: explicit path to the vendored JBIG2 encoder (mrc only).
+        tesseract_path: explicit path to the vendored recognizer; REQUIRED
+            when `mrc_verify_text` is on (mrc only).
 
     The `mrc_*` arguments are ignored on the Ghostscript branch, and `dpi` is
     meaningless on the MRC branch (its whole point is that the stencil stays
@@ -79,6 +87,9 @@ def compress(
             bg_div=mrc_bg_div,
             fg_div=mrc_fg_div,
             pdfa_safe=bool(mrc_pdfa_safe),
+            verify_text=bool(mrc_verify_text),
+            lang=mrc_lang,
+            tesseract_path=tesseract_path,
             gs_path=gs_path,
             jbig2_path=jbig2_path,
         )

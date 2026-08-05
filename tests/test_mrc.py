@@ -53,6 +53,7 @@ from engine.mrc import (
     sauvola_ink,
     segment,
 )
+from engine import mrc_verify
 from engine.mrc_codecs import CCITT_G4, JBIG2_GENERIC, JBIG2_SYMBOL
 from engine.pdfa import convert_pdfa
 
@@ -733,6 +734,144 @@ class TestLegibility:
 
 
 # --------------------------------------------------------------------------
+# The text-verification gate (slice E, § 5 / brief § 7 E)
+# --------------------------------------------------------------------------
+class TestVerifyText:
+    """A compression setting may be lossy; it may not quietly destroy the text.
+
+    Two halves, pinned separately on purpose: the SCORING (does the comparison
+    measure what it claims?) and the REVERT PATH (does a failing page keep its
+    original scan?). Only the first needs Tesseract; forcing the second through
+    a real segmentation failure would pin a fixture's luck rather than the
+    behaviour, so the score is substituted and the path is what is asserted.
+    """
+
+    def test_an_empty_source_scores_one(self):
+        # A scan with no recognisable text has nothing to lose, and MRC does
+        # not create a text layer (§ 9 boundary 3). Scoring it 0 would revert
+        # every page of a wordless scan.
+        assert mrc_verify.text_similarity("", "anything at all")[0] == 1.0
+
+    def test_identical_text_scores_one_and_destroyed_text_scores_low(self):
+        words = "the quick brown fox jumps over the lazy dog " * 30
+        assert mrc_verify.text_similarity(words, words)[0] == 1.0
+        ratio, first = mrc_verify.text_similarity(words, "|||| ||| ||||")
+        assert ratio < 0.1
+        assert first, "the first divergence is reported, not just the number"
+
+    def test_autojunk_is_off(self):
+        # The recon bug this exists for: autojunk discards any token in over
+        # 1% of a sequence longer than 200, which on prose is most words — it
+        # scored a CORRECT page at 7/713.
+        words = ("the quick brown fox jumps over the lazy dog and then some " * 25).split()
+        changed = list(words)
+        changed[5] = "0ver"
+        naive = difflib.SequenceMatcher(None, words, changed).ratio()
+        ours, _ = mrc_verify.text_similarity(" ".join(words), " ".join(changed))
+        # One word out of 300 differs. The default heuristic calls the page
+        # 1.7% similar; ours calls it 99.7%.
+        assert naive < 0.05
+        assert ours > 0.99
+
+    def test_the_reconstruction_is_what_a_viewer_draws(self):
+        # Ink pixels take the foreground colour, paper takes the background —
+        # the stencil's semantics, at SOURCE resolution.
+        from engine.mrc_codecs import encode_layer_jpeg
+
+        ink = np.zeros((40, 40), dtype=bool)
+        ink[10:20, 10:20] = True
+        bg = encode_layer_jpeg(Image.new("RGB", (10, 10), (250, 250, 250)), quality=95)
+        fg = encode_layer_jpeg(Image.new("RGB", (1, 1), (0, 0, 0)), quality=95)
+        recon = np.asarray(mrc_verify.reconstruct_page(bg, fg, ink, (40, 40)))
+        assert recon.shape == (40, 40, 3)
+        assert recon[15, 15].max() < 40, "ink is the foreground colour"
+        assert recon[2, 2].min() > 200, "paper is the background"
+
+    def test_verification_off_costs_nothing_and_reports_nothing(
+        self, text_scan, tmp_dir, gs_path
+    ):
+        report = mrc_compress(text_scan, os.path.join(tmp_dir, "o.pdf"), gs_path=gs_path)
+        assert report["verify_text"] is False
+        assert report["min_text_similarity"] is None
+        assert report["pages_reverted"] == 0
+        assert "text_similarity" not in report["pages"][0]
+
+    def test_the_switch_refuses_without_a_recognizer(self, text_scan, tmp_dir, gs_path):
+        # Asked for and not available REFUSES. Running with the check quietly
+        # skipped hands back exactly the output the switch exists to prevent.
+        with pytest.raises(RuntimeError, match="cannot be verified"):
+            mrc_compress(
+                text_scan, os.path.join(tmp_dir, "o.pdf"),
+                verify_text=True, tesseract_path="", gs_path=gs_path,
+            )
+
+    @needs_tesseract
+    @pytest.mark.parametrize("preset", ("archival", "balanced", "smallest"))
+    def test_every_preset_clears_its_own_floor_on_the_fixtures(
+        self, text_scan, tmp_dir, gs_path, preset
+    ):
+        report = mrc_compress(
+            text_scan, os.path.join(tmp_dir, f"{preset}.pdf"), preset=preset,
+            verify_text=True, tesseract_path=str(TESSERACT), gs_path=gs_path,
+        )
+        assert report["pages_reverted"] == 0
+        assert report["pages_mrc"] == 1
+        assert report["min_text_similarity"] >= PRESETS[preset]["verify_threshold"]
+        assert report["pages"][0]["text_similarity"] == report["min_text_similarity"]
+
+    def test_a_failing_page_keeps_its_original_scan(
+        self, monkeypatch, text_scan, tmp_dir, gs_path
+    ):
+        # The revert PATH. The score is substituted rather than provoked: a
+        # real segmentation failure would pin the fixture's luck, and what
+        # must be pinned is that a page below the floor is left alone.
+        monkeypatch.setattr(
+            "engine.mrc_verify.compare_page",
+            lambda *a, **k: (0.10, "replace: ['contract'] -> ['c0ntract']"),
+        )
+        out = os.path.join(tmp_dir, "reverted.pdf")
+        with pytest.raises(RuntimeError, match="failed text verification"):
+            # Any existing file satisfies the presence guard; the recognizer
+            # itself is substituted above, so nothing is ever spawned.
+            mrc_compress(
+                text_scan, out, verify_text=True,
+                tesseract_path=gs_path, gs_path=gs_path,
+            )
+        # Nothing was written: a document whose only scanned page was refused
+        # is not an output worth having, and a silent copy would be a lie.
+        assert not os.path.exists(out)
+
+    def test_a_mixed_document_reverts_only_the_failing_page(
+        self, monkeypatch, text_scan, photo_scan, tmp_dir, gs_path
+    ):
+        mixed = os.path.join(tmp_dir, "mixed.pdf")
+        with pikepdf.open(text_scan) as first, pikepdf.open(photo_scan) as second:
+            first.pages.extend(second.pages)
+            first.save(mixed)
+        # Page 1 passes, page 2 fails — the per-page revert is the claim.
+        scores = iter([(0.99, ""), (0.10, "replace: ['a'] -> ['b']")])
+        monkeypatch.setattr(
+            "engine.mrc_verify.compare_page", lambda *a, **k: next(scores)
+        )
+        out = os.path.join(tmp_dir, "mixed-mrc.pdf")
+        report = mrc_compress(
+            mixed, out, verify_text=True, tesseract_path=gs_path, gs_path=gs_path,
+        )
+        assert report["pages_mrc"] == 1
+        assert report["pages_reverted"] == 1
+        rows = {row["page"]: row for row in report["pages"]}
+        assert rows[1]["decision"] == "mrc"
+        assert rows[2]["decision"] == "reverted"
+        assert "0.1000" in rows[2]["reason"] and "floor" in rows[2]["reason"]
+        assert "first difference" in rows[2]["reason"]
+        # The reverted page still carries its ORIGINAL scan: one image, and no
+        # stencil beside it.
+        page_two = _images_on_page(out, page_number=2)
+        assert len(page_two) == 1
+        assert page_two[0]["mask"] is None
+
+
+# --------------------------------------------------------------------------
 # PDF/A (§ 1.7 — probe-measured in recon, frozen here)
 # --------------------------------------------------------------------------
 class TestPdfa:
@@ -800,6 +939,18 @@ class TestCompressDoor:
                 gs_path=gs_path,
             )
 
+    def test_the_verification_switch_reaches_the_pass_through_compress(
+        self, text_scan, tmp_dir, gs_path
+    ):
+        # Slice E travels the SAME one door. The switch is proven live by its
+        # own refusal — a parameter that silently went nowhere would let the
+        # panel show a checkbox that does nothing.
+        with pytest.raises(RuntimeError, match="cannot be verified"):
+            compress(
+                text_scan, os.path.join(tmp_dir, "o.pdf"), quality="mrc",
+                mrc_verify_text=True, tesseract_path="", gs_path=gs_path,
+            )
+
     def test_the_ghostscript_branch_is_untouched_by_the_mrc_arguments(
         self, sample_pdf, tmp_dir, gs_path
     ):
@@ -809,6 +960,7 @@ class TestCompressDoor:
         compress(
             sample_pdf, withargs, quality="ebook", gs_path=gs_path,
             mrc_preset="smallest", mrc_pdfa_safe=True, mrc_bg_div=8,
+            mrc_verify_text=True, tesseract_path="",
         )
         assert os.path.getsize(plain) == os.path.getsize(withargs)
 

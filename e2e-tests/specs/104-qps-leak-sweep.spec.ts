@@ -253,6 +253,28 @@ describe('qps pseudo-locale leak sweep (N12)', () => {
       expect(await invokeAppCommand('tools.panel.rotate')).toBe(true);
       await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 10_000 });
 
+      // O8: the Compress panel's MRC branch is a surface that only exists
+      // once the quality select is on it — the preset radios, their hints and
+      // the two checkboxes are hidden behind a choice, which is exactly the
+      // kind of surface a sweep of the DEFAULT state never reaches.
+      //
+      // `tools.panel.*` SWITCHES the docked panel on its own — no `tools.close`
+      // between them, and deliberately not: that command's `when` requires the
+      // open tool to have canvas modes, which Rotate's and Compress's owner do
+      // not, so a close here reports "disabled" and fails the step (it did, on
+      // the first battery run).
+      expect(await invokeAppCommand('tools.panel.compress')).toBe(true);
+      await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 10_000 });
+      await $('[data-testid="compress-quality"]').waitForDisplayed({ timeout: 10_000 });
+      await $('[data-testid="compress-quality"]').selectByAttribute('value', 'mrc');
+      await $('[data-testid="compress-mrc-options"]').waitForDisplayed({
+        timeout: 10_000,
+        timeoutMsg: 'choosing MRC did not reveal its options',
+      });
+      await sweep('[data-testid="tool-dock"]', leaks);
+      expect(await invokeAppCommand('tools.panel.rotate')).toBe(true);
+      await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 10_000 });
+
       // Back to the picker: the tile grid is a surface of its own.
       await $('[data-testid="tool-dock-grid"]').click();
       await browser.pause(200);

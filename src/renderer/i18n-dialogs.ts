@@ -332,6 +332,11 @@ export const DIALOG_STRINGS = {
     'Several languages are recognized together, which is slower — and on a page that is only one of them, the single right language is usually more accurate. This is not automatic detection.',
   'dialog.batch.blurb':
     'Every PDF in the source folder is mirrored into the destination: scanned pages gain an invisible searchable text layer; already-searchable files are copied unchanged. Existing destination files with the same names are overwritten.',
+  'dialog.batch.mrc': 'Compress scans after recognition (MRC)',
+  'dialog.batch.mrcPreset': 'Scan preset',
+  'dialog.batch.mrcVerify': 'Verify the text after compressing',
+  'dialog.batch.mrcNote':
+    'Runs after recognition, so the text layer is read from the original scan. A file with no scanned page keeps the bytes it already had and says so in the report.',
   'dialog.batch.filingSection': 'File the originals after processing — optional; moves your own files',
   'dialog.batch.filingWarning':
     'Everything below MOVES files out of your source folder. Left alone, the source folder is never modified — that is the default.',
@@ -370,6 +375,7 @@ export const DIALOG_STRINGS = {
   'dialog.batch.verbRecognizing': 'recognizing page {{page}} of {{pageCount}}',
   'dialog.batch.verbCopying': 'copying',
   'dialog.batch.verbWriting': 'writing searchable copy',
+  'dialog.batch.verbCompressing': 'compressing the scan',
   'dialog.batch.verbScanning': 'checking pages',
   'dialog.batch.verbLoading': 'loading',
   'dialog.batch.stoppedPrefix': 'Stopped. {{summary}}',
@@ -386,6 +392,7 @@ export const DIALOG_STRINGS = {
   'dialog.batch.rowReason': '{{rel}} — {{reason}}',
   'dialog.batch.rowCopied': '{{rel}} — copied ({{reason}})',
   'dialog.batch.rowPartial': '{{rel}} — made searchable, but {{reason}}',
+  'dialog.batch.rowMrc': '{{rel}} — {{note}}',
   'dialog.batch.unreadableDirs': 'Unreadable subfolders (missing from the mirror): {{dirs}}',
   'dialog.batch.logWritten': 'Log written: {{path}}',
   'dialog.batch.openFolder': 'Open folder',

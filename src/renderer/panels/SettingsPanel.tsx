@@ -382,6 +382,23 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           <option value="ebook">{tChrome('panel.compress.ebook')}</option>
           <option value="printer">{tChrome('panel.compress.printer')}</option>
           <option value="prepress">{tChrome('panel.compress.prepress')}</option>
+          {/* O8: a user whose corpus is scans can make MRC the default. It is
+              a quality of the same compress op, so it belongs in this list
+              rather than in a setting of its own. */}
+          <option value="mrc">{tChrome('panel.compress.mrc')}</option>
+        </select>
+      </div>
+      <div>
+        <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.settings.mrcPreset')}</label>
+        <select
+          aria-label={tChrome('panel.settings.mrcPreset')}
+          value={settings.mrcPreset}
+          onChange={(e) => update('mrcPreset', e.target.value)}
+          className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+        >
+          <option value="archival">{tChrome('panel.compress.mrcPresetArchival')}</option>
+          <option value="balanced">{tChrome('panel.compress.mrcPresetBalanced')}</option>
+          <option value="smallest">{tChrome('panel.compress.mrcPresetSmallest')}</option>
         </select>
       </div>
       <label className="flex items-center gap-2 cursor-pointer">
