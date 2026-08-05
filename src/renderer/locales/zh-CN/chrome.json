@@ -43,7 +43,7 @@
   "canvas.addtext.pageGone": "放置这段文本的页面已不存在。",
   "canvas.addtext.pickAStyleFirst": "请先为该文本段选择字号、颜色或样式。",
   "canvas.addtext.placeholder": "输入要添加的文本…",
-  "canvas.addtext.rotateDegTitle": "按角度旋转 — 支持任意角度（T19）；90 度的整数倍会保持阅读方向的排版",
+  "canvas.addtext.rotateDegTitle": "按角度旋转 — 支持任意角度；90 度的整数倍会保持阅读方向的排版",
   "canvas.addtext.rotateTitle": "旋转 — 依次切换 90 度的整数倍（旁边的输入框接受任意角度）",
   "canvas.addtext.selectTextFirst": "请先选中上面的文本，再应用文本段样式。",
   "canvas.addtext.size": "字号",

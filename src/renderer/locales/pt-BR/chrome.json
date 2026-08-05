@@ -43,7 +43,7 @@
   "canvas.addtext.pageGone": "A página em que este texto foi colocado não existe mais.",
   "canvas.addtext.pickAStyleFirst": "Escolha antes um tamanho, uma cor ou um estilo para o trecho.",
   "canvas.addtext.placeholder": "Digite o texto a adicionar…",
-  "canvas.addtext.rotateDegTitle": "Rotação em graus — qualquer ângulo (T19); os quartos de volta preservam o layout do sentido de leitura",
+  "canvas.addtext.rotateDegTitle": "Rotação em graus — qualquer ângulo; os quartos de volta preservam o layout do sentido de leitura",
   "canvas.addtext.rotateTitle": "Rotação — percorre os quartos de volta (o campo ao lado aceita qualquer ângulo)",
   "canvas.addtext.selectTextFirst": "Selecione antes um texto acima e depois aplique o estilo ao trecho.",
   "canvas.addtext.size": "Tamanho",
