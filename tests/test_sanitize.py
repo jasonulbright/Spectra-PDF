@@ -637,6 +637,171 @@ class TestOrphanSweep:
         assert counts(audit_hidden_information(out))["unreferenced_objects"] == 0
 
 
+class TestJavaScriptRemoval:
+    def test_all_five_sites_go(self, hidden_pdf, tmp_dir):
+        out, result = sanitized(hidden_pdf, tmp_dir, ["javascript"])
+        assert removed_counts(result)["javascript"] == 4
+        assert counts(audit_hidden_information(out))["javascript"] == 0
+        with pikepdf.open(out) as pdf:
+            assert "/OpenAction" not in pdf.Root
+            assert "/AA" not in pdf.pages[0].obj
+            widget = next(
+                a
+                for a in pdf.pages[0].obj["/Annots"]
+                if str(a.get("/Subtype", "")) == "/Widget"
+            )
+            assert "/AA" not in widget
+
+    def test_a_chained_action_keeps_what_follows_the_script(self, hidden_pdf, tmp_dir):
+        with pikepdf.open(hidden_pdf, allow_overwriting_input=True) as pdf:
+            pdf.Root[Name.OpenAction] = Dictionary(
+                S=Name.JavaScript,
+                JS=String("app.alert('go');"),
+                Next=Dictionary(S=Name("/GoTo"), D=Array([pdf.pages[0].obj, Name("/Fit")])),
+            )
+            pdf.save(hidden_pdf)
+        out, _result = sanitized(hidden_pdf, tmp_dir, ["javascript"])
+        with pikepdf.open(out) as pdf:
+            assert str(pdf.Root["/OpenAction"]["/S"]) == "/GoTo"
+
+
+class TestNonLinkActionRemoval:
+    def test_links_and_the_actions_that_reach_outside(self, hidden_pdf, tmp_dir):
+        before = counts(audit_hidden_information(hidden_pdf))["links_and_actions"]
+        out, result = sanitized(hidden_pdf, tmp_dir, ["links_and_actions"])
+        assert removed_counts(result)["links_and_actions"] == before
+        assert counts(audit_hidden_information(out))["links_and_actions"] == 0
+
+    def test_a_submit_action_on_a_field_goes_with_them(self, hidden_pdf, tmp_dir):
+        with pikepdf.open(hidden_pdf, allow_overwriting_input=True) as pdf:
+            widget = next(
+                a
+                for a in pdf.pages[0].obj["/Annots"]
+                if str(a.get("/Subtype", "")) == "/Widget"
+            )
+            widget[Name("/A")] = Dictionary(
+                S=Name("/SubmitForm"),
+                F=String("https://collector.example.invalid/post"),
+            )
+            pdf.save(hidden_pdf)
+        assert counts(audit_hidden_information(hidden_pdf))["links_and_actions"] == 3
+        out, _result = sanitized(hidden_pdf, tmp_dir, ["links_and_actions"])
+        assert counts(audit_hidden_information(out))["links_and_actions"] == 0
+        # The field itself is a different category and survives.
+        assert counts(audit_hidden_information(out))["form_fields"] == 1
+
+
+class TestHiddenLayerRemoval:
+    def test_the_words_leave_the_content_stream(self, hidden_pdf, tmp_dir):
+        out, result = sanitized(hidden_pdf, tmp_dir, ["hidden_layers"])
+        assert removed_counts(result)["hidden_layers"] == 1
+        after = audit_hidden_information(out)
+        assert counts(after)["hidden_layers"] == 0
+        assert b"HIDDEN LAYER TEXT" not in _page_content(out)
+        with pikepdf.open(out) as pdf:
+            assert "/OCProperties" not in pdf.Root
+
+    def test_the_visible_text_is_untouched(self, hidden_pdf, tmp_dir):
+        from engine.extract_text import extract_text
+
+        out, _result = sanitized(hidden_pdf, tmp_dir, ["hidden_layers"])
+        body = extract_text(out)
+        text = body.get("text", "") if isinstance(body, dict) else str(body)
+        assert "Visible paragraph one." in text
+        assert "Visible paragraph two." in text
+        assert "HIDDEN LAYER TEXT" not in text
+
+    def test_the_layer_is_no_longer_cross_reported_as_hidden_text(self, hidden_pdf, tmp_dir):
+        out, _result = sanitized(hidden_pdf, tmp_dir, ["hidden_layers"])
+        kinds = [d["kind"] for d in row(audit_hidden_information(out), "hidden_text")["detail"]]
+        assert "off_layer" not in kinds
+
+    def test_an_annotation_owned_by_a_hidden_group_goes(self, hidden_pdf, tmp_dir):
+        with pikepdf.open(hidden_pdf, allow_overwriting_input=True) as pdf:
+            ocg = pdf.Root["/OCProperties"]["/OCGs"][0]
+            note = pdf.make_indirect(
+                Dictionary(
+                    Type=Name.Annot,
+                    Subtype=Name.Text,
+                    Rect=Array([300, 300, 320, 320]),
+                    Contents=String("hidden note"),
+                    OC=ocg,
+                )
+            )
+            pdf.pages[0].obj["/Annots"] = Array([*pdf.pages[0].obj["/Annots"], note])
+            pdf.save(hidden_pdf)
+        assert counts(audit_hidden_information(hidden_pdf))["comments"] == 4
+        out, _result = sanitized(hidden_pdf, tmp_dir, ["hidden_layers"])
+        assert counts(audit_hidden_information(out))["comments"] == 3
+
+    def test_a_hidden_form_xobject_loses_its_content(self, tmp_dir):
+        path = os.path.join(tmp_dir, "layered-form.pdf")
+        pdf = pikepdf.new()
+        font = pdf.make_indirect(
+            Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/Helvetica"))
+        )
+        ocg = pdf.make_indirect(Dictionary(Type=Name.OCG, Name=String("Watermark")))
+        pdf.Root[Name.OCProperties] = Dictionary(
+            OCGs=Array([ocg]), D=Dictionary(ON=Array([]), OFF=Array([ocg]))
+        )
+        form = pikepdf.Stream(pdf, b"BT /F1 12 Tf 20 20 Td (INSIDE A HIDDEN FORM) Tj ET\n")
+        form[Name.Type] = Name.XObject
+        form[Name.Subtype] = Name("/Form")
+        form[Name("/BBox")] = Array([0, 0, 200, 50])
+        form[Name("/OC")] = ocg
+        form[Name("/Resources")] = Dictionary(Font=Dictionary(F1=font))
+        page = Dictionary(
+            Type=Name.Page,
+            MediaBox=Array([0, 0, 300, 300]),
+            Resources=Dictionary(Font=Dictionary(F1=font), XObject=Dictionary(Fx=form)),
+            Contents=pdf.make_stream(
+                b"BT /F1 12 Tf 20 200 Td (visible) Tj ET\nq 1 0 0 1 20 20 cm /Fx Do Q\n"
+            ),
+        )
+        pdf.pages.append(pikepdf.Page(pdf.make_indirect(page)))
+        pdf.save(path)
+
+        out, _result = sanitized(path, tmp_dir, ["hidden_layers"], name="layered-out.pdf")
+        with pikepdf.open(out) as after:
+            streams = [
+                bytes(obj.read_bytes())
+                for obj in after.objects
+                if isinstance(obj, pikepdf.Stream)
+            ]
+        assert not any(b"INSIDE A HIDDEN FORM" in s for s in streams)
+        assert any(b"visible" in s for s in streams)
+
+    def test_a_dropped_block_leaves_the_state_stack_where_it_was(self, tmp_dir):
+        path = os.path.join(tmp_dir, "nested.pdf")
+        pdf = pikepdf.new()
+        font = pdf.make_indirect(
+            Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/Helvetica"))
+        )
+        ocg = pdf.make_indirect(Dictionary(Type=Name.OCG, Name=String("Draft")))
+        pdf.Root[Name.OCProperties] = Dictionary(
+            OCGs=Array([ocg]), D=Dictionary(ON=Array([]), OFF=Array([ocg]))
+        )
+        content = (
+            b"q 1 0 0 1 10 10 cm\n"
+            b"/OC /MC0 BDC q 0 0 1 rg BT /F1 12 Tf 0 0 Td (hidden) Tj ET Q EMC\n"
+            b"BT /F1 12 Tf 0 100 Td (kept) Tj ET\nQ\n"
+        )
+        page = Dictionary(
+            Type=Name.Page,
+            MediaBox=Array([0, 0, 300, 300]),
+            Resources=Dictionary(Font=Dictionary(F1=font), Properties=Dictionary(MC0=ocg)),
+            Contents=pdf.make_stream(content),
+        )
+        pdf.pages.append(pikepdf.Page(pdf.make_indirect(page)))
+        pdf.save(path)
+
+        out, _result = sanitized(path, tmp_dir, ["hidden_layers"], name="nested-out.pdf")
+        body = _page_content(out)
+        assert b"hidden" not in body
+        assert b"kept" in body
+        assert body.count(b"q") - body.count(b"Q") == 0
+
+
 class TestInPlaceOutput:
     def test_output_may_be_the_input(self, hidden_pdf):
         result = sanitize_pdf(hidden_pdf, hidden_pdf, categories=["thumbnails"])

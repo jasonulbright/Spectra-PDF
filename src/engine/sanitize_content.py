@@ -702,3 +702,198 @@ def analyze_page(pdf, page, off_set: set) -> dict:
     an = _Analysis(pdf, off_set, _page_box(page))
     _walk_analysis(an, pikepdf.parse_content_stream(page), resources, None, IDENTITY, 0)
     return {"runs": _classify(an), "layer_blocks": an.layer_blocks}
+
+
+# ── removing hidden optional content ──────────────────────────────────────
+
+
+def _balancing(buffer: list) -> list:
+    """The save/restore operators a dropped block must keep.
+
+    Marked-content sequences are required to nest properly with the graphics
+    state stack, so a well-formed block saves and restores in equal measure and
+    dropping all of it leaves the stack where it was. A malformed block that
+    does not balance keeps its `q`/`Q` operators, so the stack depth after the
+    removal still matches what the rest of the stream expects."""
+    saves = sum(1 for i in buffer if str(i.operator) == "q")
+    restores = sum(1 for i in buffer if str(i.operator) == "Q")
+    if saves == restores:
+        return []
+    return [i for i in buffer if str(i.operator) in ("q", "Q")]
+
+
+def _prune_hidden_xobjects(resources, kept: list, dropped: set) -> None:
+    """Drop the XObject entries whose only draws were removed. Without this the
+    stream no longer paints them and their bytes are still in the file, which
+    is the difference between hiding and removing."""
+    if not dropped or not isinstance(resources, pikepdf.Dictionary):
+        return
+    table = resources.get("/XObject")
+    if not isinstance(table, pikepdf.Dictionary):
+        return
+    still_drawn = {
+        str(i.operands[0]) for i in kept if str(i.operator) == "Do" and i.operands
+    }
+    for name in dropped - still_drawn:
+        if Name(name) in table:
+            del table[Name(name)]
+
+
+def _strip_hidden(pdf, instructions, resources, fallback, off_set, stats, depth, seen) -> tuple:
+    """Rebuild one instruction list with every hidden optional-content block
+    and every hidden XObject draw gone. Returns (kept, dropped XObject names)."""
+    kept: list = []
+    dropped: set = set()
+    buffer: list = []
+    mc_depth = 0
+    drop_at = None
+    for instruction in instructions:
+        operator = str(instruction.operator)
+        operands = list(instruction.operands)
+
+        if operator in ("BDC", "BMC"):
+            mc_depth += 1
+            if drop_at is not None:
+                buffer.append(instruction)
+                continue
+            if operator == "BDC" and _bdc_hidden(operands, resources, off_set):
+                drop_at = mc_depth
+                stats["blocks"] += 1
+                buffer = []
+                continue
+            kept.append(instruction)
+            continue
+        if operator == "EMC":
+            if drop_at is not None and mc_depth == drop_at:
+                kept.extend(_balancing(buffer))
+                buffer = []
+                drop_at = None
+                mc_depth -= 1
+                continue
+            mc_depth = max(0, mc_depth - 1)
+            (buffer if drop_at is not None else kept).append(instruction)
+            continue
+        if drop_at is not None:
+            buffer.append(instruction)
+            continue
+
+        if operator == "Do":
+            name = str(operands[0]) if operands else None
+            xobj = _lookup_xobject(name, resources, fallback)
+            if xobj is not None and oc_hidden(xobj.get("/OC"), off_set):
+                stats["blocks"] += 1
+                if name:
+                    dropped.add(name)
+                continue
+            if (
+                xobj is not None
+                and str(xobj.get("/Subtype", "")) == "/Form"
+                and depth < MAX_FORM_DEPTH
+            ):
+                _strip_hidden_form(pdf, xobj, resources, off_set, stats, depth + 1, seen)
+            kept.append(instruction)
+            continue
+
+        kept.append(instruction)
+    if drop_at is not None:
+        # An unterminated block: everything after it was hidden, so it stays
+        # dropped, and its save/restore operators still have to balance.
+        kept.extend(_balancing(buffer))
+    return kept, dropped
+
+
+def _strip_hidden_form(pdf, form, parent_resources, off_set, stats, depth, seen) -> None:
+    """Rewrite a Form XObject in place. The group is going away document-wide,
+    so every placement of the form loses it — a copy per placement would leave
+    the original reachable and its content in the file."""
+    try:
+        og = form.objgen
+    except Exception:
+        og = None
+    if og is not None and og in seen:
+        return
+    if og is not None:
+        seen.add(og)
+    form_res = form.get("/Resources")
+    read_res = form_res if form_res is not None else parent_resources
+    before = stats["blocks"]
+    kept, dropped = _strip_hidden(
+        pdf, pikepdf.parse_content_stream(form), read_res, parent_resources,
+        off_set, stats, depth, seen,
+    )
+    if stats["blocks"] == before:
+        return
+    _prune_hidden_xobjects(form_res, kept, dropped)
+    form.write(pikepdf.unparse_content_stream(kept))
+
+
+def remove_hidden_layer_content(pdf, off_set: set) -> int:
+    """Drop the content every hidden optional-content group draws, then the
+    annotations it owns. Moving a group between the ON and OFF arrays only
+    changes what a viewer paints; the words stay in the stream and every
+    extractor still reads them."""
+    stats = {"blocks": 0}
+    seen: set = set()
+    for page in pdf.pages:
+        resources = _resolve_resources(page)
+        kept, dropped = _strip_hidden(
+            pdf, pikepdf.parse_content_stream(page), resources, None, off_set, stats, 0, seen
+        )
+        _prune_hidden_xobjects(resources, kept, dropped)
+        page.Contents = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+        annots = page.obj.get("/Annots")
+        if not isinstance(annots, pikepdf.Array):
+            continue
+        survivors = []
+        for annot in annots:
+            if isinstance(annot, pikepdf.Dictionary) and oc_hidden(annot.get("/OC"), off_set):
+                stats["blocks"] += 1
+                continue
+            survivors.append(annot)
+        if survivors:
+            page.obj["/Annots"] = pikepdf.Array(survivors)
+        elif "/Annots" in page.obj:
+            del page.obj["/Annots"]
+    return stats["blocks"]
+
+
+def drop_optional_content_groups(pdf, off_set: set) -> int:
+    """Remove the hidden groups themselves from /OCProperties, and the whole
+    dictionary once no group is left. A group left behind would keep reporting
+    as a hidden layer over content that is no longer there."""
+    ocp = pdf.Root.get("/OCProperties")
+    if not isinstance(ocp, pikepdf.Dictionary):
+        return 0
+    removed = 0
+
+    def survivors(arr):
+        out = []
+        for el in arr or []:
+            og = _objgen(el)
+            if og is not None and og in off_set:
+                continue
+            out.append(el)
+        return out
+
+    groups = ocp.get("/OCGs")
+    if isinstance(groups, pikepdf.Array):
+        kept = survivors(groups)
+        removed = len(groups) - len(kept)
+        ocp["/OCGs"] = pikepdf.Array(kept)
+    config = ocp.get("/D")
+    if isinstance(config, pikepdf.Dictionary):
+        for key in ("/ON", "/OFF", "/Order", "/AS", "/Locked"):
+            value = config.get(key)
+            if isinstance(value, pikepdf.Array):
+                config[key] = pikepdf.Array(survivors(value))
+    if not isinstance(groups, pikepdf.Array) or not len(ocp["/OCGs"]):
+        del pdf.Root["/OCProperties"]
+    for page in pdf.pages:
+        resources = page.obj.get("/Resources")
+        props = resources.get("/Properties") if isinstance(resources, pikepdf.Dictionary) else None
+        if not isinstance(props, pikepdf.Dictionary):
+            continue
+        for key in [str(k) for k in props.keys()]:
+            if oc_hidden(props.get(Name(key)), off_set):
+                del props[Name(key)]
+    return removed
