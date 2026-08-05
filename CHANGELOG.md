@@ -3,6 +3,35 @@
 ## 1.0.20
 
 ### Redaction
+- **Redaction now measures text with the document's own fonts, and covers
+  everything it draws a black box over.** The width of a line of text was
+  previously estimated rather than measured, and the estimate ran short on
+  most typefaces — worst on monospaced ones, where roughly the last sixth of
+  every line fell outside the area redaction checked. Text in that stretch
+  could be marked, blacked out, and reported as removed while still being
+  present in the file and readable by anything that opens it. The same
+  estimate ran the opposite way on documents using embedded font subsets,
+  where it reached about twice as far as the text really did, so a mark placed
+  in empty space could delete a neighbouring column. Both are gone: every
+  line is measured from the font that drew it, including letter and word
+  spacing, stretched text, and rotated, stamped or vertically-set text. The
+  area checked also now reaches below the baseline, so a mark drawn across the
+  descenders of a line — the tails of p, g, y — covers the line rather than
+  missing it. Where a document gives no usable measurements at all, redaction
+  deliberately covers more than it needs to and says so in the result, because
+  removing too much is recoverable and removing too little is not.
+  **This affects every earlier release. Files you have already redacted with
+  an earlier version should be checked**: search the redacted file for the
+  text you removed, and redact it again with this version if it is still
+  there.
+- **Redaction removes what you marked, not the whole line it sits in.**
+  Marking one name in a paragraph used to delete every word the document
+  happened to draw in the same instruction — often the entire line or
+  paragraph — leaving a small black box over a large hole. Redaction now
+  removes exactly the marked characters and leaves the rest of the line
+  untouched and exactly where it was, to a hundredth of a point. Letters that
+  a font draws as a single shape, and accents that belong to the letter under
+  them, are kept together rather than being split down the middle.
 - **A saved redaction mark can no longer go missing in silence.** Marks you
   save into a document are stored in the file itself, which means a document
   can also arrive carrying marks written by another program. If one of those

@@ -1215,6 +1215,384 @@ class TestRedactMeasuresWithTheFont:
         assert run["rect"][2] - run["rect"][0] == pytest.approx(raw * 1.2, abs=1e-6)
 
 
+# ── Redact: partial-run removal (F15-B) ───────────────────────────────────
+
+
+def _char_positions(path: str) -> list[tuple[str, float, float]]:
+    """Every glyph pdfminer finds, as (char, x0, y0) — an authority outside our
+    own content walk, so a position claim is not checked against itself."""
+    from pdfminer.high_level import extract_pages
+    from pdfminer.layout import LTChar
+
+    out: list[tuple[str, float, float]] = []
+    for layout in extract_pages(path):
+        stack = [layout]
+        while stack:
+            element = stack.pop()
+            if isinstance(element, LTChar):
+                out.append((element.get_text(), element.x0, element.y0))
+            stack.extend(getattr(element, "_objs", []))
+    return out
+
+
+def _worst_drift(before: list, after: list) -> float:
+    """The largest distance from a surviving glyph to the nearest position the
+    SAME character occupied in the original."""
+    by_char: dict = {}
+    for char, x0, _y0 in before:
+        by_char.setdefault(char, []).append(x0)
+    worst = 0.0
+    for char, x0, _y0 in after:
+        candidates = by_char.get(char)
+        assert candidates, f"{char!r} survived but was never in the original"
+        worst = max(worst, min(abs(x0 - o) for o in candidates))
+    return worst
+
+
+def _cid_font(doc, widths: dict[int, int], mapping: dict[int, str],
+              encoding: str = "Identity-H", vertical_advances: dict | None = None):
+    from tests.test_pdf_fonts import _tounicode_stream
+
+    w_array: list = []
+    for cid, width in sorted(widths.items()):
+        w_array += [cid, pikepdf.Array([width])]
+    descendant = Dictionary(
+        Type=Name.Font,
+        Subtype=Name("/CIDFontType2"),
+        BaseFont=Name("/Split"),
+        CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Identity", Supplement=0),
+        DW=1000,
+        W=pikepdf.Array(w_array),
+    )
+    if vertical_advances is not None:
+        w2: list = []
+        for cid, advance in sorted(vertical_advances.items()):
+            w2 += [cid, pikepdf.Array([-advance, 500, advance // 2])]
+        descendant["/W2"] = pikepdf.Array(w2)
+        descendant["/DW2"] = pikepdf.Array([880, -1000])
+    return doc.make_indirect(
+        Dictionary(
+            Type=Name.Font,
+            Subtype=Name("/Type0"),
+            BaseFont=Name("/Split"),
+            Encoding=Name(f"/{encoding}"),
+            DescendantFonts=pikepdf.Array([doc.make_indirect(descendant)]),
+            ToUnicode=_tounicode_stream(doc, mapping),
+        )
+    )
+
+
+class TestRedactSplitsPartiallyCoveredRuns:
+    """F15 slice B. `redact.py` kept or dropped a WHOLE show operator, so a mark
+    on one name inside a line a generator emitted as a single `Tj` deleted the
+    line — the user got a word-sized black box over text that was no longer
+    there. Word-sized marks are exactly what a search produces, so this is the
+    dominant shape for F15's own feature, not an edge case."""
+
+    LINE = "John Smith lives at 12 Oak Street Portland"
+
+    def _measured(self, path, data: bytes, size: float = 12.0) -> float:
+        from engine.text_metrics import _FontCache
+
+        with pikepdf.open(path) as pdf:
+            cap = _FontCache().capability(pdf.pages[0].obj.get("/Resources"), None, "/F1")
+            return cap.decoded_width(data) / 1000.0 * size
+
+    def test_a_one_tj_line_loses_only_the_marked_words(self, tmp_dir):
+        src = os.path.join(tmp_dir, "split_one_tj.pdf")
+        out = os.path.join(tmp_dir, "split_one_tj_out.pdf")
+        doc = pikepdf.new()
+        _text_page(
+            doc,
+            f"BT /F1 12 Tf 72 700 Td ({self.LINE}) Tj ET".encode("ascii"),
+            {"F1": _simple_font(doc, "Helvetica")},
+        )
+        doc.save(src)
+        doc.close()
+
+        before = _char_positions(src)
+        width = self._measured(src, b"John Smith")
+        band = [72.0, 698.0, 72.0 + width, 711.0]
+
+        result = redact(file=src, output=out, regions=[{"page": 1, "rect": band}])
+        assert result["text_runs_removed"] == 1
+        assert result["text_runs_split"] == 1
+        assert result["runs_removed_whole"] == 0
+
+        text = extract_text(out)["text"]
+        assert "John" not in text and "Smith" not in text
+        assert "lives at 12 Oak Street Portland" in text
+
+        after = _char_positions(out)
+        assert len(after) == len(before) - len("John Smith")
+        # The brief's pin: every surviving character within 0.01 pt of where it
+        # was. A TJ jump replaces the removed advance exactly, so nothing after
+        # the redaction slides left into the hole.
+        assert _worst_drift(before, after) < 0.01
+
+    def test_a_kerned_tj_keeps_its_neighbours_in_place(self, tmp_dir):
+        """The kern numbers around a removed stretch are part of the advance
+        being replaced, so they have to be folded into the jump rather than
+        re-emitted beside it."""
+        src = os.path.join(tmp_dir, "split_kern.pdf")
+        out = os.path.join(tmp_dir, "split_kern_out.pdf")
+        doc = pikepdf.new()
+        _text_page(
+            doc,
+            b"BT /F1 12 Tf 72 700 Td [(Alpha )-300(Bravo )250(Charlie)] TJ ET",
+            {"F1": _simple_font(doc, "Helvetica")},
+        )
+        doc.save(src)
+        doc.close()
+
+        before = _char_positions(src)
+        x0 = 72.0 + self._measured(src, b"Alpha ") + 300 / 1000.0 * 12.0
+        x1 = x0 + self._measured(src, b"Bravo")
+
+        result = redact(
+            file=src, output=out,
+            regions=[{"page": 1, "rect": [x0 + 0.2, 699.0, x1 - 0.2, 710.0]}],
+        )
+        assert result["text_runs_split"] == 1
+        text = extract_text(out)["text"]
+        assert "Bravo" not in text and "Alpha" in text and "Charlie" in text
+        assert _worst_drift(before, _char_positions(out)) < 0.01
+
+    def test_a_mark_in_a_kerning_gap_removes_nothing(self, tmp_dir):
+        """The run's box meets the region but no GLYPH does. Whole-operator
+        removal could not tell the difference and took the line."""
+        src = os.path.join(tmp_dir, "split_gap.pdf")
+        out = os.path.join(tmp_dir, "split_gap_out.pdf")
+        doc = pikepdf.new()
+        # A 40 pt forward jump between two words leaves genuinely empty space.
+        _text_page(
+            doc,
+            b"BT /F1 12 Tf 72 700 Td [(Left)-3333(Right)] TJ ET",
+            {"F1": _simple_font(doc, "Helvetica")},
+        )
+        doc.save(src)
+        doc.close()
+
+        left_end = 72.0 + self._measured(src, b"Left")
+        result = redact(
+            file=src, output=out,
+            regions=[{"page": 1, "rect": [left_end + 4.0, 699.0, left_end + 30.0, 710.0]}],
+        )
+        assert result["text_runs_removed"] == 0
+        text = extract_text(out)["text"]
+        assert "Left" in text and "Right" in text
+
+    def test_a_combining_mark_is_removed_with_its_base(self, tmp_dir):
+        """T25 rules 3 and 4. A mark is drawn as jump / zero-advance glyph /
+        jump back, so a split BETWEEN a base and its mark would strand the mark
+        on the surviving side of a redaction — visible, and wrong."""
+        from engine.content_walk import IDENTITY, GraphicsTextState
+        from engine.text_metrics import _FontCache, show_clusters, show_items
+
+        src = os.path.join(tmp_dir, "split_mark.pdf")
+        out = os.path.join(tmp_dir, "split_mark_out.pdf")
+        doc = pikepdf.new()
+        _text_page(
+            doc,
+            b"BT /F1 12 Tf 72 700 Td [<0001>-400<0002>400<0003>] TJ ET",
+            {"F1": _cid_font(doc, {1: 600, 2: 0, 3: 600},
+                             {1: "A", 2: "́", 3: "B"})},
+        )
+        doc.save(src)
+        doc.close()
+
+        with pikepdf.open(src) as pdf:
+            cap = _FontCache().capability(pdf.pages[0].obj.get("/Resources"), None, "/F1")
+            operands = [pikepdf.Array([
+                pikepdf.String(bytes.fromhex("0001")), -400,
+                pikepdf.String(bytes.fromhex("0002")), 400,
+                pikepdf.String(bytes.fromhex("0003")),
+            ])]
+            items = show_items("TJ", operands, cap, GraphicsTextState(IDENTITY, 12.0))
+        # base + jump out + mark + jump back is ONE cluster; the next base is
+        # its own. A split may only fall between them.
+        assert show_clusters(items) == [[0, 1, 2, 3], [4]]
+
+        result = redact(
+            file=src, output=out,
+            regions=[{"page": 1, "rect": [72.0, 699.0, 72.0 + 600 / 1000 * 12 - 0.5, 710.0]}],
+        )
+        assert result["text_runs_split"] == 1
+        from engine.text_runs import list_text_runs
+
+        assert list_text_runs(out, 1)["runs"][0]["text"] == "B"
+
+    def test_a_ligature_code_is_never_cut(self, tmp_dir):
+        """One code can spell several characters (T25 rule 1). The split points
+        are the CODESPACE's, so half a ligature is not reachable — a mark over
+        half of it takes the whole code and nothing beside it."""
+        from engine.text_runs import list_text_runs
+
+        src = os.path.join(tmp_dir, "split_lig.pdf")
+        out = os.path.join(tmp_dir, "split_lig_out.pdf")
+        doc = pikepdf.new()
+        _text_page(
+            doc,
+            b"BT /F1 12 Tf 72 700 Td <00010002> Tj ET",
+            {"F1": _cid_font(doc, {1: 900, 2: 500}, {1: "fi", 2: "x"})},
+        )
+        doc.save(src)
+        doc.close()
+
+        half = 72.0 + 900 / 1000.0 * 12.0 / 2.0
+        result = redact(
+            file=src, output=out,
+            regions=[{"page": 1, "rect": [72.0, 699.0, half, 710.0]}],
+        )
+        assert result["text_runs_split"] == 1
+        assert list_text_runs(out, 1)["runs"][0]["text"] == "x"
+
+    def test_a_vertical_column_splits_downward(self, tmp_dir):
+        """9.B4a: a vertical run's advance is downward, and a TJ number
+        displaces along the writing direction, so the same mechanism works —
+        the column above and below a removed glyph must not move."""
+        from engine.text_runs import list_text_runs
+
+        src = os.path.join(tmp_dir, "split_vert.pdf")
+        out = os.path.join(tmp_dir, "split_vert_out.pdf")
+        doc = pikepdf.new()
+        _text_page(
+            doc,
+            b"BT /F1 12 Tf 300 700 Td <000100020003> Tj ET",
+            {"F1": _cid_font(
+                doc, {1: 1000, 2: 1000, 3: 1000},
+                {1: "一", 2: "二", 3: "三"},
+                encoding="Identity-V", vertical_advances={1: 1000, 2: 1000, 3: 1000},
+            )},
+        )
+        doc.save(src)
+        doc.close()
+
+        run = list_text_runs(src, 1)["runs"][0]
+        assert run["vertical"] is True
+        # The middle glyph occupies the column band 12..24 pt below the pen.
+        result = redact(
+            file=src, output=out,
+            regions=[{"page": 1, "rect": [294.0, 700 - 23.5, 306.0, 700 - 12.5]}],
+        )
+        assert result["text_runs_split"] == 1
+        after = list_text_runs(out, 1)["runs"][0]
+        assert after["text"] == "一三"
+        # The surviving glyphs still span the ORIGINAL column: the removed
+        # advance is preserved, so the third glyph did not slide up.
+        assert after["rect"][1] == pytest.approx(run["rect"][1], abs=0.01)
+        assert after["rect"][3] == pytest.approx(run["rect"][3], abs=0.01)
+
+    def test_an_unmeasurable_run_is_removed_whole_and_says_so(self, tmp_dir):
+        """No font, no codespace, no split. The whole operator goes — the
+        over-removing direction — and the result NAMES it rather than letting
+        the caller assume the removal was surgical."""
+        src = os.path.join(tmp_dir, "split_nofont.pdf")
+        out = os.path.join(tmp_dir, "split_nofont_out.pdf")
+        doc = pikepdf.new()
+        page = doc.add_blank_page(page_size=(612, 792))
+        page.Resources = Dictionary()
+        page.Contents = doc.make_stream(b"BT /F9 12 Tf 72 700 Td (SECRET WORDS) Tj ET")
+        doc.save(src)
+        doc.close()
+
+        result = redact(
+            file=src, output=out,
+            regions=[{"page": 1, "rect": [72.0, 699.0, 78.0, 710.0]}],
+        )
+        assert result["text_runs_removed"] == 1
+        assert result["runs_removed_whole"] == 1
+        assert result["text_runs_split"] == 0
+
+    def test_a_removed_quote_operator_keeps_its_line_advance(self, tmp_dir):
+        """`'` is `T* Tj`. Dropping it whole swallowed the line advance and
+        moved every following line UP the page — a redaction that silently
+        reflowed the document around the hole it made."""
+        src = os.path.join(tmp_dir, "split_quote.pdf")
+        out = os.path.join(tmp_dir, "split_quote_out.pdf")
+        doc = pikepdf.new()
+        _text_page(
+            doc,
+            b"BT /F1 12 Tf 14 TL 72 700 Td (Alpha) Tj (SECRETLINE) ' (Gamma) ' ET",
+            {"F1": _simple_font(doc, "Helvetica")},
+        )
+        doc.save(src)
+        doc.close()
+
+        gamma_before = [c for c in _char_positions(src) if c[0] == "G"][0]
+        result = redact(
+            file=src, output=out,
+            regions=[{"page": 1, "rect": [72.0, 700 - 14 - 1.0, 200.0, 700 - 14 + 11.0]}],
+        )
+        assert result["text_runs_removed"] == 1
+        text = extract_text(out)["text"]
+        assert "SECRETLINE" not in text
+        assert "Alpha" in text and "Gamma" in text
+        gamma_after = [c for c in _char_positions(out) if c[0] == "G"][0]
+        assert gamma_after[2] == pytest.approx(gamma_before[2], abs=0.01)
+        assert gamma_after[1] == pytest.approx(gamma_before[1], abs=0.01)
+
+    def test_a_run_inside_a_form_xobject_splits_too(self, tmp_dir):
+        """The split lives in the shared walk, so a nested form's redacted COPY
+        gets it for free — but nothing proves that until something asserts it."""
+        src = os.path.join(tmp_dir, "split_form.pdf")
+        out = os.path.join(tmp_dir, "split_form_out.pdf")
+        doc = pikepdf.new()
+        font = _simple_font(doc, "Helvetica")
+        form = doc.make_stream(b"BT /F1 12 Tf 0 0 Td (Alpha Bravo) Tj ET")
+        form.Type = Name.XObject
+        form.Subtype = Name.Form
+        form.BBox = [0, -4, 200, 16]
+        form.Resources = Dictionary(Font=Dictionary(F1=font))
+        page = doc.add_blank_page(page_size=(612, 792))
+        page.Resources = Dictionary(XObject=Dictionary(Fm0=doc.make_indirect(form)))
+        page.Contents = doc.make_stream(b"q 1 0 0 1 72 700 cm /Fm0 Do Q")
+        doc.save(src)
+        doc.close()
+
+        alpha_width = 0.0
+        with pikepdf.open(src) as pdf:
+            from engine.text_metrics import _FontCache
+
+            cap = _FontCache().capability(
+                pdf.pages[0].obj["/Resources"]["/XObject"]["/Fm0"]["/Resources"], None, "/F1"
+            )
+            alpha_width = cap.decoded_width(b"Alpha") / 1000.0 * 12.0
+
+        result = redact(
+            file=src, output=out,
+            regions=[{"page": 1, "rect": [72.0, 699.0, 72.0 + alpha_width - 0.5, 710.0]}],
+        )
+        assert result["text_runs_split"] == 1
+        text = extract_text(out)["text"]
+        assert "Alpha" not in text and "Bravo" in text
+
+    def test_the_per_code_advances_sum_to_the_run_width(self, tmp_dir):
+        """`show_items` and `_run_metrics` must not drift: the split's geometry
+        and the run's own width are the same measurement, taken twice."""
+        from engine.content_walk import IDENTITY, GraphicsTextState
+        from engine.text_metrics import _FontCache, _run_metrics, show_items
+
+        src = os.path.join(tmp_dir, "split_sum.pdf")
+        doc = pikepdf.new()
+        _text_page(doc, b"BT /F1 11 Tf 72 700 Td (x) Tj ET",
+                   {"F1": _simple_font(doc, "Helvetica")})
+        doc.save(src)
+        doc.close()
+
+        operands = [pikepdf.Array([
+            pikepdf.String(b"Mixed "), -250, pikepdf.String(b"spacing "), 180,
+            pikepdf.String(b"here"),
+        ])]
+        with pikepdf.open(src) as pdf:
+            cap = _FontCache().capability(pdf.pages[0].obj.get("/Resources"), None, "/F1")
+            state = GraphicsTextState(IDENTITY, 11.0, 0.0, 1.2)
+            state.char_spacing, state.word_spacing = 1.5, 3.0
+            _text, raw = _run_metrics("TJ", operands, cap, state)
+            items = show_items("TJ", operands, cap, state)
+        assert sum(item.advance for item in items) == pytest.approx(raw, abs=1e-9)
+
+
 # ── Watermark ─────────────────────────────────────────────────────────────
 
 
