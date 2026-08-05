@@ -14,7 +14,7 @@ const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 // PDF, and the Security tab has no discriminating test without one.
 const ENCRYPTED_PDF = resolve(__dirname, '..', 'fixtures', 'encrypted.pdf');
 
-// Phase 4 M5.5b: File ▸ Properties… (Ctrl+D) — § 3.2's re-homing of the Metadata
+// File ▸ Properties… (Ctrl+D) — the re-homing of the Metadata
 // panel, the PDF-version read and the encryption status into one dialog about
 // THIS document. Driven through the real DOM: a dialog is pure UI.
 

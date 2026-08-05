@@ -139,14 +139,14 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
     </>
   ),
-  // Angle brackets — document JavaScript (9.S6).
+  // Angle brackets — document JavaScript.
   document_js: (
     <>
       <path d="M9 8l-4 4 4 4" />
       <path d="M15 8l4 4-4 4" />
     </>
   ),
-  // Ink droplet — CMYK prepress conversion (9.S5).
+  // Ink droplet — CMYK prepress conversion.
   convert_cmyk: <path d="M12 2.5s6 6.5 6 10.5a6 6 0 0 1-12 0c0-4 6-10.5 6-10.5z" />,
   // A page with a header rule and a footer rule.
   headerfooter: (

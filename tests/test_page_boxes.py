@@ -1,4 +1,4 @@
-"""§ I.5 P5 — crop pages / edit page boxes."""
+"""Crop pages / edit page boxes."""
 
 import os
 

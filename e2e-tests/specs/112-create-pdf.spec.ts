@@ -14,7 +14,7 @@ import {
   invokeAppCommand,
 } from '../support/harness.js';
 
-// P22 (brief 41) — Create PDF, through the REAL dialog and the REAL engine.
+// Create PDF, through the REAL dialog and the REAL engine.
 //
 // What this proves that pytest cannot: the command opens the rewritten
 // dialog, the dialog's own list model feeds the engine, and the result opens
@@ -155,7 +155,7 @@ function writeThreeHundredDpiPng(path: string): void {
   );
 }
 
-describe('Create PDF from any file (P22)', () => {
+describe('Create PDF from any file', () => {
   let tmp: string;
   let pngPath: string;
 
@@ -259,7 +259,7 @@ describe('Create PDF from any file (P22)', () => {
     });
   });
 
-  // ── Combine Files, widened (P22 slice D, brief 41 § 4) ──────────────────
+  // ── Combine Files, widened ──────────────────────────────────────────────
   //
   // Combine took PDFs only, because a .docx cannot enter the page tier. The
   // journey proved here is the whole widening: a mixed list — a form-bearing

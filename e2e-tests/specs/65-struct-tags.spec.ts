@@ -79,7 +79,7 @@ async function makeTaggedPdf(path: string): Promise<void> {
   writeFileSync(path, await doc.save());
 }
 
-// Untagged but CONTENT-BEARING — what autotag (P20) needs; sample.pdf is
+// Untagged but CONTENT-BEARING — what autotag needs; sample.pdf is
 // five blank pages, whose "nothing taggable" refusal is correct behavior.
 async function makeUntaggedPdf(path: string): Promise<void> {
   const doc = await PDFDocument.create();
@@ -229,7 +229,7 @@ describe('structure tags + reading order (I.6)', () => {
     expect(rolesOf(await readStructTree(dest))).toEqual(['P', 'H1', 'Figure']);
   });
 
-  it('tags survive a COMMITTED page edit (P19 struct carry)', async () => {
+  it('tags survive a COMMITTED page edit (struct carry)', async () => {
     // The page-tier rebuild used to drop /StructTreeRoot wholesale — one
     // committed rotation orphaned every MCID. pdf.js's getStructTree resolves
     // through the ParentTree, so this read-back proves the ENTIRE rebuilt
@@ -250,10 +250,10 @@ describe('structure tags + reading order (I.6)', () => {
     expect(rolesOf(await readStructTree(dest))).toEqual(['H1', 'P', 'Figure']);
   });
 
-  it('an untagged document states it honestly — and autotag builds a first tree (P20)', async () => {
+  it('an untagged document states it honestly — and autotag builds a first tree', async () => {
     // sample.pdf is five BLANK pages — the honest untagged state, and (by
     // design) autotag refuses it: nothing taggable is a named error, not an
-    // invented empty tree. The P20 leg runs on a content-bearing file.
+    // invented empty tree. The autotag leg runs on a content-bearing file.
     await openByPaths([SAMPLE]);
     await setView('operations');
     await setActiveOp('tags');
@@ -266,7 +266,7 @@ describe('structure tags + reading order (I.6)', () => {
     await setActiveOp('tags');
     await $('[data-testid="tags-untagged"]').waitForDisplayed({ timeout: 20_000 });
 
-    // P20: the refusal state carries the content-analysis half. One click
+    // The refusal state carries the content-analysis half. One click
     // runs the REAL engine op over the working copy (undoable), and the
     // panel refreshes into the tagged editor: Document + H1 + P.
     await $('[data-testid="tags-autotag"]').click();

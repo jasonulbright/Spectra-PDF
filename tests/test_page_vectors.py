@@ -1,4 +1,4 @@
-"""Phase 9.D1 — vector-object addressability (list + select + delete).
+"""Vector-object addressability (list + select + delete).
 
 A vector object is a path-construction run (m/l/c/re/…) terminated by a
 DRAWING paint (f/S/B/…); clip-only/clip-setting paths, form-nested paths,
@@ -61,7 +61,7 @@ class TestListVectors:
         assert vs[1]["rect"] == [199.5, 199.5, 300.5, 300.5]
 
     def test_clip_and_crop_frame_and_clip_fill_excluded(self, tmp_dir):
-        # `re W n` (a clip / a C3 crop frame) and `re W f` (a clip-SETTING
+        # `re W n` (a clip / a crop frame) and `re W f` (a clip-SETTING
         # fill) are NOT objects — the phantom-object guard that keeps the
         # tools' own frames from listing.
         src = _pdf(
@@ -75,7 +75,7 @@ class TestListVectors:
         assert vs[0]["rect"] == [40.0, 40.0, 100.0, 100.0]
 
     def test_clipped_away_vector_flagged(self, tmp_dir):
-        # 9-§I.0-S8: a painted path drawn wholly OUTSIDE an earlier clip lists
+        # A painted path drawn wholly OUTSIDE an earlier clip lists
         # (index space unchanged) but carries clipped=True; one inside the clip
         # carries clipped=False. Both are real objects (no W of their own).
         src = _pdf(
@@ -133,7 +133,7 @@ class TestListVectors:
         assert vs[0]["matrix"] == [2.0, 0.0, 0.0, 2.0, 100.0, 100.0]
 
     def test_curve_bbox_is_exact_not_control_points(self, tmp_dir):
-        # P8 slice A SUPERSEDED the v1 control-point approximation (this pin
+        # The control-point approximation is superseded (this pin
         # used to assert y max 400.5 — the CONTROL height): the box now hugs
         # the true curve. Symmetric cubic, controls at y=400 → apex at
         # t=0.5: y = (100 + 3·400 + 3·400 + 100)/8 = 325.
@@ -189,9 +189,9 @@ class TestListVectors:
         assert vs[2]["fill"] == [1.0, 1.0, 1.0]  # k=(0,0,0,0) → white
 
     def test_non_device_colours_resolved(self, tmp_dir):
-        # § I.0 S5: a Separation (Type-2 tint → CMYK), an Indexed lookup, and an
+        # A Separation (Type-2 tint → CMYK), an Indexed lookup, and an
         # ICCBased (N=3) fill now resolve to a swatch colour through the walk —
-        # before S5 they were None. Built with indirect objects the plain _pdf
+        # they used to be None. Built with indirect objects the plain _pdf
         # helper can't express.
         import os
 
@@ -255,7 +255,7 @@ class TestListVectors:
         assert vs[1]["rect"] == [-0.5, 99.5, 100.5, 100.5]
 
     def test_form_nested_paths_listed(self, tmp_dir):
-        # 9.D4: a path inside a Form XObject IS listed now, flagged `nested`,
+        # A path inside a Form XObject IS listed now, flagged `nested`,
         # with its bbox in DEVICE space (the form's Matrix composed into the CTM).
         pdf = pikepdf.new()
         pg = pdf.add_blank_page(page_size=(612, 792))
@@ -372,7 +372,7 @@ class TestDeleteVector:
 
 
 class TestNestedVector:
-    """Phase 9.D4 — form-nested vector paths: list them, and edit ONE on a
+    """Form-nested vector paths: list them, and edit ONE on a
     COPY of its form (the image copy-on-edit pattern), so a form stamped
     elsewhere is untouched. One level of nesting edits in v1."""
 
@@ -519,7 +519,7 @@ class TestNestedVector:
         return path
 
     def test_depth_2_delete_works_via_chain_copy(self, tmp_dir):
-        # P8 slice C LIFTED the depth refusal (this pin used to assert
+        # The depth refusal is lifted (this pin used to assert
         # "more than one form deep"): the chain copy-on-write edits any
         # depth ≤ MAX_FORM_DEPTH.
         path = self._deep_pdf(tmp_dir)
@@ -571,7 +571,7 @@ class TestNestedVector:
 
 
 class TestTransformVector:
-    """Phase 9.D2 — move/resize/rotate a vector object by wrapping its path
+    """Move/resize/rotate a vector object by wrapping its path
     run in `q <cm> … Q`; the re-listed bbox reflects the new device placement
     and NO other object moves."""
 
@@ -626,7 +626,7 @@ class TestTransformVector:
         assert ops.count("q") == ops.count("Q")  # the wrap is balanced
 
     def test_transform_interleaved_state_wraps_and_replays(self, tmp_dir):
-        # P8 slice B LIFTED the round-36 refusal: the interleaved op stays
+        # LIFTED the refusal: the interleaved op stays
         # inside the wrap AND replays after its Q, so the FOLLOWING object
         # keeps the colour the producer's mid-path `rg` gave it. The old pin
         # refused here; this pin proves the exactness argument instead.
@@ -711,7 +711,7 @@ class TestTransformVector:
 
 
 class TestRestyleVector:
-    """Phase 9.D3 — recolour / re-width a vector object by wrapping its run in
+    """Recolour / re-width a vector object by wrapping its run in
     `q <state ops> … Q`; the new fill/stroke/width apply to THIS object, the
     Q scopes them (a neighbour inheriting the surrounding state is untouched)."""
 
@@ -752,7 +752,7 @@ class TestRestyleVector:
         assert ops.count("q") == ops.count("Q")
 
     def test_interleaved_state_restyles_with_setters_at_paint_time(self, tmp_dir):
-        # P8 slice B: the new fill lands right BEFORE the paint op, where it
+        # The new fill lands right BEFORE the paint op, where it
         # beats the producer's mid-path `rg` (setters at the wrap head would
         # silently lose to it) — and the replay keeps downstream red.
         src = _pdf(

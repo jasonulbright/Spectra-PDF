@@ -13,7 +13,7 @@ import {
   commitPendingEdits,
 } from '../support/harness.js';
 
-// § I.6 Portfolio authoring: create (bridge-injected paths), the auto-open
+// Portfolio authoring: create (bridge-injected paths), the auto-open
 // "opening a portfolio shows its members" story, open-member through the one
 // open funnel, member CRUD, and THE CARRY LEG — a committed page edit must
 // not strip /EmbeddedFiles//Collection (embedded-files-carry.ts; before it,
@@ -37,7 +37,7 @@ async function memberNames(): Promise<string[]> {
   return names;
 }
 
-describe('portfolio authoring (§ I.6)', () => {
+describe('portfolio authoring', () => {
   before(() => {
     SCRATCH = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-portfolio-'));
     NOTE_V1 = resolve(SCRATCH, 'e2e-note.txt');

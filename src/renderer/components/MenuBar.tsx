@@ -8,8 +8,8 @@ import { getCommandContext, invokeCommand, isCommandEnabled } from '../commands/
 import { useTranslation } from 'react-i18next';
 import { tCommandTitle, tMenuLabel } from '../i18n';
 
-// The workbench menu bar (Phase 4 M2) — rendered entirely from commands/menus
-// data over the command registry (§ 4.1). No handlers live here: a `command`
+// The workbench menu bar — rendered entirely from commands/menus
+// data over the command registry. No handlers live here: a `command`
 // node invokes its id; a `dynamic` node's leaves carry their own ad-hoc run
 // (path-parameterized). Shortcuts are read from the keymap table via
 // shortcutForCommand, so a label can never drift from its binding.
@@ -42,7 +42,7 @@ function renderNodes(nodes: MenuNode[]): React.ReactNode {
           // A real mouse press on a menu item would COLLAPSE the document's
           // text selection before onSelect runs (mousedown outside a selection
           // clears it) — which made Edit ▸ Copy copy nothing, ever, by mouse
-          // (regression, M6.3). Radix's own MenubarTrigger prevents its
+          // (regression). Radix's own MenubarTrigger prevents its
           // pointerdown default for exactly this reason; items don't, so we
           // do. Keyboard activation never had the problem (synthetic click).
           onPointerDown={(e) => e.preventDefault()}
@@ -97,12 +97,12 @@ function renderNodes(nodes: MenuNode[]): React.ReactNode {
 export function MenuBar(): React.ReactElement {
   // Subscribe to state so enablement predicates + dynamic sections re-resolve.
   useAppState();
-  // N12: re-render on language change (the hook's only job here — labels
+  // Re-render on language change (the hook's only job here — labels
   // resolve through tCommandTitle/tMenuLabel at render).
   useTranslation();
   // Menus also re-resolve on OPEN (native-menu semantics): an enablement
   // input that isn't app state — edit.copy reads the live DOM selection —
-  // otherwise stays stale from the last app dispatch (regression, M6.3).
+  // otherwise stays stale from the last app dispatch (regression).
   const [, bumpOnOpen] = React.useReducer((n: number) => n + 1, 0);
   return (
     <Menubar.Root

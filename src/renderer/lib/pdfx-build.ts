@@ -117,7 +117,7 @@ export function pdfRectToDisplay(
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 }
 
-// N11 slice C — a count symbol's unit-square parts as PDF path operators.
+// A count symbol's unit-square parts as PDF path operators.
 //
 // The parts are authored y-DOWN (display orientation, `count-marks.ts`); PDF
 // user space is y-UP, so v flips here and nowhere else. A circle becomes four
@@ -156,7 +156,7 @@ function round2(v: number): number {
 }
 
 /** A stamp's vector geometry, or null when it is a text/image stamp. The
- * carried snapshot is the authority (N11 slice D); a bare id falls back to the
+ * carried snapshot is the authority; a bare id falls back to the
  * registry's built-ins, which is all this pure module can see. */
 function symbolPartsOf(a: ExportAnnotation): readonly SymbolPart[] | null {
   if (a.symbolParts && a.symbolParts.length > 0) return a.symbolParts;
@@ -236,8 +236,7 @@ function cloudPath(verts: [number, number][], r: number): string {
 // Positively match and remove ORIGINAL annotation objects on the copied page
 // that correspond to imported annotations in `annotations` (which the caller
 // will re-append, possibly edited, right after this runs) — never a blanket
-// subtype strip. See docs/architecture/05-phase2c-annotations.md, "importing
-// existing annotations safely": an original we can't positively fingerprint
+// subtype strip: an original we can't positively fingerprint
 // against something we're re-authoring is left alone, so a matching miss can
 // only ever produce a visible duplicate, never silent data loss.
 function stripImportedOriginals(
@@ -389,7 +388,7 @@ function addAnnotations(
     } else if (a.kind === 'ink') {
       // Rung 2's shared style edit reaches ink too: width + opacity (default
       // 2 / opaque — byte-identical to the pre-rung-2 output when unset).
-      // N2: one /InkList entry AND one AP sub-path per stroke — a signature
+      // One /InkList entry AND one AP sub-path per stroke — a signature
       // of several pen lifts round-trips as exactly its strokes.
       const strokeW = a.strokeWidth ?? 2;
       const strokesPdf: number[][] = (a.strokes ?? []).map((stroke) => {
@@ -733,7 +732,7 @@ function addAnnotations(
       // A TAKEOFF COUNT MARK — a real /Stamp, so it survives save/reload as an
       // annotation and degrades honestly (any viewer shows a printable symbol
       // with a subject and a "<group> <seq>" contents). The private keys ride
-      // beside it on the /SpectraMask precedent already shipped in P7 slice E:
+      // beside it on the /SpectraMask precedent:
       //
       //   /IT /Count           the intent. §12.5.6.10 requires a conforming
       //                        reader to IGNORE an intent it doesn't know, so
@@ -745,7 +744,7 @@ function addAnnotations(
       //   /SpectraSymbol       which vector symbol the marker draws.
       // The mark's OWN carried geometry wins over the registry lookup: a group
       // whose marker came from an imported set must draw the same on a machine
-      // that never imported that set (N11 slice D).
+      // that never imported that set.
       const symbol = symbolById(a.countSymbol);
       const parts = a.symbolParts ?? symbol.parts;
       const strokeW = 1.5;
@@ -882,7 +881,7 @@ function addAnnotations(
         ),
       );
     } else if (a.kind === 'stamp' && symbolPartsOf(a)) {
-      // A SYMBOL STAMP (N11 slice D) — the stamp library's third species. It
+      // A SYMBOL STAMP — the stamp library's third species. It
       // commits as an ordinary /Stamp whose appearance is the symbol's own
       // path operators, so it prints crisply at any scale and degrades in any
       // other viewer to exactly the drawing that was placed.
@@ -995,7 +994,7 @@ function addAnnotations(
       });
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note ?? ''));
     } else if (a.kind === 'textmarkup') {
-      // N1 native text markup — round-trips as the real /Highlight, /Underline,
+      // Native text markup — round-trips as the real /Highlight, /Underline,
       // /StrikeOut, or /Squiggly with /QuadPoints (one quad per marked run) and
       // an /AP authored in PDF space relative to the annot origin (like ink,
       // no counter-rotation matrix).
@@ -1170,7 +1169,7 @@ async function assemblePages(
   for (const [key, g] of groups) {
     const doc = await PDFDocument.load(g.bytes, { ignoreEncryption: true });
     if (sourceHasXfa(doc)) {
-      // F11: page surgery on an XFA form detaches the form from its pages
+      // Page surgery on an XFA form detaches the form from its pages
       // (the XFA template lays out its own) — refuse with the reason rather
       // than silently dropping the packet (the old behavior) or carrying a
       // lie. Same refusal the engine ops make (acroform.py refuse_if_xfa).
@@ -1214,7 +1213,7 @@ async function assemblePages(
     pairs.push({ srcIndex: page.pageIndex, outPage: copied });
   }
   carryAcroForm(output, contributions);
-  // The structure tree (P19): EVERY source contributes its surviving tags —
+  // The structure tree: EVERY source contributes its surviving tags —
   // a donor page's MCIDs arrive in its copied stream, so its subtree must
   // come along (the AcroForm precedent). Also sweeps the stale
   // /StructParents keys page copies drag in, tagged or not.

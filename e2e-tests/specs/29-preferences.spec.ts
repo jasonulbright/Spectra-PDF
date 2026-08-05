@@ -1,7 +1,7 @@
 import { expect } from '@wdio/globals';
 import { waitForHarness, invokeAppCommand } from '../support/harness.js';
 
-// Phase 4 M5.5: Preferences is a CATEGORIZED dialog (§ 7), not a flat scroll of
+// Preferences is a CATEGORIZED dialog, not a flat scroll of
 // every setting. Driven through the real DOM — the dialog is pure UI, so
 // nothing else can tell whether it works.
 
@@ -74,7 +74,7 @@ describe('preferences dialog', () => {
     await $('[data-testid="prefs-close"]').click();
   });
 
-  // Issue #1 request 4. Logging ships ON with a 30-day sweep, because the
+  // Logging ships ON with a 30-day sweep, because the
   // people this serves run batches unattended and will never open Preferences
   // to switch a log on. The retention value is the one that ARMS a delete
   // loop, so it gets pinned in storage, not just eyeballed on screen.

@@ -1,4 +1,4 @@
-"""Phase 9.K1 — pair-kerning read from a bundled face.
+"""Pair-kerning read from a bundled face.
 
 Every glyph we lay out advances by its own width alone, so an authored "AV"
 or "To" sits visibly loose. This reads the face's own pair-kerning so the
@@ -10,15 +10,15 @@ swap, per-span substitution) AND the document's own fonts, via their
 embedded program or, failing that, their metric twin among the bundled
 faces.
 
-The document half is not a nicety. K1 first shipped bundled-faces-only,
-reasoning that the A-track's byte-identity pins would break if every
+The document half is not a nicety. Kerning first shipped bundled-faces-only,
+reasoning that byte-identity pins would break if every
 emission kerned. That inverted the priority — the pins are an internal test
 convention, a 1:1 feature set is the product requirement — and it left a
 live regression standing: a paragraph whose original stream carried
 `[(A) 74 (V) 74 (A) 55 (T) 40 (AR)] TJ` came back as a plain `Tj` after a
 NO-OP re-type, so editing text visibly UN-KERNED it. Re-emitting without
 kerning does not preserve the original kerning; it discards it. The pins
-were updated to the corrected output (see DECISIONS #37).
+were updated to the corrected output.
 
 Values are returned in 1000ths of an em — the unit PDF text space uses — so
 callers never deal with a face's `unitsPerEm`.
@@ -31,7 +31,7 @@ import os
 
 # path -> {(left_char, right_char): value in 1000ths of an em}. Faces are
 # re-read constantly during an edit; parsing a kern table per call is pure
-# waste (the A3b _FontCache precedent).
+# waste (the _FontCache precedent).
 _KERN_CACHE: dict[tuple[str, float], dict[tuple[str, str], float]] = {}
 
 
@@ -89,8 +89,8 @@ def _pairpos2(sub, cmap_rev: dict[str, str], out: dict[tuple[str, str], int]) ->
 
     This is how most modern fonts encode kerning: glyphs are grouped into
     classes and the pairs live in a class x class matrix, so a font can hold
-    tens of thousands of effective pairs in a small table. K1 originally
-    skipped format 2 — harmless while only the bundled Liberation faces were
+    tens of thousands of effective pairs in a small table. Format 2 was
+    originally skipped — harmless while only the bundled Liberation faces were
     kerned (they all use the legacy table), but the moment a DOCUMENT's own
     font is the source, skipping it would kern some documents and silently
     not others, which is worse than not kerning at all.
@@ -292,7 +292,7 @@ def kerned_width(pairs: dict[tuple[str, str], float], text: str) -> float:
     return total
 
 
-# ─────────────────── the DOCUMENT'S own fonts (K1b) ──────────────────────
+# ─────────────────── the DOCUMENT'S own fonts ────────────────────────────
 #
 # Kerning is not a bundled-face nicety: a paragraph whose original content
 # stream carries `[(A) 74 (V) 74 (A) 55 (T) 40 (AR)] TJ` must not come back as
@@ -368,7 +368,7 @@ def kern_pairs_for_font(font_obj, font_dir: str = "") -> dict[tuple[str, str], f
     Resolution order:
       1. The font's own EMBEDDED program — the authoritative source, and the
          only one that can be right for a custom or subsetted face.
-      2. Its METRIC TWIN among the bundled faces. B1 vendored Liberation
+      2. Its METRIC TWIN among the bundled faces. Liberation is vendored
          precisely because it is metric-compatible with Helvetica / Times /
          Courier, and kerning IS a metric — so a non-embedded standard-14
          font (which carries no program at all, and whose Core14 AFM data

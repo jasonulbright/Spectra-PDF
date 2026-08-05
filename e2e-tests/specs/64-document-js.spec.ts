@@ -13,13 +13,13 @@ import {
   documentJsList,
 } from '../support/harness.js';
 
-// Phase 9.S6 — the Document JavaScript editor against the real binary. The
+// The Document JavaScript editor against the real binary. The
 // editor reads and REWRITES the /Names /JavaScript name tree as text; it never
 // runs the scripts. Saving routes through the undoable in-place workspace flow,
 // so a change lands on the working copy and Ctrl+Z reverts it. Proof: empty →
 // set a script (round-trips through the engine) → undo → empty again.
 
-describe('document JavaScript editor (Phase 9.S6)', () => {
+describe('document JavaScript editor', () => {
   let tmp: string;
   let source: string;
 

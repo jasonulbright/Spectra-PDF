@@ -11,10 +11,9 @@ import {
   type SnapSettings,
 } from '../../lib/snap-settings';
 
-// The docked status bar (Phase 10 slice A — 25-workbench-relayout.md § 3.A).
+// The docked status bar.
 // Replaces the floating bottom-right cluster: view state (page box, zoom,
-// Read⇄Organize), the Comments toggle (temporary home until slice D moves the
-// sidebar into the right dock), and the PENDING-COMMIT segment (Apply / Fill
+// Read⇄Organize), the Comments toggle, and the PENDING-COMMIT segment (Apply / Fill
 // N / Redact N) — the never-invisible invariant now holds by being ANCHORED
 // chrome instead of buttons hovering over the page.
 //
@@ -27,7 +26,7 @@ import {
 /**
  * The snap types the popover offers.
  *
- * All SEVEN as of slice B: `guide` and `grid` were written and tested in
+ * All SEVEN are live: `guide` and `grid` were written and tested in
  * `lib/snap.ts` from birth but stayed hidden while they had no sources, since
  * a checkbox that toggles something with no source is a control that does
  * nothing. Ruler guides and the configurable grid are those sources, so the
@@ -241,7 +240,7 @@ export interface StatusBarPageBox {
   inputRef: React.Ref<HTMLInputElement>;
   value: string;
   total: number;
-  /** P5 follow-on: the document defines /PageLabels that differ from the
+  /** Follow-on: the document defines /PageLabels that differ from the
    * sheet numbers, so the box holds a LABEL and the sheet position has to be
    * shown alongside it — "iv (4 of 20)" — or the reader loses their place in
    * the file entirely. False keeps the shipped "/ N" readout. */
@@ -274,10 +273,10 @@ interface CanvasStatusBarProps {
   redacting: boolean;
   onApplyRedact: () => void;
   onClearRedact: () => void;
-  /** F10: write the pending marks into the file as /Redact annotations. */
+  /** Write the pending marks into the file as /Redact annotations. */
   savingMarks: boolean;
   onSaveRedact: () => void;
-  /** N11 slice A: the snap segment. Absent on the Organize board, which has
+  /** The snap segment. Absent on the Organize board, which has
    * no drawing gestures to snap. */
   snap?: SnapSettings;
   /** Slice B: the live measuring scale's reported unit, for the grid rows. */
@@ -286,7 +285,7 @@ interface CanvasStatusBarProps {
 }
 
 export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element {
-  // N12: re-render on language change; strings resolve via tChrome below.
+  // Re-render on language change; strings resolve via tChrome below.
   useTranslation();
   const barRef = useRef<HTMLDivElement | null>(null);
   // One tab stop for the BUTTONS (the MainToolbar roving pattern); the page

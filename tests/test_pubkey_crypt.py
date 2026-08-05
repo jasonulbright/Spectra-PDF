@@ -1,4 +1,4 @@
-"""F9 second half: certificate-based (Adobe.PubSec) encryption.
+"""Second half: certificate-based (Adobe.PubSec) encryption.
 
 Round-trips run against in-test identities (cryptography-generated cert +
 PKCS#12 bundle — the signing suite's precedent for clock-independent

@@ -1,4 +1,4 @@
-//! The Create PDF accepted set, in Rust — ONE copy (P22).
+//! The Create PDF accepted set, in Rust — ONE copy.
 //!
 //! The set exists in three processes because three of them need it and none
 //! can import the others: Python CONVERTS (`engine/create_pdf.py` +

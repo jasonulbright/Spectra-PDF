@@ -1,4 +1,4 @@
-// The nav-pane component registry (Phase 4 M3). Maps each AVAILABLE panel id
+// The nav-pane component registry. Maps each AVAILABLE panel id
 // (commands/navpanels — grows per sub-slice) to its icon + component. Must
 // cover exactly NAV_PANEL_IDS; a `satisfies` check keeps them in lockstep so
 // an icon-strip button never renders without a component (completeness rule).
@@ -16,7 +16,7 @@ import { TagsPanel } from '../../panels/TagsPanel';
 export const NAV_PANEL_DEFS = [
   { id: 'pages', title: NAV_PANEL_TITLES.pages, icon: 'pages', Component: PagesPanel },
   { id: 'bookmarks', title: NAV_PANEL_TITLES.bookmarks, icon: 'bookmarks', Component: BookmarksPanel },
-  // Left-dock candidates (§ I.6): the SAME components the tool dock mounts,
+  // Left-dock candidates: the SAME components the tool dock mounts,
   // hosted at nav width — one implementation per capability (ToolPanelNav).
   { id: 'attachments', title: NAV_PANEL_TITLES.attachments, icon: 'attachments', Component: toolPanelNav(AttachmentsPanel) },
   { id: 'layers', title: NAV_PANEL_TITLES.layers, icon: 'layers', Component: toolPanelNav(LayersPanel) },

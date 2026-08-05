@@ -37,7 +37,7 @@ import {
   supportsPageRange,
 } from '../lib/combine';
 
-// Document ▸ Combine Files (P22 slice D, brief 41 § 4).
+// Document ▸ Combine Files.
 //
 // Combine used to be `openFiles()` → the page-tier import, which meant PDFs
 // only — a `.docx` cannot enter the page tier. The widening is NOT "let the
@@ -98,7 +98,7 @@ export function CombineDialog({
    * while Combine is open lands here (drop-to-combine). */
   initialPaths?: readonly string[];
 }): React.JSX.Element {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { callRaw } = useEngine();
   const { track } = useOperationQueue();

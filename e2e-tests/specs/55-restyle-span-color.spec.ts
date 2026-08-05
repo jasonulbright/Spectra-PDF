@@ -13,14 +13,14 @@ import {
   openParagraphEditor,
 } from '../support/harness.js';
 
-// Phase 9.A5a — per-span colour on the paragraph editor: select a word in
+// Per-span colour on the paragraph editor: select a word in
 // the textarea, pick a colour, and only that range recolours. Asserted via
 // the re-listing (the recoloured range seeds its colour back into the
 // paragraph's spans — the working copy stream is compressed, so the listing
 // round-trip is the on-disk proof), plus undo removing it. Waits key on the
 // page id advancing past the pre-op id (the generation-tagged reindex; a
 // pure restyle keeps the text identical, so a text-only wait false-passes
-// on the stale listing — the A3 timing rule).
+// on the stale listing — the timing rule).
 
 interface Para {
   index: number;
@@ -46,7 +46,7 @@ async function editParagraphOpen(pageId: string, index: number): Promise<void> {
 }
 
 /** Select a CODE-POINT range in the paragraph editor. The editor is a
- * contentEditable rich surface (9.A5-tails-b), so this delegates to the
+ * contentEditable rich surface, so this delegates to the
  * harness helper that walks the rendered style segments' text nodes. */
 async function selectRange(start: number, end: number): Promise<void> {
   await setParagraphSelection(start, end);
@@ -78,7 +78,7 @@ async function waitForReindexed(
   );
 }
 
-describe('restyle span colour (Phase 9.A5a)', () => {
+describe('restyle span colour', () => {
   let tmp: string;
   let pdfPath: string;
 

@@ -43,7 +43,7 @@ pub fn get_python_path(app: &AppHandle) -> String {
         .to_string()
 }
 
-/// Resolves the path to the vendored native Tesseract (Phase 12 step 3).
+/// Resolves the path to the vendored native Tesseract.
 ///
 /// Recognition is a SUBPROCESS, which is the property that matters: it is what
 /// lets the CLI and a scheduled run under a service account recognise at all,
@@ -80,8 +80,8 @@ pub fn get_gs_path(app: &AppHandle) -> String {
         .to_string()
 }
 
-/// The bundled fallback font for Edit ▸ Text's convert-to-compatible-font
-/// The bundled fallback-font DIRECTORY (7.4 + 9.B1): the vendored
+/// The bundled fallback-font DIRECTORY for Edit ▸ Text's
+/// convert-to-compatible-font: the vendored
 /// Liberation family (Sans/Serif/Mono, OFL) lives in resources/fonts,
 /// same class as the gs/python runtimes. Returns the DIR — the engine
 /// (font_fallback.resolve_fallback_font) picks the face matching the
@@ -97,7 +97,7 @@ pub fn get_edit_font_path(app: &AppHandle) -> String {
         .to_string()
 }
 
-/// Resolves LibreOffice's `soffice` for O1 export. Prefers the vendored copy
+/// Resolves LibreOffice's `soffice` for Office export. Prefers the vendored copy
 /// (resources/libreoffice, assembled by a setup script and gitignored like the
 /// gs / python runtimes) and falls back to a standard system install, so a dev
 /// build without the bundle still exports. "" when none is found — the engine

@@ -1,8 +1,8 @@
-// pdfDocCache (Phase 9): one live pdf.js proxy per open file, keyed by
+// pdfDocCache: one live pdf.js proxy per open file, keyed by
 // (path, buffer identity). getDocumentProxy TRUSTS its caller — a mismatched
 // buffer evicts + destroys the cached entry — so a caller whose buffer
 // crossed an async gap goes through requestDocumentProxy, which refuses
-// (null, cache untouched) when the want went stale (round 24 tail: a stale
+// (null, cache untouched) when the want went stale (a stale
 // caller must never destroy the CURRENT buffer's live proxy out from under
 // the canvas — a getPage against a destroyed proxy hangs, never rejects).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -94,7 +94,7 @@ describe('requestDocumentProxy', () => {
   });
 
   it('a stale request returns null and leaves the newer live proxy untouched', async () => {
-    // The round-24 hazard: a caller captured bufStale before an await; while
+    // The hazard: a caller captured bufStale before an await; while
     // it slept the file moved to bufCurrent and the cache loaded it. The
     // stale caller must get null — NOT evict + destroy the live entry.
     const bufCurrent = new Uint8Array([1]);

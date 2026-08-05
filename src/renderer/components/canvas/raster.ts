@@ -3,13 +3,13 @@ import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 export const BASE_RASTER = 1100;
 export const MAX_DETAIL = 4096;
 
-// ── Render timing (N13) ──────────────────────────────────────────────────
+// ── Render timing ────────────────────────────────────────────────────────
 // A ring buffer of completed pdf.js render durations, harness-read via
 // __SPECTRA_TEST__.getRenderTimings(). Recording is unconditional (a
 // float+push per page render — nanoscale next to the render itself); the
 // only CONSUMER is the e2e-build harness, so release behavior is one dead
 // array. The perf harness (e2e spec) opens fixtures, drains this, and the
-// recorded baseline lives in the punchlist dev notes.
+// recorded baseline lives in the dev notes.
 
 export interface RenderTiming {
   kind: 'base' | 'detail';
@@ -47,7 +47,7 @@ export const logRenderError =
 // A buffer swap (commit, undo, refresh) re-renders every near page of the
 // affected file; pdf.js completions arrive staggered over hundreds of ms,
 // and blitting each as it lands reads as an abrupt-swap RIPPLE across the
-// strip (probe-classified in 18-phase3-polish.md — element identity and
+// strip (probe-classified — element identity and
 // readiness survive a reorder commit; only pixels swap). Completed
 // re-blits are therefore held briefly and flushed together inside one
 // animation frame: the strip keeps its previous pixels a beat longer,
@@ -164,7 +164,7 @@ interface DetailParams {
   detailCanvas: HTMLCanvasElement;
   isCancelled: () => boolean;
   onTask: (task: RenderTask) => void;
-  /** Pending page-tier quarter-turn (P11). Baked into the pdf.js viewport on
+  /** Pending page-tier quarter-turn. Baked into the pdf.js viewport on
    *  TOP of the page's own /Rotate, so the detail pixels arrive
    *  display-oriented and need no CSS rotation — unlike the base raster,
    *  whose crop-free geometry tolerates a CSS transform. */

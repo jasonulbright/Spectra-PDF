@@ -1,4 +1,4 @@
-// N11 slice D — dragging a symbol out of the palette onto a page.
+// Dragging a symbol out of the palette onto a page.
 //
 // POINTER EVENTS with WINDOW-LEVEL native listeners, per the canvas invariant:
 // HTML5 drag-and-drop cannot complete in this webview while Tauri's native

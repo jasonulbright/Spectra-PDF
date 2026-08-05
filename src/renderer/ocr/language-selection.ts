@@ -1,10 +1,10 @@
 import { OCR_LANGUAGES, DEFAULT_OCR_LANGUAGE } from './languages';
-// N12: the SUMMARY is user-facing copy and the language names come from
+// The SUMMARY is user-facing copy and the language names come from
 // Intl.DisplayNames — the only non-pure import here (i18n is itself a data
 // module, so the orderings and refusals below stay unit-testable).
 import { tChrome, tChromeCount, tOcrLanguage } from '../i18n';
 
-// Multi-language recognition (Phase 12, issue #1 request 1).
+// Multi-language recognition.
 //
 // Tesseract takes several models at once as a '+'-joined code string
 // ("eng+fra"), loads them all, and lets any of them claim a word. That is what

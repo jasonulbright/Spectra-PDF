@@ -1,7 +1,7 @@
-// On-canvas form-field creation (2n.4c): the pure authoring lib. Every
+// On-canvas form-field creation: the pure authoring lib. Every
 // created field is read back through the app's own reader (readFormFields),
 // filled through the real fill path where fillable, and cross-checked via
-// pdf.js; created fields must also survive the 2n.4a rebuild.
+// pdf.js; created fields must also survive the rebuild.
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -116,7 +116,7 @@ describe('addFormField', () => {
     expect(m.get('later')!.widgets[0].pageIndex).toBe(2);
   });
 
-  it('created fields survive the page-tier rebuild (2n.4a interplay)', async () => {
+  it('created fields survive the page-tier rebuild (interplay)', async () => {
     const bytes = await addFormField(await blankPdf(), {
       name: 'keeper', type: 'text', pageIndex: 0, rect: [50, 700, 250, 724],
     });

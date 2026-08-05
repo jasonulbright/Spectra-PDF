@@ -5,23 +5,21 @@ it's cryptographically valid, whether the bytes it covers are intact, whether
 the document was modified after signing (coverage level), the signer's
 certificate identity, and the claimed signing time.
 
-Verification scope — deliberately "single-cert" (roadmap § C): we validate
+Verification scope — deliberately "single-cert": we validate
 the signature's cryptography and the document's integrity, but do NOT
 validate the signer's certificate against any trust store, nor check
 revocation, nor timestamp/LTV. So ``trusted`` is reported but is
 DETERMINISTICALLY False — the UI must present a valid result as
 "cryptographically valid, signer identity NOT verified against a trusted
 authority", never as fully trusted. PAdES/LTV/TSA are not implemented; an
-arm's-length AGPL subprocess is the documented integration path. See
-docs/architecture/10-phase2h-signatures.md.
+arm's-length AGPL subprocess is the documented integration path.
 
-Signing (``sign_pdf``) is shipped — Phase 2h signing + Phase 2k completeness:
+Signing (``sign_pdf``) is shipped:
 signer sources are a .pfx/.p12 (``_load_signer_from_pfx``) or a PEM key +
 certificate pair with key-match validation (``_load_signer_from_pem``);
 placement is invisible, a visible stamp rect, or an existing empty signature
 field (``--existing-field`` / sign-into-field); ``generate_signer`` creates
-an in-app self-signed identity. See docs/architecture/11-phase2h-signing.md
-and 13-phase2k-signature-completeness.md.
+an in-app self-signed identity.
 
 CRITICAL — trust context: we pass an EXPLICIT EMPTY trust context
 (``ValidationContext(trust_roots=[])``), NOT ``signer_validation_context=None``.
@@ -73,7 +71,7 @@ def _empty_trust_context() -> ValidationContext:
 def _load_trust_roots(paths: list) -> list:
     """Load CA certificates (PEM or DER) to act as trust anchors.
 
-    F4's trust management: the USER supplies the anchors (a company CA, a
+    the trust management: the USER supplies the anchors (a company CA, a
     public root they choose to trust). The OS store is deliberately never
     consulted — same explicit-trust posture as _empty_trust_context, just
     with the user's own anchors instead of none.
@@ -139,7 +137,7 @@ def _verify_one(embedded, context: ValidationContext | None = None) -> dict:
     try:
         # Explicit empty trust context by default — see the module docstring
         # for why NOT None (which would consult the OS certificate store). A
-        # caller-supplied context carries the USER'S chosen anchors (F4).
+        # caller-supplied context carries the USER'S chosen anchors.
         ctx = context if context is not None else _empty_trust_context()
         status = validate_pdf_signature(
             embedded, signer_validation_context=ctx, ts_validation_context=ctx
@@ -223,7 +221,7 @@ def verify_signatures(file: str, trust_roots: list | None = None) -> dict:
         except Exception:
             has_dss = False
 
-    # F7: each signature's PAGE (1-based) via its widget's location — a
+    # Each signature's PAGE (1-based) via its widget's location — a
     # pikepdf pass, since pyHanko's object model offers no page lookup.
     # Best-effort: a signature whose widget can't be placed simply carries
     # no page (the panel then offers no jump, never a wrong one).
@@ -460,7 +458,7 @@ def _signer_source(
     pkcs11_cert_label: str | None,
     pkcs11_key_label: str | None,
 ):
-    """Resolve EXACTLY ONE signer source, yielding a live signer (F3 added
+    """Resolve EXACTLY ONE signer source, yielding a live signer (added
     the third source). File-based signers (PKCS#12 / PEM) resolve eagerly and
     need no cleanup; a PKCS#11 signer holds an OPEN token session for the
     whole signing operation — the reason this is a context manager. The PIN,
@@ -559,15 +557,14 @@ def sign_pdf(
     pkcs11_cert_label: str | None = None,
     pkcs11_key_label: str | None = None,
 ) -> dict:
-    """Apply a digital signature (signing APPENDS an incremental revision — see
-    docs/architecture/11-phase2h-signing.md and
-    13-phase2k-signature-completeness.md). ``output`` may be a new file OR the
-    same path as ``file`` (9.F5 in-place signing — the append is byte-safe over
+    """Apply a digital signature (signing APPENDS an incremental
+    revision). ``output`` may be a new file OR the
+    same path as ``file`` (in-place signing — the append is byte-safe over
     the original, and the write is atomic).
 
     Signer source: EXACTLY ONE of a PKCS#12 file (``pfx_path``), a PEM/DER
     key + certificate pair (``key_path`` + ``cert_path``; ``cert_path`` may be
-    a fullchain file), or a PKCS#11 token (F3: ``pkcs11_module`` +
+    a fullchain file), or a PKCS#11 token (``pkcs11_module`` +
     ``pkcs11_token`` + ``pkcs11_cert_label``, optional ``pkcs11_key_label``
     defaulting to the cert label, ``pkcs11_pin``). ``password`` unlocks the
     file-based sources (empty string for an unencrypted PEM key); the PIN
@@ -582,7 +579,7 @@ def sign_pdf(
     stamp (signer, signing time, optional reason/location) at that box in a
     NEW signature field.
 
-    Existing field (2n.4d): passing ``existing_field`` instead FILLS the
+    Existing field: passing ``existing_field`` instead FILLS the
     named, already-present, EMPTY signature field — the field's own widget
     /Rect provides the stamp box (a zero-size widget signs invisibly, which
     is that field's design). Mutually exclusive with ``appearance`` (each
@@ -608,7 +605,7 @@ def sign_pdf(
     """
     input_path = Path(file)
     output_path = Path(output)
-    # 9.F5: IN-PLACE signing (output == input) is allowed ONLY when the caller
+    # IN-PLACE signing (output == input) is allowed ONLY when the caller
     # explicitly opts in (`allow_in_place`, set by the undoable in-place flow).
     # Left global, removing the refusal would silently exempt the Save-a-copy
     # and canvas sign flows too, letting a save-dialog path that happens to
@@ -643,7 +640,7 @@ def sign_pdf(
         # path, which targets a specific named field on purpose.
         field_name = _free_field_name(file, field_name)
 
-    # ── PAdES / TSA / LTV (F2/F4) ────────────────────────────────────────
+    # ── PAdES / TSA / LTV ────────────────────────────────────────────────
     # B-B  = pades (ETSI.CAdES.detached subfilter)
     # B-T  = + tsa_url (RFC 3161 timestamp from the user's chosen TSA)
     # B-LT = + embed_revocation (certs + revocation data into the /DSS)

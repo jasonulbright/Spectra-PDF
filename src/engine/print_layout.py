@@ -1,4 +1,4 @@
-"""Print-time page preparation (O2): ordering, imposition, flatten, raster.
+"""Print-time page preparation: ordering, imposition, flatten, raster.
 
 Everything driver-INDEPENDENT about the widened print contract lives here, as
 pure math plus pikepdf/Ghostscript builders that turn the user's options into
@@ -580,7 +580,7 @@ def render_preview(
     gray: bool = False,
     pages: str = "",
 ) -> list[str]:
-    """Render sheets as PNGs THE WAY THE JOB WILL PRINT them (O3): the same
+    """Render sheets as PNGs THE WAY THE JOB WILL PRINT them: the same
     fixed medium and fit switches the mswinpr2 run gets, so letterboxing,
     clipping, auto-rotation, and imposition all show as they will land on
     paper. Returns the produced files in sheet order."""

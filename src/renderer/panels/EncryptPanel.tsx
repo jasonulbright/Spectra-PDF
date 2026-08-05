@@ -8,18 +8,18 @@ import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 
 export function EncryptPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call, saveFile } = useEngine();
-  // Password vs certificate encryption (F9 both halves). One method per
+  // Password vs certificate encryption (both halves). One method per
   // output — the PDF spec allows exactly one security handler per file.
   const [mode, setMode] = useState<'password' | 'certs'>('password');
   const [userPass, setUserPass] = useState('');
   const [ownerPass, setOwnerPass] = useState('');
   // Recipient certificate files (.cer/.crt/.pem/.der) for certificate mode.
   const [recipients, setRecipients] = useState<string[]>([]);
-  // Owner permissions (F9). All allowed by default; unchecking restricts.
+  // Owner permissions. All allowed by default; unchecking restricts.
   const [perms, setPerms] = useState({ print: true, copy: true, modify: true, annotate: true });
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);

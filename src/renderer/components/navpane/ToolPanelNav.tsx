@@ -1,7 +1,7 @@
 import React from 'react';
 import type { NavPanelComponentProps } from './types';
 
-// Left-dock candidates (§ I.6): Attachments / Layers / Tags in the NAV pane.
+// Left-dock candidates: Attachments / Layers / Tags in the NAV pane.
 // These nav panels MOUNT THE SAME components the tool dock uses — one
 // implementation per capability, so the two surfaces can never disagree
 // (the selectors lesson applied to panels). The tool panels self-serve via

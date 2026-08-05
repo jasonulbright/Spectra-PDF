@@ -12,7 +12,7 @@ import {
   setReactInputValue,
 } from '../support/harness.js';
 
-// § 6.5's 1,000-page checkpoint (M4.3(e), owned by M7): virtualized window
+// The 1,000-page checkpoint: virtualized window
 // over the existing raster pipeline — smooth scroll, bounded DOM, first
 // paint not held for the tail. Wall-clock numbers vary per box, so the
 // STRUCTURAL claims carry the gate (the render window stays bounded no
@@ -25,7 +25,7 @@ async function renderedCellCount(): Promise<number> {
   )) as number;
 }
 
-describe('1,000-page checkpoint (§ 6.5)', () => {
+describe('1,000-page checkpoint', () => {
   let tmp: string;
   let bigPdf: string;
 

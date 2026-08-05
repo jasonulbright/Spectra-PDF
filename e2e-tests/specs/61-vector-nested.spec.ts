@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
 import { waitForHarness, openByPaths, getState, invokeAppCommand } from '../support/harness.js';
 
-// Phase 9.D4 — form-nested vector paths. The committed fixture has a
+// Form-nested vector paths. The committed fixture has a
 // page-level fill + a fill INSIDE a Form XObject; the nested one lists with
 // `nested: true` and is deletable (the engine edits a COPY of the form). A
 // pikepdf-authored fixture (pdf-lib can't author form XObjects).
@@ -62,7 +62,7 @@ async function waitForReindexed(
   );
 }
 
-describe('form-nested vector paths (Phase 9.D4)', () => {
+describe('form-nested vector paths', () => {
   const pdfPath = resolve(process.cwd(), 'fixtures', 'nested-vector.pdf');
 
   it('lists a nested path and deletes it (form copy-on-edit); undo restores', async function () {

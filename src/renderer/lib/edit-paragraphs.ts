@@ -1,4 +1,4 @@
-// Paragraph-box editing (Phase 7.5): the engine's combined run+paragraph
+// Paragraph-box editing: the engine's combined run+paragraph
 // listing projected into display space, the prefix/suffix diff that maps an
 // edited text back onto style-source spans (caret inheritance — typed text
 // takes the style of the character before the change), and the per-span
@@ -18,10 +18,10 @@ export interface EditSpan {
   end: number;
   /** Style-source run (engine DFS index). */
   run: number;
-  /** 9.A5a: the run's fill colour (#rrggbb) — seeds the editor's per-span
+  /** The run's fill colour (#rrggbb) — seeds the editor's per-span
    * colour overlay so a paragraph opened with mixed colours shows them. */
   color?: string;
-  /** 9.A5-tails-a DISPLAY seeds: the span's OWN weight/slant/family/size,
+  /** DISPLAY seeds: the span's OWN weight/slant/family/size,
    * so a reopened editor SHOWS genuinely mixed styling instead of starting
    * blank.
    *
@@ -42,7 +42,7 @@ export interface EditSpan {
 }
 
 /**
- * A face selector, as the ENGINE defines it (9.T6): one of the three
+ * A face selector, as the ENGINE defines it: one of the three
  * bundled family names, or an ABSOLUTE PATH to an installed font file.
  * Deliberately one type rather than a union of "bundled" and "installed" —
  * both travel the same parameter, the engine validates either, and giving
@@ -51,7 +51,7 @@ export interface EditSpan {
 export type FaceSelector = string;
 
 /**
- * 9.T13 — the frame a paragraph's layout ran in, as the engine names it.
+ * The frame a paragraph's layout ran in, as the engine names it.
  * The signed axis permutation behind each is the engine's; the renderer
  * only needs to know which page direction the paragraph's INLINE axis
  * points along, which is what the grips and the resize origin ask.
@@ -90,7 +90,7 @@ export interface EditParagraph {
   runs: number[];
   /** Display-normalized box. */
   rect: { x: number; y: number; w: number; h: number };
-  /** T18: the paragraph's box in PDF points [x0, y0, x1, y1] — the resize
+  /** The paragraph's box in PDF points [x0, y0, x1, y1] — the resize
    * grips convert their pixel drag into `box_width`/`box_left` against
    * THIS, never against the normalized rect (rotation bakes into that). */
   boxPt: [number, number, number, number];
@@ -102,93 +102,93 @@ export interface EditParagraph {
   lineCount: number;
   /** run index → its encodable inventory (live validation). */
   encodableByRun: Map<number, string>;
-  /** 9.B5: run index → its ligature sequences (longest-match validation). */
+  /** Run index → its ligature sequences (longest-match validation). */
   sequencesByRun: Map<number, string[]>;
-  /** A1 restyle seeds: the paragraph's dominant size (points) + fill
+  /** Restyle seeds: the paragraph's dominant size (points) + fill
    * colour (#rrggbb). The editor sends an override only when the user
    * changes these from the seed. */
   fontSize: number;
   color: string;
-  /** A3b style seeds: the dominant member's own weight/slant (engine
+  /** Style seeds: the dominant member's own weight/slant (engine
    * classification — descriptor flags/angle + name hints). */
   bold: boolean;
   italic: boolean;
-  /** 9.B4b: writing mode — the paragraph holds text drawn in a vertical
+  /** Writing mode — the paragraph holds text drawn in a vertical
    * (Identity-V) writing mode. It decides FONT questions (which face a
    * restyle resolves, which controls the editor offers); it is NOT the
    * geometry question, which `orientation` answers. */
   vertical: boolean;
-  /** 9.T13: the paragraph's ORIENTATION — the frame its layout ran in.
+  /** The paragraph's ORIENTATION — the frame its layout ran in.
    * `horizontal` | `vertical-rl` | `vertical-lr` | `rotated-cw` |
    * `rotated-ccw` | `rotated-180`. This is what the resize grips and the
    * box-left origin read: a standalone rotated block reads down (or up) the
    * page with no vertical writing mode in it at all, and a column may hold
    * sideways members. `vertical-rl` and `rotated-cw` denote the SAME map —
    * they differ only in what the text IS, never in where it goes.
-   * 9.T12's `vertical-lr` reads down the page like both of them and stacks
+   * the `vertical-lr` reads down the page like both of them and stacks
    * its columns the other way, so it shares their INLINE axis (which is all
    * the grips ask) while never co-grouping with either. */
   orientation: ParagraphOrientation;
-  /** 9.T3: the paragraph's bidi base direction. The page draws right-to-left
+  /** The paragraph's bidi base direction. The page draws right-to-left
    * text in VISUAL order (a PDF pen only moves one way); the engine
    * normalizes it to logical order for editing, so the textarea must be told
    * which way to read — caret motion, selection and typing all follow `dir`,
    * and an RTL paragraph edited in an LTR box is unusable. */
   rtl: boolean;
-  /** 9.A5c: the distinct font sizes among the paragraph's member runs
+  /** The distinct font sizes among the paragraph's member runs
    * (rounded points) — a per-span size bump surfaces here (a mixed-size
    * paragraph lists more than one). */
   runSizes: number[];
 }
 
-/** T18: the whole-paragraph restyle subset a MERGE can carry (the same
- * A1/A3 semantics, through the same engine pipeline). */
+/** The whole-paragraph restyle subset a MERGE can carry (the same
+ * whole-paragraph semantics, through the same engine pipeline). */
 export type MergeRestyle = Pick<
   ParagraphEditOpts,
   'size' | 'color' | 'family' | 'bold' | 'italic'
 >;
 
-/** A1/A3 restyle overrides carried on a paragraph commit. */
+/** Whole-paragraph restyle overrides carried on a paragraph commit. */
 export interface ParagraphEditOpts {
   convert?: boolean;
   /** New uniform font size in points (undefined = keep). */
   size?: number;
   /** New uniform fill colour as [r,g,b] 0-1 (undefined = keep). */
   color?: [number, number, number];
-  /** A3a: substitute the WHOLE paragraph into this bundled Liberation
+  /** Substitute the WHOLE paragraph into this bundled Liberation
    * family (an honest face replacement; undefined = keep the original
    * fonts). With any substitution the members' own coverage is
    * irrelevant — every character re-renders in the chosen face. */
   family?: FaceSelector;
-  /** A3b: absolute weight/slant of the substituted face. Sent as a PAIR
+  /** Absolute weight/slant of the substituted face. Sent as a PAIR
    * whenever a substitution happens (family picked or a toggle changed
    * from its seed); undefined = no style substitution. */
   bold?: boolean;
   italic?: boolean;
-  /** A4: split the paragraph at this CODE-POINT offset (strictly inside
+  /** Split the paragraph at this CODE-POINT offset (strictly inside
    * the text) — the engine lays the halves out as two paragraphs. */
   split_at?: number;
-  /** T18: the split gap in LEADING multiples ([1.3, 10]; requires
+  /** The split gap in LEADING multiples ([1.3, 10]; requires
    * split_at). Undefined = the engine's 2.0 default. The 2×eff relist
    * floor never shrinks, so every allowed factor still lists as two. */
   split_gap?: number;
-  /** T18 resize: rewrap to this box width (PDF points). The engine
+  /** resize: rewrap to this box width (PDF points). The engine
    * refuses a width no word can wrap into. */
   box_width?: number;
-  /** T18 resize: move the box's left edge (PDF points; requires
+  /** resize: move the box's left edge (PDF points; requires
    * box_width) — sent when the LEFT grip dragged. */
   box_left?: number;
-  /** 9.K2: whole-paragraph OpenType features (the caret / whole-text case,
-   * the sibling of the uniform A1 size/colour). `['small_caps']` and/or
+  /** Whole-paragraph OpenType features (the caret / whole-text case,
+   * the sibling of the uniform size/colour). `['small_caps']` and/or
    * `['salt']`; `alt_index` picks the salt alternate. The engine applies a
    * feature IN PLACE when the paragraph's own font carries it, else switches
    * to bundled Libertinus Serif — either way ToUnicode keeps the plain
    * letters, so the text stays searchable. */
   features?: string[];
   alt_index?: number;
-  /** A5a/A5b: per-span overrides over CODE-POINT ranges of the new text.
-   * An entry carries a `color` (A5a) and/or a face (`bold`/`italic`/
-   * `family`, A5b) and/or a 9.K2 OpenType feature (`small_caps`/
+  /** Per-span overrides over CODE-POINT ranges of the new text.
+   * An entry carries a `color` and/or a face (`bold`/`italic`/
+   * `family`) and/or an OpenType feature (`small_caps`/
    * `alternates`+`alt_index`); the engine folds colour and size
    * independently but the face AND its features share ONE face key per
    * position (last-writer-wins), so a feature MUST ride the same entry as
@@ -215,7 +215,7 @@ export function utf16ToCodePointIndex(text: string, utf16Index: number): number 
 }
 
 export interface EditTextListing {
-  /** Runs NOT covered by an editable paragraph — the 7.2 boxes (refused
+  /** Runs NOT covered by an editable paragraph — the boxes (refused
    * paragraphs decompose here; rotated text never groups at all). */
   runBoxes: EditTextRun[];
   paragraphs: EditParagraph[];
@@ -233,7 +233,7 @@ interface EngineParagraphListing {
     sequences?: string[];
     vertical?: boolean;
     font_size?: number;
-    /** 9-§I.0-S8: run wholly outside the active clip (invisible). */
+    /** Run wholly outside the active clip (invisible). */
     clipped?: boolean;
   }[];
   paragraphs: {
@@ -246,7 +246,7 @@ interface EngineParagraphListing {
       end: number;
       run: number;
       color?: string;
-      // 9.A5-tails-a: per-span DISPLAY seeds (the span's OWN face/size).
+      // Per-span DISPLAY seeds (the span's OWN face/size).
       bold?: boolean;
       italic?: boolean;
       family?: FaceSelector;
@@ -261,11 +261,11 @@ interface EngineParagraphListing {
     bold: boolean;
     italic: boolean;
     vertical?: boolean;
-    /** 9.T13: the frame the paragraph's layout ran in. */
+    /** The frame the paragraph's layout ran in. */
     orientation?: string;
-    /** 9.T3: base direction is right-to-left. */
+    /** Base direction is right-to-left. */
     rtl?: boolean;
-    /** 9-§I.0-S8: EVERY member clipped away → the paragraph is invisible.
+    /** EVERY member clipped away → the paragraph is invisible.
      * Skipped below (not offered as editable); its runs, all clipped, are
      * filtered from the run-box fallback too. */
     clipped?: boolean;
@@ -307,7 +307,7 @@ export async function fetchEditTextListing(
   const paragraphs: EditParagraph[] = [];
   for (const p of listing.paragraphs ?? []) {
     if (!p.editable) continue; // refused paragraphs decompose to run boxes
-    if (p.clipped) continue; // 9-§I.0-S8: invisible — its runs are clipped too
+    if (p.clipped) continue; // Invisible — its runs are clipped too
     for (const r of p.runs) covered.add(r);
     paragraphs.push({
       index: p.index,
@@ -318,7 +318,7 @@ export async function fetchEditTextListing(
         end: s.end,
         run: s.run,
         ...(typeof s.color === 'string' ? { color: s.color } : {}),
-        // 9.A5-tails-a display seeds (never echoed back — see EditSpan).
+        // Display seeds (never echoed back — see EditSpan).
         ...(typeof s.bold === 'boolean' ? { bold: s.bold } : {}),
         ...(typeof s.italic === 'boolean' ? { italic: s.italic } : {}),
         ...(s.family === 'serif' || s.family === 'sans' || s.family === 'mono'
@@ -351,7 +351,7 @@ export async function fetchEditTextListing(
       ),
     });
   }
-  // 9-§I.0-S8: a run box is shown only if it is neither covered by an editable
+  // A run box is shown only if it is neither covered by an editable
   // paragraph NOR clipped away. `rawRuns` stays UNFILTERED (it is index-keyed —
   // `rawRuns[r]` above), so the clip check reads the raw flag by index.
   return {
@@ -360,7 +360,7 @@ export async function fetchEditTextListing(
   };
 }
 
-/** Pasted newlines become spaces — Enter is the COMMIT key (7.2 parity),
+/** Pasted newlines become spaces — Enter is the COMMIT key (parity),
  * and a paragraph is one flowing block; splitting is a stated non-goal. */
 export function sanitizeParagraphInput(value: string): string {
   return value.replace(/[\r\n]+/g, ' ');
@@ -383,7 +383,7 @@ function diffBounds(
   return { p, oldTail: oldA.length - s, newTail: newA.length - s, delta: newA.length - oldA.length };
 }
 
-/** Remap a list of code-point ranges through an edit (9.A5a per-span
+/** Remap a list of code-point ranges through an edit (per-span
  * override ranges follow the text). A range wholly before the change stays;
  * wholly after shifts by `delta`; one that overlaps the changed region
  * absorbs it (its start clamps to the change start, its end to the change
@@ -406,7 +406,7 @@ export function remapRanges<T extends { start: number; end: number }>(
   return out;
 }
 
-/** 9.A5a: one per-span colour override — a CODE-POINT range painted a hex
+/** One per-span colour override — a CODE-POINT range painted a hex
  * colour. Disjoint + sorted once through `mergeSpanColors`. */
 export interface SpanColor {
   start: number;
@@ -414,11 +414,11 @@ export interface SpanColor {
   color: string;
 }
 
-/** 9.A5b: one per-span FACE override — a CODE-POINT range substituted into
+/** One per-span FACE override — a CODE-POINT range substituted into
  * a bundled Liberation weight/slant/family. `family` undefined = keep the
- * char's own family, apply the weight/slant (the A3b style-only swap).
+ * char's own family, apply the weight/slant (the style-only swap).
  *
- * 9.K2: a face override can ALSO carry OpenType features (`smallCaps` =>
+ * A face override can ALSO carry OpenType features (`smallCaps` =>
  * smcp+c2sc, `alternates` => salt at `altIndex`). Features live on the face
  * entry, not a parallel list, because the engine folds face + features into
  * ONE face key per position (last-writer-wins): a separate feature entry
@@ -442,7 +442,7 @@ export interface SpanFace {
  * the later-starting range (equal start → later array position) wins each
  * shared position — the SAME rule the engine's per-position fold uses, so
  * the live preview and the commit can never disagree even when `remapRanges`
- * leaves two ranges overlapping (round-32 HIGH). `key` identifies a range's
+ * leaves two ranges overlapping. `key` identifies a range's
  * style (adjacent same-key runs merge). Generic over colour + face. */
 export function flattenIntervals<T extends { start: number; end: number }>(
   ranges: T[],
@@ -499,7 +499,7 @@ export function applyInterval<T extends { start: number; end: number }>(
 }
 
 const colorKey = (r: SpanColor): string => r.color.toLowerCase();
-// 9.K2: features are part of the identity so a small-caps / alternate range
+// Features are part of the identity so a small-caps / alternate range
 // never coalesces with a plain-face one. altIndex only distinguishes when
 // alternates is on (a stray index on a non-alternate entry must not fork the
 // key, or `applyText`'s remap could leave two "equal" ranges that won't merge).
@@ -533,7 +533,7 @@ export const applySpanFace = (
   },
 ): SpanFace[] => applyInterval(existing, { start, end, ...face }, faceKey);
 
-/** 9.A5-tails-a: flip ONE axis of a face across a range, PER SEGMENT.
+/** Flip ONE axis of a face across a range, PER SEGMENT.
  *
  * The shipped toggle read the face at the selection's first code point,
  * flipped an axis on it, and painted that single face across the whole
@@ -627,7 +627,7 @@ export function toggleSpanFaceAxis(
   }));
 }
 
-/** 9.K2: set an OpenType FEATURE axis (small caps / alternates) across a
+/** Set an OpenType FEATURE axis (small caps / alternates) across a
  * selection PER SEGMENT — each piece keeps its own weight, slant and family.
  * The sibling of `toggleSpanFaceAxis`; separate only because `alternates`
  * carries an `altIndex` the boolean toggle has no slot for. Turning
@@ -662,7 +662,7 @@ export function setSpanFaceFamily(
   return segmentedFaceApply(preserve, view, start, end, (base) => ({ ...base, family }));
 }
 
-/** 9.A5-tails-a: the DISPLAY view = user overrides laid over listing seeds.
+/** The DISPLAY view = user overrides laid over listing seeds.
  * Seeds describe what the text ALREADY is; overrides are what the user
  * asked for. Only overrides are ever sent to the engine (a face entry
  * substitutes its range into a bundled face — echoing a seed back would
@@ -676,7 +676,7 @@ export const composeSpanFaces = (seed: SpanFace[], overrides: SpanFace[]): SpanF
       bold: r.bold,
       italic: r.italic,
       family: r.family,
-      // 9.K2: carry the feature axes, or a composed view would drop small
+      // Carry the feature axes, or a composed view would drop small
       // caps / alternates and the toggle's pressed look would flicker off.
       smallCaps: r.smallCaps,
       alternates: r.alternates,
@@ -727,7 +727,7 @@ export function seedSpanColors(spans: EditSpan[], paragraphColor: string): SpanC
   return mergeSpanColors(out);
 }
 
-/** 9.A5c: one per-span SIZE override — a CODE-POINT range set to a point
+/** One per-span SIZE override — a CODE-POINT range set to a point
  * size. */
 export interface SpanSize {
   start: number;
@@ -744,7 +744,7 @@ export const applySpanSize = (
   size: number,
 ): SpanSize[] => applyInterval(existing, { start, end, size }, sizeKey);
 
-/** 9.A5-tails-a: user size overrides laid over listing size seeds (display
+/** User size overrides laid over listing size seeds (display
  * only — the sibling of `composeSpanFaces`). */
 export const composeSpanSizes = (seed: SpanSize[], overrides: SpanSize[]): SpanSize[] => {
   let out = mergeSpanSizes(seed);
@@ -769,7 +769,7 @@ export function seedSpanSizes(spans: EditSpan[], paragraphSize: number): SpanSiz
  * segmented where ANY changes). `color null` = base editing colour;
  * `family undefined` / `size null` = the editor's own.
  *
- * 9.A5-tails-b: family and size are now REAL rendered styles, not flags. The
+ * Family and size are now REAL rendered styles, not flags. The
  * surface these feed is a contentEditable — the text the user sees IS the
  * input — so the caret, the selection and the line wrapping are computed by
  * the browser from these very glyphs and agree by construction. (The mirror
@@ -800,7 +800,7 @@ export function styledSegments(
   const boldAt: boolean[] = new Array(n).fill(false);
   const italicAt: boolean[] = new Array(n).fill(false);
   const familyAt: (FaceSelector | undefined)[] = new Array(n).fill(undefined);
-  // 9.K2: small caps renders in the preview (alternates cannot — no CSS
+  // Small caps renders in the preview (alternates cannot — no CSS
   // reaches an arbitrary salt index without the loaded font — so they show as
   // base glyphs and the committed page is the authority, exactly as family/
   // size already state).
@@ -865,7 +865,7 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
-// 9.T6: the editor's PREVIEW stack, keyed by the three bundled selectors.
+// The editor's PREVIEW stack, keyed by the three bundled selectors.
 // An installed face has no entry and falls through to the box's own font:
 // the browser cannot render a file path, and naming the family in CSS
 // would preview whatever the SYSTEM resolves that name to, which is not
@@ -877,7 +877,7 @@ const HTML_FAMILY: Record<string, string> = {
   mono: 'Liberation Mono, Courier New, Courier, monospace',
 };
 
-/** 9.A5-tails-b: render the style segments as ONE html string for the rich
+/** Render the style segments as ONE html string for the rich
  * surface.
  *
  * WHY innerHTML rather than React children: the surface is contentEditable, so
@@ -920,7 +920,7 @@ export function segmentsToHtml(
       const px = (seg.size / baseSize) * basePx;
       if (Number.isFinite(px) && px > 0) style.push(`font-size:${px.toFixed(2)}px`);
     }
-    // 9.K2: preview small caps. `all-small-caps` lowercases capitals to small
+    // Preview small caps. `all-small-caps` lowercases capitals to small
     // caps too, matching smcp+c2sc; the browser synthesises it from its
     // Liberation stand-in (a close approximation — the committed Libertinus
     // page is the fidelity authority, like the family/size preview).
@@ -934,7 +934,7 @@ export function segmentsToHtml(
   return parts.join('');
 }
 
-/** 9.A5-tails-b: absolute CODE-POINT offset of a position inside the rendered
+/** Absolute CODE-POINT offset of a position inside the rendered
  * segments — the pure half of the contentEditable caret mapping (the DOM walk
  * that finds which segment a browser selection landed in lives in the
  * component, where there is no test environment; this arithmetic is testable
@@ -987,7 +987,7 @@ export function spanColorsToStyles(
   return out;
 }
 
-/** Convert per-span faces to `span_styles` face entries. 9.K2 emits the
+/** Convert per-span faces to `span_styles` face entries. This emits the
  * OpenType feature flags on the SAME entry as the face — the engine reads
  * `small_caps`/`alternates`/`alt_index` into the position's one face key. */
 export function spanFacesToStyles(
@@ -1068,7 +1068,7 @@ export function computeEditSpans(
 /** Characters the mapped fonts cannot encode, deduplicated in order —
  * empty means the whole edit is expressible. Spaces always pass (the
  * engine emits synthetic gaps for space-less fonts). */
-/** T21 — position-aware relaxation. A character unencodable in the font of
+/** Position-aware relaxation. A character unencodable in the font of
  * the span it was MAPPED to (by text position) but encodable in a NEARBY
  * member's font stops refusing: it is REASSIGNED to the nearest span whose
  * run carries it (distance in span steps; earlier span wins a tie), taking
@@ -1156,7 +1156,7 @@ export function paragraphUnencodable(
       inv = new Set(encodableByRun.get(sp.run) ?? '');
       cache.set(sp.run, inv);
     }
-    // 9.B5: per-span longest-match — a ligature sequence never crosses a
+    // Per-span longest-match — a ligature sequence never crosses a
     // span boundary (spans are style-source boundaries, and the engine's
     // encode operates per styled segment the same way).
     const slice = newA.slice(sp.start, Math.min(sp.end, newA.length));

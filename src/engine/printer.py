@@ -18,8 +18,8 @@ mechanism families implement it:
   /UserSettings. The key->DEVMODE mapping (Paper->dmPaperSize,
   Orientation->dmOrientation, Color->dmColor) is source-verified against
   the bundled 10.07.1. Paper TRAY selection is NOT possible on this device
-  (dmDefaultSource is hard-forced to automatic in gdevwpr2.c) — recorded in
-  § I as blocked-external, not silently faked.
+  (dmDefaultSource is hard-forced to automatic in gdevwpr2.c) — reported as
+  blocked-external, not silently faked.
 - PAGE-LEVEL options (order, subsets, duplication, annotation modes,
   flatten/rasterize, imposition) build a temporary, exactly-prepared PDF in
   print_layout.py and print THAT verbatim — deterministic on every driver.
@@ -39,7 +39,7 @@ devices with the same switch lists (TestPrintFitSemantics and friends).
 
 All print renders pass -dUseCropBox: the CropBox is what the viewer shows,
 and printing the MediaBox of a cropped document would silently print
-content the user cannot see (the § I.0 class).
+content the user cannot see.
 """
 
 import re
@@ -77,7 +77,7 @@ JOB_TIMEOUT_S = 600
 # intent and must never be silently clamped below this documented limit.
 MAX_COPIES = 999
 
-# Scale-mode switches (§ 3.4's fit/actual). Both pin the media to the
+# Scale-mode switches (the fit/actual). Both pin the media to the
 # printer's paper (-dFIXEDMEDIA); the PDF page-size request must never win
 # over the physical paper.
 #   fit    — scale the page to the paper. Probe-pinned
@@ -119,7 +119,7 @@ _LAYOUTS = ("single", "nup", "booklet", "poster")
 MIN_IMAGE_DPI, MAX_IMAGE_DPI = 72, 1200
 MIN_SHEET_PT, MAX_SHEET_PT = 72.0, 14400.0
 
-# Preview scratch dirs (O3): distinctive prefix so cleanup can never be
+# Preview scratch dirs: distinctive prefix so cleanup can never be
 # talked into removing anything else, plus an age-based sweep for dirs a
 # crash orphaned.
 PREVIEW_PREFIX = "spectrapdf-print-preview-"
@@ -132,7 +132,7 @@ def parse_page_spec(spec: str, page_count: int) -> str:
 
     Returns the normalized spec (whitespace stripped) for -sPageList, or
     raises ValueError. Empty/whitespace input means "all pages" and returns
-    "". Strict on purpose (the 2e lesson: a lax parse turned a typo into a
+    "". Strict on purpose (the lesson: a lax parse turned a typo into a
     whole-document operation): every token must be N or N-M, 1-based,
     ascending, within the document.
     """
@@ -169,7 +169,7 @@ def printer_exists(name: str) -> bool:
     handed a name it can't open, does not error — it falls back to raising
     its own printer-selection dialog, which from a headless subprocess is an
     invisible window that hangs the job until the timeout (observed live:
-    exactly 600s, caught by the M-P e2e). The name must be proven real
+    exactly 600s, caught by the e2e). The name must be proven real
     before gs ever spawns.
     """
     if sys.platform != "win32":  # engine ships Windows-only; keep tests portable
@@ -343,7 +343,7 @@ def print_pdf(
     sheet_height: float | None = None,
     _preview: dict | None = None,
 ) -> dict:
-    """Print a PDF to a named Windows printer (full O2 contract).
+    """Print a PDF to a named Windows printer (the full option contract).
 
     Args (beyond the original six):
         scale_percent: custom scale (fit="scale", layout "single" only).
@@ -726,7 +726,7 @@ def print_preview(
     cleanup_dir: str | None = None,
     **options,
 ) -> dict:
-    """Render what the print job WILL produce (O3), sheet by sheet.
+    """Render what the print job WILL produce, sheet by sheet.
 
     Runs the exact `print_pdf` validation and prepass — same code, so the
     preview cannot drift from the job — then renders the prepared sheets

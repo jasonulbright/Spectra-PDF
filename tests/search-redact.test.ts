@@ -18,7 +18,7 @@ import {
   type SearchHit,
 } from '../src/renderer/lib/search-redact';
 
-// F15 slice D — the Search & Redact panel's model. Everything here is pure,
+// The Search & Redact panel's model. Everything here is pure,
 // which is the point: there is no DOM test environment, so the rules that
 // decide WHAT gets marked live in functions a test can call rather than
 // inside a component nothing renders.

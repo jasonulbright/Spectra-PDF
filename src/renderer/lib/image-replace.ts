@@ -1,4 +1,4 @@
-// Replacement-image sourcing for Edit ▸ Replace (Phase 7.1).
+// Replacement-image sourcing for Edit ▸ Replace.
 //
 // The division of labor mirrors batch OCR: the WEBVIEW is the decoder (it
 // reads every image format natively), the engine only embeds. A picked
@@ -17,7 +17,7 @@ export interface RawReplacementSource {
 
 export type ReplacementSource = { jpeg_path: string } | RawReplacementSource;
 
-/** ADD accepts everything replace does PLUS SVG (P7: placed as real vector
+/** ADD accepts everything replace does PLUS SVG (placed as real vector
  * content via the engine compiler — replace stays raster-only, since a
  * vector placement refuses replace by design). */
 export type AddImageSource = ReplacementSource | { svg_path: string };

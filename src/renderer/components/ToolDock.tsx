@@ -10,23 +10,23 @@ import { ToolIcon } from './tool-icons';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tOperationTitle, tToolTitle } from '../i18n';
 
-// The right tool dock (Phase 10 slice B1 — 25-workbench-relayout.md § 3.B1).
+// The right tool dock.
 // Ops-tool panels render HERE, beside an always-visible document, instead of
 // on the full-page Tools tab (which survives as a redundant-but-working
-// legacy surface until slice C). The dock shows the active operation's panel
+// legacy surface). The dock shows the active operation's panel
 // with the owning tool's op switcher; the ⊞ button flips to the ToolsCenter
 // grid — the same tile data — as the dock's "all tools" view.
 
 interface ToolDockProps {
   panels: Record<Operation, React.ComponentType>;
-  /** Extract-from-canvas hands the panel its page (slice C: the special case
+  /** Extract-from-canvas hands the panel its page (the special case
    * the Tools tab used to render — the dock carries it now). */
   extractPage: number | null;
   onConsumeExtractPage: () => void;
 }
 
 export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDockProps): React.JSX.Element {
-  // N12: re-render on language change; strings resolve via tChrome/tTool*.
+  // Re-render on language change; strings resolve via tChrome/tTool*.
   useTranslation();
   const state = useAppState();
   const dispatch = useAppDispatch();
@@ -67,7 +67,7 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
   );
 
   const Panel = panels[activeOp];
-  // The dock is sized to what it currently HOLDS (U1): the all-tools list is a
+  // The dock is sized to what it currently HOLDS: the all-tools list is a
   // fixed-width index of names, so it contracts to TOOL_DOCK_LIST_WIDTH, and
   // opening a tool expands back to the user's own width.
   const listView = showGrid;

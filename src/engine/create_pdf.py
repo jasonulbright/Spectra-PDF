@@ -496,7 +496,7 @@ def _convert_one(
     gs_path: str,
     distill_preset: str,
 ) -> dict:
-    """One source -> one scratch PDF, plus the report row § 6 describes."""
+    """One source -> one scratch PDF, plus its report row."""
     kind = str(source.get("kind") or "").lower()
     page_range = str(source.get("pages") or "").strip()
     if kind == _KIND_BLANK:

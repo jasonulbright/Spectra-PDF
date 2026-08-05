@@ -2,11 +2,11 @@ import { useEffect, useRef } from 'react';
 import { pushAppModal } from '../commands/context';
 
 /**
- * The plain-div dialog shells' keyboard/focus contract (M6.5, § 10.5) — one
+ * The plain-div dialog shells' keyboard/focus contract — one
  * hook instead of four per-dialog implementations:
  *
  *  - registers on the app-modal stack, so the keymap dispatcher's Escape
- *    closes the TOP dialog (M5.5b's recorded gap);
+ *    closes the TOP dialog (the recorded gap);
  *  - moves focus INTO the dialog on open and back to the opener on close
  *    (attach the returned ref + `tabIndex={-1}` to the dialog container);
  *  - traps Tab inside the dialog (focus must not wander into the chrome

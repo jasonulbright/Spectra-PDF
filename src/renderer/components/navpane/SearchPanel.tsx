@@ -10,11 +10,11 @@ import type { NavPanelComponentProps } from './types';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../../i18n';
 
-// Search nav panel (Phase 4 M3.3, § 5.4) — a result-list view with TWO scopes:
+// Search nav panel — a result-list view with TWO scopes:
 //   • "Open documents" — over the ONE shared workspace index (SearchProvider),
 //     so there's no second index and no doubled OCR. A hit reuses the FindBar's
 //     find session (`find.openWith`) — camera + highlights — not a bespoke path.
-//   • "On disk" (P4 part 2) — cross-file search of every PDF under a chosen
+//   • "On disk" (part 2) — cross-file search of every PDF under a chosen
 //     folder that ISN'T open, run in the engine (off the render thread) so a
 //     big folder or a pathological regex can't freeze the UI. A hit opens the
 //     file and reveals the page (`openPathAtPage`).
@@ -61,7 +61,7 @@ const EMPTY_OPEN_RESULT: OpenScopeResult = { groups: [], totalHits: 0, error: nu
 const baseName = (p: string): string => p.split(/[\\/]/).pop() || p;
 
 export function SearchPanel({ activeFile }: NavPanelComponentProps): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const state = useAppState();
   const { search, snippetsFor, version } = useSearchContext();
@@ -92,7 +92,7 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
   const docs = state.workspace.documents;
 
   // ── Open-documents scope (in-memory index) ───────────────────────────────
-  // Async since P4's ReDoS hardening: a regex-mode scan runs in a worker under
+  // Async because of the ReDoS hardening: a regex-mode scan runs in a worker under
   // a time budget, so this is an effect with a liveness guard rather than a
   // useMemo. Literal queries still resolve in the same tick.
   const [openResult, setOpenResult] = useState<OpenScopeResult>(EMPTY_OPEN_RESULT);

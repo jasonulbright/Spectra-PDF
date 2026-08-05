@@ -28,7 +28,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 ).href;
 
 // Target: 2 plain pages. Source: 1 page carrying a FILLED form field — the
-// merge must carry it into the combined file (2n.4a's multi-source AcroForm
+// merge must carry it into the combined file (the multi-source AcroForm
 // carry, proven here in the real user flow).
 async function makeTarget(path: string): Promise<void> {
   const doc = await PDFDocument.create();
@@ -48,7 +48,7 @@ async function makeFormSource(path: string): Promise<void> {
   writeFileSync(path, await doc.save());
 }
 
-describe('canvas whole-document merge (2o)', () => {
+describe('canvas whole-document merge', () => {
   let tmp: string;
   let target: string;
   let source: string;

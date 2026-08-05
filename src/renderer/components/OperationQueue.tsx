@@ -6,7 +6,7 @@ import { formatQueueLabel, type QueueLabel } from '../hooks/useOperationQueue';
 export interface QueueItem {
   id: string;
   /** What the line SAYS, as data — rendered at the current language on every
-   * paint (N12). The operation log renders the same descriptor in English. */
+   * paint. The operation log renders the same descriptor in English. */
   label: QueueLabel;
   status: 'running' | 'done' | 'error';
   /** Failure text from the engine (slice-D boundary — passed through as the
@@ -27,7 +27,7 @@ function formatTime(ts: number): string {
 }
 
 export function OperationQueue({ items, onClear }: OperationQueueProps): React.ReactElement | null {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);

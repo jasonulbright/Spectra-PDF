@@ -12,8 +12,8 @@ import {
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// Phase 4 M5.4: the floating tool pill is GONE. It listed all eight canvas
-// modes flat and permanently; the secondary toolbar (§ 3.1) shows one TOOL's
+// The floating tool pill is GONE. It listed all eight canvas
+// modes flat and permanently; the secondary toolbar shows one TOOL's
 // modes, and appears only while that tool is armed.
 //
 // This exists because the pill's retirement removed the only doc-tab way to arm
@@ -115,7 +115,7 @@ describe('secondary toolbar', () => {
   });
 
   it('Prepare Form arms ON the document and shows its single mode button', async () => {
-    // It owns exactly one mode, and § 3.2 names its "+ Add Field" control. It
+    // It owns exactly one mode, and carries a "+ Add Field" control. It
     // also has ops — which used to send it to the Tools tab, i.e. away from the
     // page it had just armed a mode on.
     await openMenuItem('menu-tools', 'menuitem-tool-prepareform');

@@ -1,4 +1,4 @@
-"""O8 slice E — the MRC text-verification gate.
+"""The MRC text-verification gate.
 
 A compression setting is allowed to be lossy. It is NOT allowed to quietly
 destroy the text the user came for — and MRC's failure mode when it goes wrong
@@ -24,10 +24,10 @@ obvious shape would have been wrong:
    path to get wrong, and the output carries the ORIGINAL scan for that page.
 
 3. **`SequenceMatcher` is used with `autojunk=False` over a normalised word
-   list, and never positionally** (§ 1.6 rule 4). The autojunk heuristic
+   list, and never positionally** (rule 4). The autojunk heuristic
    discards any token appearing in more than 1% of a sequence longer than 200
-   — on a page of prose that is most words — and it scored a CORRECT page at
-   7/713 during recon. A positional `zip` misaligns completely after one
+   — on a page of prose that is most words — and it scores a CORRECT page at
+   7/713. A positional `zip` misaligns completely after one
    inserted word.
 """
 
@@ -59,7 +59,7 @@ def text_similarity(before: str, after: str) -> tuple[float, str]:
 
     A source page with NO recognisable text scores 1.0 — there is nothing to
     lose, and a scan with no text layer is the ordinary case for this feature
-    (MRC does not create one; § 9 boundary 3). Scoring it 0 would revert every
+    (MRC does not create one). Scoring it 0 would revert every
     page of a wordless scan, which is the opposite of what the gate is for.
     """
     a = normalize_words(before)

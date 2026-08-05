@@ -23,8 +23,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
   require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs'),
 ).href;
 
-// Committed test-only signers (self-signed, 100-year) — never real keys. See
-// docs/architecture/11-phase2h-signing.md / 13-phase2k-signature-completeness.md.
+// Committed test-only signers (self-signed, 100-year) — never real keys.
 const TEST_PFX = resolve(__dirname, '..', 'fixtures', 'test-signer.pfx');
 const TEST_PFX_PASSWORD = 'testpw';
 const TEST_PEM_KEY = resolve(__dirname, '..', 'fixtures', 'test-signer.key.pem');
@@ -90,7 +89,7 @@ describe('signing applies a verifiable signature via the panel + engine', () => 
     expect(existsSync(badOut)).toBe(false);
   });
 
-  it('signs with a PEM key + certificate source (2k)', async () => {
+  it('signs with a PEM key + certificate source', async () => {
     const pemOut = resolve(tmp, 'signed-pem.pdf');
     const summary = await signActiveFile({
       keyPath: TEST_PEM_KEY,
@@ -105,7 +104,7 @@ describe('signing applies a verifiable signature via the panel + engine', () => 
     expect(await widgetFieldNames(pemOut)).toContain('Signature1');
   });
 
-  it('places a visible signature on the canvas and the stamp lands at the drawn box (2k)', async () => {
+  it('places a visible signature on the canvas and the stamp lands at the drawn box', async () => {
     // Rubber band + native dialogs aren't WebDriver-drivable: the harness
     // places the box and returns the REAL display→PDF conversion, then the
     // sign hook runs the same engine call the canvas Sign button sends.
@@ -150,7 +149,7 @@ describe('signing applies a verifiable signature via the panel + engine', () => 
     expect(widget!.rect[3]).toBeCloseTo(ey1, 0);
   });
 
-  it('signs with the PAdES profile and the CLI verifies subfilter + user trust anchor (F2/F4)', async () => {
+  it('signs with the PAdES profile and the CLI verifies subfilter + user trust anchor', async () => {
     await setView('operations');
     await setActiveOp('signatures');
     const padesOut = resolve(tmp, 'signed-pades.pdf');

@@ -1,4 +1,4 @@
-"""The fonts installed on this machine — 9.T6.
+"""The fonts installed on this machine.
 
 Text editing has offered Keep-original plus three bundled families since
 7.4. The bundled faces ensure a metric-compatible replacement is available
@@ -217,7 +217,7 @@ def installed_families() -> set[str]:
     Deliberately not `list_system_fonts`: that filters by whether THIS engine
     may embed a face, which is a different question from whether the machine
     has it. LibreOffice renders with a Restricted-License face perfectly well,
-    so excluding those here would make the substitution report (P22 § 6) accuse
+    so excluding those here would make the substitution report accuse
     the converter of dropping a font it actually used.
     """
     return {face["family"] for face in _scan() if face.get("family")}

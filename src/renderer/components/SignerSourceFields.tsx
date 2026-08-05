@@ -6,7 +6,7 @@ import { tChrome, tDate } from '../i18n';
 
 // The signer source both sign flows (SignaturesPanel invisible form, canvas
 // visible-signature popover) share: a PKCS#12 file, a PEM key+cert pair, a
-// PKCS#11 hardware token (F3), or a freshly generated self-signed .pfx
+// PKCS#11 hardware token, or a freshly generated self-signed .pfx
 // (which becomes the selected .pfx).
 // SECURITY: this component never holds the SIGNING password or token PIN —
 // only the generator sub-form's own password, which is cleared the moment
@@ -70,7 +70,7 @@ export function SignerSourceFields({
   /** Distinguishes testids when two forms exist (panel vs canvas). */
   idPrefix: string;
 }): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { call } = useEngine();
   const [showGenerate, setShowGenerate] = useState(false);

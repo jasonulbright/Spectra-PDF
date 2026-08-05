@@ -1,4 +1,4 @@
-// Recent-files list helpers (Phase 4 M2). parseRecent must never let a
+// Recent-files list helpers. parseRecent must never let a
 // JSON-valid-but-wrong-shaped localStorage value through as a non-array —
 // that would crash HomeTab's recentFiles.map on the first render.
 import { describe, expect, it } from 'vitest';
@@ -75,7 +75,7 @@ describe('withRecent', () => {
   });
 });
 
-describe('formatOpenedAt (the Home opened-when column, M7)', () => {
+describe('formatOpenedAt (the Home opened-when column)', () => {
   // Fixed "now": 2026-07-16 15:00 local.
   const now = new Date(2026, 6, 16, 15, 0).getTime();
 

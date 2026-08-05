@@ -1,4 +1,4 @@
-// App settings storage — a LEAF module (M6.4): the keymap dispatcher reads
+// App settings storage — a LEAF module: the keymap dispatcher reads
 // the single-key-accelerators flag per keystroke, and importing the
 // SettingsPanel component for that dragged its module-level theme/GS side
 // effects into the command layer (vitest, which has no `window`, caught it).
@@ -10,7 +10,7 @@ export interface Settings {
   gsSource: 'builtin' | 'external';
   defaultOutputDir: string;
   compressionQuality: string;
-  /** O8: which MRC preset the Compress panel opens on, for a user whose
+  /** Which MRC preset the Compress panel opens on, for a user whose
    * corpus is scans. Separate from `compressionQuality` because the two are
    * independent axes — a user can default to `mrc` and still choose which of
    * the three promises it makes, and choosing `ebook` must not forget it. */
@@ -28,7 +28,7 @@ export interface Settings {
    * deployments, or suppress it machine-wide with the DisableAutoUpdate
    * policy, which still wins over this preference. */
   checkUpdatesOnLaunch: boolean;
-  /** Write a log file for every Batch OCR run (issue #1 request 4). Default
+  /** Write a log file for every Batch OCR run. Default
    * ON: a batch runs unattended over folders the user cannot re-inspect
    * afterwards, and the on-screen report dies with the dialog. */
   batchLogEnabled: boolean;
@@ -49,7 +49,7 @@ export interface Settings {
    * see it. A shared, explicitly chosen folder is the fix — and once
    * scheduling exists, setting one is required for a non-interactive identity. */
   batchLogDir: string;
-  /** N12: the UI language — 'system' resolves against the shipped locales
+  /** The UI language — 'system' resolves against the shipped locales
    * (falling back to en), an explicit code pins one. Stored values are
    * locale-independent keys, never display names. */
   language: string;

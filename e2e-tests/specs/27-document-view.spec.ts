@@ -27,13 +27,13 @@ async function makeTextPdf(path: string, lines: string[]): Promise<void> {
   writeFileSync(path, await doc.save());
 }
 
-// Phase 4 M4.1: the continuous reading Document view. Default is the Organize
+// The continuous reading Document view. Default is the Organize
 // board; a pill toggles to the reading column, which hosts the SAME PageCells
 // (the reuse seam). This proves the toggle both ways and that pages actually
 // render (raster) in the column.
 const SAMPLE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-describe('document view (M4.1)', () => {
+describe('document view', () => {
   before(async () => {
     await waitForHarness();
     await closeAllFiles();
@@ -44,7 +44,7 @@ describe('document view (M4.1)', () => {
     await setView('canvas');
   });
 
-  // M4.1g: a document now OPENS in the reading view. Pinned end-to-end (the
+  // A document now OPENS in the reading view. Pinned end-to-end (the
   // reducer test pins the state; this pins that it's what actually renders).
   it('opens in the reading view and renders pages', async () => {
     await $('[data-testid="document-view"]').waitForDisplayed({
@@ -111,12 +111,12 @@ describe('document view (M4.1)', () => {
 
 });
 
-// M4.1c gate: the reading view shows exactly ONE document, but Find matches
+// gate: the reading view shows exactly ONE document, but Find matches
 // workspace-wide. A match in ANOTHER open file must bring that file to the front
 // and land on it — the bug this closed was a silent no-op while Find's own
 // counter advanced, so the assertion has to be that the VIEW actually moved, not
 // merely that Find found something.
-describe('reading view: a Find match in another open file (M4.1c)', () => {
+describe('reading view: a Find match in another open file', () => {
   let tmp: string;
   let fileA: string;
   let fileB: string;
@@ -168,9 +168,9 @@ describe('reading view: a Find match in another open file (M4.1c)', () => {
     );
     await $('[data-testid="find-next"]').click();
 
-    // THE ASSERTION: the reading view actually moved to file B. Before M4.1c the
-    // counter advanced while centerOn silently returned (the page belonged to a
-    // document this view wasn't showing).
+    // THE ASSERTION: the reading view actually moved to file B. The
+    // counter used to advance while centerOn silently returned (the page
+    // belonged to a document this view wasn't showing).
     await browser.waitUntil(async () => (await getState()).activeFile?.path === fileB, {
       timeout: 10_000,
       timeoutMsg: 'the Find jump did not bring the other file to the front — it no-oped',

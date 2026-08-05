@@ -1,6 +1,6 @@
 // Types + pure helpers for the visual (pixel) compare view. The diff itself
-// runs engine-side (Ghostscript raster + Python pixel diff — see
-// docs/architecture/09-phase2g-compare.md); this module only holds the result
+// runs engine-side (Ghostscript raster + Python pixel diff);
+// this module only holds the result
 // shape and the overlay math the panel uses to project the engine's
 // changed-region rectangles onto pdf.js-rendered page canvases.
 

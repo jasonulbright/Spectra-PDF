@@ -55,7 +55,7 @@ async function extractAllText(path: string): Promise<string> {
   return out;
 }
 
-describe('find + OCR (2m)', () => {
+describe('find + OCR', () => {
   let tmp: string;
 
   before(async () => {
@@ -87,7 +87,7 @@ describe('find + OCR (2m)', () => {
     );
   });
 
-  it('advanced Find modes: match-case, whole-word, regex, and invalid-pattern (P4)', async () => {
+  it('advanced Find modes: match-case, whole-word, regex, and invalid-pattern', async () => {
     const p = resolve(tmp, 'modes.pdf');
     const doc = await PDFDocument.create();
     const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -176,7 +176,7 @@ describe('find + OCR (2m)', () => {
     await setReactInputValue('[data-testid="find-input"]', '');
   });
 
-  it('OCRs a scanned document in-app, finds the text, and "Make searchable" persists it (2m acceptance)', async function () {
+  it('OCRs a scanned document in-app, finds the text, and "Make searchable" persists it (acceptance)', async function () {
     this.timeout(180_000); // real in-webview OCR (first run loads core+lang)
     await waitForHarness();
     await openByPaths([SCANNED]);
@@ -192,7 +192,7 @@ describe('find + OCR (2m)', () => {
     await setView('canvas');
 
     // Recognition runs in the ENGINE — the bundled native Tesseract as a
-    // subprocess, rasterizing through Ghostscript (Phase 12; tesseract.js is
+    // subprocess, rasterizing through Ghostscript (tesseract.js is
     // retired) — so the first run pays a real raster + recognize, be patient.
     // Wait on the real OCR signal (word boxes ready to persist), not the find
     // count (which the born-digital spec's leftover query could satisfy).
@@ -229,7 +229,7 @@ describe('find + OCR (2m)', () => {
     expect(text).toContain('INVOICE');
   });
 
-  it('offers the full vendored language set, each with its traineddata staged (P1)', async () => {
+  it('offers the full vendored language set, each with its traineddata staged', async () => {
     // The FindBar picker only mounts once a scanned page is detected — the
     // previous test leaves scanned.pdf active with hasScanned true.
     await ensureFindOpen();
@@ -248,9 +248,9 @@ describe('find + OCR (2m)', () => {
     }
     // Every offered language must have its traineddata staged where the
     // recognizer actually reads it — an offered-but-unstaged language OCRs to
-    // nothing (the silent-degradation class). Phase 12 moved that from
-    // public/ocr/lang (gzipped, for the retired tesseract.js WASM worker) to
-    // resources/tesseract/tessdata, DECOMPRESSED, for native Tesseract.
+    // nothing (the silent-degradation class). The traineddata lives in
+    // resources/tesseract/tessdata, DECOMPRESSED, for native Tesseract —
+    // not in public/ocr/lang, which served the retired WASM worker.
     const { readFileSync } = await import('node:fs');
     const tessdata = resolve(__dirname, '..', '..', 'resources', 'tesseract', 'tessdata');
     for (const c of codes) {

@@ -1,4 +1,4 @@
-"""Cross-file text search over PDFs on disk (§ I.5 P4, part 2).
+"""Cross-file text search over PDFs on disk (part 2).
 
 The in-app Find searches the OPEN documents' index; this searches PDFs that are
 NOT open, by path, so a user can grep a whole folder. It runs in the engine (off
@@ -23,7 +23,7 @@ import re
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import LTTextContainer
 
-# F15 slice C: the compile half moved to `text_match.py` so this module, the
+# The compile half moved to `text_match.py` so this module, the
 # new `search_regions` door and the renderer's `compileMatcher` are ONE
 # semantics with three call sites rather than three semantics. The names below
 # stay so this module's own tests and readers are undisturbed.

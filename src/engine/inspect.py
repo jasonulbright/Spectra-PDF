@@ -12,7 +12,7 @@ def check_encrypted(file: str) -> dict:
 
     ``kind`` is "password" (standard security handler) or "pubkey"
     (certificate-encrypted, Adobe.PubSec) — the open funnel routes the
-    prompt on it. F9: pikepdf raises a generic PdfError for Adobe.PubSec,
+    prompt on it. pikepdf raises a generic PdfError for Adobe.PubSec,
     so the classification lives in pubkey_crypt.classify_encryption.
     """
     from engine.pubkey_crypt import classify_encryption

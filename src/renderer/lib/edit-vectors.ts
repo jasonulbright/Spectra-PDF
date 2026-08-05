@@ -1,8 +1,8 @@
-// Edit-mode VECTOR objects (Phase 9.D1): fetch the engine's per-page vector
+// Edit-mode VECTOR objects: fetch the engine's per-page vector
 // listing and project the PDF user-space bboxes into the display-normalized
 // space PageCell overlays draw in — the same {box, bakedRotate} idiom every
 // other edit overlay uses (mirrors edit-images' fetchEditPlacements). A
-// vector object is a drawn path (fill/stroke/fillstroke); D1 lists, selects,
+// vector object is a drawn path (fill/stroke/fillstroke); this lists, selects,
 // and deletes them. Pending in-memory page rotation is applied at RENDER time
 // by PageCell (rotateNormalizedRect), like image placements and redaction.
 import { pdfRectToDisplay } from './pdfx-build';
@@ -13,22 +13,22 @@ export interface EditVectorObject {
   index: number;
   /** Display-normalized bbox at the page's BAKED orientation. */
   rect: { x: number; y: number; w: number; h: number };
-  /** The raw device/user-space bbox [x0,y0,x1,y1] — D2 builds the transform's
+  /** The raw device/user-space bbox [x0,y0,x1,y1] — the transform builds its
    * unit-square placement matrix [w,0,0,h,x0,y0] from it. */
   userRect: [number, number, number, number];
   /** How the object is painted — drives the selection affordance's honesty.
-   * P8 slice D adds 'shading' (a gradient fill — `sh`): transform/delete
+   * 'shading' is a gradient fill (`sh`): transform/delete
    * apply, restyle has nothing to recolour (the toolbar says so). */
   kind: 'fill' | 'stroke' | 'fillstroke' | 'shading';
   /** Best-effort fill colour [r,g,b] 0-1. Device colours plus ICCBased,
    *  Indexed, Separation, DeviceN, CalGray/CalRGB and Lab are resolved
-   *  engine-side (S5); a pattern or an unevaluable tint stays null. */
+   *  engine-side; a pattern or an unevaluable tint stays null. */
   fill: [number, number, number] | null;
   /** Best-effort stroke colour [r,g,b] 0-1 (same resolution as fill), else null. */
   stroke: [number, number, number] | null;
-  /** The effective line width (D3's width control seed). */
+  /** The effective line width (the width control seed). */
   lineWidth: number;
-  /** 9.D4: the path is inside a Form XObject (edited on a copy of the form). */
+  /** The path is inside a Form XObject (edited on a copy of the form). */
   nested: boolean;
 }
 
@@ -59,7 +59,7 @@ interface EngineListing {
     stroke?: [number, number, number] | null;
     line_width?: number;
     nested?: boolean;
-    /** 9-§I.0-S8: the path is wholly outside the active clip (invisible).
+    /** The path is wholly outside the active clip (invisible).
      * Filtered out below; surviving vectors keep their engine `index`. */
     clipped?: boolean;
   }[];
@@ -81,7 +81,7 @@ export async function fetchEditVectors(
     file: workingPath,
     page: pageNumber,
   })) as unknown as EngineListing;
-  // 9-§I.0-S8: drop clipped-away (invisible) paths — never offered as editable.
+  // Drop clipped-away (invisible) paths — never offered as editable.
   const visible = (listing.vectors ?? []).filter((v) => !v.clipped);
   return visible.map((v) => ({
     index: v.index,

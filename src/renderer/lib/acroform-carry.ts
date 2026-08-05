@@ -5,8 +5,7 @@
 // document-level /AcroForm. Without this module, any committed page edit on a
 // form PDF (one rotation suffices) orphans every field: getForm() sees
 // nothing, nothing is fillable, every /V is semantically lost. Verified by
-// experiment before this was built; design in
-// docs/architecture/16-phase2n-canvas-completeness.md § 2n.4(a).
+// experiment before this was built.
 //
 // Three-phase contract with the builder:
 //   1. prepareSourceForms(source, keptIndices) — on the PRIVATE per-build
@@ -319,7 +318,7 @@ const SIMPLE_FONT_SUBTYPES = new Set([
 // "different" and gets renamed; claiming a wrong face — or a wrong glyph MAP
 // (regression: same-named Helvetica entries differing only in /Encoding,
 // e.g. a custom /Differences remap, were deduplicated onto the first
-// source's encoding) — is the failure mode 2l's review flagged as HIGH.
+// source's encoding) — is the failure mode the review flagged as HIGH.
 function fontsEquivalent(output: PDFDocument, a: unknown, b: unknown): boolean {
   const da = asDict(output, a);
   const db = asDict(output, b);
@@ -593,7 +592,7 @@ export function carryAcroForm(output: PDFDocument, contributions: FormContributi
   }
   const hasSig = roots.some((r) => treeHasSigField(output, r.dict));
 
-  // ---- /CO reconciled to the surviving copied fields (F11) ----------------
+  // ---- /CO reconciled to the surviving copied fields ----------------------
   // Output-side index: FQ name → the field's indirect ref, walked from the
   // final (post-rename) roots. Only nodes carrying their own /T add entries —
   // a /T-less kid shares its parent's partial name and can't be a /CO target

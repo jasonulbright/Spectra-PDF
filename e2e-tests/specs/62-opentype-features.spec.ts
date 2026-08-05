@@ -12,10 +12,10 @@ import {
   commitAddText,
 } from '../support/harness.js';
 
-// Phase 9.K2 — OpenType features (small caps + stylistic alternates) end to
+// OpenType features (small caps + stylistic alternates) end to
 // end against the real binary. The Add-Text card's Sc/Alt toggles send
 // `features` through the SAME card→buildSignatureAppearance→add_text_box path
-// A2 proved; because authoring always renders a bundled face, a feature
+// Add Text uses; because authoring always renders a bundled face, a feature
 // switches to Libertinus Serif (Liberation carries none). The proof the wire
 // works AND the text stays usable: the authored phrase lists back as an
 // ORDINARY editable paragraph — which requires the ToUnicode to still spell
@@ -47,7 +47,7 @@ async function authoredParagraph(needle: string): Promise<{ pageId: string; text
   return null;
 }
 
-describe('OpenType features (Phase 9.K2)', () => {
+describe('OpenType features', () => {
   let tmp: string;
   let pdfPath: string;
 

@@ -1,4 +1,4 @@
-// N12 (brief 37) — chrome strings that live in JSX/dynamic code rather
+// Chrome strings that live in JSX/dynamic code rather
 // than in the COMMANDS/MENUS tables. ONE typed record, so the tChrome
 // helpers are compile-time key-safe and the en catalog stays GENERATED
 // (the i18n-catalog gate merges this record with the tables —
@@ -35,7 +35,7 @@ export const CHROME_STRINGS = {
   'chrome.status.pageNumberHint': 'Type a page number',
   'chrome.status.sheetOfTotal': '({{sheet}} of {{total}})',
   'chrome.status.ofTotal': '/ {{total}}',
-  // Snapping (N11 slice A). The status bar is the docked home for
+  // Snapping. The status bar is the docked home for
   // never-invisible view state, so the master toggle and its options popover
   // live there; `View ▸ Snapping` mirrors the toggle in the menu table. `px`
   // is notation, identical in every locale (the measure-unit rule), so it
@@ -100,7 +100,7 @@ export const CHROME_STRINGS = {
   'chrome.empty.openToStart': 'Open a PDF to get started',
   'chrome.empty.openPdf': 'Open PDF',
 
-  // ── Keyboard-shortcut display (N12 slice C) ──────────────────────────
+  // ── Keyboard-shortcut display ────────────────────────────────────────
   // The shortcut a menu row, a toolbar tooltip or the presentation exit
   // shows. Only the MODIFIER and the NAMED keys localize — a letter key is
   // the letter on the reader's own keyboard, and '+' is the chord separator

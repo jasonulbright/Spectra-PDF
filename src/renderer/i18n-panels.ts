@@ -1,4 +1,4 @@
-// N12 slice B (brief 37) — the dock panels' strings, the i18n-chrome.ts
+// The dock panels' strings, the i18n-chrome.ts
 // pattern (typed record → generated catalog → parity gate; hand-editing
 // locales/en/chrome.json stays impossible). Keys: `panel.common.*` for
 // strings shared across panels (the "Working on:" line, the Error prefix,
@@ -568,7 +568,7 @@ export const PANEL_STRINGS = {
   'panel.portfolio.saving': 'Saving…',
   'panel.portfolio.updating': 'Updating…',
   'panel.portfolio.removing': 'Removing…',
-  // N12 slice E — the DONE lines. The slice-B sweep threaded the …ing
+  // The DONE lines. The slice-B sweep threaded the …ing
   // states but not these six, because each was a `${}` TEMPLATE rather than
   // a bare literal; the attribute/literal regexes never saw them. Each is
   // one interpolated key ({{name}} is an attachment's own file name and
@@ -783,7 +783,7 @@ export const PANEL_STRINGS = {
   'panel.ga.delete': 'Delete',
   'panel.ga.addStep': 'Add step',
 
-  // Count & Takeoff (N11 slice C). Group NAMES are the user's own text and
+  // Count & Takeoff. Group NAMES are the user's own text and
   // never pass through here; `newGroupName` is only the SEED for a fresh one,
   // which the user then edits — after that it is data, not chrome.
   'panel.takeoff.open': 'Open a PDF to count items on it',
@@ -815,7 +815,7 @@ export const PANEL_STRINGS = {
   'panel.takeoff.exported': 'Exported {{total}} marks across {{groups}} groups.',
   'panel.takeoff.marker': 'Marker',
 
-  // Symbol palettes (N11 slice D). A BUILT-IN symbol's name is our word and
+  // Symbol palettes. A BUILT-IN symbol's name is our word and
   // localizes, exactly like a built-in stamp's; an IMPORTED set's name and its
   // symbols' names are the user's own data and are shown verbatim — never
   // translated, and never used as identity (ids are).
@@ -872,7 +872,7 @@ export const PANEL_STRINGS = {
   'panel.symbols.name.aec-elevation-marker': 'Elevation marker',
   'panel.symbols.name.aec-fire-extinguisher': 'Fire extinguisher',
 
-  // ── Search & Redact (F15 slice D) ─────────────────────────────────────
+  // ── Search & Redact ───────────────────────────────────────────────────
   // The panel produces MARKS; the status bar's apply/save/clear stays the
   // only destructive path, so nothing here promises removal.
   'panel.searchRedact.open': 'Open a PDF to search and redact',
@@ -938,7 +938,7 @@ export const PANEL_STRINGS = {
     'This mark covers the whole run: the text could not be measured glyph by glyph, so it errs wide.',
   'panel.searchRedact.properties': 'Redaction properties',
 
-  // ── Redaction properties (F15 slice E) ────────────────────────────────
+  // ── Redaction properties ──────────────────────────────────────────────
   // The mark's appearance, in the format's own vocabulary. One surface for
   // both producers: the band drawn on the page and every mark the search
   // makes read the same persisted record.

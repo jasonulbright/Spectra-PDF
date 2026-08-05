@@ -13,7 +13,7 @@ interface PasswordDialogProps {
 }
 
 export function PasswordDialog({ open, fileName, error, onResult }: PasswordDialogProps): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const [password, setPassword] = useState('');
 

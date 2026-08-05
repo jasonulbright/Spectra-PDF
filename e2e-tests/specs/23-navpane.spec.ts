@@ -4,7 +4,7 @@ import { waitForHarness, openByPaths, getState, getWorkspacePageIds } from '../s
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// Phase 4 M3.1: the left navigation pane + Pages (thumbnails) panel. Drives
+// The left navigation pane + Pages (thumbnails) panel. Drives
 // the real DOM — the icon strip, the virtualized thumbnails (rendered through
 // the same pdf.js proxy the board uses), click-to-select, and the F4 toggle.
 

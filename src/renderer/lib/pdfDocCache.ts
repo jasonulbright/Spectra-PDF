@@ -32,8 +32,8 @@ export function getDocumentProxy(path: string, buffer: PdfBuffer): Promise<PDFDo
   return entry.promise;
 }
 
-// Entry point for callers whose buffer crossed an async gap (Phase 9,
-// round 24 tail). getDocumentProxy trusts its caller: handed a superseded
+// Entry point for callers whose buffer crossed an async gap.
+// getDocumentProxy trusts its caller: handed a superseded
 // buffer, it would EVICT + DESTROY the live entry for the path's CURRENT
 // bytes — re-creating the mid-flight-destroy hang on whoever holds that
 // proxy. The cache cannot know files-currency, so an async-gap caller states

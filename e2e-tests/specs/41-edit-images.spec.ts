@@ -15,7 +15,7 @@ import {
   settledEditImagePageIds,
 } from '../support/harness.js';
 
-// Phase 7.1 — Edit ▸ Images round-trip against the built binary: arm the Edit
+// Edit ▸ Images round-trip against the built binary: arm the Edit
 // tool (its command lands on the document and arms the mode), wait for the
 // engine listings, then drive the REAL selection + action handlers with
 // injected dialog inputs: replace (raw pixels) → extract (file exists) →
@@ -27,7 +27,7 @@ const RED_DOT_PNG = Buffer.from(
   'base64',
 );
 
-describe('edit images (Phase 7.1)', () => {
+describe('edit images', () => {
   let tmp: string;
   let pdfPath: string;
 

@@ -11,14 +11,14 @@ interface ZoomHandlerRefs {
   lastTick: { current: number };
   onScaleRef: { current: ((scale: number) => void) | undefined };
   onSettleRef: { current: (() => void) | undefined };
-  /** Hand mode (M6.2): pages become pannable surface — the filter admits
+  /** Hand mode: pages become pannable surface — the filter admits
    * presses on `.page` (pickup is separately suppressed), while buttons and
    * inputs stay interactive. */
   handModeRef?: { current: boolean };
 }
 
 /** May a press on `target` start a pan/zoom gesture? Pure — unit-tested.
- * Hand (M6.2): a press ON a page pans (pickup is separately suppressed);
+ * Hand: a press ON a page pans (pickup is separately suppressed);
  * controls stay controls. Otherwise pages/headers belong to their own
  * interactions and only the background pans. */
 export function zoomGestureAllowed(target: Element | null, handMode: boolean): boolean {

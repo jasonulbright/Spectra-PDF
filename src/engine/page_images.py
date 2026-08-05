@@ -1,4 +1,4 @@
-"""Page-image editing (Phase 7.1 — the first Edit slice).
+"""Page-image editing (the first Edit slice).
 
 Lists, deletes, replaces, and extracts IMAGE XObject placements on a page.
 A "placement" is one `Do` draw of an image — the unit the user clicks. Ids
@@ -33,7 +33,7 @@ module only embeds):
     8-bit pixels from the renderer's canvas decode. channels=4 splits the
     alpha plane into an /SMask.
 
-Inline images (BI/ID/EI) are placements too (9.C4 re-ratified the 7.1
+Inline images (BI/ID/EI) are placements too (a re-ratified
 non-goal): they list with `kind: "inline"` in the same depth-first id
 order as XObject draws (`kind: "xobject"`), and the wrap/drop family
 (delete/transform/crop/opacity) applies to them identically — both draw
@@ -41,11 +41,10 @@ the unit square under the live CTM. REPLACE and EXTRACT refuse inline
 targets with named reasons (delete + add covers the workflow; the bytes
 live in the stream, so a deleted inline draw needs no GC).
 
-Text-run editing (7.2) will consolidate this walker and redact.py's into
+Text-run editing will consolidate this walker and redact.py's into
 one shared interpreter; for this slice the graphics-state tracking is
 deliberately duplicated (~40 lines, helpers imported) rather than churning
-the security-critical redactor in a release-bound slice — see
-docs/architecture/21-phase7-content-editing.md.
+the security-critical redactor.
 """
 
 import os
@@ -75,7 +74,7 @@ from engine.redact import (
 # ── listing ───────────────────────────────────────────────────────────────
 
 # The three wrap shapes `_emit_wrap` emits, keyed by the exact operator
-# sequence between the frame's `q` and its inner unit (C3-tail recognition).
+# sequence between the frame's `q` and its inner unit (recognition).
 _WRAP_SHAPES = {
     ("cm",): "transform",
     ("re", "W", "n"): "crop",
@@ -115,7 +114,7 @@ def _recognized_frames(instructions, t, enclosing):
 
 
 def _listed_crop(instructions, t, enclosing):
-    """C3-tail additive listing field: the intersection of RECOGNIZED crop
+    """Additive listing field: the intersection of RECOGNIZED crop
     frames around the draw at `t` (unit space), None when there are none.
     Plural frames only arise in pre-tail files (the intersect era) — the
     op now collapses to one. Author clips are deliberately unreported
@@ -149,20 +148,20 @@ def _walk_placements(
     base_mask=None,
 ):
     """Append one dict per image `Do` to `out`, in encounter order. State
-    tracking is the shared GraphicsTextState (7.2 consolidation) — the same
+    tracking is the shared GraphicsTextState (consolidation) — the same
     machine the rewriter's DFS order agreement is proven against.
 
-    Fill alpha (the C3 opacity seed) and the blend mode (P7's seed) are
+    Fill alpha (the opacity seed) and the blend mode (the blend seed) are
     tracked LOCALLY: the shared state machine's feed() has no resources
     access, and `gs` needs the current stream's /ExtGState to resolve — so
     both ride their own q/Q-scoped stack here, inherited into forms at
     their Do like the CTM. The open-q index stack rides alongside for
-    `crop` (C3-tail): wrapper frames live in the SAME instruction list as
+    `crop`: wrapper frames live in the SAME instruction list as
     their draw (nested edits wrap inside the form copy), so per-level
     recognition sees every tool frame."""
     instructions = list(instructions)
     state = GraphicsTextState(base_ctm)
-    # 9-§I.0-S8: clip tracking beside the state machine — a placement wholly
+    # Clip tracking beside the state machine — a placement wholly
     # outside the active clip lists as `clipped` (invisible) so the renderer
     # stops offering it as editable. `base_clip` is the parent's device-space
     # clip a nested form inherits (§8.10.2).
@@ -212,7 +211,7 @@ def _walk_placements(
                             blend = bm_name[1:]
                     sm = entry.get("/SMask")
                     if sm is not None:
-                        # P7 slice E: seed OUR gradient mask; /None clears;
+                        # Seed OUR gradient mask; /None clears;
                         # an author's soft mask seeds nothing (mask: null —
                         # there is no tool mask to re-edit).
                         mask = None if str(sm) == "/None" else _mask_params_of(sm)
@@ -222,7 +221,7 @@ def _walk_placements(
         if state.feed(operator, operands):
             continue
         if operator == "INLINE IMAGE":
-            # C4: a BI/ID/EI object occupies ONE stream slot and draws the
+            # A BI/ID/EI object occupies ONE stream slot and draws the
             # unit square under the live CTM exactly like an image Do — it
             # is a placement in the SAME depth-first id order (the
             # walker-agreement invariant covers both machines). pikepdf
@@ -244,12 +243,12 @@ def _walk_placements(
                     "native_width": nw,
                     "native_height": nh,
                     "opacity": round(alpha, 4),
-                    # P7: the effective blend mode at this draw (seed).
+                    # The effective blend mode at this draw (seed).
                     "blend": blend,
-                    # P7 slice E: the tool gradient mask in scope (seed).
+                    # The tool gradient mask in scope (seed).
                     "mask": mask,
                     "crop": _listed_crop(instructions, idx, q_open),
-                    # 9-§I.0-S8: True when this placement is wholly outside the
+                    # True when this placement is wholly outside the
                     # active clip (invisible); renderer filters it out. Index
                     # space unchanged (mutator count agreement untouched).
                     "clipped": clips.clips_away((x0, y0, x1, y1)),
@@ -264,7 +263,7 @@ def _walk_placements(
                 xobj.get("/SpectraVector") if xobj is not None and subtype == "/Form" else None
             )
             if xobj is not None and (subtype == "/Image" or vector_marker is not None):
-                # P7 slice F convergence: a MARKED vector-graphic form is a
+                # convergence: a MARKED vector-graphic form is a
                 # LEAF placement in the same ordinal space as image draws —
                 # it draws the unit square under the live CTM (BBox [0,0,1,1]
                 # by construction), so every wrap-family edit applies to it
@@ -284,7 +283,7 @@ def _walk_placements(
                         "index": len(out),
                         "rect": [x0, y0, x1, y1],
                         # The FULL device CTM at this Do (the unit square [0,1]²
-                        # maps to the page through it). C1's transform op needs
+                        # maps to the page through it). the transform op needs
                         # it to build the delta cm; `rect` is just its bbox.
                         "matrix": list(state.ctm),
                         "name": name,
@@ -292,16 +291,16 @@ def _walk_placements(
                         "nested": nested,
                         "native_width": nw,
                         "native_height": nh,
-                        # C3: effective fill alpha at this draw (the opacity
+                        # Effective fill alpha at this draw (the opacity
                         # slider's honest seed).
                         "opacity": round(alpha, 4),
-                        # P7: the effective blend mode at this draw (seed).
+                        # The effective blend mode at this draw (seed).
                         "blend": blend,
-                        # P7 slice E: the tool gradient mask in scope (seed).
+                        # The tool gradient mask in scope (seed).
                         "mask": mask,
-                        # C3-tail: the tool crop rect (crop-handle seed).
+                        # The tool crop rect (crop-handle seed).
                         "crop": _listed_crop(instructions, idx, q_open),
-                        # 9-§I.0-S8: True when wholly outside the active clip.
+                        # True when wholly outside the active clip.
                         "clipped": clips.clips_away((x0, y0, x1, y1)),
                     }
                 )
@@ -373,7 +372,7 @@ def _invert_matrix(m):
 class _EditState:
     """Mutable cursor shared across the recursive rewrite: counts image
     draws in the SAME order as the lister; applies the action at every
-    ordinal in `targets` (P7: a dict — multi-select group ops run as ONE
+    ordinal in `targets` (a dict — multi-select group ops run as ONE
     rewrite pass; the single-placement ops pass a one-entry dict).
 
     Per-target payloads carry what differs between targets (today: the
@@ -399,7 +398,7 @@ class _EditState:
         self.action = action
         self.replacement_name = replacement_name
         self.pending_image = pending_image
-        # 'layers' only (O8/MRC): SEVERAL images drawn in order at the target's
+        # 'layers' only (MRC): SEVERAL images drawn in order at the target's
         # own CTM, in place of the one Do. Same surgery as 'replace' — the page
         # OBJECT survives, so /Annots, /AcroForm, the structure tree, page
         # labels and bookmarks are untouched BY CONSTRUCTION rather than
@@ -407,26 +406,26 @@ class _EditState:
         # first); `layer_images` is what each name registers to.
         self.layer_names: tuple[str, ...] = ()
         self.layer_images: dict[str, object] = {}
-        # 'replace' with fit="contain" (P7): a LOCAL aspect-correction matrix
+        # 'replace' with fit="contain": a LOCAL aspect-correction matrix
         # [sx,0,0,sy,tx,ty] wrapped around the renamed draw as the RECOGNIZED
         # transform shape `q cm Do Q` — so the letterbox folds under a later
-        # transform exactly like any tool frame. None = stretch (7.1 shipped
+        # transform exactly like any tool frame. None = stretch (shipped
         # behavior, byte-stable).
         self.replace_fit = replace_fit
         # 'transform' only: the CURRENT target's delta matrix D, injected as
         # `q D cm Do Q` at its draw so the placement's effective CTM becomes
         # the caller's M'. Assigned per hit from the target's payload.
         self.delta = None
-        # 'crop' only (C3): [cx0, cy0, cx1, cy1] in the image's UNIT space —
+        # 'crop' only: [cx0, cy0, cx1, cy1] in the image's UNIT space —
         # emitted as a clip path AT the draw, so it rides the same CTM as the
         # unit square at any nesting depth (no matrix math needed).
         self.crop_rect = crop_rect
-        # 'transform' only (C3-tail): the intersection of the recognized crop
+        # 'transform' only: the intersection of the recognized crop
         # frames the collapse just dropped at the CURRENT target — re-emitted
         # as the innermost frame INSIDE the new cm, so the clip travels with
         # the move instead of staying in pre-transform space.
         self.carried_crop = None
-        # 'opacity' only (C3; P7-widened): the caller's REQUEST
+        # 'opacity' only: the caller's REQUEST
         # ({opacity: float|None, blend: str|None}) — the registered dict is
         # BUILT at the target draw, where the collapse has just surfaced the
         # dropped frames' state to merge under it. The NAME is allocated AT
@@ -507,7 +506,7 @@ class _EditState:
 
 def _emit_wrap(kept, instruction, state, resources, fallback_resources, reserved) -> bool:
     """The WRAP actions (transform/crop/opacity) at the target draw —
-    shared by Do and inline-image targets (C4): both draw the unit square
+    shared by Do and inline-image targets: both draw the unit square
     under the live CTM, so the q/Q-bounded prefix is identical. Returns
     True when the action was one of the wraps."""
     if state.action == "transform":
@@ -560,7 +559,7 @@ def _emit_wrap(kept, instruction, state, resources, fallback_resources, reserved
 
 
 def _collapse_crop_frames(kept, instructions, t, open_q, skip_q):
-    """C3-tail collapse-and-replace: at the target draw, drop every
+    """Collapse-and-replace: at the target draw, drop every
     RECOGNIZED tool crop frame from the already-emitted `kept` prefix and
     mark its closing Q for skipping, so the ONE fresh innermost frame
     `_emit_wrap` is about to emit REPLACES the old rect instead of
@@ -594,7 +593,7 @@ def _collapse_crop_frames(kept, instructions, t, open_q, skip_q):
 
 
 def _collapse_for_transform(kept, instructions, t, open_q, skip_q, delta):
-    """9-§I.5 P9 — the transform action's collapse: crop frames come out (to
+    """The transform action's collapse: crop frames come out (to
     be re-emitted inside the new `cm`, where the clip stays in unit space)
     AND every tool-written transform frame folds into the one fresh matrix.
     Returns `(carried crop or None, folded delta)`.
@@ -659,7 +658,7 @@ def _intersect_crop_rects(rects):
     """The intersection of dropped crop rects (None when none), zero-area
     when they are DISJOINT — never the raw inverted numbers, because PDF
     `re` normalizes negative extents and an inverted rect would clip to the
-    region BETWEEN the crops and un-hide what both hid (round 29 HIGH)."""
+    region BETWEEN the crops and un-hide what both hid."""
     if not rects:
         return None
     ix0 = max(r[0] for r in rects)
@@ -693,7 +692,7 @@ BLEND_MODES = (
 
 
 def _mask_params_of(smask) -> dict | None:
-    """The P7 gradient-mask params carried by a TOOL-BUILT /SMask (the
+    """The gradient-mask params carried by a TOOL-BUILT /SMask (the
     private /SpectraMask key on its /G form — the lossless round-trip
     record; parsing shading floats back would be archaeology). None for an
     author's soft mask, which is exactly what gates the collapse."""
@@ -722,17 +721,17 @@ def _mask_params_of(smask) -> dict | None:
 
 def _tool_gs_state(name, resources, fallback_resources):
     """The {ca, bm, mask} a TOOL-OWNED gs frame carries, or None when the
-    frame is not provably ours. Ownership takes BOTH tests (P7 widening):
+    frame is not provably ours. Ownership takes BOTH tests (widening):
     the name is a `_fresh_gs_name` allocation (/EditGS…) AND the dict
     carries nothing beyond alpha/blend/our-mask. The old alpha-only content
     test alone stopped being enough the moment frames can carry different
     keys — dropping an author's frame whose state the fresh frame didn't
     re-emit would change the page, and shape alone can't prove authorship
-    (the P9 outermost-transform lesson, applied to gs). An author's
+    (the outermost-transform lesson, applied to gs). An author's
     pure-alpha frame now simply SURVIVES with our frame nested inside — the
     inner value wins per key, so rendering is unchanged and author
     structure stays intact. An /SMask additionally requires OUR marker on
-    its /G (slice E): an author's soft mask is never collapsible."""
+    its /G: an author's soft mask is never collapsible."""
     if not str(name).startswith("/EditGS"):
         return None
     try:
@@ -775,7 +774,7 @@ def _tool_gs_state(name, resources, fallback_resources):
 
 
 def _collapse_opacity_frames(kept, instructions, t, open_q, skip_q, resources, fallback_resources):
-    """9-§I.5 P9 (P7-widened) — drop the RECOGNIZED tool gs frames around
+    """Drop the RECOGNIZED tool gs frames around
     the target so a re-set leaves ONE frame, and return their MERGED
     {ca, bm} state (innermost wins per key). The merge is the widening's
     safety proof: the fresh frame re-emits every dropped key it doesn't
@@ -820,7 +819,7 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
     gain stray edit-copy references. Every nesting level therefore gets its
     own resource dictionary.
 
-    Ordinal counting (`state.seen`) is untouched by the C3-tail frame
+    Ordinal counting (`state.seen`) is untouched by the frame
     bookkeeping: q/Q only ride the open_q/skip_q locals, draws increment
     exactly as the lister counts them, and collapse edits only the OUTPUT
     (`kept` + skipped Q's), never the iteration."""
@@ -844,7 +843,7 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
             kept.append(instruction)
             continue
         if operator == "INLINE IMAGE":
-            # C4: inline draws share the ordinal stream with image Do's —
+            # Inline draws share the ordinal stream with image Do's —
             # the lister counts both, so the rewriter must too (a later
             # inline draw still occupies its counted slot after the edit
             # is done).
@@ -854,7 +853,7 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                 if state.action == "crop":
                     _collapse_crop_frames(kept, instructions, i, open_q, skip_q)
                 elif state.action == "transform":
-                    # P9: crop frames come out FIRST (they re-emit inside the
+                    # Crop frames come out FIRST (they re-emit inside the
                     # new cm, where the clip stays in unit space), then the
                     # transform frames fold into the one matrix about to be
                     # written — folding first would leave a dropped crop's
@@ -874,13 +873,13 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                 elif not _emit_wrap(
                     kept, instruction, state, resources, fallback_resources, reserved
                 ):
-                    # P6: replace PROMOTES the inline draw to an XObject Do —
+                    # Replace PROMOTES the inline draw to an XObject Do —
                     # one instruction for one instruction, so every later
                     # placement keeps its counted slot, and the new image is
                     # an ordinary placement afterward (list/delete/replace/
                     # transform all see it with no special case). The old
                     # inline bytes vanish with the dropped instruction.
-                    # (P7: fit="contain" wraps the promoted draw too — the
+                    # (fit="contain" wraps the promoted draw too — the
                     # frame is balanced, so the slot arithmetic is unmoved.)
                     state.emit_replacement(kept)
             else:
@@ -894,7 +893,7 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
         name = str(operands[0]) if operands else None
         xobj = _lookup_xobject(name, resources, fallback_resources)
         subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
-        # P7 slice F: marked vector-graphic forms are LEAF placements — they
+        # Marked vector-graphic forms are LEAF placements — they
         # occupy a counted ordinal slot exactly as the lister counts them
         # (walker agreement), take every wrap-family edit, and are never
         # recursed into. Replace refuses vectors at the op entry (kind check).
@@ -908,7 +907,7 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                 if state.action == "crop":
                     _collapse_crop_frames(kept, instructions, i, open_q, skip_q)
                 elif state.action == "transform":
-                    # P9: see the inline-image branch — crops out first, then
+                    # See the inline-image branch — crops out first, then
                     # the transform frames fold into the one fresh matrix.
                     state.carried_crop, state.delta = _collapse_for_transform(
                         kept, instructions, i, open_q, skip_q, payload["delta"]
@@ -931,10 +930,10 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                     # drop the instruction
                 elif _emit_wrap(kept, instruction, state, resources, fallback_resources, reserved):
                     # transform: q D cm — effective D·M_cur = M' at any depth.
-                    # crop (C3-tail): the clip rect rides the image's own unit
+                    # crop: the clip rect rides the image's own unit
                     # space; recognized old crop frames were just collapsed,
                     # so this fresh innermost frame REPLACES (absolute rect).
-                    # opacity (C3): gs name allocated AT the draw against the
+                    # opacity: gs name allocated AT the draw against the
                     # resources in scope (never shadows a form's own names).
                     pass
                 else:
@@ -986,7 +985,7 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
                     # the INNERMOST copy (first unwind) takes it; outer
                     # frames skip. /ExtGState gets a FRESH subdict: the
                     # copied resources share it by reference, and mutating
-                    # the shared one is the C2 sibling-leak class.
+                    # the shared one is the sibling-leak class.
                     src_egs = copy_res.get("/ExtGState")
                     fresh_egs = Dictionary()
                     if src_egs is not None:
@@ -1019,7 +1018,7 @@ def _rewrite(pdf, instructions, resources, depth, fallback_resources, state, nam
 
 
 def _build_gradient_smask(pdf, mask: dict):
-    """The /SMask dict for a P7 gradient mask: a LUMINOSITY soft mask whose
+    """The /SMask dict for a tool gradient mask: a LUMINOSITY soft mask whose
     /G is a gray Form XObject over BBox [0,0,1,1] — the wrap sits inside
     the placement's cm, so unit space IS image space and the group lands
     exactly over the drawn image at any nesting depth (the crop-clip
@@ -1091,7 +1090,7 @@ def _sweep_orphan_edit_gs(content_source, resources) -> None:
     OVER-collecting is safe (an unused name kept = no harm), so forms are
     scanned whether or not anything still draws them. The caller guarantees
     `resources`' /ExtGState is safe to mutate (page-local COW or a fresh
-    form-copy dict — never a shared table, the C2 sibling rule)."""
+    form-copy dict — never a shared table, the sibling rule)."""
     used: set = set()
     seen: set = set()
 
@@ -1235,7 +1234,7 @@ def _save(pdf, input_path: Path, output_path: Path) -> None:
 
 
 def delete_page_images(file: str, output: str, page: int, indexes: list) -> dict:
-    """Remove SEVERAL image placements in ONE atomic rewrite (P7 multi-select
+    """Remove SEVERAL image placements in ONE atomic rewrite (multi-select
     group delete): one pass, one save, one undoable operation. `indexes` are
     distinct lister ordinals; per-placement semantics are identical to the
     single delete (a shared XObject drawn elsewhere is untouched, nested
@@ -1254,7 +1253,7 @@ def delete_page_images(file: str, output: str, page: int, indexes: list) -> dict
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
-        # Copy-on-write a page-LOCAL /Resources (the C2 review fix, applied to
+        # Copy-on-write a page-LOCAL /Resources (the review fix, applied to
         # every page-level image op): qpdf flattens inherited /Resources onto
         # each page's own dict BY REFERENCE, so registering an edit's new
         # XObject / form copies on the resolved dict would leak them into every
@@ -1300,7 +1299,7 @@ def delete_page_image(file: str, output: str, page: int, index: int) -> dict:
 
 def transform_page_images(file: str, output: str, page: int, targets: list) -> dict:
     """Move/resize/rotate/skew SEVERAL image placements in ONE atomic rewrite
-    (P7 multi-select group transform). `targets` is [{"index": i, "matrix":
+    (multi-select group transform). `targets` is [{"index": i, "matrix":
     [a,b,c,d,e,f]}, ...] — each placement's CTM is rewritten to its own
     ABSOLUTE M' exactly as the single transform does, in one pass with one
     save, so a group gesture is one undoable operation. Deltas are computed
@@ -1333,7 +1332,7 @@ def transform_page_images(file: str, output: str, page: int, targets: list) -> d
         p = pdf.pages[int(page) - 1]
         # Copy-on-write a page-LOCAL /Resources — nested-placement transforms
         # register a form COPY, which on a shared (qpdf-flattened) /Resources
-        # would leak into sibling pages (the C2 review fix, uniform across the
+        # would leak into sibling pages (the review fix, uniform across the
         # page-level image ops).
         resources = _copy_resources_for_write(pdf, _resolve_resources(p))
         p.obj["/Resources"] = resources
@@ -1371,7 +1370,7 @@ def transform_page_images(file: str, output: str, page: int, targets: list) -> d
 
 def transform_page_image(file: str, output: str, page: int, index: int, matrix: list) -> dict:
     """Move/resize/rotate ONE image placement by rewriting the CTM at its Do
-    (Phase 9.C1) — the image bytes are never touched.
+ — the image bytes are never touched.
 
     `matrix` is the DESIRED absolute placement matrix M' [a,b,c,d,e,f] in page
     user space — what `list_page_images` reports as `matrix` for this
@@ -1391,10 +1390,10 @@ def transform_page_image(file: str, output: str, page: int, index: int, matrix: 
 def crop_page_image(file: str, output: str, page: int, index: int, rect: list) -> dict:
     """Crop ONE image placement to `rect` = [cx0, cy0, cx1, cy1] in the
     image's UNIT space ([0,0] = bottom-left of the drawn image, [1,1] =
-    top-right) — Phase 9.C3. Display-only: the draw is wrapped in a q/Q
+    top-right). Display-only: the draw is wrapped in a q/Q
     clip (`re W n`) at the target Do, the image bytes stay untouched, and
     the visible region stays exactly where it was on the page
-    (crop-in-place). Re-crop is COLLAPSE-AND-REPLACE (C3-tail): every
+    (crop-in-place). Re-crop is COLLAPSE-AND-REPLACE: every
     RECOGNIZED tool crop frame around the draw is dropped and ONE fresh
     innermost frame carries the new ABSOLUTE rect — so a re-crop can
     WIDEN. Recognition is exact-shape over `_emit_wrap`'s three wrappers;
@@ -1424,7 +1423,7 @@ def crop_page_image(file: str, output: str, page: int, index: int, rect: list) -
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
-        # Page-local /Resources copy-on-write (the C2 sibling-leak rule,
+        # Page-local /Resources copy-on-write (the sibling-leak rule,
         # uniform across the page-image op family).
         resources = _copy_resources_for_write(pdf, _resolve_resources(p))
         p.obj["/Resources"] = resources
@@ -1455,7 +1454,7 @@ def crop_page_image(file: str, output: str, page: int, index: int, rect: list) -
 
 
 def _validated_mask(mask) -> dict | None:
-    """Normalize/validate the P7 mask request. {kind:"none"} passes through
+    """Normalize/validate the mask request. {kind:"none"} passes through
     (an explicit clear); linear/radial need unit-space from/to (distinct
     points — a zero axis has no direction) and 0..1 alphas."""
     if mask is None:
@@ -1494,7 +1493,7 @@ def set_image_opacity(
     mask: dict | None = None,
 ) -> dict:
     """Set ONE image placement's opacity, blend mode and/or gradient soft
-    mask (Phase 9.C3; P7 adds `blend` + `mask`). The draw is wrapped as
+    mask (adds `blend` + `mask`). The draw is wrapped as
     `q /EditGSn gs Do Q` with a page-local (or form-copy-local, for a
     nested target) /ExtGState carrying `/ca`+`/CA`, `/BM` and/or a
     luminosity /SMask (image-unit-space gradient; see
@@ -1553,7 +1552,7 @@ def set_image_opacity(
         if state.gs_name and not state.registered_nested:
             # Top-level target: register on the page's resources — with a
             # FRESH /ExtGState subdict (the copied resources share the old
-            # one by reference; mutating it is the C2 sibling-leak class).
+            # one by reference; mutating it is the sibling-leak class).
             src_egs = resources.get("/ExtGState")
             fresh_egs = Dictionary()
             if src_egs is not None:
@@ -1687,7 +1686,7 @@ def _image_from_source(pdf, source: dict):
 def _contain_fit_matrix(matrix, img_w: int, img_h: int):
     """The LOCAL letterbox matrix [sx,0,0,sy,tx,ty] that fits an img_w×img_h
     image inside the placement box drawn by `matrix`, aspect preserved and
-    centered (P7 fit="contain"). The drawn box's proportions are the CTM's
+    centered (fit="contain"). The drawn box's proportions are the CTM's
     column lengths |(a,b)| × |(c,d)| — rotation/skew-honest, since a local
     scale composes inside whatever orientation the CTM applies. Returns None
     (= keep stretch) when nothing sane exists: a degenerate box or image, or
@@ -1716,9 +1715,9 @@ def replace_page_image(
     file: str, output: str, page: int, index: int, source: dict, fit: str = "stretch"
 ) -> dict:
     """Swap one placement's image for a new one (per-placement; CTM kept).
-    P7: fit="contain" letterboxes the new image inside the old box (aspect
+    fit="contain" letterboxes the new image inside the old box (aspect
     preserved, centered) via a recognized transform frame; the default
-    "stretch" is the 7.1 shipped behavior, byte-stable."""
+    "stretch" is the shipped behavior, byte-stable."""
     if fit not in ("stretch", "contain"):
         raise ValueError('fit must be "stretch" or "contain"')
     input_path = Path(file)
@@ -1734,7 +1733,7 @@ def replace_page_image(
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
-        # Copy-on-write a page-LOCAL /Resources (the C2 review fix, applied to
+        # Copy-on-write a page-LOCAL /Resources (the review fix, applied to
         # every page-level image op): qpdf flattens inherited /Resources onto
         # each page's own dict BY REFERENCE, so registering an edit's new
         # XObject / form copies on the resolved dict would leak them into every
@@ -1797,7 +1796,7 @@ def replace_page_image(
 def replace_placement_with_layers(pdf, page, index: int, layers: list) -> list[str]:
     """Replace ONE image placement's `Do` with SEVERAL draws at the same CTM.
 
-    The MRC assembly primitive (O8 § 3.4), and deliberately the ONLY thing in
+    The MRC assembly primitive, and deliberately the ONLY thing in
     this module that takes an already-open `Pdf`: an MRC run rewrites every
     scanned page of a document in ONE open/save pair, so the file-in/file-out
     shape every other op here has would force a re-open per page.
@@ -1851,7 +1850,7 @@ def replace_placement_with_layers(pdf, page, index: int, layers: list) -> list[s
 
 def _resolve_placement_box(p, left, bottom, w, h, at, fit, natural_w, natural_h):
     """The final user-space box for an ADD placement — shared by raster and
-    vector adds so the two can never drift (P7 slice F). `rect` mode arrives
+    vector adds so the two can never drift. `rect` mode arrives
     as (left,bottom,w,h); fit="contain" shrinks the box around its center to
     the natural aspect. `at` mode is the natural-size click-place: natural
     units as points (1px/1 viewBox unit = 1pt), centered on the click,
@@ -1906,20 +1905,20 @@ def add_page_image(
     fit: str = "stretch",
     at: list | None = None,
 ) -> dict:
-    """Embed a NEW image (Phase 9.C2; P7 widened) — pure authoring, no rewrite
+    """Embed a NEW image (widened) — pure authoring, no rewrite
     of existing content.
 
     Placement is ONE of:
       - `rect` = [x0, y0, x1, y1] USER-space points (the drawn box). With the
         default fit="stretch" the unit image square maps onto the box exactly
-        (the 7.1 rule, byte-stable); fit="contain" first shrinks the box
+        (the rule, byte-stable); fit="contain" first shrinks the box
         around its center to the source's aspect, so nothing distorts.
       - `at` = [x, y]: natural-size click-place — the image lands at its own
         pixel dimensions in points (1px = 1pt, the 72-dpi identity), centered
         on the click, scaled DOWN (never up) to fit the page's visible box
         and shifted inside it.
 
-    `source` is the SAME shape 7.1 replace takes ({jpeg_path} passthrough |
+    `source` is the SAME shape replace takes ({jpeg_path} passthrough |
     {raw_path,width,height,channels} decoded), embedded by the SAME
     `_image_from_source`. The image is appended as `q <cm> /Name Do Q`, so
     the added image is an ORDINARY placement afterward —
@@ -1986,7 +1985,7 @@ def add_page_image(
         content = pikepdf.unparse_content_stream(
             [_op([], "q"), _op(cm, "cm"), _do_instruction(name), _op([], "Q")]
         )
-        # Shield the EXISTING content in its own q/Q (the A2 lesson): a dangling
+        # Shield the EXISTING content in its own q/Q: a dangling
         # `cm` in prior content must not transform our appended draw.
         p.contents_add(b"q\n", prepend=True)
         p.contents_add(b"\nQ\n" + content, prepend=False)
@@ -2009,7 +2008,7 @@ def add_page_vector_graphic(
     fit: str = "contain",
     at: list | None = None,
 ) -> dict:
-    """Place an SVG as REAL vector content (P7 slice F) — compiled by
+    """Place an SVG as REAL vector content — compiled by
     `engine.svg_pdf` into a unit-square Form XObject and appended as
     `q cm /Name Do Q`, so the placed graphic is an ordinary PLACEMENT
     afterward: list/transform/skew/delete/opacity/blend/mask/crop all apply
@@ -2053,7 +2052,7 @@ def add_page_vector_graphic(
         )
 
         # Page-local /Resources copy-on-write — the add_page_image rationale
-        # verbatim (the C2 sibling-leak rule).
+        # verbatim (the sibling-leak rule).
         res = _copy_resources_for_write(pdf, _resolve_resources(p))
         p.obj["/Resources"] = res
         name = _fresh_name(res, [0], set())
@@ -2063,7 +2062,7 @@ def add_page_vector_graphic(
         content = pikepdf.unparse_content_stream(
             [_op([], "q"), _op(cm, "cm"), _do_instruction(name), _op([], "Q")]
         )
-        # Shield the EXISTING content in its own q/Q (the A2 lesson).
+        # Shield the EXISTING content in its own q/Q.
         p.contents_add(b"q\n", prepend=True)
         p.contents_add(b"\nQ\n" + content, prepend=False)
 
@@ -2099,10 +2098,10 @@ def extract_page_image(file: str, page: int, index: int, output_prefix: str) -> 
 
         # Re-walk to the owning object: the lister records the NAME and
         # nesting; resolve the actual object by replaying the same order.
-        # Inline draws occupy listing slots (C4) and carry their own image
-        # object (P6 — pikepdf's PdfInlineImage), so holder[index] stays
+        # Inline draws occupy listing slots and carry their own image
+        # object (pikepdf's PdfInlineImage), so holder[index] stays
         # aligned with the listing on mixed pages AND inline targets extract.
-        # P7: marked vector forms occupy their counted slot too (never a
+        # Marked vector forms occupy their counted slot too (never a
         # valid extract target — refused above — but later indexes shift
         # without the placeholder).
         holder: list = []
@@ -2132,7 +2131,7 @@ def extract_page_image(file: str, page: int, index: int, output_prefix: str) -> 
                         )
 
         if target.get("kind") == "inline":
-            # P6: qpdf's own inline→XObject externalization (min_size=0 —
+            # qpdf's own inline→XObject externalization (min_size=0 —
             # inline images are small BY nature; a size floor here would
             # re-refuse the exact class this serves) rewrites the draw as an
             # ordinary /Do in the SAME slot, so the collection below finds a

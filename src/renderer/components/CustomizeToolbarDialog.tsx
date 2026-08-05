@@ -22,7 +22,7 @@ interface CustomizeToolbarDialogProps {
 }
 
 export function CustomizeToolbarDialog({ onClose }: CustomizeToolbarDialogProps): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const state = useAppState();
   const dispatch = useAppDispatch();

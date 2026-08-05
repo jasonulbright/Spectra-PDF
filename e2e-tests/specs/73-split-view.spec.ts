@@ -24,7 +24,7 @@ async function paneSpacerHeight(pane: 'a' | 'b'): Promise<number> {
   }, pane);
 }
 
-describe('split view (§ I.6)', () => {
+describe('split view', () => {
   before(async () => {
     await waitForHarness();
     await openByPaths([SAMPLE_PDF]);

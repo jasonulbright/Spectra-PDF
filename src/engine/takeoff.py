@@ -1,4 +1,4 @@
-"""Count & takeoff summary export (N11 slice C).
+"""Count & takeoff summary export.
 
 A count mark is a real `/Stamp` annotation carrying `/IT /Count`, its group in
 `/Subj`, `"<group> <seq>"` in `/Contents`, and the private `/SpectraSymbol`
@@ -17,7 +17,7 @@ Two properties are load-bearing:
 
 Column headers are generated ENGLISH at the writer, like every other engine
 output; the group names in the rows are the user's own text and pass through
-verbatim (the `measure.ts` format-string rule, N12 slice C).
+verbatim (the `measure.ts` format-string rule).
 """
 
 from __future__ import annotations

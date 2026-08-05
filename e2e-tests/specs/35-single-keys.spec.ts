@@ -21,7 +21,7 @@ async function setSingleKeyPref(on: boolean): Promise<void> {
   await $('[data-testid="pref-single-key"]').waitForDisplayed({ reverse: true });
 }
 
-describe('single-key accelerators (M6.4)', () => {
+describe('single-key accelerators', () => {
   before(async () => {
     await waitForHarness();
     await closeAllFiles();
@@ -52,7 +52,7 @@ describe('single-key accelerators (M6.4)', () => {
     await browser.waitUntil(async () => (await getState()).tool === 'highlight', {
       timeoutMsg: 'U did not arm Highlight',
     });
-    // Arming a mode opens its owning tool (the M5.3 invariant).
+    // Arming a mode opens its owning tool.
     expect((await getState()).activeToolId).toBe('comment');
     await browser.keys(['v']);
     await browser.waitUntil(async () => (await getState()).tool === 'select', {
@@ -74,7 +74,7 @@ describe('single-key accelerators (M6.4)', () => {
     await browser.keys(['Escape']);
   });
 
-  it('N3/N6 INVERSION — Z, S, and E arm their shipped features', async () => {
+  it('INVERSION — Z, S, and E arm their shipped features', async () => {
     // This leg used to pin the trio as RESERVED-dead; their features exist
     // now (marquee zoom, sticky note, content editing), so reserve-don't-
     // remap resolves to binding them.
@@ -86,7 +86,7 @@ describe('single-key accelerators (M6.4)', () => {
     await browser.waitUntil(async () => (await getState()).tool === 'note', {
       timeoutMsg: 'S did not arm the sticky-note mode',
     });
-    // S arms a Comment mode, so Comment opens (the M5.3 invariant).
+    // S arms a Comment mode, so Comment opens.
     expect((await getState()).activeToolId).toBe('comment');
     await browser.keys(['e']);
     await browser.waitUntil(async () => (await getState()).activeToolId === 'edit', {

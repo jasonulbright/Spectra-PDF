@@ -30,7 +30,7 @@ function doc(id: string, name: string, pages: PageRef[]): OpenDocument {
 
 beforeEach(() => resetGenerations());
 
-describe('generation-tagged positional ids (§ F)', () => {
+describe('generation-tagged positional ids', () => {
   it('bumps per path, independently', () => {
     expect(nextGeneration('a.pdf')).toBe(1);
     expect(nextGeneration('a.pdf')).toBe(2);

@@ -1,4 +1,4 @@
-// The structure-tree carry (lib/struct-carry.ts) — § I P19. Before it, ANY
+// The structure-tree carry (lib/struct-carry.ts). Before it, ANY
 // committed page edit on a tagged file dropped /StructTreeRoot + /MarkInfo
 // and left every page's /StructParents pointing into a ParentTree that no
 // longer existed. The carry rebuilds the surviving tree per contributing
@@ -127,7 +127,7 @@ function parentTreeEntries(doc: PDFDocument): Map<number, unknown> {
   return out;
 }
 
-describe('struct carry (P19)', () => {
+describe('struct carry', () => {
   it('a same-shape rebuild keeps the whole tree, renumbered and re-anchored', async () => {
     const src = await taggedSource();
     const out = await rebuild([pageOf(src, 0), pageOf(src, 1)]);

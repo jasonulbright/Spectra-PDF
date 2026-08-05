@@ -1,4 +1,4 @@
-"""Deterministic Office/text/web sources for the Create PDF tests (P22).
+"""Deterministic Office/text/web sources for the Create PDF tests.
 
 Run it to regenerate; the resulting `.docx`/`.xlsx`/`.pptx` are CHECKED IN
 beside it so a regeneration is reviewable as a git diff rather than a silent

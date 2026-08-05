@@ -17,7 +17,7 @@ interface HomeTabProps {
   onOpen: () => void;
   onOpenRecent: (path: string) => void;
   onClearRecent: () => void;
-  /** Phase 10 slice C: Home hosts the tile grid (the docless tools surface —
+  /** Home hosts the tile grid (the docless tools surface —
    * the Tools tab is gone; ops tiles run the picker-first flow). */
   onOpenTool: (id: ToolId) => void;
 }
@@ -37,7 +37,7 @@ const QUICK_ACTIONS: ReadonlyArray<{ command: CommandId; label: ChromeKey; icon:
 ];
 
 export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onOpenTool }: HomeTabProps): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   return (
     <div data-testid="home-tab" className="flex-1 overflow-y-auto">
@@ -114,7 +114,7 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onOp
           </div>
         )}
 
-        {/* The tile grid's home since the Tools tab's retirement (slice C). */}
+        {/* The tile grid's home since the Tools tab's retirement. */}
         <div className="home-section-head home-tools-head">
           <div className="home-section-title">{tChrome('chrome.home.allTools')}</div>
         </div>

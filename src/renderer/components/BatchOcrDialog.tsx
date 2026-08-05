@@ -25,7 +25,7 @@ import { TEST_HARNESS_ENABLED, registerBatchOcr } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber, tOcrLanguage } from '../i18n';
 
-// Tools ▸ Batch OCR Folder… (Phase 6, docs/architecture/20-phase6-batch-ocr.md):
+// Tools ▸ Batch OCR Folder…:
 // mirror a folder tree into searchable PDFs. Needs NO open document — the
 // command is always enabled and the dialog owns the whole flow: pick source
 // (enumerated immediately, count shown), pick destination (conflict-checked),
@@ -44,7 +44,7 @@ export interface BatchOcrDialogProps {
 type Phase = 'setup' | 'running' | 'done';
 
 export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Element {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { callRaw } = useEngine();
 
@@ -55,14 +55,14 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   const [skippedDirs, setSkippedDirs] = useState<string[]>([]);
   const [scanning, setScanning] = useState(false);
   const [langs, setLangs] = useState<string[]>([DEFAULT_OCR_LANGUAGE]);
-  // Issue #1 requests 2 and 3. Every one of these is OFF until the user acts:
+  // Every one of these is OFF until the user acts:
   // they invert the standing guarantee that a batch never modifies the source
   // tree, so "off by default" is the feature, not a timidity.
   const [movedRoot, setMovedRoot] = useState<string | null>(null);
   const [errorRoot, setErrorRoot] = useState<string | null>(null);
   const [repairDamaged, setRepairDamaged] = useState(false);
   const [replaceRepaired, setReplaceRepaired] = useState(false);
-  // O7 in-place batch mode: REPLACE each original with its searchable
+  // In-place batch mode: REPLACE each original with its searchable
   // version. Inverts the no-source-mutation guarantee harder than the filing
   // options, so it is off by default, retires the destination/moved-root
   // machinery while on, and takes a two-step confirm. Runs as ONE engine
@@ -70,7 +70,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   // driver stays mirror-only, and there is no mid-run stop.
   const [inPlace, setInPlace] = useState(false);
   const [confirmInPlace, setConfirmInPlace] = useState(false);
-  // O8 (issue #5): MRC-compress each processed file after recognition. Off by
+  // MRC-compress each processed file after recognition. Off by
   // default like every other option here — it rewrites the page images, which
   // is more than "make this searchable" promises on its own.
   const [mrc, setMrc] = useState(false);
@@ -219,7 +219,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   const [logPath, setLogPath] = useState<string | null>(null);
   const [logError, setLogError] = useState<string | null>(null);
 
-  // Issue #1 request 4. Writing is best-effort by design: a failed log must
+  // Writing is best-effort by design: a failed log must
   // never turn a completed batch into a failed one — the files are already
   // mirrored, and the run's value does not depend on its paperwork.
   const writeLog = async (
@@ -335,7 +335,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
           await callRaw('repair', { file: src, output: out });
         },
         recognize: (path, pageIndex) => recognizePage(callRaw, path, pageIndex, lang),
-        // O8 — the mirror OUTPUT is the input here, which is what makes the
+        // The mirror OUTPUT is the input here, which is what makes the
         // recognize-then-MRC order structural. `callRaw` for the same reason
         // every other engine call in this dialog uses it: batch lives outside
         // the workspace, so the commit gate must not run.
@@ -565,7 +565,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             {tChrome('dialog.batch.blurb')}
           </p>
 
-          {/* O8 (issue #5, second comment): "a batch option that could just
+          {/* (second comment): "a batch option that could just
               compress automatically". The user with a folder of smartphone
               scans is standing in THIS dialog, so the option lives here — and
               it runs AFTER recognition, which is structural rather than
@@ -846,7 +846,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               ))}
             </div>
           )}
-          {/* O8: what MRC did to each file, or why it did nothing. A run the
+          {/* What MRC did to each file, or why it did nothing. A run the
               user asked to compress must say what it compressed — a silent
               no-op on a folder of non-scans would read as a saving that never
               happened. */}

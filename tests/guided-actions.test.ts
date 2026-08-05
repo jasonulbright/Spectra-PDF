@@ -182,7 +182,7 @@ describe('persistence (localStorage stub)', () => {
   });
 });
 
-describe('action files (slice 4 — export/import)', () => {
+describe('action files (export/import)', () => {
   const store = new Map<string, string>();
   beforeEach(() => {
     store.clear();
@@ -303,7 +303,7 @@ describe('action files (slice 4 — export/import)', () => {
     expect(() => parseActionFile(both)).toThrow(/not both/);
   });
 
-  it('unattendedBlocker: ask-at-run and secret steps cannot be scheduled; plain actions can (slice 5)', () => {
+  it('unattendedBlocker: ask-at-run and secret steps cannot be scheduled; plain actions can', () => {
     const plain: GuidedAction = { id: '1', name: 'Nightly', steps: [newStep('strip_metadata')] };
     expect(unattendedBlocker(plain)).toBeNull();
 
@@ -335,13 +335,13 @@ describe('action files (slice 4 — export/import)', () => {
   });
 });
 
-// ── P22 slice E — the create_pdf source step ──────────────────────────────
+// ── the create_pdf source step ────────────────────────────────────────────
 //
 // It is the one step that PRODUCES the document rather than transforming one,
 // which is why it carries three rules the other eight do not. Every one of
 // them is mirrored in `engine/guided_actions.py`, because a CLI run and a
 // scheduled run never pass through this editor at all.
-describe('the create_pdf source step (P22)', () => {
+describe('the create_pdf source step', () => {
   const catalogDef = STEP_CATALOG.find((d) => d.op === 'create_pdf')!;
 
   it('is in the catalog, flagged as a source step', () => {

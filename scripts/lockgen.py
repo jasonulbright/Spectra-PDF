@@ -1,6 +1,6 @@
 """Convert a `pip install --report` JSON into a hash-pinned requirements
 lockfile. Invoked by scripts/lock-python-deps.ps1 — not run directly in normal
-workflows. See docs/PUNCHLIST.md dev notes.
+workflows.
 
 Usage: python lockgen.py <pip-report.json> <out-requirements.txt>
 """

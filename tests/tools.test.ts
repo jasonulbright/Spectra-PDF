@@ -19,7 +19,7 @@ import { CANVAS_MODES, COMMAND_IDS, SECONDARY_TOOLBAR_ACTIONS } from '../src/ren
 import type { CanvasTool } from '../src/renderer/state/types';
 import { OPERATIONS, OPERATION_TITLES } from '../src/renderer/commands/operations';
 
-// The tools registry (M5, § 7) regroups the 19 engine operations into 12 tools
+// The tools registry regroups the 19 engine operations into 12 tools
 // named for the JOB. These pin the properties the UI relies on — above all that
 // no operation can be orphaned by a future edit, which is the whole risk of
 // moving from "one rail listing everything" to "tools that group things".
@@ -105,8 +105,8 @@ describe('tools registry', () => {
     const dupes = [...owners.entries()].filter(([, ts]) => ts.length > 1);
     expect(dupes.map(([m, ts]) => `${m} -> ${ts.join('+')}`)).toEqual([]);
 
-    // 'select' is the ABSENCE of a tool, 'hand' (M6.2) is that absence with
-    // a different grip, and 'zoommarquee' (N3) is pure navigation — nothing
+    // 'select' is the ABSENCE of a tool, 'hand' is that absence with
+    // a different grip, and 'zoommarquee' is pure navigation — nothing
     // may claim any of the three.
     for (const ownerless of ['select', 'hand', 'zoommarquee'] as const) {
       expect(owners.has(ownerless), `'${ownerless}' must belong to no tool`).toBe(false);

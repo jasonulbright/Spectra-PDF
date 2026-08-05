@@ -4,7 +4,7 @@ import { waitForHarness, openByPaths, setView, setActiveOp, getState } from '../
 
 // A PDF signed with a long-lived (100-year) self-signed cert — committed under
 // fixtures/ (generated once via pyHanko; crypto verification is stable and
-// clock-independent). See docs/architecture/10-phase2h-signatures.md.
+// clock-independent).
 const SIGNED_PDF = resolve(__dirname, '..', 'fixtures', 'signed.pdf');
 
 describe('signatures panel verifies an embedded signature', () => {
@@ -49,14 +49,14 @@ describe('signatures panel verifies an embedded signature', () => {
     expect(await caveat.getText()).toContain('not verified against a trusted authority');
   });
 
-  it('F7: the card names the signature page; F6: the panel arms visible signing', async () => {
-    // F7 — the verify report carries the widget's page and the card offers
+  it('the card names the signature page and the panel arms visible signing', async () => {
+    // The verify report carries the widget's page and the card offers
     // the jump.
     const jump = $('[data-testid="signature-jump"]');
     await jump.waitForDisplayed({ timeout: 10_000 });
     expect(await jump.getText()).toContain('page 1');
 
-    // F6 — the panel's visible-signature hand-off arms the canvas
+    // The panel's visible-signature hand-off arms the canvas
     // placement mode (the sign card takes over from there with the
     // panel's signer details prefilled). The button lives inside the
     // sign form, which is a toggle — open it first.

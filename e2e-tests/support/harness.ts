@@ -115,7 +115,7 @@ export async function openMenuItem(menuTestId: string, itemTestId: string): Prom
   );
 }
 
-/** Focus a tab directly (Phase 4 M2): 'home' | 'tools' | { doc: path }. */
+/** Focus a tab directly: 'home' | 'tools' | { doc: path }. */
 export async function focusTab(tab: FocusedTab): Promise<void> {
   await browser.execute<void, [FocusedTab]>(
     function (t) {
@@ -156,7 +156,7 @@ export async function saveActiveAs(destPath: string): Promise<void> {
   );
 }
 
-/** O8 Compress panel run with an injected output path (panel must be open).
+/** Compress panel run with an injected output path (panel must be open).
  *
  * The save dialog is native and undrivable, so the harness supplies the
  * destination and the panel's OWN state drives everything else — the quality
@@ -177,7 +177,7 @@ export async function compressRun(
   );
 }
 
-/** O1 image export via the dialog's harness bridge (dialog must be open). */
+/** Image export via the dialog's harness bridge (dialog must be open). */
 export async function exportImagesRun(
   out: string,
   opts?: { format?: string; dpi?: number; pages?: string; gray?: boolean },
@@ -193,7 +193,7 @@ export async function exportImagesRun(
   );
 }
 
-/** O1 export via the engine (bypasses the native save dialog). Returns the
+/** Export via the engine (bypasses the native save dialog). Returns the
  *  string '__SPECTRA_E2E_ERROR__:…' on failure so the spec can assert on it. */
 export async function exportActiveAs(destPath: string, format: string): Promise<unknown> {
   return await browser.executeAsync<unknown, [string, string]>(
@@ -312,14 +312,14 @@ export interface PageAnnotationSnapshot {
   strokeWidth?: number;
   fillColor?: string;
   opacity?: number;
-  /** N11: the vertex list, for the geometry assertions a snap needs. */
+  /** The vertex list, for the geometry assertions a snap needs. */
   points?: number[];
-  /** N11 slice C: which count group a mark belongs to, its marker symbol and
+  /** Which count group a mark belongs to, its marker symbol and
    * its sequence — spec 107 asserts these RECONSTITUTE from the saved file. */
   countGroup?: string;
   countSymbol?: string;
   countSeq?: number;
-  /** N11 slice D: the registry symbol a placed stamp / count marker draws, and
+  /** The registry symbol a placed stamp / count marker draws, and
    * how many PARTS of carried geometry travel with it (spec 108 asserts the
    * artwork survives save + reopen even where the SET does not). */
   symbolId?: string;
@@ -340,7 +340,7 @@ export async function getPageAnnotations(
   );
 }
 
-/** N11 slice C: seed the count groups + arm one (a persisted preference, so
+/** Seed the count groups + arm one (a persisted preference, so
  * a spec must not inherit what the last run left behind). */
 export async function takeoffSetGroups(
   groups: { name: string; color: string; symbol: string }[],
@@ -361,7 +361,7 @@ export async function takeoffArmed(): Promise<string | null> {
   })) as string | null;
 }
 
-/** N11 slice D — import a symbol SET from a path (the native picker is the
+/** Import a symbol SET from a path (the native picker is the
  * only step skipped). Resolves `{ id, outcome }`, or rejects with the refusal
  * message a malformed file earns. */
 export async function symbolImportFromPath(
@@ -526,7 +526,7 @@ export async function applyRedactions(): Promise<void> {
   }
 }
 
-/** F10: persist the pending marks as the file's /Redact set. */
+/** Persist the pending marks as the file's /Redact set. */
 export async function saveRedactionMarks(): Promise<void> {
   const result = await browser.executeAsync<string | null, []>(function (done) {
     (window as any).__SPECTRA_TEST__.saveRedactionMarks()
@@ -550,7 +550,7 @@ export async function clearRedactionMarks(): Promise<void> {
   });
 }
 
-/** Import a file's pages into a document at an index (2n.3) — the add-page /
+/** Import a file's pages into a document at an index — the add-page /
  * per-position-drop path, bypassing the native file picker. */
 export async function importPagesIntoDoc(
   filePath: string,
@@ -579,8 +579,8 @@ export async function closeAllFiles(): Promise<void> {
   });
 }
 
-/** Workspace-flattened page ids in order (2n.1). Canvas must be mounted. */
-/** The active file's page-tier pages with sizes (M6.3 value assertions). */
+/** Workspace-flattened page ids in order. Canvas must be mounted. */
+/** The active file's page-tier pages with sizes (value assertions). */
 export async function getActiveDocPages(): Promise<
   { id: string; width: number; height: number }[]
 > {
@@ -595,7 +595,7 @@ export async function getWorkspacePageIds(): Promise<string[]> {
   });
 }
 
-/** Select a set of canvas page ids (2n.1 multi-select). */
+/** Select a set of canvas page ids (multi-select). */
 export async function selectCanvasPages(pageIds: string[]): Promise<void> {
   await browser.execute<void, [string[]]>(
     function (ids) {
@@ -630,7 +630,7 @@ export async function rotateSelectedCanvasPages(delta: 90 | 270): Promise<void> 
 }
 
 /**
- * Dispatch a real global keydown on `window` (2n.1 keyboard shortcuts).
+ * Dispatch a real global keydown on `window` (keyboard shortcuts).
  * WDIO `browser.keys` targets the focused element; the canvas shortcuts are
  * window-level listeners, so we synthesize the event directly — this exercises
  * the exact keydown handlers WorkspaceCanvasView/App register.
@@ -657,7 +657,7 @@ export async function pressGlobalKey(
   );
 }
 
-/** Flattened outline rows the sidebar shows (2n.2). Sidebar must be mounted. */
+/** Flattened outline rows the sidebar shows. Sidebar must be mounted. */
 export async function getOutlineOrder(): Promise<
   { title: string; depth: number; page: number | null }[]
 > {
@@ -710,7 +710,7 @@ export async function applyOcr(): Promise<void> {
 }
 
 export interface SignParams {
-  // One signer source: .pfx path, or PEM key+cert pair (2k).
+  // One signer source: .pfx path, or PEM key+cert pair.
   pfxPath?: string;
   keyPath?: string;
   certPath?: string;
@@ -720,7 +720,7 @@ export interface SignParams {
   location?: string;
   // Visible-stamp placement (engine convention: 1-based page, PDF points).
   appearance?: { page: number; rect: [number, number, number, number] };
-  /** PAdES (ETSI.CAdES.detached) profile (F2/F4). */
+  /** PAdES (ETSI.CAdES.detached) profile. */
   pades?: boolean;
 }
 
@@ -756,7 +756,7 @@ export interface SignInPlaceParams {
   location?: string;
 }
 
-/** 9.F5: sign the ACTIVE document in place (no output path) via the undoable
+/** Sign the ACTIVE document in place (no output path) via the undoable
  * workspace flow. Returns the post-sign verification summary. */
 export async function signActiveFileInPlace(
   params: SignInPlaceParams,
@@ -775,7 +775,7 @@ export async function signActiveFileInPlace(
   return result;
 }
 
-/** 9.F5: read-only verify of the active working copy's signatures. */
+/** Read-only verify of the active working copy's signatures. */
 export async function verifyActiveSignatures(): Promise<{
   signature_count: number;
   all_valid: boolean;
@@ -799,7 +799,7 @@ export interface DocScript {
   js: string;
 }
 
-/** 9.S6: set the active document's JavaScript (undoable) via the panel flow. */
+/** Set the active document's JavaScript (undoable) via the panel flow. */
 export async function documentJsSet(scripts: DocScript[]): Promise<void> {
   const result = await browser.executeAsync<string | null, [DocScript[]]>(function (s, done) {
     (window as any).__SPECTRA_TEST__.documentJsSet(s)
@@ -811,7 +811,7 @@ export async function documentJsSet(scripts: DocScript[]): Promise<void> {
   }
 }
 
-/** 9.S6: read the active working copy's document JavaScript. */
+/** Read the active working copy's document JavaScript. */
 export async function documentJsList(): Promise<DocScript[]> {
   const result = await browser.executeAsync<DocScript[] | string, []>(function (done) {
     (window as any).__SPECTRA_TEST__.documentJsList()
@@ -840,7 +840,7 @@ export async function placeSignature(rect: { x: number; y: number; w: number; h:
   }
 }
 
-/** P5b: draw a crop band on the first page of the active document, through
+/** Draw a crop band on the first page of the active document, through
  * the real canvas handler. */
 export async function drawCropRect(rect: { x: number; y: number; w: number; h: number }): Promise<void> {
   const result = await browser.executeAsync<string | null, [{ x: number; y: number; w: number; h: number }]>(
@@ -928,7 +928,7 @@ export async function setReactInputValue(selector: string, value: string): Promi
   );
 }
 
-/** setReactInputValue's sibling for a controlled `<select>` (A3a family
+/** setReactInputValue's sibling for a controlled `<select>` (family
  * dropdown): same hardened shape — re-query inside the execute, poke the
  * value tracker, loop until the value sticks — but the native setter is
  * HTMLSelectElement's and React hears `change` (not `input`) on selects. */
@@ -958,7 +958,7 @@ export async function setReactSelectValue(selector: string, value: string): Prom
   );
 }
 
-// --- On-canvas form fill (2n.4b) ------------------------------------------
+// --- On-canvas form fill --------------------------------------------------
 
 export async function setCanvasFormValue(
   path: string,
@@ -1080,7 +1080,7 @@ export async function commitAddText(params: {
   rotate?: 0 | 90 | 180 | 270;
   bold?: boolean;
   italic?: boolean;
-  // 9.K2 OpenType features.
+  // OpenType features.
   smallCaps?: boolean;
   alternates?: boolean;
   altIndex?: number;
@@ -1123,7 +1123,7 @@ export async function signCanvasField(params: {
   return result;
 }
 
-// --- Canvas whole-document merge (2o) --------------------------------------
+// --- Canvas whole-document merge -------------------------------------------
 
 export async function getCanvasDocs(expectedCount = 1): Promise<
   { id: string; path: string; name: string; pages: number }[]
@@ -1157,7 +1157,7 @@ export async function mergeNoticeText(): Promise<string | null> {
   });
 }
 
-// --- Batch OCR (Phase 6) ----------------------------------------------------
+// --- Batch OCR --------------------------------------------------------------
 
 export interface BatchOcrSnapshot {
   phase: 'setup' | 'running' | 'done';
@@ -1169,7 +1169,7 @@ export interface BatchOcrSnapshot {
       status: string;
       pagesOcrd?: number;
       reason?: string;
-      /** Phase 12 requests 2/3 — where the ORIGINAL ended up, and why it did
+      /** Where the ORIGINAL ended up, and why it did
        * not move if a move was asked for and did not happen. */
       movedTo?: string;
       moveError?: string;
@@ -1178,12 +1178,12 @@ export interface BatchOcrSnapshot {
     }[];
     skippedDirs: string[];
   } | null;
-  /** Full path of the log the run wrote (Phase 12), or null when logging is
+  /** Full path of the log the run wrote, or null when logging is
    * off or the write failed. The spec reads the file back from disk. */
   logPath: string | null;
 }
 
-/** Inject the opt-in moved/error roots (Phase 12 requests 2/3). The native
+/** Inject the opt-in moved/error roots. The native
  * folder pickers are not WebDriver-drivable; the checkboxes beside them ARE,
  * and the spec clicks those for real. */
 export async function batchOcrSetFiling(filing: {
@@ -1229,7 +1229,7 @@ export async function batchOcrSnapshot(): Promise<BatchOcrSnapshot | null> {
   });
 }
 
-// --- Edit ▸ Images (Phase 7.1) ---------------------------------------------
+// --- Edit ▸ Images ---------------------------------------------------------
 
 export async function editImagePageIds(): Promise<string[]> {
   return await browser.execute<string[], []>(function () {
@@ -1296,7 +1296,7 @@ export async function editImagePlacements(
   );
 }
 
-/** Transform (9.C1) an image placement to an absolute user-space matrix,
+/** Transform an image placement to an absolute user-space matrix,
  * through the canvas's REAL commit path (the drag handles are undrivable). */
 export async function editImageTransform(
   pageId: string,
@@ -1318,9 +1318,9 @@ export async function editImageTransform(
   }
 }
 
-/** Add Image (9.C2): embed a source at a user-space rect through the REAL
+/** Add Image: embed a source at a user-space rect through the REAL
  * commit path (the native picker is undrivable — inject the source).
- * P7: rect=null with `at` = the natural-size click-place. */
+ * rect=null with `at` = the natural-size click-place. */
 export async function editImageAdd(
   page: number,
   rect: [number, number, number, number] | null,
@@ -1377,7 +1377,7 @@ export async function editImageSelect(
   );
 }
 
-/** P7 multi-select: group transform — ONE multi engine op (one undo entry). */
+/** Multi-select: group transform — ONE multi engine op (one undo entry). */
 export async function editImageTransformMany(
   pageId: string,
   targets: { index: number; matrix: number[] }[],
@@ -1399,7 +1399,7 @@ export async function editImageTransformMany(
   }
 }
 
-/** P7: delete the CURRENT selection (routes the group op at N>1). */
+/** Delete the CURRENT selection (routes the group op at N>1). */
 export async function editImageDeleteSelected(): Promise<void> {
   const result = await browser.executeAsync<string | null, []>(
     function (done) {
@@ -1415,7 +1415,7 @@ export async function editImageDeleteSelected(): Promise<void> {
 
 /** Run an edit action through the canvas's REAL handler; opts inject what
  * the native dialogs would collect (replace source / extract prefix) or,
- * for the 9.C3 adjustments, the crop rect (image-unit space) / opacity. */
+ * for the adjustments, the crop rect (image-unit space) / opacity. */
 export async function editImageAct(
   kind: 'delete' | 'replace' | 'extract' | 'crop' | 'opacity',
   opts?: {
@@ -1452,7 +1452,7 @@ export async function editImageAct(
 /**
  * Choose the document pane's view (absolute set, no pill toggle).
  *
- * A document opens in the reading view since M4.1g, so a spec driving
+ * A document opens in the reading view, so a spec driving
  * BOARD-only behaviour (the page-reorder drag, the strips, the doc headers)
  * must ask for 'organize' rather than assume it.
  */
@@ -1466,7 +1466,7 @@ export async function setDocViewMode(mode: 'organize' | 'document'): Promise<voi
 }
 
 /**
- * 9.A5-tails-b: the paragraph editor is a contentEditable RICH SURFACE, not a
+ * The paragraph editor is a contentEditable RICH SURFACE, not a
  * textarea — per-span colour/weight/slant/family/size render as real styles so
  * the caret, the selection and the line wrapping are computed from the same
  * glyphs the user sees (the mirror-overlay it replaced positioned the caret
@@ -1573,7 +1573,7 @@ export async function setParagraphSelection(start: number, end: number): Promise
   );
 }
 
-// --- Scheduled batch runs (Phase 12 request 5) ------------------------------
+// --- Scheduled batch runs ---------------------------------------------------
 //
 // The dialog's folder pickers are native and not WebDriver-drivable, so a spec
 // injects a whole profile through the SAME create path the form's Save button
@@ -1593,7 +1593,7 @@ export interface ScheduleProfileInput {
   time?: string;
   days?: string;
   account?: string;
-  /** 'batch-ocr' (default) or 'action' (guided-actions slice 5). */
+  /** 'batch-ocr' (default) or 'action' (guided actions). */
   runType?: string;
 }
 

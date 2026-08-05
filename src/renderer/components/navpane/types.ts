@@ -3,13 +3,13 @@ import type { OpenFile } from '../../state/types';
 import type { ChromeIconId } from '../chrome-icons';
 import type { AvailableNavPanel } from '../../commands/navpanels';
 
-// The prop bundle every nav-pane panel receives (Phase 4 M3). `activeFile` is
+// The prop bundle every nav-pane panel receives. `activeFile` is
 // the panel's subject; the page callbacks feed the shared page context menu
 // (App's inspect / extract-text handlers, the same ones the board uses). A
 // leaf module so PagesPanel and the registry don't import each other.
 export interface NavPanelComponentProps {
   activeFile: OpenFile | null;
-  // READ this page (M6.2): flips to the reading view and jumps. Was the
+  // READ this page: flips to the reading view and jumps. Was the
   // PageInspector's (path, pageNumber) shape.
   onOpenPage: (docId: string, pageId: string) => void;
   onExtractText: (path: string, pageNumber: number) => void;

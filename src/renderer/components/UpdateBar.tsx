@@ -26,7 +26,7 @@ interface UpdateBarProps {
 }
 
 export function UpdateBar({ checkSignal = 0 }: UpdateBarProps): React.ReactElement | null {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const [state, setState] = useState<UpdateState>('idle');
   const [version, setVersion] = useState('');

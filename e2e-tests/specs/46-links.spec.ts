@@ -53,7 +53,7 @@ async function applyAndSave(dest: string): Promise<void> {
   expect(existsSync(dest)).toBe(true);
 }
 
-describe('links manager (N1)', () => {
+describe('links manager', () => {
   let tmp: string;
   let source: string;
 

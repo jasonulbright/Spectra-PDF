@@ -25,7 +25,7 @@ export interface PropertiesDialogProps {
 }
 
 export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.Element {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile } = useActiveFile();
   const { call, saveFile } = useEngine();
@@ -319,7 +319,7 @@ function byteLengthOf(buffer: PdfBuffer | null): number | null {
 }
 
 function formatBytes(n: number | null): string {
-  // Numbers go through Intl (brief 37) — the decimal separator and the
+  // Numbers go through Intl — the decimal separator and the
   // digit grouping are locale properties, never hand-rolled.
   if (n === null) return tChrome('dialog.props.unknown');
   if (n < 1024) return tChromeCount('dialog.props.bytes', n);

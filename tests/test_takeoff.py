@@ -1,4 +1,4 @@
-"""N11 slice C — the count/takeoff CSV summary."""
+"""The count/takeoff CSV summary."""
 
 import csv
 

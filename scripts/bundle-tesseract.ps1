@@ -1,6 +1,6 @@
 # Vendors native Tesseract OCR into resources/tesseract/.
 #
-# Phase 12 step 3. Upstream ships no Windows binary and points Windows users at
+# Upstream ships no Windows binary and points Windows users at
 # the UB Mannheim build, so that is the source: downloaded, verified against a
 # pinned SHA-256, and extracted from the NSIS installer with 7-Zip WITHOUT
 # running it -- byte-for-byte the technique bundle-ghostscript.ps1 already uses.

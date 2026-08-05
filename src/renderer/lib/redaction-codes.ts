@@ -1,4 +1,4 @@
-// Redaction code sets (F15 slice E — brief 42 § 6).
+// Redaction code sets.
 //
 // A redaction code is a short label a reader sees IN the black box saying why
 // the content was removed: `(b)(6)` on a FOIA release, `(k)(2)` under the

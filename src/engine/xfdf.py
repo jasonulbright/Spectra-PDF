@@ -460,7 +460,7 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
                 unresolved += 1
         # In-place safe: pikepdf can't save over its own open input — stage
         # beside it and swap (the attachments/_save pattern; the CLI's
-        # in-place bug class). O5b: a signed input's landed bytes become an
+        # in-place bug class). A signed input's landed bytes become an
         # incremental append, so importing a review file onto a signed
         # document keeps its signature verifiable.
         from engine.incremental import finalize_preserving_signatures

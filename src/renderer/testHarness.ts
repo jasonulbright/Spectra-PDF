@@ -25,23 +25,23 @@ import { importSymbolSetFromPath } from './lib/symbol-set-io';
 import type { FocusedTab } from './state/types';
 
 export interface TestStateSnapshot {
-  // Legacy projection of the tab model (Phase 4 M2) — kept so pre-M2 specs'
+  // Legacy projection of the tab model — kept so pre-M2 specs'
   // assertions hold: home→'welcome', tools→'operations', doc→'canvas'.
   view: 'welcome' | 'operations' | 'canvas';
   focusedTab: FocusedTab;
   activeOp: string;
-  /** The armed canvas mode (M5.3/M5.4 — the secondary toolbar reads it). */
+  /** The armed canvas mode (the secondary toolbar reads it). */
   tool: string;
   /** The OPEN tool, if any. */
   activeToolId: string | null;
-  /** Which document pane is showing (M6.3 — the View menu's mode items). */
+  /** Which document pane is showing (the View menu's mode items). */
   docViewMode: 'organize' | 'document';
   /** Split view (I.6, Window ▸ Split): two stacked reading panes. */
   splitView: boolean;
   /** The full split shape ('off' | 'two' | 'quad'); splitView stays the
    * boolean projection so pre-quad specs' truthy checks hold. */
   splitMode: 'off' | 'two' | 'quad';
-  /** The page being read (M4.1e tracking) — insertion anchors hang off it. */
+  /** The page being read (tracking) — insertion anchors hang off it. */
   currentPageId: string | null;
   fileCount: number;
   activeFileId: string | null;
@@ -63,7 +63,7 @@ export interface TestAnnotationInput {
   color: string;
   note?: string;
   points?: number[];
-  /** ink only (N2): per-pen-lift paths. An ink given `points` instead is
+  /** ink only: per-pen-lift paths. An ink given `points` instead is
    *  normalized to one stroke, so pre-N2 specs keep working. */
   strokes?: number[][];
   /** stamp only: a custom image stamp's data URL. */
@@ -86,7 +86,7 @@ export interface CanvasRedactionHandlers {
     h: number;
   }) => { markId: string; docId: string; pageId: string } | null;
   apply: () => Promise<string[]>;
-  /** F10: persist the pending marks as the file's /Redact set. */
+  /** Persist the pending marks as the file's /Redact set. */
   save: () => Promise<string[]>;
   clear: () => void;
   count: () => number;
@@ -99,7 +99,7 @@ export function registerCanvasRedaction(handlers: CanvasRedactionHandlers | null
 }
 
 /**
- * Visible-signature placement is likewise transient canvas state (2k). The
+ * Visible-signature placement is likewise transient canvas state. The
  * canvas registers placement + the REAL display→PDF conversion here;
  * `buildAppearance` returns the exact appearance payload the Sign & Save
  * button would send, so a spec can hand it to signActiveFile and exercise the
@@ -116,7 +116,7 @@ export interface CanvasSignatureHandlers {
 }
 
 /**
- * P5b crop draw. The band-to-insets ARITHMETIC has direct vitest coverage,
+ * Crop draw. The band-to-insets ARITHMETIC has direct vitest coverage,
  * but the wiring either side of it — canvas handler resolves the page
  * geometry, publishes on the module channel, dock panel subscribes and fills
  * its fields — has none, because there is no DOM test environment. That
@@ -159,7 +159,7 @@ export function registerCanvasOcr(handlers: CanvasOcrHandlers | null): void {
 }
 
 /**
- * Batch OCR (Phase 6): the dialog's folder pickers are native and not
+ * Batch OCR: the dialog's folder pickers are native and not
  * WebDriver-drivable, so the dialog registers path injectors that run the
  * SAME selectSource/setDest/start flow the buttons run. A spec opens the
  * dialog (`tools.batchOcr`), injects fixture folders, starts, then polls
@@ -168,7 +168,7 @@ export function registerCanvasOcr(handlers: CanvasOcrHandlers | null): void {
 export interface BatchOcrHandlers {
   setSource: (path: string) => Promise<void>;
   setDest: (path: string) => void;
-  /** Phase 12 requests 2/3 — the opt-in filing options. Native folder pickers
+  /** The opt-in filing options. Native folder pickers
    * are not WebDriver-drivable, so the spec injects the roots the same way it
    * injects source/dest; the checkboxes ARE drivable and the spec clicks them. */
   setFiling: (filing: { movedRoot?: string | null; errorRoot?: string | null }) => void;
@@ -191,18 +191,18 @@ export interface BatchOcrHandlers {
       skippedDirs: string[];
     } | null;
     /** Full path of the log this run wrote, or null (logging off / write
-     * failed). Phase 12: the spec reads the file back to prove the run left a
+     * failed). The spec reads the file back to prove the run left a
      * durable record, not just a dialog that once said so. */
     logPath: string | null;
   };
 }
 
-/** Scheduled batch runs (Phase 12 request 5). The native folder pickers are
+/** Scheduled batch runs. The native folder pickers are
  * not WebDriver-drivable, so a spec injects a whole profile through the SAME
  * create path the form uses, then lists and deletes through the same commands. */
 export interface ScheduledRunsHandlers {
   /** `actionJson` = the frozen guided-action `{name, steps}` body for
-   * runType 'action' profiles (slice 5). */
+   * runType 'action' profiles. */
   create: (profile: Record<string, unknown>, actionJson?: string) => Promise<string>;
   list: () => Promise<unknown[]>;
   remove: (name: string) => Promise<void>;
@@ -214,7 +214,7 @@ export function registerScheduledRuns(handlers: ScheduledRunsHandlers | null): v
   scheduledRuns = handlers;
 }
 
-/** Watched folders (O7). The dialog's folder pickers are native, so a spec
+/** Watched folders. The dialog's folder pickers are native, so a spec
  * injects a whole entry through the SAME upsert path the form uses. */
 export interface WatchedFoldersHandlers {
   create: (folder: Record<string, unknown>) => Promise<void>;
@@ -237,7 +237,7 @@ export function registerBatchOcr(handlers: BatchOcrHandlers | null): void {
 import type { Orientation as CreatePdfOrientation, PageSize as CreatePdfPageSize } from './lib/create-pdf';
 
 /**
- * Create PDF (P22): the source and output pickers are native dialogs — e2e
+ * Create PDF: the source and output pickers are native dialogs — e2e
  * injects the source LIST and runs the REAL conversion path.
  *
  * A source of `'__blank__'` adds a blank page member, which is the one source
@@ -267,7 +267,7 @@ export function registerCreatePdf(handlers: CreatePdfHandlers | null): void {
 }
 
 /**
- * Combine Files (P22 slice D): same shape and the same reason — the source
+ * Combine Files: same shape and the same reason — the source
  * picker and the save dialog are native, so e2e injects the LIST and the
  * output and the REAL assembly runs.
  *
@@ -302,7 +302,7 @@ export function registerCombine(handlers: CombineHandlers | null): void {
 }
 
 /**
- * Compress panel (O8): the save dialog is native and undrivable, so e2e sets
+ * Compress panel: the save dialog is native and undrivable, so e2e sets
  * the panel's REAL controls and runs the REAL engine call with an injected
  * output path — the createPdfRun precedent. `setQuality` goes through the
  * panel's own change handler, so the DPI/MRC branch it drives is the branch a
@@ -327,7 +327,7 @@ export function registerCompress(handlers: CompressHandlers | null): void {
 }
 
 /**
- * Export Pages as Images (O1): the save dialog is native — e2e injects the
+ * Export Pages as Images: the save dialog is native — e2e injects the
  * destination and runs the REAL gated export path the Export button runs.
  */
 export interface ExportImagesHandlers {
@@ -344,7 +344,7 @@ export function registerExportImages(handlers: ExportImagesHandlers | null): voi
 }
 
 /**
- * Portfolio panel bridges (§ I.6): the member pickers and save dialogs are
+ * Portfolio panel bridges: the member pickers and save dialogs are
  * NATIVE and undrivable — e2e injects the paths and runs the REAL panel
  * flows (create routes callRaw+openPath; add/update/save run the gated
  * snapshot→call→reload shape). The panel registers while mounted — which
@@ -364,7 +364,7 @@ export function registerPortfolioHandlers(handlers: PortfolioHandlers | null): v
 }
 
 /**
- * Guided-actions bridge (slice 2): a TERMINAL step's output is a NATIVE save
+ * Guided-actions bridge: a TERMINAL step's output is a NATIVE save
  * dialog — e2e injects the path and any ask-at-run values, then the REAL
  * runner executes (same executeRun the Run button uses). Panel must be
  * mounted.
@@ -376,7 +376,7 @@ export interface GuidedActionsHandlers {
     output: string,
   ) => Promise<void>;
   /** FOLDER mode with injected source/dest (the pickers are native).
-   * `inPlace` (O7): dest is ignored and the ORIGINALS are replaced. */
+   * `inPlace`: dest is ignored and the ORIGINALS are replaced. */
   runFolder: (
     actionId: string,
     values: Record<number, Record<string, string | number>>,
@@ -397,7 +397,7 @@ export function registerGuidedActionsHandlers(handlers: GuidedActionsHandlers | 
 }
 
 /**
- * Edit ▸ Images (7.1): placements live in transformed canvas space and the
+ * Edit ▸ Images: placements live in transformed canvas space and the
  * Replace/Extract actions pop NATIVE dialogs — both undrivable by WebDriver.
  * The canvas registers its real selection + action paths; `act`'s opts
  * inject what the dialogs would have collected (the signing precedent).
@@ -405,10 +405,10 @@ export function registerGuidedActionsHandlers(handlers: GuidedActionsHandlers | 
 export interface CanvasEditImagesHandlers {
   /** Page ids that currently have listed placements (edit mode armed). */
   pageIds: () => string[];
-  /** N11 slice A: page ids whose snap geometry has landed. */
+  /** Page ids whose snap geometry has landed. */
   snapGeometryPageIds: () => string[];
   snapGeometry: (pageId: string) => { subpaths: number[][]; closed: boolean[] }[];
-  /** N11 slice B: the live ruler guides, in the frame each was drawn in. */
+  /** The live ruler guides, in the frame each was drawn in. */
   guides: () => {
     id: string;
     pageId: string;
@@ -439,18 +439,18 @@ export interface CanvasEditImagesHandlers {
     crop: number[] | null;
   }[];
   select: (pageId: string, index: number, additive?: boolean) => void;
-  /** Transform (9.C1) the selected image via the real commit path. */
+  /** Transform the selected image via the real commit path. */
   transformImage: (pageId: string, index: number, matrix: number[]) => Promise<void>;
-  /** P7 multi-select: group transform via the ONE multi engine op. */
+  /** Multi-select: group transform via the ONE multi engine op. */
   transformImages: (
     pageId: string,
     targets: { index: number; matrix: number[] }[],
   ) => Promise<void>;
-  /** P7: delete the whole current selection (routes the group op at N>1). */
+  /** Delete the whole current selection (routes the group op at N>1). */
   deleteSelected: () => Promise<void>;
-  /** Add Image (9.C2): embed a source at a user-space rect via the real
+  /** Add Image: embed a source at a user-space rect via the real
    * commit path (the native file picker is undrivable — inject the source).
-   * P7: rect=null with `at` = the natural-size click-place. */
+   * rect=null with `at` = the natural-size click-place. */
   addImage: (
     page: number,
     rect: [number, number, number, number] | null,
@@ -464,14 +464,14 @@ export interface CanvasEditImagesHandlers {
     | { kind: 'image'; pageId: string; index: number; indexes: number[] }
     | { kind: 'text' | 'para'; pageId: string; index: number }
     | null;
-  /** Text runs (7.2): listing + opening the REAL inline editor (the input
+  /** Text runs: listing + opening the REAL inline editor (the input
    * itself is then driven through the DOM — data-testid edit-text-input). */
   textRuns: (
     pageId: string,
   ) => { index: number; text: string; editable: boolean; reason: string | null }[];
   textPageIds: () => string[];
   openTextEditor: (pageId: string, index: number) => void;
-  /** Paragraph layer (7.5). */
+  /** Paragraph layer. */
   paragraphs: (
     pageId: string,
   ) => {
@@ -480,7 +480,7 @@ export interface CanvasEditImagesHandlers {
     lineCount: number;
     alignment: string;
     vertical: boolean;
-    /** 9.T13: the frame the paragraph's layout ran in (horizontal /
+    /** The frame the paragraph's layout ran in (horizontal /
      * vertical-rl / rotated-cw / rotated-ccw / rotated-180). */
     orientation: string;
     colors: string[];
@@ -506,7 +506,7 @@ export interface CanvasEditImagesHandlers {
           };
     },
   ) => Promise<void>;
-  /** Add Text (9.A2): place a box on the active file's first page (the band
+  /** Add Text: place a box on the active file's first page (the band
    * lives in transformed canvas space — undrivable), then author via the REAL
    * display→PDF + engine-op path. */
   placeAddText: (rect: { x: number; y: number; w: number; h: number }) => boolean;
@@ -522,7 +522,7 @@ export interface CanvasEditImagesHandlers {
     alternates?: boolean;
     altIndex?: number;
   }) => Promise<void>;
-  // 9.D1 vector objects.
+  // Vector objects.
   vectorPageIds: () => string[];
   vectors: (pageId: string) => {
     index: number;
@@ -555,7 +555,7 @@ export function registerCanvasEditImages(handlers: CanvasEditImagesHandlers | nu
 }
 
 /**
- * Multi-select (2n.1) is local canvas view state, and both modifier-click
+ * Multi-select is local canvas view state, and both modifier-click
  * selection and the pointer-capture group drag are not reliably
  * WebDriver-drivable. The canvas registers selection setters/readers plus the
  * exact batched delete/rotate paths the Delete/`[`/`]` keys run, so a spec can
@@ -576,7 +576,7 @@ export function registerCanvasSelection(handlers: CanvasSelectionHandlers | null
 }
 
 /**
- * Outline sidebar reorder (2n.2) is a pointer-capture tree drag, not
+ * Outline sidebar reorder is a pointer-capture tree drag, not
  * WebDriver-drivable. The sidebar registers a reader + the exact drop path
  * (moveOutlineNode -> set_outline -> UPDATE_FILE) so a spec can reorder and
  * verify the persisted file. Only registered while the sidebar is mounted.
@@ -593,7 +593,7 @@ export function registerCanvasOutline(handlers: CanvasOutlineHandlers | null): v
 }
 
 /**
- * On-canvas form fill (2n.4b): the overlay inputs live inside transformed
+ * On-canvas form fill: the overlay inputs live inside transformed
  * canvas space (flaky to drive via WebDriver), so the canvas registers
  * value-setting + apply against the REAL pending-value map and fill path.
  * Values are validated against the current field read (must exist + be
@@ -604,7 +604,7 @@ export interface CanvasFormsHandlers {
   pendingCount: () => number;
   apply: () => Promise<string[]>; // per-file failure messages; empty = success
   widgetCountFor: (path: string) => number;
-  // Add-field authoring (2n.4c) — place on the active file's first page
+  // Add-field authoring — place on the active file's first page
   // (display-normalized rect), then create through the REAL conversion +
   // whole-file-op flow the card's Create button runs.
   placeNewFieldOnFirstPage: (rect: { x: number; y: number; w: number; h: number }) => boolean;
@@ -614,7 +614,7 @@ export interface CanvasFormsHandlers {
     options?: string[];
     multiline?: boolean;
   }) => Promise<void>;
-  // Sign into an existing empty signature field of the ACTIVE file (2n.4d) —
+  // Sign into an existing empty signature field of the ACTIVE file —
   // the sign card's field branch with the dialog paths injected.
   signField: (params: {
     fieldName: string;
@@ -641,7 +641,7 @@ export function registerCanvasForms(handlers: CanvasFormsHandlers | null): void 
 }
 
 /**
- * Canvas whole-document merge (2o): the header hover actions sit inside the
+ * Canvas whole-document merge: the header hover actions sit inside the
  * transformed overlay (flaky to click via WebDriver), so the canvas registers
  * the doc listing plus the REAL merge-up and guarded remove paths.
  */
@@ -666,7 +666,7 @@ export function registerCanvasMerge(handlers: CanvasMergeHandlers | null): void 
  */
 export interface SignHandler {
   sign: (params: {
-    // Signer source: a .pfx path, OR a PEM key+cert pair (2k).
+    // Signer source: a .pfx path, OR a PEM key+cert pair.
     pfxPath?: string;
     keyPath?: string;
     certPath?: string;
@@ -674,10 +674,10 @@ export interface SignHandler {
     output: string;
     reason?: string;
     location?: string;
-    // Visible-stamp placement (2k) — engine convention: 1-based page, PDF
+    // Visible-stamp placement — engine convention: 1-based page, PDF
     // user-space rect.
     appearance?: { page: number; rect: [number, number, number, number] };
-    /** PAdES (ETSI.CAdES.detached) profile (F2/F4). */
+    /** PAdES (ETSI.CAdES.detached) profile. */
     pades?: boolean;
   }) => Promise<{
     output: string;
@@ -686,7 +686,7 @@ export interface SignHandler {
     intact: boolean;
     covers_whole_document: boolean;
   }>;
-  // 9.F5: sign the ACTIVE document in place (undoable performOperation flow);
+  // Sign the ACTIVE document in place (undoable performOperation flow);
   // no output path. Returns the post-sign verification summary.
   signInPlace: (params: {
     pfxPath?: string;
@@ -696,7 +696,7 @@ export interface SignHandler {
     reason?: string;
     location?: string;
   }) => Promise<{ signature_count: number; all_valid: boolean }>;
-  // 9.F5: verify the active working copy's signatures (read-only) — lets an
+  // Verify the active working copy's signatures (read-only) — lets an
   // e2e confirm an undo restored the pre-sign, unsigned state.
   verifyActive: () => Promise<{ signature_count: number; all_valid: boolean }>;
 }
@@ -707,7 +707,7 @@ export function registerSignHandler(handler: SignHandler | null): void {
   signHandler = handler;
 }
 
-/** 9.S6: the Document JavaScript panel's harness hooks (set in place via the
+/** The Document JavaScript panel's harness hooks (set in place via the
  * undoable flow; read the active working copy). */
 export interface DocumentJsHandler {
   set: (scripts: { name: string; js: string }[]) => Promise<void>;
@@ -730,24 +730,24 @@ export interface TestHarness {
    * MAPI launch half is deliberately not bridged — it opens a real compose
    * window on boxes with a mail client. */
   sendToEmailStage: () => Promise<string>;
-  /** O1: export the active document to `destPath` in `format` via the engine
+  /** Export the active document to `destPath` in `format` via the engine
    *  (bypasses the native save dialog). Returns the engine result. */
   exportActiveAs: (destPath: string, format: string) => Promise<unknown>;
   /** Switch the main view (legacy — maps onto the tab model: welcome→Home,
    * operations→Tools, canvas→the active/first document's tab). */
   setView: (view: 'welcome' | 'operations' | 'canvas') => void;
-  /** Focus a tab directly (Phase 4 M2): 'home' | 'tools' | { doc: path }. */
+  /** Focus a tab directly: 'home' | 'tools' | { doc: path }. */
   focusTab: (tab: FocusedTab) => void;
   /** Select an operation in the sidebar. */
   setActiveOp: (op: string) => void;
   /** Invoke a command-registry entry — the ONE entry point the menus,
-   * toolbars and keymap share (Phase 4 M1). Returns false when the command's
+   * toolbars and keymap share. Returns false when the command's
    * enablement predicate refused; throws on an unknown id. */
   invokeCommand: (id: string) => boolean;
   /** Arm a canvas interaction tool directly (absolute set, no pill toggle). */
   setTool: (tool: string) => void;
   /** Choose the document pane's view (absolute set, no pill toggle). A document
-   * opens in 'document' (the reading view) since M4.1g, so a spec that drives
+   * opens in 'document' (the reading view), so a spec that drives
    * BOARD-only behaviour — the page-reorder drag, the strips — must ask for
    * 'organize' rather than assume it. */
   setDocViewMode: (mode: 'organize' | 'document') => void;
@@ -797,7 +797,7 @@ export interface TestHarness {
     /** textmarkup only: the style, and how many quads it carries. */
     markupType?: string;
     quadCount?: number;
-    /** ink only: how many pen strokes it carries (N2). */
+    /** ink only: how many pen strokes it carries. */
     strokeCount?: number;
     /** stamp only: whether it carries a custom image. */
     hasImage?: boolean;
@@ -815,7 +815,7 @@ export interface TestHarness {
    * workspace (multi-select is workspace-wide, so accumulated files across
    * cases would otherwise cross-contaminate select-all). */
   closeAllFiles: () => void;
-  /** Import a file's pages into a document at an index (2n.3) — the same path
+  /** Import a file's pages into a document at an index — the same path
    * the add-page ghost / per-position drop run, bypassing the native picker.
    * Resolves once the byte-only source is registered and the pages spliced. */
   importPagesIntoDoc: (filePath: string, toDocId: string, toIndex: number) => Promise<void>;
@@ -837,16 +837,16 @@ export interface TestHarness {
   clearRedactionMarks: () => void;
   /** Number of pending redaction marks the canvas currently shows. */
   getRedactionMarkCount: () => number;
-  /** N13: completed pdf.js render durations (base + detail rasters). */
+  /** Completed pdf.js render durations (base + detail rasters). */
   getRenderTimings: () => { kind: string; pageNumber: number; ms: number }[];
   clearRenderTimings: () => void;
-  /** F10: persist the pending marks as the file's /Redact set (the status
+  /** Persist the pending marks as the file's /Redact set (the status
    * bar's Save-marks path). */
   saveRedactionMarks: () => Promise<void>;
   /** Place a visible-signature box on the active file's first canvas page
    * (display-normalized rect), waiting for the canvas + indexer like
    * addRedactionMark. */
-  /** P5b: drive the crop band the canvas gesture produces. */
+  /** Drive the crop band the canvas gesture produces. */
   drawCropRect: (
     rect: { x: number; y: number; w: number; h: number },
     timeoutMs?: number,
@@ -863,14 +863,14 @@ export interface TestHarness {
   } | null>;
   /** Drop the pending signature placement. */
   clearSignaturePlacement: () => void;
-  /** Select a set of canvas page ids (2n.1) — bypasses modifier-click pointer
+  /** Select a set of canvas page ids — bypasses modifier-click pointer
    * simulation. Canvas view must be mounted. */
   selectCanvasPages: (pageIds: string[]) => void;
   /** The currently selected canvas page ids. */
   getSelectedCanvasPageIds: () => string[];
   /** Workspace-flattened page ids in order (the select-all / range basis). */
   getWorkspacePageIds: () => string[];
-  /** The active file's page-tier pages with sizes (M6.3 value assertions). */
+  /** The active file's page-tier pages with sizes (value assertions). */
   getActiveDocPages: () => { id: string; width: number; height: number }[];
   /** Delete the current canvas selection via the same batched path Delete runs
    * (DELETE_PAGE_REFS → page tier). Canvas view must be mounted. */
@@ -878,12 +878,12 @@ export interface TestHarness {
   /** Rotate the current canvas selection ±90 via the batched path (`[`/`]`). */
   rotateSelectedCanvasPages: (delta: 90 | 270) => void;
   /** Flattened outline rows (title/depth/page) the bookmarks surface shows.
-   * The nav-pane Bookmarks panel must be mounted (M3.2b — navicon-bookmarks). */
+   * The nav-pane Bookmarks panel must be mounted (navicon-bookmarks). */
   getOutlineOrder: () => { title: string; depth: number; page: number | null }[];
   /** Reorder an outline node via the exact drop path (moveOutlineNode ->
    * set_outline -> UPDATE_FILE); resolves after the save. */
   reorderOutline: (fromPath: number[], overIndex: number, depth: number) => Promise<void>;
-  /** Set a pending on-canvas form value for a field of an open file (2n.4b)
+  /** Set a pending on-canvas form value for a field of an open file
    * — validated against the current field read like the real overlay inputs
    * (must exist + be editable). Returns false when refused. Canvas view must
    * be mounted; polls for the async forms read like addAnnotation does for
@@ -901,7 +901,7 @@ export interface TestHarness {
   applyCanvasFormValues: () => Promise<void>;
   /** Overlay widget count read for a file (0 until the async read lands). */
   formWidgetCount: (path: string) => number;
-  /** Place a new-field box on the active file's first canvas page (2n.4c),
+  /** Place a new-field box on the active file's first canvas page,
    * waiting for the canvas + indexer like placeSignature. */
   placeNewField: (
     rect: { x: number; y: number; w: number; h: number },
@@ -916,7 +916,7 @@ export interface TestHarness {
     options?: string[];
     multiline?: boolean;
   }) => Promise<void>;
-  /** Sign into an existing empty signature field of the active file (2n.4d)
+  /** Sign into an existing empty signature field of the active file
    * via the sign card's real field branch, dialog paths injected. */
   signCanvasField: (params: {
     fieldName: string;
@@ -934,7 +934,7 @@ export interface TestHarness {
     intact: boolean;
     covers_whole_document: boolean;
   }>;
-  /** Canvas documents (id/path/name/page count), for merge-flow specs (2o).
+  /** Canvas documents (id/path/name/page count), for merge-flow specs.
    * Polls for the async indexer like addAnnotation — until at least
    * `expectedCount` docs are indexed (files index independently, so a
    * poll-until-any returns early while a later file is still cooking). */
@@ -977,7 +977,7 @@ export interface TestHarness {
     intact: boolean;
     covers_whole_document: boolean;
   }>;
-  /** 9.F5: sign the active document IN PLACE (undoable); no output path. */
+  /** Sign the active document IN PLACE (undoable); no output path. */
   signActiveFileInPlace: (params: {
     pfxPath?: string;
     keyPath?: string;
@@ -986,9 +986,9 @@ export interface TestHarness {
     reason?: string;
     location?: string;
   }) => Promise<{ signature_count: number; all_valid: boolean }>;
-  /** 9.F5: read-only signature verify of the active working copy. */
+  /** Read-only signature verify of the active working copy. */
   verifyActiveSignatures: () => Promise<{ signature_count: number; all_valid: boolean }>;
-  /** 9.S6: set the active document's JavaScript (undoable), and read it back. */
+  /** Set the active document's JavaScript (undoable), and read it back. */
   documentJsSet: (scripts: { name: string; js: string }[]) => Promise<void>;
   documentJsList: () => Promise<{ name: string; js: string }[]>;
   /** Batch OCR dialog injectors (dialog must be open — `tools.batchOcr`). */
@@ -999,21 +999,21 @@ export interface TestHarness {
   scheduleCreate: (profile: Record<string, unknown>, actionJson?: string) => Promise<string>;
   scheduleList: () => Promise<unknown[]>;
   scheduleRemove: (name: string) => Promise<void>;
-  /** Watched folders (O7; dialog must be open — `tools.watchedFolders`). */
+  /** Watched folders (dialog must be open — `tools.watchedFolders`). */
   watcherCreate: (folder: Record<string, unknown>) => Promise<void>;
   watcherList: () => Promise<unknown[]>;
   watcherRemove: (id: string) => Promise<void>;
-  /** N12: switch the live UI language ('qps' included — the pseudo-locale
+  /** Switch the live UI language ('qps' included — the pseudo-locale
    * only exists under VITE_E2E/DEV, which is the only place this harness
    * compiles in). Does NOT touch the persisted preference. */
   setLanguage: (lang: string) => void;
-  /** Edit ▸ Images (7.1; canvas must be mounted with the edit mode armed). */
+  /** Edit ▸ Images (canvas must be mounted with the edit mode armed). */
   editTextPageIds: () => string[];
   editTextRuns: (
     pageId: string,
   ) => { index: number; text: string; editable: boolean; reason: string | null }[];
   editTextOpen: (pageId: string, index: number) => void;
-  /** Edit ▸ Paragraphs (7.5): the paragraph layer's listing + opening the
+  /** Edit ▸ Paragraphs: the paragraph layer's listing + opening the
    * REAL paragraph editor (then driven via data-testid edit-para-input). */
   editParagraphs: (
     pageId: string,
@@ -1023,34 +1023,34 @@ export interface TestHarness {
     lineCount: number;
     alignment: string;
     vertical: boolean;
-    /** 9.T13: the frame the paragraph's layout ran in (horizontal /
+    /** The frame the paragraph's layout ran in (horizontal /
      * vertical-rl / rotated-cw / rotated-ccw / rotated-180). */
     orientation: string;
     colors: string[];
     sizes: number[];
   }[];
   editParagraphOpen: (pageId: string, index: number) => void;
-  /** Create PDF (P22; dialog must be open). `'__blank__'` in `sources` adds a
+  /** Create PDF (dialog must be open). `'__blank__'` in `sources` adds a
    * blank page. Null result = the conversion failed and the dialog shows why. */
   createPdfRun: (
     sources: string[],
     output: string,
     options?: CreatePdfRunOptions,
   ) => Promise<{ output: string; pages: number } | null>;
-  /** Combine Files (P22 slice D; dialog must be open). For `target: 'append'`
+  /** Combine Files (dialog must be open). For `target: 'append'`
    * the result's `output` is empty and `pages` is what was imported. */
   combineRun: (
     sources: string[],
     output: string,
     options?: CombineRunOptions,
   ) => Promise<{ output: string; pages: number } | null>;
-  /** Compress panel (O8; panel must be mounted). Sets the panel's own
+  /** Compress panel (panel must be mounted). Sets the panel's own
    * controls, then runs the real engine call with an injected output path. */
   compressRun: (
     output: string,
     opts?: { quality?: string; mrcPreset?: string; verifyText?: boolean },
   ) => Promise<string>;
-  /** Export pages as images (O1; dialog must be open). Null result = failed
+  /** Export pages as images (dialog must be open). Null result = failed
    *  (the dialog shows the error); non-null = the engine result. */
   exportImagesRun: (
     out: string,
@@ -1064,7 +1064,7 @@ export interface TestHarness {
     output: string,
   ) => Promise<void>;
   /** Guided-actions FOLDER run with injected source/dest paths. `inPlace`
-   * (O7) replaces the originals — dest is ignored. */
+   * replaces the originals — dest is ignored. */
   guidedRunFolder: (
     actionId: string,
     values: Record<number, Record<string, string | number>>,
@@ -1104,31 +1104,31 @@ export interface TestHarness {
     crop: number[] | null;
   }[];
   editImageSelect: (pageId: string, index: number, additive?: boolean) => void;
-  /** The live edit selection (C1-tail: proves the post-op auto-reselect).
-   * P7: the image arm also reports `indexes` (the whole group). */
+  /** The live edit selection (proves the post-op auto-reselect).
+   * The image arm also reports `indexes` (the whole group). */
   editImageSelection: () => {
     kind: string;
     pageId: string;
     index: number;
     indexes?: number[];
   } | null;
-  /** P7 multi-select: group transform (one multi op) + delete-selection. */
+  /** Multi-select: group transform (one multi op) + delete-selection. */
   editImageTransformMany: (
     pageId: string,
     targets: { index: number; matrix: number[] }[],
   ) => Promise<void>;
   editImageDeleteSelected: () => Promise<void>;
-  /** N11 slice A: page ids whose SNAP geometry has landed. Snapping is
+  /** Page ids whose SNAP geometry has landed. Snapping is
    * fetched asynchronously per page, and "no snap happened" is both "there
    * was nothing in range" and "the listing hasn't arrived yet" — the
    * `listingSettled` lesson, same shape. A spec waits on this before
    * asserting a snap. */
   snapGeometryPageIds: () => string[];
-  /** N11 slice A: one page's snap geometry, display-normalized. A page with
+  /** One page's snap geometry, display-normalized. A page with
    * an entry but ZERO paths is a settled EMPTY listing, which is a different
    * thing from "not fetched yet" — the spec waits for paths, not for keys. */
   snapGeometry: (pageId: string) => { subpaths: number[][]; closed: boolean[] }[];
-  /** N11 slice B: the ruler GUIDES currently on the document, in the frame
+  /** The ruler GUIDES currently on the document, in the frame
    * each was drawn in. Read-back only — spec 106 drags them off the real
    * ruler chrome, because a harness that placed them would prove nothing
    * about the gesture. */
@@ -1139,7 +1139,7 @@ export interface TestHarness {
     pos: number;
     rotationAtDraw: 0 | 90 | 180 | 270;
   }[];
-  /** N11 slice C: seed the count GROUPS and arm one, deterministically.
+  /** Seed the count GROUPS and arm one, deterministically.
    *
    * The groups are a persisted preference (localStorage), so a spec that
    * clicked its way through the panel would inherit whatever the last run
@@ -1151,7 +1151,7 @@ export interface TestHarness {
     armed: string | null,
   ) => void;
   takeoffArmed: () => string | null;
-  /** N11 slice D: import a symbol SET from a path — the native file picker is
+  /** Import a symbol SET from a path — the native file picker is
    * the only step skipped, so a spec drives the real parse, the real
    * sanitizer and the real store. Rejects with the refusal message a
    * malformed file earns (the guided-actions import precedent). */
@@ -1161,7 +1161,7 @@ export interface TestHarness {
   /** Drop the imported sets and re-read the store — the cross-spec-leak rule
    * (a set left behind would change the next run's palette). */
   symbolResetSets: () => void;
-  /** 9.D1 vector objects: list, select, delete. */
+  /** Vector objects: list, select, delete. */
   editVectorPageIds: () => string[];
   editVectors: (pageId: string) => {
     index: number;
@@ -1175,9 +1175,9 @@ export interface TestHarness {
   editVectorSelect: (pageId: string, index: number) => void;
   editVectorSelection: () => { pageId: string; index: number } | null;
   editVectorDelete: () => Promise<void>;
-  /** 9.D2: transform (move/resize/rotate) a vector to a target placement M'. */
+  /** Transform (move/resize/rotate) a vector to a target placement M'. */
   editVectorTransform: (pageId: string, index: number, matrix: number[]) => Promise<void>;
-  /** 9.D3: recolour / re-width a vector object. */
+  /** Recolour / re-width a vector object. */
   editVectorRestyle: (
     pageId: string,
     index: number,
@@ -1187,7 +1187,7 @@ export interface TestHarness {
       lineWidth?: number;
     },
   ) => Promise<void>;
-  /** Transform (9.C1) an image placement to an absolute user-space matrix. */
+  /** Transform an image placement to an absolute user-space matrix. */
   editImageTransform: (pageId: string, index: number, matrix: number[]) => Promise<void>;
   editImageAct: (
     kind: 'delete' | 'replace' | 'extract' | 'crop' | 'opacity',
@@ -1208,7 +1208,7 @@ export interface TestHarness {
           };
     },
   ) => Promise<void>;
-  /** Add Image (9.C2): embed a source at a user-space rect; P7: rect=null
+  /** Add Image: embed a source at a user-space rect; rect=null
    * with `at` places at natural size on the click point. */
   editImageAdd: (
     page: number,
@@ -1219,7 +1219,7 @@ export interface TestHarness {
       | { svg_path: string },
     at?: [number, number],
   ) => Promise<void>;
-  /** Add Text (9.A2): place then author. */
+  /** Add Text: place then author. */
   addTextPlace: (rect: { x: number; y: number; w: number; h: number }, timeoutMs?: number) => Promise<void>;
   addTextCommit: (params: {
     text: string;
@@ -1248,7 +1248,7 @@ export interface TestHarnessDeps {
    * async indexer has produced one; null until then. */
   getFirstPage: () => { docId: string; pageId: string } | null;
   /** The active file's page-tier pages with their sizes, workspace order —
-   * for asserting VALUES about page-level edits (M6.3: the blank page copies
+   * for asserting VALUES about page-level edits (the blank page copies
    * its insertion neighbor's size). */
   getActiveDocPages: () => { id: string; width: number; height: number }[];
   /** Same page lookup as getFirstPage, plus its first annotation if any. */
@@ -1276,7 +1276,7 @@ export interface TestHarnessDeps {
   commitPendingEdits: () => Promise<void>;
   closeAllFiles: () => void;
   importPagesIntoDoc: (filePath: string, toDocId: string, toIndex: number) => Promise<void>;
-  /** O1 export via the engine, with an explicit destination (no dialog). */
+  /** Export via the engine, with an explicit destination (no dialog). */
   exportActiveDocument: (destPath: string, format: string) => Promise<unknown>;
 }
 

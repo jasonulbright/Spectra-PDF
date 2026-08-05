@@ -2,7 +2,7 @@ import { buildPdf, buildPdfx, stripExtension } from './pdfx-format';
 import { carriesManifest } from './doc-names';
 import type { ExportPage } from './pdfx-format';
 import type { AppAction, OpenDocument, OpenFile, PdfBuffer, Workspace } from '../state/types';
-// N12 slice E: the one refusal here that reaches the user resolves through
+// The one refusal here that reaches the user resolves through
 // the catalog (the concurrent-entry throw below is an internal invariant —
 // a programming error nobody is meant to read, so it stays English).
 import { tChrome } from '../i18n';
@@ -44,7 +44,7 @@ export interface CommitFilePlan {
   useManifest: boolean;
   documents: CommitDocumentPlan[];
   pageCount: number;
-  // The identity channel (Phase 5, § F): the old ids IN THE ORDER the new
+  // The identity channel: the old ids IN THE ORDER the new
   // file's pages/partitions are written — this plan IS the old→new
   // mapping, published instead of discarded. Adopted by the post-commit
   // reindex (lib/durable-identity.ts).
@@ -114,7 +114,7 @@ export function planCommit(
                     color,
                     note,
                     points,
-                    strokes, // N2 — ink's per-pen-lift paths (the ALLOWLIST trap)
+                    strokes, // Ink's per-pen-lift paths (the ALLOWLIST trap)
                     imageData,
                     markupType,
                     quads,
@@ -130,7 +130,7 @@ export function planCommit(
                     calloutBox,
                     lineEndings,
                     cloudIntensity,
-                    // N11 slice C — the count mark's group/symbol/sequence and
+                    // The count mark's group/symbol/sequence and
                     // the placed legend's snapshot rows. The ALLOWLIST trap
                     // again: a field absent from this map never reaches the
                     // builder, however faithfully the type carries it.
@@ -140,7 +140,7 @@ export function planCommit(
                     legendRows,
                     legendTitle,
                     legendTotalWord,
-                    // N11 slice D — a placed symbol's registry id and its own
+                    // A placed symbol's registry id and its own
                     // carried geometry (the same allowlist trap).
                     symbolId,
                     symbolParts,
@@ -190,7 +190,7 @@ interface CommitDeps {
   writeBuffer: (filePath: string, bytes: Uint8Array) => Promise<unknown>;
   rename: (fromPath: string, toPath: string) => Promise<unknown>;
   remove: (filePath: string) => Promise<unknown>;
-  /** O5b: rewrite a staged temp as an incremental append onto the SIGNED
+  /** Rewrite a staged temp as an incremental append onto the SIGNED
    *  working copy (engine `transplant_incremental`). Returns whether it
    *  applied — false covers unsigned files and out-of-scope deltas (page
    *  removal/reorder, content edits), which keep the plain rewrite. */
@@ -260,7 +260,7 @@ export async function commitPageEdits({
         const tmp = plans[i].workingPath + runTag;
         await writeBuffer(tmp, built[i]);
         staged.push(tmp); // before the transplant attempt — cleanup owns it either way
-        // O5b: an annotation-tier commit on a SIGNED file lands as an
+        // An annotation-tier commit on a SIGNED file lands as an
         // incremental append instead of the pdf-lib rewrite, so the
         // signature keeps verifying. Failure here (engine down, refusal)
         // NEVER blocks the commit — the rewrite is the standing behavior

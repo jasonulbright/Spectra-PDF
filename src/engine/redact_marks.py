@@ -1,4 +1,4 @@
-"""Persistent redaction marks (F10): real /Redact annotations.
+"""Persistent redaction marks: real /Redact annotations.
 
 The canvas's pending marks are TRANSIENT view state by invariant (positional
 ids + a destructive tool — see lib/redaction.ts). Persistence therefore
@@ -8,14 +8,14 @@ subtype used by mark-then-apply workflows. Save replaces the file's
 once); on open or reload the renderer lists them and re-seeds its transient
 marks; APPLYING redactions consumes them naturally, because the redaction
 engine removes every annotation overlapping an applied region (fail-closed,
-the R2 rule) — an applied mark cannot survive its own application.
+the rule) — an applied mark cannot survive its own application.
 
 The annotations carry an appearance (red outline box) so OTHER viewers show
 the marks; /F stays 0 — a pending redaction mark must never PRINT as if it
 were content. Saving onto a SIGNED document lands as an incremental append
-like the rest of the annotation tier (O5b).
+like the rest of the annotation tier.
 
-F12: a mark this module cannot ACCOUNT FOR refuses, loudly, naming how many
+A mark this module cannot ACCOUNT FOR refuses, loudly, naming how many
 and where. Both entry points read the file through one scanner (`_scan`), so
 the listing the canvas seeds from and the save that replaces the stored set
 cannot disagree about what the document carries.
@@ -37,7 +37,7 @@ def _page_annots(page) -> tuple[list, bool]:
     """The page's /Annots entries, and whether the ARRAY itself resolved.
 
     A `/Annots` that will not resolve is not an empty page: its contents are
-    unaccountable, and under F12 that is reported rather than assumed to hold
+    unaccountable, and that is reported rather than assumed to hold
     no marks.
     """
     try:
@@ -68,8 +68,7 @@ def _entry_kind(entry) -> str:
 
 
 def _mark_properties(annot) -> dict:
-    """The mark's REDACTION PROPERTIES, in the format's own vocabulary (F15
-    slice E), read back so a round trip does not lose them.
+    """The mark's REDACTION PROPERTIES, in the format's own vocabulary, read back so a round trip does not lose them.
 
     Absent keys are absent from the result rather than defaulted here: the
     applier's `properties_of` owns the defaults, and inventing them in the
@@ -181,9 +180,9 @@ def _scan(pdf: pikepdf.Pdf) -> list[dict]:
 
 
 def _refuse_unreadable(pages: list[dict]) -> None:
-    """F12 — REFUSE when the document carries marks we cannot account for.
+    """REFUSE when the document carries marks we cannot account for.
 
-    This is R2's shape one module over. `_annot_overlaps` was made to fail
+    This is the shape one module over. `_annot_overlaps` was made to fail
     CLOSED because a redaction tool's only tolerable error is removing too
     much; a LISTING has no "too much" available to it, so its fail-closed is
     the refusal. Skipping was the entire defect: the reply's `count` counted
@@ -239,7 +238,7 @@ def save_redaction_marks(file: str, output: str, regions: list) -> dict:
         scanned = _scan(pdf)
         # BEFORE any mutation: a replace over a set we cannot read would drop
         # or keep marks arbitrarily, which is the same silence from the other
-        # direction (F12).
+        # direction.
         _refuse_unreadable(scanned)
         removed = _strip_redact_annots(pdf, scanned)
         added = 0
@@ -267,7 +266,7 @@ def save_redaction_marks(file: str, output: str, regions: list) -> dict:
                 Subtype=pikepdf.Name("/Redact"),
                 Rect=pikepdf.Array([x0, y0, x1, y1]),
                 # /IC: the fill applied redactions get. No longer hard-coded
-                # black — F15 slice E made it the user's choice, and the same
+                # black — it is the user's choice, and the same
                 # value reaches `redact()` when the mark is applied.
                 IC=pikepdf.Array(list(props.fill)),
                 C=pikepdf.Array([1, 0, 0]),
@@ -321,7 +320,7 @@ def save_redaction_marks(file: str, output: str, regions: list) -> dict:
 def list_redact_annotations(file: str) -> dict:
     """The file's /Redact set — what re-seeds the canvas marks on open.
 
-    Refuses when any mark cannot be accounted for (F12): `count` counts
+    Refuses when any mark cannot be accounted for: `count` counts
     survivors, so a partial listing is indistinguishable from a complete one
     at every layer above this — the caller must be told, not handed fewer
     marks than the document holds.

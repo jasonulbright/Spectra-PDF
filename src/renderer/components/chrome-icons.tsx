@@ -1,9 +1,9 @@
 import React from 'react';
 
 /**
- * Workbench-chrome glyphs (Phase 4 M2) — toolbar, tab strip, Home tab — in
+ * Workbench-chrome glyphs — toolbar, tab strip, Home tab — in
  * the app's established icon idiom (see tool-icons.tsx / canvas/icons.tsx):
- * 24-grid, stroke-only, `currentColor`, round caps. No Adobe artwork (§ 1);
+ * 24-grid, stroke-only, `currentColor`, round caps. No Adobe artwork;
  * hand-authored. The Record is total over ChromeIconId, so a missing glyph
  * fails to compile (the GLYPHS precedent).
  */
@@ -77,7 +77,7 @@ const GLYPHS: Record<ChromeIconId, React.JSX.Element> = {
       <path d="M11 8v6M8 11h6" />
     </>
   ),
-  // Open palm — the hold-the-paper grip (M6.2).
+  // Open palm — the hold-the-paper grip.
   hand: (
     <>
       <path d="M8 12V6.5a1.5 1.5 0 013 0V11" />

@@ -4,7 +4,7 @@ import { waitForHarness, getState, openByPaths, invokeAppCommand } from '../supp
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// Phase 4 M2: the tab strip (Home | Tools | doc tabs) replaces the old
+// The tab strip (Home | Tools | doc tabs) replaces the old
 // Home/Tools/Canvas view switcher. Navigation is tab clicks + Ctrl+Tab
 // cycling (driven here through the window.nextTab/prevTab commands).
 

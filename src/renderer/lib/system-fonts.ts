@@ -1,5 +1,5 @@
 /**
- * The machine's installed fonts, for the editor's family pickers — 9.T6.
+ * The machine's installed fonts, for the editor's family pickers.
  *
  * Editing has offered Keep-original plus three bundled families since 7.4.
  * Those exist so a replacement is always available offline and metric-

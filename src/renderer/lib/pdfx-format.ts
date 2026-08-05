@@ -49,7 +49,7 @@ export interface ExportAnnotation {
   color: string; // #rrggbb
   note?: string;
   points?: number[]; // measure/shape/callout-leader: flat [x0,y0,...] in x/y/w/h space
-  strokes?: number[][]; // ink only (N2): one flat path per pen lift, same space
+  strokes?: number[][]; // ink only: one flat path per pen lift, same space
   imageData?: string; // stamp only: custom image stamp's data URL (the AP draws it)
   markupType?: 'highlight' | 'underline' | 'strikeout' | 'squiggly'; // textmarkup only
   quads?: number[]; // textmarkup only: flat [x0,y0,x1,y1,...] per quad, in x/y/w/h space
@@ -66,14 +66,14 @@ export interface ExportAnnotation {
   calloutBox?: [number, number, number, number];
   lineEndings?: [string, string];
   cloudIntensity?: number;
-  // count / countlegend (N11 slice C) — see PageAnnotation's field comments.
+  // count / countlegend — see PageAnnotation's field comments.
   countGroup?: string;
   countSymbol?: string;
   countSeq?: number;
   legendRows?: import('./count-marks').CountLegendRow[];
   legendTitle?: string;
   legendTotalWord?: string;
-  // stamp / count (N11 slice D) — a vector symbol's registry id and its own
+  // stamp / count — a vector symbol's registry id and its own
   // carried geometry. See PageAnnotation's field comments: the parts travel
   // with the annotation so an imported set's symbol draws where the set is
   // absent.

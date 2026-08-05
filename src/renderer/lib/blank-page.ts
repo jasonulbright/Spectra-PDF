@@ -1,6 +1,6 @@
 import { PDFDocument } from 'pdf-lib';
 
-// Insert Blank Page (§ 9.3): generate a one-blank-page PDF, sized to the
+// Insert Blank Page: generate a one-blank-page PDF, sized to the
 // insertion neighbor, and hand it to the EXISTING byte-only import machinery
 // (REGISTER_IMPORT_SOURCE + IMPORT_PAGES via App.importFilesIntoDoc) — which
 // makes it undoable page-tier work with zero new commit paths. This module

@@ -199,8 +199,7 @@ export function TextSelectionMenu({
       setLinkError(tChrome('canvas.markup.enterUrl'));
       return;
     }
-    // Reentrancy taken before the first await — the double-click class the
-    // punchlist's tripwire note records.
+    // Reentrancy taken before the first await — the double-click class.
     busyRef.current = true;
     try {
       await onCreateLinks(pending, target);

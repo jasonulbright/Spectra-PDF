@@ -1,12 +1,12 @@
-// The command system — the load-bearing architecture of Phase 4
-// (docs/architecture/19-phase4-workbench-ui.md § 4). Everything visible
+// The command system — the load-bearing architecture of the workbench.
+// Everything visible
 // (menus, toolbars, context menus, tool tiles, the keymap) is data that
 // references command ids; handlers live in exactly one place.
 import type { Dispatch } from 'react';
 import type { AppAction, AppState } from '../state/types';
 import type { CanvasHandle } from '../canvas/canvas-handle';
 
-// Menu-bar namespaces (§ 4.1). Every command id must live under one of them —
+// Menu-bar namespaces. Every command id must live under one of them —
 // enforced by the `satisfies` check on COMMAND_IDS in registry.ts. The
 // concrete ids are a finite union (typeof COMMAND_IDS[number]) so that
 // `COMMANDS: Record<CommandId, Command>` is a TOTAL record: adding an id
@@ -23,7 +23,7 @@ export type CommandNamespace =
 
 /**
  * App-level handlers the registry invokes — registered by App.tsx while
- * mounted (the same handlers the header buttons ran before M1; commands are
+ * mounted (the same handlers the header buttons once ran; commands are
  * entry points, not re-implementations). Everything that only needs
  * state+dispatch is implemented directly in the registry instead.
  */
@@ -39,7 +39,7 @@ export interface AppCommandHandlers {
    * File ▸ Open Recent and Home-tab recent/open flows. */
   openPath(path: string): Promise<void>;
   /** Open a path (if not already open) and reveal a 1-based page — the
-   * cross-file search hit click (P4 part 2). Polls for the doc to index. */
+   * cross-file search hit click (part 2). Polls for the doc to index. */
   openPathAtPage(path: string, pageNumber: number): Promise<void>;
   /** Save active file to its original path (commit-gated). */
   save(): Promise<void>;
@@ -49,11 +49,11 @@ export interface AppCommandHandlers {
    * hand it to the default desktop mail client via MAPI (commit-gated).
    * Failures — chiefly no registered mail client — surface as a notice. */
   sendToEmail(): Promise<void>;
-  /** Export the active document to an editable Office / web format (O1) via
+  /** Export the active document to an editable Office / web format via
    * bundled LibreOffice — docx/rtf/odt/html/xhtml. Commit-gated (the export
    * reflects pending page edits); writes a NEW external file. */
   exportDocument(format: string): Promise<void>;
-  /** Open the Export Pages as Images dialog (O1, image half). */
+  /** Open the Export Pages as Images dialog (image half). */
   openExportImages(): void;
   /** Enter full-screen presentation mode on the active document (I.6). */
   openPresentation(): void;
@@ -67,33 +67,33 @@ export interface AppCommandHandlers {
   /** Materialize pending page edits — the "Apply changes" path
    * (commitAndReport: failures surface on the commit-error banner). */
   applyPageEdits(): Promise<void>;
-  /** Open the Settings modal (Edit ▸ Preferences… at M5). */
+  /** Open the Settings modal (Edit ▸ Preferences…). */
   openPreferences(): void;
   /** Open the Document Properties dialog (File ▸ Properties…, Ctrl+D). */
   openProperties(): void;
-  /** Open the Print dialog (File ▸ Print…, Ctrl+P — M-P, § 3.4). */
+  /** Open the Print dialog (File ▸ Print…, Ctrl+P). */
   openPrint(): void;
-  /** Open the Batch OCR dialog (Tools ▸ Batch OCR Folder… — Phase 6).
+  /** Open the Batch OCR dialog (Tools ▸ Batch OCR Folder…).
    * Needs no open document: the dialog operates on a picked folder tree,
    * entirely outside the workspace. */
   openBatchOcr(): void;
   openScheduledRuns(): void;
-  /** Open the Watched Folders dialog (O7 — Tools ▸ Watched Folders…). */
+  /** Open the Watched Folders dialog (Tools ▸ Watched Folders…). */
   openWatchedFolders(): void;
-  /** Insert a blank page after the page being read (§ 9.3, M6.3) — pdf-lib
+  /** Insert a blank page after the page being read — pdf-lib
    * one-pager sized to the neighbor, through the byte-only import machinery. */
   insertBlankPage(): Promise<void>;
   /** Insert another file's pages after the page being read (Ctrl+Shift+I,
-   * § 9.2) — the native picker, then the same import machinery. */
+   * — the native picker, then the same import machinery. */
   insertPagesFromFile(): Promise<void>;
   /** Combine Files appends picked PDF pages to the end of the active document,
    * providing a menu path to the same import machinery as board drag-merging
    * does (same import machinery, page-tier undoable). */
   combineFiles(): Promise<void>;
-  /** Create PDF from PostScript (Phase 8): open the distill dialog. */
+  /** Create PDF from PostScript: open the distill dialog. */
   openCreatePdf(): void;
   /** Open the Settings modal at its third-party-licenses section (Help ▸
-   * Third-party Licenses). Same surface as preferences until M5 splits it. */
+   * Third-party Licenses). Same surface as preferences. */
   openLicenses(): void;
   /** Open the About dialog (name/version/repo). */
   openAbout(): void;
@@ -117,7 +117,7 @@ export interface CanvasServices {
   /** The d3-zoom camera handle (null until the Canvas mounts its ref). */
   canvas(): CanvasHandle | null;
   /**
-   * Bring a page into view, wherever it lives (M4.1c).
+   * Bring a page into view, wherever it lives.
    *
    * ALWAYS prefer this over `canvas().centerOn()` for a page the caller didn't
    * get from the currently-shown document. The board renders every document, so
@@ -129,50 +129,50 @@ export interface CanvasServices {
    */
   jumpToPage(pageId: string): void;
   /** Jump to the Nth page (1-based) of a FILE, resolving the page id from
-   * live workspace state. Phase 5 (§ F): ids are opaque — generation-
+   * live workspace state. Ids are opaque — generation-
    * tagged when positional, historic when adopted — so callers that know
    * only a page NUMBER (bookmarks) must resolve here, never string-build
    * an id. */
   jumpToFilePage(path: string, pageNumber: number): boolean;
-  /** READ this page (M6.2): switch to the reading view (focusing the owning
+  /** READ this page: switch to the reading view (focusing the owning
    * document if needed) and land on the page — the PageInspector's
    * replacement. Uses the pending-jump slot, so it is safe to call from any
    * view mode; `jumpToPage` after a mode dispatch is NOT (stale-ref fast
    * path — regression). */
   openPageForReading(pageId: string): void;
-  /** The floating Find bar (2m). */
+  /** The floating Find bar. */
   find: {
     isOpen(): boolean;
     open(): void;
     /** Open seeded with a query, optional page jump, and optional advanced
-     * modes — the Search nav panel's result click (Phase 4 M3.3; P4 carries the
+     * modes — the Search nav panel's result click (carries the
      * panel's regex/case/whole-word modes so the highlight agrees). */
     openWith(query: string, pageId?: string, options?: import('../search/normalize').SearchOptions): void;
     close(): void;
-    /** Step the match cursor (F3 / Shift+F3, M6.3). Only meaningful while
+    /** Step the match cursor. Only meaningful while
      * open — the commands open the bar first when it isn't. */
     next(): void;
     prev(): void;
   };
-  /** Focus the reading view's page box (Ctrl+Shift+N, § 9.2). Returns false
+  /** Focus the reading view's page box (Ctrl+Shift+N). Returns false
    * when the box isn't on screen (organize view) — the command's `when`
    * gates on the view mode, this is the belt for the render race. */
   goToPage(): boolean;
-  /** N11 slice B: drop every ruler guide (View ▸ Clear Guides). Guides are
+  /** Drop every ruler guide (View ▸ Clear Guides). Guides are
    * per-document VIEW state owned by the canvas — the redaction-mark
    * lifetime — so the command routes here rather than through the reducer or
    * the snap-preference store. */
   clearGuides(): void;
-  /** F6: arm the canvas's visible-signature placement from a PANEL, with the
+  /** Arm the canvas's visible-signature placement from a PANEL, with the
    * panel's signer details prefilled into the canvas sign card. Optional —
    * present only while the canvas view is mounted with a document. */
   startVisibleSignature?(prefill?: import('../components/SignerSourceFields').SignerSource): void;
   /**
-   * F15 slice D — the Search & Redact panel's seam onto the canvas's redaction
+   * The Search & Redact panel's seam onto the canvas's redaction
    * marks.
    *
    * The panel does not own geometry and must not: converting a page-space rect
-   * into a display-normalized mark is the F10 seed's own conversion, and there
+   * into a display-normalized mark is the seed's own conversion, and there
    * is exactly ONE of it (in the canvas, where the pdf.js proxies and the
    * PageRef rotations live). What crosses this seam is the payload shape
    * `list_redact_annotations` returns and `save_redaction_marks` takes —
@@ -199,7 +199,7 @@ export interface CanvasServices {
      * already-marked state stays live while the user also draws by hand.
      * Returns its own unsubscribe. */
     subscribe(listener: () => void): () => void;
-    /** The SECOND rect authority (§ 1.6): an image-only page's hits come from
+    /** The SECOND rect authority: an image-only page's hits come from
      * the in-memory OCR word boxes the index already holds, converted to page
      * space by the same machinery "Make searchable" uses. Returns [] when the
      * page has not been recognised yet. */
@@ -252,12 +252,12 @@ export interface CommandContext {
 }
 
 export interface Command {
-  /** Menu/tooltip label (menus render from the registry at M2). */
+  /** Menu/tooltip label (menus render from the registry). */
   title: string;
   /** Pure enablement predicate — menus/toolbars gray consistently from this,
    * and the keymap only runs enabled commands. Absent = always enabled.
    * `disabled` is rendering-state only; features we don't ship are ABSENT
-   * (§ 3.3), never registered-and-disabled. */
+   * Never registered-and-disabled. */
   when?: (ctx: CommandContext) => boolean;
   run: (ctx: CommandContext) => void | Promise<void>;
 }

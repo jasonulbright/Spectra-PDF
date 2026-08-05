@@ -2,7 +2,7 @@ export interface OcrLanguage {
   /** Tesseract's model code — what the engine and the traineddata staging use. */
   code: string
   /** English name. A LAST-RESORT fallback only: the UI says a language's name
-   * through Intl.DisplayNames (N12), which every locale already knows how to
+   * through Intl.DisplayNames, which every locale already knows how to
    * spell, so these are never authored into the translation catalogs. */
   label: string
   /** BCP-47 tag for Intl.DisplayNames. Tesseract's codes are ISO 639-2/T plus
@@ -11,7 +11,7 @@ export interface OcrLanguage {
   bcp47: string
 }
 
-// The vendored recognition languages (P1). Every entry's traineddata is staged
+// The vendored recognition languages. Every entry's traineddata is staged
 // into resources/ocr-lang by scripts/sync-ocr-assets.mjs — the script PARSES
 // this file for the codes, so this list is the single source of truth and a
 // language added here without a matching @tesseract.js-data package fails the

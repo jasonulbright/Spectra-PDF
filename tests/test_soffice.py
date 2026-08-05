@@ -1,4 +1,4 @@
-"""P22 slice B — the hardened LibreOffice runner (brief 41 § 9 B, § 10).
+"""The hardened LibreOffice runner.
 
 Three things here are pins on MEASURED defects rather than on design:
 

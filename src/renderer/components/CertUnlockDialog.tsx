@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { dialog } from '../lib/tauri-bridge';
 import { tChrome } from '../i18n';
 
-/** F9: unlocking a certificate-encrypted (Adobe.PubSec) file — the pubkey
+/** Unlocking a certificate-encrypted (Adobe.PubSec) file — the pubkey
  * sibling of PasswordDialog. The user picks their PKCS#12 key bundle and
  * enters ITS password (the .pfx password, not a document password). */
 export type CertUnlockResult = { pfx: string; password: string } | 'cancel';
@@ -22,7 +22,7 @@ export function CertUnlockDialog({
   error,
   onResult,
 }: CertUnlockDialogProps): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const [pfx, setPfx] = useState<string | null>(null);
   const [password, setPassword] = useState('');

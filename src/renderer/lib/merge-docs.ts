@@ -1,8 +1,8 @@
-// Canvas whole-document merge (2o): pure helpers for the DocHeader merge-up
-// action and its close-guard. Design: docs/architecture/17-phase2o-canvas-merge.md.
+// Canvas whole-document merge: pure helpers for the DocHeader merge-up
+// action and its close-guard.
 //
 // A merge appends a COPY of the source document's pages to the target via
-// one IMPORT_PAGES dispatch (2n.3's machinery unchanged, one undo step) —
+// one IMPORT_PAGES dispatch (the machinery unchanged, one undo step) —
 // copy, not move, because the reducer's zero-page guard forbids emptying a
 // file's pages, and the copy semantic leaves the source strip visibly intact
 // until the user removes it (post-commit, once the copies re-bake to the

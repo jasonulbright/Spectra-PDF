@@ -1,4 +1,4 @@
-// Canvas pan constraint (Phase 3 polish): the fitted-content case must
+// Canvas pan constraint (polish): the fitted-content case must
 // CENTER-clamp instead of applying no constraint — extreme zoom-out used to
 // let a pan fling the workspace off-screen (only "Fit" recovered).
 import { describe, expect, it } from 'vitest';

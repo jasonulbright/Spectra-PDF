@@ -16,10 +16,10 @@ import {
   editImageAct,
 } from '../support/harness.js';
 
-// Phase 9.C3 — image adjustments against the built binary: opacity (a
+// Image adjustments against the built binary: opacity (a
 // page-local ExtGState the LISTING seeds back), crop (a unit-space clip —
 // bytes change, the placement matrix does not), and the rotate-90 toolbar
-// button (routed through the shipped C1 transform). The engine ops and the
+// button (routed through the image transform). The engine ops and the
 // gesture math are unit-tested; this proves the end-to-end wire + undo.
 // Waits are generation-keyed (page ids regenerate per commit — the
 // non-authored-rebuild rule; see e2e README §Adding-a-spec 4).
@@ -46,7 +46,7 @@ async function workingHash(): Promise<string> {
   return createHash('sha256').update(readFileSync(wp)).digest('hex');
 }
 
-describe('image adjustments (Phase 9.C3)', () => {
+describe('image adjustments', () => {
   let tmp: string;
   let pdfPath: string;
 
@@ -86,7 +86,7 @@ describe('image adjustments (Phase 9.C3)', () => {
     // the on-disk proof — the listing walks the buffer reloaded from the
     // WRITTEN file, resolving the registered ExtGState by name. (No byte-grep
     // here: qpdf packs small dicts into compressed object streams, so a raw
-    // "/EditGS0" search false-fails — unlike the A3 font-name greps, which
+    // "/EditGS0" search false-fails — unlike the font-name greps, which
     // hit plain objects.)
     await browser.waitUntil(
       async () => {
@@ -95,7 +95,7 @@ describe('image adjustments (Phase 9.C3)', () => {
       },
       { timeout: 30_000, timeoutMsg: 'opacity 0.5 never listed back' },
     );
-    // C1-tail: the selection SURVIVED the rebuild (auto-reselect against
+    // The selection SURVIVED the rebuild (auto-reselect against
     // the regenerated page id) — a chained edit needs no re-click.
     await browser.waitUntil(
       async () => {
@@ -134,7 +134,7 @@ describe('image adjustments (Phase 9.C3)', () => {
     await editImageSelect(pageId, 0);
     await editImageAct('crop', { rect: [0.25, 0.25, 0.75, 0.75] });
     // Generation-keyed; the crop clips — the placement matrix must NOT
-    // move, and the LISTING now reports the tool crop (C3-tail).
+    // move, and the LISTING now reports the tool crop.
     const cropIs = (
       c: number[] | null | undefined,
       want: [number, number, number, number],
@@ -156,7 +156,7 @@ describe('image adjustments (Phase 9.C3)', () => {
 
     // Re-crop WIDER — inexpressible under the old intersect semantics;
     // collapse-replace makes the listed crop GROW (the tail headline).
-    // The C1-tail reselect means the selection survived the commit — the
+    // The auto-reselect means the selection survived the commit — the
     // chained act needs no re-select.
     const midId = (await editImagePageIds())[0];
     await editImageAct('crop', { rect: [0.1, 0.1, 0.9, 0.9] });
@@ -193,7 +193,7 @@ describe('image adjustments (Phase 9.C3)', () => {
     );
   });
 
-  it('rotate-90 toolbar button turns the placement via the C1 transform', async function () {
+  it('rotate-90 toolbar button turns the placement via the transform', async function () {
     this.timeout(120_000);
     await waitForHarness();
     await invokeAppCommand('tools.open.edit');
@@ -237,7 +237,7 @@ describe('image adjustments (Phase 9.C3)', () => {
     );
   });
 
-  it('sets a blend mode (P7): listed back as the seed, merged with opacity, undone', async function () {
+  it('sets a blend mode: listed back as the seed, merged with opacity, undone', async function () {
     this.timeout(120_000);
     await waitForHarness();
     await invokeAppCommand('tools.open.edit');
@@ -301,7 +301,7 @@ describe('image adjustments (Phase 9.C3)', () => {
     );
   });
 
-  it('sets a linear gradient mask (P7): seeded back, cleared, undone', async function () {
+  it('sets a linear gradient mask: seeded back, cleared, undone', async function () {
     this.timeout(120_000);
     await waitForHarness();
     await invokeAppCommand('tools.open.edit');

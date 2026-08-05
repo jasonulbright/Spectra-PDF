@@ -1,4 +1,4 @@
-// T20 — rich paste, the whole wire: a synthetic clipboard paste carrying
+// Rich paste, the whole wire: a synthetic clipboard paste carrying
 // text/html lands in the paragraph editor as per-span overlays (the same
 // vocabulary the toolbar writes), and the commit drives them through the
 // engine's span_styles into the relisted page. Styles asserted from the
@@ -35,7 +35,7 @@ async function editParagraphs(pageId: string): Promise<ParaSnapshot[]> {
   }, pageId);
 }
 
-describe('rich paste (T20)', () => {
+describe('rich paste', () => {
   let tmp: string;
   let pdfPath: string;
 

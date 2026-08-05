@@ -44,7 +44,7 @@ function forceDelete(name: string): void {
   }
 }
 
-describe('scheduled batch runs (Phase 12 request 5)', () => {
+describe('scheduled batch runs', () => {
   let tmp: string;
   let src: string;
   let dest: string;

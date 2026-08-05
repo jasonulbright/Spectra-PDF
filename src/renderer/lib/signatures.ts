@@ -1,4 +1,4 @@
-// Shared signature-verification types + status classifier (Phase 4 M3.3b).
+// Shared signature-verification types + status classifier.
 // Both the Tools ▸ Signatures panel (the signing surface) and the nav-pane
 // Signatures panel (the read/status surface) render the SAME verify_signatures
 // result, so the shape and the valid/modified/invalid decision live here once —
@@ -24,7 +24,7 @@ export interface SignatureEntry {
   timestamped?: boolean;
   timestamp_time?: string | null;
   timestamp_valid?: boolean;
-  /** 1-based page carrying the signature's widget (F7) — absent when the
+  /** 1-based page carrying the signature's widget — absent when the
    * engine could not place it, in which case no jump is offered. */
   page?: number;
   error?: string;
@@ -52,7 +52,7 @@ export function classifySignature(sig: SignatureEntry): SignatureStatus {
   return 'valid';
 }
 
-/** Badge text per status — identical wording across both panels. N12: the
+/** Badge text per status — identical wording across both panels. The
  * values are CATALOG KEYS (both consumers render `tChrome(...)`), kept here
  * so the two surfaces still cannot drift on the wording — they share the
  * key, and the catalog owns the text. */

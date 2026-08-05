@@ -1,6 +1,6 @@
-// The page context menu, factored out of WorkspaceCanvasView (Phase 4 M3) so
+// The page context menu, factored out of WorkspaceCanvasView so
 // the canvas board and the nav-pane Pages panel share ONE definition — the
-// § 3.2 "same menu, same code" promise. A pure builder over (docs, target,
+// "same menu, same code" promise. A pure builder over (docs, target,
 // selection, dispatch, callbacks) returning MenuItem[]; behavior is identical
 // to the inline version it replaced (Open / Rotate CW/CCW / Extract Text /
 // Delete, with the same multi-select and empties-a-file guards).
@@ -16,7 +16,7 @@ export interface PageMenuDeps {
   selectedPageIds: ReadonlySet<string>;
   dispatch: (action: AppAction) => void;
   /** Open the page (inspector / document view) — 1-based workspace page. */
-  // "Open" = READ this page (M6.2): the reading pane replaced the
+  // "Open" = READ this page: the reading pane replaced the
   // PageInspector as the look-closely surface, and a jump wants the page's
   // id, not a file+number pair.
   onOpen: (docId: string, pageId: string) => void;

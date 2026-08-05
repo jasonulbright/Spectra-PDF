@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAppModal } from '../hooks/useAppModal';
 import { tChrome } from '../i18n';
 
-// About dialog (Phase 4 M2) — the app name/version/repo, moved out of the
+// About dialog — the app name/version/repo, moved out of the
 // old header chrome (the native title bar carries the name now). Version is
 // passed in (App already fetches it via app.getVersion).
 
@@ -15,7 +15,7 @@ interface AboutDialogProps {
 const REPO_URL = 'https://github.com/jasonulbright/Spectra-PDF';
 
 export function AboutDialog({ version, onClose }: AboutDialogProps): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const shellRef = useAppModal(onClose);
   return (

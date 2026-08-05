@@ -1,11 +1,11 @@
-"""Guided-actions folder runs (slice 3) — the Action Wizard's batch half.
+"""Guided-actions folder runs — the Action Wizard's batch half.
 
 Runs a validated step sequence over every PDF under a source folder,
 mirroring the tree into a destination (the batch-OCR shape: sources are
 never modified, outputs land at the same relative paths, one file's failure
 never stops the run). Lives ENGINE-SIDE deliberately: one RPC per run, the
 CLI arm gets it for free, and a scheduled run can fire with the app closed —
-the same reasoning that put batch OCR here (Phase 12).
+the same reasoning that put batch OCR here.
 
 Steps arrive as DATA (saved actions, CLI JSON, scheduled profiles), so they
 are validated against an explicit dispatch table — op names and parameter
@@ -17,7 +17,7 @@ the copy — the engine-wide in-place support (engine/inplace.py) makes every
 step atomic per write, and a failed step deletes the partial copy so the
 mirror never holds half-processed files.
 
-**One step breaks that shape deliberately: `create_pdf` (P22 slice E).** It
+**One step breaks that shape deliberately: `create_pdf`.** It
 PRODUCES the mirrored document instead of transforming a copy of the source,
 so an action can start "convert every Office file that lands in this folder"
 and then compress, stamp and OCR the result. Because it produces rather than
@@ -60,7 +60,7 @@ _STEPS: dict = {
             {
                 "quality",
                 "dpi",
-                # O8: `quality="mrc"` routes the SAME step to the MRC pass, so
+                # `quality="mrc"` routes the SAME step to the MRC pass, so
                 # watched folders and scheduled runs get it with no new op.
                 "mrc_preset",
                 "mrc_mask_codec",
@@ -106,7 +106,7 @@ _STEPS: dict = {
     ),
     "ocr_file": (ocr_file, frozenset({"language"}), frozenset({"gs_path", "tesseract_path"})),
     "encrypt": (encrypt, frozenset({"user_password", "owner_password", "permissions"}), frozenset()),
-    # P22 slice E. The one step that PRODUCES the document instead of
+    # The one step that PRODUCES the document instead of
     # transforming it, which is why it is handled by `run_action` directly
     # rather than by `_apply_steps`: every other step is `fn(file=p,
     # output=p)`, and `create_pdf` refuses to write over its own source (the
@@ -166,7 +166,7 @@ def validate_steps(steps) -> list[dict]:
                 {"position": str(params.pop("position")), "text": str(params.pop("text"))}
             ]
         if op == "compress" and str(params.get("quality", "")).strip().lower() == "mrc":
-            # ORDER, enforced rather than documented (§ 5.4): recognition
+            # ORDER, enforced rather than documented: recognition
             # rasterizes from the page, so OCR after MRC would read the
             # RECONSTRUCTION instead of the scan it was meant to read.
             later_ocr = any(
@@ -239,7 +239,7 @@ def run_action(
 ) -> dict:
     """Run a step sequence over every PDF under `source`, mirroring into
     `dest` — or, with `in_place`, REPLACING each original with its processed
-    version (O7 in-place batch mode; staged beside the original, verified,
+    version (in-place batch mode; staged beside the original, verified,
     then swapped atomically). Returns the report; writes an
     `action-run-*.log` beside the batch-OCR logs when `write_log` and a
     `log_dir` are given."""
@@ -293,7 +293,7 @@ def run_action(
 
     started_at = datetime.now()
     # Guided actions run PDF steps; image sources are the batch-OCR
-    # sweep's own option (P3) and would have nothing to run against here —
+    # sweep's own option and would have nothing to run against here —
     # UNLESS the action starts by CREATING the document, which is exactly the
     # "convert every Office file that lands in this folder" run.
     entries, skipped_dirs = _list_sources(
@@ -310,7 +310,7 @@ def run_action(
         elif creates and not rel.lower().endswith(".pdf"):
             # The mirrored name GAINS `.pdf` rather than replacing the
             # extension — `invoice.docx` and `invoice.pdf` in one folder must
-            # not collide, and the original name stays legible (the P3
+            # not collide, and the original name stays legible (the
             # image-source rule, met at a second surface).
             out_path = dest_path / f"{rel}.pdf"
         else:

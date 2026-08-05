@@ -117,7 +117,7 @@ import { useTranslation } from 'react-i18next';
 import { tChrome } from './i18n';
 
 // The Preferences shell — a component (not inline JSX) so it can carry the
-// shared dialog keyboard/focus contract (useAppModal, M6.5).
+// shared dialog keyboard/focus contract (useAppModal).
 function PreferencesModal({
   category,
   onClose,
@@ -125,7 +125,7 @@ function PreferencesModal({
   category: PrefCategory;
   onClose: () => void;
 }): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const shellRef = useAppModal(onClose);
   return (
@@ -172,12 +172,12 @@ const panels: Record<Operation, React.ComponentType> = {
 };
 
 function AppContent(): React.ReactElement {
-  // N12: re-render on language change; the banner's buttons and every
+  // Re-render on language change; the banner's buttons and every
   // confirm/notice message below resolve via tChrome.
   useTranslation();
   const state = useAppState();
   const dispatch = useAppDispatch();
-  // The tab model lives in the ui slice (Phase 4 M2) so the command registry,
+  // The tab model lives in the ui slice so the command registry,
   // menus, and tab strip all read it. focusedTab replaces the old `view`.
   const focusedTab = state.ui.focusedTab;
   const inDocTab = isDocTab(focusedTab);
@@ -203,10 +203,10 @@ function AppContent(): React.ReactElement {
   const [showSchedules, setShowSchedules] = useState(false);
   const [showWatchers, setShowWatchers] = useState(false);
   const [showCreatePdf, setShowCreatePdf] = useState(false);
-  // Sources a drop pre-populates Create PDF with (P22). Cleared on close so
+  // Sources a drop pre-populates Create PDF with. Cleared on close so
   // the next menu-opened dialog starts empty rather than replaying a drop.
   const [createPdfSeed, setCreatePdfSeed] = useState<string[]>([]);
-  // Combine Files (P22 slice D) is a dialog now, not a bare picker: it has to
+  // Combine Files is a dialog now, not a bare picker: it has to
   // show per-row conversion state, page ranges and a target, none of which a
   // native file picker can carry.
   const [showCombine, setShowCombine] = useState(false);
@@ -262,7 +262,7 @@ function AppContent(): React.ReactElement {
     }
   }, [passwordState]);
 
-  // Certificate-unlock prompt (F9) — the pubkey sibling of the password one.
+  // Certificate-unlock prompt — the pubkey sibling of the password one.
   const [certUnlockState, setCertUnlockState] = useState<{
     fileName: string;
     error?: string;
@@ -331,7 +331,7 @@ function AppContent(): React.ReactElement {
     persistToolbarOverrides(state.ui.toolbarOverrides);
   }, [state.ui.toolbarOverrides]);
 
-  // Mirror the nav-pane state (M3) to the workbench-ui key. Debounced: a resize
+  // Mirror the nav-pane state to the workbench-ui key. Debounced: a resize
   // drag dispatches a new width per pointermove, and an unthrottled synchronous
   // localStorage write per event competes with the drag for main-thread time
   // (regression). Each change reschedules; only the settled value persists.
@@ -368,7 +368,7 @@ function AppContent(): React.ReactElement {
           writeBuffer: file.writeBuffer,
           rename: file.rename,
           remove: file.remove,
-          // O5b: callRaw, deliberately — this runs INSIDE the commit, so
+          // callRaw, deliberately — this runs INSIDE the commit, so
           // the gated `call` would re-enter commitPageEdits (loud throw).
           // The gate's guarantee ("engine reads bytes matching what the
           // user sees") holds by construction here: we ARE the commit,
@@ -432,7 +432,7 @@ function AppContent(): React.ReactElement {
   }, [state.files, call]);
 
   // Create a working copy, unlock if encrypted, read bytes + page count. Shared
-  // by opening files and by importing a file's pages into a document (2n.3).
+  // by opening files and by importing a file's pages into a document.
   // Returns null if the user cancelled an encrypted file.
   const prepareFileBytes = useCallback(
     async (
@@ -446,7 +446,7 @@ function AppContent(): React.ReactElement {
         let error: string | undefined;
         while (!unlocked) {
           if (encStatus.kind === 'pubkey') {
-            // F9: certificate-encrypted (Adobe.PubSec) — unlock with the
+            // Certificate-encrypted (Adobe.PubSec) — unlock with the
             // user's PKCS#12 key. The engine's refusals are already honest
             // ("does not match any recipient" / "check the file and its
             // password"), so they surface verbatim.
@@ -486,7 +486,7 @@ function AppContent(): React.ReactElement {
   stateRef.current = state;
 
   // Open files, then focus the last opened document's tab (opening a file is
-  // an explicit request to view it — § M2 tab model). Already-open files are
+  // an explicit request to view it). Already-open files are
   // re-activated. Recent list accumulates once so a multi-open batch doesn't
   // clobber itself.
   // `focus: false` opens without moving the user: a panel's "Open a PDF"
@@ -501,7 +501,7 @@ function AppContent(): React.ReactElement {
     let lastOpened: string | null = null;
     let changed = false;
     try {
-      // THE PATH-IDENTITY GATE (M7). File identity is the raw path string
+      // THE PATH-IDENTITY GATE. File identity is the raw path string
       // app-wide (`state.files` keys, tabs, recents, activeFileId,
       // PageRef.sourceDocId), and Windows spells the same file many ways —
       // case, slash direction, 8.3 short names. Rust producers (dialogs,
@@ -575,7 +575,7 @@ function AppContent(): React.ReactElement {
   }, [dispatch, prepareFileBytes]);
 
   // Import one or more files' pages INTO an existing document at an index (the
-  // add-page ghost and per-position drops, 2n.3). Each file is registered
+  // add-page ghost and per-position drops). Each file is registered
   // byte-only (no strip) and its pages spliced in — atomic, undoable. Files
   // already open are reused. A cancelled encrypted file is skipped.
   const importFilesIntoDoc = useCallback(
@@ -633,13 +633,13 @@ function AppContent(): React.ReactElement {
     [state.files, dispatch, prepareFileBytes],
   );
 
-  // The canvas publishes its drop resolver here (2n.3).
+  // The canvas publishes its drop resolver here.
   const dropResolverRef = useRef<CanvasDropResolver | null>(null);
 
   const handleFilesDropped = useCallback(
     async (paths: string[], position?: { x: number; y: number }) => {
       // A drop landing ON a document while a doc tab is focused imports its
-      // pages into that document at the drop point (2n.3). A miss falls
+      // pages into that document at the drop point. A miss falls
       // through to opening the files (which focuses the last one's tab).
       if (inDocTab && position && dropResolverRef.current) {
         const dpr = window.devicePixelRatio || 1;
@@ -649,7 +649,7 @@ function AppContent(): React.ReactElement {
           return;
         }
       }
-      // Drop-to-combine (P22 slice D): while the Combine dialog is open a
+      // Drop-to-combine: while the Combine dialog is open a
       // drop is an ADD, whatever the kinds are — including PDFs, which the
       // funnel would otherwise open in their own tabs behind the dialog the
       // user is building a list in. Read through a ref so the drop handler
@@ -659,7 +659,7 @@ function AppContent(): React.ReactElement {
         if (accepted.length > 0) setCombineSeed(accepted);
         return;
       }
-      // P22: a drop carrying files the open funnel cannot take (a .docx, a
+      // A drop carrying files the open funnel cannot take (a .docx, a
       // .png, a .ps) used to do NOTHING. It now offers to convert them,
       // through the same dialog, pre-populated — and the funnel rule holds,
       // because everything still lands in openByPaths once a PDF exists.
@@ -683,7 +683,7 @@ function AppContent(): React.ReactElement {
     return false;
   }, [openFiles, openByPaths]);
 
-  // Add-page ghost (2n.3): pick file(s) and import their pages into a document.
+  // Add-page ghost: pick file(s) and import their pages into a document.
   const handleAddPages = useCallback(
     async (docId: string, toIndex: number) => {
       const paths = await openFiles();
@@ -692,16 +692,16 @@ function AppContent(): React.ReactElement {
     [openFiles, importFilesIntoDoc],
   );
 
-  // Document ▸ Insert Pages ▸ … (M6.3). Both land AFTER the page being read
+  // Document ▸ Insert Pages ▸ …. Both land AFTER the page being read
   // (`insertAnchor`) and both ride the byte-only import machinery — undoable
-  // page-tier work, zero new commit paths (§ 9.3).
+  // page-tier work, zero new commit paths.
   const insertPagesFromFile = useCallback(async () => {
     const anchor = insertAnchor(stateRef.current);
     if (!anchor) return;
     await handleAddPages(anchor.docId, anchor.index);
   }, [handleAddPages]);
 
-  // Combine Files (P22 slice D). Was a bare `openFiles()` into the page-tier
+  // Combine Files. Was a bare `openFiles()` into the page-tier
   // import, which is why it took PDFs only — a .docx cannot enter the page
   // tier. It opens the Combine dialog now: the conversion happens through the
   // one `create_pdf` door and only the RESULT reaches the import machinery,
@@ -793,7 +793,7 @@ function AppContent(): React.ReactElement {
     [performOperation],
   );
 
-  // F10: persist the pending marks as the file's /Redact set — undoable,
+  // Persist the pending marks as the file's /Redact set — undoable,
   // same snapshot→engine→reload shape as apply. The reload's buffer change
   // clears the transient marks and the re-seed loads them back from the
   // file, so state and file agree by construction.
@@ -804,7 +804,7 @@ function AppContent(): React.ReactElement {
     [performOperation],
   );
 
-  // F8: a pushbutton widget clicked in fill mode. Reset runs for REAL (the
+  // A pushbutton widget clicked in fill mode. Reset runs for REAL (the
   // engine op, undoable). A URI is SHOWN and offered to the clipboard — this
   // app deliberately opens no external URLs itself (the notify-only-updates
   // posture: no general shell-open surface exists to misuse). JavaScript and
@@ -894,7 +894,7 @@ function AppContent(): React.ReactElement {
     async (path: string, values: Record<string, FormFieldValue>) => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      // Pre/post reads route through the engine (FC4b) — `read_form_fields` is
+      // Pre/post reads route through the engine — `read_form_fields` is
       // INTERNAL, so neither read runs the commit gate. The pre-read sees the
       // current working copy (== buffer); `file.snapshot` then flushes pending
       // page edits, and the post-read sees those committed bytes, so the
@@ -907,9 +907,9 @@ function AppContent(): React.ReactElement {
       if (skipped.length > 0) {
         throw new Error(skipped.map((s) => `"${s.name}": ${s.reason}`).join('; '));
       }
-      // FC4 (§I.0 S1/S3): route the fill through the ENGINE — Unicode-capable
+      // Route the fill through the ENGINE — Unicode-capable
       // (embeds a font for non-WinAnsi values) and multi-select-optionlist
-      // aware. Read (above) and fill are now one engine implementation (FC4b);
+      // aware. Read (above) and fill are now one engine implementation;
       // `resolveFillTargets`' fingerprint/rename-family machinery is unchanged.
       // The snapshot already flushed pending edits, and `call` is commit-gated
       // for `fill_form_fields`, so the engine reads the committed bytes.
@@ -971,7 +971,7 @@ function AppContent(): React.ReactElement {
     [performOperation],
   );
 
-  // --- Edit ▸ Images (Phase 7.1) ----------------------------------------
+  // --- Edit ▸ Images ----------------------------------------------------
   // One handler, three actions. Mutations route through performOperation
   // (gate → snapshot → engine → reload → undoable); extract is a gated read
   // that writes a NEW image file where the user chose. `opts` lets the e2e
@@ -1014,7 +1014,7 @@ function AppContent(): React.ReactElement {
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
       if (opts?.convert) {
-        // 7.4 + 9.B1: render the replacement in the bundled fallback
+        // Render the replacement in the bundled fallback
         // font FAMILY — getEditFontPath returns the fonts DIRECTORY and
         // the engine picks the face (serif/sans/mono) matching the run's
         // own font. The path the editor offers when the run's own font
@@ -1033,7 +1033,7 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
-  // T14: run-scoped size/color restyle — same signed-doc gate, text unchanged.
+  // Run-scoped size/color restyle — same signed-doc gate, text unchanged.
   const handleRestyleText = useCallback(
     async (
       path: string,
@@ -1077,37 +1077,37 @@ function AppContent(): React.ReactElement {
         expected_runs: para.runs,
         expected_text: para.text,
       };
-      // A1 restyle: uniform size (points) / fill colour ([r,g,b] 0-1).
+      // restyle: uniform size (points) / fill colour ([r,g,b] 0-1).
       if (opts?.size !== undefined) params.size = opts.size;
       if (opts?.color !== undefined) params.color = opts.color;
-      // A3a/A3b substitution: the whole paragraph re-renders in the chosen
+      // substitution: the whole paragraph re-renders in the chosen
       // bundled face (family and/or absolute bold/italic pair).
       if (opts?.family !== undefined) params.family = opts.family;
       if (opts?.bold !== undefined) params.bold = opts.bold;
       if (opts?.italic !== undefined) params.italic = opts.italic;
-      // A4 split: a code-point offset — the engine lays out two blocks.
+      // split: a code-point offset — the engine lays out two blocks.
       if (opts?.split_at !== undefined) params.split_at = opts.split_at;
-      // T18: a user-chosen split gap (leading multiples) and/or an explicit
+      // A user-chosen split gap (leading multiples) and/or an explicit
       // box resize (points; box_left rides when the LEFT grip dragged).
       if (opts?.split_gap !== undefined) params.split_gap = opts.split_gap;
       if (opts?.box_width !== undefined) params.box_width = opts.box_width;
       if (opts?.box_left !== undefined) params.box_left = opts.box_left;
       if (opts?.convert) params.convert = true;
-      // 9.K2 whole-paragraph OpenType features (small caps / alternates). The
+      // Whole-paragraph OpenType features (small caps / alternates). The
       // engine applies them in place when the paragraph's own font carries the
       // feature, else switches to Libertinus Serif. Per-span features ride
       // span_styles below.
       if (opts?.features !== undefined) params.features = opts.features;
       if (opts?.alt_index !== undefined) params.alt_index = opts.alt_index;
-      // A5a/A5b/A5c: per-span overrides ride ONE span_styles list (colour,
+      // Per-span overrides ride ONE span_styles list (colour,
       // face, and size fold independently in the engine). Forward it verbatim
       // — dropping it silently reverts a per-span edit to a plain re-typeset.
       if (opts?.span_styles !== undefined) params.span_styles = opts.span_styles;
-      // The bundled fallback faces (7.4/9.B1/9.A3): convert renders only the
+      // The bundled fallback faces: convert renders only the
       // characters the mapped fonts cannot express; a substitution re-renders
       // every character. Either way the engine resolves the face from the
       // fonts DIRECTORY.
-      // 9.K1b: sent UNCONDITIONALLY now — kerning reads the document's own
+      // Sent UNCONDITIONALLY now — kerning reads the document's own
       // font, and a non-embedded standard-14 reaches its kern data through
       // the metric twin in that directory. Gating this on substitution would
       // kern some documents and silently not others.
@@ -1117,7 +1117,7 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
-  // 9.A4 merge: one engine op, one undo step; both fingerprints ride so the
+  // merge: one engine op, one undo step; both fingerprints ride so the
   // engine refuses a stale view. Signed-doc-guarded like every content edit.
   const handleMergeParagraph = useCallback(
     async (
@@ -1125,7 +1125,7 @@ function AppContent(): React.ReactElement {
       page: number,
       prev: { index: number; runs: number[]; text: string },
       cur: { index: number; runs: number[]; text: string },
-      // T18: `withNext` merges cur (the NEXT paragraph) into prev (the
+      // `withNext` merges cur (the NEXT paragraph) into prev (the
       // SELECTED one — prev is always the anchor slot); an edited editor
       // rides its text in as the selected side's override with the span
       // map the replace path would have sent.
@@ -1150,7 +1150,7 @@ function AppContent(): React.ReactElement {
         expected_runs: cur.runs,
         expected_text: cur.text,
         ...(opts?.withNext ? { with_next: true } : {}),
-        // T18: whole-paragraph restyle riding the merge (same A1/A3
+        // Whole-paragraph restyle riding the merge (same
         // semantics as replace, same engine pipeline).
         ...(opts?.restyle?.size !== undefined ? { size: opts.restyle.size } : {}),
         ...(opts?.restyle?.color !== undefined ? { color: opts.restyle.color } : {}),
@@ -1163,7 +1163,7 @@ function AppContent(): React.ReactElement {
               selected_spans_override: opts.overrideSpans,
             }
           : {}),
-        // 9.K1b: a merge re-lays-out text too, so it needs the same kern
+        // A merge re-lays-out text too, so it needs the same kern
         // source an edit gets.
         font_path: await app.getEditFontPath(),
       });
@@ -1171,10 +1171,10 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
-  // 9.A2 Add Text: author a NEW text object at `rect` (PDF user-space points,
+  // Add Text: author a NEW text object at `rect` (PDF user-space points,
   // bottom-up — buildSignatureAppearance's output). Engine `add_text_box`
-  // subset-embeds a bundled face (7.4), so the result is searchable and
-  // re-editable by 7.2/7.5 with no special case. Undoable via performOperation;
+  // subset-embeds a bundled face, so the result is searchable and
+  // re-editable by the run and paragraph editors with no special case. Undoable via performOperation;
   // refuses on a signed doc like every other content edit.
   const handleAddText = useCallback(
     async (
@@ -1189,14 +1189,14 @@ function AppContent(): React.ReactElement {
         rotate?: number;
         bold?: boolean;
         italic?: boolean;
-        /** 9.K1: pair kerning. Defaults ON engine-side, so only an explicit
+        /** Pair kerning. Defaults ON engine-side, so only an explicit
          * opt-OUT is ever sent. */
         kern?: boolean;
-        /** 9.K2: OpenType features — ['small_caps'] and/or ['salt']. Authoring
+        /** OpenType features — ['small_caps'] and/or ['salt']. Authoring
          * always renders in a bundled face, so a feature switches to Libertinus
          * Serif (Liberation has none); alt_index picks the salt alternate. */
         features?: string[];
-        /** T15: per-span styling over the text's character positions. */
+        /** Per-span styling over the text's character positions. */
         spans?: {
           start: number;
           end: number;
@@ -1232,7 +1232,7 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
-  // 9.D1/D2/D3: delete, transform (move/resize/rotate), or restyle (recolour /
+  // Delete, transform (move/resize/rotate), or restyle (recolour /
   // line-width) one vector path object. Same undoable snapshot/commit-gate flow
   // as an image edit (signed-doc-guarded), just a different engine op.
   const handleEditVector = useCallback(
@@ -1298,7 +1298,7 @@ function AppContent(): React.ReactElement {
       }
 
       if (kind === 'transform') {
-        // 9.C1: rewrite the placement's CTM to the gesture's target matrix.
+        // Rewrite the placement's CTM to the gesture's target matrix.
         // User-space M' is invariant to /Rotate, so no rotation re-projection
         // is needed here (unlike signature placement).
         if (!opts?.matrix) throw new Error('transform requires a target matrix');
@@ -1307,7 +1307,7 @@ function AppContent(): React.ReactElement {
       }
 
       if (kind === 'crop') {
-        // 9.C3: rect is the crop in the image's UNIT space — depth- and
+        // rect is the crop in the image's UNIT space — depth- and
         // rotation-invariant by construction (the engine emits it as a clip
         // at the draw), so like transform it needs no re-projection.
         if (!opts?.rect) throw new Error('crop requires a rect');
@@ -1316,8 +1316,8 @@ function AppContent(): React.ReactElement {
       }
 
       if (kind === 'opacity') {
-        // 9.C3: uniform placement opacity via a page-local ExtGState.
-        // P7: the same frame carries the blend mode and/or a gradient soft
+        // Uniform placement opacity via a page-local ExtGState.
+        // The same frame carries the blend mode and/or a gradient soft
         // mask — any combination; the engine merges into ONE frame.
         if (
           opts?.opacity === undefined &&
@@ -1367,7 +1367,7 @@ function AppContent(): React.ReactElement {
         };
         try {
           const snapshotPath = await file.snapshot(f.workingPath);
-          // P7 (slice C): the replacement letterboxes into the old frame
+          // The replacement letterboxes into the old frame
           // (aspect preserved, centered) instead of stretching — the engine
           // emits a recognized transform frame, so later moves fold it.
           const params = {
@@ -1433,7 +1433,7 @@ function AppContent(): React.ReactElement {
     [state.files, call, performOperation, reloadFile, dispatch, confirmEditOfSignedDoc],
   );
 
-  // P7 multi-select: group transform/delete over N placements on one page —
+  // Multi-select: group transform/delete over N placements on one page —
   // ONE engine call, one snapshot, one undo entry (the whole point of the
   // engine's multi ops; N single calls would churn N undo entries and N page
   // rebuilds for one gesture).
@@ -1458,12 +1458,12 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
-  // 9.C2 Add Image: embed a NEW raster at `rect` (PDF user-space points). Picks
+  // Add Image: embed a NEW raster at `rect` (PDF user-space points). Picks
   // the file with the SAME EXIF-aware JPEG-passthrough / raw-decode routing as
-  // 7.1 replace (one snapshot for the whole attempt, incl. the CMYK raw
+  // image replace (one snapshot for the whole attempt, incl. the CMYK raw
   // fallback). `injected` lets the harness supply a source (the native picker
   // is undrivable). Undoable; refuses on a signed doc. The added image is an
-  // ordinary placement afterward (movable/resizable via C1).
+  // ordinary placement afterward (movable and resizable).
   const handleAddImage = useCallback(
     async (
       path: string,
@@ -1476,7 +1476,7 @@ function AppContent(): React.ReactElement {
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
 
-      // P7 slice F: an SVG (picked or injected) places as REAL vector
+      // An SVG (picked or injected) places as REAL vector
       // content — the engine compiles it into a unit-square form and the
       // result is an ordinary placement (movable, styleable, deletable).
       let svgPath: string | null =
@@ -1526,7 +1526,7 @@ function AppContent(): React.ReactElement {
       };
       try {
         const snapshotPath = await file.snapshot(f.workingPath);
-        // P7 (slice C): a drawn box embeds aspect-honest (fit contain — the
+        // A drawn box embeds aspect-honest (fit contain — the
         // engine shrinks the box around its center to the source's aspect);
         // a click (`at`) places at natural size, page-clamped engine-side.
         const params = {
@@ -1663,7 +1663,7 @@ function AppContent(): React.ReactElement {
     }
   }, [activeFile, commitOrAbort, showNotice]);
 
-  // O1: export the active document to an editable Office / web format via the
+  // Export the active document to an editable Office / web format via the
   // bundled LibreOffice. The engine `call` is commit-gated, so pending page
   // edits flush first and the export reflects what the user sees; the output is
   // a NEW external file (never the workspace copy), so there's no reload/undo
@@ -1732,7 +1732,7 @@ function AppContent(): React.ReactElement {
     await app.confirmClose();
   }, [state.files, isFileDirty, showConfirm, commitOrAbort]);
 
-  // --- Command layer (Phase 4 M1/M2) ------------------------------------
+  // --- Command layer ----------------------------------------------------
   // Reading mode's Escape exit (I.6). An interceptor, not a keymap entry —
   // in-flight drags push their own interceptors ABOVE this one (LIFO), so Esc
   // still cancels a drag first, then leaves reading mode on the next press.
@@ -1847,7 +1847,7 @@ function AppContent(): React.ReactElement {
       setCommandStateSource(null);
     };
   }, [dispatch]);
-  // The ONE window-level shortcut dispatcher (M1).
+  // The ONE window-level shortcut dispatcher.
   useKeymapDispatcher();
 
   const handleExtractFromCanvas = useCallback((path: string, page: number) => {
@@ -1906,7 +1906,7 @@ function AppContent(): React.ReactElement {
   // exist only while a document tab is focused" invariant — the Tools panels
   // and Home always see materialized state). Doc→doc switches don't commit
   // (the tier is workspace-global). On failure the banner shows and the tier
-  // stays pending. Re-keyed from the old view-transition effect (§ 6.6).
+  // stays pending. Re-keyed from the old view-transition effect.
   const prevInDocRef = useRef(inDocTab);
   useEffect(() => {
     const prev = prevInDocRef.current;
@@ -1922,7 +1922,7 @@ function AppContent(): React.ReactElement {
     dispatch({ type: 'UI_FOCUS_TAB', tab: firstDoc ? { doc: firstDoc.path } : 'home' });
   }, [dispatch]);
 
-  // Handle tray actions (Quick Merge) — land on the document board (2o), or
+  // Handle tray actions (Quick Merge) — land on the document board, or
   // Home (its Open button) when nothing is open yet.
   useEffect(() => {
     const unlisten = app.onTrayAction((action: string) => {
@@ -2013,7 +2013,7 @@ function AppContent(): React.ReactElement {
 
   // Map the legacy harness setView onto the tab model so pre-M2 specs keep
   // working: welcome→Home; canvas→the active (or first) document's tab (a
-  // no-op to Home when nothing is open); and — Phase 10 slice C — 'operations'
+  // no-op to Home when nothing is open); and 'operations'
   // becomes the NAME-COMPATIBLE BRIDGE: the Tools tab is gone, so it focuses
   // the showable doc tab and opens the right dock, which is where the ~30
   // legacy panel specs' panels actually render now. Their next setActiveOp
@@ -2070,18 +2070,18 @@ function AppContent(): React.ReactElement {
           strokeWidth: a.strokeWidth,
           fillColor: a.fillColor,
           opacity: a.opacity,
-          // N11 slice A: the VERTEX list. A snapped point is exact where a
+          // The VERTEX list. A snapped point is exact where a
           // raw pointer is not, so the spec's honest question is "is this
           // coordinate the geometry's own?" — which needs the points, not
           // the padded bbox they sit inside.
           points: a.points ? [...a.points] : undefined,
-          // N11 slice C: the count mark's group/symbol/sequence — spec 107
+          // The count mark's group/symbol/sequence — spec 107
           // asserts the group RECONSTITUTES from the file, so it has to see
           // what the mark says it belongs to.
           countGroup: a.countGroup,
           countSymbol: a.countSymbol,
           countSeq: a.countSeq,
-          // N11 slice D: which registry symbol a placed stamp / count marker
+          // Which registry symbol a placed stamp / count marker
           // draws, and how many PARTS its carried geometry has — spec 108
           // asserts the artwork travels with the annotation, so "did the
           // geometry survive?" must be answerable without the geometry itself.
@@ -2163,13 +2163,13 @@ function AppContent(): React.ReactElement {
             />
           ) : (
             <div className="flex-1 flex flex-row overflow-hidden">
-              {/* Left navigation pane (M3) — thumbnails etc. for the active doc.
+              {/* Left navigation pane — thumbnails etc. for the active doc.
                   Hidden entirely in reading mode (I.6); navPane.open state is
                   untouched underneath, so exiting restores it exactly. */}
               {!state.ui.readingMode && <NavPane
                 activeFile={activeFile ?? null}
                 onOpenPage={(_docId, pageId) =>
-                  // READ the page (M6.2) — the reading pane replaced the
+                  // READ the page — the reading pane replaced the
                   // PageInspector. One implementation (the canvas's
                   // pending-jump path); a local mode-dispatch + jumpToPage
                   // here read a stale view ref and landed on page 1
@@ -2204,7 +2204,7 @@ function AppContent(): React.ReactElement {
                   dropResolverRef={dropResolverRef}
                 />
               </div>
-              {/* The right tool dock (Phase 10 B1): ops panels beside the
+              {/* The right tool dock: ops panels beside the
                   document. Reading mode collapses it with the rest of the
                   chrome; toolDock.open is untouched underneath, so exiting
                   restores it (the navPane precedent). */}

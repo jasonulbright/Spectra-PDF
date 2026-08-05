@@ -1,4 +1,4 @@
-"""Phase 9.S5 — ICC-managed CMYK conversion for prepress (Ghostscript)."""
+"""ICC-managed CMYK conversion for prepress (Ghostscript)."""
 
 import os
 
@@ -130,7 +130,7 @@ class TestConvertCmyk:
 
 
 class TestConvertPdfx:
-    """O6 tail — PDF/X masters with a real output intent."""
+    """PDF/X masters with a real output intent."""
 
     def test_x3_default_carries_intent_and_version(self, tmp_dir, gs_path):
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))

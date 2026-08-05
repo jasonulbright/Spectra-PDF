@@ -19,7 +19,7 @@ Approach (per page, per requested region):
   2. An image or vector instruction whose bbox intersects ANY requested region
      is dropped entirely from the rebuilt stream (not blanked, not made
      invisible — removed from the instruction list that gets re-serialized).
-     A TEXT instruction is SPLIT (F15 slice B): the codes whose own boxes meet
+     A TEXT instruction is SPLIT: the codes whose own boxes meet
      a region go, the rest are re-emitted from the original bytes, and each
      removed stretch becomes a TJ jump carrying exactly the advance it had, so
      every surviving character stays where it was. Removing whole operators
@@ -94,7 +94,7 @@ from engine.text_metrics import (
 # cyclic forms; real documents never approach it.
 MAX_FORM_DEPTH = 16
 
-# Matrix/bbox helpers moved to content_walk.py at 7.2 (the one-interpreter
+# Matrix/bbox helpers live in content_walk.py (the one-interpreter
 # consolidation) — these aliases keep this module's established names (and
 # page_images.py's imports) stable.
 _mat_mult = mat_mult
@@ -156,14 +156,14 @@ def _span_bbox(
     state: GraphicsTextState,
     ink: tuple[float, float],
 ) -> Rect:
-    """The device-space box of a stretch of one show operator's INK (F15-A).
+    """The device-space box of a stretch of one show operator's INK.
 
     Horizontal: the stretch runs from `x0` to `x1` along the pen's sweep
     (pre-Tz text space, scaled here), and the ink reaches `below` under the
     baseline and `above` over it — the font's own descent/ascent, not the em
     box. `Ts` (rise) lifts it.
 
-    Vertical (9.B4a): the run occupies one em-wide column centred on the pen
+    Vertical: the run occupies one em-wide column centred on the pen
     and spans its advance sum DOWNWARD, the lister's convention; Tz never
     applies vertically.
     """
@@ -243,7 +243,7 @@ def _split_instructions(
     state: GraphicsTextState,
 ) -> list:
     """Re-emit a show operator with the marked clusters GONE and every
-    surviving glyph still where it was (F15 slice B).
+    surviving glyph still where it was.
 
     Each removed cluster becomes ONE TJ number carrying exactly the advance it
     contributed, so the pen arrives at the next surviving glyph at the same
@@ -254,7 +254,7 @@ def _split_instructions(
 
     The surviving bytes are SLICED from the original operands, never
     re-encoded: a round trip through decode/encode could substitute a
-    different code for the same character (the 9.B5 ligature table is filtered
+    different code for the same character (the ligature table is filtered
     to unambiguous inverses, so it cannot be relied on to give a byte back),
     and there is nothing to gain from asking.
 
@@ -294,7 +294,7 @@ def _split_instructions(
 class WalkResult(NamedTuple):
     kept: list
     text_runs_removed: int
-    text_runs_split: int  # runs that lost SOME codes and kept the rest (F15-B)
+    text_runs_split: int  # runs that lost SOME codes and kept the rest
     runs_removed_whole: int  # runs removed entire because they could not be split
     images_removed: int
     dropped_image_names: set
@@ -344,7 +344,7 @@ def _walk(
     uses). `fonts` is the per-call capability cache; `fallback_resources` are
     the invoker's resources, consulted for an XObject name a form's own
     /Resources omits (a lenient per-name fallback)."""
-    # The state machine moved to content_walk.GraphicsTextState at 7.2 (the
+    # The state machine lives in content_walk.GraphicsTextState (the
     # one-interpreter consolidation): q/Q save/restore CTM AND text-state
     # parameters — all elements of the graphics state per the PDF spec;
     # restoring only the CTM left a stale font size after `q .. Tf .. Q`,
@@ -359,7 +359,7 @@ def _walk(
     # the same family as the inline-image one.
     #
     # The tracker (originally local here) is now the shared
-    # `content_walk.ClipTracker` (9-§I.0-S8) — this module is its regression
+    # `content_walk.ClipTracker` — this module is its regression
     # harness. FRESH per stream (base_clip default None = unbounded): a form's
     # `sh` then "covers everything" and is removed, redaction's safe
     # over-removal direction. `clips.clip is None` means the shading covers the
@@ -367,7 +367,7 @@ def _walk(
     # not over-removal.
     clips = ClipTracker()
 
-    # F15-A: how far the pen position may LAG what we have tracked, in scaled
+    # How far the pen position may LAG what we have tracked, in scaled
     # text-space units, accumulated since the last repositioning operator.
     # A run whose font cannot measure it advances the text matrix by the WIDE
     # estimate, so everything after it on the same line may really sit up to
@@ -441,7 +441,7 @@ def _walk(
             if not _intersects_any(bbox, regions):
                 kept.append(instruction)
             else:
-                # F15-B: keep the codes OUTSIDE the region and drop the ones
+                # Keep the codes OUTSIDE the region and drop the ones
                 # inside. Whole-operator removal turned a mark on one name into
                 # the loss of the whole line a generator happened to emit as one
                 # Tj — over-removal the user can see, and the dominant shape once
@@ -689,7 +689,7 @@ def _redact_form(pdf, form, parent_resources, regions, form_ctm, depth, name_cou
     )
 
 
-# ── redaction properties: the overlay a region is painted with (F15 slice E) ──
+# ── redaction properties: the overlay a region is painted with ──
 #
 # The format's own vocabulary, and `save_redaction_marks` already writes three
 # of its neighbours: `/IC` is the fill, `/OverlayText` the text drawn over it,
@@ -747,7 +747,7 @@ def _auto_text_color(fill: tuple) -> tuple:
 def properties_of(spec: dict) -> RedactionProperties:
     """Read one region's properties, defaulting to today's shipped look — a
     plain black box with no overlay, so a caller that sends none gets exactly
-    the bytes it got before slice E."""
+    the bytes it got before redaction properties existed."""
     fill = _rgb(spec.get("fill"), DEFAULT_FILL)
     text = str(spec.get("overlay_text") or "")
     align = spec.get("align", 0)
@@ -806,7 +806,7 @@ def _overlay_face(pdf, text: str, font_dir: str) -> _OverlayFace:
 
     Latin-1 keeps the standard-14 Helvetica emission byte for byte (so an
     ASCII overlay adds no font program to the file). Anything else EMBEDS
-    through the bundled fallback — S4's precedent: a non-Latin-1 overlay is
+    through the bundled fallback — the precedent: a non-Latin-1 overlay is
     not a refusal and is never `?`-mapped, because a redaction code printed as
     question marks tells the reader nothing. A right-to-left overlay goes
     through `rtl_text`, the builder the watermark and the field appearances
@@ -1121,7 +1121,7 @@ def redact(file: str, output: str, regions: list[dict], font_dir: str = "") -> d
             rect in the page's own /MediaBox point space (i.e. the same
             coordinate system the page's content stream already uses —
             callers are responsible for accounting for /Rotate themselves).
-            Each region may also carry its REDACTION PROPERTIES (F15 slice E),
+            Each region may also carry its REDACTION PROPERTIES,
             in the format's own vocabulary: `fill` (`/IC`), `overlay_text`
             (`/OverlayText`), `repeat_overlay` (`/Repeat`), `align` (`/Q`),
             `font_size` and `text_color` (`/DA`). Omitting them all paints the

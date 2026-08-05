@@ -1,4 +1,4 @@
-// N11 slice B — RULERS, GRID, GUIDES and the Shift angle constrain, against
+// RULERS, GRID, GUIDES and the Shift angle constrain, against
 // the built binary.
 //
 // The fixture is a BLANK 400×400 page on purpose: with no drawn geometry the
@@ -221,7 +221,7 @@ async function openFixture(): Promise<void> {
   });
 }
 
-describe('rulers and guides (N11 slice B)', () => {
+describe('rulers and guides', () => {
   before(async () => {
     await waitForHarness();
     await openFixture();
@@ -376,7 +376,7 @@ describe('rulers and guides (N11 slice B)', () => {
   });
 });
 
-describe('grid and angle constrain (N11 slice B)', () => {
+describe('grid and angle constrain', () => {
   before(async () => {
     await waitForHarness();
     await openFixture();

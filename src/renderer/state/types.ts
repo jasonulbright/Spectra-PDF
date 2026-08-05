@@ -18,9 +18,9 @@ export interface OpenFile {
   // and for the commit builder), NOT as a document of its own — the workspace
   // indexer skips these, so they never get a strip. Set by REGISTER_IMPORT_SOURCE
   // for pages imported into another document; evicted once no page references
-  // them and the page tier is empty. See 2n.3 in the phase doc.
+  // them and the page tier is empty.
   importOnly?: boolean;
-  // Phase 5 (§ F) identity channel: the ids the LAST page-tier commit
+  // Identity channel: the ids the LAST page-tier commit
   // authored for this file's pages/partitions, valid only while `buffer`
   // IS the record's buffer object (adoption checks identity — any later
   // buffer change makes the record inert with no cleanup choreography).
@@ -33,9 +33,7 @@ export interface OpenFile {
 // invalidates it. Used at commit (pdfx-build.ts's stripImportedOriginals) to
 // positively match and remove that one original from the copied page's real
 // /Annots before re-authoring it (or, for PageRef.removedImportedOriginals,
-// WITHOUT re-authoring it — see there). See
-// docs/architecture/05-phase2c-annotations.md, "importing existing
-// annotations safely".
+// WITHOUT re-authoring it — see there).
 export interface ImportedAnnotationFingerprint {
   subtype:
     | 'Square' | 'FreeText' | 'Ink' | 'Stamp' | 'Highlight' | 'Underline' | 'StrikeOut'
@@ -64,7 +62,7 @@ export interface ImportedAnnotationFingerprint {
 }
 
 // Native PDF text-markup subtypes (quad-based) — imported from a foreign PDF as
-// first-class editable annotations (N1). Distinct from `kind: 'highlight'`,
+// first-class editable annotations. Distinct from `kind: 'highlight'`,
 // which authors a /Square rectangle; a native /Highlight must round-trip as
 // /Highlight + /QuadPoints, never be converted to a Square.
 export type TextMarkupType = 'highlight' | 'underline' | 'strikeout' | 'squiggly';
@@ -88,7 +86,7 @@ export interface PageAnnotation {
   // extent (box + leader) so selection and manipulation cover everything;
   // calloutBox is the text sub-rect and `points` the leader [tip, knee,
   // attach], all in the same display-normalized page space.
-  // 'count' is a takeoff count mark (N11 slice C): a real /Stamp carrying
+  // 'count' is a takeoff count mark: a real /Stamp carrying
   // /IT /Count, its group in /Subj, "<group> <seq>" in /Contents and a vector
   // symbol appearance. Point-placed like 'note' (fixed marker size, so it
   // moves but never resizes); tallies are DERIVED from these, never stored.
@@ -129,7 +127,7 @@ export interface PageAnnotation {
   // Re-projected point-by-point alongside the bbox on rotation. NOT used by
   // ink (see `strokes`).
   points?: number[];
-  // ink only (N2): the pen strokes, one flat [x0,y0,...] path per pen-lift,
+  // ink only: the pen strokes, one flat [x0,y0,...] path per pen-lift,
   // in the same display-normalized space. Ink uses `strokes` EXCLUSIVELY —
   // a single-stroke drawing is strokes.length === 1 — so a multi-stroke
   // /InkList (a signature) round-trips whole instead of being refused.
@@ -166,14 +164,14 @@ export interface PageAnnotation {
   measureRatio?: string;
   measureUnitsPerPt?: number;
   measureUnit?: string;
-  // count only (N11 slice C): the group's NAME (→ /Subj — user data, never
+  // count only: the group's NAME (→ /Subj — user data, never
   // translated), the marker symbol's id (→ the private /SpectraSymbol), and
   // the mark's sequence number within its group (→ /Contents, with the group).
   // The group's colour is the annotation's own `color`.
   countGroup?: string;
   countSymbol?: string;
   countSeq?: number;
-  // N11 slice D — a VECTOR SYMBOL placed as a stamp: which registry symbol it
+  // A VECTOR SYMBOL placed as a stamp: which registry symbol it
   // is (→ the private /SpectraSymbol), and its own geometry (→ the private
   // /SpectraSymbolParts).
   //
@@ -245,11 +243,11 @@ export interface PageEditSnapshot {
 }
 
 // The canvas interaction tool. Lives in the ui slice so command enablement
-// and the keymap can read it (Phase 4 M1); PageCell re-exports the type for
-// its overlay consumers. Generalizes to the 2.0 ToolId at M5.
+// and the keymap can read it; PageCell re-exports the type for
+// its overlay consumers.
 export type CanvasTool =
   | 'select'
-  // How you HOLD the page (M6.2): drag-scrolls the reading view, suppresses
+  // How you HOLD the page: drag-scrolls the reading view, suppresses
   // page pickup on the board. The second OWNERLESS mode beside 'select' —
   // hand is not a tool's mode, it's the absence of one with a different grip.
   | 'hand'
@@ -269,18 +267,18 @@ export type CanvasTool =
   // axis on top of `tool`) the reason 'forms' had two owning tools at once and
   // "which tool is armed?" had no answer. It's a mode; it says so now.
   | 'formfields'
-  // Selecting page IMAGES to replace/extract/delete (Phase 7.1). The Edit
+  // Selecting page IMAGES to replace/extract/delete. The Edit
   // tool's mode; placements come from the engine's list_page_images.
   | 'edit'
-  // AUTHORING new text: drag to place a box, then type (Phase 9.A2). The Edit
+  // AUTHORING new text: drag to place a box, then type. The Edit
   // tool's SECOND mode — a sibling of 'edit', not a replacement (Comment owns
   // four the same way). Bands like 'formfields'/'signature'; commits a fresh
   // Type0 text object via the engine's add_text_box, undoable.
   | 'addtext'
-  // AUTHORING a new image: drag a box, then pick a raster (Phase 9.C2). The
+  // AUTHORING a new image: drag a box, then pick a raster. The
   // Edit tool's THIRD mode. Bands like 'addtext'; the picked image is embedded
   // at the box via the engine's add_page_image, undoable — an ordinary
-  // placement afterward (movable/resizable via C1).
+  // placement afterward (movable and resizable).
   | 'addimage'
   // Measuring uses three modes in one tool: distance is a drag, while
   // perimeter and area are click-a-vertex sequences
@@ -300,7 +298,7 @@ export type CanvasTool =
   // Callout (rung 2): drag the text box; the leader lands pointing at the
   // drag origin, editable per-vertex afterward.
   | 'callout'
-  // Sticky note (N3): click places a native /Text note at the point and opens
+  // Sticky note: click places a native /Text note at the point and opens
   // its editor. Comment's mode; the note keeps its fixed icon size (rung 1's
   // kind rule) so placement is the only geometry.
   | 'note'
@@ -312,24 +310,24 @@ export type CanvasTool =
   // navigation mode beside Select and Hand, with no
   // tool, commits nothing.
   | 'zoommarquee'
-  // Count (N11 slice C): click places a takeoff mark of the armed group at
+  // Count: click places a takeoff mark of the armed group at
   // the point; clicking an existing mark of that group removes it (the
   // "click again to un-count" convention). Ctrl-drag bands a marquee that
   // re-files the marks it covers into the armed group. Count & Takeoff's mode.
   | 'count'
-  // Crop draw (P5b): band the region to KEEP; the Page Boxes panel receives
+  // Crop draw: band the region to KEEP; the Page Boxes panel receives
   // it as per-edge insets and commits through the same `set_page_boxes` op a
   // typed crop uses. The band is a REQUEST, not page state — nothing changes
   // until the panel's Apply, so a mis-drag costs a redraw, not an undo.
   | 'cropdraw';
 
-// The tab-strip model (Phase 4 M2, § 3.1): Home | Tools | one tab per open
-// document. A doc tab focuses that file and shows the document pane (at M2:
-// the all-docs organize board with that file active; M4 adds the per-doc
-// Document view). The legacy ViewMode literals survive only as the harness
+// The tab-strip model: Home | Tools | one tab per open
+// document. A doc tab focuses that file and shows the document pane —
+// either the all-docs organize board with that file active, or the per-doc
+// Document view. The legacy ViewMode literals survive only as the harness
 // snapshot's derived view (home→'welcome', tools→'operations', doc→'canvas')
 // so pre-M2 e2e specs keep their assertions.
-// Phase 10 slice C: 'tools' RETIRED — the Tools tab is gone; ops panels live
+// 'tools' RETIRED — the Tools tab is gone; ops panels live
 // in the right dock (ToolDock) and the tile grid lives on Home. ViewMode
 // keeps the 'operations' literal ONLY as the harness setView() INPUT
 // vocabulary (the bridge maps it to "focus the doc tab + open the dock");
@@ -348,11 +346,11 @@ export function viewOf(tab: FocusedTab): ViewMode {
   return 'canvas';
 }
 
-// Left navigation pane (Phase 4 M3, § 5). The panel-id union is the full
+// Left navigation pane. The panel-id union is the full
 // stable set; the runtime NAV_PANELS registry (components/navpane) only lists
 // the panels that actually exist at a given sub-slice, so an icon never
 // appears without a working panel (completeness rule). Persisted under the
-// `workbench-ui` localStorage key (§ 4.3 — new keys don't extend `spectra-`).
+// `workbench-ui` localStorage key (new keys don't extend `spectra-`).
 export type NavPanelId =
   | 'pages'
   | 'bookmarks'
@@ -368,8 +366,8 @@ export interface NavPaneState {
   width: number; // px, clamped ≥ NAV_PANE_MIN_WIDTH
 }
 
-// Per-document view mode (Phase 4 M4, § 6.1). `document` = the continuous
-// single-column reading view (the 2.0 centerpiece); `organize` = the existing
+// Per-document view mode. `document` = the continuous
+// single-column reading view; `organize` = the existing
 // strips board (page-management). Global (one mode, like `tool`) — a doc tab
 // renders one or the other. Entered via the toolbar toggle / Organize Pages
 // tool; `View ▸ Organize All Documents` forces the board.
@@ -382,13 +380,13 @@ export const NAV_PANE_MIN_WIDTH = 180;
 export const NAV_PANE_MAX_WIDTH = 520;
 export const NAV_PANE_DEFAULT_WIDTH = 240;
 
-// The right-hand tool dock (Phase 10 slice B1). Panels were authored around
+// The right-hand tool dock. Panels were authored around
 // ~380px of comfortable form width; the clamp keeps a drag from crushing them
 // or swallowing the document.
 export interface ToolDockState {
   open: boolean;
   width: number; // px, clamped to [TOOL_DOCK_MIN_WIDTH, TOOL_DOCK_MAX_WIDTH]
-  // NOTE: slice D's `view: 'tool' | 'comments'` is GONE (U3). Comments are a
+  // NOTE: the `view: 'tool' | 'comments'` is GONE. Comments are a
   // normal op panel now, seated through `tools.panel.comments` like every
   // other tool, so the dock has ONE mode and the status-bar Comments toggle
   // and the Comments tool cannot land on different surfaces.
@@ -408,7 +406,7 @@ export const TOOL_DOCK_DEFAULT_WIDTH = 400;
 export const TOOL_DOCK_LIST_WIDTH = 250;
 
 // UI state the command registry needs to read (menus/toolbars can't read
-// component-local state — 19-phase4 § 4.3). Ephemeral interaction state
+// component-local state). Ephemeral interaction state
 // (in-flight drags, rubber bands, inline edits, pending marks/placements)
 // stays component-local: it has no command consumers.
 export interface UiState {
@@ -420,8 +418,8 @@ export interface UiState {
   // always names some operation.
   activeToolId: string | null;
   tool: CanvasTool;
-  // Document-pane view mode (M4). The board and the reading view are two
-  // renders of the same per-page cells (§ 6.2); commands/toolbar read this.
+  // Document-pane view mode. The board and the reading view are two
+  // renders of the same per-page cells; commands/toolbar read this.
   docViewMode: DocViewMode;
   // Reading-view page layout (I.6). `twoUpCover` = first page alone (the book
   // convention); only meaningful while pageLayout === 'two'.
@@ -449,10 +447,10 @@ export interface UiState {
   // toolbar catalog. Persisted — App mirrors it to localStorage, the
   // recent-files pattern (lib/toolbar-layout.ts).
   toolbarOverrides: ToolbarOverrides;
-  // The right-hand TOOL DOCK (Phase 10 slice B1): where ops-tool panels render
+  // The right-hand TOOL DOCK: where ops-tool panels render
   // over an always-visible document. Persisted with navPane in workbench-ui.
   toolDock: ToolDockState;
-  // WHICH document the reading view shows (M4.1c), as an `OpenDocument.id`.
+  // WHICH document the reading view shows, as an `OpenDocument.id`.
   // The board renders every doc at once, but the reading view renders exactly
   // one — and a tab addresses a FILE, while a `.pdfx` partitions one file into
   // several documents. Without this, "the focused doc" could only ever be the
@@ -461,23 +459,23 @@ export interface UiState {
   // to the active file's first document. Resolution falls back to that default
   // when the id no longer exists (ids are positional and rebuilt on reindex).
   focusedDocId: string | null;
-  // Rotate View (M6.1, § 9.1/§ 9.2): render-only quarter-turns of the READING
+  // Rotate View: render-only quarter-turns of the READING
   // view's display, per file path. NEVER the page tier — Document ▸ Rotate
   // Pages… is the persisted edit; this is how you look at the page, dropped on
   // close and never persisted. Keyed by path (a tab's worth of reading), only
   // non-zero entries stored. The board never reads it: the board is where REAL
   // rotation lives, and a view gesture must not read as a page edit.
   viewRotationByPath: Record<string, 0 | 90 | 180 | 270>;
-  // The page the reading view is currently ON (M4.1e), as a `PageRef.id`. The
+  // The page the reading view is currently ON, as a `PageRef.id`. The
   // Pages nav panel highlights and scroll-follows it, which is a DIFFERENT thing
   // from `selectedPageIds` — you can be reading page 40 with nothing selected,
   // or have a selection you scrolled away from. Reading-view only (the board
   // shows every page at once and reports no "current"), so it is null there.
   // Positional like every id here, so it is invalidated on the same triggers as
   // `focusedDocId`; a stale one would only mis-highlight, but it would still be
-  // wrong (see roadmap § F).
+  // wrong.
   currentPageId: string | null;
-  // Canvas multi-select (2n.1) — view state, never the page-edit tier.
+  // Canvas multi-select — view state, never the page-edit tier.
   // Positional PageRef ids: any buffer-identity change clears the selection
   // (the reducer does this where the buffers change; formerly a
   // WorkspaceCanvasView effect).
@@ -486,7 +484,7 @@ export interface UiState {
   // Recent files (the `spectra-recent` list) — in state because the File ▸
   // Open Recent menu and the Home tab render it; App owns persistence.
   recentFiles: import('../lib/recent-files').RecentEntry[];
-  // Left navigation pane (M3). App mirrors it to the `workbench-ui` key.
+  // Left navigation pane. App mirrors it to the `workbench-ui` key.
   navPane: NavPaneState;
 }
 
@@ -508,7 +506,7 @@ export interface AppState {
 
 export type AppAction =
   | { type: 'OPEN_FILE'; path: string; workingPath: string; name: string; pageCount: number; buffer: PdfBuffer }
-  // Register a file's bytes WITHOUT a strip, as an import source (2n.3). Not a
+  // Register a file's bytes WITHOUT a strip, as an import source. Not a
   // page edit (doesn't touch the page-tier undo history or activeFileId);
   // idempotent. Its pages are then spliced into a real document via IMPORT_PAGES.
   | { type: 'REGISTER_IMPORT_SOURCE'; path: string; workingPath: string; name: string; pageCount: number; buffer: PdfBuffer }
@@ -525,7 +523,7 @@ export type AppAction =
         pageCount: number;
         buffer: PdfBuffer;
         snapshotPath: string;
-        // The § F identity channel — old ids in authored (new-file) order.
+        // The identity channel — old ids in authored (new-file) order.
         authored: { pages: string[]; documents: { id: string; name: string }[] };
       }[];
     }
@@ -550,11 +548,11 @@ export type AppAction =
   // reducer step = one page-edit undo entry (a per-page dispatch loop would push
   // N snapshots). pageIds may span docs/files; the pages move in
   // workspace-flattened order. Same guards as the singulars (no file emptied to
-  // zero pages). See docs/architecture/16-phase2n-canvas-completeness.md § 2n.1.
+  // zero pages).
   | { type: 'MOVE_PAGES'; pageIds: string[]; toDocId: string; toIndex: number }
   | { type: 'MOVE_PAGES_TO_NEW_DOC'; pageIds: string[]; docIndex: number; newDocId: string; newName: string }
   // Splice NEW page refs (sourced from a REGISTER_IMPORT_SOURCE byte-only file)
-  // into an existing document at an index — the import-into-doc machinery (2n.3),
+  // into an existing document at an index — the import-into-doc machinery,
   // one page-edit undo step.
   | { type: 'IMPORT_PAGES'; toDocId: string; toIndex: number; pages: PageRef[] }
   | { type: 'DELETE_PAGE_REF'; docId: string; pageId: string }
@@ -581,7 +579,7 @@ export type AppAction =
         w: number;
         h: number;
         points?: number[];
-        strokes?: number[][]; // ink only (N2)
+        strokes?: number[][]; // ink only
         note?: string; // measure only: the recomputed value
         calloutBox?: [number, number, number, number]; // callout only
       }[];
@@ -599,7 +597,7 @@ export type AppAction =
         strokeWidth?: number;
         fillColor?: string | null;
         opacity?: number;
-        // Kind-specific sheet fields (N7 residual): the reducer applies
+        // Kind-specific sheet fields (residual): the reducer applies
         // each only to kinds that carry it — endings to line/arrow/
         // polyline, cloud intensity to clouds.
         lineEndings?: [string, string];
@@ -627,7 +625,7 @@ export type AppAction =
       note: string;
     }
   | { type: 'REMOVE_ANNOTATIONS'; docId: string; pageId: string; annotationIds: string[] }
-  // N11 slice C: re-file count marks into another group (the Ctrl-marquee
+  // Re-file count marks into another group (the Ctrl-marquee
   // gesture). Colour and symbol travel with the group, and each moved mark is
   // renumbered at the end of the target — its old number belonged to the
   // group it left.
@@ -649,7 +647,7 @@ export type AppAction =
   | { type: 'UNDO_PAGE_OP' }
   | { type: 'REDO_PAGE_OP' }
   | { type: 'CLEAR_PAGE_EDITS' }
-  // ui slice (Phase 4 M1/M2). One dispatch pathway so the whole app state
+  // ui slice. One dispatch pathway so the whole app state
   // stays snapshot-testable; commands and the keymap read state.ui.
   // Focusing a doc tab syncs activeFileId; entering doc-land is always
   // caller/command-driven (the reducer never yanks the user onto the board).
@@ -675,7 +673,7 @@ export type AppAction =
   | { type: 'UI_CLEAR_SELECTION' }
   // Explicit set — drag re-select after a move, and the e2e harness.
   | { type: 'UI_SET_SELECTION'; pageIds: string[]; anchor: string | null }
-  // Nav pane (M3). Open on a panel (icon-strip toggle: re-opening the active
+  // Nav pane. Open on a panel (icon-strip toggle: re-opening the active
   // panel closes); toggle open/closed; resize.
   | { type: 'UI_OPEN_NAV_PANEL'; panel: NavPanelId }
   | { type: 'UI_TOGGLE_NAV_PANE' }

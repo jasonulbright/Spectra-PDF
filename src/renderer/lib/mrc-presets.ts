@@ -1,4 +1,4 @@
-// O8 slice D — the MRC preset mapping, as a pure module.
+// The MRC preset mapping, as a pure module.
 //
 // There is no DOM test environment in this repo, so a rule that lives inside a
 // component is a rule with no test. Everything a surface needs to decide about
@@ -8,7 +8,7 @@
 // controls to it.
 //
 // ONE DOOR: MRC is a `quality` of the `compress` op, never a second operation
-// (brief 40 § 6.1). That is why this module exports a `quality` value rather
+// That is why this module exports a `quality` value rather
 // than an op name — the panel, the batch dialog, the CLI, guided actions,
 // watched folders and scheduled runs all reach the same `compress`.
 
@@ -41,7 +41,7 @@ export interface MrcOptions {
   /** Keep every filter inside PDF/A-1's set (a modifier, not a fourth preset). */
   pdfaSafe: boolean;
   /** Recognise the source and the output and revert any page whose text did
-   * not survive (slice E). Requires a recognizer path. */
+   * not survive. Requires a recognizer path. */
   verifyText: boolean;
   /** Recognition language for the verification, Tesseract's own spelling. */
   lang?: string;
@@ -92,7 +92,7 @@ export interface MrcReport {
 
 /** True when the encoder the preset asked for was unavailable and the pass
  * fell back to CCITT G4. Never silent: a swapped codec makes the size claim
- * untrue, so the surfaces say so (brief § 5.2). */
+ * untrue, so the surfaces say so. */
 export function mrcCodecFellBack(report: MrcReport): boolean {
   return report.mask_codec !== report.requested_mask_codec;
 }

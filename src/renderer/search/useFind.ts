@@ -29,7 +29,7 @@ export interface Find {
   openFind: () => void;
   /** Open the bar seeded with a query and (optionally) jump to a page — the
    * Search nav panel drives this so a result click highlights via the same
-   * tested find path (Phase 4 M3.3). */
+   * tested find path. */
   openWith: (query: string, pageId?: string, options?: SearchOptions) => void;
   closeFind: () => void;
   next: () => void;

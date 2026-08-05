@@ -1,4 +1,4 @@
-"""§ I.6 — accessibility checker."""
+"""Accessibility checker."""
 
 import os
 

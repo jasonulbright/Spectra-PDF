@@ -5,7 +5,7 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 use uuid::Uuid;
 
-// ── Path canonicalization (M7 — the path-identity gate) ──────────────────
+// ── Path canonicalization (the path-identity gate) ───────────────────────
 //
 // File identity is the raw path STRING app-wide (`state.files` is keyed on
 // it; tabs/recents/PageRef.sourceDocId take string equality), and Windows
@@ -315,7 +315,7 @@ pub async fn pick_pem_file(
     }
 }
 
-/// Pick a PKCS#11 provider module — the token-signing source (F3). The
+/// Pick a PKCS#11 provider module — the token-signing source. The
 /// vendor's cryptoki DLL is the one artifact every token ships.
 #[tauri::command]
 pub async fn pick_pkcs11_module(
@@ -339,7 +339,7 @@ pub async fn pick_pkcs11_module(
 }
 
 /// Pick an ICC colour profile — the prepress destination-profile picker
-/// (O6 tail). .icm is the same format under Windows' preferred extension.
+/// (tail). .icm is the same format under Windows' preferred extension.
 #[tauri::command]
 pub async fn pick_icc_file(
     app: AppHandle,
@@ -361,8 +361,8 @@ pub async fn pick_icc_file(
     }
 }
 
-/// Pick a folder — Batch OCR's source/destination pickers (Phase 6).
-/// Canonicalized like every other Rust path producer (the M7 path rule).
+/// Pick a folder — Batch OCR's source/destination pickers.
+/// Canonicalized like every other Rust path producer (the path rule).
 #[tauri::command]
 pub async fn pick_folder_dialog(
     app: AppHandle,
@@ -494,7 +494,7 @@ fn walk_pdfs(
 }
 
 /// Pick an image (Edit ▸ Replace Image / Add Image). Not canonicalized into
-/// an identity — it's a media source, read once. P7: `include_svg` widens
+/// an identity — it's a media source, read once. `include_svg` widens
 /// the filter for ADD (SVG places as real vector content); Replace stays
 /// raster-only (a vector placement refuses replace by design).
 #[tauri::command]
@@ -596,7 +596,7 @@ pub async fn copy_file_creating_dirs(src: String, dest: String) -> Result<(), St
 /// written, which may differ from `dest` (see the collision rule below).
 ///
 /// This is the ONLY batch operation that mutates the user's SOURCE tree
-/// (Phase 12 requests 2/3 — the "moved" and "error" folders), so it carries the
+/// (the "moved" and "error" folders), so it carries the
 /// paranoia the mirror's copy does not need:
 ///
 /// - **Same-file refusal, by identity.** A rename onto itself is a harmless

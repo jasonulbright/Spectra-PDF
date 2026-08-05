@@ -1,4 +1,4 @@
-// Backdrop stamping (Phase 3b): only a positive "mica" report from the
+// Backdrop stamping: only a positive "mica" report from the
 // backend may enable the translucent shell CSS — unknown values, missing
 // commands, and errors must all leave the solid look untouched.
 import { describe, expect, it, vi } from 'vitest';
@@ -44,7 +44,7 @@ describe('initBackdrop', () => {
     await expect(initBackdrop()).resolves.toBeUndefined();
   });
 
-  // Review round 1: initBackdrop gates the ENTIRE first render, so a bridge
+  // initBackdrop gates the ENTIRE first render, so a bridge
   // whose promise never settles must not blank the app forever. Pre-fix
   // (no timeout race) this test hangs into vitest's test timeout.
   it('resolves via timeout when the backdrop signal never settles', async () => {

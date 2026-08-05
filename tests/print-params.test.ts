@@ -1,4 +1,4 @@
-// Print wire contract + validation (M-P + O2). The dialog's engine call is
+// Print wire contract + validation. The dialog's engine call is
 // assembled by buildPrintParams; these pin the exact wire KEY NAMES the
 // engine's print_pdf signature accepts (pytest pins the same set from the
 // Python side) — a renamed key would otherwise surface only as every print
@@ -130,7 +130,7 @@ describe('pageRangeError', () => {
     expect(pageRangeError('1-1', 5)).toBeNull();
   });
 
-  // Strict like the engine (the 2e lesson: a lax parse turned a typo into a
+  // Strict like the engine (the lesson: a lax parse turned a typo into a
   // whole-document operation).
   it.each(['abc', '1-2-3', ',', '1,,2', '0', '5-2', '-3', '3-', '1.5', '1;2'])(
     'rejects %j',
@@ -147,7 +147,7 @@ describe('pageRangeError', () => {
 });
 
 describe('copiesError', () => {
-  it('accepts whole numbers 1..MAX_COPIES (999 — the O4 flip from 99)', () => {
+  it('accepts whole numbers 1..MAX_COPIES (999 — the flip from 99)', () => {
     expect(MAX_COPIES).toBe(999);
     expect(copiesError('1')).toBeNull();
     expect(copiesError('100')).toBeNull();

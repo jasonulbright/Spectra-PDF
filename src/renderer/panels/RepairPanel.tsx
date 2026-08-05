@@ -7,13 +7,13 @@ import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 
 export function RepairPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call, saveFile } = useEngine();
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
-  // N12: which operation is running — the busy-button labels used to sniff
+  // Which operation is running — the busy-button labels used to sniff
   // the English status text (status.includes('Repairing')), which a
   // localized status silently breaks. State, not string matching.
   const [busyOp, setBusyOp] = useState<'check' | 'repair' | null>(null);

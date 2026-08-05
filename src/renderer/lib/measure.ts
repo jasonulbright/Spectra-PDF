@@ -1,4 +1,4 @@
-// Measure-tool math (parity map § 2): pure geometry + unit formatting, kept
+// Measure-tool math: pure geometry + unit formatting, kept
 // out of PageCell because there is no DOM test environment — the breakable
 // part must be the testable part (the spread-layout precedent).
 //
@@ -38,7 +38,7 @@ const PT_PER: Record<MeasureUnit, number> = {
 };
 
 /** PDF points in one of the measure units — the ONE conversion table, read by
- * N11's grid spacing (a paper-unit grid is `spacing × ptPerUnit(unit)`). A
+ * the grid spacing (a paper-unit grid is `spacing × ptPerUnit(unit)`). A
  * function rather than the exported record so nobody can mutate the table. */
 export function ptPerUnit(unit: MeasureUnit): number {
   return PT_PER[unit];

@@ -183,7 +183,7 @@ describe('formatBatchLog', () => {
     expect(text).toContain('(no files were processed)');
   });
 
-  // Phase 12 requests 2/3 — the filing half. A log that does not record what
+  // The filing half. A log that does not record what
   // the run was ALLOWED to touch cannot be audited after the fact, and this is
   // the one setting that moves the user's own files.
   it('states plainly when nothing was allowed to move', () => {
@@ -256,7 +256,7 @@ describe('formatBatchLog', () => {
     expect(text).toContain('2 repaired');
   });
 
-  it('carries the MRC note, saving or refusal alike (O8)', () => {
+  it('carries the MRC note, saving or refusal alike', () => {
     // A run the user asked to compress must say what it compressed — a silent
     // no-op on a folder of non-scans would read as a saving that never
     // happened. Same bracket, same position as engine/batch_ocr.py's.

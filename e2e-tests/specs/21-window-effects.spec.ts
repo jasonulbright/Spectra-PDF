@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
 import { waitForHarness, openByPaths, setView, getState } from '../support/harness.js';
 
-// Phase 3b: the backend reports which backdrop it actually applied
+// The backend reports which backdrop it actually applied
 // ("mica" on Win11, "none" elsewhere/on failure); the renderer stamps
 // <html data-backdrop> to match and keys the translucent shell CSS on it.
 // The assertions branch on the report, so the spec is honest on any
@@ -51,9 +51,8 @@ describe('window effects + accent theming', () => {
   it('renders the shell per the backdrop: translucent frame, opaque content', async () => {
     const kind = await invokeCommand<string>('get_window_backdrop');
     // Computed styles, not class lists — this is what actually composes. The
-    // Phase 4 M2 frame is three bars (menu bar, main toolbar, tab strip), all
-    // carrying .app-shell-bar; every one must tint under Mica (spec-21
-    // extension per § 10.3 — the re-key done by class reuse).
+    // frame is three bars (menu bar, main toolbar, tab strip), all
+    // carrying .app-shell-bar; every one must tint under Mica.
     const styles = await browser.execute(() => {
       const bg = (sel: string) => {
         const el = document.querySelector(sel);
@@ -110,7 +109,7 @@ describe('window effects + accent theming', () => {
     const fg = await browser.execute(() =>
       document.documentElement.style.getPropertyValue('--accent-fg').trim(),
     );
-    // P21: the dark side is PURE black — with a softened dark there is a
+    // The dark side is PURE black — with a softened dark there is a
     // luminance band where neither text color reaches 4.5:1 (accent.ts).
     expect(['#ffffff', '#000000']).toContain(fg);
   });
@@ -138,8 +137,8 @@ describe('window effects + accent theming', () => {
   });
 
   it('extends the backdrop to the nav pane: strip translucent (frame), body opaque (content)', async () => {
-    // Mica re-key #2 (§ 10.3, Phase 4 M3): the nav-pane icon strip carries
-    // .app-rail (a frame surface — must tint like the M2 bars) and the panel
+    // Mica re-key #2: the nav-pane icon strip carries
+    // .app-rail (a frame surface — must tint like the bars) and the panel
     // body carries .app-content (must stay opaque). The nav pane only mounts on
     // a doc tab, so open a file, ensure canvas, and open a panel first.
     const kind = await invokeCommand<string>('get_window_backdrop');
@@ -170,7 +169,7 @@ describe('window effects + accent theming', () => {
     if (kind === 'mica') {
       const a = alphaOf(styles.strip!);
       expect(a).toBeGreaterThan(0);
-      expect(a).toBeLessThan(1); // frame tint, like the three M2 bars
+      expect(a).toBeLessThan(1); // frame tint, like the three bars
       expect(alphaOf(styles.body!)).toBe(1); // panel body is opaque content
     }
   });

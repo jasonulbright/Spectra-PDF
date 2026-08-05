@@ -13,7 +13,7 @@ import {
   verifyActiveSignatures,
 } from '../support/harness.js';
 
-// Phase 9.F5 — IN-PLACE signing against the real binary. Unlike Sign & Save
+// IN-PLACE signing against the real binary. Unlike Sign & Save
 // (a new file), in-place signing routes through the workspace's undoable
 // performOperation: the signature APPENDS to the open document's working copy
 // (pyHanko IncrementalPdfFileWriter — the original bytes stay verbatim), the
@@ -24,7 +24,7 @@ import {
 const TEST_PFX = resolve(__dirname, '..', 'fixtures', 'test-signer.pfx');
 const TEST_PFX_PASSWORD = 'testpw';
 
-describe('in-place signing (Phase 9.F5)', () => {
+describe('in-place signing', () => {
   let tmp: string;
   let source: string;
 

@@ -37,7 +37,7 @@ export function showableFile(state: AppState): OpenFile | null {
   return path ? state.files.get(path) ?? null : null;
 }
 
-/** The open files that get tabs — byte-only import sources (2n.3) don't. */
+/** The open files that get tabs — byte-only import sources don't. */
 export function tabFiles(state: AppState): OpenFile[] {
   return [...state.files.values()].filter((f) => !f.importOnly);
 }
@@ -60,16 +60,16 @@ export function showableDocuments(state: AppState): OpenDocument[] {
 }
 
 /**
- * Where "Insert Pages" (from file / blank — M6, § 9.3) puts new pages:
+ * Where "Insert Pages" (from file / blank) puts new pages:
  * AFTER the page currently being read, when that page belongs to the active
  * document; else at the END of the active file's last workspace document.
- * `neighbor` is the page whose size a blank page copies (§ 9.3 "page size =
+ * `neighbor` is the page whose size a blank page copies ("page size =
  * insertion neighbor's") — the page before the insertion point, or the
  * destination's last page when appending; null only for an empty document,
  * which the zero-page guards make unreachable in practice.
  *
  * Answered here, not in App: it is a state question ("where is the user?"),
- * and the reading-view current page (`ui.currentPageId`, M4.1e) is the only
+ * and the reading-view current page (`ui.currentPageId`) is the only
  * honest anchor. The organize view acts on selections, but insertion is a
  * position rather than a selection, so the default is after the current page.
  */

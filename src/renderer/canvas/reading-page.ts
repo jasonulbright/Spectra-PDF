@@ -1,6 +1,6 @@
 
 
-// Which page is "current" in the reading view (Phase 4 M4.1b).
+// Which page is "current" in the reading view.
 //
 // Extracted as pure math because the tie-break is subtle and got this wrong
 // once: every page that is FULLY visible overlaps the viewport by exactly
@@ -48,8 +48,8 @@ const TIE_EPS = 0.5;
  * For an engine-authored or external reindex that is also IRREDUCIBLE: the
  * renderer didn't author those bytes, so position can't be trusted (a reopened,
  * externally-edited file can re-compose the doc while scroll/zoom/pane all stay
- * equal) and content-fingerprint matching is the identity-model surgery
- * `18-phase3-polish.md` weighed and declined.
+ * equal) and content-fingerprint matching is identity-model surgery
+ * that was weighed and declined.
  *
  * For the JS page-tier COMMIT it is a COST decision, not an impossibility — be
  * honest about which (regression: the first draft of this note conflated
@@ -189,7 +189,7 @@ export const ZOOM_SETTLE_MS = 140;
 export const SAFE_ELEMENT_EXTENT = 30_000_000;
 
 /**
- * P12 — the scaled-spacer scroll map (brief 36). A document whose true
+ * The scaled-spacer scroll map. A document whose true
  * extent exceeds the element cap renders a spacer of `spacerHeight =
  * min(contentHeight, SAFE_ELEMENT_EXTENT)`; the scrollbar lives in REAL
  * (spacer) space and every piece of document math lives in VIRTUAL space,
@@ -227,7 +227,7 @@ export const realTopFor = (virtualTop: number, map: ScrollMap): number => virtua
 
 /**
  * The largest zoom this document can take without its spacer exceeding
- * `SAFE_ELEMENT_EXTENT` on the WIDTH axis. P12 (brief 36) REMOVED the height
+ * `SAFE_ELEMENT_EXTENT` on the WIDTH axis. There is no height
  * (pageCount) bound this function shipped with: the spacer's height is now
  * capped by construction (`scrollMapFor`) and rows translate under it, so no
  * page count can make the tail unreachable — and Actual Size / Fit Width are
@@ -238,12 +238,12 @@ export const realTopFor = (virtualTop: number, map: ScrollMap): number => virtua
 export function maxZoomFor(pageCount: number, widestWidthAtZoom1 = 0): number {
   const bounds: number[] = [MAX_ZOOM];
   if (widestWidthAtZoom1 > 0) {
-    // Width axis: M4.1f gave the spacer a REAL width (the widest page) so wide
+    // Width axis: the spacer has a REAL width (the widest page) so wide
     // pages are reachable — which means the width can blow the same element cap.
     // BOTH axes must be bounded or the fix for one becomes the bug in the other:
     // a degenerate but spec-legal page (aspect ≳488:1, e.g. MediaBox
     // [0 0 14400 26]) overflows on WIDTH at max zoom, and its far edge becomes
-    // unreachable by horizontal scroll — defeating exactly what M4.1f exists for
+    // unreachable by horizontal scroll — defeating exactly what the real width exists for
     // (regression: the height bound never looks at aspect).
     // Width scales linearly with zoom (the widest page is `widestWidthAtZoom1 *
     // zoom` wide), so the bound is just the extent over it.

@@ -14,7 +14,7 @@ import {
   editImageTransform,
 } from '../support/harness.js';
 
-// Phase 9.C1 — image move/resize/rotate against the built binary. Arm Edit,
+// Image move/resize/rotate against the built binary. Arm Edit,
 // select the image, and drive the REAL transform commit (the on-canvas drag
 // handles live in transformed space — undrivable by WebDriver, the new-field
 // precedent). The re-listed placement matrix must equal the target M'; undo
@@ -52,7 +52,7 @@ async function waitForMatrix(target: number[], msg: string): Promise<string> {
   return (await editImagePageIds())[0];
 }
 
-describe('edit image transform (Phase 9.C1)', () => {
+describe('edit image transform', () => {
   let tmp: string;
   let pdfPath: string;
 

@@ -1,6 +1,6 @@
 """Shared Helvetica metrics (AFM-derived, pdfminer-cross-checked in tests).
 
-Extracted from watermark.py when forms fill (Phase 2l) needed the same
+Extracted from watermark.py when forms fill needed the same
 tables for appearance-stream layout — one implementation so a future fix
 propagates to every consumer (same rationale as pdf_tree.py). The values are
 pinned against pdfminer's own font descriptor by the watermark test suite.

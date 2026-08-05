@@ -11,7 +11,7 @@ import {
   setReactInputValue,
 } from '../support/harness.js';
 
-// § parity-map 2 — custom stamp authoring: author a dynamic TEXT stamp
+// Custom stamp authoring: author a dynamic TEXT stamp
 // through the real library UI, place it (tokens resolve at placement), put a
 // custom IMAGE stamp through the REAL commit + save and verify the /Stamp
 // with the CLI, then delete from the library. Library state and armed modes
@@ -34,7 +34,7 @@ async function customStampsInStore(): Promise<unknown[]> {
   });
 }
 
-describe('custom stamp authoring (parity map § 2)', () => {
+describe('custom stamp authoring', () => {
   before(async () => {
     SCRATCH = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-stamps-'));
     await waitForHarness();

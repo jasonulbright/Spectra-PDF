@@ -1,6 +1,6 @@
-"""Phase 9.K1/K1b — pair-kerning extraction.
+"""Pair-kerning extraction.
 
-K1 shipped bundled-faces-only. K1b reverses that (DECISIONS #37): editing a
+Kerning first shipped bundled-faces-only. The document half reverses that: editing a
 paragraph in the document's OWN font was DESTROYING its kerning — a stream
 carrying `[(A) 74 (V) 74 (A) 55 (T) 40 (AR)] TJ` came back as a plain `Tj`
 after a no-op re-type — so kerning must come from whatever font the text
@@ -67,7 +67,7 @@ class TestBundledFaces:
 
 
 class TestGposExtensionLookups:
-    """The K1b catch, and the sharpest one in this module.
+    """The document-font catch, and the sharpest one in this module.
 
     Large fonts routinely hide kerning behind Extension Positioning
     (LookupType 9): the lookup's subtables are thin wrappers whose real
@@ -136,7 +136,7 @@ class TestCoverageBits:
 
 
 class TestDocumentFonts:
-    """K1b: the source is whatever font the text actually uses."""
+    """The source is whatever font the text actually uses."""
 
     def _pdf_font(self, embedded=None, base="/Helvetica"):
         import pikepdf
@@ -170,7 +170,7 @@ class TestDocumentFonts:
     def test_non_embedded_standard14_falls_back_to_its_metric_twin(self):
         # Helvetica ships no program and our Core14 metrics carry no kern
         # pairs, so the kerning its METRICS imply comes from Liberation Sans
-        # — the face B1 vendored for exactly that compatibility.
+        # — the face vendored for exactly that compatibility.
         from engine.font_kerning import kern_pairs, kern_pairs_for_font
 
         pdf, font = self._pdf_font(base="/Helvetica")

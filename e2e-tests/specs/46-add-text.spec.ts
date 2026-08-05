@@ -13,7 +13,7 @@ import {
   setReactInputValue,
 } from '../support/harness.js';
 
-// Phase 9.A2 — Add Text round-trip against the real binary: arm the Edit
+// Add Text round-trip against the real binary: arm the Edit
 // tool's Add-Text mode, place a box (harness injects the placement the band
 // would have drawn — transformed-canvas-space is undrivable, the new-field
 // precedent), author text through the REAL card→buildSignatureAppearance→
@@ -69,7 +69,7 @@ async function authoredParagraph(
   return null;
 }
 
-describe('add text (Phase 9.A2)', () => {
+describe('add text', () => {
   let tmp: string;
   let pdfPath: string;
 
@@ -130,13 +130,13 @@ describe('add text (Phase 9.A2)', () => {
     await $('[data-testid="add-text-form"]').waitForDisplayed({ timeout: 10_000 });
 
     const phrase = 'Sideways label';
-    // A2-tail: rotate rides the same authored-op path; the engine wraps
+    // Rotate rides the same authored-op path; the engine wraps
     // the block in one rotation frame.
     //
-    // 9.T13 INVERSION (the spec-42 / test_rotated_text_never_groups
+    // INVERSION (the spec-42 / test_rotated_text_never_groups
     // precedent — the capability this pinned is deliberately replaced).
     // This case used to require the phrase on the RUN-BOX layer with NO
-    // paragraph carrying it. Neither half survives T13, and the probe
+    // paragraph carrying it. Neither half survives the orientation model, and the probe
     // (`probe-rot90.local.ts`) shows why: admission now runs in the
     // member's OWN transposed frame, so a quarter-turned run is an
     // ordinary axis-aligned member there and GROUPS. Once it groups the
@@ -144,7 +144,7 @@ describe('add text (Phase 9.A2)', () => {
     // so "on the run layer" was never the authoring proof it read as,
     // and the old undo check (an always-empty runs list) was vacuous.
     // The honest pin is the paragraph layer, including the ORIENTATION,
-    // which is the whole content of T13. Off-quarter angles still refuse
+    // which is the whole point. Off-quarter angles still refuse
     // — that boundary is retained and the 37° case below is its pin.
     await commitAddText({ text: phrase, size: 14, rotate: 90 });
 
@@ -164,7 +164,7 @@ describe('add text (Phase 9.A2)', () => {
     });
   });
 
-  it('authors FREE-ANGLE text (T19): a 37° block lists as a run box; undo removes', async function () {
+  it('authors FREE-ANGLE text: a 37° block lists as a run box; undo removes', async function () {
     this.timeout(120_000);
     await waitForHarness();
     await invokeAppCommand('tools.addtext');
@@ -172,7 +172,7 @@ describe('add text (Phase 9.A2)', () => {
     await $('[data-testid="add-text-form"]').waitForDisplayed({ timeout: 10_000 });
 
     const phrase = 'Angled banner';
-    // T19: any finite angle rides the same authored-op wire; the engine
+    // Any finite angle rides the same authored-op wire; the engine
     // emits one cos/sin frame about the box center. Rotated text stays on
     // the run surface (the standing boundary — same proof as the 90° case).
     await commitAddText({ text: phrase, size: 14, rotate: 37 });
@@ -204,7 +204,7 @@ describe('add text (Phase 9.A2)', () => {
     );
   });
 
-  it('authors BOLD text via the style toggle params; undo removes (A2-tail-2)', async function () {
+  it('authors BOLD text via the style toggle params; undo removes', async function () {
     this.timeout(120_000);
     await waitForHarness();
     await invokeAppCommand('tools.addtext');
@@ -228,7 +228,7 @@ describe('add text (Phase 9.A2)', () => {
     });
   });
 
-  it('shows the live overflow notice for text exceeding the box, non-blocking (A2-tail-2)', async function () {
+  it('shows the live overflow notice for text exceeding the box, non-blocking', async function () {
     this.timeout(120_000);
     await waitForHarness();
     await invokeAppCommand('tools.addtext');

@@ -23,7 +23,7 @@ import { tChrome, tOcrLanguage, tStepTitle } from '../i18n';
 // The list is read back from the registered tasks themselves — there is no
 // profile file that could disagree with what will actually fire.
 //
-// Guided-actions slice 5: the same lifecycle schedules a SAVED ACTION over a
+// Guided actions: the same lifecycle schedules a SAVED ACTION over a
 // folder (run_action was built engine-side for exactly this). The action is
 // frozen to a machine-scoped file at creation — a scheduled task must not
 // depend on the GUI's localStorage (wrong profile under a service account,
@@ -54,7 +54,7 @@ const EMPTY: ScheduleProfile = {
 };
 
 export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): React.JSX.Element {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const [runs, setRuns] = useState<ScheduledRun[] | null>(null);
   const [editing, setEditing] = useState<ScheduleProfile | null>(null);

@@ -120,7 +120,7 @@ export function rowWidth(row: PageLike[]): number {
   );
 }
 
-// Width of the add-page ghost (2n.3) — the trailing "+" flex child of every
+// Width of the add-page ghost — the trailing "+" flex child of every
 // document's page strip. Single source of truth: DocumentRow sizes the button
 // from this, and docSize below reserves its row so the JS card height matches
 // what the CSS flex-wrap actually produces (the same "must mirror" contract the

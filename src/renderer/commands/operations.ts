@@ -4,7 +4,7 @@
 // to be the rail's items). Tools group them by the JOB the user came to do
 // (`commands/tools.ts`); this module is just the flat set and its names.
 //
-// `metadata` retired at M5.5b: document properties are a DIALOG (Ctrl+D), not a
+// `metadata` is retired: document properties are a DIALOG (Ctrl+D), not a
 // job you pick from a tool — the first op to leave this list, and the type
 // system walked every dependent (the glyph map, the panel map, the owning
 // tool's ops, the command ids) rather than leaving one behind.

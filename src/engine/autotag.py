@@ -1,4 +1,4 @@
-"""Autotag (P20) — build a structure tree for an UNTAGGED PDF heuristically.
+"""Autotag — build a structure tree for an UNTAGGED PDF heuristically.
 
 The Tags panel deliberately refuses to conjure a tree from nothing (an empty
 manual tree helps no one); this op is the content-analysis half that makes a

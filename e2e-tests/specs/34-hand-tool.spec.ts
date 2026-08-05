@@ -12,7 +12,7 @@ import {
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
-// M6.2: Hand/Select modes + Space temporary hand + the PageInspector's
+// Hand/Select modes + Space temporary hand + the PageInspector's
 // retirement (double-click / context-menu "Open" now READ the page).
 
 async function scrollTopOf(): Promise<number> {
@@ -49,7 +49,7 @@ async function dragBy(dx: number, dy: number): Promise<void> {
   await act.pause(60).up().perform();
 }
 
-describe('hand tool (M6.2)', () => {
+describe('hand tool', () => {
   it('the toolbar Hand button arms the mode, pressed-state and all', async () => {
     await waitForHarness();
     await closeAllFiles();

@@ -1,4 +1,4 @@
-"""N12 slice D — the gate over the engine refusal table (brief 37 § Slices D).
+"""The gate over the engine refusal table.
 
 `src/renderer/locales/engine-messages.tsv` is a CHECKED-IN, reviewed table:
 every user-facing refusal the engine raises, mapped to the stable catalog key

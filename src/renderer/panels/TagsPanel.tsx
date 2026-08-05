@@ -18,7 +18,7 @@ import {
   type StructTree,
 } from '../lib/struct-tree';
 
-// The Tags panel (§ I.6) — the structure-tree editor. View the tag tree,
+// The Tags panel — the structure-tree editor. View the tag tree,
 // retag/retitle/set alt text, reorder (up/down) and renest (indent/outdent),
 // create empty tags, and delete tags (content stays; it becomes untagged).
 // Reading order for one page at a time lives next door in Reading Order.
@@ -46,7 +46,7 @@ function draftOf(node: StructNode): Draft {
 }
 
 export function TagsPanel(): React.ReactElement {
-  // N12: re-render on language change; strings resolve via tChrome.
+  // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();
@@ -364,7 +364,7 @@ export function TagsPanel(): React.ReactElement {
           <p className="text-sm text-neutral-500" data-testid="tags-untagged">
             {tChrome('panel.tags.untagged')}
           </p>
-          {/* P20: the content-analysis half — builds a FIRST tree (headings
+          {/* The content-analysis half — builds a FIRST tree (headings
               by size, paragraphs, figures, page-stream order) that this
               panel and Reading Order then refine. Undoable like every other
               mutation here. */}

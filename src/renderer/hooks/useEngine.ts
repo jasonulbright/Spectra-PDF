@@ -12,7 +12,7 @@ interface PendingRequest {
 
 // Canonical outline node type lives in the (dependency-free) reorder lib so the
 // sidebar's reorder and the engine contract share one definition; its index
-// signature carries the opaque 2l action/dest/action_lossy payloads untouched.
+// signature carries the opaque action/dest/action_lossy payloads untouched.
 export type { OutlineNode } from '../lib/outline-reorder';
 import type { OutlineNode } from '../lib/outline-reorder';
 
@@ -41,11 +41,11 @@ export interface EngineResult {
   level: string;
   encryption: string;
   encrypted: boolean;
-  /** check_encrypted (F9): which credentials open it — "password" | "pubkey". */
+  /** check_encrypted: which credentials open it — "password" | "pubkey". */
   kind: string;
   /** encrypt_pubkey: how many recipient certificates the file is locked to. */
   recipients: number;
-  /** convert_pdfx (O6): the GTS version string the output actually carries. */
+  /** convert_pdfx: the GTS version string the output actually carries. */
   pdfx_version: string;
   /** convert_pdfx: whether the output intent embeds a destination profile. */
   embedded_profile: boolean;
@@ -88,7 +88,7 @@ export function useEngine() {
       pending.current.delete(res.id);
 
       if (res.error) {
-        // N12 slice D — the engine-message boundary. The refusal keeps its
+        // The engine-message boundary. The refusal keeps its
         // English in `raw` (the log, the batch report and the CLI read that);
         // `message` renders it through the catalog when the UI shows it, and
         // passes it through verbatim when the table doesn't know it.
@@ -124,7 +124,7 @@ export function useEngine() {
       // A gate failure rejects here, so the operation aborts instead of
       // running against bytes that don't match what the user sees.
       await runCommitGate();
-      // P17: the gate runs OUTSIDE the lock, deliberately — it writes files
+      // The gate runs OUTSIDE the lock, deliberately — it writes files
       // itself, so gating from inside would have this operation wait on a
       // commit that is waiting on this operation. Once the gate is clear,
       // the call serializes against any other operation naming the same

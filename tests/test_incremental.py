@@ -1,4 +1,4 @@
-"""O5b — incremental-append editing of SIGNED documents.
+"""Incremental-append editing of SIGNED documents.
 
 The property under test is singular: after an annotate/fill/add-page edit
 lands through the transplant, the output STARTS WITH the signed original's
@@ -407,7 +407,7 @@ class TestWrappedOps:
         _assert_sig_still_valid(signed, pki)
 
     def test_verify_reports_signature_page(self, tmp_dir, pki):
-        # F7: the panel's jump-to-signature needs the widget's page.
+        # The panel's jump-to-signature needs the widget's page.
         signed = _signed(tmp_dir, pki)
         r = verify_signatures(signed)
         assert r["signatures"][0]["page"] == 1

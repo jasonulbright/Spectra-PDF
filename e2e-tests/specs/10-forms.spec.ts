@@ -99,7 +99,7 @@ describe('forms panel fills AcroForm fields and bakes them into the saved file',
     expect(vals.get('subscribe')).not.toBe('Off');
   });
 
-  it('page-edit commits preserve the form (2n.4a): rotate → apply → fields intact', async () => {
+  it('page-edit commits preserve the form: rotate → apply → fields intact', async () => {
     // The page-tier commit rebuilds the file from scratch (buildPdf); before
     // the AcroForm carry, that rebuild dropped /AcroForm entirely — ONE
     // committed rotation semantically destroyed every field (still rendered,
@@ -134,7 +134,7 @@ describe('forms panel fills AcroForm fields and bakes them into the saved file',
     expect(vals.get('subscribe')).not.toBe('Off');
   });
 
-  it('CLI fill (engine path) matches the GUI fill (pdf-lib path) field-for-field (2l)', async () => {
+  it('CLI fill (engine path) matches the GUI fill (pdf-lib path) field-for-field', async () => {
     // Cross-IMPLEMENTATION parity: the same source form filled with the same
     // values via the headless CLI (pikepdf engine + generated appearances)
     // must read back identically — through a third reader (pdf.js) — to the
@@ -157,7 +157,7 @@ describe('forms panel fills AcroForm fields and bakes them into the saved file',
     expect(gui.get('subscribe')).not.toBe('Off');
   });
 
-  it('CLI merge preserves both inputs\' form fields (2n.4a, bundled-runtime path)', async () => {
+  it('CLI merge preserves both inputs\' form fields (bundled-runtime path)', async () => {
     // Drives the REAL bundled Python runtime through the binary — the path
     // that caught a too-old bundled pikepdf (venv-only testing missed it).
     // Uses the FILLED output from the first test as input 1 so values must

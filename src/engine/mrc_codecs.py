@@ -251,7 +251,7 @@ def encode_masks_jbig2(
         _as_mask(mask)
 
     pixels = sum(m.width * m.height for m in masks)
-    # Derived, not fixed (§ 5.5): the encoder's work is proportional to pixel
+    # Derived, not fixed: the encoder's work is proportional to pixel
     # count, and a 600-dpi multi-page scan is the case the feature exists for.
     # ~4 MB of 1-bit samples per megapixel-page is the scale, so the budget is
     # expressed against the uncompressed bitmap size.
@@ -479,7 +479,7 @@ def verify_mask_stream(
     """Decode the embedded stencil back and return its measured ink coverage.
 
     Raises when the coverage misses `stream.ink_fraction` by more than
-    `tolerance`. Both § 1.6 rules are invisible to any check weaker than this:
+    `tolerance`. Both failure modes are invisible to any check weaker than this:
     a multi-strip G4 stream renders as a plausible eroded page, and an inverted
     stencil renders as a solid black one that OCR still returns words from.
 

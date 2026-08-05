@@ -5,7 +5,7 @@ import { expect } from '@wdio/globals';
 import { PDFDocument, rgb } from 'pdf-lib';
 import { waitForHarness, openByPaths, getState, invokeAppCommand } from '../support/harness.js';
 
-// Phase 9.D2 — move/resize/rotate a vector object. Driven via the harness
+// Move/resize/rotate a vector object. Driven via the harness
 // transform bridge (a target placement M'); asserted via the generation-tagged
 // reindex (a whole-file op rebuilds the page) + the re-listed userRect.
 
@@ -70,7 +70,7 @@ async function waitForReindexed(
   );
 }
 
-describe('vector-object transform (Phase 9.D2)', () => {
+describe('vector-object transform', () => {
   let tmp: string;
   let pdfPath: string;
 

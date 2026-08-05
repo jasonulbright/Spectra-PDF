@@ -10,7 +10,7 @@ import { tChrome, tCommandTitle } from '../i18n';
 import { ContextMenu } from './ContextMenu';
 import { OmniSearch } from './OmniSearch';
 
-// The main toolbar (Phase 4 M2) — icon buttons driven by the command
+// The main toolbar — icon buttons driven by the command
 // registry over commands/toolbars data. Enablement comes from each command's
 // pure predicate; zoom/find self-disable off the document board (their
 // commands need the canvas services), so no toolbar-side view gating. The
@@ -77,7 +77,7 @@ function ToolbarButton({
 }
 
 export function MainToolbar(): React.ReactElement {
-  // N12: re-render on language change; labels resolve via tChrome/tCommandTitle.
+  // Re-render on language change; labels resolve via tChrome/tCommandTitle.
   useTranslation();
   const state = useAppState(); // re-render on state change so enablement stays live
   // Hand and Select are modes, so the armed one reads pressed. Select is
@@ -95,7 +95,7 @@ export function MainToolbar(): React.ReactElement {
   const nodes = visibleToolbarNodes(state.ui.toolbarOverrides);
   // Right-click anywhere on the strip opens the customize entry point.
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
-  // Roving tabindex (§ 10.5, M6.5): the toolbar is ONE Tab stop; arrows move
+  // Roving tabindex: the toolbar is ONE Tab stop; arrows move
   // within it, skipping disabled buttons. The roving index follows real focus
   // (mouse clicks included), so Tab always leaves from where the user was.
   const buttons = nodes.filter(
@@ -168,7 +168,7 @@ export function MainToolbar(): React.ReactElement {
           />
         );
       })}
-      {/* U2: the universal search box lives in this row, pushed right — it is
+      {/* The universal search box lives in this row, pushed right — it is
           fixed chrome, NOT a catalog item, because the customizable catalog is
           a set of glyph buttons and a text field is not one of those. */}
       <div className="ml-auto pl-2">

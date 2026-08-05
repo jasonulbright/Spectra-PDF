@@ -12,7 +12,7 @@ import {
   setReactInputValue,
 } from '../support/harness.js';
 
-// Phase 4 M3.3: the Search nav panel — a result-list view over the shared
+// The Search nav panel — a result-list view over the shared
 // workspace search index (same index the canvas FindBar uses). Drives the real
 // DOM: open the panel, type a query, read the per-file hit list, and click a
 // hit to confirm it routes through the find/highlight path (find.openWith).

@@ -1,4 +1,4 @@
-// Menu + toolbar data integrity (Phase 4 M2). Every static item references a
+// Menu + toolbar data integrity. Every static item references a
 // registered command; displayed shortcuts come from the keymap table (so a
 // label can't drift from its binding); dynamic sections produce valid leaves.
 import { describe, expect, it } from 'vitest';
@@ -94,7 +94,7 @@ describe('dynamic sections', () => {
   });
 });
 
-describe('§ 9.1 completeness (M6.3)', () => {
+describe('menu completeness', () => {
   const idsIn = (menuId: string): string[] => {
     const menu = MENUS.find((m) => m.id === menuId)!;
     return menuCommandIds(menu.items);
@@ -123,7 +123,7 @@ describe('§ 9.1 completeness (M6.3)', () => {
     );
   });
 
-  it('Document inserts (file + blank, § 9.3), operates in § 9.1 order, and OCRs', () => {
+  it('Document inserts (file + blank), operates in menu order, and OCRs', () => {
     const ids = idsIn('document');
     expect(ids).toEqual(expect.arrayContaining([
       'document.insertFromFile', 'document.insertBlankPage',
@@ -131,7 +131,7 @@ describe('§ 9.1 completeness (M6.3)', () => {
       'tools.panel.extract_text', 'tools.panel.watermark',
       'document.applyPageEdits', 'tools.open.ocr',
     ]));
-    // Insert Pages leads the menu (§ 9.1's reading order).
+    // Insert Pages leads the menu (the reading order).
     expect(ids[0]).toBe('document.insertFromFile');
   });
 });
@@ -167,7 +167,7 @@ describe('discoverability copy', () => {
     expect(desc('comment')).toMatch(/text box/i);
   });
 
-  it('Edit names text AND paragraphs AND images (the full 7.1–7.5 surface)', () => {
+  it('Edit names text AND paragraphs AND images (the full edit surface)', () => {
     expect(desc('edit')).toMatch(/text/i);
     expect(desc('edit')).toMatch(/paragraph/i);
     expect(desc('edit')).toMatch(/image/i);
