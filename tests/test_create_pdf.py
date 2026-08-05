@@ -455,6 +455,79 @@ class TestOrderAndAssembly:
         assert [row["converter"] for row in result["sources"]] == ["passthrough"] * 2
 
 
+class TestPerMemberPageRanges:
+    """P22 slice D — Combine Files' per-member range, through the one door.
+
+    Applied AFTER that member's conversion, which is why it reads the same on
+    a `.docx` as on a PDF and why no arm had to learn ranges exist.
+    """
+
+    def test_a_member_contributes_only_its_range(self, tmp_dir, sample_pdf, sample_pdf2):
+        out = Path(tmp_dir) / "ranged.pdf"
+        result = create_pdf(
+            [{"path": sample_pdf, "pages": "2-3"}, {"path": sample_pdf2, "pages": "1"}],
+            str(out),
+        )
+        assert result["pages"] == 3
+        assert [row["pages"] for row in result["sources"]] == [2, 1]
+        assert [row["page_range"] for row in result["sources"]] == ["2-3", "1"]
+
+    def test_a_list_of_pages_and_spans_is_taken_in_the_range_order(self, tmp_dir, sample_pdf):
+        out = Path(tmp_dir) / "list.pdf"
+        result = create_pdf([{"path": sample_pdf, "pages": "5,1-2"}], str(out))
+        assert result["pages"] == 3
+
+    def test_a_span_end_is_clamped_to_the_document(self, tmp_dir, sample_pdf):
+        out = Path(tmp_dir) / "clamped.pdf"
+        assert create_pdf([{"path": sample_pdf, "pages": "1-999"}], str(out))["pages"] == 5
+
+    def test_a_range_selecting_nothing_refuses_by_name(self, tmp_dir, sample_pdf):
+        with pytest.raises(ValueError, match="selects no pages"):
+            create_pdf([{"path": sample_pdf, "pages": "99"}], str(Path(tmp_dir) / "x.pdf"))
+
+    def test_a_malformed_range_refuses_naming_what_was_typed(self, tmp_dir, sample_pdf):
+        # `parse_ranges` alone would raise a bare int() ValueError naming a
+        # literal the user never typed; the shape is checked first.
+        for spec in ("abc", "2-", "-3", "1..3"):
+            with pytest.raises(ValueError, match="is not a list of pages or ranges"):
+                create_pdf(
+                    [{"path": sample_pdf, "pages": spec}], str(Path(tmp_dir) / "x.pdf")
+                )
+
+    def test_a_blank_member_refuses_a_range_rather_than_ignoring_it(self, tmp_dir):
+        # A range that silently does nothing is a user believing they made a
+        # selection.
+        with pytest.raises(ValueError, match="no pages to select a range from"):
+            create_pdf([{"kind": "blank", "pages": "1"}], str(Path(tmp_dir) / "x.pdf"))
+
+    def test_a_range_survives_page_size_normalisation(self, tmp_dir, sample_pdf):
+        out = Path(tmp_dir) / "ranged-a4.pdf"
+        result = create_pdf(
+            [{"path": sample_pdf, "pages": "2-3"}], str(out), page_size="a4"
+        )
+        assert result["pages"] == 2
+        assert boxes(out) == [[0.0, 0.0, 595.28, 841.89]] * 2
+
+    def test_a_ranged_form_member_keeps_the_fields_on_its_kept_pages(self, tmp_dir):
+        # A range is a SPLIT of that member, so it goes through the same
+        # form-aware copy `split` uses — a bare `pages.append` would leave
+        # every widget on a kept page orphaned and dead.
+        form = FIXTURES / "form-pdflib.pdf"
+        out = Path(tmp_dir) / "form-ranged.pdf"
+        create_pdf([{"path": str(form)}, {"path": str(form), "pages": "1"}], str(out))
+        assert field_names(out), "the fixture must actually carry fields"
+        # Both copies' fields are registered; the collision renames rather
+        # than dropping one, exactly as the shipped merge does.
+        assert len(field_names(out)) == 2 * len(field_names(form))
+
+    def test_an_image_member_takes_a_range_of_its_frames(self, tmp_dir):
+        out = Path(tmp_dir) / "frames.pdf"
+        result = create_pdf(
+            [{"path": str(three_frame_tiff(tmp_dir)), "pages": "2-3"}], str(out)
+        )
+        assert result["pages"] == 2
+
+
 class TestFormsSurviveTheAssembly:
     def test_a_form_member_keeps_its_fields_through_a_mixed_build(self, tmp_dir):
         # The risk the brief names for this slice: assembly MUST route through
