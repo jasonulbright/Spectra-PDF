@@ -10,6 +10,7 @@ import {
   invokeAppCommand,
   setParagraphSelection,
   setReactInputValue,
+  openParagraphEditor,
 } from '../support/harness.js';
 
 // Phase 9.A4 — paragraph split (Enter mid-text) + merge (Backspace at the
@@ -36,13 +37,7 @@ async function editParagraphs(
 }
 
 async function editParagraphOpen(pageId: string, index: number): Promise<void> {
-  await browser.execute<void, [string, number]>(
-    function (p, i) {
-      (window as any).__SPECTRA_TEST__.editParagraphOpen(p, i);
-    },
-    pageId,
-    index,
-  );
+  await openParagraphEditor(pageId, index);
 }
 
 /** Place the REAL caret (collapsed) at a CODE-POINT offset. The editor is a
