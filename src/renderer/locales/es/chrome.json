@@ -1229,6 +1229,8 @@
   "engine.font_fallback.libertinusSerifFeatureFont": "no se encontró Libertinus Serif (fuente de características) en {{font_path}}",
   "engine.font_fallback.textEmbed": "no hay texto que incrustar",
   "engine.font_fallback.verticalFallbackFontCannot": "la fuente vertical de reserva no puede representar {{ch}}",
+  "engine.form_detect.cannotNameDetectedField": "no se puede nombrar el campo detectado {{base}}: demasiados campos ya tienen ese nombre",
+  "engine.form_detect.maxCandidatesMustPositive": "max_candidates debe ser un número positivo",
   "engine.forms.acroformFieldTreeNested": "el árbol de campos AcroForm está anidado a demasiada profundidad",
   "engine.forms.couldnTRegenerateAppearance": "no se pudo regenerar la apariencia de {{v0}}: {{exc}}",
   "engine.forms.valueContainsCharactersOutside": "el valor contiene caracteres fuera de la codificación de la fuente del formulario (WinAnsi)",

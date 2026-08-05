@@ -1229,6 +1229,8 @@
   "engine.font_fallback.libertinusSerifFeatureFont": "Libertinus Serif（機能フォント）が {{font_path}} に見つかりません",
   "engine.font_fallback.textEmbed": "埋め込むテキストがありません",
   "engine.font_fallback.verticalFallbackFontCannot": "縦組みの代替フォントでは {{ch}} を表現できません",
+  "engine.form_detect.cannotNameDetectedField": "検出されたフィールド {{base}} に名前を付けられません: 同じ名前のフィールドが多すぎます",
+  "engine.form_detect.maxCandidatesMustPositive": "max_candidates には正の数を指定してください",
   "engine.forms.acroformFieldTreeNested": "AcroForm のフィールドツリーが深く入れ子になりすぎています",
   "engine.forms.couldnTRegenerateAppearance": "{{v0}} の外観を再生成できませんでした：{{exc}}",
   "engine.forms.valueContainsCharactersOutside": "値にフォームフォントのエンコーディング（WinAnsi）外の文字が含まれています",

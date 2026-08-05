@@ -1229,6 +1229,8 @@
   "engine.font_fallback.libertinusSerifFeatureFont": "Libertinus Serif (Feature-Schrift) nicht gefunden in {{font_path}}",
   "engine.font_fallback.textEmbed": "kein Text zum Einbetten",
   "engine.font_fallback.verticalFallbackFontCannot": "die vertikale Ersatzschrift kann {{ch}} nicht darstellen",
+  "engine.form_detect.cannotNameDetectedField": "das erkannte Feld {{base}} kann nicht benannt werden: zu viele Felder tragen diesen Namen bereits",
+  "engine.form_detect.maxCandidatesMustPositive": "max_candidates muss eine positive Zahl sein",
   "engine.forms.acroformFieldTreeNested": "AcroForm-Feldbaum zu tief verschachtelt",
   "engine.forms.couldnTRegenerateAppearance": "das Erscheinungsbild für {{v0}} konnte nicht neu erzeugt werden: {{exc}}",
   "engine.forms.valueContainsCharactersOutside": "der Wert enthält Zeichen außerhalb der Kodierung der Formularschrift (WinAnsi)",
