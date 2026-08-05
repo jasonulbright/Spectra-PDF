@@ -211,6 +211,18 @@ def list_system_fonts(refresh: bool = False) -> dict:
     }
 
 
+def installed_families() -> set[str]:
+    """Every family name installed on this machine, RESTRICTED ONES INCLUDED.
+
+    Deliberately not `list_system_fonts`: that filters by whether THIS engine
+    may embed a face, which is a different question from whether the machine
+    has it. LibreOffice renders with a Restricted-License face perfectly well,
+    so excluding those here would make the substitution report (P22 § 6) accuse
+    the converter of dropping a font it actually used.
+    """
+    return {face["family"] for face in _scan() if face.get("family")}
+
+
 def resolve_face(path: str, index: int = 0) -> str:
     """Validate a caller-supplied face path and hand back its absolute form.
 

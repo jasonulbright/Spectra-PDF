@@ -108,11 +108,15 @@ def test_rejects_a_directory_destination(tmp_dir):
 
 def test_timeout_kills_the_process_tree_and_frees_the_profile(tmp_dir, monkeypatch):
     # A hung soffice must not orphan its worker + lock its profile dir. Drive
-    # _run_soffice with a fake "soffice" that never exits and a 0s budget: the
-    # timeout path must taskkill the tree and raise, and the finally must remove
-    # the profile directory (rmtree can't succeed while a child holds it open,
-    # so this also proves the tree-kill ran).
-    import engine.office_export as oe
+    # the runner with a fake "soffice" that never exits and a near-zero budget:
+    # the timeout path must taskkill the tree and raise, and the finally must
+    # remove the profile directory (rmtree can't succeed while a child holds it
+    # open, so this also proves the tree-kill ran).
+    #
+    # P22 slice B: the runner moved to engine/soffice.py — one invocation for
+    # both directions — and its flat 240 s became a DERIVED budget, so the
+    # timeout is forced by shrinking the floor rather than by a constant.
+    import engine.soffice as oe
 
     profiles: list[str] = []
     real_mkdtemp = oe.tempfile.mkdtemp
@@ -131,7 +135,8 @@ def test_timeout_kills_the_process_tree_and_frees_the_profile(tmp_dir, monkeypat
         real_kill(pid)  # actually terminate the tree so communicate() returns
 
     monkeypatch.setattr(oe.tempfile, "mkdtemp", spy_mkdtemp)
-    monkeypatch.setattr(oe, "_TIMEOUT", 0)
+    monkeypatch.setattr(oe, "_BASE_SECONDS", 0.001)
+    monkeypatch.setattr(oe, "_PER_MB_SECONDS", 0.0)
     monkeypatch.setattr(oe, "_kill_tree", spy_kill)
 
     src = Path(os.path.join(tmp_dir, "s.pdf"))
@@ -148,8 +153,8 @@ def test_timeout_kills_the_process_tree_and_frees_the_profile(tmp_dir, monkeypat
         lambda cmd, **k: real_popen([sys.executable, "-c", "import time; time.sleep(30)"], **k),
     )
 
-    with pytest.raises(RuntimeError, match="timed out"):
-        oe._run_soffice(sys.executable, "html", src, work, ".html")
+    with pytest.raises(RuntimeError, match="did not finish within the derived budget"):
+        oe.run_convert(sys.executable, "html", src, work, ".html")
 
     assert killed, "the process tree was not killed on timeout"
     assert profiles and not os.path.exists(profiles[-1]), "the profile dir leaked"
