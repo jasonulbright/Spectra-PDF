@@ -1,6 +1,35 @@
 # Changelog
 
-## 1.0.20
+## 1.0.20 — Redaction that searches and measures, and a PDF from any file
+
+Redaction stops being a box you draw by hand, one at a time. Type a term —
+or paste a list of them, or pick a pattern like a card number, an IBAN or a
+social security number — and every occurrence in the page range, the
+document, or every document you have open comes back as a list you tick
+through before anything is marked. The black box itself gained a colour, a
+caption and an exemption code, and marks are stored in the document, so they
+survive being closed and reopened and other programs can read them.
+
+Underneath that, redaction now measures text with the fonts that drew it.
+The old estimate ran short — on monospaced text, roughly the last sixth of
+every line sat outside the area redaction checked — which means content could
+be marked, blacked out, and reported as removed while it was still in the
+file and readable. That is fixed. **It affects every earlier release: files
+you have already redacted are worth re-checking.** And what a mark removes is
+now the characters you marked, rather than every word the document happened
+to draw in the same instruction.
+
+Creating a PDF stops meaning PostScript. File ▸ Create PDF takes Word, Excel,
+PowerPoint, OpenDocument, RTF, plain text, CSV, HTML and EPS files, images
+from PNG to HEIC, PDFs you already have, and blank pages — in one list you
+order yourself. Combine Files takes the same set, with a page range on every
+PDF in it. So do the command line and saved actions, so a watched folder can
+turn every document that lands in it into a stamped, searchable PDF with
+nobody at the keyboard. Conversion never reaches the network, and every page
+of a multi-page fax or scan is kept.
+
+Headers, footers and Bates stamps now work in Japanese, Chinese and Korean,
+and in Arabic, Hebrew and Persian, at any of the six page positions.
 
 ### Redaction
 - **Search & Redact: mark every occurrence of something in one pass.** Until
