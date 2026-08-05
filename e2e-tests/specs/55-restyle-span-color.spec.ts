@@ -10,6 +10,7 @@ import {
   invokeAppCommand,
   setReactInputValue,
   setParagraphSelection,
+  openParagraphEditor,
 } from '../support/harness.js';
 
 // Phase 9.A5a — per-span colour on the paragraph editor: select a word in
@@ -41,13 +42,7 @@ async function editParagraphs(pageId: string): Promise<Para[]> {
 }
 
 async function editParagraphOpen(pageId: string, index: number): Promise<void> {
-  await browser.execute<void, [string, number]>(
-    function (p, i) {
-      (window as any).__SPECTRA_TEST__.editParagraphOpen(p, i);
-    },
-    pageId,
-    index,
-  );
+  await openParagraphEditor(pageId, index);
 }
 
 /** Select a CODE-POINT range in the paragraph editor. The editor is a

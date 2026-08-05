@@ -10,6 +10,7 @@ import {
   invokeAppCommand,
   setReactInputValue,
   setContentEditableValue,
+  openParagraphEditor,
 } from '../support/harness.js';
 
 // Phase 7.5 — paragraph reflow round-trip against the real binary: a
@@ -36,13 +37,7 @@ async function editParagraphs(
 }
 
 async function editParagraphOpen(pageId: string, index: number): Promise<void> {
-  await browser.execute<void, [string, number]>(
-    function (p, i) {
-      (window as any).__SPECTRA_TEST__.editParagraphOpen(p, i);
-    },
-    pageId,
-    index,
-  );
+  await openParagraphEditor(pageId, index);
 }
 
 /** The listing this returns is the SAME read that was validated — never a
