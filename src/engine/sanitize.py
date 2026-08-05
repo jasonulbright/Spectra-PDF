@@ -1043,6 +1043,33 @@ def _remove_links_and_actions(pdf) -> int:
     return removed
 
 
+def _remove_hidden_text(pdf, hidden_text_ocr: bool) -> int:
+    """Text a reader cannot see, removed run by run.
+
+    The pages are re-analyzed against the LIVE document rather than against the
+    audit taken before it: an earlier category in the same pass can rewrite a
+    content stream, and a run id names a position in the stream it was read
+    from.
+
+    Partially covered runs are never removed — the uncovered half is content —
+    and a recognition layer goes only when it is asked for by name, because
+    removing it makes a scan unsearchable.
+    """
+    from engine.sanitize_content import analyze_page, remove_runs
+
+    kinds = set(REMOVABLE_TEXT_KINDS)
+    if hidden_text_ocr:
+        kinds.add(OCR_TEXT_KIND)
+    off_set = off_ocg_set(pdf)
+    removed = 0
+    for page in pdf.pages:
+        found = analyze_page(pdf, page, off_set)
+        targets = {run.index for run in found["runs"] if run.kind in kinds}
+        if targets:
+            removed += remove_runs(pdf, page, targets)
+    return removed
+
+
 def _remove_hidden_layers(pdf) -> int:
     from engine.sanitize_content import drop_optional_content_groups, remove_hidden_layer_content
 
@@ -1099,6 +1126,9 @@ REMOVERS = {
     ),
     "javascript": lambda pdf, audit, options: _remove_javascript(pdf),
     "hidden_layers": lambda pdf, audit, options: _remove_hidden_layers(pdf),
+    "hidden_text": lambda pdf, audit, options: _remove_hidden_text(
+        pdf, options["hidden_text_ocr"]
+    ),
     "links_and_actions": lambda pdf, audit, options: _remove_links_and_actions(pdf),
     "thumbnails": lambda pdf, audit, options: _remove_thumbnails(pdf),
     "attached_structure": lambda pdf, audit, options: _remove_attached_structure(pdf),
@@ -1194,7 +1224,11 @@ def sanitize_pdf(
 
     options = {"form_fields_mode": form_fields_mode, "hidden_text_ocr": bool(hidden_text_ocr)}
     with pikepdf.open(file) as pdf:
-        for category in chosen:
+        # Report order is also apply order, and two pairs depend on it: hidden
+        # layers are dropped before hidden text is re-analyzed, so the layer's
+        # words are not looked for twice, and a flatten stamps its appearances
+        # into the page before that analysis reads it.
+        for category in sorted(chosen, key=CATEGORY_IDS.index):
             if category in FREE_FROM_SAVE:
                 removed[category] = counts[category]
                 continue
