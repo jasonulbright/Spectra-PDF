@@ -28,6 +28,7 @@ silently over a structure it failed to parse.
 from pathlib import Path
 
 import pikepdf
+from pikepdf import Name
 
 from engine.inplace import finish_staged, is_same_file, staging_target
 from engine.sanitize_content import analyze_page, off_ocg_set
@@ -897,8 +898,7 @@ def _remove_form_fields(pdf, mode: str) -> int:
 
 
 def _remove_document_scripts(pdf) -> int:
-    """The catalog's named script tree. The other four script sites are
-    action dictionaries and are swept with them."""
+    """The catalog's named script tree."""
     names = pdf.Root.get("/Names")
     if not isinstance(names, pikepdf.Dictionary):
         return 0
@@ -912,7 +912,119 @@ def _remove_document_scripts(pdf) -> int:
     return removed
 
 
-def _remove_links(pdf) -> int:
+def _strip_actions(action, matches, depth: int = 0):
+    """Rebuild an action chain without the actions `matches` selects.
+
+    An action's `/Next` is a chain, so removing one link must splice rather
+    than truncate: everything the removed action would have run afterwards
+    still runs. Returns (replacement or None, removed count)."""
+    if not isinstance(action, pikepdf.Dictionary) or depth > 16:
+        return action, 0
+    removed = 0
+    following = action.get("/Next")
+    if isinstance(following, pikepdf.Array):
+        kept_next = []
+        for entry in following:
+            replacement, sub = _strip_actions(entry, matches, depth + 1)
+            removed += sub
+            if replacement is not None:
+                kept_next.append(replacement)
+        following = pikepdf.Array(kept_next) if kept_next else None
+    elif isinstance(following, pikepdf.Dictionary):
+        following, sub = _strip_actions(following, matches, depth + 1)
+        removed += sub
+    else:
+        following = None
+    if matches(action):
+        return following, removed + 1
+    if following is None:
+        if "/Next" in action:
+            del action["/Next"]
+    else:
+        action["/Next"] = following
+    return action, removed
+
+
+def _strip_action_slot(container, key, matches) -> int:
+    """Prune one `/A` or one `/AA` entry in place."""
+    if not isinstance(container, pikepdf.Dictionary):
+        return 0
+    slot = container.get(Name(key)) if isinstance(key, str) else container.get(key)
+    if not isinstance(slot, pikepdf.Dictionary):
+        return 0
+    replacement, removed = _strip_actions(slot, matches)
+    if replacement is None:
+        del container[key]
+    else:
+        container[key] = replacement
+    return removed
+
+
+def _action_sites(pdf):
+    """Every dictionary that owns an action slot, with the slot's key. The
+    additional-action dictionaries are enumerated by their own keys, so a
+    document, page, field or annotation trigger is reached the same way."""
+    def emit(owner):
+        if not isinstance(owner, pikepdf.Dictionary):
+            return
+        if isinstance(owner.get("/A"), pikepdf.Dictionary):
+            yield owner, "/A"
+        extra = owner.get("/AA")
+        if isinstance(extra, pikepdf.Dictionary):
+            for key in [str(k) for k in extra.keys()]:
+                yield extra, key
+
+    if isinstance(pdf.Root.get("/OpenAction"), pikepdf.Dictionary):
+        yield pdf.Root, "/OpenAction"
+    catalog_aa = pdf.Root.get("/AA")
+    if isinstance(catalog_aa, pikepdf.Dictionary):
+        for key in [str(k) for k in catalog_aa.keys()]:
+            yield catalog_aa, key
+    for page in pdf.pages:
+        yield from emit(page.obj)
+        annots = page.obj.get("/Annots")
+        if not isinstance(annots, pikepdf.Array):
+            continue
+        for annot in annots:
+            yield from emit(annot)
+
+
+def _prune_empty_action_dicts(pdf) -> None:
+    for owner in [pdf.Root] + [p.obj for p in pdf.pages]:
+        extra = owner.get("/AA")
+        if isinstance(extra, pikepdf.Dictionary) and not len(extra.keys()):
+            del owner["/AA"]
+    for page in pdf.pages:
+        annots = page.obj.get("/Annots")
+        if not isinstance(annots, pikepdf.Array):
+            continue
+        for annot in annots:
+            if not isinstance(annot, pikepdf.Dictionary):
+                continue
+            extra = annot.get("/AA")
+            if isinstance(extra, pikepdf.Dictionary) and not len(extra.keys()):
+                del annot["/AA"]
+
+
+def _remove_javascript(pdf) -> int:
+    """All five script sites. The named tree is one of them; the other four are
+    action dictionaries — the open action, and the additional actions on the
+    catalog, the pages and their annotations and fields."""
+    removed = _remove_document_scripts(pdf)
+    for container, key in list(_action_sites(pdf)):
+        removed += _strip_action_slot(container, key, _is_js_action)
+    _prune_empty_action_dicts(pdf)
+    return removed
+
+
+def _is_non_link_action(action) -> bool:
+    return isinstance(action, pikepdf.Dictionary) and str(action.get("/S", "")) in NON_LINK_ACTIONS
+
+
+def _remove_links_and_actions(pdf) -> int:
+    """Link annotations, and every action that reaches outside the document or
+    runs something. A link's own action goes with the annotation, so the two
+    halves cannot double-count."""
     removed = 0
     for page in pdf.pages:
         annots = page.obj.get("/Annots")
@@ -925,7 +1037,20 @@ def _remove_links(pdf) -> int:
                 continue
             kept.append(annot)
         _write_annots(page, kept)
+    for container, key in list(_action_sites(pdf)):
+        removed += _strip_action_slot(container, key, _is_non_link_action)
+    _prune_empty_action_dicts(pdf)
     return removed
+
+
+def _remove_hidden_layers(pdf) -> int:
+    from engine.sanitize_content import drop_optional_content_groups, remove_hidden_layer_content
+
+    off_set = off_ocg_set(pdf)
+    if not off_set:
+        return 0
+    remove_hidden_layer_content(pdf, off_set)
+    return drop_optional_content_groups(pdf, off_set)
 
 
 def _remove_thumbnails(pdf) -> int:
@@ -972,8 +1097,9 @@ REMOVERS = {
     "form_fields": lambda pdf, audit, options: _remove_form_fields(
         pdf, options["form_fields_mode"]
     ),
-    "javascript": lambda pdf, audit, options: _remove_document_scripts(pdf),
-    "links_and_actions": lambda pdf, audit, options: _remove_links(pdf),
+    "javascript": lambda pdf, audit, options: _remove_javascript(pdf),
+    "hidden_layers": lambda pdf, audit, options: _remove_hidden_layers(pdf),
+    "links_and_actions": lambda pdf, audit, options: _remove_links_and_actions(pdf),
     "thumbnails": lambda pdf, audit, options: _remove_thumbnails(pdf),
     "attached_structure": lambda pdf, audit, options: _remove_attached_structure(pdf),
 }
