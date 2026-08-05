@@ -128,10 +128,6 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'redact',
     title: 'Redact',
-    // F15: the tool now offers BOTH producers — a hand-drawn band, and a
-    // search that marks every occurrence of a term, a word list or a built-in
-    // pattern across a page range. The description says so, because "draw a
-    // box" was the only thing a user could discover.
     description: 'Mark text to remove — by hand, or by searching every occurrence — then permanently strip it from the file.',
     ops: ['search_redact'],
     // It still ARMS the band mode when opened (worksOnPage stays true because

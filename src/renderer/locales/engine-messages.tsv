@@ -85,6 +85,8 @@ font_fallback.fontVerticalMetricsPick	exact	font_fallback,text_paragraphs	that f
 font_fallback.libertinusSerifFeatureFont	pattern	font_fallback	Libertinus Serif (feature font) not found in {{font_path}}
 font_fallback.textEmbed	exact	font_fallback	no text to embed
 font_fallback.verticalFallbackFontCannot	pattern	font_fallback	the vertical fallback font cannot express {{ch}}
+form_detect.cannotNameDetectedField	pattern	form_detect	cannot name the detected field {{base}}: too many fields already carry that name
+form_detect.maxCandidatesMustPositive	exact	form_detect	max_candidates must be a positive number
 forms.acroformFieldTreeNested	exact	forms	AcroForm field tree nested too deeply
 forms.couldnTRegenerateAppearance	pattern	forms	couldn't regenerate the appearance for {{v0}}: {{exc}}
 forms.valueContainsCharactersOutside	exact	forms	value contains characters outside the form font's encoding (WinAnsi)
@@ -123,7 +125,7 @@ inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 links.linkIndexOutRange	pattern	links	link index {{index}} is out of range (page has {{v1}})
 links.linksAdd	exact	links	no links to add
-links.pageOutRange	pattern	links,page_images,page_vectors,redact_marks,search_regions,text_authoring,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
+links.pageOutRange	pattern	form_detect,links,page_images,page_vectors,redact_marks,search_regions,text_authoring,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
 links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive width and height
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
 links.urlMustEmpty	exact	links	url must not be empty
@@ -293,7 +295,7 @@ rtl_text.textContainsDirectionalFormatting	exact	rtl_text	text contains directio
 search_regions.expandMustMatchWord	exact	search_regions	expand must be "match", "word" or "line"
 search_regions.giveSearchTermWord	exact	search_regions	give a search term, a word list or a built-in pattern — searching for nothing would mark every page
 search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a positive number
-search_regions.pagesMustListPage	exact	search_regions	pages must be a list of page numbers or "all"
+search_regions.pagesMustListPage	exact	form_detect,search_regions	pages must be a list of page numbers or "all"
 shaping.fontSVerticalForm	pattern	shaping	this font's vertical form of {{name}} has no advance
 shaping.shapingFontCannotExpress	pattern	shaping	the shaping font cannot express {{text}}
 signatures.certificatesFoundTrustRoot	pattern	signatures	no certificates found in trust root: {{p}}

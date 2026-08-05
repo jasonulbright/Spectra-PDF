@@ -1229,6 +1229,8 @@
   "engine.font_fallback.libertinusSerifFeatureFont": "在 {{font_path}} 中找不到 Libertinus Serif（特性字体）",
   "engine.font_fallback.textEmbed": "没有要嵌入的文本",
   "engine.font_fallback.verticalFallbackFontCannot": "竖排后备字体无法表示 {{ch}}",
+  "engine.form_detect.cannotNameDetectedField": "无法为检测到的字段 {{base}} 命名：已有过多字段使用该名称",
+  "engine.form_detect.maxCandidatesMustPositive": "max_candidates 必须是正数",
   "engine.forms.acroformFieldTreeNested": "AcroForm 字段树嵌套过深",
   "engine.forms.couldnTRegenerateAppearance": "无法重新生成 {{v0}} 的外观：{{exc}}",
   "engine.forms.valueContainsCharactersOutside": "该值含有表单字体编码（WinAnsi）之外的字符",

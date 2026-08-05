@@ -1229,6 +1229,8 @@
   "engine.font_fallback.libertinusSerifFeatureFont": "Libertinus Serif (police à fonctionnalités) introuvable dans {{font_path}}",
   "engine.font_fallback.textEmbed": "aucun texte à incorporer",
   "engine.font_fallback.verticalFallbackFontCannot": "la police de repli verticale ne peut pas exprimer {{ch}}",
+  "engine.form_detect.cannotNameDetectedField": "impossible de nommer le champ détecté {{base}} : trop de champs portent déjà ce nom",
+  "engine.form_detect.maxCandidatesMustPositive": "max_candidates doit être un nombre positif",
   "engine.forms.acroformFieldTreeNested": "arbre de champs AcroForm imbriqué trop profondément",
   "engine.forms.couldnTRegenerateAppearance": "impossible de régénérer l’apparence de {{v0}} : {{exc}}",
   "engine.forms.valueContainsCharactersOutside": "la valeur contient des caractères hors de l’encodage de la police du formulaire (WinAnsi)",
