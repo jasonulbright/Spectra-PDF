@@ -17,13 +17,21 @@ Each call uses a FRESH, throwaway user-profile directory: a headless soffice
 refuses to start a second instance against a profile another soffice (e.g. the
 user's open GUI copy) already holds, and would silently hang. The profile and any
 bridge temp are cleaned up in a finally.
+
+**The invocation itself lives in `engine/soffice.py` (P22 slice B)** — one
+runner for both directions. Export gained three things from that move it did
+not have on its own: the seeded OFFLINE profile (headless soffice fetched a
+remote resource referenced by a converted document — measured), a DERIVED time
+budget instead of a flat 240 s, and an output that is proven by reading it
+rather than by trusting the exit code.
 """
 
 import os
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
+
+from engine.soffice import run_convert
 
 # format key -> (extension, soffice --convert-to filter, needs the HTML bridge)
 # The filter strings are LibreOffice's registered filter names; the Writer ones
@@ -36,118 +44,10 @@ _FORMATS = {
     "xhtml": (".xhtml", "xhtml:XHTML Writer File", False),
 }
 
-# LibreOffice's own first-run + import can be slow on a cold profile; a large PDF
-# plus the bridge's second launch stays well under this.
-_TIMEOUT = 240
-
-
-def _kill_tree(pid: int) -> None:
-    """Kill a process and its children. soffice.exe launches soffice.bin as a
-    child, so a bare kill of the tracked pid leaves the worker running and its
-    profile dir locked — taskkill /T terminates the whole tree (Windows-only,
-    which this app is). Best-effort: a race where it already exited is fine."""
-    try:
-        subprocess.run(
-            ["taskkill", "/F", "/T", "/PID", str(pid)],
-            capture_output=True,
-            stdin=subprocess.DEVNULL,
-            timeout=15,
-        )
-    except (OSError, subprocess.SubprocessError):
-        pass
-
 
 def supported_formats() -> dict:
     """The export targets this build offers (for the UI + CLI help)."""
     return {"formats": sorted(_FORMATS.keys())}
-
-
-def _run_soffice(soffice_path: str, convert_to: str, src: Path, out_dir: Path, want_ext: str) -> Path:
-    """One `soffice --headless --convert-to` pass. Returns the produced file.
-
-    LibreOffice names the output after the INPUT's stem with the filter's
-    extension, into ``out_dir`` — it ignores any name we might want, so the
-    caller renames the result to the user's chosen path.
-
-    ``want_ext`` (".rtf", ".docx", …) disambiguates the bridge case: the HTML
-    intermediate ``s.html`` and the new ``s.rtf`` share a stem in the same
-    directory, so a stem-only match could grab the intermediate. Match on the
-    expected extension and exclude the source file.
-    """
-    profile = Path(tempfile.mkdtemp(prefix="lo-profile-"))
-    try:
-        cmd = [
-            soffice_path,
-            # Isolate the user profile so a running GUI instance can't block us.
-            f"-env:UserInstallation={profile.as_uri()}",
-            "--headless",
-            "--norestore",
-            "--convert-to",
-            convert_to,
-            "--outdir",
-            str(out_dir),
-            str(src),
-        ]
-        # NOT subprocess.run(timeout=): on Windows soffice.exe is a launcher
-        # stub that spawns the real soffice.bin as a CHILD, and run()'s timeout
-        # kills only the parent handle — a hung Draw import (a pathological or
-        # crafted PDF) would orphan soffice.bin holding the profile dir open, so
-        # the finally's rmtree silently fails and both leak. Track the pid and
-        # kill the whole TREE on timeout (taskkill /T), so the profile frees.
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            # soffice must never inherit the engine's JSON-RPC stdin (the
-            # distill review's lesson — a subprocess reading the RPC pipe).
-            stdin=subprocess.DEVNULL,
-            text=True,
-        )
-        try:
-            stdout, stderr = proc.communicate(timeout=_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            _kill_tree(proc.pid)
-            proc.communicate()  # reap, and release the pipes
-            raise RuntimeError(f"LibreOffice conversion timed out after {_TIMEOUT}s")
-        if proc.returncode != 0:
-            raise RuntimeError(
-                f"LibreOffice conversion failed (exit {proc.returncode}): "
-                f"{(stderr or '').strip() or (stdout or '').strip()}"
-            )
-        # The output is <src stem><want_ext> in out_dir. Match stem AND
-        # extension, excluding the source itself (the bridge's HTML intermediate
-        # lives here too and shares the stem).
-        stem = src.stem
-        src_resolved = src.resolve()
-        produced = [
-            p for p in out_dir.iterdir()
-            if p.is_file()
-            and p.stem == stem
-            and p.suffix.lower() == want_ext.lower()
-            and p.resolve() != src_resolved
-        ]
-        if not produced:
-            # `result` never existed in this function — the run was refactored
-            # to Popen/communicate and the live names are `stdout`/`stderr`, so
-            # this path died with `NameError: name 'result' is not defined`
-            # instead of its own message (P22 recon, brief 41 § 1.7).
-            raise RuntimeError(
-                "LibreOffice reported success but wrote no output "
-                f"(stderr: {(stderr or '').strip() or (stdout or '').strip() or 'none'})"
-            )
-        out = produced[0]
-        # A ZERO exit code is not a success signal — measured: soffice returns
-        # 0 for a zero-byte source. Success is proven by READING the output,
-        # never by the exit code, so an empty file refuses here rather than
-        # travelling on as a "converted" document.
-        if out.stat().st_size == 0:
-            raise RuntimeError(
-                "LibreOffice reported success but the file it wrote is empty "
-                f"({out.name})"
-            )
-        return out
-    finally:
-        shutil.rmtree(profile, ignore_errors=True)
 
 
 def export_document(file: str, output: str, fmt: str, soffice_path: str) -> dict:
@@ -190,10 +90,10 @@ def export_document(file: str, output: str, fmt: str, soffice_path: str) -> dict
     try:
         if bridged:
             # PDF -> HTML (carries the real text) -> the Writer format.
-            html = _run_soffice(soffice_path, "html", input_path, work, ".html")
-            produced = _run_soffice(soffice_path, convert_to, html, work, want_ext)
+            html = run_convert(soffice_path, "html", input_path, work, ".html")
+            produced = run_convert(soffice_path, convert_to, html, work, want_ext)
         else:
-            produced = _run_soffice(soffice_path, convert_to, input_path, work, want_ext)
+            produced = run_convert(soffice_path, convert_to, input_path, work, want_ext)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         # A read-only existing target (a re-export over a prior output) must not

@@ -51,7 +51,7 @@ create_pdf.unreadableImage	pattern	create_pdf	unreadable image: {{src_path}} ({{
 distill.alreadyPdfDistillingConverts	exact	distill	this is already a PDF — distilling converts PostScript; use Repair (Tier 2 rebuild) to re-render a PDF
 distill.ghostscriptProducedPdfPages	exact	distill	Ghostscript produced a PDF with no pages
 distill.ghostscriptProducedUnreadablePdf	pattern	distill	Ghostscript produced an unreadable PDF: {{exc}}
-distill.inputFileFound	pattern	distill,office_export	input file not found: {{file}}
+distill.inputFileFound	pattern	distill,office_export,soffice	input file not found: {{file}}
 distill.outputMustDifferentFile	exact	distill	output must be a different file from the input
 distill.postscriptFileMissingHeader	exact	distill	not a PostScript file (missing the '%!' header)
 distill.unknownPresetScreenEbook	pattern	distill	unknown preset {{preset}} (screen, ebook, printer, prepress, default)
@@ -94,7 +94,7 @@ headers.textContainsCharactersOutside	exact	headers	text contains characters out
 image_export.dpiMustGot	pattern	image_export	dpi must be {{_MIN_DPI}}-{{_MAX_DPI}}, got {{dpi}}
 image_export.dpiMustNumberGot	pattern	image_export	dpi must be a number, got {{dpi}}
 image_export.ghostscriptReportedSuccessExpected	pattern	image_export	Ghostscript reported success but {{v0}} expected output file(s) are missing (first: {{v1}})
-image_export.outputPathDirectoryFile	pattern	image_export,office_export	output path is a directory, not a file: {{output}}
+image_export.outputPathDirectoryFile	pattern	image_export,office_export,soffice	output path is a directory, not a file: {{output}}
 image_export.unsupportedImageFormat	pattern	image_export	unsupported image format {{fmt}} (have {{v1}})
 incremental.incrementalTransplantFailed	pattern	incremental	Incremental transplant failed: {{e}}
 incremental.incrementalWriteDidPreserve	exact	incremental	Incremental write did not preserve the original bytes verbatim — refusing to emit a signature-breaking file
@@ -136,13 +136,12 @@ mrc_codecs.maskVerificationFailedEmbedded	pattern	mrc_codecs	mask verification f
 mrc_codecs.unknownJbigMode	pattern	mrc_codecs	unknown JBIG2 mode: {{mode}}
 mrc_codecs.unknownMaskCodecExpected	pattern	mrc_codecs	unknown mask codec: {{codec}} (expected one of {{v1}})
 ocr_layer.ocrWordsApply	exact	ocr_layer	No OCR words to apply.
-office_export.inputFileEmpty	pattern	office_export	the input file is empty: {{file}}
-office_export.libreofficeAvailableSofficePath	exact	office_export	LibreOffice is not available (no soffice path)
-office_export.libreofficeConversionFailedExit	pattern	office_export	LibreOffice conversion failed (exit {{v0}}): {{v1}}
-office_export.libreofficeConversionTimedOut	pattern	office_export	LibreOffice conversion timed out after {{_TIMEOUT}}s
-office_export.libreofficeReportedSuccessFile	pattern	office_export	LibreOffice reported success but the file it wrote is empty ({{v0}})
-office_export.libreofficeReportedSuccessWrote	pattern	office_export	LibreOffice reported success but wrote no output (stderr: {{v0}})
-office_export.outputPathSameFile	exact	office_export	output path is the same file as the input
+office_export.inputFileEmpty	pattern	office_export,soffice	the input file is empty: {{file}}
+office_export.libreofficeAvailableSofficePath	exact	office_export,soffice	LibreOffice is not available (no soffice path)
+office_export.libreofficeConversionFailedExit	pattern	soffice	LibreOffice conversion failed (exit {{v0}}): {{v1}}
+office_export.libreofficeReportedSuccessFile	pattern	soffice	LibreOffice reported success but the file it wrote is empty ({{v0}})
+office_export.libreofficeReportedSuccessWrote	pattern	soffice	LibreOffice reported success but wrote no output (stderr: {{v0}})
+office_export.outputPathSameFile	exact	office_export,soffice	output path is the same file as the input
 office_export.unsupportedExportFormat	pattern	office_export	unsupported export format {{fmt}} (have {{v1}})
 outline.bookmarkActionPayloadMust	pattern	outline	bookmark '{{title}}': action payload must be a dictionary
 outline.bookmarkDestPayloadMust	pattern	outline	bookmark '{{title}}': dest payload must be a name or string
@@ -306,6 +305,11 @@ signatures.signerKeyFileFound	exact	signatures	Signer key file not found.
 signatures.signerNameCommonName	exact	signatures	A signer name (common name) is required.
 signatures.trustRootFound	pattern	signatures	trust root not found: {{p}}
 signatures.validityMustBetweenDay	exact	signatures	Validity must be between 1 day and 20 years.
+soffice.documentPasswordProtectedCannot	pattern	soffice	the document is password-protected and cannot be converted without its password: {{src}}
+soffice.libreofficeAvailable	pattern	soffice	LibreOffice is not available at {{soffice_path}}
+soffice.libreofficeCannotConvertAccepted	pattern	soffice	LibreOffice cannot convert {{v0}} (accepted: {{v1}})
+soffice.libreofficeProducedPdfCannot	pattern	soffice	LibreOffice produced a PDF that cannot be read: {{exc}}
+soffice.libreofficeReportedSuccessPdf	exact	soffice	LibreOffice reported success but the PDF it wrote has no pages
 struct_tree.directionMustOneUp	exact	struct_tree	direction must be one of up, down, indent, outdent, to
 struct_tree.directionNeedsIndex	exact	struct_tree	direction 'to' needs an index
 struct_tree.documentStructureTreeUntagged	exact	struct_tree	document has no structure tree (it is untagged)
