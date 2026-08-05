@@ -44,7 +44,7 @@ uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 # Windows-safe fs::canonicalize (strips the \\?\ verbatim prefix): file
 # identity is the raw path STRING app-wide, so every path must enter the
-# renderer in ONE canonical spelling (M7 — the path-identity gate).
+# renderer in ONE canonical spelling (the path-identity gate).
 dunce = "1"
 # TRUE file identity (volume serial + file index), for the batch-mirror
 # same-file refusals: canonical STRINGS can disagree about one physical file

@@ -18,11 +18,11 @@ const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 // renders [Ẽẽ...]; a BARE ENGLISH string on a swept surface is a leak this
 // spec exists to catch.
 //
-// SLICE E — the FINAL form. Slices A/B/C each hand-picked the elements they
-// had just threaded, which caught what they were looking for and nothing
-// else. This version sweeps CONTAINERS: every button, label, heading, option
-// and every title / aria-label / placeholder inside a named region, so a
-// string nobody thought to list is caught by the same pass. The hand-picked
+// The sweep is CONTAINER-scoped, not element-scoped: every button, label,
+// heading, option and every title / aria-label / placeholder inside a named
+// region, so a string nobody thought to list is caught by the same pass. A
+// hand-picked element list only ever catches what its author was looking
+// for. The hand-picked
 // checks stay where a specific element carries the point (a heading that
 // used to glue a raw mode id into English, a stamp preset whose test id must
 // NOT move when its word does).

@@ -20,9 +20,9 @@ jobs:
   # another workflow's conclusion is one API shape away from silently passing,
   # and re-running the suites costs minutes on a job that already takes ~35.
   #
-  # E2E is not here and must not be faked: register row P16, BLOCKED-EXTERNAL
-  # upstream (see ci.yml). The full local suite on the built binary is the
-  # release gate, a manual precondition recorded per milestone in the punchlist.
+  # E2E is not here and must not be faked: it is blocked upstream (see
+  # ci.yml). The full local suite on the built binary is the release gate, a
+  # manual precondition recorded per milestone.
   verify:
     name: Verify (gates + version consistency)
     runs-on: windows-latest

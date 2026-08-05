@@ -1,6 +1,6 @@
 {
   "note": [
-    "F15 slice C — the pin that keeps ONE matcher semantics honest across THREE",
+    "The pin that keeps ONE matcher semantics honest across THREE",
     "implementations: engine/text_match.compile_matcher (search_in_files +",
     "search_regions) and renderer/search/normalize.compileMatcher (the find bar",
     "+ the search worker). Read by tests/test_text_match.py and",
