@@ -1388,7 +1388,7 @@ FONTS_DIR = os.path.dirname(FALLBACK_FONT)
 
 # The COMPLETE vendored bundle (sync-edit-fonts.ps1's $Faces): the guard
 # must cover every face any test here embeds, or a stale local cache
-# (pre-A3b: Regulars only) runs the style tests against the degrade
+# (Regulars only) runs the style tests against the degrade
 # ladder and FAILS them instead of skipping (regression, repro'd).
 _ALL_FACES = [
     f"Liberation{fam}-{style}.ttf"

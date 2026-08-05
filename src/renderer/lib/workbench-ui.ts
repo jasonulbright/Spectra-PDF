@@ -52,7 +52,7 @@ function coerceToolDock(raw: unknown, fallback: ToolDockState): ToolDockState {
     typeof r.width === 'number' && Number.isFinite(r.width)
       ? Math.min(TOOL_DOCK_MAX_WIDTH, Math.max(TOOL_DOCK_MIN_WIDTH, Math.round(r.width)))
       : fallback.width;
-  // A pre-U3 entry may still carry `view: 'comments'` — it is simply dropped;
+  // A legacy entry may still carry `view: 'comments'` — it is simply dropped;
   // the dock has one mode now, so there is nothing to coerce it to.
   return {
     open: typeof r.open === 'boolean' ? r.open : fallback.open,
