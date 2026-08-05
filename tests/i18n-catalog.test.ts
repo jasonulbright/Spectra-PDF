@@ -29,7 +29,29 @@ const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 // Mirrors SHIPPED_LOCALES in src/renderer/i18n.ts — imported indirectly
 // would drag i18next's init (and its DOM expectations) into this node
 // test, so the list is pinned here and a drift fails the parity loop.
-const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR'];
+const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja'];
+
+/**
+ * Does this locale's CLDR plural rule set have exactly ONE category?
+ *
+ * Japanese and Chinese make no grammatical number distinction, so i18next —
+ * which resolves plurals through `Intl.PluralRules`, the same CLDR data this
+ * asks — selects `_other` for EVERY count and never reads `_one`. The `_one`
+ * key still has to EXIST, because key-set parity with en is exact; what it
+ * must not do is say something different from `_other`, since that would be a
+ * distinction the language does not make and the runtime would never show.
+ *
+ * So for these locales the plural gate INVERTS: the two forms are required to
+ * be identical instead of required to differ. This is derived, not listed —
+ * `INVARIANT_PLURALS` below is a per-key translation decision (one noun with
+ * no plural inside an inflecting language), while "this language has no
+ * plural at all" is a property of the language, and a hand-maintained list of
+ * 51 keys per pluralless locale would be a list of the obvious that goes stale
+ * the moment a plural key is added.
+ */
+function isPluralless(locale: string): boolean {
+  return new Intl.PluralRules(locale).resolvedOptions().pluralCategories.length === 1;
+}
 
 /**
  * Plural bases whose two forms are legitimately IDENTICAL in a locale because
@@ -166,7 +188,7 @@ describe('i18n catalogs (N12)', () => {
     }
   });
 
-  it('every plural pair is complete in every locale and the two forms differ', () => {
+  it("every plural pair is complete and obeys its locale's plural rules", () => {
     const en = JSON.parse(readFileSync(EN_PATH, 'utf8')) as Record<string, string>;
     const bases = Object.keys(en)
       .filter((k) => k.endsWith('_one'))
@@ -175,9 +197,19 @@ describe('i18n catalogs (N12)', () => {
     for (const locale of SHIPPED_LOCALES) {
       const p = resolve(__dirname, `../src/renderer/locales/${locale}/chrome.json`);
       const cat = JSON.parse(readFileSync(p, 'utf8')) as Record<string, string>;
+      const pluralless = isPluralless(locale);
       for (const base of bases) {
         expect(cat[`${base}_one`], `${locale}:${base}_one missing`).toBeTruthy();
         expect(cat[`${base}_other`], `${locale}:${base}_other missing`).toBeTruthy();
+        if (pluralless) {
+          // See isPluralless: `_one` is unreachable at run time, so it must
+          // not disagree with the form the runtime will actually show.
+          expect(
+            cat[`${base}_one`],
+            `${locale}:${base} splits a plural ${locale} does not have — _one is never selected`,
+          ).toBe(cat[`${base}_other`]);
+          continue;
+        }
         // Identical forms are LEGITIMATE where the source does not inflect
         // either ("{{count}} selected" reads the same at 1 and at 3, while
         // Spanish still inflects it). What is never legitimate is a locale
