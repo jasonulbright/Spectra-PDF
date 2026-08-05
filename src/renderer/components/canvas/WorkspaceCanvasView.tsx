@@ -22,9 +22,11 @@ import {
 } from '../../lib/page-labels';
 import { getDocumentProxy } from '../../lib/pdfDocCache';
 import { buildRedactionRegions } from '../../lib/redaction';
-import { pdfRectToDisplay } from '../../lib/pdfx-build';
+import { displayRectToPdf, pdfRectToDisplay } from '../../lib/pdfx-build';
+import { sameRegion } from '../../lib/search-redact';
 import { buildLinkPayloads, type LinkSpec, type PageQuads } from '../../lib/text-selection-markup';
 import type { PageGeometry, RedactionMark, RedactionRegion } from '../../lib/redaction';
+import type { PageRef } from '../../state/types';
 import { buildSignatureAppearance } from '../../lib/signature-placement';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import { useEngine } from '../../hooks/useEngine';
@@ -35,6 +37,7 @@ import { sourceKeyOf } from '../../search/useSearchIndex';
 import { useSearchContext } from '../../search/SearchProvider';
 import { useFind } from '../../search/useFind';
 import { normalizeQuery, highlightWords } from '../../search/normalize';
+import type { SearchOptions } from '../../search/normalize';
 import { FindBar } from './FindBar';
 import { DocumentView } from './DocumentView';
 import { buildOcrApplyPayload } from '../../lib/ocr-apply';
@@ -787,6 +790,11 @@ export function WorkspaceCanvasView({
   // Search nav panel shares it (Phase 4 M3.3 — double-instantiating would
   // double the OCR work and desync results). Ctrl+F opens the bar.
   const searchIndex = useSearchContext();
+  // F15 slice D: the Search & Redact panel's OCR arm reads the index through
+  // the services seam, which is registered once — so it reaches the CURRENT
+  // index through a ref rather than a captured one.
+  const searchIndexRef = useRef(searchIndex);
+  searchIndexRef.current = searchIndex;
   // A jump that lands in a document the current view isn't showing. The board
   // renders every doc, so it can always centre directly; the reading view shows
   // exactly ONE, so a match in another file (or another `.pdfx` partition) has
@@ -1475,6 +1483,26 @@ export function WorkspaceCanvasView({
       // through the snap-settings store) this one has to route through the
       // services seam — the same reason the find bar does.
       clearGuides: () => clearGuidesRef.current(),
+      // F15 slice D. Every method reaches the live implementation through a
+      // ref — the registration happens once at mount, while `docs`, the mark
+      // set and the search index all change under it.
+      redaction: {
+        addMarks: async (requests) => {
+          const service = redactionServiceRef.current;
+          if (!service) return { added: 0, duplicates: 0, skipped: requests.length };
+          return service.addMarksFromRects(requests);
+        },
+        markedRects: async () => redactionServiceRef.current?.markedRects() ?? [],
+        count: () => liveMarksRef.current.length,
+        subscribe: (listener) => {
+          markSubscribersRef.current.add(listener);
+          return () => {
+            markSubscribersRef.current.delete(listener);
+          };
+        },
+        searchOcrPage: async (path, page, query, options) =>
+          redactionServiceRef.current?.searchOcrPage(path, page, query, options) ?? [],
+      },
     });
     return () => registerCanvasServices(null);
   }, [activeCanvasHandle]);
@@ -1914,6 +1942,26 @@ export function WorkspaceCanvasView({
     if (marks.length === 0) return NO_MARKS;
     return marks.filter((m) => docs.some((d) => d.pages.some((p) => p.id === m.pageId)));
   }, [marks, docs]);
+  // Declared HERE, above the services registration that reads them, and
+  // populated further down where the mark machinery lives — the registration
+  // effect runs after render, so both are always filled by the time a caller
+  // arrives. Same shape as `docsRef`/`filesRef`, which the F10 seed already
+  // reads from above their own declarations.
+  const markSubscribersRef = useRef(new Set<() => void>());
+  const redactionServiceRef = useRef<{
+    addMarksFromRects: (
+      requests: { path: string; page: number; rect: [number, number, number, number] }[],
+    ) => Promise<{ added: number; duplicates: number; skipped: number }>;
+    markedRects: () => Promise<
+      { path: string; page: number; rect: [number, number, number, number] }[]
+    >;
+    searchOcrPage: (
+      path: string,
+      page: number,
+      query: string,
+      options: SearchOptions,
+    ) => Promise<{ text: string; rect: [number, number, number, number] }[]>;
+  } | null>(null);
 
   const redactionMarksByPage = useMemo(() => {
     if (liveMarks.length === 0) return NO_MARKS_BY_PAGE;
@@ -2070,6 +2118,53 @@ export function WorkspaceCanvasView({
   // queue a visible operation (and re-run the gate) on every settle.
   const seedSeqRef = useRef(new Map<string, number>());
   const pendingSeedRef = useRef<Set<string>>(new Set());
+
+  // ONE page-space → mark conversion, shared by the F10 seed and F15's
+  // Search & Redact panel (slice D). Both take the same payload shape
+  // `list_redact_annotations` returns and `save_redaction_marks` accepts —
+  // `{page, rect}` in the page's own point space — so the stored marks, the
+  // searched ones and the applied regions cannot disagree about geometry.
+  // A page this view cannot resolve is COUNTED, never guessed at: the F12
+  // refusal one layer down would be pointless if the conversion silently
+  // dropped what it could not place.
+  const marksFromFileRects = useCallback(
+    async (
+      path: string,
+      entries: { page: number; rect: [number, number, number, number] }[],
+    ): Promise<{ marks: RedactionMark[]; orphaned: number }> => {
+      const f = filesRef.current.get(path);
+      if (!f?.buffer) return { marks: [], orphaned: entries.length };
+      const pages = docsRef.current.filter((d) => d.path === path).flatMap((d) => d.pages);
+      const marks: RedactionMark[] = [];
+      let orphaned = 0;
+      for (const entry of entries) {
+        const pageRef = pages[entry.page - 1];
+        if (!pageRef) {
+          orphaned += 1;
+          continue;
+        }
+        const proxy = await getDocumentProxy(pageRef.sourceDocId, f.buffer);
+        const p = await proxy.getPage(pageRef.sourcePageIndex + 1);
+        const [vx0, vy0, vx1, vy1] = p.view;
+        const composed = ((p.rotate + pageRef.rotation) % 360) as 0 | 90 | 180 | 270;
+        const rect = pdfRectToDisplay(
+          entry.rect,
+          { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
+          composed,
+        );
+        marks.push({
+          id: crypto.randomUUID(),
+          path,
+          pageId: pageRef.id,
+          rect,
+          rotationAtDraw: pageRef.rotation,
+        });
+      }
+      return { marks, orphaned };
+    },
+    [],
+  );
+
   const seedMarksFromFile = useCallback(
     async (path: string) => {
       const f = filesRef.current.get(path);
@@ -2082,37 +2177,7 @@ export function WorkspaceCanvasView({
         })) as unknown as { marks: { page: number; rect: [number, number, number, number] }[] };
         if (seedSeqRef.current.get(path) !== seq) return; // superseded
         if (!listed.marks?.length) return;
-        const pages = docsRef.current.filter((d) => d.path === path).flatMap((d) => d.pages);
-        const seeded: RedactionMark[] = [];
-        let orphaned = 0;
-        for (const entry of listed.marks) {
-          const pageRef = pages[entry.page - 1];
-          if (!pageRef) {
-            // F12, renderer half: a stored mark whose page this view cannot
-            // resolve is a mark the user will not see and will not apply.
-            // Counting it and saying so is the whole point — the engine's
-            // refusal would be pointless if the seed silently dropped marks
-            // one layer further up.
-            orphaned += 1;
-            continue;
-          }
-          const proxy = await getDocumentProxy(pageRef.sourceDocId, f.buffer);
-          const p = await proxy.getPage(pageRef.sourcePageIndex + 1);
-          const [vx0, vy0, vx1, vy1] = p.view;
-          const composed = ((p.rotate + pageRef.rotation) % 360) as 0 | 90 | 180 | 270;
-          const rect = pdfRectToDisplay(
-            entry.rect,
-            { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
-            composed,
-          );
-          seeded.push({
-            id: crypto.randomUUID(),
-            path,
-            pageId: pageRef.id,
-            rect,
-            rotationAtDraw: pageRef.rotation,
-          });
-        }
+        const { marks: seeded, orphaned } = await marksFromFileRects(path, listed.marks);
         if (seedSeqRef.current.get(path) !== seq) return;
         markPathsEverRef.current.add(path);
         setMarks((prev) => [...prev.filter((m) => m.path !== path), ...seeded]);
@@ -2137,7 +2202,7 @@ export function WorkspaceCanvasView({
         );
       }
     },
-    [engineCallRaw],
+    [engineCallRaw, marksFromFileRects],
   );
 
   const lastBuffersRef = useRef<Map<string, PdfBuffer | null>>(new Map());
@@ -4371,6 +4436,126 @@ export function WorkspaceCanvasView({
       setSavingMarks(false);
     }
   }, [liveMarks, docs, state.files, onSaveRedactionMarks]);
+
+  // ── F15 slice D: the Search & Redact panel's seam ────────────────────────
+  //
+  // The panel is a PRODUCER OF MARKS and nothing else — it never calls
+  // `redact`, and the status bar's apply / save marks / clear stays the only
+  // destructive path. What crosses this seam is page-space `{page, rect}`,
+  // the payload shape `list_redact_annotations` returns and
+  // `save_redaction_marks` takes, converted here by `marksFromFileRects` —
+  // the F10 seed's own conversion, so there is exactly one of it.
+  const geometryForPage = useCallback(
+    async (page: PageRef): Promise<PageGeometry> => {
+      const f = filesRef.current.get(page.sourceDocId);
+      if (!f?.buffer) throw new Error(`no buffer loaded for ${page.sourceDocId}`);
+      const proxy = await getDocumentProxy(page.sourceDocId, f.buffer);
+      const p = await proxy.getPage(page.sourcePageIndex + 1);
+      const [vx0, vy0, vx1, vy1] = p.view;
+      return {
+        box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
+        bakedRotate: p.rotate,
+      };
+    },
+    [],
+  );
+
+  const markedRects = useCallback(async () => {
+    // buildRedactionRegions, not a second conversion: what the panel compares
+    // a fresh hit against must be exactly what an apply would send.
+    const { files: payloads } = await buildRedactionRegions(
+      docsRef.current,
+      liveMarksRef.current,
+      geometryForPage,
+    );
+    return payloads.flatMap((payload) =>
+      payload.regions.map((region) => ({
+        path: payload.path,
+        page: region.page,
+        rect: region.rect,
+      })),
+    );
+  }, [geometryForPage]);
+
+  const addMarksFromRects = useCallback(
+    async (
+      requests: { path: string; page: number; rect: [number, number, number, number] }[],
+    ) => {
+      // Dedupe against what is already pending AND within this batch: two
+      // patterns can name the same characters on one page, and clicking
+      // "Mark checked" twice must not stack marks the user then has to
+      // delete twice.
+      const existing = await markedRects();
+      const byPath = new Map<string, { page: number; rect: [number, number, number, number] }[]>();
+      let duplicates = 0;
+      for (const request of requests) {
+        const pending = byPath.get(request.path) ?? [];
+        const already =
+          existing.some(
+            (mark) =>
+              mark.path === request.path &&
+              mark.page === request.page &&
+              sameRegion(mark.rect, request.rect),
+          ) ||
+          pending.some(
+            (entry) => entry.page === request.page && sameRegion(entry.rect, request.rect),
+          );
+        if (already) {
+          duplicates += 1;
+          continue;
+        }
+        pending.push({ page: request.page, rect: request.rect });
+        byPath.set(request.path, pending);
+      }
+      const fresh: RedactionMark[] = [];
+      let skipped = 0;
+      for (const [path, entries] of byPath) {
+        const { marks: made, orphaned } = await marksFromFileRects(path, entries);
+        fresh.push(...made);
+        skipped += orphaned;
+      }
+      if (fresh.length > 0) setMarks((prev) => [...prev, ...fresh]);
+      return { added: fresh.length, duplicates, skipped };
+    },
+    [markedRects, marksFromFileRects],
+  );
+
+  const searchOcrPage = useCallback(
+    async (
+      path: string,
+      page: number,
+      query: string,
+      options: SearchOptions,
+    ): Promise<{ text: string; rect: [number, number, number, number] }[]> => {
+      // The SECOND rect authority (§ 1.6): an image-only page has no text
+      // runs for the engine to slice, but the in-app index already recognised
+      // it and holds word boxes. They convert to page space through the same
+      // machinery "Make searchable" uses, so a scanned page's marks and an
+      // OCR layer's words land in the same coordinates.
+      const pages = docsRef.current.filter((d) => d.path === path).flatMap((d) => d.pages);
+      const pageRef = pages[page - 1];
+      if (!pageRef) return [];
+      const words = searchIndexRef.current.getOcrWords(sourceKeyOf(pageRef));
+      if (!words || words.length === 0) return [];
+      const matched = highlightWords(words, query, options);
+      if (matched.length === 0) return [];
+      const geometry = await geometryForPage(pageRef);
+      return matched.map((word) => ({
+        text: word.text,
+        rect: displayRectToPdf(word, geometry.box, geometry.bakedRotate),
+      }));
+    },
+    [geometryForPage],
+  );
+
+  // Listeners so the panel's already-marked state stays live while the user
+  // also draws bands by hand — the panel cannot poll, and a stale disabled
+  // checkbox on a destructive tool is a checkbox that lies.
+  useEffect(() => {
+    for (const listener of [...markSubscribersRef.current]) listener();
+  }, [marks]);
+
+  redactionServiceRef.current = { addMarksFromRects, markedRects, searchOcrPage };
 
   // Sign the placement's file (visible stamp at the drawn box) or fill the
   // targeted existing empty signature field (2n.4d — the field's own widget

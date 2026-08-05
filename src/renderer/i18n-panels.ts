@@ -871,6 +871,71 @@ export const PANEL_STRINGS = {
   'panel.symbols.name.aec-detail-bubble': 'Detail bubble',
   'panel.symbols.name.aec-elevation-marker': 'Elevation marker',
   'panel.symbols.name.aec-fire-extinguisher': 'Fire extinguisher',
+
+  // ── Search & Redact (F15 slice D) ─────────────────────────────────────
+  // The panel produces MARKS; the status bar's apply/save/clear stays the
+  // only destructive path, so nothing here promises removal.
+  'panel.searchRedact.open': 'Open a PDF to search and redact',
+  'panel.searchRedact.queryPlaceholder': 'Search for…',
+  'panel.searchRedact.queryAria': 'Text to search for',
+  'panel.searchRedact.scope': 'Search',
+  'panel.searchRedact.scopeAria': 'Where to search',
+  'panel.searchRedact.scopeDocument': 'This document',
+  'panel.searchRedact.scopeAll': 'All open documents',
+  'panel.searchRedact.scopePages': 'These pages',
+  'panel.searchRedact.pagesAria': 'Pages to search',
+  'panel.searchRedact.wordList': 'Word list',
+  'panel.searchRedact.wordListAria': 'One term per line',
+  'panel.searchRedact.wordListPlaceholder': 'One term per line',
+  'panel.searchRedact.importWordList': 'Import from a file…',
+  'panel.searchRedact.patterns': 'Patterns',
+  'panel.searchRedact.pattern.phone': 'Phone number',
+  'panel.searchRedact.pattern.email': 'Email address',
+  'panel.searchRedact.pattern.credit_card': 'Credit card number',
+  'panel.searchRedact.pattern.ssn': 'Social security number',
+  'panel.searchRedact.pattern.date': 'Date',
+  'panel.searchRedact.pattern.iban': 'IBAN',
+  'panel.searchRedact.pattern.nhs_uk': 'NHS number (UK)',
+  'panel.searchRedact.pattern.sin_ca': 'Social insurance number (Canada)',
+  'panel.searchRedact.expand': 'Each mark covers',
+  'panel.searchRedact.expand.match': 'What matched',
+  'panel.searchRedact.expand.word': 'The whole word',
+  'panel.searchRedact.expand.line': 'The whole line',
+  'panel.searchRedact.expandHint.match': 'Searching “55” inside “1955” marks the two digits.',
+  'panel.searchRedact.expandHint.word': 'Searching “55” inside “1955” marks the whole year.',
+  'panel.searchRedact.expandHint.line': 'Marks everything the matched text was drawn with — a whole table row.',
+  'panel.searchRedact.search': 'Search',
+  'panel.searchRedact.searching': 'Searching…',
+  'panel.searchRedact.found_one': '{{count}} match',
+  'panel.searchRedact.found_other': '{{count}} matches',
+  'panel.searchRedact.hitCount_one': '{{count}} match',
+  'panel.searchRedact.hitCount_other': '{{count}} matches',
+  'panel.searchRedact.markChecked_one': 'Mark {{count}} for redaction',
+  'panel.searchRedact.markChecked_other': 'Mark {{count}} for redaction',
+  'panel.searchRedact.pending_one': '{{count}} mark pending',
+  'panel.searchRedact.pending_other': '{{count}} marks pending',
+  'panel.searchRedact.marked': 'Marked {{added}} ({{duplicates}} already marked, {{skipped}} skipped).',
+  'panel.searchRedact.page': 'Page {{page}}',
+  'panel.searchRedact.jump': 'Go to this page',
+  'panel.searchRedact.alreadyMarked': 'Already marked for redaction.',
+  'panel.searchRedact.noHits': 'No matches.',
+  'panel.searchRedact.nothingToSearch':
+    'Enter a search term, a word list or a pattern. Searching for nothing would mark every page.',
+  'panel.searchRedact.badRange': '“{{token}}” is not a page or a page range.',
+  'panel.searchRedact.noCanvas': 'Open the document to mark it.',
+  'panel.searchRedact.stale':
+    'This document changed since the search ran. Search again — these results point at content that may no longer be there.',
+  'panel.searchRedact.truncated':
+    'Stopped at {{max}} matches, so this list is incomplete. Narrow the search before marking.',
+  'panel.searchRedact.truncatedSelectAll': 'The list is incomplete, so it cannot be selected all at once.',
+  'panel.searchRedact.pagesWithoutText_one':
+    '{{count}} page carries no searchable text.',
+  'panel.searchRedact.pagesWithoutText_other':
+    '{{count}} pages carry no searchable text.',
+  'panel.searchRedact.runOcr': 'Scan & OCR',
+  'panel.searchRedact.sourceOcr': 'scan',
+  'panel.searchRedact.impreciseHint':
+    'This mark covers the whole run: the text could not be measured glyph by glyph, so it errs wide.',
 } as const;
 
 export type PanelKey = keyof typeof PANEL_STRINGS;

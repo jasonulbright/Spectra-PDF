@@ -38,6 +38,7 @@ import { AttachmentsPanel } from './panels/AttachmentsPanel';
 import { PortfolioPanel, PortfolioAutoOpen } from './panels/PortfolioPanel';
 import { GuidedActionsPanel } from './panels/GuidedActionsPanel';
 import { TakeoffPanel } from './panels/TakeoffPanel';
+import { SearchRedactPanel } from './panels/SearchRedactPanel';
 import { LayersPanel } from './panels/LayersPanel';
 import { AccessibilityPanel } from './panels/AccessibilityPanel';
 import { CommentsPanel } from './panels/CommentsPanel';
@@ -162,6 +163,7 @@ const panels: Record<Operation, React.ComponentType> = {
   links: LinksPanel, tags: TagsPanel, readingorder: ReadingOrderPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
   actions: GuidedActionsPanel, takeoff: TakeoffPanel,
+  search_redact: SearchRedactPanel,
 };
 
 function AppContent(): React.ReactElement {
