@@ -46,7 +46,8 @@ const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 //     keyboard; only the modifier and named keys localize, slice C).
 //   • The PRODUCT NAME.
 //   • The LANGUAGE PICKER's own options. Every locale is listed in ITS OWN
-//     language (English · Español — i18n.ts LOCALE_NATIVE_NAMES), which is
+//     language (English · Español · Français · Deutsch · Italiano — i18n.ts
+//     LOCALE_NATIVE_NAMES), which is
 //     the whole convention: a reader hunting for their language finds it by
 //     its native name, so these are proper names and never translated.
 //
@@ -72,8 +73,10 @@ const notCatalog = (text: string): boolean => {
     'pt', 'KB', 'MB', '%',
     'PDF', 'PDF/A', 'PDF/X', 'XFA', 'AcroForm', 'OCR', 'ICC', 'CMYK', 'RGB',
     'Normal', 'Color', 'Serif', 'Sans', 'Mono', 'Radial',
-    // The language picker names every locale in its own language.
-    'English', 'Español',
+    // The language picker names every locale in its own language. This list
+    // tracks LOCALE_NATIVE_NAMES in i18n.ts — a wave-1 locale that lands
+    // without its row here fails this sweep, which is the intended nudge.
+    'English', 'Español', 'Français', 'Deutsch', 'Italiano',
   ]);
   if (exact.has(text)) return true;
   // A single character is notation (a keyboard letter, a maths sign).
