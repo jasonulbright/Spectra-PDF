@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.0.21 — Prepare Form finds the fields for you
+
+Preparing a form used to mean drawing every field by hand and typing every
+name. Open a flat form, pick Prepare Form and choose **Detect fields**: the
+lines, boxes, checkboxes and radio buttons on the page come back as a list of
+suggestions, each already named from the label beside it and typed by its own
+shape — a long rule becomes a single-line text field, a tall box becomes a
+multi-line one, a small square becomes a checkbox, a circle becomes a radio
+button, and a box divided by tick marks becomes a comb field with the right
+number of characters.
+
+**Nothing is written to the document until you say so.** Suggestions are drawn
+on the page in a dashed outline that no real field uses, and they can be moved,
+resized, renamed, retyped or discarded before you keep any of them. Tick the
+ones you want and create them in one step — and one undo takes the whole set
+back out.
+
+It also reads a scan. A page with nothing but an image on it is recognised
+automatically, and the rules and labels recovered from it land within a point
+of where they would on the original.
+
+Two things it deliberately does not do: it never offers a line that has no
+label beside it — those read as a table, not a fill-in — and it never offers a
+region that already carries a field, so running it twice on a half-prepared
+form does not double anything. Both are reported with a count rather than
+silently skipped.
+
+- Detection also has a command-line arm: `spectrapdf detect-fields <file>`
+  prints what it found as JSON and writes nothing.
+
 ## 1.0.20 — Redaction that searches and measures, and a PDF from any file
 
 Redaction stops being a box you draw by hand, one at a time. Type a term —
