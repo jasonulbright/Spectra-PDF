@@ -138,3 +138,132 @@ class TestSaveAndList:
         assert open(signed, "rb").read()[: len(orig)] == orig
         _assert_sig_still_valid(signed, pki)
         assert list_redact_annotations(signed)["count"] == 1
+
+
+def _mark(pdf, rect):
+    return pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/Redact"),
+        Rect=rect, F=0,
+    ))
+
+
+def _with_annots(path, per_page):
+    """Write `per_page[i]` as page i's /Annots (each item a list of objects
+    built from the open Pdf)."""
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        for i, build in enumerate(per_page):
+            if build is None:
+                continue
+            pdf.pages[i].obj["/Annots"] = pikepdf.Array(build(pdf))
+        pdf.save(path)
+
+
+class TestUnreadableMarksRefuse:
+    """F12 — a mark that cannot be ACCOUNTED FOR refuses, loudly.
+
+    The old reader skipped it inside `except Exception: continue` and
+    returned `count = len(survivors)`, so a document whose /Redact set we
+    could only partly read looked identical to one we had read completely.
+    The user then applied redactions over fewer bands than they had marked
+    and was told it worked — R2's fail-open shape, one module over.
+    """
+
+    @pytest.mark.parametrize("rect", [
+        pikepdf.Array([1, 2, 3]),                       # too few numbers
+        pikepdf.Array([1, 2, 3, 4, 5]),                 # too many
+        pikepdf.Array([1, 2, 3, pikepdf.String("x")]),  # not a number
+        pikepdf.Name("/Rect"),                          # not an array at all
+    ])
+    def test_malformed_rect_refuses_naming_count_and_page(self, tmp_dir, rect):
+        src = os.path.join(tmp_dir, "s.pdf")
+        _pdf(src, pages=2)
+        _with_annots(src, [None, lambda pdf: [_mark(pdf, rect)]])
+        with pytest.raises(ValueError, match=r"1 redaction mark\(s\).*page\(s\) 2"):
+            list_redact_annotations(src)
+
+    def test_missing_rect_refuses(self, tmp_dir):
+        src = os.path.join(tmp_dir, "s.pdf")
+        _pdf(src, pages=1)
+        with pikepdf.open(src, allow_overwriting_input=True) as pdf:
+            annot = pdf.make_indirect(pikepdf.Dictionary(
+                Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/Redact"), F=0,
+            ))
+            pdf.pages[0].obj["/Annots"] = pikepdf.Array([annot])
+            pdf.save(src)
+        with pytest.raises(ValueError, match="cannot be read"):
+            list_redact_annotations(src)
+
+    def test_count_and_locations_are_the_whole_document(self, tmp_dir):
+        # Two bad marks on two different pages, and one good one — the report
+        # names how many and where, not just the first.
+        src = os.path.join(tmp_dir, "s.pdf")
+        _pdf(src, pages=2)
+        _with_annots(src, [
+            lambda pdf: [_mark(pdf, pikepdf.Array([1, 2, 3])),
+                         _mark(pdf, pikepdf.Array([10, 10, 40, 40]))],
+            lambda pdf: [_mark(pdf, pikepdf.Array([1, 2, 3]))],
+        ])
+        with pytest.raises(ValueError, match=r"2 redaction mark\(s\).*page\(s\) 1, 2"):
+            list_redact_annotations(src)
+
+    def test_non_finite_rect_is_unreadable(self):
+        # It coerces to float and names no region: seeding it would put a mark
+        # nowhere and applying it would redact nothing.
+        from engine.redact_marks import _mark_rect
+
+        assert _mark_rect(_Fake([0, 0, float("nan"), 10])) is None
+        assert _mark_rect(_Fake([0, 0, 10, float("inf")])) is None
+        assert _mark_rect(_Fake([0, 0, 10, 10])) == [0.0, 0.0, 10.0, 10.0]
+
+    def test_save_refuses_before_touching_the_file(self, tmp_dir):
+        # The replace runs over the set it just read: refusing AFTER a strip
+        # would drop the very marks it could not account for.
+        src = os.path.join(tmp_dir, "s.pdf")
+        _pdf(src, pages=1)
+        _with_annots(src, [lambda pdf: [_mark(pdf, pikepdf.Array([1, 2, 3]))]])
+        before = open(src, "rb").read()
+        with pytest.raises(ValueError, match="cannot be read"):
+            save_redaction_marks(src, src, [{"page": 1, "rect": [10, 10, 40, 40]}])
+        assert open(src, "rb").read() == before
+
+    def test_null_and_non_dictionary_entries_are_not_marks(self, tmp_dir):
+        # Producers do leave nulls in /Annots. An entry that is not a
+        # dictionary carries no /Subtype, so it PROVABLY is not a redaction
+        # mark — that is the one case the reader may pass over, and it must
+        # not turn an ordinary file into a refusal.
+        src = os.path.join(tmp_dir, "s.pdf")
+        _pdf(src, pages=1)
+        _with_annots(src, [lambda pdf: [
+            pikepdf.Object.parse(b"null"),
+            pikepdf.Array([1, 2]),
+            _mark(pdf, pikepdf.Array([10, 10, 40, 40])),
+        ]])
+        listed = list_redact_annotations(src)
+        assert listed == {"marks": [{"page": 1, "rect": [10.0, 10.0, 40.0, 40.0]}], "count": 1}
+
+    def test_replace_leaves_untouched_pages_alone(self, tmp_dir):
+        # The strip is per PAGE: a page with no marks keeps its own /Annots
+        # array (the old cumulative `if removed:` rewrote every later page's).
+        src = os.path.join(tmp_dir, "s.pdf")
+        _pdf(src, pages=2)
+        _with_annots(src, [
+            lambda pdf: [_mark(pdf, pikepdf.Array([10, 10, 40, 40]))],
+            lambda pdf: [pdf.make_indirect(pikepdf.Dictionary(
+                Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/Square"),
+                Rect=pikepdf.Array([1, 1, 5, 5]),
+            ))],
+        ])
+        save_redaction_marks(src, src, [{"page": 1, "rect": [20, 20, 60, 60]}])
+        with pikepdf.open(src) as pdf:
+            assert [str(a["/Subtype"]) for a in pdf.pages[0].obj["/Annots"]] == ["/Redact"]
+            assert [str(a["/Subtype"]) for a in pdf.pages[1].obj["/Annots"]] == ["/Square"]
+
+
+class _Fake:
+    """The smallest thing `_mark_rect` reads: an object with a /Rect."""
+
+    def __init__(self, rect):
+        self._rect = rect
+
+    def get(self, key):
+        return self._rect if key == "/Rect" else None
