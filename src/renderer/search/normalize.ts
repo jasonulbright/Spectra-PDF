@@ -43,6 +43,31 @@ export function escapeRegExp(s: string): string {
   return s.replace(REGEXP_SPECIALS, '\\$&')
 }
 
+// The word character class the whole-word boundary is defined over, spelled
+// out rather than left to `\b` (F15 slice C).
+//
+// Two reasons, both measured against the engine's matcher while building the
+// shared corpus (tests/fixtures/matcher-corpus.json, asserted by BOTH this
+// side and pytest):
+//
+//   1. JavaScript's `\b` is defined over `[A-Za-z0-9_]` and nothing else, so a
+//      whole-word search for `café` matched in the engine and found NOTHING
+//      here — the find bar and Search & Redact would disagree about the same
+//      document. `\p{L}\p{N}\p{Pc}` IS Python's `\w` for str, measured
+//      character by character (a combining mark is in neither).
+//   2. `\b` takes its meaning from whatever character the QUERY starts with,
+//      so `\b(?:-foo)\b` required a WORD character before the hyphen: `x-foo`
+//      matched and ` -foo` did not. "Whole word" means "no word character
+//      immediately outside", which is what the lookarounds say.
+//
+// The `u` flag is required for `\p{…}` and is added ONLY in whole-word mode,
+// so an exotic user regex that `u` would reject keeps working everywhere else.
+const WORD_CHAR = '[\\p{L}\\p{N}\\p{Pc}]'
+
+export function wordBounded(pattern: string): string {
+  return `(?<!${WORD_CHAR})(?:${pattern})(?!${WORD_CHAR})`
+}
+
 export interface CompiledMatcher {
   /** A global RegExp for the query+options, or null when the query is empty. */
   regex: RegExp | null
@@ -67,8 +92,11 @@ export function compileMatcher(query: string, options: SearchOptions = {}): Comp
     if (norm.length === 0) return { regex: null, error: null }
     pattern = escapeRegExp(norm)
   }
-  if (wholeWord) pattern = `\\b(?:${pattern})\\b`
-  const flags = caseSensitive ? 'g' : 'gi'
+  let flags = caseSensitive ? 'g' : 'gi'
+  if (wholeWord) {
+    pattern = wordBounded(pattern)
+    flags += 'u'
+  }
   try {
     return { regex: new RegExp(pattern, flags), error: null }
   } catch (e) {
