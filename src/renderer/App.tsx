@@ -39,6 +39,7 @@ import { PortfolioPanel, PortfolioAutoOpen } from './panels/PortfolioPanel';
 import { GuidedActionsPanel } from './panels/GuidedActionsPanel';
 import { TakeoffPanel } from './panels/TakeoffPanel';
 import { SearchRedactPanel } from './panels/SearchRedactPanel';
+import { PrepareFormPanel } from './panels/PrepareFormPanel';
 import { LayersPanel } from './panels/LayersPanel';
 import { AccessibilityPanel } from './panels/AccessibilityPanel';
 import { CommentsPanel } from './panels/CommentsPanel';
@@ -167,6 +168,7 @@ const panels: Record<Operation, React.ComponentType> = {
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
   actions: GuidedActionsPanel, takeoff: TakeoffPanel,
   search_redact: SearchRedactPanel,
+  prepareform: PrepareFormPanel,
 };
 
 function AppContent(): React.ReactElement {
@@ -2198,6 +2200,7 @@ function AppContent(): React.ReactElement {
                   onAddPages={handleAddPages}
                   onFillFormValues={handleFillFormValues}
                   onAddFormField={handleAddFormField}
+                  onAddFormFields={handleAddFormFields}
                   dropResolverRef={dropResolverRef}
                 />
               </div>

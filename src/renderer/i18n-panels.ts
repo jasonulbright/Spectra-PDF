@@ -998,6 +998,57 @@ export const PANEL_STRINGS = {
   'panel.redactProps.desc.privacy-act.k5': 'Investigatory material for federal employment or contracts',
   'panel.redactProps.desc.privacy-act.k6': 'Testing or examination material for federal service',
   'panel.redactProps.desc.privacy-act.k7': 'Evaluation material for armed-forces promotion',
+
+  // Prepare Form — automatic field detection. Candidates are suggestions:
+  // nothing here reaches the document until the user checks a row and creates.
+  'panel.prepareForm.open': 'Open a PDF to prepare it as a form',
+  'panel.prepareForm.blurb':
+    'Find the lines, boxes and checkboxes on a flat form and offer them as fields. Nothing is written until you create the ones you keep.',
+  'panel.prepareForm.scope': 'Look at',
+  'panel.prepareForm.scopeDocument': 'The whole document',
+  'panel.prepareForm.scopePages': 'Certain pages',
+  'panel.prepareForm.pagesAria': 'Pages to look at',
+  'panel.prepareForm.pagesPlaceholder': 'e.g. 1,3,5-8',
+  'panel.prepareForm.noPages': 'Give at least one page number.',
+  'panel.prepareForm.noCanvas': 'Open the document on the page to review suggested fields.',
+  'panel.prepareForm.detect': 'Detect fields',
+  'panel.prepareForm.detecting': 'Looking…',
+  'panel.prepareForm.found_one': '{{count}} suggested field.',
+  'panel.prepareForm.found_other': '{{count}} suggested fields.',
+  'panel.prepareForm.foundNone': 'Nothing on these pages looks like a form field.',
+  'panel.prepareForm.nothingOffered':
+    'No fields were suggested. Draw one on the page instead.',
+  'panel.prepareForm.truncated':
+    'The page limit was reached, so this is not the whole form — select rows individually.',
+  'panel.prepareForm.selectAll': 'Check all',
+  'panel.prepareForm.selectNone': 'Uncheck all',
+  'panel.prepareForm.checked_one': '{{count}} checked',
+  'panel.prepareForm.checked_other': '{{count}} checked',
+  'panel.prepareForm.pageHeading': 'Page {{page}}',
+  'panel.prepareForm.nameAria': 'Field name',
+  'panel.prepareForm.kindAria': 'Field type',
+  'panel.prepareForm.kindText': 'Text',
+  'panel.prepareForm.kindCheckbox': 'Checkbox',
+  'panel.prepareForm.kindRadio': 'Radio button',
+  'panel.prepareForm.kindSignature': 'Signature',
+  'panel.prepareForm.multiline': 'Multiple lines',
+  'panel.prepareForm.fromLabel': 'from “{{label}}”',
+  'panel.prepareForm.looksLikeDate': 'looks like a date',
+  'panel.prepareForm.optionValue': 'value “{{value}}”',
+  'panel.prepareForm.reveal': 'Show',
+  'panel.prepareForm.discard': 'Discard this suggestion',
+  'panel.prepareForm.create_one': 'Create {{count}} field',
+  'panel.prepareForm.create_other': 'Create {{count}} fields',
+  'panel.prepareForm.creating': 'Creating…',
+  'panel.prepareForm.created_one': '{{count}} field created.',
+  'panel.prepareForm.created_other': '{{count}} fields created.',
+  'panel.prepareForm.reasonRuleWithoutLabel':
+    'Page {{page}}: {{count}} line(s) with no label beside them were left out — they read as a table, not a fill-in.',
+  'panel.prepareForm.reasonCovered':
+    'Page {{page}}: {{count}} region(s) already carry a field.',
+  'panel.prepareForm.reasonRadioDemoted':
+    'Page {{page}}: {{count}} group(s) had no distinct option labels, so each option is offered on its own.',
+  'panel.prepareForm.reasonOther': 'Page {{page}}: {{count}} region(s) were not offered.',
 } as const;
 
 export type PanelKey = keyof typeof PANEL_STRINGS;

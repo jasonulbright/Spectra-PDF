@@ -121,8 +121,8 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'prepareform',
     title: 'Prepare Form',
-    description: 'Add and edit form fields, then flatten them.',
-    ops: ['forms', 'document_js'],
+    description: 'Detect the fields on a flat form, or add and edit them by hand, then flatten.',
+    ops: ['prepareform', 'forms', 'document_js'],
     canvasTools: ['formfields'],
   },
   {

@@ -5,6 +5,7 @@ import { DocumentRow } from './DocumentRow';
 import type { DocPlacement } from '../../canvas/layout';
 import type { PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
+import type { FieldCandidate } from '../../lib/form-candidates';
 import type { AnnotationTransform } from '../../lib/annotation-manipulation';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import type { EditVectorObject } from '../../lib/edit-vectors';
@@ -39,6 +40,15 @@ interface DocLayerProps {
   measureLeaveMarkup?: boolean;
   onMeasureResult?: (text: string) => void;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
+  fieldCandidatesByPage: ReadonlyMap<string, FieldCandidate[]>;
+  selectedCandidateId: string | null;
+  onSelectCandidate: (candidateId: string) => void;
+  onRemoveCandidate: (candidateId: string) => void;
+  onMoveCandidate: (
+    candidateId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
   editVectorsByPage: ReadonlyMap<string, EditVectorObject[]>;
   snapGeomByPage: ReadonlyMap<string, import('../../lib/snap-geometry').PageSnapGeometry>;
@@ -209,6 +219,11 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               measureLeaveMarkup={props.measureLeaveMarkup}
               onMeasureResult={props.onMeasureResult}
               redactionMarksByPage={props.redactionMarksByPage}
+              fieldCandidatesByPage={props.fieldCandidatesByPage}
+              selectedCandidateId={props.selectedCandidateId}
+              onSelectCandidate={props.onSelectCandidate}
+              onRemoveCandidate={props.onRemoveCandidate}
+              onMoveCandidate={props.onMoveCandidate}
               editImagesByPage={props.editImagesByPage}
               editVectorsByPage={props.editVectorsByPage}
               snapGeomByPage={props.snapGeomByPage}

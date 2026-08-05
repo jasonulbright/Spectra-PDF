@@ -5,6 +5,8 @@ import type { PageAnnotation, PageRef } from '../../state/types';
 import { displayWidthAt, displayWidthOf, BASE_PAGE_HEIGHT } from '../../canvas/layout';
 import { projectMarkRect, rotateNormalizedPoints, rotateNormalizedRect } from '../../lib/redaction';
 import type { RedactionMark } from '../../lib/redaction';
+import type { FieldCandidate } from '../../lib/form-candidates';
+import FieldCandidateOverlay from './FieldCandidateOverlay';
 import type { OcrWord } from '../../ocr/types';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import { rgb01ToHex, hex01ToRgb, type EditVectorObject } from '../../lib/edit-vectors';
@@ -642,6 +644,17 @@ interface PageCellProps {
   // Pending redaction marks on this page (transient view state — see
   // lib/redaction.ts); undefined when none.
   redactionMarks?: RedactionMark[];
+  /** Provisional detected field candidates on this page, display-normalized at
+   * the orientation they were detected in — projected like marks. */
+  fieldCandidates?: FieldCandidate[];
+  selectedCandidateId?: string | null;
+  onSelectCandidate?: (candidateId: string) => void;
+  onRemoveCandidate?: (candidateId: string) => void;
+  onMoveCandidate?: (
+    candidateId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
   /** Edit-mode image placements (7.1), display-normalized at baked
    * orientation — pending rotation is applied at render like marks. */
   editImages?: EditImagePlacement[];
@@ -1006,6 +1019,11 @@ function PageCellImpl({
   onMoveGuide,
   onRemoveGuide,
   redactionMarks,
+  fieldCandidates,
+  selectedCandidateId,
+  onSelectCandidate,
+  onRemoveCandidate,
+  onMoveCandidate,
   editImages,
   editSelectedIndexes,
   editImageGroup,
@@ -3566,6 +3584,34 @@ function PageCellImpl({
           </div>
         );
       })}
+      {tool === 'formfields' &&
+        (fieldCandidates ?? []).map((candidate) => {
+          // A candidate stores the rect it was detected at; a page rotated in
+          // memory since then changes only the projection.
+          const r = rotateNormalizedRect(
+            candidate.rect,
+            page.rotation - candidate.rotationAtDraw,
+          );
+          return (
+            <FieldCandidateOverlay
+              key={candidate.id}
+              id={candidate.id}
+              rect={r}
+              name={candidate.name}
+              kind={candidate.kind}
+              selected={selectedCandidateId === candidate.id}
+              onSelect={(id) => onSelectCandidate?.(id)}
+              onRemove={(id) => onRemoveCandidate?.(id)}
+              onCommit={(id, next) =>
+                onMoveCandidate?.(
+                  id,
+                  rotateNormalizedRect(next, candidate.rotationAtDraw - page.rotation),
+                  candidate.rotationAtDraw,
+                )
+              }
+            />
+          );
+        })}
       {/* 9.D1 vector objects — rendered FIRST (before paragraphs/text/images)
           so those inner-content overlays paint on top and win a click where
           they overlap a vector's bbox (a coloured rect behind a heading, a
