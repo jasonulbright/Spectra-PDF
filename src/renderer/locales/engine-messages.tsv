@@ -259,6 +259,9 @@ recognize.tessdataBesideRunScripts	pattern	recognize	No tessdata beside {{exe}};
 recover.cannotOpenFileRecovery	pattern	recover	Cannot open file for recovery: {{e}}. File may be completely unreadable.
 recover.pagesCouldRecoveredFile	exact	recover	No pages could be recovered. File is completely unreadable.
 recover.pdfEncryptedDecryptBefore	exact	recover	PDF is encrypted -- decrypt before recovery
+redact.alignMustLeftCentred	exact	redact	align must be 0 (left), 1 (centred) or 2 (right)
+redact.fontSizeMustNegative	exact	redact	font size must not be negative
+redact.overlayTextNeedsEmbedded	exact	redact	this overlay text needs an embedded font and no font directory was given
 redact_marks.redactionMarkSDocument	pattern	redact_marks	{{count}} redaction mark(s) in this document cannot be read (page(s) {{location}}). A mark whose annotation or /Rect will not resolve is neither shown nor applied, so redacting now would leave marked content in place. Repair the document first.
 repair.pdfEncryptedDecryptBefore	exact	repair	PDF is encrypted -- decrypt before repairing
 repair.pdfTooDamagedTier	pattern	repair	PDF is too damaged for Tier 1 repair: {{e2}}. Try 'rebuild' (Tier 2) or 'recover' (Tier 3).

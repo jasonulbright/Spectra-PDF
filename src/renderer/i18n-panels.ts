@@ -936,6 +936,37 @@ export const PANEL_STRINGS = {
   'panel.searchRedact.sourceOcr': 'scan',
   'panel.searchRedact.impreciseHint':
     'This mark covers the whole run: the text could not be measured glyph by glyph, so it errs wide.',
+  'panel.searchRedact.properties': 'Redaction properties',
+
+  // ── Redaction properties (F15 slice E) ────────────────────────────────
+  // The mark's appearance, in the format's own vocabulary. One surface for
+  // both producers: the band drawn on the page and every mark the search
+  // makes read the same persisted record.
+  'panel.redactProps.fill': 'Box colour',
+  'panel.redactProps.code': 'Code',
+  'panel.redactProps.noCode': 'No code',
+  'panel.redactProps.overlay': 'Overlay text',
+  'panel.redactProps.overlayPlaceholder': 'Drawn over the box — e.g. (b)(6)',
+  'panel.redactProps.align': 'Align',
+  'panel.redactProps.alignLeft': 'Left',
+  'panel.redactProps.alignCenter': 'Centred',
+  'panel.redactProps.alignRight': 'Right',
+  'panel.redactProps.size': 'Text size',
+  'panel.redactProps.sizeAuto': '0 fits the box',
+  'panel.redactProps.textColor': 'Text colour',
+  'panel.redactProps.textColorAuto': 'Match the box automatically',
+  'panel.redactProps.repeat': 'Repeat the text to fill the box',
+  'panel.redactProps.importSet': 'Import a code set…',
+  'panel.redactProps.exportSet': 'Export this code set…',
+  'panel.redactProps.reset': 'Reset',
+  'panel.redactProps.imported': 'Imported “{{name}}” ({{count}} codes).',
+  'panel.redactProps.updated': 'Updated “{{name}}” ({{count}} codes).',
+  'panel.redactProps.exported': 'Exported “{{name}}”.',
+  'panel.redactProps.import.notJson': 'Not a valid JSON file.',
+  'panel.redactProps.import.notASet':
+    'Not a redaction code set — expected an id, a name and a list of codes with labels.',
+  'panel.redactProps.import.builtinId':
+    'That id belongs to a built-in code set — give the imported set its own id.',
 } as const;
 
 export type PanelKey = keyof typeof PANEL_STRINGS;

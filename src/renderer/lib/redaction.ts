@@ -13,6 +13,7 @@
 // docs/architecture/06-phase2d-redaction.md.
 import { displayRectToPdf } from './pdfx-build';
 import { workspacePageNumber } from './workspace-commit';
+import { propertiesPayload, type RedactionProperties } from './redaction-properties';
 import type { OpenDocument, PageRef } from '../state/types';
 
 export interface RedactionMark {
@@ -31,6 +32,12 @@ export interface RedactionMark {
   // half is read from the file at apply time (PageGeometry.bakedRotate) and
   // composed there; storing the composition here would double-count it.
   rotationAtDraw: 0 | 90 | 180 | 270;
+  // F15 slice E: the mark's own appearance — fill, overlay text, repeat,
+  // alignment, size and colour. Per MARK, not per apply: a user marks some
+  // regions under one FOIA exemption and others under another in the same
+  // pass, and one global setting at apply time could not express that.
+  // Absent = the plain black box every mark drawn before slice E carries.
+  props?: RedactionProperties;
 }
 
 // Geometry of the page as it exists in the CURRENT file bytes, read from the
@@ -46,6 +53,17 @@ export interface PageGeometry {
 export interface RedactionRegion {
   page: number; // 1-based position within the file's committed order
   rect: [number, number, number, number];
+  // F15 slice E, in the ENGINE's key names (which are the PDF key names one
+  // step removed): fill=/IC, overlay_text=/OverlayText, repeat_overlay=/Repeat,
+  // align=/Q, font_size + text_color=/DA. Omitted where the user left the
+  // default, so "no overlay" and "an overlay of nothing" stay distinguishable
+  // through the file.
+  fill?: [number, number, number];
+  overlay_text?: string;
+  repeat_overlay?: boolean;
+  align?: number;
+  font_size?: number;
+  text_color?: [number, number, number];
 }
 
 export interface RedactionFilePayload {
@@ -148,7 +166,11 @@ export async function buildRedactionRegions(
       payload = { path: doc.path, regions: [], markIds: [] };
       byPath.set(doc.path, payload);
     }
-    payload.regions.push({ page: pageNumber, rect });
+    payload.regions.push({
+      page: pageNumber,
+      rect,
+      ...(mark.props ? propertiesPayload(mark.props) : {}),
+    });
     payload.markIds.push(mark.id);
   }
   return { files: [...byPath.values()], skippedMarkIds };

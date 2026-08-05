@@ -693,6 +693,251 @@ def _redact_form(pdf, form, parent_resources, regions, form_ctm, depth, name_cou
     )
 
 
+# ── redaction properties: the overlay a region is painted with (F15 slice E) ──
+#
+# The format's own vocabulary, and `save_redaction_marks` already writes three
+# of its neighbours: `/IC` is the fill, `/OverlayText` the text drawn over it,
+# `/Repeat` tiles that text to fill the box, `/Q` aligns it and `/DA` carries
+# the font, size and colour. Until now the fill was hard-coded `0 0 0 rg` here
+# and hard-coded `[0,0,0]` there — two copies of a decision the user never got
+# to make, on a tool where a FOIA exemption code printed in the box is the
+# whole point of the redaction for the reader who receives the file.
+
+
+class RedactionProperties(NamedTuple):
+    """One region's appearance. Every field has a format key behind it."""
+
+    fill: tuple  # /IC — the box colour, RGB 0..1
+    overlay_text: str  # /OverlayText
+    repeat: bool  # /Repeat — tile the text to fill the box
+    align: int  # /Q — 0 left, 1 centred, 2 right
+    font_size: float  # /DA — 0 = fit the box
+    text_color: tuple  # /DA
+
+
+DEFAULT_FILL = (0.0, 0.0, 0.0)
+# Leading as a multiple of the font size, for a repeated/tiled overlay.
+OVERLAY_LINE_EM = 1.15
+MIN_OVERLAY_SIZE = 4.0
+MAX_OVERLAY_SIZE = 72.0
+# The overlay is inset from the box edge so a glyph never touches the border.
+OVERLAY_PAD_EM = 0.15
+
+
+def _rgb(value, fallback: tuple) -> tuple:
+    try:
+        parts = [float(v) for v in value]
+    except (TypeError, ValueError):
+        return fallback
+    if len(parts) != 3:
+        return fallback
+    return tuple(min(max(p, 0.0), 1.0) for p in parts)
+
+
+def _auto_text_color(fill: tuple) -> tuple:
+    """White on a dark fill, black on a light one.
+
+    A DEFAULT, not a decision taken from the user: `text_color` given
+    explicitly always wins. Defaulting to a fixed colour instead would make
+    the common "white box, coded overlay" case draw white on white — an
+    overlay nobody can read is the same as no overlay, on a surface whose job
+    is telling the reader WHY something was removed.
+    """
+    r, g, b = fill
+    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return (0.0, 0.0, 0.0) if luminance > 0.55 else (1.0, 1.0, 1.0)
+
+
+def properties_of(spec: dict) -> RedactionProperties:
+    """Read one region's properties, defaulting to today's shipped look — a
+    plain black box with no overlay, so a caller that sends none gets exactly
+    the bytes it got before slice E."""
+    fill = _rgb(spec.get("fill"), DEFAULT_FILL)
+    text = str(spec.get("overlay_text") or "")
+    align = spec.get("align", 0)
+    try:
+        align = int(align)
+    except (TypeError, ValueError):
+        align = 0
+    if align not in (0, 1, 2):
+        raise ValueError("align must be 0 (left), 1 (centred) or 2 (right)")
+    try:
+        size = float(spec.get("font_size") or 0.0)
+    except (TypeError, ValueError):
+        size = 0.0
+    if size < 0:
+        raise ValueError("font size must not be negative")
+    color = (
+        _rgb(spec.get("text_color"), _auto_text_color(fill))
+        if spec.get("text_color") is not None
+        else _auto_text_color(fill)
+    )
+    return RedactionProperties(fill, text, bool(spec.get("repeat_overlay")), align, size, color)
+
+
+class _OverlayFace(NamedTuple):
+    """A face that can DRAW and MEASURE one line of overlay text."""
+
+    obj: object
+    show: object  # (text) -> the complete show-operator bytes
+    width_em: object  # (text) -> advance in ems
+
+
+def _helvetica_face(pdf) -> _OverlayFace:
+    from engine.pdf_metrics import text_width_em
+
+    obj = pdf.make_indirect(
+        pikepdf.Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/Type1"),
+            BaseFont=Name("/Helvetica"),
+            Encoding=Name("/WinAnsiEncoding"),
+        )
+    )
+
+    def show(text: str) -> bytes:
+        escaped = "".join(
+            ("\\" + ch) if ch in ("(", ")", "\\") else (ch if 32 <= ord(ch) <= 255 else "?")
+            for ch in text
+        )
+        return b"(" + escaped.encode("latin-1") + b") Tj"
+
+    return _OverlayFace(obj, show, text_width_em)
+
+
+def _overlay_face(pdf, text: str, font_dir: str) -> _OverlayFace:
+    """The face to draw `text` with.
+
+    Latin-1 keeps the standard-14 Helvetica emission byte for byte (so an
+    ASCII overlay adds no font program to the file). Anything else EMBEDS
+    through the bundled fallback — S4's precedent: a non-Latin-1 overlay is
+    not a refusal and is never `?`-mapped, because a redaction code printed as
+    question marks tells the reader nothing. A right-to-left overlay goes
+    through `rtl_text`, the builder the watermark and the field appearances
+    already share — a per-character `Tj` would draw a joining script
+    disconnected and reversed.
+    """
+    if not text or all(ord(ch) <= 255 for ch in text):
+        return _helvetica_face(pdf)
+    if not font_dir:
+        # No fonts directory to embed from. Refuse rather than draw '?' — an
+        # overlay that lies about what it says is worse than the refusal.
+        raise ValueError(
+            "this overlay text needs an embedded font and no font directory was given"
+        )
+    from engine.font_fallback import build_fallback_font, resolve_fallback_font
+
+    try:
+        from engine import bidi
+
+        rtl = bidi.has_strong_rtl(text)
+    except Exception:
+        rtl = False
+    face = resolve_fallback_font(font_dir, text=text, rtl_ok=rtl)
+    if rtl:
+        from engine import rtl_text
+
+        built = rtl_text.build(pdf, face, text)
+        if built is not None:
+            return _OverlayFace(
+                built.font_obj,
+                lambda t: built.show(t, 1.0),
+                lambda t: built.width_em(t),
+            )
+    font_dict, encode, width_1000 = build_fallback_font(pdf, face, text)
+    return _OverlayFace(
+        font_dict,
+        lambda t: b"<" + encode(t).hex().encode("ascii") + b"> Tj",
+        lambda t: width_1000(t) / 1000.0,
+    )
+
+
+def _fit_size(props: RedactionProperties, face: _OverlayFace, w: float, h: float) -> float:
+    if props.font_size > 0:
+        return props.font_size
+    advance = max(face.width_em(props.overlay_text), 0.01)
+    inner = max(w - 2 * OVERLAY_PAD_EM * 12.0, 1.0)
+    by_width = inner / advance
+    by_height = h / OVERLAY_LINE_EM
+    return max(MIN_OVERLAY_SIZE, min(MAX_OVERLAY_SIZE, min(by_width, by_height)))
+
+
+def _overlay_lines(props: RedactionProperties, face: _OverlayFace, size: float, w: float, h: float):
+    """(text, x, y) baselines for the overlay, in the box's own coordinates.
+
+    `/Repeat` tiles the text to FILL the box — horizontally by repeating it
+    within a line, vertically by drawing as many lines as fit. Without it, one
+    line, vertically centred, which is what a single exemption code wants.
+    """
+    unit = max(face.width_em(props.overlay_text) * size, 0.01)
+    pad = OVERLAY_PAD_EM * size
+    inner = max(w - 2 * pad, 0.01)
+    line_h = OVERLAY_LINE_EM * size
+    if props.repeat:
+        per_line = max(int(inner // unit), 1)
+        text = props.overlay_text * per_line
+        rows = max(int(h // line_h), 1)
+    else:
+        text = props.overlay_text
+        rows = 1
+    width = face.width_em(text) * size
+    if props.align == 1:
+        x = (w - width) / 2.0
+    elif props.align == 2:
+        x = w - pad - width
+    else:
+        x = pad
+    out = []
+    if props.repeat:
+        # Top-down, so the first line sits where a reader starts.
+        top = h - line_h
+        for row in range(rows):
+            out.append((text, x, top - row * line_h + 0.25 * size))
+    else:
+        out.append((text, x, (h - size * 0.7) / 2.0 + 0.02 * size))
+    return out
+
+
+def _overlay_stream(
+    pdf, specs: list, font_dir: str
+) -> tuple[bytes, dict]:
+    """The content painted OVER the rebuilt page: one filled box per region,
+    plus its overlay text clipped to that box. Returns (bytes, fonts to
+    register), where an empty font map means the standard-14 path was enough.
+    """
+    parts: list[bytes] = []
+    fonts: dict = {}
+    counter = 0
+    for spec in specs:
+        rect = spec["rect"]
+        props = spec["props"]
+        x0, y0, x1, y1 = rect
+        w, h = x1 - x0, y1 - y0
+        r, g, b = props.fill
+        parts.append(
+            f"q {r:.6g} {g:.6g} {b:.6g} rg {x0} {y0} {w} {h} re f Q\n".encode("ascii")
+        )
+        if not props.overlay_text or w <= 0 or h <= 0:
+            continue
+        face = _overlay_face(pdf, props.overlay_text, font_dir)
+        name = f"/RdxOv{counter}"
+        counter += 1
+        fonts[name] = face.obj
+        size = _fit_size(props, face, w, h)
+        tr, tg, tb = props.text_color
+        body = [
+            f"q {x0} {y0} {w} {h} re W n {tr:.6g} {tg:.6g} {tb:.6g} rg BT "
+            f"{name} {size:.6g} Tf\n".encode("ascii")
+        ]
+        for text, tx, ty in _overlay_lines(props, face, size, w, h):
+            body.append(f"1 0 0 1 {x0 + tx:.6g} {y0 + ty:.6g} Tm ".encode("ascii"))
+            body.append(face.show(text))
+            body.append(b"\n")
+        body.append(b"ET Q\n")
+        parts.append(b"".join(body))
+    return b"".join(parts), fonts
+
+
 def _annot_key(obj):
     """Identity key for an annotation object, so /Popup /Parent /IRT references
     can be matched against /Annots entries. Indirect objects key on objgen;
@@ -809,8 +1054,11 @@ def _strip_annotations(page: "pikepdf.Page", regions: list[Rect]) -> int:
     return removed
 
 
-def _redact_page(pdf: "pikepdf.Pdf", page: "pikepdf.Page", regions: list[Rect]) -> dict:
+def _redact_page(
+    pdf: "pikepdf.Pdf", page: "pikepdf.Page", specs: list, font_dir: str = ""
+) -> dict:
     resources = _resolve_resources(page)
+    regions: list[Rect] = [spec["rect"] for spec in specs]
     name_counter = [0]
     result = _walk(
         pdf, pikepdf.parse_content_stream(page), resources, regions, IDENTITY, 0,
@@ -818,10 +1066,7 @@ def _redact_page(pdf: "pikepdf.Pdf", page: "pikepdf.Page", regions: list[Rect]) 
     )
 
     new_bytes = pikepdf.unparse_content_stream(result.kept)
-    overlay = b"".join(
-        f"q 0 0 0 rg {r[0]} {r[1]} {r[2] - r[0]} {r[3] - r[1]} re f Q\n".encode("ascii")
-        for r in regions
-    )
+    overlay, overlay_fonts = _overlay_stream(pdf, specs, font_dir)
     page.Contents = pdf.make_stream(new_bytes + b"\n" + overlay)
 
     # Register redacted form copies on this page's effective /Resources.
@@ -832,6 +1077,17 @@ def _redact_page(pdf: "pikepdf.Pdf", page: "pikepdf.Page", regions: list[Rect]) 
             resources["/XObject"] = xo
         for nm, st in result.new_forms.items():
             xo[Name(nm)] = st
+    if overlay_fonts:
+        # The overlay draws in the PAGE's content stream, so its font lives in
+        # the page's own /Resources — registered BEFORE the unreferenced-
+        # resource sweep below, which would otherwise drop a font nothing had
+        # referenced yet.
+        fonts = resources.get("/Font")
+        if fonts is None:
+            fonts = pikepdf.Dictionary()
+            resources["/Font"] = fonts
+        for nm, obj in overlay_fonts.items():
+            fonts[Name(nm)] = obj
 
     # remove_unreferenced_resources drops orphaned images/fonts but leaves
     # unreferenced FORM XObjects in place; explicitly drop the originals we
@@ -859,7 +1115,7 @@ def _redact_page(pdf: "pikepdf.Pdf", page: "pikepdf.Page", regions: list[Rect]) 
     }
 
 
-def redact(file: str, output: str, regions: list[dict]) -> dict:
+def redact(file: str, output: str, regions: list[dict], font_dir: str = "") -> dict:
     """Strip content under one or more rectangular regions and black them out.
 
     Args:
@@ -869,15 +1125,24 @@ def redact(file: str, output: str, regions: list[dict]) -> dict:
             rect in the page's own /MediaBox point space (i.e. the same
             coordinate system the page's content stream already uses —
             callers are responsible for accounting for /Rotate themselves).
+            Each region may also carry its REDACTION PROPERTIES (F15 slice E),
+            in the format's own vocabulary: `fill` (`/IC`), `overlay_text`
+            (`/OverlayText`), `repeat_overlay` (`/Repeat`), `align` (`/Q`),
+            `font_size` and `text_color` (`/DA`). Omitting them all paints the
+            plain black box this function has always painted, byte for byte.
+        font_dir: The bundled fonts directory, for an overlay whose text is
+            not Latin-1 — it EMBEDS rather than refusing or drawing '?'.
     """
     input_path = Path(file)
     output_path = Path(output)
     same_file = input_path.resolve() == output_path.resolve()
 
-    by_page: dict[int, list[Rect]] = {}
+    by_page: dict[int, list[dict]] = {}
     for region in regions:
         page_num = int(region["page"])
-        by_page.setdefault(page_num, []).append(_normalize_rect(region["rect"]))
+        by_page.setdefault(page_num, []).append(
+            {"rect": _normalize_rect(region["rect"]), "props": properties_of(region)}
+        )
 
     stats = {
         "text_runs_removed": 0,
@@ -889,10 +1154,10 @@ def redact(file: str, output: str, regions: list[dict]) -> dict:
     pages_redacted = 0
     with pikepdf.open(file) as pdf:
         total = len(pdf.pages)
-        for page_num, rects in by_page.items():
+        for page_num, specs in by_page.items():
             if not (1 <= page_num <= total):
                 continue
-            page_stats = _redact_page(pdf, pdf.pages[page_num - 1], rects)
+            page_stats = _redact_page(pdf, pdf.pages[page_num - 1], specs, font_dir)
             for key in stats:
                 stats[key] += page_stats[key]
             pages_redacted += 1
