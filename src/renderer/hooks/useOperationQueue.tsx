@@ -21,6 +21,7 @@ const QueueContext = createContext<QueueContextValue | null>(null);
  * generates an `opqueue.op.<method>` key from every row (exported for it). */
 export const FRIENDLY_NAMES: Record<string, string> = {
   merge: 'Merge',
+  create_pdf: 'Create PDF',
   split: 'Split',
   add_attachment: 'Attach File',
   remove_attachment: 'Remove Attachment',

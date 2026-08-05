@@ -234,12 +234,30 @@ export function registerBatchOcr(handlers: BatchOcrHandlers | null): void {
   batchOcr = handlers;
 }
 
+import type { Orientation as CreatePdfOrientation, PageSize as CreatePdfPageSize } from './lib/create-pdf';
+
 /**
- * Create PDF from PostScript (Phase 8): the source/output pickers are
- * native dialogs — e2e injects paths and runs the REAL conversion path.
+ * Create PDF (P22): the source and output pickers are native dialogs — e2e
+ * injects the source LIST and runs the REAL conversion path.
+ *
+ * A source of `'__blank__'` adds a blank page member, which is the one source
+ * that has no path to inject. The injected list goes through the SAME
+ * `addPaths` the picker's result does, so an injected run and a clicked one
+ * cannot diverge.
  */
+export interface CreatePdfRunOptions {
+  pageSize?: CreatePdfPageSize;
+  orientation?: CreatePdfOrientation;
+  marginPt?: number;
+  preset?: string;
+}
+
 export interface CreatePdfHandlers {
-  run: (source: string, output: string, preset?: string) => Promise<boolean>;
+  run: (
+    sources: string[],
+    output: string,
+    options?: CreatePdfRunOptions,
+  ) => Promise<{ output: string; pages: number } | null>;
 }
 
 let createPdf: CreatePdfHandlers | null = null;
@@ -977,8 +995,13 @@ export interface TestHarness {
     sizes: number[];
   }[];
   editParagraphOpen: (pageId: string, index: number) => void;
-  /** Create PDF from PostScript (Phase 8; dialog must be open). */
-  createPdfRun: (source: string, output: string, preset?: string) => Promise<boolean>;
+  /** Create PDF (P22; dialog must be open). `'__blank__'` in `sources` adds a
+   * blank page. Null result = the conversion failed and the dialog shows why. */
+  createPdfRun: (
+    sources: string[],
+    output: string,
+    options?: CreatePdfRunOptions,
+  ) => Promise<{ output: string; pages: number } | null>;
   /** Compress panel (O8; panel must be mounted). Sets the panel's own
    * controls, then runs the real engine call with an injected output path. */
   compressRun: (
@@ -1768,13 +1791,13 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     editTextOpen: (pageId, index) => canvasEditImages?.openTextEditor(pageId, index),
     editParagraphs: (pageId) => canvasEditImages?.paragraphs(pageId) ?? [],
     editParagraphOpen: (pageId, index) => canvasEditImages?.openParagraphEditor(pageId, index),
-    createPdfRun: async (source, output, preset) => {
+    createPdfRun: async (sources, output, options) => {
       if (!createPdf) {
         const msg = 'createPdfRun: dialog not mounted';
         lastError = msg;
         throw new Error(msg);
       }
-      return createPdf.run(source, output, preset);
+      return createPdf.run(sources, output, options);
     },
     compressRun: async (output, opts) => {
       if (!compress) {
