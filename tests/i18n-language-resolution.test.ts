@@ -30,6 +30,11 @@ describe('resolveLanguage (N12)', () => {
   it('is case-insensitive about the tag', () => {
     expect(resolveLanguage('PT-br')).toBe('pt-BR');
     expect(resolveLanguage('ES')).toBe('es');
+    expect(resolveLanguage('JA')).toBe('ja');
+  });
+
+  it('takes a regional tag to its bare catalog', () => {
+    expect(resolveLanguage('ja-JP')).toBe('ja');
   });
 
   it('falls back to English for a language we do not ship', () => {
