@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.0.20
+
+### Redaction
+- **A saved redaction mark can no longer go missing in silence.** Marks you
+  save into a document are stored in the file itself, which means a document
+  can also arrive carrying marks written by another program. If one of those
+  marks is damaged and cannot be read, the app now says so — naming how many
+  and which pages — instead of quietly showing you the ones it could read.
+  Before this, a damaged mark was skipped, the count reported only the
+  survivors, and applying redaction over what was shown could permanently
+  leave behind content that had been marked for removal, with a success
+  message. Saving marks over a document in that state refuses for the same
+  reason, and a saved mark whose page is no longer part of the open document
+  is now reported rather than dropped.
+
+### Headers, footers and Bates numbering
+- **Headers, footers and Bates stamps work in every script.** Japanese,
+  Chinese and Korean text — and Arabic, Hebrew and Persian — can now be
+  stamped at any of the six page positions. Right-to-left text is shaped and
+  laid out properly rather than drawn as disconnected letters in reverse, and
+  a page or Bates number inside a right-to-left line sits where that language
+  puts it. A header in one script and a footer in another are handled in a
+  single pass. Latin stamps are unchanged.
+
 ## 1.0.19 — Vertical writing, scans that shrink, and seven languages
 
 Text set in columns finishes the job it started. Mongolian — and the Todo,
