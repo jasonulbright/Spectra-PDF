@@ -297,10 +297,23 @@ def show_items(
     text could only guess). Caller must have checked `measurable()`; the
     advances are meaningless otherwise.
     """
+    return show_items_from_segments(_show_segments(operator, operands), cap, state)
+
+
+def show_items_from_segments(
+    segments: list, cap: FontCapability, state: GraphicsTextState
+) -> list[ShowItem]:
+    """`show_items` for a caller that already holds the segments (F15 slice C).
+
+    The run LISTER's detail channel carries `segments` detached from pikepdf so
+    an analysis can outlive the walk; re-deriving them from operands the walk no
+    longer has would mean a second decomposition of the same operator, which is
+    exactly the two-answers-to-one-question shape slice A deleted.
+    """
     items: list[ShowItem] = []
     x = 0.0
     tw_applies = cap.single_byte_codes()
-    for seg in _show_segments(operator, operands):
+    for seg in segments:
         if isinstance(seg, float):
             advance = -seg / 1000.0 * state.font_size
             items.append(ShowItem(True, b"", float(seg), advance, x))
@@ -399,8 +412,15 @@ def wide_width(
     run's right edge out and ARE counted; backward ones are ignored for the
     same reason. This is the R2 fail-closed direction: for a redaction tool the
     tolerable error is removing too much."""
+    return wide_width_from_segments(_show_segments(operator, operands), cap, state)
+
+
+def wide_width_from_segments(
+    segments: list, cap: Optional[FontCapability], state: GraphicsTextState
+) -> float:
+    """`wide_width` for a caller holding the lister's detached segments."""
     width = 0.0
-    for seg in _show_segments(operator, operands):
+    for seg in segments:
         if isinstance(seg, float):
             width += max(-seg / 1000.0 * state.font_size, 0.0)
             continue

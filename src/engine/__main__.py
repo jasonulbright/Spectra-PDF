@@ -35,6 +35,7 @@ from engine.encrypt import encrypt, decrypt
 from engine.pubkey_crypt import decrypt_with_pfx, encrypt_with_certs
 from engine.extract_text import extract_text
 from engine.search_in_files import search_in_files
+from engine.search_regions import search_text_regions
 from engine.headers import add_header_footer
 from engine.page_boxes import set_page_boxes
 from engine.page_labels import get_page_labels, set_page_labels
@@ -143,6 +144,7 @@ def main() -> None:
     server.register("decrypt_pubkey", decrypt_with_pfx)
     server.register("extract_text", extract_text)
     server.register("search_in_files", search_in_files)
+    server.register("search_text_regions", search_text_regions)
     server.register("add_header_footer", add_header_footer)
     server.register("set_page_boxes", set_page_boxes)
     server.register("get_page_labels", get_page_labels)
