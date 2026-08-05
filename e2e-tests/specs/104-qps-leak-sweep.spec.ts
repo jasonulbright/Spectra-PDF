@@ -77,6 +77,7 @@ const notCatalog = (text: string): boolean => {
     // tracks LOCALE_NATIVE_NAMES in i18n.ts — a wave-1 locale that lands
     // without its row here fails this sweep, which is the intended nudge.
     'English', 'Español', 'Français', 'Deutsch', 'Italiano',
+    'Português (Brasil)', '日本語', '简体中文',
   ]);
   if (exact.has(text)) return true;
   // A single character is notation (a keyboard letter, a maths sign).
