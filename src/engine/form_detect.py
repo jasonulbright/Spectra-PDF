@@ -43,6 +43,7 @@ every field.
 from __future__ import annotations
 
 import math
+import pathlib
 import statistics
 from typing import NamedTuple, Optional
 
@@ -99,6 +100,18 @@ DEFAULT_LABEL_SIZE = 11.0
 # Characters a derived field name may carry. `.` is the hierarchy separator and
 # `/` is a name delimiter; both are dropped rather than escaped.
 _NAME_KEEP = set(" _-")
+# The shortest dark stroke the raster arm recovers, in points: below a small
+# toggle's side, and long enough that no glyph stroke reaches it.
+MIN_RASTER_STROKE_PT = 8.0
+# A recognised word's ink height as a share of its font size, with and without
+# a descender. The raster arm has no font to ask, and a rule's field box is one
+# line tall, so the line height is recovered from the ink.
+ASCENT_ONLY_EM = 0.72
+ASCENT_DESCENT_EM = 0.93
+_DESCENDER_CHARS = set("gjpqy")
+# A space advance, as a share of a recognised word's ink height.
+OCR_SPACE_FRACTION = 0.39
+_SCAN_MODES = ("auto", "never", "always")
 
 _SHAPE_KINDS = ("fill", "stroke", "fillstroke")
 
@@ -120,6 +133,7 @@ class _Shape(NamedTuple):
     nested: bool
     closed: bool
     points: int
+    raster: bool = False
 
 
 def _effective_size(run) -> float:
@@ -215,8 +229,13 @@ def _page_segments(pdf, page) -> list[_Segment]:
     return segments
 
 
-def _page_shapes(pdf, page) -> list[_Shape]:
-    """Every painted, visible path on the page, with its subpath shape."""
+def _page_shapes(pdf, page) -> tuple[list[_Shape], bool]:
+    """Every painted, visible path on the page, and whether it places anything.
+
+    The placement flag is what separates a SCAN from a genuinely blank page:
+    both draw no paths and carry no text, and only one of them is worth
+    rasterising and recognising.
+    """
     walked = _walk_vectors(
         list(pikepdf.parse_content_stream(page)),
         pdf=pdf,
@@ -224,7 +243,11 @@ def _page_shapes(pdf, page) -> list[_Shape]:
         geometry=True,
     )
     shapes: list[_Shape] = []
+    placed = False
     for item in walked:
+        if item.get("kind") == "placement":
+            placed = True
+            continue
         if item.get("kind") not in _SHAPE_KINDS:
             continue
         if item.get("clipped"):
@@ -245,7 +268,291 @@ def _page_shapes(pdf, page) -> list[_Shape]:
                 points=points,
             )
         )
+    return shapes, placed
+
+
+def _display_point_to_pdf(u: float, v: float, page_box: tuple, rotate: int) -> tuple:
+    """A raster-normalized point (origin top-left) mapped into user space.
+
+    The rasteriser applies the page's `/Rotate`, so the image is in DISPLAY
+    orientation while every rect this module produces — and every widget
+    `/Rect` a candidate becomes — is in unrotated user space.
+    """
+    mx, my = page_box[0], page_box[1]
+    width, height = page_box[2] - page_box[0], page_box[3] - page_box[1]
+    angle = int(rotate) % 360
+    if angle == 90:
+        return (mx + v * width, my + u * height)
+    if angle == 180:
+        return (mx + (1.0 - u) * width, my + v * height)
+    if angle == 270:
+        return (mx + (1.0 - v) * width, my + (1.0 - u) * height)
+    return (mx + u * width, my + (1.0 - v) * height)
+
+
+def _display_rect_to_pdf(box: tuple, page_box: tuple, rotate: int) -> tuple:
+    """`box` is (u, v, w, h) in raster-normalized coordinates."""
+    u, v, w, h = box
+    first = _display_point_to_pdf(u, v, page_box, rotate)
+    second = _display_point_to_pdf(u + w, v + h, page_box, rotate)
+    return (
+        min(first[0], second[0]),
+        min(first[1], second[1]),
+        max(first[0], second[0]),
+        max(first[1], second[1]),
+    )
+
+
+def _row_runs(mask, min_length: int) -> list:
+    """Maximal runs of dark pixels per row of `mask`, at least `min_length`."""
+    import numpy as np
+
+    runs: list = []
+    for row in range(mask.shape[0]):
+        line = mask[row]
+        if not line.any():
+            continue
+        edges = np.flatnonzero(
+            np.diff(np.concatenate(([0], line.view(np.int8), [0])))
+        )
+        for start, end in zip(edges[::2], edges[1::2]):
+            if end - start >= min_length:
+                runs.append((row, int(start), int(end)))
+    return runs
+
+
+def _collapse_runs(runs: list, row_gap: int, edge_tol: int) -> list:
+    """Runs on adjacent rows with the same extent are one drawn stroke."""
+    bands: list = []
+    for row, start, end in runs:
+        for band in bands:
+            if (
+                row - band["row1"] <= row_gap
+                and abs(start - band["x0"]) <= edge_tol
+                and abs(end - band["x1"]) <= edge_tol
+            ):
+                band["row1"] = row
+                band["x0"] = min(band["x0"], start)
+                band["x1"] = max(band["x1"], end)
+                break
+        else:
+            bands.append({"row0": row, "row1": row, "x0": start, "x1": end})
+    return bands
+
+
+def _raster_strokes(mask, min_length: int) -> tuple[list, list]:
+    """Horizontal and vertical dark strokes, as pixel rectangles.
+
+    A vertical stroke is the same computation on the transposed mask, so both
+    axes come from one implementation and cannot drift apart.
+    """
+    horizontal = [
+        (band["x0"], band["row0"], band["x1"], band["row1"] + 1)
+        for band in _collapse_runs(_row_runs(mask, min_length), 2, 6)
+    ]
+    vertical = [
+        (band["row0"], band["x0"], band["row1"] + 1, band["x1"])
+        for band in _collapse_runs(_row_runs(mask.T, min_length), 2, 6)
+    ]
+    return horizontal, vertical
+
+
+def _pair_boxes(horizontal: list, vertical: list, min_side: int) -> tuple[list, set]:
+    """Rectangles closed by two horizontal and two vertical strokes.
+
+    Pairing rather than thresholding is what keeps a glyph stem out of the
+    result: a stroke only becomes an edge when three other strokes meet it at
+    the corners.
+    """
+    boxes: list = []
+    consumed: set = set()
+    for i, top in enumerate(horizontal):
+        for j, bottom in enumerate(horizontal):
+            if j <= i:
+                continue
+            upper, lower = (top, bottom) if top[1] < bottom[1] else (bottom, top)
+            if abs(upper[0] - lower[0]) > 4 or abs(upper[2] - lower[2]) > 4:
+                continue
+            if lower[1] - upper[3] < min_side:
+                continue
+            span0, span1 = upper[1], lower[3]
+
+            def touches(edge_x: float) -> bool:
+                for side in vertical:
+                    centre = (side[0] + side[2]) / 2.0
+                    if abs(centre - edge_x) > 4:
+                        continue
+                    if side[1] <= span0 + 4 and side[3] >= span1 - 4:
+                        return True
+                return False
+
+            if touches(upper[0]) and touches(upper[2]):
+                boxes.append((upper[0], upper[1], lower[2], lower[3]))
+                consumed.add(i)
+                consumed.add(j)
+    return boxes, consumed
+
+
+def _page_rotate(page) -> int:
+    try:
+        return int(page.obj.get("/Rotate", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _raster_shapes(file: str, page, page_number: int, gs_path: str) -> list[_Shape]:
+    """Rules, boxes and comb ticks recovered from the page's own raster."""
+    import tempfile
+
+    import numpy as np
+    from PIL import Image
+
+    from engine.recognize import OCR_DPI, _render_page_png
+
+    with tempfile.TemporaryDirectory(prefix="spectrapdf-detect-") as tmp:
+        png = pathlib.Path(tmp) / "page.png"
+        _render_page_png(file, page_number, gs_path, png)
+        with Image.open(png) as image:
+            mask = np.asarray(image.convert("L")) < 128
+    height_px, width_px = mask.shape
+    if height_px < 2 or width_px < 2:
+        return []
+    min_length = max(int(MIN_RASTER_STROKE_PT * OCR_DPI / 72.0), 4)
+    horizontal, vertical = _raster_strokes(mask, min_length)
+    boxes, consumed = _pair_boxes(horizontal, vertical, min_length)
+    page_box = _crop_box(page)
+    rotate = _page_rotate(page)
+
+    def to_pdf(px_rect: tuple) -> tuple:
+        x0, y0, x1, y1 = px_rect
+        return _display_rect_to_pdf(
+            (x0 / width_px, y0 / height_px, (x1 - x0) / width_px, (y1 - y0) / height_px),
+            page_box,
+            rotate,
+        )
+
+    shapes: list[_Shape] = []
+    for rect in boxes:
+        shapes.append(
+            _Shape(
+                rect=to_pdf(rect),
+                kind="stroke",
+                line_width=0.0,
+                nested=False,
+                closed=True,
+                points=4,
+                raster=True,
+            )
+        )
+    for index, rect in enumerate(horizontal):
+        if index in consumed:
+            continue
+        shapes.append(
+            _Shape(
+                rect=to_pdf(rect),
+                kind="stroke",
+                line_width=0.0,
+                nested=False,
+                closed=False,
+                points=2,
+                raster=True,
+            )
+        )
+    for rect in vertical:
+        shapes.append(
+            _Shape(
+                rect=to_pdf(rect),
+                kind="stroke",
+                line_width=0.0,
+                nested=False,
+                closed=False,
+                points=2,
+                raster=True,
+            )
+        )
     return shapes
+
+
+def _ocr_segments(
+    file: str,
+    page,
+    page_number: int,
+    lang: str,
+    tesseract_path: str,
+    gs_path: str,
+    drawn: list[_Shape],
+) -> list[_Segment]:
+    """Recognised words assembled into the same label segments the walk emits.
+
+    Word boxes arrive normalised to the rendered page with y measured from the
+    top; they are mapped through the same display-to-user-space rule every
+    other consumer of recognition uses, so a scanned page's labels land in the
+    space a widget rectangle is written in.
+
+    A recogniser reads the FORM's own lines and boxes as characters — an empty
+    square comes back as `[]` or `[J`, glued onto the option's real label by the
+    line assembly. A word sitting on a recovered stroke is that stroke, so it is
+    dropped before any label is built.
+    """
+    from engine.recognize import recognize
+
+    words = recognize(file, page_number, lang, tesseract_path, gs_path)["words"]
+    page_box = _crop_box(page)
+    rotate = _page_rotate(page)
+    strokes = [shape.rect for shape in drawn]
+    placed: list[tuple] = []
+    for word in words:
+        text = str(word.get("text") or "").strip()
+        if not text or not any(ch.isalnum() for ch in text):
+            continue
+        rect = _display_rect_to_pdf(
+            (float(word["x"]), float(word["y"]), float(word["w"]), float(word["h"])),
+            page_box,
+            rotate,
+        )
+        if _covered(rect, strokes):
+            continue
+        ink = rect[3] - rect[1]
+        em = ASCENT_DESCENT_EM if any(c in _DESCENDER_CHARS for c in text) else ASCENT_ONLY_EM
+        placed.append((text, rect, ink / em if em > 0 else ink))
+    if not placed:
+        return []
+    lines: list[list[tuple]] = []
+    for item in sorted(placed, key=lambda p: -(p[1][1] + p[1][3]) / 2.0):
+        centre = (item[1][1] + item[1][3]) / 2.0
+        height = item[1][3] - item[1][1]
+        for line in lines:
+            ref = line[0]
+            if abs(centre - (ref[1][1] + ref[1][3]) / 2.0) <= 0.5 * max(height, 1.0):
+                line.append(item)
+                break
+        else:
+            lines.append([item])
+    segments: list[_Segment] = []
+    for line in lines:
+        line.sort(key=lambda p: p[1][0])
+        chunk: list[tuple] = []
+        for item in line:
+            if chunk:
+                gap = item[1][0] - chunk[-1][1][2]
+                budget = SEGMENT_GAP_SPACES * OCR_SPACE_FRACTION * (item[1][3] - item[1][1])
+                if gap >= budget:
+                    segments.append(_merge_words(chunk))
+                    chunk = []
+            chunk.append(item)
+        if chunk:
+            segments.append(_merge_words(chunk))
+    return segments
+
+
+def _merge_words(chunk: list) -> _Segment:
+    xs = [w[1][0] for w in chunk] + [w[1][2] for w in chunk]
+    ys = [w[1][1] for w in chunk] + [w[1][3] for w in chunk]
+    return _Segment(
+        " ".join(w[0] for w in chunk),
+        (min(xs), min(ys), max(xs), max(ys)),
+        max(w[2] for w in chunk),
+    )
 
 
 def _crop_box(page) -> tuple:
@@ -678,13 +985,52 @@ class _Raw(NamedTuple):
     warnings: list
 
 
-def _page_candidates(pdf, page, page_number: int, unoffered: dict) -> tuple[list[_Raw], bool]:
-    """This page's candidates, and whether it carries any drawn content."""
+def _evidence(shape: _Shape, base: str) -> str:
+    return f"raster-{base}" if shape.raster else base
+
+
+def _page_candidates(
+    pdf,
+    page,
+    page_number: int,
+    unoffered: dict,
+    file: str,
+    scan: str,
+    lang: str,
+    tesseract_path: str,
+    gs_path: str,
+) -> tuple[list[_Raw], str]:
+    """This page's candidates, and which arm produced them.
+
+    The arm is chosen by a decidable test, not by a guess: a page with no
+    painted paths and no text runs carries nothing a walk can read, and that is
+    exactly what a scan looks like. Both arms then feed the same candidate
+    builder, so a raster candidate and a vector candidate are the same object.
+    """
+    page_box = _crop_box(page)
     segments = _page_segments(pdf, page)
-    shapes = _page_shapes(pdf, page)
-    if not shapes and not segments:
-        return [], False
-    rules, ticks, boxes = _classify_shapes(shapes, _crop_box(page))
+    shapes, placed = _page_shapes(pdf, page)
+    unreadable = not shapes and not segments and placed
+    raster = scan == "always" or (scan == "auto" and unreadable)
+    if raster:
+        shapes = _raster_shapes(file, page, page_number, gs_path)
+        rules, ticks, boxes = _classify_shapes(shapes, page_box)
+        # Only the CLASSIFIED strokes mask recognised words: the page border is
+        # a recovered rectangle too, and masking against it would cover every
+        # word on the page.
+        segments = _ocr_segments(
+            file, page, page_number, lang, tesseract_path, gs_path, rules + ticks + boxes
+        )
+        arm = "raster"
+    elif unreadable:
+        # Told not to recognise: the page is reported as the image it is, so
+        # nothing reads as "this page has no fields on it".
+        return [], "image"
+    elif not shapes and not segments:
+        return [], "empty"
+    else:
+        arm = "vector"
+        rules, ticks, boxes = _classify_shapes(shapes, page_box)
     combs = _absorb_combs(boxes, ticks)
     widgets = _widget_rects(page)
 
@@ -714,7 +1060,7 @@ def _page_candidates(pdf, page, page_number: int, unoffered: dict) -> tuple[list
                 label=segment.text,
                 label_source="left",
                 label_gap=gap,
-                evidence="rule",
+                evidence=_evidence(shape, "rule"),
                 nested=shape.nested,
                 group_id=None,
                 group_label=None,
@@ -743,7 +1089,7 @@ def _page_candidates(pdf, page, page_number: int, unoffered: dict) -> tuple[list
         if _covered(rect, widgets):
             bump("covered_by_existing_field")
             continue
-        segment, gap, source = _bind_box_label(shape.rect, segments)
+        segment, gap, box_source = _bind_box_label(shape.rect, segments)
         label = segment.text if segment is not None else None
         size = segment.size if segment is not None else DEFAULT_LABEL_SIZE
         typing = _infer_text_kind(rect, size, combs.get(index))
@@ -755,9 +1101,9 @@ def _page_candidates(pdf, page, page_number: int, unoffered: dict) -> tuple[list
                 kind=kind,
                 rect=rect,
                 label=label,
-                label_source=source,
+                label_source=box_source,
                 label_gap=gap,
-                evidence="box",
+                evidence=_evidence(shape, "box"),
                 nested=shape.nested,
                 group_id=None,
                 group_label=None,
@@ -778,7 +1124,7 @@ def _page_candidates(pdf, page, page_number: int, unoffered: dict) -> tuple[list
     ):
         question, _question_gap = _group_question(group, box_rects, segments)
         pool = [s for s in segments if s is not question]
-        source, found = (
+        direction, found = (
             _group_option_labels(group, box_rects, pool, pitch)
             if len(group) >= 2
             else (None, [])
@@ -787,8 +1133,8 @@ def _page_candidates(pdf, page, page_number: int, unoffered: dict) -> tuple[list
         # A named answer set is a radio group; the same set with no question
         # above it is that many independent toggles, because the members would
         # have no name to share. A round option is a radio whatever labels it.
-        radio = len(group) >= 2 and source is not None and (question is not None or round_shape)
-        if len(group) >= 2 and question is not None and source is None:
+        radio = len(group) >= 2 and direction is not None and (question is not None or round_shape)
+        if len(group) >= 2 and question is not None and direction is None:
             bump("radio_demoted")
         group_label = question.text if (radio and question is not None) else None
         for position, member in enumerate(group):
@@ -797,9 +1143,9 @@ def _page_candidates(pdf, page, page_number: int, unoffered: dict) -> tuple[list
             if _covered(rect, widgets):
                 bump("covered_by_existing_field")
                 continue
-            if source is not None:
+            if direction is not None:
                 segment, gap = found[position]
-                label, label_source = segment.text, source
+                label, label_source = segment.text, direction
             else:
                 segment, gap, label_source = _bind_box_label(shape.rect, segments)
                 label = segment.text if segment is not None else None
@@ -811,7 +1157,7 @@ def _page_candidates(pdf, page, page_number: int, unoffered: dict) -> tuple[list
                     label=label,
                     label_source=label_source,
                     label_gap=gap,
-                    evidence="box-round" if shape.points > 8 else "box",
+                    evidence=_evidence(shape, "box-round" if shape.points > 8 else "box"),
                     nested=shape.nested,
                     group_id=f"{page_number}:{ordinal}" if radio else None,
                     group_label=group_label,
@@ -823,7 +1169,7 @@ def _page_candidates(pdf, page, page_number: int, unoffered: dict) -> tuple[list
                     warnings=[] if label else ["unlabeled"],
                 )
             )
-    return raw, True
+    return raw, arm
 
 
 _NAME_STEM = {
@@ -899,6 +1245,10 @@ def _assign_names(raw: list[_Raw], taken: set) -> list[dict]:
 def detect_form_fields(
     file: str,
     pages="all",
+    scan: str = "auto",
+    lang: str = "eng",
+    tesseract_path: str = "",
+    gs_path: str = "",
     max_candidates: int = MAX_CANDIDATES_DEFAULT,
 ) -> dict:
     """Field candidates for a flat form.
@@ -908,9 +1258,17 @@ def detect_form_fields(
     ``rect``, the inferred ``kind``, the bound ``label`` with the direction it
     came from, a derived ``name``, and — for a radio option — its ``group`` and
     ``export``. Nothing is written; the caller decides what becomes a field.
+
+    ``scan`` chooses the arm: ``auto`` reads a page's own content and uses the
+    raster arm only where there is none, ``never`` keeps the run offline, and
+    ``always`` forces recognition. A page that needs the raster arm and has no
+    recogniser available REFUSES by name — an empty result would read as a page
+    with nothing on it.
     """
     if int(max_candidates) <= 0:
         raise ValueError("max_candidates must be a positive number")
+    if scan not in _SCAN_MODES:
+        raise ValueError('scan must be "auto", "never" or "always"')
     validate_pdf(file)
     with pikepdf.open(file) as pdf:
         wanted = _page_numbers(pages, pdf)
@@ -922,9 +1280,19 @@ def detect_form_fields(
         for page_number in wanted:
             page = pdf.pages[page_number - 1]
             counts: dict = {}
-            found, has_content = _page_candidates(pdf, page, page_number, counts)
+            found, arm = _page_candidates(
+                pdf,
+                page,
+                page_number,
+                counts,
+                file,
+                scan,
+                lang,
+                tesseract_path,
+                gs_path,
+            )
             unoffered_by_page[page_number] = counts
-            by_source[str(page_number)] = "vector" if has_content else "empty"
+            by_source[str(page_number)] = arm
             for item in found:
                 if len(raw) >= int(max_candidates):
                     truncated = True

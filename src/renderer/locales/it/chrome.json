@@ -1231,6 +1231,7 @@
   "engine.font_fallback.verticalFallbackFontCannot": "il carattere verticale di ripiego non può rappresentare {{ch}}",
   "engine.form_detect.cannotNameDetectedField": "impossibile assegnare un nome al campo rilevato {{base}}: troppi campi hanno già quel nome",
   "engine.form_detect.maxCandidatesMustPositive": "max_candidates deve essere un numero positivo",
+  "engine.form_detect.scanMustAutoNever": "scan deve essere \"auto\", \"never\" o \"always\"",
   "engine.forms.acroformFieldTreeNested": "albero dei campi AcroForm annidato troppo in profondità",
   "engine.forms.couldnTRegenerateAppearance": "impossibile rigenerare l’aspetto di {{v0}}: {{exc}}",
   "engine.forms.valueContainsCharactersOutside": "il valore contiene caratteri fuori dalla codifica del carattere del modulo (WinAnsi)",
