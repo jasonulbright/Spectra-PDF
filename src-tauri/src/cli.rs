@@ -146,6 +146,8 @@ pub enum CliCommand {
     GenerateSigner(GenerateSignerArgs),
     /// List AcroForm fields (JSON), or fill them with --set (and optionally --flatten)
     Forms(FormsArgs),
+    /// Report where form fields could be added to a flat form (JSON); writes nothing
+    DetectFields(DetectFieldsArgs),
     /// Read the bookmark tree (JSON), or replace it with --from-json
     Outline(OutlineArgs),
     /// View or set PDF metadata
@@ -1239,6 +1241,18 @@ pub struct FormsArgs {
     /// all form fields (locks the form)
     #[arg(long)]
     pub flatten: bool,
+}
+
+#[derive(Args)]
+pub struct DetectFieldsArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Pages to analyze, e.g. "1,3,5" or "all"
+    #[arg(long, default_value = "all")]
+    pub pages: String,
+    /// Stop after this many candidates (the result reports the truncation)
+    #[arg(long, default_value_t = 5000)]
+    pub max_candidates: u32,
 }
 
 #[derive(Args)]
@@ -2886,6 +2900,20 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "edits": edits,
                     "flatten": args.flatten,
                     "font_dir": resolve_fonts().to_string_lossy().to_string(),
+                }),
+            )
+        }
+
+        CliCommand::DetectFields(args) => {
+            // Read-only: it reports where fields COULD go and writes nothing.
+            // Field creation itself stays an interactive canvas gesture, the
+            // same class as annotations and redaction marks; a report is not.
+            engine.call(
+                "detect_form_fields",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "pages": parse_pages(&args.pages),
+                    "max_candidates": args.max_candidates,
                 }),
             )
         }

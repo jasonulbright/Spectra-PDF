@@ -72,6 +72,7 @@ from engine.document_js import list_document_js, set_document_js
 from engine.redact import redact
 from engine.watermark import watermark
 from engine.compare import compare_text, compare_visual
+from engine.form_detect import detect_form_fields
 from engine.forms import read_form_fields, fill_form_fields, reset_form_fields
 from engine.ocr_layer import apply_ocr_layer
 from engine.recognize import recognize
@@ -203,6 +204,7 @@ def main() -> None:
     server.register("read_form_fields", read_form_fields)
     server.register("fill_form_fields", fill_form_fields)
     server.register("reset_form_fields", reset_form_fields)
+    server.register("detect_form_fields", detect_form_fields)
     server.register("apply_ocr_layer", apply_ocr_layer)
     server.register("recognize", recognize)
     server.register("batch_ocr", batch_ocr)
