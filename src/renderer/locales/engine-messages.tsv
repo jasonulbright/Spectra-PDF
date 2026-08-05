@@ -42,6 +42,12 @@ compare.toleranceMustBetween	exact	compare	tolerance must be between 0 and 255.
 compare.unsupportedPpmMaxvalExpected	pattern	compare	Unsupported PPM maxval {{maxval}} (expected 255)
 compress.ghostscriptFailed	pattern	compress,distill,image_export	Ghostscript failed: {{v0}}
 compress.mrcCompressionDpiSetting	exact	compress	MRC compression has no DPI setting — the text stays at the scan's own resolution, which is the point of it. Choose a preset instead.
+create_pdf.heicHeifImagesNeed	pattern	create_pdf	HEIC/HEIF images need the pillow-heif plugin, which this runtime does not have: {{src_path}}
+create_pdf.imageContainsFrames	pattern	create_pdf	the image contains no frames: {{src_path}}
+create_pdf.imageDpiDefaultMust	exact	create_pdf	the image DPI default must be a positive number
+create_pdf.imageFileEmpty	pattern	create_pdf	the image file is empty: {{src_path}}
+create_pdf.imageFileFound	pattern	create_pdf	image file not found: {{src_path}}
+create_pdf.unreadableImage	pattern	create_pdf	unreadable image: {{src_path}} ({{exc}})
 distill.alreadyPdfDistillingConverts	exact	distill	this is already a PDF — distilling converts PostScript; use Repair (Tier 2 rebuild) to re-render a PDF
 distill.ghostscriptProducedPdfPages	exact	distill	Ghostscript produced a PDF with no pages
 distill.ghostscriptProducedUnreadablePdf	pattern	distill	Ghostscript produced an unreadable PDF: {{exc}}
@@ -130,9 +136,11 @@ mrc_codecs.maskVerificationFailedEmbedded	pattern	mrc_codecs	mask verification f
 mrc_codecs.unknownJbigMode	pattern	mrc_codecs	unknown JBIG2 mode: {{mode}}
 mrc_codecs.unknownMaskCodecExpected	pattern	mrc_codecs	unknown mask codec: {{codec}} (expected one of {{v1}})
 ocr_layer.ocrWordsApply	exact	ocr_layer	No OCR words to apply.
+office_export.inputFileEmpty	pattern	office_export	the input file is empty: {{file}}
 office_export.libreofficeAvailableSofficePath	exact	office_export	LibreOffice is not available (no soffice path)
 office_export.libreofficeConversionFailedExit	pattern	office_export	LibreOffice conversion failed (exit {{v0}}): {{v1}}
 office_export.libreofficeConversionTimedOut	pattern	office_export	LibreOffice conversion timed out after {{_TIMEOUT}}s
+office_export.libreofficeReportedSuccessFile	pattern	office_export	LibreOffice reported success but the file it wrote is empty ({{v0}})
 office_export.libreofficeReportedSuccessWrote	pattern	office_export	LibreOffice reported success but wrote no output (stderr: {{v0}})
 office_export.outputPathSameFile	exact	office_export	output path is the same file as the input
 office_export.unsupportedExportFormat	pattern	office_export	unsupported export format {{fmt}} (have {{v1}})
