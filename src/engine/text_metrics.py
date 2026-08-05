@@ -38,7 +38,7 @@ reason this module has a surface of its own:
     across the descenders of a line missed the bbox entirely.
 """
 
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from pdfminer.fontmetrics import FONT_METRICS
 from pikepdf import Name
@@ -267,6 +267,113 @@ def _run_metrics(
         else:
             width += len(seg) * state.font_size * 0.5  # no font: a bare guess
     return "".join(text_parts), width
+
+
+class ShowItem(NamedTuple):
+    """One indivisible piece of a show operator: a drawn CODE, or a TJ number.
+
+    `x` is the pen offset at the piece's start and `advance` what it adds, both
+    in TEXT-SPACE units before Tz — the same space `_run_metrics` sums in, so
+    `sum(item.advance for item in show_items(...))` equals its width.
+    """
+
+    kern: bool
+    data: bytes  # the code's own bytes; b"" for a kern
+    number: float  # the TJ number; 0.0 for a code
+    advance: float
+    x: float
+
+
+def show_items(
+    operator: str, operands: list, cap: FontCapability, state: GraphicsTextState
+) -> list[ShowItem]:
+    """A show operator decomposed per CODE (F15 slice B).
+
+    The split points are the codespace's own — `FontCapability.codes()` is
+    "the ONE place the codespace is interpreted" — so a code is never cut in
+    half and a LIGATURE, which is one code spelling several characters, is
+    structurally unsplittable here (T25 rule 2: what a glyph spells is a
+    property of the (glyph, cluster) pair, and a caller that re-split decoded
+    text could only guess). Caller must have checked `measurable()`; the
+    advances are meaningless otherwise.
+    """
+    items: list[ShowItem] = []
+    x = 0.0
+    tw_applies = cap.single_byte_codes()
+    for seg in _show_segments(operator, operands):
+        if isinstance(seg, float):
+            advance = -seg / 1000.0 * state.font_size
+            items.append(ShowItem(True, b"", float(seg), advance, x))
+            x += advance
+            continue
+        offset = 0
+        for _code, n in cap.codes(seg):
+            raw = seg[offset : offset + n]
+            offset += n
+            advance = cap.decoded_width(raw) / 1000.0 * state.font_size
+            advance += state.char_spacing
+            if tw_applies and raw == b" ":
+                advance += state.word_spacing
+            items.append(ShowItem(False, raw, 0.0, advance, x))
+            x += advance
+    return items
+
+
+def show_clusters(items: list[ShowItem]) -> list[list[int]]:
+    """Group `show_items` into the units a split may fall BETWEEN.
+
+    A cluster is one advancing glyph plus every zero-advance glyph that follows
+    it and the kerns around them. T25 rules 3 and 4: a combining mark carries
+    its horizontal offset as jump / zero-advance glyph / jump back, so cutting
+    between a base and its mark would strand the mark on the wrong side of the
+    redaction — and the jump routinely exceeds half a space, which is why the
+    grouping is by ADVANCE rather than by any notion of what the codes spell.
+    """
+    clusters: list[list[int]] = []
+    i = 0
+    n = len(items)
+    while i < n:
+        start = i
+        while i < n and items[i].kern:  # leading kerns join this cluster
+            i += 1
+        if i >= n:
+            # Trailing kerns own no glyph — they ride with the last cluster so
+            # that removing it removes their displacement too.
+            if clusters:
+                clusters[-1].extend(range(start, n))
+            else:
+                clusters.append(list(range(start, n)))
+            break
+        i += 1  # the base glyph
+        while True:
+            j = i
+            while j < n and items[j].kern:
+                j += 1
+            if j < n and not items[j].kern and items[j].advance == 0.0:
+                i = j + 1  # a zero-advance mark: same cluster, with its kerns
+                while i < n and items[i].kern:
+                    i += 1  # …and the jump BACK that pairs with the jump out
+                continue
+            break
+        clusters.append(list(range(start, i)))
+    return clusters
+
+
+def cluster_span(items: list[ShowItem], cluster: list[int]) -> tuple[float, float]:
+    """(x0, x1) of the ink a cluster draws, in pre-Tz text space. Kerns move
+    the pen but draw nothing, so only glyph items contribute — a cluster whose
+    mark sits 400/1000 em to the left of its base spans both."""
+    xs: list[float] = []
+    for index in cluster:
+        item = items[index]
+        if item.kern:
+            continue
+        xs.append(item.x)
+        xs.append(item.x + item.advance)
+    if not xs:
+        anchor = items[cluster[0]].x if cluster else 0.0
+        return (anchor, anchor)
+    return (min(xs), max(xs))
 
 
 def measurable(cap: Optional[FontCapability], data: bytes) -> bool:
