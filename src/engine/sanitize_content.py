@@ -1,0 +1,704 @@
+"""Content-stream analysis for text a reader cannot see.
+
+Four things make text invisible without removing it from the file, and an
+extractor reads all four exactly as it reads visible text:
+
+  1. a non-painting render mode (``3 Tr``, and ``7 Tr`` which only clips);
+  2. a fill colour equal to whatever is painted under the run;
+  3. a later opaque object drawn over it;
+  4. membership of an optional-content group that is OFF in the default
+     configuration.
+
+The walk is one depth-first pass that emits an ORDERED event list — text
+shows, painted fills, image placements — because three of the four detectors
+are questions about what was painted BEFORE or AFTER a run, and a separate
+walk per detector could not answer them consistently. Form XObjects recurse at
+their ``Do`` position, so event order is paint order.
+
+Two conservatisms are deliberate, both in the direction of leaving content
+alone:
+
+  * a covering object counts only when it is an AXIS-ALIGNED rectangle (or an
+    axis-aligned image placement). A general path's bounding box claims more
+    coverage than the path paints, and acting on that claim deletes text a
+    reader can see.
+  * PARTIAL coverage is reported and never removed. The uncovered half is
+    content.
+
+Run ids are the depth-first show-operator encounter order. The analysis walk
+and the removal walk below share that traversal shape, which is what makes an
+id from one addressable by the other.
+"""
+
+from typing import NamedTuple, Optional
+
+import pikepdf
+from pikepdf import Name
+
+from engine import color_spaces
+from engine.content_walk import (
+    IDENTITY,
+    Matrix,
+    Rect,
+    as_matrix,
+    bbox_of_corners_under_matrix,
+    mat_mult,
+    transform_point,
+)
+from engine.redact import (
+    MAX_FORM_DEPTH,
+    _lookup_xobject,
+    _resolve_resources,
+    _span_bbox,
+)
+from engine.text_metrics import (
+    _child_state,
+    _FontCache,
+    _run_metrics,
+    measurable,
+    show_bytes,
+    wide_width,
+)
+
+SHOW_OPS = ("Tj", "'", '"', "TJ")
+
+# Render modes that paint no glyph. 7 adds to the clip path only; 3 paints
+# nothing at all.
+INVISIBLE_MODES = frozenset({3, 7})
+# Render modes whose glyphs are painted with the FILL colour. 1 and 5 stroke
+# only, so their visibility is a question about the stroke colour.
+FILL_MODES = frozenset({0, 2, 4, 6})
+
+# Per-channel sRGB distance at which two colours are treated as the same. One
+# 8-bit step is 1/255; the threshold sits just above it so a rounded-trip
+# colour still matches.
+COLOR_TOLERANCE = 0.005
+
+# A placement covering at least this fraction of the page box makes the page a
+# scan, which is what puts its invisible text in the recognition sub-class.
+SCAN_COVERAGE = 0.8
+
+# Below this the geometry is degenerate and containment tests are meaningless.
+MIN_EXTENT = 0.01
+
+# The name this tool's own recognition overlay is registered under.
+OCR_FORM_NAME = "/SpectraPDFOCR"
+
+
+class HiddenRun(NamedTuple):
+    index: int
+    kind: str
+    text: str
+    rect: Rect
+
+
+class _Event(NamedTuple):
+    """One painting event in depth-first (paint) order."""
+
+    kind: str  # "text" | "cover"
+    rect: Rect
+    payload: dict
+
+
+def _axis_aligned(m: Matrix) -> bool:
+    """Does this matrix map axis-parallel edges to axis-parallel edges?"""
+    return (abs(m[1]) < 1e-9 and abs(m[2]) < 1e-9) or (
+        abs(m[0]) < 1e-9 and abs(m[3]) < 1e-9
+    )
+
+
+def _contains(outer: Rect, inner: Rect, slack: float = 0.0) -> bool:
+    return (
+        outer[0] - slack <= inner[0]
+        and outer[1] - slack <= inner[1]
+        and outer[2] + slack >= inner[2]
+        and outer[3] + slack >= inner[3]
+    )
+
+
+def _intersects(a: Rect, b: Rect) -> bool:
+    return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+
+def _area(r: Rect) -> float:
+    return max(0.0, r[2] - r[0]) * max(0.0, r[3] - r[1])
+
+
+def _colors_match(a, b) -> bool:
+    if a is None or b is None:
+        return False
+    return all(abs(float(x) - float(y)) <= COLOR_TOLERANCE for x, y in zip(a, b))
+
+
+def _color_rgb(color_state, resources, pdf):
+    """Best-effort sRGB for a captured colour state. Device operators resolve
+    inline; a named space resolves through the stream's /ColorSpace."""
+    if color_state is None:
+        return None
+    space_op, value_op = color_state
+    if value_op is None:
+        # No value set and no non-device space selected is the stream default,
+        # device-gray black.
+        return [0.0, 0.0, 0.0] if space_op is None else None
+    op, vals = value_op
+    opl = op.lower()
+    if opl in ("g", "rg", "k"):
+        try:
+            nums = [float(v) for v in vals]
+        except (TypeError, ValueError):
+            return None
+        if opl == "g" and len(nums) == 1:
+            v = min(1.0, max(0.0, nums[0]))
+            return [v, v, v]
+        if opl == "rg" and len(nums) == 3:
+            return [min(1.0, max(0.0, c)) for c in nums]
+        if opl == "k" and len(nums) == 4:
+            c, m, y, k = (min(1.0, max(0.0, n)) for n in nums)
+            return [(1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k)]
+        return None
+    return color_spaces.resolve_color(space_op, value_op, resources, pdf)
+
+
+# ── optional content ──────────────────────────────────────────────────────
+
+
+def _objgen(obj):
+    try:
+        og = obj.objgen
+    except Exception:
+        return None
+    return og if og != (0, 0) else None
+
+
+def off_ocg_set(pdf) -> set:
+    """The objgens of every optional-content group hidden by the DEFAULT
+    configuration. /BaseState /OFF inverts the question: everything is hidden
+    except what /ON names."""
+    ocp = pdf.Root.get("/OCProperties")
+    if not isinstance(ocp, pikepdf.Dictionary):
+        return set()
+    d = ocp.get("/D")
+    if not isinstance(d, pikepdf.Dictionary):
+        return set()
+
+    def og_set(key):
+        arr = d.get(key)
+        out = set()
+        if isinstance(arr, pikepdf.Array):
+            for el in arr:
+                og = _objgen(el)
+                if og is not None:
+                    out.add(og)
+        return out
+
+    base_off = str(d.get("/BaseState", "")) == "/OFF"
+    if not base_off:
+        return og_set("/OFF")
+    everything = set()
+    ocgs = ocp.get("/OCGs")
+    if isinstance(ocgs, pikepdf.Array):
+        for el in ocgs:
+            og = _objgen(el)
+            if og is not None:
+                everything.add(og)
+    return everything - og_set("/ON")
+
+
+def oc_hidden(obj, off_set: set) -> bool:
+    """Is this /OC value (an OCG, or an OCMD naming several) hidden in the
+    default configuration? An OCMD's /P policy decides; AnyOn is the default."""
+    if not isinstance(obj, pikepdf.Dictionary):
+        return False
+    kind = str(obj.get("/Type", ""))
+    if kind == "/OCMD":
+        groups = obj.get("/OCGs")
+        members = []
+        if isinstance(groups, pikepdf.Array):
+            members = [g for g in groups]
+        elif isinstance(groups, pikepdf.Dictionary):
+            members = [groups]
+        if not members:
+            return False
+        states = []
+        for g in members:
+            og = _objgen(g)
+            states.append(og is not None and og in off_set)
+        policy = str(obj.get("/P", "/AnyOn"))
+        if policy == "/AllOn":
+            return any(states)
+        if policy == "/AnyOff":
+            return not any(states)
+        if policy == "/AllOff":
+            return not all(states)
+        return all(states)  # AnyOn: visible while any member is on
+    og = _objgen(obj)
+    return og is not None and og in off_set
+
+
+def _bdc_hidden(operands: list, resources, off_set: set) -> bool:
+    """Does this BDC open a hidden optional-content block? The property is
+    either an inline dictionary or a name resolved through /Properties."""
+    if len(operands) < 2 or str(operands[0]) != "/OC":
+        return False
+    prop = operands[1]
+    if isinstance(prop, pikepdf.Dictionary):
+        return oc_hidden(prop, off_set)
+    try:
+        name = str(prop)
+    except Exception:
+        return False
+    props = resources.get("/Properties") if resources is not None else None
+    if not isinstance(props, pikepdf.Dictionary):
+        return False
+    target = props.get(Name(name))
+    return oc_hidden(target, off_set) if target is not None else False
+
+
+# ── path geometry ─────────────────────────────────────────────────────────
+
+
+class _PathBox:
+    """The device-space box of the path under construction, plus whether that
+    path is a single axis-aligned rectangle. Only a rectangle is trusted as a
+    cover: a bounding box over a general path claims coverage the path does
+    not paint."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self) -> None:
+        self.points: list = []
+        self.subpaths = 0
+        self.rect_only = True
+        self._current: list = []
+
+    def _push(self, pt) -> None:
+        self.points.append(pt)
+        self._current.append(pt)
+
+    def rect(self, operands: list, ctm: Matrix) -> None:
+        try:
+            x, y, w, h = (float(v) for v in operands[:4])
+        except (TypeError, ValueError, IndexError):
+            self.rect_only = False
+            return
+        self._end_sub()
+        self.subpaths += 1
+        for cx, cy in ((x, y), (x + w, y), (x + w, y + h), (x, y + h)):
+            self._push(transform_point(ctm, cx, cy))
+        if not _axis_aligned(ctm):
+            self.rect_only = False
+        self._end_sub()
+
+    def move(self, operands: list, ctm: Matrix) -> None:
+        self._end_sub()
+        self.subpaths += 1
+        try:
+            self._push(transform_point(ctm, float(operands[0]), float(operands[1])))
+        except (TypeError, ValueError, IndexError):
+            self.rect_only = False
+
+    def line(self, operands: list, ctm: Matrix) -> None:
+        try:
+            self._push(transform_point(ctm, float(operands[0]), float(operands[1])))
+        except (TypeError, ValueError, IndexError):
+            self.rect_only = False
+
+    def curve(self, operands: list, ctm: Matrix) -> None:
+        # A curve is never a rectangle edge; its control points still bound it.
+        self.rect_only = False
+        for i in range(0, len(operands) - 1, 2):
+            try:
+                self._push(transform_point(ctm, float(operands[i]), float(operands[i + 1])))
+            except (TypeError, ValueError):
+                return
+
+    def _end_sub(self) -> None:
+        pts = self._current
+        self._current = []
+        if not pts:
+            return
+        if len(pts) == 5 and _same_point(pts[0], pts[4]):
+            pts = pts[:4]
+        if len(pts) != 4 or not _is_axis_rect(pts):
+            self.rect_only = False
+
+    def finish(self) -> tuple:
+        self._end_sub()
+        if not self.points:
+            return None, False
+        xs = [p[0] for p in self.points]
+        ys = [p[1] for p in self.points]
+        box = (min(xs), min(ys), max(xs), max(ys))
+        return box, bool(self.rect_only and self.subpaths == 1)
+
+
+def _same_point(a, b) -> bool:
+    return abs(a[0] - b[0]) < 1e-6 and abs(a[1] - b[1]) < 1e-6
+
+
+def _is_axis_rect(pts: list) -> bool:
+    closed = list(pts) + [pts[0]]
+    for i in range(4):
+        dx = abs(closed[i + 1][0] - closed[i][0])
+        dy = abs(closed[i + 1][1] - closed[i][1])
+        if dx > 1e-6 and dy > 1e-6:
+            return False
+    return True
+
+
+_CONSTRUCT_MOVE = ("m",)
+_CONSTRUCT_LINE = ("l",)
+_CONSTRUCT_CURVE = ("c", "v", "y")
+_CONSTRUCT_RECT = ("re",)
+_CLOSE = ("h",)
+_PAINT = ("f", "F", "f*", "B", "B*", "b", "b*", "S", "s", "n")
+_PAINT_FILLS = ("f", "F", "f*", "B", "B*", "b", "b*")
+_CLIP_OPS = ("W", "W*")
+
+
+# ── graphics-state alpha ──────────────────────────────────────────────────
+
+
+def _gs_opacity(resources, name) -> Optional[dict]:
+    """The fill alpha, soft mask and blend mode an /ExtGState names, or None
+    when the resource cannot be resolved."""
+    if resources is None:
+        return None
+    egs = resources.get("/ExtGState")
+    if not isinstance(egs, pikepdf.Dictionary):
+        return None
+    entry = egs.get(Name(str(name)))
+    if not isinstance(entry, pikepdf.Dictionary):
+        return None
+    out: dict = {}
+    if "/ca" in entry:
+        try:
+            out["ca"] = float(entry["/ca"])
+        except (TypeError, ValueError):
+            pass
+    if "/SMask" in entry:
+        out["smask"] = str(entry["/SMask"]) != "/None"
+    if "/BM" in entry:
+        bm = entry["/BM"]
+        first = str(bm[0]) if isinstance(bm, pikepdf.Array) and len(bm) else str(bm)
+        out["blend"] = first
+    return out
+
+
+class _AlphaState:
+    """Fill alpha, soft mask and blend mode, stacked with q/Q the way every
+    other graphics-state parameter is."""
+
+    def __init__(self, alpha: float = 1.0, smask: bool = False, blend: str = "/Normal"):
+        self.alpha = alpha
+        self.smask = smask
+        self.blend = blend
+        self._stack: list = []
+
+    def push(self) -> None:
+        self._stack.append((self.alpha, self.smask, self.blend))
+
+    def pop(self) -> None:
+        if self._stack:
+            self.alpha, self.smask, self.blend = self._stack.pop()
+
+    def apply(self, info: Optional[dict]) -> None:
+        if not info:
+            return
+        if "ca" in info:
+            self.alpha = info["ca"]
+        if "smask" in info:
+            self.smask = info["smask"]
+        if "blend" in info:
+            self.blend = info["blend"]
+
+    @property
+    def opaque(self) -> bool:
+        return (
+            self.alpha >= 1.0 - 1e-6
+            and not self.smask
+            and self.blend in ("/Normal", "/Compatible")
+        )
+
+
+def _image_is_opaque(xobj) -> bool:
+    if not isinstance(xobj, pikepdf.Stream):
+        return False
+    if "/SMask" in xobj:
+        return False
+    mask = xobj.get("/Mask")
+    return mask is None
+
+
+# ── the analysis walk ─────────────────────────────────────────────────────
+
+
+class _Analysis:
+    def __init__(self, pdf, off_set: set, page_box: Rect):
+        self.pdf = pdf
+        self.off_set = off_set
+        self.page_box = page_box
+        self.events: list = []
+        self.fonts = _FontCache()
+        self.run_index = 0
+        self.layer_blocks = 0
+        self.scan_cover = 0.0
+
+
+def _walk_analysis(
+    an: _Analysis,
+    instructions,
+    resources,
+    fallback,
+    base_ctm: Matrix,
+    depth: int,
+    parent_state=None,
+    hidden_depth: int = 0,
+    in_ocr_form: bool = False,
+) -> None:
+    state = _child_state(base_ctm, parent_state)
+    alpha = _AlphaState()
+    path = _PathBox()
+    pending_clip = False
+    # Nesting depth of marked-content sections, and the depth at which the
+    # outermost HIDDEN optional-content section opened. A run is off-layer
+    # while that marker stands.
+    mc_depth = 0
+    hidden_at = None if hidden_depth == 0 else 0
+
+    for instruction in instructions:
+        operator = str(instruction.operator)
+        operands = list(instruction.operands)
+
+        if operator == "q":
+            alpha.push()
+        elif operator == "Q":
+            alpha.pop()
+        elif operator == "gs" and operands:
+            alpha.apply(_gs_opacity(resources, operands[0]))
+
+        if operator == "BDC" or operator == "BMC":
+            mc_depth += 1
+            if (
+                hidden_at is None
+                and operator == "BDC"
+                and _bdc_hidden(operands, resources, an.off_set)
+            ):
+                hidden_at = mc_depth
+                an.layer_blocks += 1
+            continue
+        if operator == "EMC":
+            if hidden_at is not None and mc_depth == hidden_at:
+                hidden_at = None
+            mc_depth = max(0, mc_depth - 1)
+            continue
+
+        if state.feed(operator, operands):
+            continue
+
+        if operator in _CONSTRUCT_RECT:
+            path.rect(operands, state.ctm)
+            continue
+        if operator in _CONSTRUCT_MOVE:
+            path.move(operands, state.ctm)
+            continue
+        if operator in _CONSTRUCT_LINE:
+            path.line(operands, state.ctm)
+            continue
+        if operator in _CONSTRUCT_CURVE:
+            path.curve(operands, state.ctm)
+            continue
+        if operator in _CLOSE:
+            continue
+        if operator in _CLIP_OPS:
+            pending_clip = True
+            continue
+        if operator in _PAINT:
+            box, is_rect = path.finish()
+            if (
+                operator in _PAINT_FILLS
+                and box is not None
+                and not pending_clip
+                and hidden_at is None
+                and alpha.opaque
+            ):
+                an.events.append(
+                    _Event(
+                        "cover",
+                        box,
+                        {
+                            "rgb": _color_rgb(state.fill_color, resources, an.pdf),
+                            "trusted": is_rect,
+                        },
+                    )
+                )
+            path.reset()
+            pending_clip = False
+            continue
+
+        if operator in SHOW_OPS:
+            if operator in ("'", '"'):
+                state.next_line()
+                if operator == '"' and len(operands) >= 2:
+                    try:
+                        state.word_spacing = float(operands[0])
+                        state.char_spacing = float(operands[1])
+                    except (TypeError, ValueError):
+                        pass
+            cap = an.fonts.capability(resources, fallback, state.font_name)
+            data = show_bytes(operator, operands)
+            if measurable(cap, data):
+                text, raw_width = _run_metrics(operator, operands, cap, state)
+            else:
+                text, raw_width = "", wide_width(operator, operands, cap, state)
+            vertical = bool(cap is not None and cap.writes_vertical)
+            combined = mat_mult(state.tm, state.ctm)
+            ink = an.fonts.ink_extent(resources, fallback, state.font_name)
+            if vertical:
+                rect = _span_bbox(combined, 0.0, max(raw_width, MIN_EXTENT), True, state, ink)
+            else:
+                rect = _span_bbox(combined, 0.0, raw_width, False, state, ink)
+            an.events.append(
+                _Event(
+                    "text",
+                    rect,
+                    {
+                        "index": an.run_index,
+                        "text": text,
+                        "mode": state.render_mode,
+                        "rgb": _color_rgb(state.fill_color, resources, an.pdf),
+                        "off_layer": hidden_at is not None,
+                        "ocr_form": in_ocr_form,
+                        "empty": not text.strip(),
+                    },
+                )
+            )
+            an.run_index += 1
+            state.advance_after_show(raw_width, vertical)
+            continue
+
+        if operator == "INLINE IMAGE":
+            box = bbox_of_corners_under_matrix(state.ctm, 0.0, 0.0, 1.0, 1.0)
+            if hidden_at is None and alpha.opaque:
+                an.events.append(
+                    _Event("cover", box, {"rgb": None, "trusted": _axis_aligned(state.ctm)})
+                )
+            _note_scan(an, box)
+            continue
+
+        if operator == "Do":
+            name = str(operands[0]) if operands else None
+            xobj = _lookup_xobject(name, resources, fallback)
+            subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
+            xobj_hidden = xobj is not None and oc_hidden(xobj.get("/OC"), an.off_set)
+            if subtype == "/Image":
+                box = bbox_of_corners_under_matrix(state.ctm, 0.0, 0.0, 1.0, 1.0)
+                if hidden_at is None and not xobj_hidden and alpha.opaque and _image_is_opaque(xobj):
+                    an.events.append(
+                        _Event("cover", box, {"rgb": None, "trusted": _axis_aligned(state.ctm)})
+                    )
+                _note_scan(an, box)
+            elif subtype == "/Form" and depth < MAX_FORM_DEPTH:
+                if xobj_hidden and hidden_at is None:
+                    an.layer_blocks += 1
+                form_matrix = as_matrix(xobj.get("/Matrix")) or IDENTITY
+                form_res = xobj.get("/Resources")
+                _walk_analysis(
+                    an,
+                    pikepdf.parse_content_stream(xobj),
+                    form_res if form_res is not None else resources,
+                    resources,
+                    mat_mult(form_matrix, state.ctm),
+                    depth + 1,
+                    parent_state=state,
+                    hidden_depth=1 if (hidden_at is not None or xobj_hidden) else 0,
+                    in_ocr_form=in_ocr_form or name == OCR_FORM_NAME,
+                )
+            continue
+
+        # Anything else abandons the path under construction.
+        path.reset()
+        pending_clip = False
+
+
+def _note_scan(an: _Analysis, box: Rect) -> None:
+    page_area = _area(an.page_box)
+    if page_area <= 0:
+        return
+    an.scan_cover = max(an.scan_cover, _area(box) / page_area)
+
+
+def _classify(an: _Analysis) -> list:
+    """Turn the ordered event list into the hidden runs. Background is the last
+    trusted cover painted UNDER the run; concealment is any trusted cover
+    painted OVER it."""
+    covers = [(i, e) for i, e in enumerate(an.events) if e.kind == "cover"]
+    out: list = []
+    for position, event in enumerate(an.events):
+        if event.kind != "text":
+            continue
+        info = event.payload
+        if info["empty"]:
+            continue
+        rect = event.rect
+        if info["off_layer"]:
+            out.append(HiddenRun(info["index"], "off_layer", info["text"], rect))
+            continue
+        if info["mode"] in INVISIBLE_MODES:
+            kind = (
+                "ocr_layer"
+                if info["ocr_form"] or an.scan_cover >= SCAN_COVERAGE
+                else "invisible"
+            )
+            out.append(HiddenRun(info["index"], kind, info["text"], rect))
+            continue
+        if info["mode"] in FILL_MODES:
+            background = [1.0, 1.0, 1.0]
+            for i, cover in covers:
+                if i > position:
+                    break
+                if cover.payload["trusted"] and cover.payload["rgb"] is not None and _contains(
+                    cover.rect, rect
+                ):
+                    background = cover.payload["rgb"]
+            if _colors_match(info["rgb"], background):
+                out.append(HiddenRun(info["index"], "background_fill", info["text"], rect))
+                continue
+        covered = False
+        partial = False
+        for i, cover in covers:
+            if i <= position or not cover.payload["trusted"]:
+                continue
+            if _contains(cover.rect, rect):
+                covered = True
+                break
+            if _intersects(cover.rect, rect):
+                partial = True
+        if covered:
+            out.append(HiddenRun(info["index"], "covered", info["text"], rect))
+        elif partial:
+            out.append(HiddenRun(info["index"], "partially_covered", info["text"], rect))
+    return out
+
+
+def _page_box(page) -> Rect:
+    for key in ("/CropBox", "/MediaBox"):
+        try:
+            arr = page.obj.get(key)
+            if arr is None:
+                continue
+            v = [float(x) for x in arr]
+            return (min(v[0], v[2]), min(v[1], v[3]), max(v[0], v[2]), max(v[1], v[3]))
+        except (TypeError, ValueError, IndexError):
+            continue
+    return (0.0, 0.0, 612.0, 792.0)
+
+
+def analyze_page(pdf, page, off_set: set) -> dict:
+    """Hidden runs on one page, plus how many hidden optional-content blocks
+    its streams carry."""
+    resources = _resolve_resources(page)
+    an = _Analysis(pdf, off_set, _page_box(page))
+    _walk_analysis(an, pikepdf.parse_content_stream(page), resources, None, IDENTITY, 0)
+    return {"runs": _classify(an), "layer_blocks": an.layer_blocks}

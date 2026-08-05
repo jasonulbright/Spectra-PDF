@@ -148,6 +148,8 @@ pub enum CliCommand {
     Forms(FormsArgs),
     /// Report where form fields could be added to a flat form (JSON); writes nothing
     DetectFields(DetectFieldsArgs),
+    /// Inventory the hidden information a PDF carries (JSON report); writes nothing
+    Audit(AuditArgs),
     /// Read the bookmark tree (JSON), or replace it with --from-json
     Outline(OutlineArgs),
     /// View or set PDF metadata
@@ -1260,6 +1262,20 @@ pub struct DetectFieldsArgs {
     /// Stop after this many candidates (the result reports the truncation)
     #[arg(long, default_value_t = 5000)]
     pub max_candidates: u32,
+}
+
+#[derive(Args)]
+pub struct AuditArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Pages the per-page findings report on, e.g. "1,3,5" or "all". Removal
+    /// is always document-wide; this scopes the report.
+    #[arg(long, default_value = "all")]
+    pub pages: String,
+    /// Skip the content-stream analysis for text a reader cannot see. The
+    /// report says so rather than reporting none.
+    #[arg(long)]
+    pub no_hidden_text: bool,
 }
 
 #[derive(Args)]
@@ -2928,6 +2944,15 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 }),
             )
         }
+
+        CliCommand::Audit(args) => engine.call(
+            "audit_hidden_information",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "pages": parse_pages(&args.pages),
+                "deep_text": !args.no_hidden_text,
+            }),
+        ),
 
         CliCommand::DocumentJsList(args) => engine.call(
             "list_document_js",
