@@ -8,6 +8,7 @@ import {
   getState,
   invokeAppCommand,
   setContentEditableValue,
+  openParagraphEditor,
 } from '../support/harness.js';
 
 // Phase 9.T13 (brief 39 slice B) — the ORIENTATION model against the built
@@ -62,13 +63,7 @@ async function editParagraphs(
 }
 
 async function editParagraphOpen(pageId: string, index: number): Promise<void> {
-  await browser.execute<void, [string, number]>(
-    function (p, i) {
-      (window as any).__SPECTRA_TEST__.editParagraphOpen(p, i);
-    },
-    pageId,
-    index,
-  );
+  await openParagraphEditor(pageId, index);
 }
 
 /** Replace the editor's text wholesale — WebDriver key injection is
