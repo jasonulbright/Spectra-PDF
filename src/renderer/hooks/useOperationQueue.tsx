@@ -37,6 +37,7 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   set_outline: 'Save Bookmarks',
   unlock: 'Unlock',
   redact: 'Redact',
+  search_text_regions: 'Search & Redact',
   watermark: 'Watermark',
   compare_text: 'Compare',
   compare_visual: 'Compare (visual)',

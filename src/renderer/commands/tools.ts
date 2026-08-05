@@ -133,8 +133,16 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'redact',
     title: 'Redact',
-    description: 'Permanently remove text and images from the file.',
-    ops: [],
+    // F15: the tool now offers BOTH producers — a hand-drawn band, and a
+    // search that marks every occurrence of a term, a word list or a built-in
+    // pattern across a page range. The description says so, because "draw a
+    // box" was the only thing a user could discover.
+    description: 'Mark text to remove — by hand, or by searching every occurrence — then permanently strip it from the file.',
+    ops: ['search_redact'],
+    // It still ARMS the band mode when opened (worksOnPage stays true because
+    // it owns a canvas mode), and the Search & Redact panel is one dock click
+    // away — the Comment/Takeoff precedent, not a tool that yanks the user off
+    // the page to fill in a form.
     canvasTools: ['redact'],
   },
   {
