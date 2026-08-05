@@ -120,7 +120,7 @@ pub fn run() {
             commands::open_files_dialog,
             commands::save_file_dialog,
             commands::pick_certificate_file,
-            commands::pick_postscript_file,
+            commands::pick_create_pdf_sources,
             commands::pick_pem_file,
             commands::pick_icc_file,
             commands::pick_pkcs11_module,

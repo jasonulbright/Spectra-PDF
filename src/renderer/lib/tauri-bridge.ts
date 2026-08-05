@@ -34,7 +34,7 @@ export const engine = {
 // dialog instead of stacking another.
 let openDialogInflight: Promise<string[]> | null = null;
 let saveDialogInflight: Promise<string | null> | null = null;
-let psDialogInflight: Promise<string | null> | null = null;
+let psDialogInflight: Promise<string[]> | null = null;
 
 export const dialog = {
   openFiles: () => {
@@ -57,14 +57,14 @@ export const dialog = {
   },
   /** Pick a PKCS#12 (.pfx/.p12) signer file. Returns null if cancelled. */
   pickCertificate: () => invoke<string | null>('pick_certificate_file'),
-  /** Pick a PostScript/EPS source for distilling (Phase 8). Serialized
-   * like openFiles/saveFile — modality lands a beat after the click, so a
-   * rapid second click must join the open dialog, not stack another
-   * (review-caught: this one was added without the guard the comment
-   * above exists to explain). */
-  pickPostScript: () => {
+  /** Pick one or more Create PDF sources (P22 — images, Office, text, web,
+   * PostScript and PDFs). Serialized like openFiles/saveFile — modality lands
+   * a beat after the click, so a rapid second click must join the open dialog,
+   * not stack another (review-caught: the single-file version this replaces
+   * was added without the guard the comment above exists to explain). */
+  pickCreatePdfSources: () => {
     if (!psDialogInflight) {
-      psDialogInflight = invoke<string | null>('pick_postscript_file').finally(() => {
+      psDialogInflight = invoke<string[]>('pick_create_pdf_sources').finally(() => {
         psDialogInflight = null;
       });
     }
