@@ -4,6 +4,8 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { getCanvasServices } from '../commands/context';
+import { ghostscriptPath, tesseractPath } from '../lib/ocr-recognize';
+import { DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
 import { tChrome, tChromeCount } from '../i18n';
 import {
   candidateKind,
@@ -131,9 +133,17 @@ export function PrepareFormPanel(): React.ReactElement {
         setError(tChrome('panel.prepareForm.noPages'));
         return;
       }
+      // A page with nothing readable on it is a scan, and its rules and
+      // labels come back through the recogniser — so the vendored binaries
+      // travel with every call, not only when the user knows to ask.
+      const [tesseract, gs] = await Promise.all([tesseractPath(), ghostscriptPath()]);
       const detection = (await call('detect_form_fields', {
         file: workingPath,
         pages,
+        scan: 'auto',
+        lang: DEFAULT_OCR_LANGUAGE,
+        tesseract_path: tesseract,
+        gs_path: gs,
       })) as unknown as DetectionResult;
       setResult(detection);
       const services = getCanvasServices();
