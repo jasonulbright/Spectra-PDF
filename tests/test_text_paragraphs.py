@@ -4527,9 +4527,18 @@ class TestMongolianColumns:
         assert p["columns"] == "rtl"
         assert p["text"] == "あいうあい"
 
+    @pytest.mark.skipif(
+        not os.path.isfile(MONG_FACE),
+        reason="edit fonts not provisioned (scripts/sync-edit-fonts.ps1)",
+    )
     def test_growth_adds_a_column_rightward(self, tmp_dir):
         # The mirror of `test_vertical_growth_adds_a_column_leftward`, and it
         # needs no code of its own: the inverse map does it.
+        # The guard is not decoration: the reflow GROWS the text, so with no
+        # embedded program the ladder must reach the bundled Mongolian face,
+        # and `resolve_mongolian_font`'s absent-directory escape does not fire
+        # when CI has created `resources/fonts` as an empty stub — it raises
+        # instead. That is what killed the v1.0.18 release build.
         src = _mong_page(tmp_dir, [MONGOL, NARAN], [300, 314], program=_mong_program())
         p = _paras(src)[0]
         out = os.path.join(tmp_dir, "grown.pdf")

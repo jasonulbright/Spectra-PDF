@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.18 — Vertical writing, scans that shrink, and seven languages
+## 1.0.19 — Vertical writing, scans that shrink, and seven languages
 
 Text set in columns finishes the job it started. Mongolian — and the Todo,
 Sibe and Manchu that share its alphabet — reads and edits the way it is
