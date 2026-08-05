@@ -77,7 +77,7 @@ describe('add image', () => {
     // Embed a new image at user band [200,150,320,240]. The
     // add is ASPECT-HONEST — the SQUARE 2x2 source lands contained in the
     // 120x90 band as a 90x90 box centered → cm [90,0,0,90,215,150]
-    // (pre-P7 this stretched to [120,0,0,90,200,150] and distorted).
+    // (this used to stretch to [120,0,0,90,200,150] and distort).
     await editImageAdd(1, [200, 150, 320, 240], {
       raw_path: rawPath,
       width: 2,

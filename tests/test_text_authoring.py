@@ -562,7 +562,7 @@ class TestKerning:
         assert [o for o, _ in self._show_ops(out)] == ["Tj"]
 
     def test_kern_false_is_byte_identical_to_the_shipped_path(self, tmp_dir):
-        # The guard: opting out reproduces pre-K1 output exactly, so the
+        # The guard: opting out reproduces un-kerned output exactly, so the
         # feature can never perturb a caller that did not ask for it.
         a = self._author(tmp_dir, "a", kern=False)
         b = self._author(tmp_dir, "b", kern=False)

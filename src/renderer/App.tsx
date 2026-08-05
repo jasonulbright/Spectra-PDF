@@ -2011,7 +2011,7 @@ function AppContent(): React.ReactElement {
       : null;
   };
 
-  // Map the legacy harness setView onto the tab model so pre-M2 specs keep
+  // Map the legacy harness setView onto the tab model so legacy specs keep
   // working: welcome→Home; canvas→the active (or first) document's tab (a
   // no-op to Home when nothing is open); and 'operations'
   // becomes the NAME-COMPATIBLE BRIDGE: the Tools tab is gone, so it focuses
