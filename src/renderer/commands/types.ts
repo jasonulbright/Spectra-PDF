@@ -167,6 +167,49 @@ export interface CanvasServices {
    * panel's signer details prefilled into the canvas sign card. Optional —
    * present only while the canvas view is mounted with a document. */
   startVisibleSignature?(prefill?: import('../components/SignerSourceFields').SignerSource): void;
+  /**
+   * F15 slice D — the Search & Redact panel's seam onto the canvas's redaction
+   * marks.
+   *
+   * The panel does not own geometry and must not: converting a page-space rect
+   * into a display-normalized mark is the F10 seed's own conversion, and there
+   * is exactly ONE of it (in the canvas, where the pdf.js proxies and the
+   * PageRef rotations live). What crosses this seam is the payload shape
+   * `list_redact_annotations` returns and `save_redaction_marks` takes —
+   * `{page, rect}` in the page's own point space — so the panel, the seed and
+   * the apply all speak the same geometry.
+   *
+   * Nothing here is destructive. Marks are transient view state; the status
+   * bar's apply/save/clear remains the only path that changes a file.
+   */
+  redaction: {
+    /** Add marks from page-space rects. Returns what happened: a rect that
+     * duplicates a mark already on that page is NOT added (double-clicking
+     * "Mark checked" must not stack marks), and a page the view can no longer
+     * resolve is skipped and counted rather than guessed at. */
+    addMarks(
+      requests: { path: string; page: number; rect: [number, number, number, number] }[],
+    ): Promise<{ added: number; duplicates: number; skipped: number }>;
+    /** Every pending mark, converted back to page-space rects — what the
+     * panel compares a fresh hit against to show it as already marked. */
+    markedRects(): Promise<{ path: string; page: number; rect: [number, number, number, number] }[]>;
+    /** How many marks are pending, across every document. */
+    count(): number;
+    /** Fires whenever the pending mark set changes, so the panel's
+     * already-marked state stays live while the user also draws by hand.
+     * Returns its own unsubscribe. */
+    subscribe(listener: () => void): () => void;
+    /** The SECOND rect authority (§ 1.6): an image-only page's hits come from
+     * the in-memory OCR word boxes the index already holds, converted to page
+     * space by the same machinery "Make searchable" uses. Returns [] when the
+     * page has not been recognised yet. */
+    searchOcrPage(
+      path: string,
+      page: number,
+      query: string,
+      options: import('../search/normalize').SearchOptions,
+    ): Promise<{ text: string; rect: [number, number, number, number] }[]>;
+  };
 }
 
 export interface CommandContext {

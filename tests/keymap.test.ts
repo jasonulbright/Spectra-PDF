@@ -245,6 +245,13 @@ describe('dispatchKeyEvent', () => {
       jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
       clearGuides: vi.fn(),
+      redaction: {
+        addMarks: async () => ({ added: 0, duplicates: 0, skipped: 0 }),
+        markedRects: async () => [],
+        count: () => 0,
+        subscribe: () => () => {},
+        searchOcrPage: async () => [],
+      },
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
@@ -264,6 +271,13 @@ describe('dispatchKeyEvent', () => {
       jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
       clearGuides: vi.fn(),
+      redaction: {
+        addMarks: async () => ({ added: 0, duplicates: 0, skipped: 0 }),
+        markedRects: async () => [],
+        count: () => 0,
+        subscribe: () => () => {},
+        searchOcrPage: async () => [],
+      },
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });

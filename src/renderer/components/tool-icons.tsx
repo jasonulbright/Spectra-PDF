@@ -246,6 +246,14 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <path d="M18 5v14M21 5v14" />
     </>
   ),
+  // A magnifier over a blacked-out line — search, then redact (F15).
+  search_redact: (
+    <>
+      <circle cx="10" cy="9.5" r="5.5" />
+      <path d="M20.5 20l-6.6-6.6" />
+      <path d="M3.5 19.5h8" strokeWidth={4} />
+    </>
+  ),
   // Chain link.
   links: (
     <>
