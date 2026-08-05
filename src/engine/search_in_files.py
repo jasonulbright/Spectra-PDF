@@ -23,33 +23,15 @@ import re
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import LTTextContainer
 
-_WS = re.compile(r"\s+")
+# F15 slice C: the compile half moved to `text_match.py` so this module, the
+# new `search_regions` door and the renderer's `compileMatcher` are ONE
+# semantics with three call sites rather than three semantics. The names below
+# stay so this module's own tests and readers are undisturbed.
+from engine.text_match import collapse_ws as _collapse_ws
+from engine.text_match import compile_matcher as _compile
+from engine.text_match import snippet as _snippet_at
+
 _SNIPPET_RADIUS = 40
-
-
-def _collapse_ws(text: str) -> str:
-    return _WS.sub(" ", text).strip()
-
-
-def _compile(query: str, regex: bool, case_sensitive: bool, whole_word: bool):
-    """(compiled pattern, error). A literal query is escaped; a regex is verbatim.
-    Returns (None, None) for an empty query, (None, message) for a bad regex."""
-    if regex:
-        if query == "":
-            return None, None
-        pattern = query
-    else:
-        norm = _collapse_ws(query)
-        if norm == "":
-            return None, None
-        pattern = re.escape(norm)
-    if whole_word:
-        pattern = r"\b(?:" + pattern + r")\b"
-    flags = 0 if case_sensitive else re.IGNORECASE
-    try:
-        return re.compile(pattern, flags), None
-    except re.error as exc:
-        return None, str(exc)
 
 
 def _page_texts(path: str):
@@ -63,13 +45,7 @@ def _page_texts(path: str):
 
 
 def _snippet(text: str, match: re.Match) -> str:
-    start = max(0, match.start() - _SNIPPET_RADIUS)
-    end = min(len(text), match.end() + _SNIPPET_RADIUS)
-    return (
-        ("…" if start > 0 else "")
-        + text[start:end]
-        + ("…" if end < len(text) else "")
-    )
+    return _snippet_at(text, match.start(), match.end(), _SNIPPET_RADIUS)
 
 
 def _count_and_first(pattern: re.Pattern, text: str):

@@ -59,6 +59,8 @@ pub enum CliCommand {
     Delete(DeleteArgs),
     /// Redact (true content removal, not just a visual box) a rectangular region on a page
     Redact(RedactArgs),
+    /// Find a term, a word list or a built-in pattern and report GLYPH-ACCURATE page rectangles
+    SearchRegions(SearchRegionsArgs),
     /// Stamp a translucent text watermark across pages
     Watermark(WatermarkArgs),
     /// Add headers, footers, page numbers, and Bates numbering
@@ -518,6 +520,40 @@ pub struct RedactArgs {
     /// display-normalized, not rotation-adjusted): "x0,y0,x1,y1"
     #[arg(long)]
     pub rect: String,
+}
+
+#[derive(Args)]
+pub struct SearchRegionsArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Search term (combinable with --term and --pattern)
+    #[arg(short, long, default_value = "")]
+    pub query: String,
+    /// A word-list term; repeatable. Terms are OR-ed into one search.
+    #[arg(long = "term")]
+    pub terms: Vec<String>,
+    /// A built-in pattern id; repeatable (phone, email, credit_card, ssn,
+    /// date, iban, nhs_uk, sin_ca). Additive to --query, never a replacement.
+    #[arg(long = "pattern")]
+    pub patterns: Vec<String>,
+    /// Pages to search, e.g. "1,3,5" or "all"
+    #[arg(long, default_value = "all")]
+    pub pages: String,
+    /// Treat the query as a regular expression
+    #[arg(long, default_value_t = false)]
+    pub regex: bool,
+    /// Match case
+    #[arg(long, default_value_t = false)]
+    pub case_sensitive: bool,
+    /// Match whole words only
+    #[arg(long, default_value_t = false)]
+    pub whole_word: bool,
+    /// What each hit's rectangle covers: match | word | line
+    #[arg(long, default_value = "match")]
+    pub expand: String,
+    /// Stop after this many hits (the result reports the truncation)
+    #[arg(long, default_value_t = 50000)]
+    pub max_hits: u32,
 }
 
 #[derive(Args)]
@@ -2037,6 +2073,28 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "file": abs(&args.input).to_string_lossy(),
                     "output": abs(&args.output).to_string_lossy(),
                     "regions": [{"page": args.page, "rect": rect}],
+                }),
+            )
+        }
+
+        CliCommand::SearchRegions(args) => {
+            // Read-only: it reports rectangles, it never writes a file. The
+            // rects it returns are in the page's own point space — the space
+            // `redact --rect` and `save_redaction_marks` already take — so a
+            // script can pipe one into the other.
+            engine.call(
+                "search_text_regions",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "query": args.query,
+                    "terms": args.terms,
+                    "patterns": args.patterns,
+                    "pages": parse_pages(&args.pages),
+                    "regex": args.regex,
+                    "case_sensitive": args.case_sensitive,
+                    "whole_word": args.whole_word,
+                    "expand": args.expand,
+                    "max_hits": args.max_hits,
                 }),
             )
         }
