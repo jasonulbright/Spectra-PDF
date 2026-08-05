@@ -2,6 +2,7 @@ import { memo } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
+import type { FieldCandidate } from '../../lib/form-candidates';
 import type { AnnotationTransform } from '../../lib/annotation-manipulation';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import type { EditVectorObject } from '../../lib/edit-vectors';
@@ -46,6 +47,15 @@ interface DocumentRowProps {
   // per marks change (WorkspaceCanvasView useMemo), so PageCell memoization
   // survives unrelated re-renders.
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
+  fieldCandidatesByPage: ReadonlyMap<string, FieldCandidate[]>;
+  selectedCandidateId: string | null;
+  onSelectCandidate: (candidateId: string) => void;
+  onRemoveCandidate: (candidateId: string) => void;
+  onMoveCandidate: (
+    candidateId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
   editVectorsByPage: ReadonlyMap<string, EditVectorObject[]>;
   snapGeomByPage: ReadonlyMap<string, import('../../lib/snap-geometry').PageSnapGeometry>;
@@ -195,6 +205,11 @@ function DocumentRowImpl({
   measureLeaveMarkup,
   onMeasureResult,
   redactionMarksByPage,
+  fieldCandidatesByPage,
+  selectedCandidateId,
+  onSelectCandidate,
+  onRemoveCandidate,
+  onMoveCandidate,
   editImagesByPage,
   editVectorsByPage,
   snapGeomByPage,
@@ -299,6 +314,11 @@ function DocumentRowImpl({
         measureLeaveMarkup={measureLeaveMarkup}
         onMeasureResult={onMeasureResult}
         redactionMarks={redactionMarksByPage.get(page.id)}
+        fieldCandidates={fieldCandidatesByPage.get(page.id)}
+        selectedCandidateId={selectedCandidateId}
+        onSelectCandidate={onSelectCandidate}
+        onRemoveCandidate={onRemoveCandidate}
+        onMoveCandidate={onMoveCandidate}
         editImages={editImagesByPage.get(page.id)}
         editVectors={editVectorsByPage.get(page.id)}
         snapGeometry={snapGeomByPage.get(page.id)}

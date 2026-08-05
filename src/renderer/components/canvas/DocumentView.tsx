@@ -11,6 +11,7 @@ import {
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation, PageRef } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
+import type { FieldCandidate } from '../../lib/form-candidates';
 import type { AnnotationTransform } from '../../lib/annotation-manipulation';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import type { EditVectorObject } from '../../lib/edit-vectors';
@@ -105,6 +106,15 @@ export interface DocumentViewProps {
   measureLeaveMarkup?: boolean;
   onMeasureResult?: (text: string) => void;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
+  fieldCandidatesByPage: ReadonlyMap<string, FieldCandidate[]>;
+  selectedCandidateId: string | null;
+  onSelectCandidate: (candidateId: string) => void;
+  onRemoveCandidate: (candidateId: string) => void;
+  onMoveCandidate: (
+    candidateId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
   editImagesByPage: ReadonlyMap<string, EditImagePlacement[]>;
   editVectorsByPage: ReadonlyMap<string, EditVectorObject[]>;
   /** N11 slice A: per-page snap geometry + the live snap preferences. */
@@ -890,6 +900,11 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           measureLeaveMarkup={props.measureLeaveMarkup}
           onMeasureResult={props.onMeasureResult}
           redactionMarks={props.redactionMarksByPage.get(page.id)}
+          fieldCandidates={props.fieldCandidatesByPage.get(page.id)}
+          selectedCandidateId={props.selectedCandidateId}
+          onSelectCandidate={props.onSelectCandidate}
+          onRemoveCandidate={props.onRemoveCandidate}
+          onMoveCandidate={props.onMoveCandidate}
           editImages={props.editImagesByPage.get(page.id)}
           editVectors={props.editVectorsByPage.get(page.id)}
           snapGeometry={props.snapGeomByPage.get(page.id)}
