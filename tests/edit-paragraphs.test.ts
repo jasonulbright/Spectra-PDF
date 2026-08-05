@@ -315,7 +315,7 @@ describe('fetchEditTextListing projection', () => {
       { box: { x: 0, y: 0, width: 612, height: 792 }, bakedRotate: 0 },
     );
     expect(out.paragraphs[0].vertical).toBe(true);
-    // Pre-B4b engines omit the field — it must default false, not crash.
+    // An older engine omits the field — it must default false, not crash.
     const plain = await fetchEditTextListing(
       async () => listing,
       'C:\\w.pdf',

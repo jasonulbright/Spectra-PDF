@@ -2917,7 +2917,7 @@ class _Emission:
         self.base_level = base_level
         self.styled = styled
         # Pair-kerning source for whatever face each slice renders
-        # in; None keeps the pre-K1b un-kerned emission.
+        # in; None keeps the un-kerned emission.
         self.kerns = kerns
         # True when the caller folded per-span SIZE ranges (size_by_pos
         # is not None). The per-line-leading rule + the size-aware split gap

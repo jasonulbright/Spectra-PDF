@@ -472,7 +472,7 @@ mod tests {
 
     /// the acceptance, against real sockets: one client that connects and
     /// never writes must not block later jobs. This is the exact wedge shape
-    /// the fix exists for — pre-R2, the accept loop read each connection to
+    /// the fix exists for: the accept loop used to read each connection to
     /// EOF, so the silent client held every later print until app restart.
     #[test]
     fn a_stalled_client_does_not_block_other_jobs() {

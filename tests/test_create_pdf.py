@@ -113,7 +113,7 @@ class TestDpiHonesty:
 
 class TestEveryFrameIsAPage:
     def test_a_three_frame_tiff_produces_three_pages(self, tmp_dir):
-        # THE pin that fails on the pre-P22 code: `im.save(..., "PDF")` with no
+        # THE pin that fails on the older code: `im.save(..., "PDF")` with no
         # save_all wrote frame 1 and silently dropped frames 2 and 3 — silent
         # data loss in the shipped batch-OCR feature, not only a Create PDF gap.
         src = Path(tmp_dir) / "fax.tif"

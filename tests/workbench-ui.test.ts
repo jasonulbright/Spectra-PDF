@@ -38,7 +38,7 @@ describe('readWorkbenchUi', () => {
     expect(read.toolDock).toEqual({ open: true, width: 420 });
   });
 
-  it('drops a PRE-U3 entry\'s retired toolDock.view instead of choking on it', () => {
+  it('drops a legacy entry\'s retired toolDock.view instead of choking on it', () => {
     // Every existing install has one of these on disk: the dock used to carry
     // `view: 'tool' | 'comments'` and it is retired (comments are a normal op
     // panel now). The reader must keep the fields it still understands rather
@@ -67,7 +67,7 @@ describe('readWorkbenchUi', () => {
     expect(readWorkbenchUi(DEFAULTS).navPane.width).toBe(520);
   });
 
-  it('coerces the tool dock the same way (and tolerates its absence — pre-B1 entries)', () => {
+  it('coerces the tool dock the same way (and tolerates its absence — older entries)', () => {
     // A persisted value from before the dock existed: navPane only.
     store.set('workbench-ui', JSON.stringify({ navPane: { open: true, panel: 'pages', width: 200 } }));
     expect(readWorkbenchUi(DEFAULTS).toolDock).toEqual(DEFAULTS.toolDock);

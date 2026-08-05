@@ -6,7 +6,7 @@ import { formatOpenedAt, parseRecent, withRecent } from '../src/renderer/lib/rec
 
 describe('parseRecent', () => {
   it('reads a valid string array', () => {
-    // Legacy pre-M7 entries are bare strings; they migrate with an honest
+    // Legacy entries are bare strings; they migrate with an honest
     // "unknown" openedAt, never a fabricated date.
     expect(parseRecent('["a.pdf","b.pdf"]')).toEqual([
       { path: 'a.pdf', openedAt: null },
@@ -87,7 +87,7 @@ describe('formatOpenedAt (the Home opened-when column)', () => {
     expect(formatOpenedAt(new Date(2025, 11, 3, 8, 0).getTime(), now)).toBe('Dec 3, 2025');
   });
 
-  it('a pre-M7 entry with no recorded time reads as an em dash — never a fabricated date', () => {
+  it('a legacy entry with no recorded time reads as an em dash — never a fabricated date', () => {
     expect(formatOpenedAt(null, now)).toBe('—');
   });
 });

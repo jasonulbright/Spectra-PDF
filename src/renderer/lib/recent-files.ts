@@ -68,7 +68,7 @@ export function withRecent(
 
 /** The opened-when column's label. Relative where it reads naturally
  * ("Today 14:32", "Yesterday"), a plain date beyond that, an em dash for
- * pre-M7 entries whose time was never recorded. */
+ * entries whose time was never recorded. */
 export function formatOpenedAt(openedAt: number | null, now: number): string {
   if (openedAt === null) return '—';
   const then = new Date(openedAt);
