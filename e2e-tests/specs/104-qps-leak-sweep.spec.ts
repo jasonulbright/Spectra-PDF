@@ -379,6 +379,33 @@ describe('qps pseudo-locale leak sweep (N12)', () => {
       await sweep('[data-testid="create-pdf-dialog"]', leaks);
       await $('[data-testid="create-pdf-close"]').click();
 
+      // ── DIALOG 4: Combine Files (P22 slice D). 36 more strings, and the
+      // same shape of problem — the per-row converter line, the page-range
+      // field's placeholder and the blocked message only exist once the LIST
+      // does. Empty state first, then a refused row injected through the
+      // harness (which the dialog's own blocker stops before any engine
+      // call, leaving the rows on screen), then swept again.
+      expect(await invokeAppCommand('document.combineFiles')).toBe(true);
+      await $('[data-testid="combine-dialog"]').waitForDisplayed({
+        timeout: 10_000,
+        timeoutMsg: 'the Combine dialog never opened',
+      });
+      await $('[data-testid="combine-empty"]').waitForDisplayed({ timeout: 10_000 });
+      await sweep('[data-testid="combine-dialog"]', leaks);
+
+      await browser.executeAsync<null, [string[], string]>(
+        function (srcs, out, done) {
+          (window as any).__SPECTRA_TEST__.combineRun(srcs, out, { target: 'new' })
+            .then(() => done(null))
+            .catch(() => done(null));
+        },
+        [bogus, SAMPLE_PDF],
+        resolve(mkdtempSync(resolve(tmpdir(), 'spectrapdf', 'e2e-combine-out-')), 'never.pdf'),
+      );
+      await $('[data-testid="combine-blocked"]').waitForDisplayed({ timeout: 15_000 });
+      await sweep('[data-testid="combine-dialog"]', leaks);
+      await $('[data-testid="combine-close"]').click();
+
       expect(leaks).toEqual([]);
     } finally {
       await qps('en');
