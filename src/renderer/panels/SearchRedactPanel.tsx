@@ -402,7 +402,12 @@ export function SearchRedactPanel(): React.ReactElement {
           aria-expanded={showWordList}
           className="text-sm text-neutral-300 hover:text-white"
         >
-          {showWordList ? '▾' : '▸'} {tChrome('panel.searchRedact.wordList')}
+          {/* The caret is DECORATION, and it lives in its own element so the
+              button's own text is the catalog string — a glyph glued to the
+              front of it reads as bare English to the qps sweep, which is
+              exactly the check that caught it. */}
+          <span aria-hidden="true">{showWordList ? '▾' : '▸'}</span>{' '}
+          {tChrome('panel.searchRedact.wordList')}
         </button>
         {showWordList && (
           <div className="mt-1 flex flex-col gap-1">
@@ -479,7 +484,8 @@ export function SearchRedactPanel(): React.ReactElement {
           aria-expanded={showProperties}
           className="text-sm text-neutral-300 hover:text-white"
         >
-          {showProperties ? '▾' : '▸'} {tChrome('panel.searchRedact.properties')}
+          <span aria-hidden="true">{showProperties ? '▾' : '▸'}</span>{' '}
+          {tChrome('panel.searchRedact.properties')}
         </button>
         {/* F15 slice E: the SAME control surface the hand-drawn band reads —
             the properties persist and govern both producers, so a FOIA code

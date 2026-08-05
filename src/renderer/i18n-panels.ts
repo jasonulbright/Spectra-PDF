@@ -967,6 +967,37 @@ export const PANEL_STRINGS = {
     'Not a redaction code set — expected an id, a name and a list of codes with labels.',
   'panel.redactProps.import.builtinId':
     'That id belongs to a built-in code set — give the imported set its own id.',
+
+  // The built-in code sets' NAMES and DESCRIPTIONS. The LABELS ((b)(6), (k)(2))
+  // stay out of the catalog on purpose: a label is the statutory citation
+  // itself AND the text drawn into the file, so a translated one would misname
+  // the exemption a release is checked against. The prose about it localizes
+  // like every other built-in catalogue label (the symbol-name precedent).
+  'panel.redactProps.set.foia': 'FOIA exemptions',
+  'panel.redactProps.set.privacy-act': 'Privacy Act exemptions',
+  'panel.redactProps.desc.foia.b1': 'Classified in the interest of national defense or foreign policy',
+  'panel.redactProps.desc.foia.b2': 'Related solely to internal personnel rules and practices',
+  'panel.redactProps.desc.foia.b3': 'Specifically exempted from disclosure by another statute',
+  'panel.redactProps.desc.foia.b4': 'Trade secrets and privileged or confidential commercial information',
+  'panel.redactProps.desc.foia.b5': 'Privileged inter-agency or intra-agency communications',
+  'panel.redactProps.desc.foia.b6': 'Personnel, medical and similar files — a clearly unwarranted invasion of personal privacy',
+  'panel.redactProps.desc.foia.b7a': 'Law-enforcement records that could interfere with proceedings',
+  'panel.redactProps.desc.foia.b7b': 'Law-enforcement records that would deprive a person of a fair trial',
+  'panel.redactProps.desc.foia.b7c': 'Law-enforcement records — an unwarranted invasion of personal privacy',
+  'panel.redactProps.desc.foia.b7d': 'Law-enforcement records that could disclose a confidential source',
+  'panel.redactProps.desc.foia.b7e': 'Law-enforcement techniques, procedures or guidelines',
+  'panel.redactProps.desc.foia.b7f': 'Law-enforcement records that could endanger life or physical safety',
+  'panel.redactProps.desc.foia.b8': 'Records of financial institution examinations',
+  'panel.redactProps.desc.foia.b9': 'Geological and geophysical information concerning wells',
+  'panel.redactProps.desc.privacy-act.j1': 'General exemption — Central Intelligence Agency records',
+  'panel.redactProps.desc.privacy-act.j2': 'General exemption — criminal law-enforcement records',
+  'panel.redactProps.desc.privacy-act.k1': 'Classified material',
+  'panel.redactProps.desc.privacy-act.k2': 'Investigatory material compiled for law-enforcement purposes',
+  'panel.redactProps.desc.privacy-act.k3': 'Records maintained for Secret Service protective duties',
+  'panel.redactProps.desc.privacy-act.k4': 'Statistical records required by statute',
+  'panel.redactProps.desc.privacy-act.k5': 'Investigatory material for federal employment or contracts',
+  'panel.redactProps.desc.privacy-act.k6': 'Testing or examination material for federal service',
+  'panel.redactProps.desc.privacy-act.k7': 'Evaluation material for armed-forces promotion',
 } as const;
 
 export type PanelKey = keyof typeof PANEL_STRINGS;
