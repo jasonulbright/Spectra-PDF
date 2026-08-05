@@ -127,11 +127,25 @@ def _run_soffice(soffice_path: str, convert_to: str, src: Path, out_dir: Path, w
             and p.resolve() != src_resolved
         ]
         if not produced:
+            # `result` never existed in this function — the run was refactored
+            # to Popen/communicate and the live names are `stdout`/`stderr`, so
+            # this path died with `NameError: name 'result' is not defined`
+            # instead of its own message (P22 recon, brief 41 § 1.7).
             raise RuntimeError(
                 "LibreOffice reported success but wrote no output "
-                f"(stderr: {result.stderr.strip()})"
+                f"(stderr: {(stderr or '').strip() or (stdout or '').strip() or 'none'})"
             )
-        return produced[0]
+        out = produced[0]
+        # A ZERO exit code is not a success signal — measured: soffice returns
+        # 0 for a zero-byte source. Success is proven by READING the output,
+        # never by the exit code, so an empty file refuses here rather than
+        # travelling on as a "converted" document.
+        if out.stat().st_size == 0:
+            raise RuntimeError(
+                "LibreOffice reported success but the file it wrote is empty "
+                f"({out.name})"
+            )
+        return out
     finally:
         shutil.rmtree(profile, ignore_errors=True)
 
@@ -154,6 +168,11 @@ def export_document(file: str, output: str, fmt: str, soffice_path: str) -> dict
     output_path = Path(output)
     if not input_path.is_file():
         raise ValueError(f"input file not found: {file}")
+    # Validate the SOURCE before any converter runs: soffice returns 0 on a
+    # zero-byte input and writes a plausible-looking output from nothing
+    # (measured, brief 41 § 1.7), so an empty source has to be caught here.
+    if input_path.stat().st_size == 0:
+        raise ValueError(f"the input file is empty: {file}")
     # A directory destination would make shutil.move drop the file INSIDE it
     # under the intermediate's stem (e.g. a bridge's HTML-stem name) while we
     # report `output` + a directory's stat size — a silent misplace + a
