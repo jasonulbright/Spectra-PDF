@@ -81,6 +81,7 @@ const noopHandlers = (): AppCommandHandlers => ({
   checkForUpdates: vi.fn(),
   exit: vi.fn(async () => {}),
   minimizeToTray: vi.fn(async () => {}),
+  sanitizeDocument: vi.fn(async () => true),
 });
 
 afterEach(() => {

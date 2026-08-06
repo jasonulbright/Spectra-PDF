@@ -1049,6 +1049,77 @@ export const PANEL_STRINGS = {
   'panel.prepareForm.reasonRadioDemoted':
     'Page {{page}}: {{count}} group(s) had no distinct option labels, so each option is offered on its own.',
   'panel.prepareForm.reasonOther': 'Page {{page}}: {{count}} region(s) were not offered.',
+
+  'panel.sanitize.open': 'Open a PDF to see what it carries',
+  'panel.sanitize.blurb':
+    'Everything in this document that is not the page you can see. Nothing is removed until you check it and apply.',
+  'panel.sanitize.rerun': 'Check again',
+  'panel.sanitize.applying': 'Removing…',
+  'panel.sanitize.apply_one': 'Remove {{count}} category',
+  'panel.sanitize.apply_other': 'Remove {{count}} categories',
+  'panel.sanitize.nothingChecked': 'Check what to remove.',
+  'panel.sanitize.clean': 'Nothing of this kind is in the document.',
+  'panel.sanitize.blocked':
+    'Part of this document could not be read ({{category}}: {{reason}}), so nothing can be removed from it.',
+  'panel.sanitize.blockedPage':
+    'Page {{page}} could not be read ({{category}}: {{reason}}), so nothing can be removed from this document.',
+  'panel.sanitize.pagesAnalyzed_one': 'Read {{count}} page.',
+  'panel.sanitize.pagesAnalyzed_other': 'Read {{count}} pages.',
+  'panel.sanitize.selectAll': 'Check everything that costs nothing',
+  'panel.sanitize.selectNone': 'Uncheck all',
+  'panel.sanitize.details': 'Details',
+  'panel.sanitize.moreRows': 'Only the first findings are listed.',
+  'panel.sanitize.unreadableRow': 'This could not be read.',
+  'panel.sanitize.reportedOnly': 'Reported, never removed.',
+
+  'panel.sanitize.category.metadata': 'Document and page metadata',
+  'panel.sanitize.category.embedded_files': 'Embedded and attached files',
+  'panel.sanitize.category.bookmarks': 'Bookmarks',
+  'panel.sanitize.category.comments': 'Comments and markup',
+  'panel.sanitize.category.form_fields': 'Form fields and their values',
+  'panel.sanitize.category.javascript': 'JavaScript',
+  'panel.sanitize.category.hidden_layers': 'Hidden layers',
+  'panel.sanitize.category.hidden_text': 'Text you cannot see',
+  'panel.sanitize.category.prior_revisions': 'Earlier revisions of this file',
+  'panel.sanitize.category.unreferenced_objects': 'Objects nothing points to',
+  'panel.sanitize.category.links_and_actions': 'Links and actions',
+  'panel.sanitize.category.thumbnails': 'Page thumbnails',
+  'panel.sanitize.category.attached_structure': 'Tags, language and article threads',
+  'panel.sanitize.category.signatures': 'Digital signatures',
+
+  'panel.sanitize.cost.form_fields':
+    'Removing the fields makes the form no longer fillable. Flatten instead to keep how it looks.',
+  'panel.sanitize.cost.attached_structure':
+    'The tags are the reading order a screen reader follows. Removing them makes this document inaccessible.',
+  'panel.sanitize.cost.ocr_layer':
+    'This invisible text is what makes a scan searchable. Removing it means the words can no longer be found.',
+  'panel.sanitize.fieldMode': 'Form fields',
+  'panel.sanitize.fieldModeRemove': 'Remove the fields',
+  'panel.sanitize.fieldModeFlatten': 'Flatten (keep the look, lose the fields)',
+  'panel.sanitize.includeOcr_one': 'Also remove {{count}} recognized-text run',
+  'panel.sanitize.includeOcr_other': 'Also remove {{count}} recognized-text runs',
+  'panel.sanitize.partialKept_one':
+    '{{count}} run is only partly covered and is kept — the uncovered part is content.',
+  'panel.sanitize.partialKept_other':
+    '{{count}} runs are only partly covered and are kept — the uncovered part is content.',
+  'panel.sanitize.xfa':
+    'This document carries an XML form, so its fields cannot be removed here.',
+  'panel.sanitize.revisions_one':
+    '{{count}} earlier revision, {{bytes}} bytes of it recoverable from this file.',
+  'panel.sanitize.revisions_other':
+    '{{count}} earlier revisions, {{bytes}} bytes of them recoverable from this file.',
+  'panel.sanitize.signed_one': '{{count}} signature. Removing anything breaks it.',
+  'panel.sanitize.signed_other': '{{count}} signatures. Removing anything breaks them.',
+  'panel.sanitize.certified':
+    'This document is certified, which states what may change in it. A clean-up changes more than that allows.',
+
+  'panel.sanitize.resultTitle': 'Before and after',
+  'panel.sanitize.resultRow': '{{category}}: {{before}} → {{after}}',
+  'panel.sanitize.residue':
+    '{{category}} still reports {{after}}. Something in it could not be removed.',
+  'panel.sanitize.done_one': '{{count}} category removed. Undo puts it back.',
+  'panel.sanitize.done_other': '{{count}} categories removed. Undo puts them back.',
+  'panel.sanitize.declined': 'Nothing was changed.',
 } as const;
 
 export type PanelKey = keyof typeof PANEL_STRINGS;

@@ -27,7 +27,7 @@ export const OPERATIONS = [
   'extract_text', 'watermark', 'forms', 'compare', 'signatures',
   'document_js', 'convert_cmyk', 'headerfooter', 'pagebox', 'pagelabels', 'attachments', 'portfolio', 'layers', 'accessibility',
   'comments', 'preflight', 'links', 'tags', 'readingorder', 'actions', 'takeoff',
-  'search_redact', 'prepareform',
+  'search_redact', 'prepareform', 'sanitize',
 ] as const;
 
 export type Operation = (typeof OPERATIONS)[number];
@@ -60,5 +60,6 @@ export const OPERATION_TITLES: Record<Operation, string> = {
   takeoff: 'Count & Takeoff',
   search_redact: 'Search & Redact',
   prepareform: 'Detect Form Fields',
+  sanitize: 'Remove Hidden Information',
   repair: 'Repair PDF', rebuild: 'Rebuild PDF', recover: 'Recover Pages',
 };

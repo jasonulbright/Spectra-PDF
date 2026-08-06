@@ -1134,11 +1134,24 @@ REMOVERS = {
     "attached_structure": lambda pdf, audit, options: _remove_attached_structure(pdf),
 }
 
+# Every category a selection may name: those with a remover, plus the two the
+# full save clears on its own.
+REMOVERS_OR_FREE = frozenset(REMOVERS) | FREE_FROM_SAVE
+
 
 # ── the sanitize door ─────────────────────────────────────────────────────
 
 
-def _selection(categories) -> list:
+def _selection(categories, all_removable: bool = False) -> list:
+    if all_removable and not categories:
+        # Everything except the categories that cost the document something.
+        # A convenience that silently destroyed an accessibility tree would be
+        # the same defect as a surface that pre-checked it.
+        return [
+            cid
+            for cid in CATEGORY_IDS
+            if cid not in UNREMOVABLE and cid not in COSTLY and cid in REMOVERS_OR_FREE
+        ]
     if not categories:
         raise ValueError(
             "Choose at least one category to remove — sanitize never removes "
@@ -1183,6 +1196,7 @@ def sanitize_pdf(
     categories: list | None = None,
     form_fields_mode: str = "remove",
     hidden_text_ocr: bool = False,
+    all_removable: bool = False,
 ) -> dict:
     """Remove exactly the selected categories and write the result.
 
@@ -1202,8 +1216,10 @@ def sanitize_pdf(
             their appearances into the page first, keeping the look.
         hidden_text_ocr: Also remove invisible text that is a recognition
             layer. Off by default: removing it makes a scan unsearchable.
+        all_removable: Select every category except the ones that cost the
+            document something. Those are named explicitly or not at all.
     """
-    chosen = _selection(categories)
+    chosen = _selection(categories, all_removable)
     if form_fields_mode not in ("remove", "flatten"):
         raise ValueError("form_fields_mode must be 'remove' or 'flatten'.")
 

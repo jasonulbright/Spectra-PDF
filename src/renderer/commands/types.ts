@@ -107,6 +107,17 @@ export interface AppCommandHandlers {
   exit(): Promise<void>;
   /** Hide the window to the system tray (Window ▸ Minimize to Tray). */
   minimizeToTray(): Promise<void>;
+  /** Remove the checked categories of hidden information from a document.
+   *
+   * The pass is a full rewrite by construction — collapsing prior revisions is
+   * what removes content an earlier revision still holds — so a signed
+   * document is warned about first, with the signature count the report
+   * measured. Returns false when the warning was declined and the document was
+   * left alone. */
+  sanitizeDocument(
+    path: string,
+    request: import('../lib/sanitize-report').SanitizeRequest,
+  ): Promise<boolean>;
 }
 
 /**

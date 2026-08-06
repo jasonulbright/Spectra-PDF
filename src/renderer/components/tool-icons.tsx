@@ -253,6 +253,17 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <rect x="7" y="4.5" width="10" height="6" rx="1" strokeDasharray="2 2" />
     </>
   ),
+  // A document with a brush sweeping across it — what is carried away is what
+  // was never on the page.
+  sanitize: (
+    <>
+      <path d="M7 3h7l4 4v6" />
+      <path d="M14 3v4h4" />
+      <path d="M4 21l3-3" />
+      <path d="M9.5 15.5l-4 4-2.5-2.5 4-4z" />
+      <path d="M11 14l3-3 2.5 2.5-3 3z" />
+    </>
+  ),
   // A magnifier over a blacked-out line — search, then redact.
   search_redact: (
     <>
