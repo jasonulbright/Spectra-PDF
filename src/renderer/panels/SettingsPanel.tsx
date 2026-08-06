@@ -208,6 +208,28 @@ getCurrentWindow().onFocusChanged(({ payload: focused }) => {
   if (focused) applyAccentColor(themeGeneration);
 });
 
+/**
+ * Whether the OS is forcing its own palette on the window.
+ *
+ * The theme setting keeps its stored value while this is true — a transient OS
+ * state must not overwrite a standing preference, and switching would change
+ * nothing on screen because every colour in either theme is being replaced
+ * anyway. What changes is that the picker says so.
+ */
+function useForcedColors(): boolean {
+  const [forced, setForced] = useState(
+    () => window.matchMedia('(forced-colors: active)').matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(forced-colors: active)');
+    const onChange = () => setForced(mq.matches);
+    mq.addEventListener('change', onChange);
+    onChange();
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return forced;
+}
+
 function GsInfoDisplay({ info, label }: { info: GsInfo | null; label: string }): React.ReactElement | null {
   if (!info) return null;
   return (
@@ -258,6 +280,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
   const [bundledGs, setBundledGs] = useState<GsInfo | null>(cachedBundledGs);
   const [externalGs, setExternalGs] = useState<GsInfo | null>(cachedExternalGs);
   const [startWithWindows, setStartWithWindows] = useState(false);
+  const forcedColors = useForcedColors();
 
   useEffect(() => {
     // Refresh GS info when panel opens (cached values may not be ready yet)
@@ -513,6 +536,14 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           <option value="light">{tChrome('panel.settings.themeLight')}</option>
           <option value="high-contrast">{tChrome('panel.settings.themeHighContrast')}</option>
         </select>
+        {forcedColors && (
+          <p
+            data-testid="prefs-theme-forced-note"
+            className="mt-1.5 text-xs text-neutral-400 max-w-prose"
+          >
+            {tChrome('panel.settings.themeForcedColors')}
+          </p>
+        )}
       </div>
       <div>
         {/* The UI language. Options show each locale's NATIVE name (the
