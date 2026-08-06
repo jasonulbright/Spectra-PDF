@@ -974,6 +974,8 @@ export const PANEL_STRINGS = {
   'panel.settings.themeDark': 'Dark',
   'panel.settings.themeLight': 'Light',
   'panel.settings.themeHighContrast': 'High contrast',
+  'panel.settings.themeForcedColors':
+    'A system contrast theme is on, so the system palette controls the colours of this window and the theme above has no effect until you turn it off. Documents keep their own colours either way.',
   'panel.settings.minimizeToTray': 'Minimize to system tray on close',
   'panel.settings.startMinimized': 'Start minimized to tray',
   'panel.settings.startWithWindows': 'Start with Windows',

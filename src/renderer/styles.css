@@ -1241,6 +1241,32 @@
   opacity: 1;
 }
 
+/* ── The document is never recoloured ─────────────────────────────────────
+   An OS contrast theme puts the webview into forced-colors mode, where every
+   author colour is replaced from the system palette. Page content is not the
+   app's to recolour in any mode, so these roots opt the whole document
+   subtree out — UNCONDITIONALLY, not per app theme: the OS setting is
+   independent of which theme is picked.
+
+   `forced-color-adjust` inherits, so one declaration per root covers the
+   rasters, the pdf.js text layer, annotation artwork and the white paper
+   beneath them. It also covers the PAGE-LOCAL chrome (selection handles,
+   mode bands, the drafting grid, snap markers), and that is the intent: the
+   forced palette is defined against the system canvas, and its foreground
+   drawn over unforced white paper is routinely invisible. Those overlays are
+   designed against paper in every theme already.
+
+   Bitmaps need no rule of their own — forced colors replaces CSS colour
+   properties, not canvas or image content. What it destroys is the CSS
+   around them: white paper becoming Canvas, and SVG fill/stroke on
+   annotation artwork. */
+.page,
+.docview-row,
+.pageview,
+.thumb-frame {
+  forced-color-adjust: none;
+}
+
 .page-number {
   position: absolute;
   bottom: 6px;
@@ -3706,12 +3732,13 @@
 [data-theme="high-contrast"] .border-neutral-800 {
   border-color: #ffffff;
 }
-/* The DOCUMENT stays the document: page rasters render file content and
-   must never be re-tinted by the shell theme. */
+/* The DOCUMENT stays the document: page rasters render file content and must
+   never be re-tinted by the shell theme. The forced-colors half of this lives
+   unconditionally on the document roots near the .pageview rules — an OS
+   contrast theme forces colours under every app theme, not only this one. */
 [data-theme="high-contrast"] .pageview-base,
 [data-theme="high-contrast"] .pageview-separation,
 [data-theme="high-contrast"] .pageview-detail {
-  forced-color-adjust: none;
   filter: none;
 }
 /* ── end high-contrast (generated) ── */
@@ -4043,4 +4070,99 @@
   right: -4px;
   bottom: -4px;
   cursor: nwse-resize;
+}
+
+/* ── OS forced colors ─────────────────────────────────────────────────────
+   A Windows contrast theme puts the webview into forced-colors mode: every
+   author colour is replaced from the system palette, ignoring specificity,
+   custom properties and !important alike. That is the correct behaviour for
+   CHROME and the block below does not fight it. What it does is restore the
+   signals the substitution removes, in the palette's own vocabulary — a
+   system colour keyword written by an author is honoured rather than
+   re-forced, which is the mechanism every rule here relies on.
+
+   The document subtree is exempt (see the .page/.pageview rules above) and is
+   excluded from anything that would paint into it.
+
+   Scope was measured, not guessed: a walk of every surface with the palette
+   off and then on flagged the elements whose background carried a meaning and
+   lost it with no border to stand in. Six kinds came out; there is one rule
+   per kind. Large regions that lose only their tint from the shell are left
+   alone — every seam around them is drawn by a neighbour that carries a real
+   border. Focus rings are left alone too: outline-color is forced like any
+   other colour, so a forced focus ring is the palette's own.
+   ──────────────────────────────────────────────────────────────────────── */
+@media (forced-colors: active) {
+  /* The utility framework's preflight zeroes border-width on every element,
+     which removes the border the user agent's own control styling supplies.
+     With backgrounds flattened onto Canvas, a button or a text field became a
+     region indistinguishable from the surface behind it. Native check
+     controls do not take this: the user agent paints those itself under a
+     forced palette and an author border does not participate. */
+  button:not(.page *),
+  select:not(.page *),
+  input:not(.page *),
+  textarea:not(.page *),
+  [role="button"]:not(.page *) {
+    border: 1px solid ButtonBorder;
+  }
+
+  /* Selected and armed chrome signalled itself with an accent fill, which the
+     palette flattens along with every other background. Highlight is the
+     palette's own answer, and declaring it is also what keeps an arbitrary
+     system accent from being expected to carry the state. */
+  .tool-op.active,
+  .secondary-tool.active,
+  .prefs-cat.active,
+  .nav-icon-btn.active,
+  [aria-pressed="true"]:not(.page *):not(.annot-swatch),
+  [aria-selected="true"]:not(.page *) {
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  /* A hairline divider is a background on a one-pixel box; Canvas on Canvas
+     is nothing. */
+  .chrome-divider {
+    background-color: CanvasText;
+  }
+
+  /* A panel's status box is a fill with text in it, and its ordinary and
+     error states differ only by that fill. The wording carries the state
+     (the error prefix comes from the catalog), so what is restored here is
+     the boundary that says a status is being reported at all. */
+  .panel-status-box {
+    border: 1px solid CanvasText;
+  }
+
+  /* A colour sample IS its colour — flattening it destroys the only thing it
+     shows, the same reason document pixels are not forced. The outline is
+     declared in system colours because the authored one is inline (so it
+     survives the exemption) and is drawn for a dark shell: white on a light
+     contrast theme is invisible. */
+  .annot-swatch,
+  .color-swatch,
+  .status-dot {
+    forced-color-adjust: none;
+  }
+  .annot-swatch[aria-pressed="true"],
+  .color-swatch.is-selected {
+    outline: 2px solid CanvasText !important;
+    outline-offset: 1px;
+  }
+  .annot-swatch:not([aria-pressed="true"]),
+  .color-swatch:not(.is-selected) {
+    outline: 1px solid GrayText !important;
+    outline-offset: 1px;
+  }
+
+  /* A contrast theme disables system transparency, so a translucent bar would
+     composite the desktop through the forced palette. Same contract the app's
+     own contrast theme keeps. */
+  :root[data-backdrop] .app-shell-bar,
+  :root[data-backdrop] .app-rail,
+  :root[data-backdrop] .app-content,
+  :root[data-backdrop] .app-banner {
+    background: Canvas;
+  }
 }

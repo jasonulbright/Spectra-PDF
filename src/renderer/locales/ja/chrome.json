@@ -3058,6 +3058,7 @@
   "panel.settings.startWithWindows": "Windows の起動時に実行する",
   "panel.settings.theme": "テーマ",
   "panel.settings.themeDark": "ダーク",
+  "panel.settings.themeForcedColors": "システムのコントラスト テーマがオンのため、このウィンドウの色はシステムのパレットが制御し、上のテーマはオフにするまで反映されません。文書はどちらの場合も独自の色を保ちます。",
   "panel.settings.themeHighContrast": "ハイコントラスト",
   "panel.settings.themeLight": "ライト",
   "panel.settings.themeSystem": "システム",

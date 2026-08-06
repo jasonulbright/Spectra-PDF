@@ -3058,6 +3058,7 @@
   "panel.settings.startWithWindows": "Start with Windows",
   "panel.settings.theme": "Theme",
   "panel.settings.themeDark": "Dark",
+  "panel.settings.themeForcedColors": "A system contrast theme is on, so the system palette controls the colours of this window and the theme above has no effect until you turn it off. Documents keep their own colours either way.",
   "panel.settings.themeHighContrast": "High contrast",
   "panel.settings.themeLight": "Light",
   "panel.settings.themeSystem": "System",

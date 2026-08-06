@@ -3058,6 +3058,7 @@
   "panel.settings.startWithWindows": "开机时随 Windows 启动",
   "panel.settings.theme": "主题",
   "panel.settings.themeDark": "深色",
+  "panel.settings.themeForcedColors": "系统对比度主题已开启，因此此窗口的颜色由系统调色板控制，在关闭它之前上面的主题不会生效。无论哪种情况，文档都保留自身的颜色。",
   "panel.settings.themeHighContrast": "高对比度",
   "panel.settings.themeLight": "浅色",
   "panel.settings.themeSystem": "跟随系统",

@@ -3058,6 +3058,7 @@
   "panel.settings.startWithWindows": "Démarrer avec Windows",
   "panel.settings.theme": "Thème",
   "panel.settings.themeDark": "Sombre",
+  "panel.settings.themeForcedColors": "Un thème de contraste système est activé : la palette du système contrôle les couleurs de cette fenêtre et le thème ci-dessus reste sans effet tant qu’il n’est pas désactivé. Les documents conservent leurs propres couleurs dans les deux cas.",
   "panel.settings.themeHighContrast": "Contraste élevé",
   "panel.settings.themeLight": "Clair",
   "panel.settings.themeSystem": "Système",
