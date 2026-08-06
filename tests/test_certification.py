@@ -6,12 +6,21 @@ document after it was signed. The assertions here read the RAW
 change that stops writing the transform is caught rather than papered over.
 """
 
+import io
 import os
 
 import pikepdf
 import pytest
+from pyhanko.pdf_utils import generic
+from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+from pyhanko.pdf_utils.reader import PdfFileReader
+from pyhanko.sign.diff_analysis import DEFAULT_DIFF_POLICY
+from pyhanko.sign.validation import validate_pdf_signature
+from pyhanko_certvalidator import ValidationContext
 
 from engine.docmdp import certification_of_file
+from engine.docmdp_policy import DIFF_POLICY
+from engine.incremental import transplant_incremental
 from engine.signatures import sign_pdf, verify_signatures
 from tests.test_pades import _build_pki
 
@@ -329,3 +338,212 @@ def test_a_malformed_certification_reports_an_error_and_does_not_raise(tmp_dir, 
     assert verdict["certification"]["certified"] is False
     assert verdict["certification"]["error"]
     assert verdict["signed"] is True
+
+
+# ── the difference policy ──────────────────────────────────────────────────
+
+def _rows_under(path, policy):
+    """``(field, docmdp_ok, modification_level)`` per signature, judged by the
+    given difference policy."""
+    ctx = ValidationContext(trust_roots=[], allow_fetching=False)
+    rows = []
+    with open(path, "rb") as fh:
+        reader = PdfFileReader(fh)
+        for esig in reader.embedded_regular_signatures:
+            status = validate_pdf_signature(
+                esig, signer_validation_context=ctx, ts_validation_context=ctx,
+                diff_policy=policy,
+            )
+            level = status.modification_level
+            rows.append((esig.field_name, status.docmdp_ok, level.name if level else None))
+    return rows
+
+
+def _rewritten(src, dst, mutate):
+    """A full pikepdf rewrite carrying one edit — what every pipeline emits,
+    and what the transplant re-expresses as an appended revision."""
+    with pikepdf.open(src) as pdf:
+        mutate(pdf)
+        pdf.save(dst)
+    return dst
+
+
+def _add_square(pdf):
+    annot = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/Square"),
+        Rect=pikepdf.Array([100, 300, 200, 360]), F=4,
+        C=pikepdf.Array([1, 0, 0]),
+    ))
+    annots = pdf.pages[0].obj.get("/Annots")
+    if annots is None:
+        pdf.pages[0].obj["/Annots"] = pdf.make_indirect(pikepdf.Array([annot]))
+    else:
+        annots.append(annot)
+
+
+def _fill_field(pdf):
+    for field in pdf.Root["/AcroForm"]["/Fields"]:
+        if field.get("/FT") == pikepdf.Name("/Tx"):
+            field["/V"] = pikepdf.String("filled")
+
+
+def _edited(tmp_dir, certified, kind, tag):
+    """The certified document plus one edit, landed as an appended revision."""
+    modified = _rewritten(
+        certified, os.path.join(tmp_dir, f"mod-{tag}.pdf"),
+        _add_square if kind == "annotate" else _fill_field,
+    )
+    out = os.path.join(tmp_dir, f"edited-{tag}.pdf")
+    result = transplant_incremental(certified, modified, out)
+    assert result["applied"], result
+    return out
+
+
+_EXPECTED_UNDER_OURS = {
+    ("none", "fill"): (False, "FORM_FILLING"),
+    ("none", "annotate"): (False, "ANNOTATIONS"),
+    ("form-fill", "fill"): (True, "FORM_FILLING"),
+    ("form-fill", "annotate"): (False, "ANNOTATIONS"),
+    ("annotate", "fill"): (True, "FORM_FILLING"),
+    ("annotate", "annotate"): (True, "ANNOTATIONS"),
+}
+
+# The bundled policy models form filling but not annotations, so it reports a
+# permitted annotation as an illegal modification. Recorded here so a change
+# that quietly restores it fails rather than passes.
+_EXPECTED_UNDER_BUNDLED = {
+    ("none", "fill"): (False, "FORM_FILLING"),
+    ("none", "annotate"): (False, "OTHER"),
+    ("form-fill", "fill"): (True, "FORM_FILLING"),
+    ("form-fill", "annotate"): (False, "OTHER"),
+    ("annotate", "fill"): (True, "FORM_FILLING"),
+    ("annotate", "annotate"): (False, "OTHER"),
+}
+
+
+@pytest.mark.parametrize("level", ["none", "form-fill", "annotate"])
+@pytest.mark.parametrize("edit", ["fill", "annotate"])
+def test_the_edit_matrix_under_the_shipped_policy(tmp_dir, pki, level, edit):
+    certified, _ = _certify(tmp_dir, pki, level, name=f"m-{level}.pdf")
+    out = _edited(tmp_dir, certified, edit, f"{level}-{edit}")
+    _field, ok, modification = _rows_under(out, DIFF_POLICY)[0]
+    assert (ok, modification) == _EXPECTED_UNDER_OURS[(level, edit)]
+
+
+@pytest.mark.parametrize("level", ["none", "form-fill", "annotate"])
+@pytest.mark.parametrize("edit", ["fill", "annotate"])
+def test_the_edit_matrix_under_the_bundled_policy(tmp_dir, pki, level, edit):
+    certified, _ = _certify(tmp_dir, pki, level, name=f"b-{level}.pdf")
+    out = _edited(tmp_dir, certified, edit, f"b-{level}-{edit}")
+    _field, ok, modification = _rows_under(out, DEFAULT_DIFF_POLICY)[0]
+    assert (ok, modification) == _EXPECTED_UNDER_BUNDLED[(level, edit)]
+
+
+def test_a_permitted_annotation_reports_within_policy_through_the_engine_door(tmp_dir, pki):
+    certified, _ = _certify(tmp_dir, pki, "annotate", name="door.pdf")
+    out = _edited(tmp_dir, certified, "annotate", "door")
+    verdict = verify_signatures(out)
+    assert verdict["signatures"][0]["policy_judged"] is True
+    assert verdict["signatures"][0]["policy_ok"] is True
+    assert verdict["signatures"][0]["modification_level"] == "ANNOTATIONS"
+    assert verdict["summary"]["any_policy_violation"] is False
+
+
+def test_a_forbidden_annotation_reports_a_violation_through_the_engine_door(tmp_dir, pki):
+    certified, _ = _certify(tmp_dir, pki, "form-fill", name="door2.pdf")
+    out = _edited(tmp_dir, certified, "annotate", "door2")
+    verdict = verify_signatures(out)
+    assert verdict["signatures"][0]["policy_judged"] is True
+    assert verdict["signatures"][0]["policy_ok"] is False
+    assert verdict["summary"]["any_policy_violation"] is True
+
+
+# ── where the annotation rule must NOT reach ───────────────────────────────
+
+def _appended(path, out, mutate):
+    """One incremental revision written by the library's own writer."""
+    with open(path, "rb") as fh:
+        writer = IncrementalPdfFileWriter(fh)
+        mutate(writer)
+        buf = io.BytesIO()
+        writer.write(buf)
+    with open(out, "wb") as fh:
+        fh.write(buf.getvalue())
+    return out
+
+
+def _first_page(writer):
+    page_ref, _ = writer.find_page_for_modification(0)
+    return page_ref.get_object()
+
+
+def _append_to_annots(writer, page, ref):
+    value = page.get(generic.pdf_name("/Annots"))
+    if value is None:
+        page[generic.pdf_name("/Annots")] = generic.ArrayObject([ref])
+        writer.update_container(page)
+        return
+    array = value.get_object()
+    array.append(ref)
+    writer.update_container(array)
+
+
+def test_a_content_stream_swap_is_never_cleared(tmp_dir, pki):
+    certified, _ = _certify(tmp_dir, pki, "annotate", name="content.pdf")
+
+    def swap(writer):
+        page = _first_page(writer)
+        stream = generic.StreamObject(
+            stream_data=b"BT /F1 12 Tf 72 700 Td (Replaced.) Tj ET"
+        )
+        page[generic.pdf_name("/Contents")] = writer.add_object(stream)
+        writer.update_container(page)
+
+    out = _appended(certified, os.path.join(tmp_dir, "content-swapped.pdf"), swap)
+    _field, ok, modification = _rows_under(out, DIFF_POLICY)[0]
+    assert modification == "OTHER"
+    assert ok is False
+
+
+def test_a_widget_added_to_a_page_is_not_cleared_by_the_annotation_rule(tmp_dir, pki):
+    certified, _ = _certify(tmp_dir, pki, "annotate", name="widget.pdf")
+
+    def add_widget(writer):
+        page = _first_page(writer)
+        widget = generic.DictionaryObject({
+            generic.pdf_name("/Type"): generic.pdf_name("/Annot"),
+            generic.pdf_name("/Subtype"): generic.pdf_name("/Widget"),
+            generic.pdf_name("/FT"): generic.pdf_name("/Tx"),
+            generic.pdf_name("/T"): generic.TextStringObject("smuggled"),
+            generic.pdf_name("/Rect"): generic.ArrayObject(
+                [generic.NumberObject(x) for x in (10, 10, 100, 40)]
+            ),
+            generic.pdf_name("/F"): generic.NumberObject(4),
+        })
+        _append_to_annots(writer, page, writer.add_object(widget))
+
+    out = _appended(certified, os.path.join(tmp_dir, "widget-added.pdf"), add_widget)
+    _field, ok, modification = _rows_under(out, DIFF_POLICY)[0]
+    assert modification == "OTHER"
+    assert ok is False
+
+
+def test_a_plain_annotation_added_the_same_way_is_cleared(tmp_dir, pki):
+    certified, _ = _certify(tmp_dir, pki, "annotate", name="square.pdf")
+
+    def add_square(writer):
+        page = _first_page(writer)
+        annot = generic.DictionaryObject({
+            generic.pdf_name("/Type"): generic.pdf_name("/Annot"),
+            generic.pdf_name("/Subtype"): generic.pdf_name("/Square"),
+            generic.pdf_name("/Rect"): generic.ArrayObject(
+                [generic.NumberObject(x) for x in (100, 300, 200, 360)]
+            ),
+            generic.pdf_name("/F"): generic.NumberObject(4),
+        })
+        _append_to_annots(writer, page, writer.add_object(annot))
+
+    out = _appended(certified, os.path.join(tmp_dir, "square-added.pdf"), add_square)
+    _field, ok, modification = _rows_under(out, DIFF_POLICY)[0]
+    assert modification == "ANNOTATIONS"
+    assert ok is True
