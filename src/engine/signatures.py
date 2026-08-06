@@ -51,9 +51,12 @@ from pathlib import Path
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.sign import fields, signers
-from pyhanko.sign.fields import SigSeedSubFilter
+from pyhanko.sign.fields import MDPPerm, SigSeedSubFilter
+from pyhanko.sign.general import SigningError
 from pyhanko.sign.timestamps import HTTPTimeStamper
 from pyhanko.sign.validation import validate_pdf_signature
+
+from engine.docmdp import VALUE_BY_LEVEL, certification_of_file
 from pyhanko import stamp
 from pyhanko.keys import load_certs_from_pemder_data, load_private_key_from_pemder_data
 from pyhanko_certvalidator import ValidationContext
@@ -429,6 +432,91 @@ def _free_field_name(file: str, requested: str) -> str:
     return f"Signature{n}"
 
 
+_MDP_PERM_BY_LEVEL: dict[str, MDPPerm] = {
+    "none": MDPPerm.NO_CHANGES,
+    "form-fill": MDPPerm.FILL_FORMS,
+    "annotate": MDPPerm.ANNOTATE,
+}
+
+
+def _filled_signature_fields(file: str) -> list[str]:
+    """Names of the signature fields that already carry a value.
+
+    A certification signature must be the first signature in a document, so
+    this is read BEFORE any signing work — the refusal can then name the count
+    and the field, which an exception raised from inside the signing machinery
+    cannot."""
+    filled: list[str] = []
+    try:
+        with open(file, "rb") as f:
+            reader = PdfFileReader(f)
+            for name, value, _ref in fields.enumerate_sig_fields(reader, filled_status=True):
+                filled.append(name)
+    except Exception:
+        # An unreadable file fails on its own in the signing path below, with a
+        # message about the actual problem.
+        return []
+    return filled
+
+
+def _certification_refusals(file: str, certify: bool, certify_level: str | None) -> dict:
+    """Validate the certification request against the document, and return the
+    document's own certification state for the signing path to reason with.
+
+    Every refusal here happens before the signer is resolved, so a rejected
+    request never unlocks a key or opens a token session."""
+    if certify_level is not None and not certify:
+        raise ValueError(
+            "A certification level applies only to a certification signature. "
+            "Certify the document, or leave the level unset."
+        )
+    if certify_level is not None and certify_level not in VALUE_BY_LEVEL:
+        raise ValueError(
+            f'Unknown certification level "{certify_level}". '
+            "Choose none, form-fill, or annotate."
+        )
+    existing = certification_of_file(file)
+    if certify and existing["certified"]:
+        existing_level = existing["level"] or "an unrecognized level"
+        raise ValueError(
+            f'This document is already certified at level "{existing_level}". '
+            "A document can carry at most one certification signature."
+        )
+    if certify:
+        filled = _filled_signature_fields(file)
+        if filled:
+            signature_count = len(filled)
+            first_field = filled[0]
+            raise ValueError(
+                f"This document already carries {signature_count} signature(s), the first "
+                f'in field "{first_field}". A certification signature must be the first '
+                "signature in a document."
+            )
+    return existing
+
+
+def _raise_mapped_signing_refusal(certify: bool, existing: dict) -> None:
+    """Re-raise the library's own certification enforcement as an engine refusal.
+
+    The mapping is keyed on the REQUEST and the document's certification state,
+    never on the library exception's text: that text is a library string that
+    can change under us, and control flow that reads it breaks silently when it
+    does. ``from None`` because the library message is not the user's."""
+    if certify:
+        raise ValueError(
+            "A certification signature must be the first signature in a document, and "
+            "this document could not accept one."
+        ) from None
+    if existing["certified"] and existing["level"] == "none":
+        raise ValueError(
+            "This document is certified with no changes allowed, so it cannot be signed "
+            "again. Save a copy and sign that instead."
+        ) from None
+    raise ValueError(
+        "This document could not be signed — its own signature policy forbids the change."
+    ) from None
+
+
 def _stamp_style(reason: str | None, location: str | None) -> "stamp.TextStampStyle":
     """Visible-stamp style: signer + timestamp via pyHanko's built-in
     interpolation, plus optional reason/location lines. USER TEXT IS
@@ -556,6 +644,8 @@ def sign_pdf(
     pkcs11_pin: str = "",
     pkcs11_cert_label: str | None = None,
     pkcs11_key_label: str | None = None,
+    certify: bool = False,
+    certify_level: str | None = None,
 ) -> dict:
     """Apply a digital signature (signing APPENDS an incremental
     revision). ``output`` may be a new file OR the
@@ -602,6 +692,15 @@ def sign_pdf(
         key_path / cert_path: PEM/DER signer files (alternative to pfx_path).
         appearance: Optional visible-stamp placement (see above).
         existing_field: Name of an existing empty signature field to fill.
+        certify: Apply an AUTHOR (certification) signature, which records in
+            the catalog what may change in the document afterwards. At most one
+            per document, and it must be the document's first signature.
+        certify_level: What the certification permits — ``"none"`` (no changes)
+            / ``"form-fill"`` (form filling and signing) / ``"annotate"`` (form
+            filling, signing and commenting), defaulting to ``"form-fill"``.
+            Refuses without ``certify``: the level applies to approval
+            signatures too under PDF 2.0, and writing one there produces an
+            entry most readers disregard.
     """
     input_path = Path(file)
     output_path = Path(output)
@@ -623,6 +722,10 @@ def sign_pdf(
         raise ValueError(
             "Choose ONE placement: fill an existing signature field, or place a new visible stamp."
         )
+
+    # Certification is orthogonal to placement, signer source and PAdES
+    # profile; only the document's own state can refuse it.
+    existing_certification = _certification_refusals(file, certify, certify_level)
 
     signer_cm = _signer_source(
         pfx_path, password, key_path, cert_path,
@@ -676,32 +779,38 @@ def sign_pdf(
             )
         if lta:
             meta_kwargs["use_pades_lta"] = True
+        if certify:
+            meta_kwargs["certify"] = True
+            meta_kwargs["docmdp_permissions"] = _MDP_PERM_BY_LEVEL[certify_level or "form-fill"]
         meta = signers.PdfSignatureMetadata(**meta_kwargs)
-        with open(file, "rb") as inf:
-            writer = IncrementalPdfFileWriter(inf)
-            if existing_field is not None:
-                # existing_fields_only is the fail-closed backstop: pyHanko will
-                # refuse to CREATE a field here, so a lookup miss can never
-                # silently turn into a new invisible signature. The stamp style
-                # draws in the field's own widget rect (zero-size -> invisible).
-                pdf_signer = signers.PdfSigner(
-                    meta, signer=signer, stamp_style=_stamp_style(reason, location),
-                    timestamper=timestamper,
-                )
-                signed = pdf_signer.sign_pdf(writer, existing_fields_only=True)
-            elif placement is not None:
-                page_ix, box = placement
-                fields.append_signature_field(
-                    writer,
-                    sig_field_spec=fields.SigFieldSpec(field_name, on_page=page_ix, box=box),
-                )
-                pdf_signer = signers.PdfSigner(
-                    meta, signer=signer, stamp_style=_stamp_style(reason, location),
-                    timestamper=timestamper,
-                )
-                signed = pdf_signer.sign_pdf(writer)
-            else:
-                signed = signers.sign_pdf(writer, meta, signer=signer, timestamper=timestamper)
+        try:
+            with open(file, "rb") as inf:
+                writer = IncrementalPdfFileWriter(inf)
+                if existing_field is not None:
+                    # existing_fields_only is the fail-closed backstop: pyHanko will
+                    # refuse to CREATE a field here, so a lookup miss can never
+                    # silently turn into a new invisible signature. The stamp style
+                    # draws in the field's own widget rect (zero-size -> invisible).
+                    pdf_signer = signers.PdfSigner(
+                        meta, signer=signer, stamp_style=_stamp_style(reason, location),
+                        timestamper=timestamper,
+                    )
+                    signed = pdf_signer.sign_pdf(writer, existing_fields_only=True)
+                elif placement is not None:
+                    page_ix, box = placement
+                    fields.append_signature_field(
+                        writer,
+                        sig_field_spec=fields.SigFieldSpec(field_name, on_page=page_ix, box=box),
+                    )
+                    pdf_signer = signers.PdfSigner(
+                        meta, signer=signer, stamp_style=_stamp_style(reason, location),
+                        timestamper=timestamper,
+                    )
+                    signed = pdf_signer.sign_pdf(writer)
+                else:
+                    signed = signers.sign_pdf(writer, meta, signer=signer, timestamper=timestamper)
+        except SigningError:
+            _raise_mapped_signing_refusal(certify, existing_certification)
     # Fail closed + atomic: write the signed bytes to a temp beside the output,
     # Self-verify the temporary file before replacement. This keeps the
     # in-place case honest: a transient
@@ -721,6 +830,9 @@ def sign_pdf(
         # verification is the output's — computed while a failure is still fully
         # recoverable.
         verification = verify_signatures(tmp_name)
+        # Read back out of the WRITTEN bytes, never echoed from the request —
+        # the same discipline as the valid/intact fields beside it.
+        written_certification = certification_of_file(tmp_name)
         os.replace(tmp_name, output_path)
     except BaseException:
         try:
@@ -741,6 +853,8 @@ def sign_pdf(
         "intact": sig["intact"] if sig else False,
         "covers_whole_document": sig["covers_whole_document"] if sig else False,
         "signature_count": verification["signature_count"],
+        "certified": bool(written_certification["certified"]),
+        "certification_level": written_certification["level"],
     }
 
 
