@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEngine } from '../hooks/useEngine';
-import { useAppModal } from '../hooks/useAppModal';
+import { FolderRow, RunningView, SweepShell } from './FolderSweepUi';
 import { dialog, batch, app } from '../lib/tauri-bridge';
 import { FindModeToggles } from '../search/FindModeToggles';
 import { RedactionPropertiesFields } from './RedactionPropertiesFields';
@@ -407,7 +407,12 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
   const totals = report ? summarize(report) : null;
 
   return (
-    <Shell onClose={guardedClose}>
+    <SweepShell
+      title={tChrome('dialog.diskRedact.title')}
+      testid="disk-redact-dialog"
+      closeTestid="disk-redact-x"
+      onClose={guardedClose}
+    >
       {phase === 'setup' && (
         <div className="flex flex-col gap-4">
           <FolderRow
@@ -673,11 +678,13 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
                 })
               : tChrome('dialog.batch.progressStarting')
           }
-          progress={progress}
+          fileIndex={progress?.fileIndex ?? null}
+          fileCount={progress?.fileCount ?? 0}
           stopping={stopping}
           onStop={stop}
           buttonRef={stopBtnRef}
           testid="disk-redact-searching"
+          stopTestid="disk-redact-stop"
         />
       )}
 
@@ -693,11 +700,13 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
                 })
               : tChrome('dialog.batch.progressStarting')
           }
-          progress={progress}
+          fileIndex={progress?.fileIndex ?? null}
+          fileCount={progress?.fileCount ?? 0}
           stopping={stopping}
           onStop={stop}
           buttonRef={stopBtnRef}
           testid="disk-redact-applying"
+          stopTestid="disk-redact-stop"
         />
       )}
 
@@ -878,7 +887,7 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
           </div>
         </div>
       )}
-    </Shell>
+    </SweepShell>
   );
 }
 
@@ -962,131 +971,6 @@ function FileGroup({
           })}
         </div>
       ))}
-    </div>
-  );
-}
-
-function RunningView({
-  label,
-  progress,
-  stopping,
-  onStop,
-  buttonRef,
-  testid,
-}: {
-  label: string;
-  progress: DiskProgress | null;
-  stopping: boolean;
-  onStop: () => void;
-  buttonRef: React.RefObject<HTMLButtonElement | null>;
-  testid: string;
-}): React.JSX.Element {
-  const fraction = progress
-    ? (progress.fileIndex + 1) / Math.max(1, progress.fileCount)
-    : 0;
-  return (
-    <div className="flex flex-col gap-3" data-testid={testid}>
-      <p className="text-sm text-neutral-300 truncate">
-        {stopping ? tChrome('dialog.batch.progressStopping') : label}
-      </p>
-      <div className="h-1.5 bg-neutral-800 rounded overflow-hidden">
-        <div
-          className="h-full bg-blue-600 transition-all"
-          style={{ width: `${Math.round(fraction * 100)}%` }}
-        />
-      </div>
-      <div className="flex justify-end">
-        <button
-          type="button"
-          ref={buttonRef}
-          onClick={onStop}
-          disabled={stopping}
-          data-testid="disk-redact-stop"
-          className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 rounded text-sm"
-        >
-          {stopping ? tChrome('dialog.batch.stopping') : tChrome('dialog.batch.stop')}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function FolderRow({
-  label,
-  testid,
-  value,
-  onPick,
-  note,
-  buttonRef,
-}: {
-  label: string;
-  testid: string;
-  value: string | null;
-  onPick: () => void;
-  note: string | null;
-  buttonRef?: React.RefObject<HTMLButtonElement | null>;
-}): React.JSX.Element {
-  return (
-    <div>
-      <span className="block text-sm text-neutral-400 mb-1">{label}</span>
-      <div className="flex items-center gap-2">
-        <button
-          ref={buttonRef}
-          data-testid={`${testid}-pick`}
-          onClick={onPick}
-          className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium shrink-0"
-        >
-          {tChrome('dialog.common.choose')}
-        </button>
-        <span
-          data-testid={testid}
-          className="text-sm text-neutral-300 truncate"
-          title={value ?? undefined}
-        >
-          {value ?? tChrome('dialog.batch.noFolder')}
-        </span>
-      </div>
-      {note && <p className="text-xs text-neutral-500 mt-1">{note}</p>}
-    </div>
-  );
-}
-
-function Shell({
-  children,
-  onClose,
-}: {
-  children: React.ReactNode;
-  onClose: () => void;
-}): React.JSX.Element {
-  const shellRef = useAppModal(onClose);
-  return (
-    <div
-      data-app-modal
-      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center"
-      onClick={onClose}
-    >
-      <div
-        ref={shellRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label={tChrome('dialog.diskRedact.title')}
-        data-testid="disk-redact-dialog"
-        className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-2xl w-[620px] max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
-          <h3 className="text-sm font-semibold">{tChrome('dialog.diskRedact.title')}</h3>
-          <button
-            data-testid="disk-redact-x"
-            onClick={onClose}
-            className="text-neutral-500 hover:text-neutral-300 text-sm"
-          >
-            {tChrome('dialog.common.close')}
-          </button>
-        </div>
-        <div className="p-5">{children}</div>
-      </div>
     </div>
   );
 }

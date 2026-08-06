@@ -85,6 +85,7 @@ const toolsItems: MenuNode[] = [
   sep,
   cmd('tools.batchOcr', 'menuitem-tools-batch-ocr'),
   cmd('tools.diskRedact', 'menuitem-tools-disk-redact'),
+  cmd('tools.formPrepFolder', 'menuitem-tools-form-prep-folder'),
   cmd('tools.scheduledRuns', 'menuitem-tools-scheduled-runs'),
   cmd('tools.watchedFolders', 'menuitem-tools-watched-folders'),
 ];

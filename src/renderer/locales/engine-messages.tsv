@@ -85,9 +85,13 @@ font_fallback.fontVerticalMetricsPick	exact	font_fallback,text_paragraphs	that f
 font_fallback.libertinusSerifFeatureFont	pattern	font_fallback	Libertinus Serif (feature font) not found in {{font_path}}
 font_fallback.textEmbed	exact	font_fallback	no text to embed
 font_fallback.verticalFallbackFontCannot	pattern	font_fallback	the vertical fallback font cannot express {{ch}}
-form_detect.cannotNameDetectedField	pattern	form_detect	cannot name the detected field {{base}}: too many fields already carry that name
+form_authoring.documentCertifiedAllowChanges	exact	form_authoring	this document is certified to allow no changes, so adding form fields would produce a file that reports as illegally modified
+form_authoring.documentSignedAddingForm	exact	form_authoring	this document is signed and adding form fields invalidates its signatures -- the run must state that signed documents are included before it will touch one
+form_authoring.theseFormFieldsCannot	pattern	form_authoring	these form fields cannot be created: {{joined}}
+form_detect.cannotNameDetectedField	pattern	form_detect,form_prepare	cannot name the detected field {{base}}: too many fields already carry that name
 form_detect.maxCandidatesMustPositive	exact	form_detect	max_candidates must be a positive number
 form_detect.scanMustAutoNever	exact	form_detect	scan must be "auto", "never" or "always"
+form_prepare.unknownFieldKindChoose	pattern	form_prepare	unknown field kind: {{v0}} (choose from {{v1}})
 forms.acroformFieldTreeNested	exact	forms	AcroForm field tree nested too deeply
 forms.couldnTRegenerateAppearance	pattern	forms	couldn't regenerate the appearance for {{v0}}: {{exc}}
 forms.valueContainsCharactersOutside	exact	forms	value contains characters outside the form font's encoding (WinAnsi)
