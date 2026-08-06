@@ -1,4 +1,5 @@
-// Field-level locking (/FieldMDP) end to end: signing with a lock, the panel's
+// Field-level locking (/FieldMDP) end to end: signing with a lock, seeding one
+// onto an unsigned signature field while preparing the form, the panel's
 // readout of what it locks, and what the document's own signatures then permit.
 //
 // The two properties under test are the ones a user acts on: filling a LOCKED
@@ -9,11 +10,20 @@
 // The violation READBACK is pinned in tests/test_field_lock.py, where a file
 // whose locked field did change can be constructed; no route through the
 // product produces one, which is what this spec's refusal proves.
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect } from '@wdio/globals';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import {
+  PDFArray,
+  PDFDict,
+  PDFDocument,
+  PDFHexString,
+  PDFName,
+  PDFRef,
+  PDFString,
+  StandardFonts,
+} from 'pdf-lib';
 import {
   waitForHarness,
   openByPaths,
@@ -21,9 +31,14 @@ import {
   setView,
   setActiveOp,
   signActiveFileInPlace,
+  signCanvasField,
   verifyActiveSignatures,
   setCanvasFormValue,
   applyCanvasFormValues,
+  saveActiveAs,
+  placeNewField,
+  createPlacedField,
+  invokeAppCommand,
   focusTab,
   type SignatureVerifySnapshot,
 } from '../support/harness.js';
@@ -206,6 +221,165 @@ describe('field locks', () => {
     await clickEl('[data-testid="notice-ok"]');
 
     expect((await verifyOnPanel()).signature_count).toBe(1);
+    await closeAllFiles();
+  });
+});
+
+/** Field names and lock targets are PDF text strings, which the renderer writes
+ * in hex form — `String(value)` would give the `<…>` literal, not the name. */
+function decodeText(value: unknown): string | null {
+  return value instanceof PDFString || value instanceof PDFHexString ? value.decodeText() : null;
+}
+
+/** The `/Lock` a top-level signature field carries, read straight from the file
+ * rather than through any app surface. */
+async function lockOfFile(
+  path: string,
+  fieldName: string,
+): Promise<{ action: string; fields: string[] } | null> {
+  const doc = await PDFDocument.load(new Uint8Array(readFileSync(path)), {
+    ignoreEncryption: true,
+  });
+  const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+  const fields = acro?.lookupMaybe(PDFName.of('Fields'), PDFArray);
+  for (let i = 0; i < (fields?.size() ?? 0); i++) {
+    const entry = fields!.get(i);
+    const dict = entry instanceof PDFRef ? doc.context.lookup(entry) : entry;
+    if (!(dict instanceof PDFDict)) continue;
+    if (decodeText(dict.get(PDFName.of('T'))) !== fieldName) continue;
+    const lock = dict.lookupMaybe(PDFName.of('Lock'), PDFDict);
+    if (!lock) return null;
+    const action = lock.lookupMaybe(PDFName.of('Action'), PDFName)?.asString() ?? '';
+    const listed = lock.lookupMaybe(PDFName.of('Fields'), PDFArray);
+    const names: string[] = [];
+    for (let j = 0; j < (listed?.size() ?? 0); j++) {
+      const text = decodeText(listed!.get(j));
+      if (text !== null) names.push(text);
+    }
+    return { action, fields: names };
+  }
+  return null;
+}
+
+describe('preparer-placed field locks', () => {
+  let tmp: string;
+  let prepared: string;
+
+  before(async () => {
+    tmp = mkdtempSync(join(tmpdir(), 'spectra-e2e-seed-'));
+    await waitForHarness();
+  });
+
+  it('authors a signature field carrying its own lock', async () => {
+    const work = await formFixture(join(tmp, 'prepare.pdf'));
+    await closeAllFiles();
+    await openByPaths([work]);
+    await setView('canvas');
+
+    // The picker offers the document's own fillable names and no signature
+    // field: a lock governs form fields.
+    await placeNewField({ x: 0.55, y: 0.6, w: 0.35, h: 0.12 });
+    await $('[data-testid="new-field-type"]').waitForExist({ timeout: 20_000 });
+    await browser.execute(() => {
+      const select = document.querySelector('[data-testid="new-field-type"]') as HTMLSelectElement | null;
+      if (select) {
+        select.value = 'signature';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    await $('[data-testid="new-field-lock-action"]').waitForExist({ timeout: 20_000 });
+    await browser.execute(() => {
+      const select = document.querySelector('[data-testid="new-field-lock-action"]') as HTMLSelectElement | null;
+      if (select) {
+        select.value = 'include';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    await $('[data-testid="new-field-lock-field-applicant"]').waitForExist({ timeout: 20_000 });
+    await $('[data-testid="new-field-lock-field-reviewer"]').waitForExist({ timeout: 20_000 });
+    expect(await $('[data-testid="new-field-lock-field-Approval"]').isExisting()).toBe(false);
+
+    await createPlacedField(
+      { name: 'Approval', type: 'signature', lock: { action: 'include', fields: ['applicant'] } },
+      { path: work },
+    );
+
+    prepared = join(tmp, 'prepared.pdf');
+    await saveActiveAs(prepared);
+    expect(await lockOfFile(prepared, 'Approval')).toEqual({
+      action: '/Include',
+      fields: ['applicant'],
+    });
+    await closeAllFiles();
+  });
+
+  it('binds whoever signs that field, with no lock asked for', async () => {
+    await openByPaths([prepared]);
+    await setView('canvas');
+    const signed = join(tmp, 'prepared-signed.pdf');
+    // No lock parameter anywhere in this call: the seed is the whole request.
+    const summary = await signCanvasField({
+      fieldName: 'Approval',
+      pfxPath: TEST_PFX,
+      password: TEST_PFX_PASSWORD,
+      output: signed,
+    });
+    expect(summary.valid).toBe(true);
+
+    await closeAllFiles();
+    await openByPaths([signed]);
+    const verified = await verifyOnPanel();
+    expect(verified.signature_count).toBe(1);
+    expect(verified.signatures[0].lock).toEqual({ action: 'include', fields: ['applicant'] });
+    expect(verified.signatures[0].lock_violation).toBe(null);
+  });
+
+  it('refuses a fill of the field the preparer locked', async () => {
+    const signed = join(tmp, 'prepared-signed.pdf');
+    await setView('canvas');
+    await focusTab({ doc: signed });
+    expect(await setCanvasFormValue(signed, 'applicant', 'Should not land')).toBe(true);
+    // Fired without awaiting: the call blocks on the dialog it raises.
+    await browser.execute(() => {
+      void (
+        window as unknown as { __SPECTRA_TEST__: { applyCanvasFormValues: () => Promise<void> } }
+      ).__SPECTRA_TEST__.applyCanvasFormValues();
+    });
+    const message = await $('[data-testid="confirm-message"]');
+    await message.waitForDisplayed({ timeout: 20_000 });
+    expect(await message.getText()).toContain('applicant');
+    await clickEl('[data-testid="notice-ok"]');
+
+    // The other field of the same document is untouched by the lock.
+    expect(await setCanvasFormValue(signed, 'reviewer', 'Reviewed')).toBe(true);
+    await applyCanvasFormValues();
+    const after = await verifyOnPanel();
+    expect(after.any_lock_violation).toBe(false);
+    expect(after.signatures[0].modification_level).toBe('FORM_FILLING');
+    await closeAllFiles();
+  });
+
+  it('edits an unsigned signature field lock from the Prepare Form panel', async () => {
+    await openByPaths([prepared]);
+    expect(await invokeAppCommand('tools.panel.prepareform')).toBe(true);
+    await $('[data-testid="prepare-form-panel"]').waitForDisplayed({ timeout: 20_000 });
+    const row = await $('[data-testid="prepare-form-sigfield-Approval"]');
+    await row.waitForExist({ timeout: 20_000 });
+    await browser.execute(() => {
+      const select = document.querySelector(
+        '[data-testid="prepare-form-sigfield-Approval-lock-action"]',
+      ) as HTMLSelectElement | null;
+      if (select) {
+        select.value = 'all';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    await clickEl('[data-testid="prepare-form-sigfield-apply-Approval"]');
+    await $('[data-testid="prepare-form-status"]').waitForDisplayed({ timeout: 30_000 });
+
+    const edited = join(tmp, 'edited.pdf');
+    await saveActiveAs(edited);
+    expect(await lockOfFile(edited, 'Approval')).toEqual({ action: '/All', fields: [] });
     await closeAllFiles();
   });
 });
