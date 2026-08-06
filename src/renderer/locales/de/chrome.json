@@ -1521,6 +1521,8 @@
   "engine.struct_tree.unknownProperties": "unbekannte Eigenschaften: {{v0}}",
   "engine.system_fonts.fontFileFound": "Schriftdatei nicht gefunden: {{path}}",
   "engine.system_fonts.usableFontFile": "keine verwendbare Schriftdatei: {{v0}}",
+  "engine.table_export.tableFoundPageS": "Auf den {{v0}} analysierten Seite(n) wurde keine Tabelle gefunden, es gibt also nichts, was in eine Arbeitsmappe geschrieben werden könnte.",
+  "engine.table_export.unknownSheetGroupingChoose": "Unbekannte Blattgruppierung {{sheet_per}} (wählen Sie table oder page).",
   "engine.takeoff.outputFolderDoesExist": "Der Ausgabeordner existiert nicht: {{v0}}",
   "engine.text_authoring.boldMustTrueFalse": "bold muss true oder false sein (erhalten {{bold}})",
   "engine.text_authoring.directionalFormattingCharactersCannot": "Richtungssteuerzeichen lassen sich in einem Textfeld nicht setzen",

@@ -1521,6 +1521,8 @@
   "engine.struct_tree.unknownProperties": "propriedades desconhecidas: {{v0}}",
   "engine.system_fonts.fontFileFound": "arquivo de fonte não encontrado: {{path}}",
   "engine.system_fonts.usableFontFile": "não é um arquivo de fonte utilizável: {{v0}}",
+  "engine.table_export.tableFoundPageS": "Nenhuma tabela foi encontrada nas {{v0}} página(s) analisadas, portanto não há nada para gravar em uma planilha.",
+  "engine.table_export.unknownSheetGroupingChoose": "Agrupamento de planilhas desconhecido {{sheet_per}} (escolha table ou page).",
   "engine.takeoff.outputFolderDoesExist": "A pasta de saída não existe: {{v0}}",
   "engine.text_authoring.boldMustTrueFalse": "bold precisa ser true ou false (veio {{bold}})",
   "engine.text_authoring.directionalFormattingCharactersCannot": "caracteres de formatação direcional não podem ser diagramados em uma caixa de texto",

@@ -1521,6 +1521,8 @@
   "engine.struct_tree.unknownProperties": "proprietà sconosciute: {{v0}}",
   "engine.system_fonts.fontFileFound": "file del carattere non trovato: {{path}}",
   "engine.system_fonts.usableFontFile": "non è un file di carattere utilizzabile: {{v0}}",
+  "engine.table_export.tableFoundPageS": "Nessuna tabella trovata nelle {{v0}} pagina/e analizzate, quindi non c’è nulla da scrivere in un foglio di calcolo.",
+  "engine.table_export.unknownSheetGroupingChoose": "Raggruppamento fogli sconosciuto {{sheet_per}} (scegli table o page).",
   "engine.takeoff.outputFolderDoesExist": "La cartella di output non esiste: {{v0}}",
   "engine.text_authoring.boldMustTrueFalse": "bold deve essere true o false (ricevuto {{bold}})",
   "engine.text_authoring.directionalFormattingCharactersCannot": "i caratteri di formattazione direzionale non possono essere impaginati in una casella di testo",

@@ -910,10 +910,10 @@ pub struct ExportArgs {
     /// Output file (extension should match the format)
     #[arg(short, long)]
     pub output: PathBuf,
-    /// Target format: docx, rtf, odt, html, xhtml, txt
+    /// Target format: docx, rtf, odt, html, xhtml, txt, xlsx
     #[arg(short, long, default_value = "docx")]
     pub format: String,
-    /// Page range like "1,3" or "all" (txt only)
+    /// Page range like "1,3" or "all" (txt, xlsx)
     #[arg(long, default_value = "")]
     pub pages: String,
     /// Text ordering: reading or layout (txt only)
@@ -922,6 +922,12 @@ pub struct ExportArgs {
     /// Write a form feed between pages (txt only)
     #[arg(long)]
     pub page_breaks: bool,
+    /// Sheet grouping: table or page (xlsx only)
+    #[arg(long)]
+    pub sheet_per: Option<String>,
+    /// Add a sheet carrying the text no table claimed (xlsx only)
+    #[arg(long)]
+    pub include_untabled: bool,
 }
 
 #[derive(Args)]
@@ -2756,6 +2762,12 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             }
             if args.page_breaks {
                 params["page_breaks"] = json!(true);
+            }
+            if let Some(sheet_per) = &args.sheet_per {
+                params["sheet_per"] = json!(sheet_per);
+            }
+            if args.include_untabled {
+                params["include_untabled"] = json!(true);
             }
             engine.call("export_document", params)
         }
