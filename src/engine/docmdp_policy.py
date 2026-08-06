@@ -61,10 +61,18 @@ _SUBTYPE = generic.pdf_name("/Subtype")
 _PAGE = generic.pdf_name("/Page")
 _PAGES = generic.pdf_name("/Pages")
 _WIDGET = generic.pdf_name("/Widget")
+_ACROFORM = generic.pdf_name("/AcroForm")
+_FIELDS = generic.pdf_name("/Fields")
+_AP = generic.pdf_name("/AP")
+_AS = generic.pdf_name("/AS")
+_V = generic.pdf_name("/V")
 
 # A page tree deeper than this is not walked; the pages below it are simply not
 # cleared, which reports as suspicious rather than as approved.
 _MAX_PAGE_TREE_DEPTH = 64
+# Likewise for the field tree: past this many nodes the walk stops, and the
+# fields it did not reach are simply not cleared.
+_MAX_FIELDS = 20_000
 
 
 def _refs(value) -> list | None:
@@ -219,6 +227,142 @@ class PageAnnotationRule(WhitelistRule):
             yield ReferenceUpdate(dep)
 
 
+class FieldWidgetAppearanceRule(WhitelistRule):
+    """Clears the appearance update of a widget that is a form field's KID.
+
+    A text field can carry its widget either merged into the field dictionary
+    or as a separate ``/Kids`` entry. The standard form rules model the merged
+    shape only: they clear the field's own ``/AP`` update, and a widget held
+    under ``/Kids`` is never mentioned by any rule, so filling such a field
+    leaves its appearance stream unexplained and the whole revision reads as a
+    suspicious modification — for a fill, which is the least a certification
+    ever permits.
+
+    The clearance is deliberately narrow, and each condition is a way this
+    could be written too loosely:
+
+      * the widget object must be the SAME object in both revisions, so a
+        substituted widget is never cleared;
+      * every key on it except ``/AP`` and ``/AS`` must be unchanged — a moved
+        ``/Rect``, a re-pointed ``/Parent`` or a changed ``/F`` falls through
+        to the standard rules;
+      * its owning field's ``/V`` must have changed, so an appearance rewritten
+        without a fill is not cleared;
+      * only objects the new appearance stream introduces IN THIS REVISION are
+        pulled in, so an appearance cannot reach back and clear an object that
+        predates the signature.
+
+    Qualified at the form-filling level, so it cannot clear anything under a
+    certification that permits no changes at all.
+    """
+
+    def apply(self, old, new):
+        try:
+            updated = new.explicit_refs_in_revision()
+        except Exception:
+            return
+        old_parents = _widget_parents(old)
+        new_parents = _widget_parents(new)
+        for ref, parent_ref in new_parents.items():
+            if ref not in updated or old_parents.get(ref) != parent_ref:
+                continue
+            try:
+                old_widget = old(ref)
+                new_widget = new(ref)
+            except Exception:
+                continue
+            if not (
+                isinstance(old_widget, generic.DictionaryObject)
+                and isinstance(new_widget, generic.DictionaryObject)
+                and old_widget.get(_SUBTYPE) == _WIDGET
+                and new_widget.get(_SUBTYPE) == _WIDGET
+            ):
+                continue
+            if not compare_dicts(
+                old_widget, new_widget, frozenset([_AP, _AS]), raise_exc=False
+            ):
+                continue
+            if not _field_value_changed(old, new, parent_ref):
+                continue
+            yield ReferenceUpdate(ref)
+            yield from _appearance_dependencies(old, new, new_widget)
+
+
+def _widget_parents(resolver) -> dict:
+    """``{widget reference: owning field reference}`` for every widget held
+    under a form field's ``/Kids``. A merged field-widget is deliberately
+    absent: the standard rules already model that shape."""
+    out: dict = {}
+    try:
+        acroform = resolver.root.get(_ACROFORM)
+        fields = _refs(acroform.get_object().raw_get(_FIELDS))
+    except Exception:
+        return out
+    if not fields:
+        return out
+    seen: set = set()
+    queue = list(fields)
+    while queue:
+        field_ref = queue.pop()
+        if field_ref in seen or len(seen) > _MAX_FIELDS:
+            continue
+        seen.add(field_ref)
+        try:
+            field = resolver(field_ref)
+        except Exception:
+            continue
+        if not isinstance(field, generic.DictionaryObject):
+            continue
+        kids = _refs(field.get(_KIDS))
+        if not kids:
+            continue
+        for kid_ref in kids:
+            try:
+                kid = resolver(kid_ref)
+            except Exception:
+                continue
+            if not isinstance(kid, generic.DictionaryObject):
+                continue
+            if kid.get(_SUBTYPE) == _WIDGET:
+                out[kid_ref] = field_ref
+            else:
+                queue.append(kid_ref)
+    return out
+
+
+def _field_value_changed(old, new, field_ref) -> bool:
+    try:
+        old_field = old(field_ref)
+        new_field = new(field_ref)
+    except Exception:
+        return False
+    if not (
+        isinstance(old_field, generic.DictionaryObject)
+        and isinstance(new_field, generic.DictionaryObject)
+    ):
+        return False
+    return old_field.get(_V) != new_field.get(_V)
+
+
+def _appearance_dependencies(old, new, widget):
+    """The widget's own ``/AP`` reference when it is indirect, and everything
+    the new appearance reaches that this revision introduced."""
+    try:
+        raw = widget.raw_get(_AP)
+    except KeyError:
+        return
+    if isinstance(raw, generic.IndirectObject):
+        yield ReferenceUpdate(raw.reference)
+    try:
+        deps = new.collect_dependencies(
+            raw.get_object(), since_revision=old.revision + 1
+        )
+    except Exception:
+        return
+    for dep in deps:
+        yield ReferenceUpdate(dep)
+
+
 class _TolerantSigFieldCreationRule(SigFieldCreationRule):
     """The signature-field creation rule, minus its refusal to coexist with an
     annotation it does not model.
@@ -249,14 +393,16 @@ class _TolerantSigFieldCreationRule(SigFieldCreationRule):
 
 
 ANNOTATION_RULE = PageAnnotationRule()
+WIDGET_APPEARANCE_RULE = FieldWidgetAppearanceRule()
 
 
 def build_diff_policy() -> StandardDiffPolicy:
-    """The standard rules plus the annotation rule, the latter qualified so it
-    can only ever clear a change at the annotation level."""
+    """The standard rules plus the two this build supplies, each qualified at
+    the lowest level that describes what it clears."""
     return StandardDiffPolicy(
         global_rules=[
             *DEFAULT_DIFF_POLICY.global_rules,
+            WIDGET_APPEARANCE_RULE.as_qualified(ModificationLevel.FORM_FILLING),
             ANNOTATION_RULE.as_qualified(ModificationLevel.ANNOTATIONS),
         ],
         form_rule=FormUpdatingRule(
