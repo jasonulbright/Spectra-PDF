@@ -307,10 +307,16 @@ search_regions.pagesMustListPage	exact	form_detect,search_regions	pages must be 
 shaping.fontSVerticalForm	pattern	shaping	this font's vertical form of {{name}} has no advance
 shaping.shapingFontCannotExpress	pattern	shaping	the shaping font cannot express {{text}}
 signatures.certificatesFoundTrustRoot	pattern	signatures	no certificates found in trust root: {{p}}
+signatures.certificationLevelAppliesOnly	exact	signatures	A certification level applies only to a certification signature. Certify the document, or leave the level unset.
+signatures.certificationSignatureMustFirst	exact	signatures	A certification signature must be the first signature in a document, and this document could not accept one.
 signatures.chooseOnePlacementFill	exact	signatures	Choose ONE placement: fill an existing signature field, or place a new visible stamp.
 signatures.chooseOneSignerSource	exact	signatures	Choose ONE signer source: a .pfx file, a PEM key + certificate, or a PKCS#11 token.
 signatures.couldLoadSignerWrong	exact	signatures	Could not load the signer — wrong key passphrase, no certificate matching the key, or an unsupported/corrupt key or certificate file.
 signatures.couldLoadSignerWrong2	exact	signatures	Could not load the signer — wrong password, or an unsupported/corrupt .pfx.
+signatures.documentAlreadyCarriesSignature	pattern	signatures	This document already carries {{signature_count}} signature(s), the first in field "{{first_field}}". A certification signature must be the first signature in a document.
+signatures.documentAlreadyCertifiedLevel	pattern	signatures	This document is already certified at level "{{existing_level}}". A document can carry at most one certification signature.
+signatures.documentCertifiedChangesAllowed	exact	signatures	This document is certified with no changes allowed, so it cannot be signed again. Save a copy and sign that instead.
+signatures.documentCouldSignedOwn	exact	signatures	This document could not be signed — its own signature policy forbids the change.
 signatures.embeddingRevocationInfoLtv	exact	signatures	Embedding revocation info (LTV) requires PAdES mode.
 signatures.emptySignatureFieldNamed	pattern	signatures	No empty signature field named "{{field_name}}" exists in this PDF.
 signatures.fileAlreadyExistsChoose	exact	signatures	That file already exists. Choose a different name, or explicitly allow overwriting.
@@ -331,6 +337,7 @@ signatures.signerGivenProvidePfx	exact	signatures	No signer given — provide a 
 signatures.signerKeyFileFound	exact	signatures	Signer key file not found.
 signatures.signerNameCommonName	exact	signatures	A signer name (common name) is required.
 signatures.trustRootFound	pattern	signatures	trust root not found: {{p}}
+signatures.unknownCertificationLevelChoose	pattern	signatures	Unknown certification level "{{certify_level}}". Choose none, form-fill, or annotate.
 signatures.validityMustBetweenDay	exact	signatures	Validity must be between 1 day and 20 years.
 soffice.documentPasswordProtectedCannot	pattern	soffice	the document is password-protected and cannot be converted without its password: {{src}}
 soffice.libreofficeAvailable	pattern	soffice	LibreOffice is not available at {{soffice_path}}
