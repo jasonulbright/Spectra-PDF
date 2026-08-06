@@ -2,6 +2,36 @@
 
 ## 1.0.22 — Signatures can trust what this computer already trusts
 
+### Search & Redact a whole folder
+
+Redaction has worked one document at a time. Tools ▸ Search & Redact Folder…
+takes the same search — a term, a word list, the built-in patterns for card
+numbers, national identifiers, dates and the rest — and runs it over every PDF
+in a folder and its subfolders. Nothing has to be open, and nothing is opened:
+the files are read where they sit.
+
+The results arrive as a checkable list grouped by file and page, and nothing is
+checked for you. You tick the occurrences that should go, and only those are
+written. By default the redacted documents are written into a destination
+folder you choose, leaving your originals exactly as they were; you can instead
+redact the originals in place, which takes a separate confirmation because
+there is no undo.
+
+A second mode writes redaction marks instead of removing anything, so a folder
+can be swept for review and the marks applied later, document by document, by
+whoever signs the work off.
+
+Signed documents are decided per file rather than swept along. Removing content
+breaks a signature, so signed files are left untouched unless you say to
+include them, and a document certified to allow no changes is refused outright
+and named in the results. Files that cannot be read — a password, damage — are
+reported the same way, and never stop the run. Every sweep writes a log naming
+what was redacted, what was copied unchanged, and what was skipped and why.
+
+The same step is available inside a guided action, so a watched folder or a
+scheduled run can do it unattended, and on the command line as
+`search-redact`.
+
 ### A second trust source for signature verification
 
 Verifying a signature answers two questions: is the document cryptographically

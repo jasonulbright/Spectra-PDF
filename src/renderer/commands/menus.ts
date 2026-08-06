@@ -84,6 +84,7 @@ const toolsItems: MenuNode[] = [
   // stays reachable from an empty workspace.
   sep,
   cmd('tools.batchOcr', 'menuitem-tools-batch-ocr'),
+  cmd('tools.diskRedact', 'menuitem-tools-disk-redact'),
   cmd('tools.scheduledRuns', 'menuitem-tools-scheduled-runs'),
   cmd('tools.watchedFolders', 'menuitem-tools-watched-folders'),
 ];

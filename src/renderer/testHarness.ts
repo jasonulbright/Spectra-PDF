@@ -234,6 +234,41 @@ export function registerBatchOcr(handlers: BatchOcrHandlers | null): void {
   batchOcr = handlers;
 }
 
+/**
+ * Disk-scope Search & Redact. The folder pickers are native, so a spec
+ * injects source and destination into the same selection flow the buttons
+ * run, then drives the same search and apply the buttons call. `check` takes
+ * hit keys from the snapshot, which is what lets a spec redact a SUBSET and
+ * prove the unchecked hits survived.
+ */
+export interface DiskRedactHandlers {
+  setSource: (path: string) => Promise<void>;
+  setDest: (path: string) => void;
+  setQuery: (text: string) => void;
+  search: () => Promise<void>;
+  check: (keys: string[]) => void;
+  apply: () => Promise<void>;
+  snapshot: () => {
+    phase: 'setup' | 'searching' | 'review' | 'applying' | 'done';
+    fileCount: number | null;
+    /** Every hit key the run may act on, in file then page then hit order. */
+    hitKeys: string[];
+    files: { rel: string; hits: number; skipReason: string | null }[] | null;
+    report: {
+      cancelled: boolean;
+      results: { rel: string; status: string; regions?: number; reason?: string }[];
+      skippedDirs: string[];
+    } | null;
+    logPath: string | null;
+  };
+}
+
+let diskRedact: DiskRedactHandlers | null = null;
+
+export function registerDiskRedact(handlers: DiskRedactHandlers | null): void {
+  diskRedact = handlers;
+}
+
 import type { Orientation as CreatePdfOrientation, PageSize as CreatePdfPageSize } from './lib/create-pdf';
 
 /**
@@ -1028,6 +1063,13 @@ export interface TestHarness {
   batchOcrSetFiling: (filing: { movedRoot?: string | null; errorRoot?: string | null }) => void;
   batchOcrStart: () => Promise<void>;
   batchOcrSnapshot: () => ReturnType<BatchOcrHandlers['snapshot']> | null;
+  /** Search & Redact folder injectors (dialog must be open —
+   * `tools.diskRedact`). */
+  diskRedactSetFolders: (source: string, dest: string) => Promise<void>;
+  diskRedactSearch: (query: string) => Promise<void>;
+  diskRedactCheck: (keys: string[]) => void;
+  diskRedactApply: () => Promise<void>;
+  diskRedactSnapshot: () => ReturnType<DiskRedactHandlers['snapshot']> | null;
   scheduleCreate: (profile: Record<string, unknown>, actionJson?: string) => Promise<string>;
   scheduleList: () => Promise<unknown[]>;
   scheduleRemove: (name: string) => Promise<void>;
@@ -1835,6 +1877,56 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     batchOcrSnapshot: () => batchOcr?.snapshot() ?? null,
+    diskRedactSetFolders: async (source, dest) => {
+      if (!diskRedact) {
+        const msg = 'diskRedactSetFolders: Search & Redact folder dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await diskRedact.setSource(source);
+        diskRedact.setDest(dest);
+      } catch (err) {
+        captureError('diskRedactSetFolders', err);
+        throw err;
+      }
+    },
+    diskRedactSearch: async (query) => {
+      if (!diskRedact) {
+        const msg = 'diskRedactSearch: Search & Redact folder dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        diskRedact.setQuery(query);
+        await diskRedact.search();
+      } catch (err) {
+        captureError('diskRedactSearch', err);
+        throw err;
+      }
+    },
+    diskRedactCheck: (keys) => {
+      if (!diskRedact) {
+        const msg = 'diskRedactCheck: Search & Redact folder dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      diskRedact.check(keys);
+    },
+    diskRedactApply: async () => {
+      if (!diskRedact) {
+        const msg = 'diskRedactApply: Search & Redact folder dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await diskRedact.apply();
+      } catch (err) {
+        captureError('diskRedactApply', err);
+        throw err;
+      }
+    },
+    diskRedactSnapshot: () => diskRedact?.snapshot() ?? null,
     scheduleCreate: async (profile, actionJson) => {
       if (!scheduledRuns) throw new Error('scheduleCreate: Scheduled Runs dialog not mounted');
       return scheduledRuns.create(profile, actionJson);
