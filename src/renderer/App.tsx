@@ -327,21 +327,26 @@ function AppContent(): React.ReactElement {
   // sign). `signature_policy` is an internal read, so asking the question does
   // not flush the user's pending annotations to disk.
   const confirmEditOfSignedDoc = useCallback(
-    async (path: string, workingPath: string, editClass: EditClass): Promise<boolean> => {
+    async (
+      path: string,
+      workingPath: string,
+      editClass: EditClass,
+      fields: readonly string[] | null = null,
+    ): Promise<boolean> => {
       const policy = (await call('signature_policy', {
         path: workingPath,
       })) as unknown as SignaturePolicy;
-      const decision = signedEditDecision(policy, editClass);
+      const decision = signedEditDecision(policy, editClass, fields);
       if (decision.kind === 'proceed') return true;
+      // The locked-field refusal names what it stopped; every other decision
+      // takes no values, and passing an unused one is harmless.
+      const body = tChrome(decision.bodyKey, { fields: (decision.fields ?? []).join(', ') });
       if (decision.kind === 'refuse') {
-        await showNotice(tChrome(decision.titleKey), tChrome(decision.bodyKey));
+        await showNotice(tChrome(decision.titleKey), body);
         return false;
       }
       if (editWarnedPathsRef.current.has(path)) return true;
-      const proceed = await showProceedConfirm(
-        tChrome(decision.titleKey),
-        tChrome(decision.bodyKey),
-      );
+      const proceed = await showProceedConfirm(tChrome(decision.titleKey), body);
       if (!proceed) return false;
       editWarnedPathsRef.current.add(path);
       return true;
@@ -956,7 +961,8 @@ function AppContent(): React.ReactElement {
     async (path: string, values: Record<string, FormFieldValue>) => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'form-fill'))) return;
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'form-fill', Object.keys(values))))
+        return;
       // Pre/post reads route through the engine — `read_form_fields` is
       // INTERNAL, so neither read runs the commit gate. The pre-read sees the
       // current working copy (== buffer); `file.snapshot` then flushes pending

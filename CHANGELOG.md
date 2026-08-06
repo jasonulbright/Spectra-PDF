@@ -2,6 +2,26 @@
 
 ## 1.0.22 — Whole folders at a time
 
+### Lock form fields when you sign
+
+A signature can now settle particular form fields for good. When you sign, you
+can lock every field, only the ones you choose, or everything except the ones
+you choose — and the fields are picked from the document's own list rather than
+typed. The choice sits beside the certification options on both signing
+surfaces, and on the command line as `--lock` with `--lock-field`.
+
+Locking is independent of certifying: a plain signature can lock fields, and a
+certification signature can do both at once. A signature field that was prepared
+with its own locking rule keeps it — signing that field applies what its author
+set, and the result says so rather than repeating what was asked for.
+
+Afterwards, each signature says what it locks, and says separately when a locked
+field has been changed since. Filling a locked field is refused rather than
+warned about, naming the fields and pointing at saving a copy: the file that
+would result reports as altered in every reader, so there is no version of that
+edit worth offering. Every other field of the same document still fills exactly
+as before, and comments are unaffected — a lock covers form fields only.
+
 ### Prepare a whole folder of forms
 
 Prepare Form has worked one document at a time. Tools ▸ Prepare Forms in a

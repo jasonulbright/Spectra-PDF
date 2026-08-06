@@ -49,12 +49,16 @@ import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../
 import type { SignerSource } from '../SignerSourceFields';
 import {
   certifyParams,
+  lockParams,
   CERTIFICATION_LEVEL_LABEL,
   CERTIFY_LEVELS,
   DEFAULT_CERTIFY,
+  DEFAULT_LOCK,
   type CertificationLevel,
   type CertifyOptions,
+  type LockOptions,
 } from '../../lib/signatures';
+import { FieldLockControl } from '../FieldLockControl';
 import { sourceKeyOf } from '../../search/useSearchIndex';
 import { useSearchContext } from '../../search/SearchProvider';
 import { useFind } from '../../search/useFind';
@@ -109,7 +113,7 @@ import { buildMergedPageRefs, pathBlockedFromClose } from '../../lib/merge-docs'
 import { useWorkspaceForms } from '../../hooks/useWorkspaceForms';
 import { placementDocsCurrent, pruneFormValues, valueShapeMatches } from '../../lib/form-overlay';
 import type { OverlayWidget } from '../../lib/form-overlay';
-import type { FormFieldValue } from '../../lib/forms';
+import { readFormFields, type FormFieldValue } from '../../lib/forms';
 import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
 import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasCrop, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge, registerCanvasEditImages } from '../../testHarness';
 import { invokeCommand, registerCanvasServices, pushEscapeInterceptor } from '../../commands/context';
@@ -765,6 +769,11 @@ export function WorkspaceCanvasView({
   // Certification travels beside the signer source and the placement, never
   // inside either: it is orthogonal to both.
   const [sigCertify, setSigCertify] = useState<CertifyOptions>(DEFAULT_CERTIFY);
+  // The field lock, on the same card. Independent of certification — a lock
+  // binds with no certification present — so it is offered on every signature,
+  // and the names come from the target document rather than from typing.
+  const [sigLock, setSigLock] = useState<LockOptions>(DEFAULT_LOCK);
+  const [sigLockFields, setSigLockFields] = useState<string[]>([]);
   // Whether the document the card targets could still take a certification.
   // Starts false so the offer only ever appears once the read has ANSWERED —
   // showing it first and withdrawing it is worse than showing it a beat late.
@@ -1498,9 +1507,10 @@ export function WorkspaceCanvasView({
       // The Signatures PANEL's "visible signature" hand-off — arm the
       // placement mode and seed the canvas sign card with the panel's
       // signer details, so nothing is typed twice.
-      startVisibleSignature: (prefill, certification) => {
+      startVisibleSignature: (prefill, certification, fieldLock) => {
         if (prefill) setSigSource(prefill);
         setSigCertify(certification ?? DEFAULT_CERTIFY);
+        setSigLock(fieldLock ?? DEFAULT_LOCK);
         invokeCommand('tools.signature');
       },
       openPageForReading: (pageId) => openPageForReadingRef.current(pageId),
@@ -2225,11 +2235,13 @@ export function WorkspaceCanvasView({
   useEffect(() => {
     if (!sigTargetPath) {
       setSigCanCertify(false);
+      setSigLockFields([]);
       return;
     }
     const workingPath = state.files.get(sigTargetPath)?.workingPath;
     if (!workingPath) {
       setSigCanCertify(false);
+      setSigLockFields([]);
       return;
     }
     let cancelled = false;
@@ -2244,6 +2256,15 @@ export function WorkspaceCanvasView({
       })
       .catch(() => {
         if (!cancelled) setSigCanCertify(false);
+      });
+    // The names a lock can choose from; signature fields are not among them.
+    void readFormFields(engineCall, workingPath)
+      .then(({ fields }) => {
+        if (cancelled) return;
+        setSigLockFields(fields.filter((f) => f.type !== 'signature').map((f) => f.name));
+      })
+      .catch(() => {
+        if (!cancelled) setSigLockFields([]);
       });
     return () => {
       cancelled = true;
@@ -4923,6 +4944,7 @@ export function WorkspaceCanvasView({
         ...(sigLocation.trim() ? { location: sigLocation.trim() } : {}),
         ...placementParams,
         ...certifyParams(sigCertify),
+        ...lockParams(sigLock),
       })) as unknown as { signer: string | null; output: string; valid: boolean; intact: boolean; covers_whole_document: boolean };
       setSignDone({ signer: res.signer, output: res.output, ok: res.valid && res.intact && res.covers_whole_document });
       setSigPlacement(null);
@@ -4938,7 +4960,7 @@ export function WorkspaceCanvasView({
       signingRef.current = false;
       setSigningBusy(false);
     }
-  }, [liveSigPlacement, sigFieldTarget, sigSource, sigPassword, sigReason, sigLocation, sigCertify, docs, state.files, state.pageDirtyPaths, engineCall, setTool]);
+  }, [liveSigPlacement, sigFieldTarget, sigSource, sigPassword, sigReason, sigLocation, sigCertify, sigLock, docs, state.files, state.pageDirtyPaths, engineCall, setTool]);
 
   // Harness bridge (e2e builds only): redaction marks live here, out of the
   // reducer's reach, so the canvas registers its own handlers while mounted.
@@ -6062,6 +6084,12 @@ export function WorkspaceCanvasView({
               {tChrome('panel.sig.certifyUnavailable')}
             </p>
           )}
+          <FieldLockControl
+            value={sigLock}
+            onChange={setSigLock}
+            fieldNames={sigLockFields}
+            idPrefix="canvas-sign"
+          />
           {signError && <div data-testid="canvas-sign-error" className="text-xs text-red-400">{signError}</div>}
           <div className="flex justify-end gap-2">
             <button

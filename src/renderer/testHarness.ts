@@ -752,12 +752,15 @@ export interface SignatureVerifySnapshot {
   certified: boolean;
   certification_level: string | null;
   any_policy_violation: boolean;
+  any_lock_violation?: boolean;
   signatures: {
     field: string | null;
     certification_level: string | null;
     policy_ok: boolean | null;
     policy_judged: boolean;
     modification_level: string | null;
+    lock?: { action: string; fields: string[] } | null;
+    lock_violation?: { fields: string[] } | null;
   }[];
 }
 
@@ -779,6 +782,9 @@ export interface SignHandler {
     /** Apply an author (certification) signature at this level. */
     certify?: boolean;
     certifyLevel?: 'none' | 'form-fill' | 'annotate';
+    /** Lock form fields against further change after signing. */
+    lock?: 'all' | 'include' | 'exclude';
+    lockFields?: string[];
   }) => Promise<{
     output: string;
     signer: string | null;
@@ -787,6 +793,8 @@ export interface SignHandler {
     covers_whole_document: boolean;
     certified?: boolean;
     certification_level?: string | null;
+    lock?: string | null;
+    lock_fields?: string[];
   }>;
   // Sign the ACTIVE document in place (undoable performOperation flow);
   // no output path. Returns the post-sign verification summary.
@@ -799,6 +807,8 @@ export interface SignHandler {
     location?: string;
     certify?: boolean;
     certifyLevel?: 'none' | 'form-fill' | 'annotate';
+    lock?: 'all' | 'include' | 'exclude';
+    lockFields?: string[];
   }) => Promise<{ signature_count: number; all_valid: boolean }>;
   // Verify the active working copy's signatures (read-only) — lets an
   // e2e confirm an undo restored the pre-sign, unsigned state.

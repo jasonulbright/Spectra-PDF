@@ -9,7 +9,10 @@
     "",
     "`policy` is what signature_policy reports. `reason` is a stable enum",
     "name, never display text: one side renders a catalog string from it and",
-    "the other writes it into a report. A `proceed` case carries no reason."
+    "the other writes it into a report. A `proceed` case carries no reason.",
+    "",
+    "`fields` names what a form fill targets. Absent means the caller cannot",
+    "name them, which a lock covering ALL fields is still decidable against."
   ],
   "cases": [
     {
@@ -103,6 +106,144 @@
       "class": "structural",
       "kind": "warn",
       "reason": "certified-annotate"
+    },
+    {
+      "name": "a lock covering every field refuses a form fill",
+      "policy": {
+        "signed": true, "count": 1, "certified": false, "level": null,
+        "locks": [{ "action": "all", "fields": [] }]
+      },
+      "class": "form-fill",
+      "fields": ["Name"],
+      "kind": "refuse",
+      "reason": "fields-locked"
+    },
+    {
+      "name": "a lock covering every field refuses a fill that cannot name its targets",
+      "policy": {
+        "signed": true, "count": 1, "certified": false, "level": null,
+        "locks": [{ "action": "all", "fields": [] }]
+      },
+      "class": "form-fill",
+      "kind": "refuse",
+      "reason": "fields-locked"
+    },
+    {
+      "name": "an include lock refuses a fill of a field it names",
+      "policy": {
+        "signed": true, "count": 1, "certified": false, "level": null,
+        "locks": [{ "action": "include", "fields": ["Total"] }]
+      },
+      "class": "form-fill",
+      "fields": ["Name", "Total"],
+      "kind": "refuse",
+      "reason": "fields-locked"
+    },
+    {
+      "name": "an include lock lets a fill of a field it does not name proceed",
+      "policy": {
+        "signed": true, "count": 1, "certified": false, "level": null,
+        "locks": [{ "action": "include", "fields": ["Total"] }]
+      },
+      "class": "form-fill",
+      "fields": ["Name"],
+      "kind": "proceed"
+    },
+    {
+      "name": "a list lock cannot be adjudicated against unnamed targets",
+      "policy": {
+        "signed": true, "count": 1, "certified": false, "level": null,
+        "locks": [{ "action": "include", "fields": ["Total"] }]
+      },
+      "class": "form-fill",
+      "kind": "proceed"
+    },
+    {
+      "name": "an exclude lock refuses a fill of a field it does not name",
+      "policy": {
+        "signed": true, "count": 1, "certified": false, "level": null,
+        "locks": [{ "action": "exclude", "fields": ["Name"] }]
+      },
+      "class": "form-fill",
+      "fields": ["Total"],
+      "kind": "refuse",
+      "reason": "fields-locked"
+    },
+    {
+      "name": "an exclude lock lets a fill of a field it names proceed",
+      "policy": {
+        "signed": true, "count": 1, "certified": false, "level": null,
+        "locks": [{ "action": "exclude", "fields": ["Name"] }]
+      },
+      "class": "form-fill",
+      "fields": ["Name"],
+      "kind": "proceed"
+    },
+    {
+      "name": "a lock naming a parent covers the fields beneath it",
+      "policy": {
+        "signed": true, "count": 1, "certified": false, "level": null,
+        "locks": [{ "action": "include", "fields": ["Buyer"] }]
+      },
+      "class": "form-fill",
+      "fields": ["Buyer.Name"],
+      "kind": "refuse",
+      "reason": "fields-locked"
+    },
+    {
+      "name": "a lock governs form fields only, so an annotation proceeds",
+      "policy": {
+        "signed": true, "count": 1, "certified": false, "level": null,
+        "locks": [{ "action": "all", "fields": [] }]
+      },
+      "class": "annotate",
+      "kind": "proceed"
+    },
+    {
+      "name": "a lock does not change what a structural edit warns about",
+      "policy": {
+        "signed": true, "count": 1, "certified": false, "level": null,
+        "locks": [{ "action": "all", "fields": [] }]
+      },
+      "class": "structural",
+      "kind": "warn",
+      "reason": "signed"
+    },
+    {
+      "name": "a locked field is refused under a certification that would permit the fill",
+      "policy": {
+        "signed": true, "count": 2, "certified": true, "level": "form-fill",
+        "locks": [{ "action": "include", "fields": ["Total"] }]
+      },
+      "class": "form-fill",
+      "fields": ["Total"],
+      "kind": "refuse",
+      "reason": "fields-locked"
+    },
+    {
+      "name": "a no-changes certification outranks a field lock",
+      "policy": {
+        "signed": true, "count": 1, "certified": true, "level": "none",
+        "locks": [{ "action": "include", "fields": ["Total"] }]
+      },
+      "class": "form-fill",
+      "fields": ["Total"],
+      "kind": "refuse",
+      "reason": "certified-no-changes"
+    },
+    {
+      "name": "two signatures lock different sets and either one bites",
+      "policy": {
+        "signed": true, "count": 2, "certified": false, "level": null,
+        "locks": [
+          { "action": "include", "fields": ["Total"] },
+          { "action": "include", "fields": ["Name"] }
+        ]
+      },
+      "class": "form-fill",
+      "fields": ["Name"],
+      "kind": "refuse",
+      "reason": "fields-locked"
     }
   ]
 }

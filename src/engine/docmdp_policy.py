@@ -392,6 +392,61 @@ class _TolerantSigFieldCreationRule(SigFieldCreationRule):
             yield update
 
 
+class LockedFieldModification(SuspiciousModification):
+    """A revision updated a form field a signature's ``/FieldMDP`` locks.
+
+    Carries the field NAMES, so the verdict crosses the IPC boundary as data.
+    The library's own refusal for this case is a message naming an object
+    number, which is not user information and would have to be parsed to be
+    useful."""
+
+    def __init__(self, fields):
+        super().__init__("a locked form field was updated")
+        self.fields = list(fields)
+
+
+class LockAwareDiffPolicy(StandardDiffPolicy):
+    """The standard policy, reporting a locked-field update as its own kind.
+
+    The check itself is the standard policy's — it raises when a form update
+    that is not valid-when-locked touches a locked field. Only the FAILURE path
+    is re-examined here, so the ordinary verdict costs nothing extra, and a
+    suspicious modification that is not a lock violation propagates unchanged
+    rather than being relabelled as one.
+    """
+
+    def apply(self, old, new, field_mdp_spec=None, doc_mdp=None):
+        try:
+            return super().apply(
+                old, new, field_mdp_spec=field_mdp_spec, doc_mdp=doc_mdp
+            )
+        except SuspiciousModification:
+            if field_mdp_spec is None:
+                raise
+            locked = self._locked_fields_touched(old, new, field_mdp_spec)
+            if not locked:
+                raise
+            raise LockedFieldModification(locked) from None
+
+    def _locked_fields_touched(self, old, new, field_mdp_spec) -> list:
+        if self.form_rule is None:
+            return []
+        found: list = []
+        try:
+            for _level, update in self.form_rule.apply(old, new):
+                name = update.field_name
+                if name is None or update.valid_when_locked or name in found:
+                    continue
+                if field_mdp_spec.is_locked(name):
+                    found.append(name)
+        except Exception:
+            # The form rule refusing mid-walk leaves whatever it had already
+            # reported; naming fewer fields is honest, naming none is the
+            # unchanged verdict.
+            return found
+        return found
+
+
 ANNOTATION_RULE = PageAnnotationRule()
 WIDGET_APPEARANCE_RULE = FieldWidgetAppearanceRule()
 
@@ -399,7 +454,7 @@ WIDGET_APPEARANCE_RULE = FieldWidgetAppearanceRule()
 def build_diff_policy() -> StandardDiffPolicy:
     """The standard rules plus the two this build supplies, each qualified at
     the lowest level that describes what it clears."""
-    return StandardDiffPolicy(
+    return LockAwareDiffPolicy(
         global_rules=[
             *DEFAULT_DIFF_POLICY.global_rules,
             WIDGET_APPEARANCE_RULE.as_qualified(ModificationLevel.FORM_FILLING),

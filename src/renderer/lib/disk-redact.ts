@@ -20,6 +20,7 @@ import {
   ineligibleReason,
   joinDest,
   signedReasonText,
+  sweepReason,
   type DiskEntry,
   type SignedNote,
 } from './folder-sweep';
@@ -191,7 +192,7 @@ export async function runDiskSearch(
           const decision = signedEditDecision(policy, editClass);
           if (decision.kind !== 'proceed') {
             result.signed = {
-              reason: decision.reason,
+              reason: sweepReason(decision.reason),
               count: policy.count,
               refused: decision.kind === 'refuse',
             };

@@ -17,14 +17,21 @@ import {
   SIGNATURE_KIND_LABEL,
   SIGNATURE_STATUS_LABEL,
   CERTIFICATION_LEVEL_LABEL,
+  LOCK_ACTION_LABEL,
   CERTIFY_LEVELS,
   DEFAULT_CERTIFY,
+  DEFAULT_LOCK,
   certifyParams,
+  lockParams,
   type CertificationLevel,
   type CertifyOptions,
+  type LockAction,
+  type LockOptions,
   type SignatureEntry,
   type VerifyResult,
 } from '../lib/signatures';
+import { FieldLockControl } from '../components/FieldLockControl';
+import { readFormFields } from '../lib/forms';
 import {
   loadTrustConfig,
   saveSystemStore,
@@ -50,6 +57,8 @@ interface SignResult {
   /** Read back out of the written bytes, never echoed from the request. */
   certified?: boolean;
   certification_level?: CertificationLevel | null;
+  lock?: LockAction | null;
+  lock_fields?: string[];
 }
 
 const EMPTY_VERIFY_SNAPSHOT: SignatureVerifySnapshot = {
@@ -70,6 +79,11 @@ function harnessCertify(params: {
   return params.certify
     ? { certify: true, level: params.certifyLevel ?? DEFAULT_CERTIFY.level }
     : DEFAULT_CERTIFY;
+}
+
+/** The same for the field lock; an omitted action locks nothing. */
+function harnessLock(params: { lock?: LockAction; lockFields?: string[] }): LockOptions {
+  return params.lock ? { action: params.lock, fields: params.lockFields ?? [] } : DEFAULT_LOCK;
 }
 
 export function SignaturesPanel(): React.ReactElement {
@@ -103,6 +117,11 @@ export function SignaturesPanel(): React.ReactElement {
   // so on any other document the control is ABSENT with a sentence saying why
   // rather than present and unusable.
   const [certify, setCertify] = useState<CertifyOptions>(DEFAULT_CERTIFY);
+  // The field lock. Independent of certification — a lock binds with no
+  // certification present — so it is offered on every signature, and the field
+  // names come from the document rather than from typing.
+  const [lock, setLock] = useState<LockOptions>(DEFAULT_LOCK);
+  const [lockableFields, setLockableFields] = useState<string[]>([]);
 
   // Trust management: user-chosen CA anchors, plus an explicit opt-in to the
   // OS certificate store. Both persisted, both off/empty by default — with
@@ -159,7 +178,30 @@ export function SignaturesPanel(): React.ReactElement {
     setSignResult(null);
     setSignError(null);
     setCertify(DEFAULT_CERTIFY);
+    setLock(DEFAULT_LOCK);
   }, [path]);
+
+  // The names a lock can choose from. Signature fields are excluded — a lock
+  // governs form fields. `read_form_fields` is an INTERNAL read, so opening the
+  // sign form does not flush the user's pending page edits to disk.
+  useEffect(() => {
+    if (!workingPath) {
+      setLockableFields([]);
+      return;
+    }
+    let cancelled = false;
+    void readFormFields(call, workingPath)
+      .then(({ fields }) => {
+        if (cancelled) return;
+        setLockableFields(fields.filter((f) => f.type !== 'signature').map((f) => f.name));
+      })
+      .catch(() => {
+        if (!cancelled) setLockableFields([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workingPath, call]);
 
   // The core engine call, shared by the UI handler and the e2e harness hook
   // (native .pfx/save dialogs aren't WebDriver-drivable). No dialog / no state
@@ -174,6 +216,7 @@ export function SignaturesPanel(): React.ReactElement {
       appearance?: { page: number; rect: [number, number, number, number] },
       profile?: { pades?: boolean; tsaUrl?: string; ltv?: boolean },
       certification: CertifyOptions = DEFAULT_CERTIFY,
+      fieldLock: LockOptions = DEFAULT_LOCK,
     ): Promise<SignResult> => {
       if (!activeFile) throw new Error(tChrome('refusal.file.noActiveToSign'));
       return (await call('sign_pdf', {
@@ -189,6 +232,7 @@ export function SignaturesPanel(): React.ReactElement {
         ...(profile?.tsaUrl?.trim() ? { tsa_url: profile.tsaUrl.trim() } : {}),
         ...(profile?.ltv ? { embed_revocation: true, ...trustVerifyParams(trust) } : {}),
         ...certifyParams(certification),
+        ...lockParams(fieldLock),
       })) as unknown as SignResult;
     },
     [activeFile, call, trust],
@@ -221,6 +265,7 @@ export function SignaturesPanel(): React.ReactElement {
         resolved.params!, password, dest, reason, location, undefined,
         { pades, tsaUrl, ltv },
         certify,
+        lock,
       );
       setSignResult(res);
       setShowSign(false);
@@ -234,7 +279,7 @@ export function SignaturesPanel(): React.ReactElement {
       signingRef.current = false;
       setSigning(false);
     }
-  }, [activeFile, source, password, reason, location, doSign, pades, tsaUrl, ltv, certify]);
+  }, [activeFile, source, password, reason, location, doSign, pades, tsaUrl, ltv, certify, lock]);
 
   // The core in-place sign, shared by the UI handler and the e2e harness
   // hook (the native .pfx picker is not WebDriver-drivable, exactly as doSign).
@@ -250,6 +295,7 @@ export function SignaturesPanel(): React.ReactElement {
       rsn?: string,
       loc?: string,
       certification: CertifyOptions = DEFAULT_CERTIFY,
+      fieldLock: LockOptions = DEFAULT_LOCK,
     ): Promise<VerifyResult> => {
       if (!activeFile) throw new Error(tChrome('refusal.file.noActiveToSign'));
       await performOperation(activeFile.path, 'sign_pdf', {
@@ -265,6 +311,7 @@ export function SignaturesPanel(): React.ReactElement {
         ...(tsaUrl.trim() ? { tsa_url: tsaUrl.trim() } : {}),
         ...(ltv ? { embed_revocation: true, ...trustVerifyParams(trust) } : {}),
         ...certifyParams(certification),
+        ...lockParams(fieldLock),
       });
       // The now-signed working copy (same path, new bytes) re-verifies under
       // the same trust configuration the panel is displaying.
@@ -293,7 +340,7 @@ export function SignaturesPanel(): React.ReactElement {
     setSignError(null);
     setSignResult(null);
     try {
-      const v = await doSignInPlace(resolved.params!, password, reason, location, certify);
+      const v = await doSignInPlace(resolved.params!, password, reason, location, certify, lock);
       setResult(v); // the new signature lists immediately
       setShowSign(false);
     } catch (e: unknown) {
@@ -303,7 +350,7 @@ export function SignaturesPanel(): React.ReactElement {
       signInPlaceRef.current = false;
       setSigning(false);
     }
-  }, [activeFile, source, password, reason, location, doSignInPlace, certify]);
+  }, [activeFile, source, password, reason, location, doSignInPlace, certify, lock]);
 
   // e2e-only: register the real sign call so the harness can drive it with
   // injected paths (the native dialogs can't be driven by WebDriver).
@@ -330,6 +377,7 @@ export function SignaturesPanel(): React.ReactElement {
           p.appearance,
           p.pades ? { pades: true } : undefined,
           harnessCertify(p),
+          harnessLock(p),
         ),
       signInPlace: (p) =>
         doSignInPlaceRef
@@ -341,6 +389,7 @@ export function SignaturesPanel(): React.ReactElement {
             p.reason,
             p.location,
             harnessCertify(p),
+            harnessLock(p),
           )
           .then((v) => ({
             signature_count: v.signature_count,
@@ -356,12 +405,15 @@ export function SignaturesPanel(): React.ReactElement {
           certified: v.certification?.certified === true,
           certification_level: v.certification?.level ?? null,
           any_policy_violation: v.summary.any_policy_violation === true,
+          any_lock_violation: v.summary.any_lock_violation === true,
           signatures: v.signatures.map((s) => ({
             field: s.field,
             certification_level: s.certification_level ?? null,
             policy_ok: s.policy_ok ?? null,
             policy_judged: s.policy_judged === true,
             modification_level: s.modification_level ?? null,
+            lock: s.lock ?? null,
+            lock_violation: s.lock_violation ?? null,
           })),
         };
       },
@@ -509,6 +561,7 @@ export function SignaturesPanel(): React.ReactElement {
                 getCanvasServices()?.startVisibleSignature?.(
                   source,
                   result?.signed ? DEFAULT_CERTIFY : certify,
+                  lock,
                 )
               }
               className="self-start px-2 py-1 text-xs bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded"
@@ -627,6 +680,12 @@ export function SignaturesPanel(): React.ReactElement {
               )}
             </div>
           )}
+          <FieldLockControl
+            value={lock}
+            onChange={setLock}
+            fieldNames={lockableFields}
+            idPrefix="sign"
+          />
           {signError && <div className="text-xs text-red-400">{signError}</div>}
           <div className="flex justify-end gap-2">
             <button
@@ -780,6 +839,22 @@ function SignatureCard({
           className={`text-xs ${verdict === 'unjudged' ? 'text-amber-200/90' : 'text-red-300'}`}
         >
           {tChrome(POLICY_VERDICT_LABEL[verdict])}
+        </div>
+      )}
+      {/* The field lock is a THIRD fact beside validity and the certification
+          verdict: a signature can be valid, within the document's
+          certification, and still report a change to what it locked. */}
+      {sig.lock && (
+        <div data-testid="signature-lock" data-lock-action={sig.lock.action} className="text-xs text-neutral-400">
+          {tChrome(LOCK_ACTION_LABEL[sig.lock.action], { fields: sig.lock.fields.join(', ') })}
+        </div>
+      )}
+      {sig.lock_violation && (
+        <div data-testid="signature-lock-violation" className="text-xs text-red-300">
+          {tChrome('panel.sig.lockViolated', {
+            field: sig.field ?? tChrome('panel.sig.unnamedField'),
+            fields: sig.lock_violation.fields.join(', '),
+          })}
         </div>
       )}
       <div className="text-xs text-neutral-500 flex flex-wrap gap-x-4 gap-y-0.5">
