@@ -61,15 +61,21 @@ export function formatTimestamp(d: Date): string {
   );
 }
 
-/** The log's own name. Colons are illegal in Windows filenames, so the clock
- * part is run together; the date-first shape sorts chronologically in Explorer
- * and is the pattern the retention sweep matches on. */
-export function batchLogFileName(startedAt: Date): string {
+/** A run log's name. Colons are illegal in Windows filenames, so the clock
+ * part is run together; the date-first shape sorts chronologically in Explorer.
+ * The prefix is what the retention sweep matches on, so a new kind of run
+ * takes a new prefix here AND in the Rust name check, or its logs accumulate
+ * forever. */
+export function sweepLogFileName(prefix: string, startedAt: Date): string {
   const d = startedAt;
   return (
-    `batch-ocr-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `${prefix}${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
     `_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.log`
   );
+}
+
+export function batchLogFileName(startedAt: Date): string {
+  return sweepLogFileName('batch-ocr-', startedAt);
 }
 
 export function formatDuration(ms: number): string {

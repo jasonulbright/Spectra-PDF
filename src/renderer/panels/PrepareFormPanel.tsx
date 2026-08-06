@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
-import { getCanvasServices } from '../commands/context';
+import { getCanvasServices, invokeCommand } from '../commands/context';
 import { ghostscriptPath, tesseractPath } from '../lib/ocr-recognize';
 import { DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
 import { tChrome, tChromeCount } from '../i18n';
@@ -239,6 +239,15 @@ export function PrepareFormPanel(): React.ReactElement {
         onClick={() => void detect()}
       >
         {busy ? tChrome('panel.prepareForm.detecting') : tChrome('panel.prepareForm.detect')}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => invokeCommand('tools.formPrepFolder')}
+        data-testid="prepare-form-folder"
+        className="self-start text-xs text-neutral-400 hover:text-neutral-200 underline"
+      >
+        {tChrome('dialog.formPrep.openPanel')}
       </button>
 
       {error && <div className="text-sm text-red-400">{tChrome('panel.common.error', { message: error })}</div>}

@@ -31,6 +31,7 @@ export type GuidedStepOp =
   | 'strip_metadata'
   | 'sanitize'
   | 'search_redact'
+  | 'prepare_forms'
   | 'watermark'
   | 'ocr_file'
   | 'add_header_footer'
@@ -249,6 +250,65 @@ export const STEP_CATALOG: readonly StepDef[] = [
         marks_only: String(params.mode ?? 'apply') === 'marks',
         allow_signed: String(params.signed ?? 'skip') === 'include',
         ...(overlay ? { properties: { overlay_text: overlay } } : {}),
+      };
+    },
+  },
+  {
+    // A folder run has no review step, so this creates every field the
+    // detector offers. The kinds list is the only narrowing available without
+    // a reviewer.
+    op: 'prepare_forms',
+    title: 'Prepare Forms (detect fields)',
+    needsGs: true,
+    needsTesseract: true,
+    needsFontDir: true,
+    params: [
+      {
+        key: 'kinds',
+        label: 'Field types to add',
+        kind: 'text',
+        defaultValue: '',
+        hint: 'Comma-separated: text, checkbox, radio, signature. Empty adds every type it finds.',
+      },
+      {
+        key: 'scan',
+        label: 'Scanned pages',
+        kind: 'select',
+        options: [
+          { value: 'auto', label: 'Recognise a page with nothing readable on it' },
+          { value: 'never', label: 'Never recognise — stay offline' },
+          { value: 'always', label: 'Recognise every page' },
+        ],
+        defaultValue: 'auto',
+      },
+      {
+        key: 'language',
+        label: 'Recognition language',
+        kind: 'select',
+        options: OCR_LANGUAGES.map((l) => ({ value: l.code, label: l.label })),
+        defaultValue: 'eng',
+      },
+      {
+        key: 'signed',
+        label: 'Signed documents',
+        kind: 'select',
+        options: [
+          { value: 'skip', label: 'Refuse (leave them untouched)' },
+          { value: 'include', label: 'Add fields anyway (their signatures break)' },
+        ],
+        defaultValue: 'skip',
+      },
+    ],
+    mapParams: (params) => {
+      const kinds = String(params.kinds ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      return {
+        scan: String(params.scan ?? 'auto'),
+        lang: String(params.language ?? 'eng'),
+        allow_signed: String(params.signed ?? 'skip') === 'include',
+        ...(kinds.length > 0 ? { kinds } : {}),
       };
     },
   },

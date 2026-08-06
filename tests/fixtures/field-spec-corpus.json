@@ -1,0 +1,357 @@
+{
+  "note": "Detected candidate rows and the authoring specs they must become. Read by the Python and the TypeScript spec builders alike: two implementations of one rule drift the moment nothing compares them. Rect values are PDF user space; page_index is 0-based.",
+  "cases": [
+    {
+      "name": "labelled rules, with one name already taken by the document",
+      "existing": ["First_name"],
+      "candidates": [
+        {
+          "page": 1,
+          "kind": "text",
+          "rect": [170.0, 700.35, 520.35, 714.7],
+          "name": "First_name",
+          "label": "First name:",
+          "group": null,
+          "export": null,
+          "multiline": false,
+          "comb": null
+        },
+        {
+          "page": 1,
+          "kind": "text",
+          "rect": [170.0, 660.35, 520.35, 674.7],
+          "name": "Last_name",
+          "label": "Last name:",
+          "group": null,
+          "export": null,
+          "multiline": false,
+          "comb": null
+        },
+        {
+          "page": 2,
+          "kind": "text",
+          "rect": [170.0, 620.35, 520.35, 634.7],
+          "name": "Employer",
+          "label": "Employer:",
+          "group": null,
+          "export": null,
+          "multiline": false,
+          "comb": null
+        }
+      ],
+      "specs": [
+        {
+          "name": "First_name_2",
+          "type": "text",
+          "page_index": 0,
+          "rect": [170.0, 700.35, 520.35, 714.7]
+        },
+        {
+          "name": "Last_name",
+          "type": "text",
+          "page_index": 0,
+          "rect": [170.0, 660.35, 520.35, 674.7]
+        },
+        {
+          "name": "Employer",
+          "type": "text",
+          "page_index": 1,
+          "rect": [170.0, 620.35, 520.35, 634.7]
+        }
+      ]
+    },
+    {
+      "name": "independent toggles beside a radio group",
+      "existing": [],
+      "candidates": [
+        {
+          "page": 1,
+          "kind": "checkbox",
+          "rect": [72.0, 380.0, 82.0, 390.0],
+          "name": "Yes",
+          "label": "Yes",
+          "group": null,
+          "export": null,
+          "multiline": false,
+          "comb": null
+        },
+        {
+          "page": 1,
+          "kind": "checkbox",
+          "rect": [192.0, 380.0, 202.0, 390.0],
+          "name": "No",
+          "label": "No",
+          "group": null,
+          "export": null,
+          "multiline": false,
+          "comb": null
+        },
+        {
+          "page": 1,
+          "kind": "radio",
+          "rect": [72.0, 320.0, 81.0, 329.0],
+          "name": "Preferred_contact_method",
+          "label": "Email",
+          "group": "Preferred_contact_method",
+          "export": "Email",
+          "multiline": false,
+          "comb": null
+        },
+        {
+          "page": 1,
+          "kind": "radio",
+          "rect": [182.0, 320.0, 191.0, 329.0],
+          "name": "Preferred_contact_method",
+          "label": "Phone",
+          "group": "Preferred_contact_method",
+          "export": "Phone",
+          "multiline": false,
+          "comb": null
+        },
+        {
+          "page": 1,
+          "kind": "radio",
+          "rect": [292.0, 320.0, 301.0, 329.0],
+          "name": "Preferred_contact_method",
+          "label": "Mail",
+          "group": "Preferred_contact_method",
+          "export": "Mail",
+          "multiline": false,
+          "comb": null
+        }
+      ],
+      "specs": [
+        {
+          "name": "Yes",
+          "type": "checkbox",
+          "page_index": 0,
+          "rect": [72.0, 380.0, 82.0, 390.0]
+        },
+        {
+          "name": "No",
+          "type": "checkbox",
+          "page_index": 0,
+          "rect": [192.0, 380.0, 202.0, 390.0]
+        },
+        {
+          "name": "Preferred_contact_method",
+          "type": "radio",
+          "page_index": 0,
+          "rect": [72.0, 320.0, 301.0, 329.0],
+          "options": [
+            { "label": "Email", "rect": [72.0, 320.0, 81.0, 329.0] },
+            { "label": "Phone", "rect": [182.0, 320.0, 191.0, 329.0] },
+            { "label": "Mail", "rect": [292.0, 320.0, 301.0, 329.0] }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a group drawn across two pages keeps one home",
+      "existing": [],
+      "candidates": [
+        {
+          "page": 1,
+          "kind": "radio",
+          "rect": [72.0, 320.0, 81.0, 329.0],
+          "name": "Choose_one",
+          "label": "A",
+          "group": "Choose_one",
+          "export": "A",
+          "multiline": false,
+          "comb": null
+        },
+        {
+          "page": 1,
+          "kind": "radio",
+          "rect": [182.0, 320.0, 191.0, 329.0],
+          "name": "Choose_one",
+          "label": "B",
+          "group": "Choose_one",
+          "export": "B",
+          "multiline": false,
+          "comb": null
+        },
+        {
+          "page": 2,
+          "kind": "radio",
+          "rect": [72.0, 320.0, 81.0, 329.0],
+          "name": "Choose_one",
+          "label": "C",
+          "group": "Choose_one",
+          "export": "C",
+          "multiline": false,
+          "comb": null
+        }
+      ],
+      "specs": [
+        {
+          "name": "Choose_one",
+          "type": "radio",
+          "page_index": 0,
+          "rect": [72.0, 320.0, 191.0, 329.0],
+          "options": [
+            { "label": "A", "rect": [72.0, 320.0, 81.0, 329.0] },
+            { "label": "B", "rect": [182.0, 320.0, 191.0, 329.0] }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "text extras and a signature",
+      "existing": [],
+      "candidates": [
+        {
+          "page": 1,
+          "kind": "text",
+          "rect": [72.0, 420.0, 540.0, 510.0],
+          "name": "Comments",
+          "label": "Comments",
+          "group": null,
+          "export": null,
+          "multiline": true,
+          "comb": null
+        },
+        {
+          "page": 1,
+          "kind": "text",
+          "rect": [72.0, 300.0, 192.0, 320.0],
+          "name": "Postcode",
+          "label": "Postcode",
+          "group": null,
+          "export": null,
+          "multiline": false,
+          "comb": 6
+        },
+        {
+          "page": 1,
+          "kind": "text",
+          "rect": [72.0, 250.0, 192.0, 290.0],
+          "name": "Notes",
+          "label": "Notes",
+          "group": null,
+          "export": null,
+          "multiline": true,
+          "comb": 6
+        },
+        {
+          "page": 1,
+          "kind": "signature",
+          "rect": [72.0, 150.0, 300.0, 200.0],
+          "name": "Signature",
+          "label": "Signature:",
+          "group": null,
+          "export": null,
+          "multiline": false,
+          "comb": null
+        }
+      ],
+      "specs": [
+        {
+          "name": "Comments",
+          "type": "text",
+          "page_index": 0,
+          "rect": [72.0, 420.0, 540.0, 510.0],
+          "multiline": true
+        },
+        {
+          "name": "Postcode",
+          "type": "text",
+          "page_index": 0,
+          "rect": [72.0, 300.0, 192.0, 320.0],
+          "comb": true,
+          "max_length": 6
+        },
+        {
+          "name": "Notes",
+          "type": "text",
+          "page_index": 0,
+          "rect": [72.0, 250.0, 192.0, 290.0],
+          "multiline": true
+        },
+        {
+          "name": "Signature",
+          "type": "signature",
+          "page_index": 0,
+          "rect": [72.0, 150.0, 300.0, 200.0]
+        }
+      ]
+    },
+    {
+      "name": "names the format cannot carry",
+      "existing": [],
+      "candidates": [
+        {
+          "page": 1,
+          "kind": "text",
+          "rect": [72.0, 700.0, 300.0, 714.0],
+          "name": "Zip/Postal",
+          "label": "Zip/Postal",
+          "group": null,
+          "export": null,
+          "multiline": false,
+          "comb": null
+        },
+        {
+          "page": 1,
+          "kind": "text",
+          "rect": [72.0, 680.0, 300.0, 694.0],
+          "name": "Amount.paid",
+          "label": "Amount.paid",
+          "group": null,
+          "export": null,
+          "multiline": false,
+          "comb": null
+        },
+        {
+          "page": 1,
+          "kind": "text",
+          "rect": [72.0, 660.0, 300.0, 674.0],
+          "name": "",
+          "label": null,
+          "group": null,
+          "export": null,
+          "multiline": false,
+          "comb": null
+        },
+        {
+          "page": 1,
+          "kind": "text",
+          "rect": [72.0, 640.0, 300.0, 654.0],
+          "name": "",
+          "label": null,
+          "group": null,
+          "export": null,
+          "multiline": false,
+          "comb": null
+        }
+      ],
+      "specs": [
+        {
+          "name": "ZipPostal",
+          "type": "text",
+          "page_index": 0,
+          "rect": [72.0, 700.0, 300.0, 714.0]
+        },
+        {
+          "name": "Amountpaid",
+          "type": "text",
+          "page_index": 0,
+          "rect": [72.0, 680.0, 300.0, 694.0]
+        },
+        {
+          "name": "Field",
+          "type": "text",
+          "page_index": 0,
+          "rect": [72.0, 660.0, 300.0, 674.0]
+        },
+        {
+          "name": "Field_2",
+          "type": "text",
+          "page_index": 0,
+          "rect": [72.0, 640.0, 300.0, 654.0]
+        }
+      ]
+    }
+  ]
+}

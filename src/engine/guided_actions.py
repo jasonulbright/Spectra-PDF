@@ -51,6 +51,7 @@ from engine.headers import add_header_footer
 from engine.metadata import strip_metadata
 from engine.pdfa import convert_pdfa
 from engine.sanitize import sanitize_pdf
+from engine.form_prepare import prepare_form_fields
 from engine.search_redact import search_and_redact
 from engine.watermark import watermark
 
@@ -138,6 +139,14 @@ _STEPS: dict = {
         frozenset({"font_dir"}),
     ),
     "ocr_file": (ocr_file, frozenset({"language"}), frozenset({"gs_path", "tesseract_path"})),
+    # No review step exists in a folder run, so this creates every field the
+    # detector offers. `kinds` is the only narrowing available without a
+    # reviewer.
+    "prepare_forms": (
+        prepare_form_fields,
+        frozenset({"pages", "scan", "lang", "max_candidates", "kinds", "allow_signed"}),
+        frozenset({"gs_path", "tesseract_path", "font_dir"}),
+    ),
     "encrypt": (encrypt, frozenset({"user_password", "owner_password", "permissions"}), frozenset()),
     # The one step that PRODUCES the document instead of
     # transforming it, which is why it is handled by `run_action` directly
