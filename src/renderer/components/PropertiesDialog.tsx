@@ -4,8 +4,9 @@ import { useEngine } from '../hooks/useEngine';
 import { invokeCommand } from '../commands/context';
 import { useAppModal } from '../hooks/useAppModal';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tChromeCount, tNumber } from '../i18n';
+import { tChrome, tNumber } from '../i18n';
 import { runCommitGate } from '../lib/commit-gate';
+import { formatBytes } from '../lib/format-bytes';
 import type { PdfBuffer } from '../state/types';
 
 // File ▸ Properties combines metadata, PDF version, and encryption status in a
@@ -318,12 +319,3 @@ function byteLengthOf(buffer: PdfBuffer | null): number | null {
   return buffer.byteLength;
 }
 
-function formatBytes(n: number | null): string {
-  // Numbers go through Intl — the decimal separator and the
-  // digit grouping are locale properties, never hand-rolled.
-  if (n === null) return tChrome('dialog.props.unknown');
-  if (n < 1024) return tChromeCount('dialog.props.bytes', n);
-  const opts = { minimumFractionDigits: 1, maximumFractionDigits: 1 };
-  if (n < 1024 * 1024) return tChrome('dialog.props.kilobytes', { size: tNumber(n / 1024, opts) });
-  return tChrome('dialog.props.megabytes', { size: tNumber(n / (1024 * 1024), opts) });
-}
