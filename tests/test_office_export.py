@@ -27,8 +27,8 @@ def _text_pdf(path: str) -> None:
 
 
 def test_supported_formats_lists_the_targets():
-    fmts = supported_formats()["formats"]
-    assert set(fmts) >= {"docx", "rtf", "odt", "html", "xhtml"}
+    keys = {f["key"] for f in supported_formats()["formats"]}
+    assert keys >= {"docx", "rtf", "odt", "html", "xhtml"}
 
 
 def test_rejects_an_unknown_format(tmp_dir, soffice_path):
@@ -84,6 +84,46 @@ def test_rtf_bridge(tmp_dir, soffice_path):
     export_document(src, out, "rtf", soffice_path)
     body = open(out, encoding="latin-1", errors="replace").read()
     assert body.lstrip().startswith("{\\rtf")
+
+
+def test_odt_bridge_carries_a_body_part(tmp_dir, soffice_path):
+    src = os.path.join(tmp_dir, "s.pdf")
+    out = os.path.join(tmp_dir, "out.odt")
+    _text_pdf(src)
+    export_document(src, out, "odt", soffice_path)
+    with zipfile.ZipFile(out) as z:
+        assert "content.xml" in z.namelist()
+
+
+def test_xhtml_export_carries_a_body(tmp_dir, soffice_path):
+    src = os.path.join(tmp_dir, "s.pdf")
+    out = os.path.join(tmp_dir, "out.xhtml")
+    _text_pdf(src)
+    export_document(src, out, "xhtml", soffice_path)
+    assert b"<body" in open(out, "rb").read().lower()
+
+
+def test_an_empty_package_is_not_reported_as_a_success(tmp_dir, monkeypatch):
+    # A conversion can write a well-formed, non-empty package with none of the
+    # document in it, which the size check passes. Drive the runner to produce
+    # exactly that and require a refusal.
+    import engine.office_export as oe
+
+    src = os.path.join(tmp_dir, "s.pdf")
+    _text_pdf(src)
+
+    def fake_convert(_soffice, _convert_to, _source, out_dir, want_ext):
+        produced = Path(out_dir) / f"hollow{want_ext}"
+        if want_ext == ".html":
+            produced.write_bytes(b"<html><body>text</body></html>")
+            return produced
+        with zipfile.ZipFile(produced, "w") as package:
+            package.writestr("[Content_Types].xml", "<Types/>")
+        return produced
+
+    monkeypatch.setattr(oe, "run_convert", fake_convert)
+    with pytest.raises(RuntimeError, match="carries no document content"):
+        export_document(src, os.path.join(tmp_dir, "o.docx"), "docx", "any-soffice-path")
 
 
 def test_same_file_guard(tmp_dir, soffice_path):

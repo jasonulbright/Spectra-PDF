@@ -535,6 +535,9 @@ pub struct ExtractTextArgs {
     /// Comma-separated page numbers (1-based), or "all"
     #[arg(short, long, default_value = "all")]
     pub pages: String,
+    /// Write the extracted text to this file (UTF-8, no BOM)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -907,9 +910,18 @@ pub struct ExportArgs {
     /// Output file (extension should match the format)
     #[arg(short, long)]
     pub output: PathBuf,
-    /// Target format: docx, rtf, odt, html, xhtml
+    /// Target format: docx, rtf, odt, html, xhtml, txt
     #[arg(short, long, default_value = "docx")]
     pub format: String,
+    /// Page range like "1,3" or "all" (txt only)
+    #[arg(long, default_value = "")]
+    pub pages: String,
+    /// Text ordering: reading or layout (txt only)
+    #[arg(long)]
+    pub layout: Option<String>,
+    /// Write a form feed between pages (txt only)
+    #[arg(long)]
+    pub page_breaks: bool,
 }
 
 #[derive(Args)]
@@ -2262,13 +2274,14 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::ExtractText(args) => {
-            engine.call(
-                "extract_text",
-                json!({
-                    "file": abs(&args.input).to_string_lossy(),
-                    "pages": parse_pages(&args.pages),
-                }),
-            )
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "pages": parse_pages(&args.pages),
+            });
+            if let Some(output) = &args.output {
+                params["output"] = json!(abs(output).to_string_lossy());
+            }
+            engine.call("extract_text", params)
         }
 
         CliCommand::Delete(args) => {
@@ -2725,15 +2738,27 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             engine.call("add_struct_node", params)
         }
 
-        CliCommand::Export(args) => engine.call(
-            "export_document",
-            json!({
+        CliCommand::Export(args) => {
+            let mut params = json!({
                 "file": abs(&args.input).to_string_lossy(),
                 "output": abs(&args.output).to_string_lossy(),
                 "fmt": args.format,
                 "soffice_path": resolve_soffice(),
-            }),
-        ),
+            });
+            // An omitted option stays absent rather than defaulting here: the
+            // engine refuses an option the target does not take, and a value
+            // sent unasked would turn every such refusal into a false one.
+            if !args.pages.trim().is_empty() {
+                params["pages"] = parse_pages(&args.pages);
+            }
+            if let Some(layout) = &args.layout {
+                params["layout"] = json!(layout);
+            }
+            if args.page_breaks {
+                params["page_breaks"] = json!(true);
+            }
+            engine.call("export_document", params)
+        }
 
         CliCommand::ExportImages(args) => {
             let gs = resolve_gs();

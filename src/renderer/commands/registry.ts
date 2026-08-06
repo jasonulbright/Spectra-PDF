@@ -145,6 +145,7 @@ export const COMMAND_IDS = [
   'file.exportOdt',
   'file.exportHtml',
   'file.exportXhtml',
+  'file.exportText',
   'file.exportImages',
   'file.close',
   'file.closeAll',
@@ -420,6 +421,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'XHTML (.xhtml)…',
     when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
     run: (ctx) => ctx.app!.exportDocument('xhtml'),
+  },
+  // Plain text is produced by the engine itself, so it stays available whether
+  // or not LibreOffice is provisioned.
+  'file.exportText': {
+    title: 'Plain Text (.txt)…',
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    run: (ctx) => ctx.app!.exportDocument('txt'),
   },
   'file.exportImages': {
     title: 'Images (PNG/JPEG/TIFF)…',

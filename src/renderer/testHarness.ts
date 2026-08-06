@@ -757,7 +757,7 @@ export interface TestHarness {
   sendToEmailStage: () => Promise<string>;
   /** Export the active document to `destPath` in `format` via the engine
    *  (bypasses the native save dialog). Returns the engine result. */
-  exportActiveAs: (destPath: string, format: string) => Promise<unknown>;
+  exportActiveAs: (destPath: string, format: string, options?: Record<string, unknown>) => Promise<unknown>;
   /** Switch the main view (legacy — maps onto the tab model: welcome→Home,
    * operations→Tools, canvas→the active/first document's tab). */
   setView: (view: 'welcome' | 'operations' | 'canvas') => void;
@@ -1309,7 +1309,7 @@ export interface TestHarnessDeps {
   closeAllFiles: () => void;
   importPagesIntoDoc: (filePath: string, toDocId: string, toIndex: number) => Promise<void>;
   /** Export via the engine, with an explicit destination (no dialog). */
-  exportActiveDocument: (destPath: string, format: string) => Promise<unknown>;
+  exportActiveDocument: (destPath: string, format: string, options?: Record<string, unknown>) => Promise<unknown>;
 }
 
 export const TEST_HARNESS_ENABLED =
@@ -1422,7 +1422,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw err;
       }
     },
-    exportActiveAs: async (destPath, format) => {
+    exportActiveAs: async (destPath, format, options) => {
       const snap = deps.getStateSnapshot();
       if (!snap.activeFile) {
         const msg = 'exportActiveAs: no active file';
@@ -1430,7 +1430,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       try {
-        return await deps.exportActiveDocument(destPath, format);
+        return await deps.exportActiveDocument(destPath, format, options);
       } catch (err) {
         captureError('exportActiveAs', err);
         throw err;
