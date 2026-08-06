@@ -25,6 +25,16 @@ import {
   type SignatureEntry,
   type VerifyResult,
 } from '../lib/signatures';
+import {
+  loadTrustConfig,
+  saveSystemStore,
+  saveTrustAnchors,
+  systemStoreUnavailable,
+  trustSummary,
+  trustVerifyParams,
+  TRUST_SOURCE_LABEL,
+  type TrustConfig,
+} from '../lib/trust-store';
 import { CertificationBanner } from '../components/CertificationBanner';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
@@ -94,25 +104,19 @@ export function SignaturesPanel(): React.ReactElement {
   // rather than present and unusable.
   const [certify, setCertify] = useState<CertifyOptions>(DEFAULT_CERTIFY);
 
-  // Trust management: user-chosen CA anchors, persisted. The OS store is
-  // deliberately never consulted (the panel's standing explicit-trust rule);
-  // these are the ONLY anchors `trusted` can chain to.
-  const [trustRoots, setTrustRoots] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem('spectra.trustAnchors');
-      const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-      return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === 'string') : [];
-    } catch {
-      return [];
-    }
-  });
+  // Trust management: user-chosen CA anchors, plus an explicit opt-in to the
+  // OS certificate store. Both persisted, both off/empty by default — with
+  // neither, nothing can make `trusted` true, which is the explicit-trust
+  // posture the panel has always stated.
+  const [trust, setTrust] = useState<TrustConfig>(loadTrustConfig);
+  const trustRoots = trust.anchors;
   const saveTrustRoots = useCallback((roots: string[]) => {
-    setTrustRoots(roots);
-    try {
-      localStorage.setItem('spectra.trustAnchors', JSON.stringify(roots));
-    } catch {
-      // persistence is best-effort; the session state still holds them
-    }
+    setTrust((t) => ({ ...t, anchors: roots }));
+    saveTrustAnchors(roots);
+  }, []);
+  const setSystemStore = useCallback((on: boolean) => {
+    setTrust((t) => ({ ...t, systemStore: on }));
+    saveSystemStore(on);
   }, []);
 
   const path = activeFile?.path ?? null;
@@ -126,7 +130,7 @@ export function SignaturesPanel(): React.ReactElement {
     try {
       const res = (await call('verify_signatures', {
         file: workingPath,
-        ...(trustRoots.length > 0 ? { trust_roots: trustRoots } : {}),
+        ...trustVerifyParams(trust),
       })) as unknown as VerifyResult;
       setResult(res);
       setStatus('');
@@ -135,14 +139,14 @@ export function SignaturesPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [workingPath, call, trustRoots]);
+  }, [workingPath, call, trust]);
 
-  // Auto-verify when the active file OR the trust anchors change.
+  // Auto-verify when the active file OR the trust configuration changes.
   useEffect(() => {
     if (path) void runVerify();
     else setResult(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, trustRoots]);
+  }, [path, trust]);
 
   // Reset the sign form when the active file changes — never carry a typed
   // password or a previous file's result across a switch.
@@ -183,11 +187,11 @@ export function SignaturesPanel(): React.ReactElement {
         ...(appearance ? { appearance } : {}),
         ...(profile?.pades ? { pades: true } : {}),
         ...(profile?.tsaUrl?.trim() ? { tsa_url: profile.tsaUrl.trim() } : {}),
-        ...(profile?.ltv ? { embed_revocation: true, ...(trustRoots.length > 0 ? { trust_roots: trustRoots } : {}) } : {}),
+        ...(profile?.ltv ? { embed_revocation: true, ...trustVerifyParams(trust) } : {}),
         ...certifyParams(certification),
       })) as unknown as SignResult;
     },
-    [activeFile, call, trustRoots],
+    [activeFile, call, trust],
   );
 
   // Ref, not just state: two clicks in the same tick both read a stale
@@ -259,15 +263,17 @@ export function SignaturesPanel(): React.ReactElement {
         ...(loc && loc.trim() ? { location: loc.trim() } : {}),
         ...(pades ? { pades: true } : {}),
         ...(tsaUrl.trim() ? { tsa_url: tsaUrl.trim() } : {}),
-        ...(ltv ? { embed_revocation: true, ...(trustRoots.length > 0 ? { trust_roots: trustRoots } : {}) } : {}),
+        ...(ltv ? { embed_revocation: true, ...trustVerifyParams(trust) } : {}),
         ...certifyParams(certification),
       });
-      // The now-signed working copy (same path, new bytes) re-verifies.
+      // The now-signed working copy (same path, new bytes) re-verifies under
+      // the same trust configuration the panel is displaying.
       return (await call('verify_signatures', {
         file: activeFile.workingPath,
+        ...trustVerifyParams(trust),
       })) as unknown as VerifyResult;
     },
-    [activeFile, performOperation, call, pades, tsaUrl, ltv, trustRoots],
+    [activeFile, performOperation, call, pades, tsaUrl, ltv, trust],
   );
 
   const signInPlaceRef = useRef(false);
@@ -423,30 +429,11 @@ export function SignaturesPanel(): React.ReactElement {
               />
             ))}
           </div>
-          {/* Trust posture: with no anchors, identity is explicitly
-              unverified (never the OS store); with user anchors, `trusted`
-              is validated against exactly those. */}
-          {trustRoots.length === 0 ? (
-            <div
-              data-testid="trust-caveat"
-              className="shrink-0 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded text-xs text-amber-200/90"
-            >
-              {tChrome('panel.sig.trustCaveat')}
-            </div>
-          ) : (
-            <div
-              data-testid="trust-status"
-              className={`shrink-0 px-3 py-2 rounded text-xs border ${
-                result.summary.trust_verified
-                  ? 'bg-green-600/10 border-green-600/30 text-green-200/90'
-                  : 'bg-amber-500/10 border-amber-500/30 text-amber-200/90'
-              }`}
-            >
-              {result.summary.trust_verified
-                ? tChromeCount('panel.sig.trustVerified', trustRoots.length)
-                : tChrome('panel.sig.trustFailed')}
-            </div>
-          )}
+          {/* Trust posture. With no source configured, identity is explicitly
+              unverified; with one, `trusted` is validated against exactly the
+              anchors that source supplies, and the box names which of them
+              vouched for the chain. */}
+          <TrustStatusBox trust={trust} result={result} />
         </>
       )}
 
@@ -481,6 +468,25 @@ export function SignaturesPanel(): React.ReactElement {
             </button>
           </div>
         ))}
+        {/* The second trust SOURCE, beside the anchors rather than in a
+            settings surface: it is the same decision, and it changes what the
+            list above means. Off unless turned on — the engine reads no
+            certificate store at all while it is off. */}
+        <label className="flex items-center gap-2 text-xs text-neutral-300 mt-1">
+          <input
+            data-testid="trust-system-store"
+            type="checkbox"
+            checked={trust.systemStore}
+            onChange={(e) => setSystemStore(e.target.checked)}
+          />
+          {tChrome('panel.sig.systemStore')}
+        </label>
+        <p className="text-[11px] text-neutral-500">{tChrome('panel.sig.systemStoreHint')}</p>
+        {systemStoreUnavailable(result) && (
+          <p data-testid="trust-system-store-unavailable" className="text-[11px] text-amber-200/90">
+            {tChrome('panel.sig.systemStoreUnavailable')}
+          </p>
+        )}
       </div>
 
       {showSign && (
@@ -681,6 +687,50 @@ export function SignaturesPanel(): React.ReactElement {
   );
 }
 
+/** The aggregate trust readout. The no-source case is its own box, not a
+ * failed verification: nothing was asked to vouch for the chain. */
+function TrustStatusBox({
+  trust,
+  result,
+}: {
+  trust: TrustConfig;
+  result: VerifyResult;
+}): React.ReactElement {
+  const summary = trustSummary(trust, result);
+  if (summary === 'none') {
+    return (
+      <div
+        data-testid="trust-caveat"
+        className="shrink-0 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded text-xs text-amber-200/90"
+      >
+        {tChrome('panel.sig.trustCaveat')}
+      </div>
+    );
+  }
+  const verified = summary !== 'failed';
+  const message =
+    summary === 'failed'
+      ? tChrome('panel.sig.trustFailed')
+      : summary === 'system'
+        ? tChrome('panel.sig.trustVerifiedSystem')
+        : summary === 'mixed'
+          ? tChrome('panel.sig.trustVerifiedMixed')
+          : tChromeCount('panel.sig.trustVerified', trust.anchors.length);
+  return (
+    <div
+      data-testid="trust-status"
+      data-trust={summary}
+      className={`shrink-0 px-3 py-2 rounded text-xs border ${
+        verified
+          ? 'bg-green-600/10 border-green-600/30 text-green-200/90'
+          : 'bg-amber-500/10 border-amber-500/30 text-amber-200/90'
+      }`}
+    >
+      {message}
+    </div>
+  );
+}
+
 function SignatureCard({
   sig,
   certified,
@@ -764,7 +814,17 @@ function SignatureCard({
         ) : (
           sig.signing_time && <span>{tChrome('panel.sig.claimedTime', { time: sig.signing_time })}</span>
         )}
-        {sig.trusted && <span data-testid="signature-trusted">{tChrome('panel.sig.identityTrusted')}</span>}
+        {sig.trusted && (
+          <span data-testid="signature-trusted" data-trust-source={sig.trust_source ?? 'unknown'}>
+            {/* Naming the source is the point: "trusted" means something
+                different when the machine vouched for the chain than when the
+                user did. An anchor matching neither set falls back to the
+                unqualified wording rather than claiming a source. */}
+            {sig.trust_source
+              ? tChrome(TRUST_SOURCE_LABEL[sig.trust_source])
+              : tChrome('panel.sig.identityTrusted')}
+          </span>
+        )}
       </div>
       {sig.error && <div className="text-xs text-red-400">{tChrome('panel.sig.errorLine', { message: sig.error })}</div>}
     </div>

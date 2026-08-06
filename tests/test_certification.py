@@ -260,6 +260,9 @@ _PRIOR_SIGNATURE_KEYS = {
 _CERTIFICATION_SIGNATURE_KEYS = {
     "certification_level", "policy_ok", "policy_judged", "modification_level",
 }
+# Named separately from the certification keys so the delta assertion still
+# says which capability each addition came from.
+_TRUST_SOURCE_SIGNATURE_KEYS = {"trust_source"}
 
 
 def test_an_unsigned_document_reports_the_certification_block(tmp_dir):
@@ -284,7 +287,9 @@ def test_an_approval_signature_reports_no_certification_and_keeps_its_keys(tmp_d
     assert all(s["certification_level"] is None for s in verdict["signatures"])
     keys = set(verdict["signatures"][0])
     assert _PRIOR_SIGNATURE_KEYS - {"page"} <= keys
-    assert keys - _PRIOR_SIGNATURE_KEYS == _CERTIFICATION_SIGNATURE_KEYS
+    assert keys - _PRIOR_SIGNATURE_KEYS == (
+        _CERTIFICATION_SIGNATURE_KEYS | _TRUST_SOURCE_SIGNATURE_KEYS
+    )
     # No policy is in force, so there is nothing to violate and nothing unmade.
     assert verdict["signatures"][0]["policy_judged"] is True
     assert verdict["signatures"][0]["policy_ok"] is True

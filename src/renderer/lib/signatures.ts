@@ -11,6 +11,10 @@ export interface SignatureEntry {
   valid: boolean;
   intact: boolean;
   trusted: boolean;
+  /** Which anchor set the validated chain terminated at. Null whenever
+   * `trusted` is false, and on a trusted chain whose anchor matched neither
+   * set — reported rather than guessed. */
+  trust_source?: 'user' | 'system' | null;
   coverage: string;
   covers_whole_document: boolean;
   modified_after_signing: boolean;
@@ -67,6 +71,14 @@ export interface VerifyResult {
   /** PAdES B-LTA document timestamps sealing the file. */
   document_timestamps?: number;
   certification?: CertificationInfo;
+  /** What the OS certificate store contributed. `requested` true with
+   * `available` false is a platform exposing no store to read — which must not
+   * be shown as a chain that failed to verify. */
+  system_trust?: {
+    requested: boolean;
+    available: boolean;
+    anchor_count: number;
+  };
   summary: {
     all_valid: boolean;
     any_modified_after_signing: boolean;

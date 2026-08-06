@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.0.22 — Signatures can trust what this computer already trusts
+
+### A second trust source for signature verification
+
+Verifying a signature answers two questions: is the document cryptographically
+intact, and does the signer's certificate chain to an authority you trust. The
+second question has only ever had one answer here — the certificate authorities
+you added yourself — so a signer backed by an authority this computer already
+trusts read as untrusted, which looks like a bad signature rather than a
+difference in policy.
+
+The Signatures panel now offers **Also trust the system certificate store**,
+sitting beside your trust anchors and off until you turn it on. Turn it on and
+verification also anchors on the certificate authorities this computer records,
+respecting the purposes each one is trusted for: an authority trusted only for
+web servers or for software does not become a document authority. A verified
+signature says which source vouched for it — your own anchor, or the system
+store — and the Signatures pane in the navigation panel now reports the same
+verdict the panel does instead of always showing the identity caveat.
+
+Nothing changes unless you turn it on. With the setting off, verification reads
+no certificate store at all, and only anchors you chose can make a signature
+trusted. On the command line, `verify-signatures --system-trust` and
+`sign --system-trust` do the same.
+
 ## 1.0.21 — Fields found, hidden content named, documents certified, and export to spreadsheets and slides
 
 Preparing a form stops meaning drawing every box by hand. Open a flat form,
