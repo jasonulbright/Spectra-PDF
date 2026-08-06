@@ -168,6 +168,8 @@ after any change, and it is available on the command line as `audit-space`.
   so the app could no longer say whether the change was one the certification
   permitted. The original signature is now carried through untouched and the
   verdict reads back as it should.
+- Updated the bundled and build-time dependencies, including fixes for reported
+  vulnerabilities in build tooling.
 
 ## 1.0.21 — Fields found, hidden content named, documents certified, and export to spreadsheets and slides
 
