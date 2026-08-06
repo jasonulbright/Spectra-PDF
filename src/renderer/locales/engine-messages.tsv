@@ -112,9 +112,12 @@ guided_actions.destinationMustOutsideSource	exact	guided_actions	The destination
 guided_actions.encryptMustLastStep	exact	guided_actions	encrypt must be the last step
 guided_actions.encryptSetOpenOwner	exact	guided_actions	encrypt: set an open or an owner password
 guided_actions.mrcCompressionMustCome	exact	guided_actions	MRC compression must come after OCR — OCR reads the page image, and MRC replaces it
+guided_actions.mustLastStepWrites	pattern	guided_actions	{{op}} must be the last step -- it writes a different kind of file, and nothing can run on that
+guided_actions.placeModeCannotEnd	exact	guided_actions	In-place mode cannot end with an export -- the exported document is a new file, not a replacement for its source.
 guided_actions.placeModeCannotStart	exact	guided_actions	In-place mode cannot start with create_pdf -- the converted document is a new file, not a replacement for its source.
 guided_actions.processedOriginalsFolderMust	exact	guided_actions	The processed-originals folder must be outside the destination folder.
 guided_actions.processedOriginalsFolderMust2	exact	guided_actions	The processed-originals folder must be outside the source folder.
+guided_actions.stepNameExportFormat	pattern	guided_actions	step {{v0}} ({{op}}): name the export format
 guided_actions.stepParamsMustObject	pattern	guided_actions	step {{v0}} ({{op}}): params must be an object
 guided_actions.stepPositionTextGo	pattern	guided_actions	step {{v0}} ({{op}}): position and text go together
 guided_actions.stepStepObject	pattern	guided_actions	step {{v0}} is not a step object

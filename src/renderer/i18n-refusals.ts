@@ -35,6 +35,8 @@ export const REFUSAL_STRINGS = {
     '{{step}} creates a document, so this action runs over a folder of files rather than against the document you have open.',
   'refusal.action.sourceNotInPlace':
     '{{step}} creates a new document, so this action cannot replace the original files.',
+  'refusal.action.exportNotInPlace':
+    '{{step}} writes a file of another kind, so this action cannot replace the original files.',
   'refusal.action.runParamRequired': '{{step}}: {{param}} is required.',
   'refusal.action.encryptNeedsPassword': 'Encrypt: set an open or an owner password.',
 

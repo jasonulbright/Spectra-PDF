@@ -313,6 +313,34 @@ export function registerFormPrep(handlers: FormPrepHandlers | null): void {
   formPrep = handlers;
 }
 
+/**
+ * Folder-scope export: the folder pickers are native dialogs, so e2e injects
+ * the paths into the same flow the buttons run and then drives the REAL sweep.
+ * There is no review step to drive — the run's per-file rows ARE its result.
+ */
+export interface FolderExportHandlers {
+  setSource: (path: string) => Promise<void>;
+  setDest: (path: string) => void;
+  setFormat: (format: string) => void;
+  run: () => Promise<void>;
+  snapshot: () => {
+    phase: 'setup' | 'running' | 'done';
+    fileCount: number | null;
+    report: {
+      cancelled: boolean;
+      results: { rel: string; status: string; out?: string; produced?: string; reason?: string }[];
+      skippedDirs: string[];
+    } | null;
+    logPath: string | null;
+  };
+}
+
+let folderExport: FolderExportHandlers | null = null;
+
+export function registerFolderExport(handlers: FolderExportHandlers | null): void {
+  folderExport = handlers;
+}
+
 import type { Orientation as CreatePdfOrientation, PageSize as CreatePdfPageSize } from './lib/create-pdf';
 
 /**
@@ -1148,6 +1176,12 @@ export interface TestHarness {
   formPrepCheck: (keys: string[]) => void;
   formPrepApply: () => Promise<void>;
   formPrepSnapshot: () => ReturnType<FormPrepHandlers['snapshot']> | null;
+  /** Folder-scope export injectors (dialog must be open —
+   * `tools.folderExport`). */
+  folderExportSetFolders: (source: string, dest: string) => Promise<void>;
+  folderExportSetFormat: (format: string) => void;
+  folderExportRun: () => Promise<void>;
+  folderExportSnapshot: () => ReturnType<FolderExportHandlers['snapshot']> | null;
   scheduleCreate: (profile: Record<string, unknown>, actionJson?: string) => Promise<string>;
   scheduleList: () => Promise<unknown[]>;
   scheduleRemove: (name: string) => Promise<void>;
@@ -2057,6 +2091,42 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     formPrepSnapshot: () => formPrep?.snapshot() ?? null,
+    folderExportSetFolders: async (source, dest) => {
+      if (!folderExport) {
+        const msg = 'folderExportSetFolders: folder export dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await folderExport.setSource(source);
+        folderExport.setDest(dest);
+      } catch (err) {
+        captureError('folderExportSetFolders', err);
+        throw err;
+      }
+    },
+    folderExportSetFormat: (format) => {
+      if (!folderExport) {
+        const msg = 'folderExportSetFormat: folder export dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      folderExport.setFormat(format);
+    },
+    folderExportRun: async () => {
+      if (!folderExport) {
+        const msg = 'folderExportRun: folder export dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await folderExport.run();
+      } catch (err) {
+        captureError('folderExportRun', err);
+        throw err;
+      }
+    },
+    folderExportSnapshot: () => folderExport?.snapshot() ?? null,
     scheduleCreate: async (profile, actionJson) => {
       if (!scheduledRuns) throw new Error('scheduleCreate: Scheduled Runs dialog not mounted');
       return scheduledRuns.create(profile, actionJson);
