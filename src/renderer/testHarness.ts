@@ -245,7 +245,9 @@ export interface DiskRedactHandlers {
   setSource: (path: string) => Promise<void>;
   setDest: (path: string) => void;
   setQuery: (text: string) => void;
-  search: () => Promise<void>;
+  /** The query travels with the call: setting the field and starting the
+   * search in one round trip leaves no render in between for state to land. */
+  search: (query: string) => Promise<void>;
   check: (keys: string[]) => void;
   apply: () => Promise<void>;
   snapshot: () => {
@@ -1899,7 +1901,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
       try {
         diskRedact.setQuery(query);
-        await diskRedact.search();
+        await diskRedact.search(query);
       } catch (err) {
         captureError('diskRedactSearch', err);
         throw err;
