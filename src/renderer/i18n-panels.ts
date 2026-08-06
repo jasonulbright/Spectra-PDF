@@ -699,6 +699,20 @@ export const PANEL_STRINGS = {
   'panel.sig.certifyLevel': 'Permitted changes',
   'panel.sig.certifyUnavailable':
     'This document is already signed, so it cannot be certified — a certification signature must be the first signature in a document.',
+  'panel.sig.lockAll': 'Locks every form field against further change',
+  'panel.sig.lockIncluded': 'Locks these form fields against further change: {{fields}}',
+  'panel.sig.lockExcluded': 'Locks every form field except: {{fields}}',
+  'panel.sig.lockViolated':
+    'The signature in field {{field}} reports a change to form fields it locks: {{fields}}.',
+  'panel.sig.lock': 'Lock form fields',
+  'panel.sig.lockHint':
+    'A locked form field cannot be filled in or changed after this signature without the document reporting as altered.',
+  'panel.sig.lockOff': 'Lock nothing',
+  'panel.sig.lockActionAll': 'Every form field',
+  'panel.sig.lockActionInclude': 'Only the fields chosen below',
+  'panel.sig.lockActionExclude': 'Every field except those chosen below',
+  'panel.sig.lockFields': 'Fields',
+  'panel.sig.lockNoFields': 'This document has no form fields to lock.',
 
   'panel.settings.catGeneral': 'General',
   'panel.settings.catAppearance': 'Appearance',

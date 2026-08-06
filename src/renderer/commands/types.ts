@@ -190,6 +190,7 @@ export interface CanvasServices {
   startVisibleSignature?(
     prefill?: import('../components/SignerSourceFields').SignerSource,
     certification?: import('../lib/signatures').CertifyOptions,
+    fieldLock?: import('../lib/signatures').LockOptions,
   ): void;
   /**
    * The Search & Redact panel's seam onto the canvas's redaction
