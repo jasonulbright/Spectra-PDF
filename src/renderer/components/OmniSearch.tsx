@@ -8,7 +8,7 @@ import { showableDoc } from '../state/selectors';
 import { ToolIcon } from './tool-icons';
 import { TILE_GLYPH } from './ToolsCenter';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tToolDescription, tToolTitle } from '../i18n';
+import { formattingLocale, tChrome, tToolDescription, tToolTitle } from '../i18n';
 
 // The universal search box in the toolbar row.
 //
@@ -77,7 +77,7 @@ export function OmniSearch(): React.JSX.Element {
           title: tToolTitle(t.id, t.title, language),
           description: tToolDescription(t.id, t.description, language),
         })),
-        language,
+        formattingLocale(language),
       )
         .slice(0, MAX_TOOL_HITS)
         .map((t) => ({

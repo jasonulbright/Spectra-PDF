@@ -202,6 +202,19 @@ interface TextInfoLocale {
 }
 
 /**
+ * The tag the Intl FORMATTERS are given for a UI language.
+ *
+ * A pseudo-locale has no BCP-47 identity: `qps-rtl` is not even well-formed
+ * (a three-letter region does not exist), and every Intl constructor throws
+ * `RangeError: Invalid language tag` on it — which unmounts the whole app the
+ * first time a ruler label formats a number. Formatting therefore follows the
+ * ENGLISH source the pseudo-catalog was generated from.
+ */
+export function formattingLocale(lng: string = i18next.language): string {
+  return lng in PSEUDO_DIRECTIONS ? 'en' : lng;
+}
+
+/**
  * A language's writing direction, read from CLDR.
  *
  * The accessor was renamed mid-standardization (`textInfo` → `getTextInfo()`)
@@ -333,7 +346,7 @@ export function tOcrLanguage(code: string): string {
   if (!entry) return code;
   try {
     return (
-      new Intl.DisplayNames([i18next.language], { type: 'language' }).of(entry.bcp47) ??
+      new Intl.DisplayNames([formattingLocale()], { type: 'language' }).of(entry.bcp47) ??
       entry.label
     );
   } catch {
@@ -344,7 +357,7 @@ export function tOcrLanguage(code: string): string {
 /** Locale-aware number formatting (`Intl.NumberFormat`, never a
  * hand-rolled decimal — the separator and grouping are locale properties). */
 export function tNumber(value: number, opts?: Intl.NumberFormatOptions): string {
-  return new Intl.NumberFormat(i18next.language, opts).format(value);
+  return new Intl.NumberFormat(formattingLocale(), opts).format(value);
 }
 
 /** Locale-aware DATE formatting for an ISO timestamp. An unparseable value
@@ -352,7 +365,7 @@ export function tNumber(value: number, opts?: Intl.NumberFormatOptions): string 
 export function tDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return new Intl.DateTimeFormat(i18next.language, { dateStyle: 'medium' }).format(d);
+  return new Intl.DateTimeFormat(formattingLocale(), { dateStyle: 'medium' }).format(d);
 }
 
 /** Translate an OPERATION QUEUE op name by its engine method id (the

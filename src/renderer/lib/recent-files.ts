@@ -9,7 +9,7 @@
 // bare-string entries migrate with `openedAt: null` — an honest "unknown",
 // displayed as an em dash, never a fabricated date.
 
-import i18next, { tChrome } from '../i18n';
+import { formattingLocale, tChrome } from '../i18n';
 
 const KEY = 'spectra-recent';
 const MAX = 10;
@@ -89,7 +89,7 @@ export function formatOpenedAt(openedAt: number | null, now: number): string {
   // 'Mmm D' / 'Mmm D, YYYY' strings, which is what keeps the pure tests
   // meaningful as en pins.
   const sameYear = then.getFullYear() === today.getFullYear();
-  return new Intl.DateTimeFormat(i18next.language || 'en', {
+  return new Intl.DateTimeFormat(formattingLocale(), {
     month: 'short',
     day: 'numeric',
     ...(sameYear ? {} : { year: 'numeric' }),
