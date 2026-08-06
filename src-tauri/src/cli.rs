@@ -152,6 +152,9 @@ pub enum CliCommand {
     Forms(FormsArgs),
     /// Report where form fields could be added to a flat form (JSON); writes nothing
     DetectFields(DetectFieldsArgs),
+    /// Detect a flat form's fields and CREATE every one of them (no review
+    /// step exists headlessly). Use --kinds to narrow what is accepted
+    PrepareForms(PrepareFormsArgs),
     /// Inventory the hidden information a PDF carries (JSON report); writes nothing
     Audit(AuditArgs),
     /// Remove the named categories of hidden information, writing a new file
@@ -1367,6 +1370,36 @@ pub struct DetectFieldsArgs {
     /// Stop after this many candidates (the result reports the truncation)
     #[arg(long, default_value_t = 5000)]
     pub max_candidates: u32,
+}
+
+#[derive(Args)]
+pub struct PrepareFormsArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Pages to analyze, e.g. "1,3,5" or "all"
+    #[arg(long, default_value = "all")]
+    pub pages: String,
+    /// Scanned-page handling: auto (recognise a page with nothing readable on
+    /// it) | never (stay offline) | always (recognise every page)
+    #[arg(long, default_value = "auto")]
+    pub scan: String,
+    /// Recognition language for scanned pages; '+'-joined for several at once
+    #[arg(long, default_value = "eng")]
+    pub lang: String,
+    /// Comma-separated field kinds to create: text, checkbox, radio,
+    /// signature. Every kind by default.
+    #[arg(long, default_value = "")]
+    pub kinds: String,
+    /// Stop after this many candidates (the result reports the truncation)
+    #[arg(long, default_value_t = 5000)]
+    pub max_candidates: u32,
+    /// Proceed on a document whose signatures this edit invalidates. A
+    /// certification allowing no changes still refuses.
+    #[arg(long, default_value_t = false)]
+    pub include_signed: bool,
 }
 
 #[derive(Args)]
@@ -3146,6 +3179,33 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "max_candidates": args.max_candidates,
                 }),
             )
+        }
+
+        CliCommand::PrepareForms(args) => {
+            // A headless run has no reviewer, so every candidate the detector
+            // offers becomes a field; `--kinds` is the only narrowing.
+            let kinds: Vec<String> = args
+                .kinds
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "pages": parse_pages(&args.pages),
+                "scan": args.scan,
+                "lang": args.lang,
+                "tesseract_path": resolve_tesseract().to_string_lossy(),
+                "gs_path": resolve_gs().to_string_lossy(),
+                "max_candidates": args.max_candidates,
+                "allow_signed": args.include_signed,
+                "font_dir": resolve_fonts().to_string_lossy().to_string(),
+            });
+            if !kinds.is_empty() {
+                params["kinds"] = json!(kinds);
+            }
+            engine.call("prepare_form_fields", params)
         }
 
         CliCommand::Audit(args) => engine.call(

@@ -1,52 +1,47 @@
-// Disk Search & Redact run log — the text of one run.
+// Folder form-preparation run log — the text of one run.
 //
 // Pure formatting, no IO, for the reason the batch log is: a report dies with
-// the dialog it is drawn in, and a sweep over a thousand documents needs an
+// the dialog it is drawn in, and a sweep over hundreds of forms needs an
 // artefact that can be read and grepped afterwards. The timestamp, duration
-// and filename helpers are the batch log's own — one log-name pattern, one
+// and filename helpers are the shared ones — one log-name pattern, one
 // retention sweep.
 //
-// The line format is the batch log's too, and for the same greppability
-// reasons: status first in fixed-width brackets, then the source-relative
-// path unquoted, then the honesty note. What is redacted is the one thing a
-// reader needs to count, so a written file always states its rectangle count.
+// What a reader of this log needs to count is FIELDS, so a prepared file
+// always states how many it got and how many candidates were accepted to make
+// them: a radio group is one field however many options it carries.
 
 import { formatDuration, formatTimestamp, sweepLogFileName } from './batch-log';
-import type { DiskFileResult, DiskRedactReport } from './disk-redact';
-import { summarize } from './disk-redact';
+import { summarize, type PrepFileResult, type PrepReport } from './folder-prep';
 
-export interface DiskRedactLogRun {
+export interface PrepLogRun {
   startedAt: Date;
   finishedAt: Date;
   sourceRoot: string;
   /** Empty in the in-place mode, which writes each file where it stands. */
   destRoot: string;
-  /** What the run searched for, as one readable line. */
-  searchLabel: string;
-  marksOnly: boolean;
+  /** How the scan arm was configured, and in which languages. */
+  scanLabel: string;
   includeSigned: boolean;
-  report: DiskRedactReport;
+  report: PrepReport;
   fatalError?: string;
 }
 
-/** The log's own name. Shares the batch log's date-first shape so one folder
- * sorts chronologically, and carries its own prefix so the retention sweep
- * matches it by name like the others. */
-export function diskRedactLogFileName(startedAt: Date): string {
-  return sweepLogFileName('search-redact-', startedAt);
+export function prepLogFileName(startedAt: Date): string {
+  return sweepLogFileName('form-prep-', startedAt);
 }
 
-function fileLine(r: DiskFileResult): string {
+function fileLine(r: PrepFileResult): string {
   const tag = `[${r.status}]`.padEnd(12);
   let line = `${tag}${r.rel}`;
-  if (r.regions !== undefined) {
-    line += ` — ${r.regions} region${r.regions === 1 ? '' : 's'}`;
+  if (r.fields !== undefined) {
+    line += ` — ${r.fields} field${r.fields === 1 ? '' : 's'}`;
+    line += ` from ${r.candidates ?? 0} candidate${r.candidates === 1 ? '' : 's'}`;
   }
   if (r.reason) line += ` — ${r.reason}`;
   return line;
 }
 
-export function formatDiskRedactLog(run: DiskRedactLogRun): string {
+export function formatPrepLog(run: PrepLogRun): string {
   const { report } = run;
   const totals = summarize(report);
   const outcome = run.fatalError
@@ -56,19 +51,14 @@ export function formatDiskRedactLog(run: DiskRedactLogRun): string {
       : 'completed';
 
   const lines: string[] = [
-    'Spectra PDF — Search & Redact folder log',
+    'Spectra PDF — Prepare Forms folder log',
     `Started:      ${formatTimestamp(run.startedAt)}`,
     `Finished:     ${formatTimestamp(run.finishedAt)}  (${formatDuration(
       run.finishedAt.getTime() - run.startedAt.getTime(),
     )})`,
     `Source:       ${run.sourceRoot}`,
     `Destination:  ${run.destRoot || 'IN PLACE — the source files were rewritten'}`,
-    `Searched for: ${run.searchLabel}`,
-    `Mode:         ${
-      run.marksOnly
-        ? 'marks only — /Redact annotations written, no content removed'
-        : 'apply — the marked content was removed'
-    }`,
+    `Scanned pages: ${run.scanLabel}`,
     `Signed files: ${
       run.includeSigned
         ? 'INCLUDED — their signatures were invalidated'
@@ -85,11 +75,11 @@ export function formatDiskRedactLog(run: DiskRedactLogRun): string {
     lines.push('written before the failure remain where the run put them.');
   } else {
     lines.push(
-      `Files: ${report.results.length} processed — ${totals.redacted} redacted · ` +
-        `${totals.marked} marked · ${totals.copied} copied unchanged · ` +
-        `${totals.unchanged} left alone · ${totals.skipped} skipped`,
+      `Files: ${report.results.length} processed — ${totals.prepared} prepared · ` +
+        `${totals.copied} copied unchanged · ${totals.unchanged} left alone · ` +
+        `${totals.skipped} skipped`,
     );
-    lines.push(`Regions written: ${totals.regions}`);
+    lines.push(`Fields created: ${totals.fields}`);
     lines.push('');
     if (report.results.length === 0) lines.push('(no files were processed)');
     else for (const r of report.results) lines.push(fileLine(r));

@@ -205,6 +205,7 @@ export const COMMAND_IDS = [
   'file.clearRecent',
   'tools.batchOcr',
   'tools.diskRedact',
+  'tools.formPrepFolder',
   'tools.scheduledRuns',
   'tools.watchedFolders',
   'file.createPdf',
@@ -553,6 +554,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Search & Redact Folder…',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openDiskRedact(),
+  },
+  // Same no-document shape: it analyses and prepares a picked folder tree by
+  // path, and never opens a document to do it.
+  'tools.formPrepFolder': {
+    title: 'Prepare Forms in a Folder…',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openFormPrepFolder(),
   },
   // Request 5 — same no-document shape as Batch OCR: it manages schedules over
   // picked folder trees, nothing to do with what is open.

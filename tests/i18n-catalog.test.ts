@@ -109,14 +109,17 @@ function expectedCatalog(): Record<string, string> {
     out[`opqueue.op.${method}`] = name;
   }
   // Guided-actions step catalog (serialized DATA — display strings derive
-  // keys here, like the command titles). OCR language options excluded:
-  // they await the Intl.DisplayNames switch in the dialogs pass.
+  // keys here, like the command titles). Recognition-language options are
+  // excluded: they resolve through Intl.DisplayNames.
   for (const def of STEP_CATALOG) {
     out[`gaction.step.${def.op}`] = def.title;
     for (const p of def.params) {
       out[`gaction.param.${def.op}.${p.key}`] = p.label;
       if (p.hint) out[`gaction.hint.${def.op}.${p.key}`] = p.hint;
-      if (p.options && !(def.op === 'ocr_file' && p.key === 'language')) {
+      // A recognition-language list is excluded wherever it appears: those
+      // names come from Intl.DisplayNames, and deriving 47 keys per step that
+      // offers one would author by hand what the platform already knows.
+      if (p.options && p.key !== 'language') {
         for (const o of p.options) {
           out[`gaction.opt.${def.op}.${p.key}.${o.value}`] = o.label;
         }
