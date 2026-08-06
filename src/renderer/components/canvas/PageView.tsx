@@ -20,7 +20,7 @@ interface PageViewProps {
    *  Preview is armed. It paints onto its own canvas above the base, so the
    *  base still holds the viewer's pixels and dropping this restores the page
    *  with nothing to re-render. */
-  separationUrl?: string | null;
+  separation?: Blob | null;
 }
 
 function PageViewImpl({
@@ -34,7 +34,7 @@ function PageViewImpl({
   displayHeight,
   eager = false,
   detail = true,
-  separationUrl = null,
+  separation = null,
 }: PageViewProps): React.JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null);
   const baseRef = useRef<HTMLCanvasElement>(null);
@@ -92,13 +92,13 @@ function PageViewImpl({
   }, [near, pdf, pageNumber, naturalWidth, naturalHeight]);
 
   useEffect(() => {
-    if (!separationUrl) {
+    if (!separation) {
       setSeparationReady(false);
       return;
     }
     let cancelled = false;
     void renderSeparation({
-      url: separationUrl,
+      image: separation,
       canvasRef: separationRef,
       isCancelled: () => cancelled,
       onReady: () => {
@@ -110,7 +110,7 @@ function PageViewImpl({
     return () => {
       cancelled = true;
     };
-  }, [separationUrl, pageNumber]);
+  }, [separation, pageNumber]);
 
   useEffect(() => {
     if (!near || !pdf) return;
@@ -120,7 +120,7 @@ function PageViewImpl({
     // The detail canvas is the viewer's own sharper RGB render. It must not
     // sit on top of a separation composite, which is a different rendering of
     // the page and the only one that can show overprint.
-    if (!detail || separationUrl) {
+    if (!detail || separation) {
       detailCanvas.style.display = 'none';
       return;
     }
@@ -166,7 +166,7 @@ function PageViewImpl({
       cancelled = true;
       task?.cancel();
     };
-  }, [near, version, detail, rotation, pdf, pageNumber, naturalWidth, naturalHeight, separationUrl]);
+  }, [near, version, detail, rotation, pdf, pageNumber, naturalWidth, naturalHeight, separation]);
 
   const swapped = rotation === 90 || rotation === 270;
   const baseStyle: React.CSSProperties | undefined =

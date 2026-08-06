@@ -21,7 +21,6 @@ import {
   previewDpi,
   aliasIsAllowed,
   moveInSequence,
-  orderInks,
   type CacheEntry,
   type CompositeResult,
   type Ink,
@@ -74,13 +73,17 @@ export interface SeparationPreviewValue {
   /** Throw the plate cache away. A document change invalidates every plate;
    *  an applied ink edit is a document change. */
   invalidate: () => void;
-  rasterFor: (docId: string, pageId: string) => string | null;
+  rasterFor: (docId: string, pageId: string) => Blob | null;
 }
 
 const PreviewContext = createContext<SeparationPreviewValue | null>(null);
 
 interface RasterEntry {
-  url: string;
+  /** The composite as the engine wrote it. Held as a BLOB, never an object
+   *  URL: the canvas decodes it with `createImageBitmap`, which is the only
+   *  decode path this webview honours (see `raster.ts`), and a blob owns no
+   *  lifetime there is a revoke to get wrong. */
+  image: Blob;
   docId: string;
   pageId: string;
 }
@@ -126,7 +129,6 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
   const publish = useCallback(() => setRasters([...rasterRef.current.values()]), []);
 
   const releaseAll = useCallback(() => {
-    for (const entry of rasterRef.current.values()) URL.revokeObjectURL(entry.url);
     rasterRef.current.clear();
     setRasters([]);
   }, []);
@@ -153,11 +155,7 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
     return ids;
   }, [documents]);
   for (const key of prunePlateCache(plateCache.current, livePageIds)) {
-    const entry = rasterRef.current.get(key);
-    if (entry) {
-      URL.revokeObjectURL(entry.url);
-      rasterRef.current.delete(key);
-    }
+    rasterRef.current.delete(key);
   }
 
   // The pages to raster: the one being read and its neighbours, each resolved
@@ -286,18 +284,13 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
           if (target.current) {
             setPlates(set.plates);
             setCoverage(set.coverage ?? {});
-            setSequence((prev) => {
-              const known = new Set(prev);
-              const added = set!.plates.map((p) => p.name).filter((n) => !known.has(n));
-              return added.length > 0 ? [...prev, ...added] : prev;
-            });
           }
           // Compositing touches no PDF — it reads the cached plates. It stays
           // off the gated path deliberately: gating it would commit the
           // user's pending page edits on every ink checkbox.
           const composite = (await callRaw('composite_separations', {
             dir: set.dir,
-            inks: compositeRequest(orderInks(set.plates, sequence), hidden, densities, aliases),
+            inks: compositeRequest(set.plates, hidden, densities, aliases),
             limit_pct: limitPct,
             alarm,
           })) as unknown as CompositeResult;
@@ -305,10 +298,11 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
           if (target.current) setStats(composite);
           const bytes = await batchBridge.readFileBuffer(composite.png);
           if (cancelled) return;
-          const url = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
-          const previous = rasterRef.current.get(key);
-          if (previous) URL.revokeObjectURL(previous.url);
-          rasterRef.current.set(key, { url, docId: target.docId, pageId: target.pageId });
+          rasterRef.current.set(key, {
+            image: new Blob([bytes], { type: 'image/png' }),
+            docId: target.docId,
+            pageId: target.pageId,
+          });
           publish();
         }
       } catch (e: unknown) {
@@ -323,7 +317,17 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
     // `wantedKey` stands for the page window: the array's identity changes on
     // every state tick and would restart the run for the same pages.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [armed, wantedKey, overprint, hidden, densities, aliases, sequence, limitPct, alarm, generation]);
+  }, [armed, wantedKey, overprint, hidden, densities, aliases, limitPct, alarm, generation]);
+
+  // A plate the sequence has never seen joins the end of it, so an ink the
+  // document adds is listed rather than silently sorted to the front.
+  useEffect(() => {
+    setSequence((prev) => {
+      const known = new Set(prev);
+      const added = plates.map((p) => p.name).filter((name) => !known.has(name));
+      return added.length > 0 ? [...prev, ...added] : prev;
+    });
+  }, [plates]);
 
   // Leaving the mode drops the images. The viewer's own raster was never
   // overwritten, so the page comes back with no re-render.
@@ -337,10 +341,10 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
   useEffect(() => releaseAll, [releaseAll]);
 
   const rasterFor = useCallback(
-    (docId: string, pageId: string): string | null => {
+    (docId: string, pageId: string): Blob | null => {
       if (!armed) return null;
       const hit = rasters.find((r) => r.docId === docId && r.pageId === pageId);
-      return hit ? hit.url : null;
+      return hit ? hit.image : null;
     },
     [armed, rasters],
   );
@@ -369,7 +373,7 @@ export function useSeparationPreview(): SeparationPreviewValue {
 /** The separation raster for one page, or null when nothing stands in for the
  *  viewer's own. Returns null outside the provider: the canvas also renders
  *  in surfaces the provider does not wrap. */
-export function useSeparationRaster(docId: string, pageId: string): string | null {
+export function useSeparationRaster(docId: string, pageId: string): Blob | null {
   const value = useContext(PreviewContext);
   return value ? value.rasterFor(docId, pageId) : null;
 }
