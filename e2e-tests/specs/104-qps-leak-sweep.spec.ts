@@ -406,6 +406,20 @@ describe('qps pseudo-locale leak sweep', () => {
       await sweep('[data-testid="combine-dialog"]', leaks);
       await $('[data-testid="combine-close"]').click();
 
+      // ── DIALOG 5: Search & Redact Folder. Its setup phase carries the whole
+      // search form plus the two consent surfaces, and it is reachable with no
+      // document open — which is exactly why it has to be swept: nothing else
+      // in this spec renders it.
+      expect(await invokeAppCommand('tools.diskRedact')).toBe(true);
+      await $('[data-testid="disk-redact-dialog"]').waitForDisplayed({
+        timeout: 15_000,
+        timeoutMsg: 'the Search & Redact folder dialog never opened',
+      });
+      await $('[data-testid="disk-redact-wordlist-toggle"]').click();
+      await $('[data-testid="disk-redact-properties-toggle"]').click();
+      await sweep('[data-testid="disk-redact-dialog"]', leaks);
+      await $('[data-testid="disk-redact-x"]').click();
+
       expect(leaks).toEqual([]);
     } finally {
       await qps('en');

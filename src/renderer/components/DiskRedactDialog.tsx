@@ -193,9 +193,9 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
     (source !== null && dest !== null && destConflictsWithSource(source, dest)) ||
     identityConflict;
 
-  const request = useMemo<SearchRequest>(
-    () => ({
-      query,
+  const buildRequest = useCallback(
+    (text: string): SearchRequest => ({
+      query: text,
       terms: parseWordList(wordList),
       patterns: [...patterns],
       options,
@@ -203,17 +203,18 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
       pages: null,
       maxHits: MAX_HITS,
     }),
-    [query, wordList, patterns, options, expand],
+    [wordList, patterns, options, expand],
   );
+  const request = useMemo(() => buildRequest(query), [buildRequest, query]);
 
-  const canSearch =
+  const foldersReady =
     phase === 'setup' &&
     !scanning &&
     source !== null &&
     (inPlace || (dest !== null && !conflict)) &&
     entries !== null &&
-    entries.length > 0 &&
-    !requestIsEmpty(request);
+    entries.length > 0;
+  const canSearch = foldersReady && !requestIsEmpty(request);
 
   const searchLabel = useMemo(() => {
     const parts: string[] = [];
@@ -261,8 +262,13 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
     [callRaw],
   );
 
-  const runSearch = useCallback(async (): Promise<void> => {
-    if (!canSearch || !entries) return;
+  // The query may arrive WITH the call rather than from state: a caller that
+  // sets the field and starts the search in one go would otherwise run the
+  // previous render's (empty) request, since a state update is not visible to
+  // the closure that scheduled it.
+  const runSearch = useCallback(async (queryOverride?: string): Promise<void> => {
+    const active = queryOverride === undefined ? request : buildRequest(queryOverride);
+    if (!foldersReady || !entries || requestIsEmpty(active)) return;
     setPhase('searching');
     setError(null);
     setProgress(null);
@@ -271,7 +277,7 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
     cancelledRef.current = false;
     try {
       const io = await makeIo();
-      const found = await runDiskSearch(entries, skippedDirs, request, marksOnly, io, {
+      const found = await runDiskSearch(entries, skippedDirs, active, marksOnly, io, {
         onProgress: setProgress,
         isCancelled: () => cancelledRef.current,
       });
@@ -284,7 +290,7 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
       setError(e instanceof Error ? e.message : String(e));
       setPhase('setup');
     }
-  }, [canSearch, entries, skippedDirs, request, marksOnly, makeIo]);
+  }, [foldersReady, entries, skippedDirs, request, buildRequest, marksOnly, makeIo]);
 
   const filesWithHits = useMemo(
     () => searchReport?.files.filter((f) => f.hits.length > 0) ?? [],
@@ -370,7 +376,9 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
       setSource: (path) => harnessRef.current.selectSource(path),
       setDest: (path) => harnessRef.current.setDest(path),
       setQuery: (text) => harnessRef.current.setQuery(text),
-      search: () => harnessRef.current.runSearch(),
+      // The query rides WITH the call: a caller that sets the field and starts
+      // the search in one round trip has not re-rendered in between.
+      search: (text) => harnessRef.current.runSearch(text),
       check: (keys) => harnessRef.current.setSelected(new Set(keys)),
       apply: () => harnessRef.current.apply(),
       snapshot: () => ({
