@@ -814,30 +814,30 @@ function FileGroup({
           type="button"
           onClick={() => onReview(file.abs)}
           data-testid={`form-prep-review-${file.rel}`}
-          className="ml-auto text-xs underline text-neutral-400 hover:text-neutral-200 shrink-0"
+          className="ms-auto text-xs underline text-neutral-400 hover:text-neutral-200 shrink-0"
         >
           {tChrome('dialog.formPrep.reviewInApp')}
         </button>
       </div>
-      <div className="text-xs text-neutral-500 pl-5">
+      <div className="text-xs text-neutral-500 ps-5">
         {Object.entries(counts)
           .map(([kind, count]) => `${count} × ${kindLabel(kind)}`)
           .join(' · ')}
       </div>
       {file.existingFields > 0 && (
-        <div className="text-xs text-neutral-500 pl-5">
+        <div className="text-xs text-neutral-500 ps-5">
           {tChromeCount('dialog.formPrep.existingFields', file.existingFields)}
         </div>
       )}
       {file.truncated && (
-        <div className="text-xs text-amber-400 pl-5">{tChrome('dialog.formPrep.truncated')}</div>
+        <div className="text-xs text-amber-400 ps-5">{tChrome('dialog.formPrep.truncated')}</div>
       )}
       {file.candidates.map((candidate) => {
         const key = candidateKey(file.abs, candidate);
         return (
           <label
             key={key}
-            className="flex items-start gap-1.5 pl-6 py-0.5 text-sm hover:bg-neutral-800 rounded"
+            className="flex items-start gap-1.5 ps-6 py-0.5 text-sm hover:bg-neutral-800 rounded"
           >
             <input
               type="checkbox"

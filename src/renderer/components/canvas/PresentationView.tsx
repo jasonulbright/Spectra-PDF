@@ -181,7 +181,7 @@ export function PresentationView({
           e.stopPropagation();
           exit();
         }}
-        className="absolute top-4 right-4 px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white/80 text-xs"
+        className="absolute top-4 end-4 px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 text-white/80 text-xs"
       >
         {formatKey('escape')}
       </button>

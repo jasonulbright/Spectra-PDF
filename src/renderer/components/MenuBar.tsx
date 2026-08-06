@@ -20,7 +20,10 @@ const itemCls =
   'data-[disabled]:text-neutral-600 data-[disabled]:pointer-events-none';
 const contentCls =
   'app-menu-content min-w-[200px] bg-neutral-800 border border-neutral-700 rounded-md shadow-2xl p-1 z-50';
-const shortcutCls = 'text-[11px] text-neutral-500 data-[highlighted]:text-blue-100';
+// A chord names physical keys in the order they are pressed, so it is
+// notation and does not mirror.
+const shortcutCls =
+  'ltr-notation text-[11px] text-neutral-500 data-[highlighted]:text-blue-100';
 
 function Shortcut({ command }: { command: CommandId }): React.ReactElement | null {
   const s = shortcutForCommand(command);

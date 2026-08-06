@@ -227,7 +227,7 @@ export function TextSelectionMenu({
           <input
             autoFocus
             data-testid="markup-link-url"
-            className="text-selection-url"
+            className="text-selection-url ltr-notation"
             type="text"
             placeholder="https://…"
             spellCheck={false}

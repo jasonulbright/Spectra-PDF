@@ -79,7 +79,7 @@ export function FindBar({
     <div
       data-testid="find-bar"
       role="search"
-      className="absolute top-4 right-4 z-30 flex items-center gap-2 px-3 py-2 bg-neutral-800/95 border border-neutral-700 rounded-lg shadow-xl"
+      className="absolute top-4 end-4 z-30 flex items-center gap-2 px-3 py-2 bg-neutral-800/95 border border-neutral-700 rounded-lg shadow-xl"
     >
       <input
         ref={inputRef}

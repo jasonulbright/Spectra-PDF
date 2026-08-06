@@ -112,7 +112,7 @@ export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
                   onCloseFile(path);
                 }}
                 title={tChrome('chrome.tabs.closeFile', { name: f.name })}
-                className="ml-1 w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-red-400 hover:bg-neutral-700 opacity-0 group-hover:opacity-100 shrink-0"
+                className="ms-1 w-4 h-4 flex items-center justify-center rounded text-neutral-500 hover:text-red-400 hover:bg-neutral-700 opacity-0 group-hover:opacity-100 shrink-0"
               >
                 <ChromeIcon icon="close" size={11} />
               </button>

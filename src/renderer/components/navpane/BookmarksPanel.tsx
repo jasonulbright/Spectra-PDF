@@ -12,6 +12,7 @@ import {
   outlinesEqual,
 } from '../../lib/outline-reorder';
 import type { OutlineNode, FlatNode } from '../../lib/outline-reorder';
+import { inlineDelta } from '../../lib/inline-direction';
 import { ChromeIcon } from '../chrome-icons';
 import { TEST_HARNESS_ENABLED, registerCanvasOutline } from '../../testHarness';
 import type { OpenFile, PdfBuffer } from '../../state/types';
@@ -338,7 +339,10 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
     clientY: number,
   ) => {
     const y = clientY + ((listRef.current?.scrollTop ?? 0) - cache.scrollTop0);
-    const desired = s.path.length - 1 + Math.round((clientX - s.startX) / INDENT_PX);
+    // Depth follows the INLINE axis: dragging toward the inline-end side
+    // nests deeper, which is leftward under `dir=rtl`.
+    const desired =
+      s.path.length - 1 + Math.round(inlineDelta(clientX - s.startX) / INDENT_PX);
     return projectDrop(cache.rest, cache.mids, y, desired);
   };
 
@@ -498,13 +502,13 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
           return (
             <div key={key}>
               {indicatorPath && indicatorPath.join('.') === key && (
-                <div className="outline-drop-indicator" style={{ marginLeft: drag!.depth * INDENT_PX }} />
+                <div className="outline-drop-indicator" style={{ marginInlineStart: drag!.depth * INDENT_PX }} />
               )}
               <div
                 data-outline-row={key}
                 data-testid="bookmark-row"
                 className={'bookmark-row group' + (isDragged ? ' dragging' : '')}
-                style={{ marginLeft: f.depth * INDENT_PX }}
+                style={{ marginInlineStart: f.depth * INDENT_PX }}
               >
                 <span
                   className="bookmark-handle"
@@ -577,7 +581,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
             </div>
           );
         })}
-        {loaded && indicatorAtEnd && <div className="outline-drop-indicator" style={{ marginLeft: drag!.depth * INDENT_PX }} />}
+        {loaded && indicatorAtEnd && <div className="outline-drop-indicator" style={{ marginInlineStart: drag!.depth * INDENT_PX }} />}
       </div>
       <div className="bookmarks-footer">
         <button

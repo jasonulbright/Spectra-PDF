@@ -490,7 +490,7 @@ export function CombineDialog({
                       ✕
                     </button>
                   </div>
-                  <div className="flex items-center gap-2 pl-1 text-[10px]">
+                  <div className="flex items-center gap-2 ps-1 text-[10px]">
                     <span className="text-neutral-500" data-testid="combine-row-converter">
                       {row.kind
                         ? tChrome(CONVERTER_LABEL_KEYS[row.kind] as UiKey)
@@ -541,14 +541,14 @@ export function CombineDialog({
           </label>
           {target === 'append' &&
             (destinations.length === 0 ? (
-              <p className="text-xs text-neutral-500 pl-6" data-testid="combine-no-destination">
+              <p className="text-xs text-neutral-500 ps-6" data-testid="combine-no-destination">
                 {tChrome('dialog.combine.noDestinations')}
               </p>
             ) : (
               <select
                 data-testid="combine-destination"
                 aria-label={tChrome('dialog.combine.destination')}
-                className="ml-6 px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-xs"
+                className="ms-6 px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-xs"
                 value={destinationId}
                 disabled={busy}
                 onChange={(e) => setDestinationId(e.target.value)}

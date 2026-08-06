@@ -105,7 +105,7 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onOp
                   <ChromeIcon icon="document" size={16} />
                 </span>
                 <span className="home-recent-name">{path.split(/[\\/]/).pop()}</span>
-                <span className="home-recent-folder">{folderOf(path)}</span>
+                <span className="home-recent-folder ltr-notation">{folderOf(path)}</span>
                 <span data-testid="home-recent-opened" className="home-recent-when">
                   {formatOpenedAt(openedAt, Date.now())}
                 </span>

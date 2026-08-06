@@ -201,27 +201,27 @@ export function OptimizePanel(): React.ReactElement {
           <>
             <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 gap-y-0.5 text-xs" data-testid="space-audit-table">
               <span className="text-neutral-500">{tChrome('panel.optimize.audit.headerCategory')}</span>
-              <span className="text-right text-neutral-500">{tChrome('panel.optimize.audit.headerBytes')}</span>
-              <span className="text-right text-neutral-500">{tChrome('panel.optimize.audit.headerShare')}</span>
+              <span className="text-end text-neutral-500">{tChrome('panel.optimize.audit.headerBytes')}</span>
+              <span className="text-end text-neutral-500">{tChrome('panel.optimize.audit.headerShare')}</span>
               {rows.map((row: SpaceCategory) => (
                 <React.Fragment key={row.id}>
                   <span className="text-neutral-200" data-testid={`space-audit-name-${row.id}`}>
                     {labelOf(CATEGORY_LABELS, row.id, row.id)}
                   </span>
                   <span
-                    className="text-right tabular-nums text-neutral-300"
+                    className="text-end tabular-nums text-neutral-300"
                     data-testid={`space-audit-bytes-${row.id}`}
                     data-bytes={row.bytes}
                   >
                     {formatBytes(row.bytes)}
                   </span>
                   <span
-                    className="text-right tabular-nums text-neutral-400"
+                    className="text-end tabular-nums text-neutral-400"
                     data-testid={`space-audit-share-${row.id}`}
                   >
                     {sharePercent(row)}
                   </span>
-                  <span className="col-span-3 pb-1 pl-3 text-neutral-500">
+                  <span className="col-span-3 pb-1 ps-3 text-neutral-500">
                     <span data-testid={`space-audit-knob-${row.id}`}>
                       {labelOf(
                         KNOB_LABELS,
@@ -230,13 +230,13 @@ export function OptimizePanel(): React.ReactElement {
                       )}
                     </span>
                     {row.objects > 0 && (
-                      <span className="pl-2 text-neutral-600">
+                      <span className="ps-2 text-neutral-600">
                         {tChromeCount('panel.optimize.audit.objects', row.objects)}
                       </span>
                     )}
                     {row.detail.length > 0 && (
                       <button
-                        className="pl-2 underline text-neutral-400"
+                        className="ps-2 underline text-neutral-400"
                         data-testid={`space-audit-details-${row.id}`}
                         onClick={() =>
                           setExpanded((prev) => {
@@ -276,7 +276,7 @@ export function OptimizePanel(): React.ReactElement {
                 {tChrome('panel.optimize.audit.total')}
               </span>
               <span
-                className="border-t border-neutral-700 pt-1 text-right tabular-nums text-neutral-200"
+                className="border-t border-neutral-700 pt-1 text-end tabular-nums text-neutral-200"
                 data-testid="space-audit-total"
                 data-bytes={report.file_size}
               >

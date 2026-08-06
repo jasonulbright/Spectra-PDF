@@ -6004,7 +6004,7 @@ export function WorkspaceCanvasView({
       {ocrApplyError && (
         <div
           data-testid="ocr-apply-error"
-          className="absolute top-16 right-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
+          className="absolute top-16 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
         >
           <span className="flex-1">{ocrApplyError}</span>
           <button onClick={() => setOcrApplyError(null)} className="text-red-300 hover:text-red-100">×</button>
@@ -6013,7 +6013,7 @@ export function WorkspaceCanvasView({
       {formsError && (
         <div
           data-testid="forms-fill-error"
-          className="absolute top-28 right-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
+          className="absolute top-28 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
         >
           <span className="flex-1">{formsError}</span>
           <button onClick={() => setFormsError(null)} className="text-red-300 hover:text-red-100">×</button>
@@ -6022,7 +6022,7 @@ export function WorkspaceCanvasView({
       {mergeNotice && (
         <div
           data-testid="merge-notice"
-          className="absolute top-40 right-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-amber-500/15 border border-amber-500/40 rounded text-xs text-amber-200 shadow-lg"
+          className="absolute top-40 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-amber-500/15 border border-amber-500/40 rounded text-xs text-amber-200 shadow-lg"
         >
           <span className="flex-1">{mergeNotice}</span>
           <button onClick={() => setMergeNotice(null)} className="text-amber-300 hover:text-amber-100">×</button>
@@ -6032,7 +6032,7 @@ export function WorkspaceCanvasView({
       {(liveSigPlacement || sigFieldTarget) && (
         <div
           data-testid="sign-canvas-form"
-          className="absolute bottom-4 left-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
+          className="absolute bottom-4 start-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
         >
           <div className="text-sm text-neutral-200 font-medium">
             {sigFieldTarget
@@ -6153,7 +6153,7 @@ export function WorkspaceCanvasView({
       {liveNewFieldPlacement && (
         <div
           data-testid="new-field-form"
-          className="absolute bottom-4 left-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
+          className="absolute bottom-4 start-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
         >
           <div className="text-sm text-neutral-200 font-medium">
             {tChrome('canvas.newfield.title')}
@@ -6251,7 +6251,7 @@ export function WorkspaceCanvasView({
       {liveAddTextPlacement && (
         <div
           data-testid="add-text-form"
-          className="absolute bottom-4 left-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
+          className="absolute bottom-4 start-4 z-30 w-80 rounded border border-neutral-700 bg-neutral-900/95 p-3 shadow-xl flex flex-col gap-2.5"
         >
           <div className="text-sm text-neutral-200 font-medium">
             {tChrome('canvas.addtext.title')}
@@ -6563,7 +6563,7 @@ export function WorkspaceCanvasView({
                 className="w-12 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500"
               />
             )}
-            <span className="text-xs text-neutral-400 flex-1 text-right shrink-0">
+            <span className="text-xs text-neutral-400 flex-1 text-end shrink-0">
               {tChrome('canvas.addtext.colour')}
             </span>
             <input
@@ -6602,7 +6602,7 @@ export function WorkspaceCanvasView({
       {signDone && (
         <div
           data-testid="canvas-sign-done"
-          className={`absolute bottom-4 left-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 rounded text-xs shadow-lg border ${
+          className={`absolute bottom-4 start-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 rounded text-xs shadow-lg border ${
             signDone.ok
               ? 'bg-green-600/15 border-green-600/40 text-green-200'
               : 'bg-amber-500/15 border-amber-500/40 text-amber-200'
@@ -6621,7 +6621,7 @@ export function WorkspaceCanvasView({
       {redactError && (
         <div
           data-testid="redact-error"
-          className="absolute bottom-16 right-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
+          className="absolute bottom-16 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
         >
           <span className="flex-1">{redactError}</span>
           <button
