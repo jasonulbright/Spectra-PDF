@@ -74,6 +74,18 @@ pub enum CliCommand {
     /// Flatten transparency by rasterizing only the regions that composite,
     /// leaving text and vectors outside them live
     Flatten(FlattenArgs),
+    /// Report the in-RIP trapping vocabulary: every parameter, its type, its
+    /// range and its initial value (JSON; writes nothing)
+    TrapFields,
+    /// Report the trapping presets a document carries and its Trapped value
+    /// (JSON; writes nothing)
+    TrapList(AccessibilityArgs),
+    /// Assign an in-RIP trapping preset to a page range and set the Trapped
+    /// declaration
+    TrapAssign(TrapAssignArgs),
+    /// Write the document as DSC PostScript, with each assigned range's
+    /// trapping setup in its own page setup
+    ExportPostscript(ExportPostscriptArgs),
     /// Extract text from a PDF
     ExtractText(ExtractTextArgs),
     /// Delete pages from a PDF
@@ -1319,6 +1331,51 @@ pub struct FlattenArgs {
     /// Comma-separated 1-based page numbers (omit for all pages)
     #[arg(long)]
     pub pages: Option<String>,
+}
+
+#[derive(Args)]
+pub struct TrapAssignArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Preset name, as it appears in the document's assignment list
+    #[arg(long, default_value = "")]
+    pub name: String,
+    /// First page of the range
+    #[arg(long, default_value_t = 1)]
+    pub first: i64,
+    /// Last page of the range (defaults to the first)
+    #[arg(long)]
+    pub last: Option<i64>,
+    /// Trapping parameters as a JSON object over the in-RIP vocabulary; see
+    /// `trap-fields` for the parameter names, types and ranges
+    #[arg(long, default_value = "{}")]
+    pub params: String,
+    /// The DocInfo Trapped declaration: Unknown, False or True. Assigning a
+    /// preset adds no trap network, so True is an assertion about work done
+    /// elsewhere
+    #[arg(long, default_value = "Unknown")]
+    pub trapped: String,
+}
+
+#[derive(Args)]
+pub struct ExportPostscriptArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output .ps file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// PostScript language level, 2 or 3. In-RIP trapping needs level 3
+    #[arg(long, default_value_t = 3)]
+    pub level: i64,
+    /// Comma-separated 1-based page numbers (omit for all pages)
+    #[arg(long)]
+    pub pages: Option<String>,
+    /// Write the PostScript without the document's trapping setup
+    #[arg(long)]
+    pub no_trapping: bool,
 }
 
 #[derive(Args)]
@@ -2844,6 +2901,48 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 params["pages"] = json!(parse_page_numbers(pages)?);
             }
             engine.call("flatten_transparency", params)
+        }
+
+        CliCommand::TrapFields => engine.call("trap_preset_defaults", json!({})),
+
+        CliCommand::TrapList(args) => engine.call(
+            "list_trap_presets",
+            json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
+
+        CliCommand::TrapAssign(args) => {
+            let preset: serde_json::Value = serde_json::from_str(&args.params)
+                .map_err(|e| format!("--params must be a JSON object of trapping parameters: {e}"))?;
+            engine.call(
+                "assign_trap_presets",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "trapped": args.trapped,
+                    "assignments": [{
+                        "first": args.first,
+                        "last": args.last.unwrap_or(args.first),
+                        "name": args.name,
+                        "preset": preset,
+                    }],
+                }),
+            )
+        }
+
+        CliCommand::ExportPostscript(args) => {
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "level": args.level,
+                "trapping": !args.no_trapping,
+                "gs_path": resolve_gs().to_string_lossy(),
+            });
+            if let Some(pages) = &args.pages {
+                let numbers = parse_page_numbers(pages)?;
+                let list: Vec<String> = numbers.iter().map(|n| n.to_string()).collect();
+                params["pages"] = json!(list.join(","));
+            }
+            engine.call("export_postscript", params)
         }
 
         CliCommand::PageBox(args) => {

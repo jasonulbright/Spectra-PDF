@@ -406,6 +406,21 @@ export function registerCompress(handlers: CompressHandlers | null): void {
 }
 
 /**
+ * Trap Presets: the PostScript export's save dialog is native, so e2e injects
+ * the destination and the panel's OWN state drives everything else — the same
+ * shape the compress bridge uses, and for the same reason.
+ */
+export interface TrapPresetHandlers {
+  exportPostscript: (output: string) => Promise<unknown>;
+}
+
+let trapPresets: TrapPresetHandlers | null = null;
+
+export function registerTrapPresets(handlers: TrapPresetHandlers | null): void {
+  trapPresets = handlers;
+}
+
+/**
  * Export Pages as Images: the save dialog is native — e2e injects the
  * destination and runs the REAL gated export path the Export button runs.
  */
@@ -1187,6 +1202,9 @@ export interface TestHarness {
     output: string,
     opts?: { quality?: string; mrcPreset?: string; verifyText?: boolean },
   ) => Promise<string>;
+  /** Trap Presets PostScript export (panel must be mounted). Runs the real
+   * engine call the Export button runs, with an injected output path. */
+  trapExportPostscript: (output: string) => Promise<unknown>;
   /** Export pages as images (dialog must be open). Null result = failed
    *  (the dialog shows the error); non-null = the engine result. */
   exportImagesRun: (
@@ -2111,6 +2129,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
       if (!compress) throw new Error('compressRun: panel unmounted mid-run');
       return compress.run(output);
+    },
+    trapExportPostscript: async (output) => {
+      if (!trapPresets) {
+        const msg = 'trapExportPostscript: panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return trapPresets.exportPostscript(output);
     },
     exportImagesRun: async (out, opts) => {
       if (!exportImages) {

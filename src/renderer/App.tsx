@@ -90,6 +90,7 @@ import { InkManagerPanel } from './panels/InkManagerPanel';
 import { PrinterMarksPanel } from './panels/PrinterMarksPanel';
 import { HairlinesPanel } from './panels/HairlinesPanel';
 import { FlattenerPanel } from './panels/FlattenerPanel';
+import { TrapPresetsPanel } from './panels/TrapPresetsPanel';
 import { SettingsPanel, getSettings, ensureGsPath, type PrefCategory } from './panels/SettingsPanel';
 import { MenuBar } from './components/MenuBar';
 import { MainToolbar } from './components/MainToolbar';
@@ -185,6 +186,7 @@ const panels: Record<Operation, React.ComponentType> = {
   accessibility: AccessibilityPanel, comments: CommentsPanel, preflight: PreflightPanel,
   outputpreview: OutputPreviewPanel, inkmanager: InkManagerPanel,
   printermarks: PrinterMarksPanel, hairlines: HairlinesPanel, flattener: FlattenerPanel,
+  trappresets: TrapPresetsPanel,
   links: LinksPanel, tags: TagsPanel, readingorder: ReadingOrderPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
   actions: GuidedActionsPanel, takeoff: TakeoffPanel,

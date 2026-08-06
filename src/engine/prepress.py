@@ -25,6 +25,7 @@ import pikepdf
 
 from . import budget
 from .acroform import reattach_forms_file
+from .trapping import DEFAULT_TRAPPED, TRAPPED_VALUES
 from .validate import validate_pdf
 
 # Ghostscript render intent for the colour transform. Relative colorimetric
@@ -172,17 +173,27 @@ def _pdfx_def_ps(
     identifier: str,
     info: str,
     icc_path: str,
+    trapped: str = DEFAULT_TRAPPED,
 ) -> str:
     """A customized PDFX_def.ps (the bundled template's contract, trimmed to
     our fixed choices): DOCINFO GTS_PDFXVersion per level, an OutputIntent
     with the given condition/identifier, and — when a profile file is given —
     the embedded /DestOutputProfile stream with /N 4 declared directly (our
     ColorConversionStrategy is ALWAYS CMYK, so the template's fragile
-    N-detection block is unnecessary, exactly as its own comments advise)."""
+    N-detection block is unnecessary, exactly as its own comments advise).
+
+    `/Trapped` is a CLAIM about the document, and the converter is entitled to
+    make it only when the caller asserts it: converting colour neither adds a
+    trap network nor proves the absence of one, so the default is `/Unknown`.
+    """
     gts = {1: "PDF/X-1a:2001", 3: "PDF/X-3:2002", 4: "PDF/X-4"}[version]
+    claim = str(trapped).strip().lstrip("/").capitalize()
+    if claim not in TRAPPED_VALUES:
+        allowed = ", ".join(TRAPPED_VALUES)
+        raise ValueError(f"Trapped must be one of {allowed}.")
     lines = [
         "%!",
-        f"[ /GTS_PDFXVersion ({gts}) /Trapped /False /DOCINFO pdfmark",
+        f"[ /GTS_PDFXVersion ({gts}) /Trapped /{claim} /DOCINFO pdfmark",
     ]
     if icc_path:
         ps_path = _ps_escape(str(Path(icc_path)).replace("\\", "/"))
@@ -216,6 +227,7 @@ def convert_pdfx(
     identifier: str = "CGATS TR001",
     info: str = "",
     gs_path: str = "gs",
+    trapped: str = DEFAULT_TRAPPED,
 ) -> dict:
     """Produce a PDF/X print master with a real output intent (tail).
 
@@ -253,7 +265,7 @@ def convert_pdfx(
     def_fd, def_path = tempfile.mkstemp(suffix=".ps", dir=str(output_path.parent))
     try:
         with open(def_fd, "w", encoding="ascii") as f:
-            f.write(_pdfx_def_ps(version, condition, identifier, info, profile))
+            f.write(_pdfx_def_ps(version, condition, identifier, info, profile, trapped))
         cmd = [
             gs_path,
             "-sDEVICE=pdfwrite",
@@ -290,10 +302,12 @@ def convert_pdfx(
         if intents is None or len(intents) == 0:
             raise RuntimeError("PDF/X output carries no /OutputIntents — conversion failed.")
         gts = str(pdf.docinfo.get("/GTS_PDFXVersion", ""))
+        claimed = str(pdf.docinfo.get("/Trapped", "")).lstrip("/")
 
     return {
         "output": str(output_path),
         "pdfx_version": gts,
+        "trapped": claimed,
         "embedded_profile": bool(profile),
         "original_size": input_path.stat().st_size,
         "output_size": output_path.stat().st_size,

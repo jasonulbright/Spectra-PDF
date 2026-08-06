@@ -252,7 +252,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     // the tools that inspect the separations it produces.
     description: 'Preview separations and ink coverage, manage inks, check print readiness, and convert colour.',
     ops: ['outputpreview', 'inkmanager', 'printermarks', 'hairlines', 'flattener',
-      'preflight', 'convert_cmyk'],
+      'trappresets', 'preflight', 'convert_cmyk'],
   },
   {
     id: 'links',
