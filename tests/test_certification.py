@@ -235,3 +235,97 @@ def test_an_uncertified_document_reports_no_error(tmp_dir):
     src = _base_pdf(os.path.join(tmp_dir, "plain.pdf"))
     state = certification_of_file(src)
     assert state == {"certified": False, "level": None, "level_value": None, "error": None}
+
+
+# ── the reported shape ─────────────────────────────────────────────────────
+
+# The per-signature keys the report carried before certification existed. The
+# set comparison below is what catches an accidental REMOVAL — every consumer
+# of this door reads these by name.
+_PRIOR_SIGNATURE_KEYS = {
+    "coverage", "covers_whole_document", "digest_algorithm", "field", "intact",
+    "modified_after_signing", "pades", "page", "signer", "signing_time",
+    "subfilter", "timestamp_time", "timestamp_valid", "timestamped", "trusted",
+    "valid",
+}
+_CERTIFICATION_SIGNATURE_KEYS = {
+    "certification_level", "policy_ok", "policy_judged", "modification_level",
+}
+
+
+def test_an_unsigned_document_reports_the_certification_block(tmp_dir):
+    src = _base_pdf(os.path.join(tmp_dir, "plain.pdf"))
+    verdict = verify_signatures(src)
+    assert verdict["signed"] is False
+    assert verdict["certification"] == {
+        "certified": False, "level": None, "level_value": None,
+        "field": None, "error": None,
+    }
+    assert verdict["summary"]["certified"] is False
+    assert verdict["summary"]["any_policy_violation"] is False
+
+
+def test_an_approval_signature_reports_no_certification_and_keeps_its_keys(tmp_dir, pki):
+    src = _base_pdf(os.path.join(tmp_dir, "base.pdf"))
+    out = os.path.join(tmp_dir, "approval.pdf")
+    sign_pdf(src, out, pfx_path=pki["pfx"], password="pw")
+    verdict = verify_signatures(out)
+    assert verdict["certification"]["certified"] is False
+    assert verdict["certification"]["field"] is None
+    assert all(s["certification_level"] is None for s in verdict["signatures"])
+    keys = set(verdict["signatures"][0])
+    assert _PRIOR_SIGNATURE_KEYS - {"page"} <= keys
+    assert keys - _PRIOR_SIGNATURE_KEYS == _CERTIFICATION_SIGNATURE_KEYS
+    # No policy is in force, so there is nothing to violate and nothing unmade.
+    assert verdict["signatures"][0]["policy_judged"] is True
+    assert verdict["signatures"][0]["policy_ok"] is True
+
+
+@pytest.mark.parametrize("level,value", [("none", 1), ("form-fill", 2), ("annotate", 3)])
+def test_a_certified_document_names_its_level_and_its_author_signature(
+    tmp_dir, pki, level, value
+):
+    out, _ = _certify(tmp_dir, pki, level, name=f"report-{value}.pdf")
+    verdict = verify_signatures(out)
+    assert verdict["certification"]["certified"] is True
+    assert verdict["certification"]["level"] == level
+    assert verdict["certification"]["level_value"] == value
+    assert verdict["certification"]["field"] == verdict["signatures"][0]["field"]
+    assert verdict["signatures"][0]["certification_level"] == level
+    assert verdict["summary"]["certified"] is True
+
+
+def test_a_counter_signature_is_distinguishable_from_the_author_signature(tmp_dir, pki):
+    certified, _ = _certify(tmp_dir, pki, "form-fill", name="cert-counter.pdf")
+    out = os.path.join(tmp_dir, "countersigned.pdf")
+    sign_pdf(certified, out, pfx_path=pki["pfx"], password="pw")
+    verdict = verify_signatures(out)
+    levels = [s["certification_level"] for s in verdict["signatures"]]
+    assert levels.count("form-fill") == 1
+    assert levels.count(None) == 1
+    assert verdict["certification"]["field"] == verdict["signatures"][0]["field"]
+
+
+def test_an_unrecognized_permission_value_is_reported_unjudged(tmp_dir, pki):
+    certified, _ = _certify(tmp_dir, pki, "form-fill", name="cert-odd.pdf")
+    mangled = os.path.join(tmp_dir, "odd.pdf")
+    with pikepdf.open(certified) as pdf:
+        pdf.Root["/Perms"]["/DocMDP"]["/Reference"][0]["/TransformParams"]["/P"] = 7
+        pdf.save(mangled)
+    verdict = verify_signatures(mangled)
+    assert verdict["certification"]["level"] is None
+    assert verdict["certification"]["level_value"] == 7
+    assert verdict["signatures"][0]["policy_judged"] is False
+    assert verdict["signatures"][0]["policy_ok"] is None
+
+
+def test_a_malformed_certification_reports_an_error_and_does_not_raise(tmp_dir, pki):
+    certified, _ = _certify(tmp_dir, pki, "form-fill", name="cert-bad.pdf")
+    broken = os.path.join(tmp_dir, "bad.pdf")
+    with pikepdf.open(certified) as pdf:
+        del pdf.Root["/Perms"]["/DocMDP"]["/Reference"]
+        pdf.save(broken)
+    verdict = verify_signatures(broken)
+    assert verdict["certification"]["certified"] is False
+    assert verdict["certification"]["error"]
+    assert verdict["signed"] is True
