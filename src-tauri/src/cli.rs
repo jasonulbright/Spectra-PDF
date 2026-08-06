@@ -4,7 +4,7 @@
 //! no Tauri runtime, no window — just Python engine over JSON-RPC,
 //! results on stdout, exit code on completion.
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -1348,6 +1348,10 @@ pub struct SignArgs {
 }
 
 #[derive(Args)]
+// A named signature field states an INTENT; setting and clearing are the two,
+// and they are exclusive. Grouping them lets the parser refuse a bare
+// --sig-field, so no flag combination can clear a lock by omission.
+#[command(group(ArgGroup::new("lock_intent").args(["lock", "clear_lock"]).multiple(false)))]
 pub struct FormsArgs {
     /// Input PDF file
     pub input: PathBuf,
@@ -1362,6 +1366,21 @@ pub struct FormsArgs {
     /// all form fields (locks the form)
     #[arg(long)]
     pub flatten: bool,
+    /// An UNSIGNED signature field whose own field lock is being set — the seed
+    /// whoever signs it later is bound by. Needs --lock or --clear-lock.
+    #[arg(long = "sig-field", requires = "output", requires = "lock_intent")]
+    pub sig_field: Option<String>,
+    /// What that field's lock covers: all | include (only those named by
+    /// --lock-field) | exclude (all but those named).
+    #[arg(long, requires = "sig_field", value_parser = ["all", "include", "exclude"])]
+    pub lock: Option<String>,
+    /// A form field the lock names; repeatable. Fully qualified, and a name
+    /// that scopes a subtree locks everything beneath it.
+    #[arg(long = "lock-field", requires = "lock")]
+    pub lock_field: Vec<String>,
+    /// Remove the field's lock, leaving whoever signs it unbound.
+    #[arg(long, requires = "sig_field", conflicts_with = "lock")]
+    pub clear_lock: bool,
 }
 
 #[derive(Args)]
@@ -3148,6 +3167,21 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
 
         CliCommand::Forms(args) => {
             let input = abs(&args.input).to_string_lossy().to_string();
+            if let Some(field) = &args.sig_field {
+                // The parser guarantees an --output and exactly one of
+                // --lock / --clear-lock; --clear-lock is the null lock.
+                let output = abs(args.output.as_ref().unwrap()).to_string_lossy().to_string();
+                let mut params = json!({
+                    "file": input,
+                    "output": output,
+                    "field": field,
+                });
+                if let Some(action) = &args.lock {
+                    params["lock"] = json!(action);
+                    params["lock_fields"] = json!(args.lock_field);
+                }
+                return engine.call("set_field_lock", params);
+            }
             if args.set.is_empty() && !args.flatten {
                 return engine.call("read_form_fields", json!({ "file": input }));
             }
@@ -3879,5 +3913,61 @@ mod tests {
             vec!["a.pdf", "b.docx", "c.PNG"]
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn forms_seeds_a_signature_fields_own_lock() {
+        let cli = parse(&[
+            "spectrapdf",
+            "forms",
+            "in.pdf",
+            "-o",
+            "out.pdf",
+            "--sig-field",
+            "Signature1",
+            "--lock",
+            "include",
+            "--lock-field",
+            "applicant",
+            "--lock-field",
+            "reviewer",
+        ]);
+        match cli.command {
+            Some(CliCommand::Forms(args)) => {
+                assert_eq!(args.sig_field.as_deref(), Some("Signature1"));
+                assert_eq!(args.lock.as_deref(), Some("include"));
+                assert_eq!(args.lock_field, vec!["applicant", "reviewer"]);
+                assert!(!args.clear_lock);
+            }
+            _ => panic!("not the forms arm"),
+        }
+    }
+
+    #[test]
+    fn a_named_signature_field_states_exactly_one_lock_intent() {
+        // A bare --sig-field would clear the lock by omission.
+        assert!(
+            Cli::try_parse_from(["spectrapdf", "forms", "in.pdf", "-o", "out.pdf", "--sig-field", "S"])
+                .is_err()
+        );
+        // Setting and clearing are exclusive.
+        assert!(Cli::try_parse_from([
+            "spectrapdf", "forms", "in.pdf", "-o", "out.pdf", "--sig-field", "S", "--lock", "all",
+            "--clear-lock",
+        ])
+        .is_err());
+        // Clearing needs no field names and no action.
+        let cli = parse(&[
+            "spectrapdf", "forms", "in.pdf", "-o", "out.pdf", "--sig-field", "S", "--clear-lock",
+        ]);
+        match cli.command {
+            Some(CliCommand::Forms(args)) => {
+                assert!(args.clear_lock);
+                assert!(args.lock.is_none());
+            }
+            _ => panic!("not the forms arm"),
+        }
+        // Listing a document's fields still takes no lock flags at all.
+        assert!(Cli::try_parse_from(["spectrapdf", "forms", "in.pdf"]).is_ok());
     }
 }

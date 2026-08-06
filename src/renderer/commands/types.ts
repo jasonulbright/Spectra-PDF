@@ -127,6 +127,18 @@ export interface AppCommandHandlers {
     path: string,
     request: import('../lib/sanitize-report').SanitizeRequest,
   ): Promise<boolean>;
+  /** Set the `/Lock` an UNSIGNED signature field carries — the seed whoever
+   * signs it later is bound by. `lock` of null removes it.
+   *
+   * Writing it is a structural edit, so a signed document is decided the way
+   * every other one is: refused under a certification that allows no changes,
+   * warned about otherwise. Returns false when the warning was declined and
+   * the document was left alone. */
+  setFieldLock(
+    path: string,
+    field: string,
+    lock: import('../lib/signatures').FieldLock | null,
+  ): Promise<boolean>;
 }
 
 /**

@@ -1155,6 +1155,17 @@ export const PANEL_STRINGS = {
   'panel.prepareForm.creating': 'Creating…',
   'panel.prepareForm.created_one': '{{count}} field created.',
   'panel.prepareForm.created_other': '{{count}} fields created.',
+  'panel.prepareForm.sigFields': 'Signature fields',
+  'panel.prepareForm.sigFieldsBlurb':
+    'A signature field can carry the form fields it locks. Whoever signs it is bound by that, without you signing anything.',
+  'panel.prepareForm.sigFieldsNone': 'This document has no signature fields.',
+  'panel.prepareForm.sigFieldSigned':
+    'This field is signed, so what it locks can no longer change.',
+  'panel.prepareForm.lockNone': 'Locks nothing.',
+  'panel.prepareForm.lockApply': 'Apply lock',
+  'panel.prepareForm.lockApplying': 'Applying…',
+  'panel.prepareForm.lockApplied': 'Lock set on {{field}}.',
+  'panel.prepareForm.lockDeclined': 'The document was left alone.',
   'panel.prepareForm.reasonRuleWithoutLabel':
     'Page {{page}}: {{count}} line(s) with no label beside them were left out — they read as a table, not a fill-in.',
   'panel.prepareForm.reasonCovered':

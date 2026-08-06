@@ -24,8 +24,11 @@ from pyhanko.sign.fields import FieldMDPAction, FieldMDPSpec
 from pyhanko.sign.validation import validate_pdf_signature
 from pyhanko_certvalidator import ValidationContext
 
+from engine.acroform import form_field_forest
 from engine.docmdp_policy import DIFF_POLICY, LockedFieldModification
-from engine.fieldmdp import is_locked, locked_fields, locks_of_file
+from engine.fieldmdp import is_locked, lock_of_field_dict, locked_fields, locks_of_file
+from engine.form_authoring import add_form_fields, set_field_lock
+from engine.forms import read_form_fields
 from engine.incremental import signature_policy, transplant_incremental
 from engine.signatures import sign_pdf, verify_signatures
 from tests.test_pades import _build_pki
@@ -111,6 +114,12 @@ def _raw_lock(path, field_name="Signature1"):
             if str(field.get("/T") or "") == field_name:
                 return _flatten(field.get("/Lock"))
     return None
+
+
+def lock_of_file_field(path, field_name):
+    """The ``/Lock`` a named field carries, in the wire vocabulary."""
+    with pikepdf.open(path) as pdf:
+        return lock_of_field_dict(form_field_forest(pdf).get(field_name))
 
 
 def _raw_transform(path, field_name="Signature1"):
@@ -214,6 +223,122 @@ def test_a_seeded_field_lock_applies_with_no_request(tmp_dir, pki):
                           existing_field="Approval")
     assert result["lock"] == "include"
     assert result["lock_fields"] == ["Total"]
+
+
+# ── the preparer's half: seeding a lock without signing ────────────────────
+
+def _prepared(tmp_dir, name, lock=None, lock_fields=None, src=None):
+    """``_base_pdf`` with an empty signature field authored through the field
+    door, carrying whatever lock is asked for."""
+    src = src or _base_pdf(os.path.join(tmp_dir, "prep-base-" + name))
+    out = os.path.join(tmp_dir, name)
+    spec = {
+        "name": "Approval",
+        "type": "signature",
+        "page_index": 0,
+        "rect": [300, 500, 500, 560],
+    }
+    if lock is not None:
+        spec["lock"] = {"action": lock, "fields": list(lock_fields or [])}
+    add_form_fields(src, out, [spec])
+    return out
+
+
+def test_a_prepared_lock_applies_to_whoever_signs_with_no_request(tmp_dir, pki):
+    """The row's whole point: the preparer places the seed, the signer asks for
+    nothing, and the signature carries the lock."""
+    prepared = _prepared(tmp_dir, "prepared.pdf", "include", ["Total"])
+    assert lock_of_file_field(prepared, "Approval") == {"action": "include", "fields": ["Total"]}
+    out, result = _signed(
+        tmp_dir, pki, name="prepared-signed.pdf", src=prepared, existing_field="Approval"
+    )
+    assert result["lock"] == "include"
+    assert result["lock_fields"] == ["Total"]
+    assert _raw_transform(out, "Approval")["/Action"] == "/Include"
+    # And the seed now binds: the field it named refuses a fill.
+    assert locked_fields(locks_of_file(out), ["Name", "Total"]) == ["Total"]
+
+
+def test_a_prepared_field_with_no_lock_leaves_the_signer_unbound(tmp_dir, pki):
+    prepared = _prepared(tmp_dir, "unbound.pdf")
+    assert lock_of_file_field(prepared, "Approval") is None
+    _, result = _signed(
+        tmp_dir, pki, name="unbound-signed.pdf", src=prepared, existing_field="Approval"
+    )
+    assert result["lock"] is None
+    assert result["lock_fields"] == []
+
+
+@pytest.mark.parametrize(
+    "action,names",
+    [("all", []), ("include", ["Total"]), ("exclude", ["Total"])],
+)
+def test_the_edit_door_sets_every_action(tmp_dir, action, names):
+    prepared = _prepared(tmp_dir, "edit-base.pdf")
+    out = os.path.join(tmp_dir, f"edited-{action}.pdf")
+    result = set_field_lock(prepared, out, "Approval", action, names)
+    assert result["lock"] == {"action": action, "fields": names}
+    assert lock_of_file_field(out, "Approval") == {"action": action, "fields": names}
+
+
+def test_the_edit_door_replaces_and_clears_an_unsigned_fields_lock(tmp_dir):
+    """An unsigned field's seed is the preparer's to change: it constrains
+    nobody until someone signs."""
+    prepared = _prepared(tmp_dir, "replace-base.pdf", "include", ["Total"])
+    replaced = os.path.join(tmp_dir, "replaced.pdf")
+    set_field_lock(prepared, replaced, "Approval", "exclude", ["Name"])
+    assert lock_of_file_field(replaced, "Approval") == {"action": "exclude", "fields": ["Name"]}
+    cleared = os.path.join(tmp_dir, "cleared.pdf")
+    assert set_field_lock(replaced, cleared, "Approval")["lock"] is None
+    assert lock_of_file_field(cleared, "Approval") is None
+
+
+def test_the_edit_door_refuses_a_signed_fields_lock(tmp_dir, pki):
+    """The lock is inside what the signature covers, and it is a constraint
+    whoever signed accepted."""
+    prepared = _prepared(tmp_dir, "signed-base.pdf", "include", ["Total"])
+    signed, _ = _signed(
+        tmp_dir, pki, name="signed-lock.pdf", src=prepared, existing_field="Approval"
+    )
+    out = os.path.join(tmp_dir, "never.pdf")
+    with pytest.raises(ValueError, match="already signed"):
+        set_field_lock(signed, out, "Approval", "all", allow_signed=True)
+    assert not os.path.exists(out)
+
+
+def test_the_edit_door_refuses_a_field_that_is_not_a_signature_field(tmp_dir):
+    prepared = _prepared(tmp_dir, "wrong-kind.pdf")
+    out = os.path.join(tmp_dir, "never.pdf")
+    with pytest.raises(ValueError, match="not a signature field"):
+        set_field_lock(prepared, out, "Total", "all")
+    assert not os.path.exists(out)
+
+
+def test_the_edit_door_refuses_a_name_the_document_does_not_carry(tmp_dir):
+    prepared = _prepared(tmp_dir, "no-such.pdf")
+    out = os.path.join(tmp_dir, "never.pdf")
+    with pytest.raises(ValueError, match="no form field named"):
+        set_field_lock(prepared, out, "Ghost", "all")
+    with pytest.raises(ValueError, match="no form field named"):
+        set_field_lock(prepared, out, "Approval", "include", ["Ghost"])
+    assert not os.path.exists(out)
+
+
+def test_a_field_cannot_lock_itself(tmp_dir):
+    """A lock names the form fields that may no longer change; the field being
+    signed is fixed by the signature itself."""
+    out = os.path.join(tmp_dir, "never.pdf")
+    with pytest.raises(ValueError, match="cannot lock itself"):
+        set_field_lock(_prepared(tmp_dir, "self.pdf"), out, "Approval", "include", ["Approval"])
+    assert not os.path.exists(out)
+
+
+def test_the_prepared_lock_is_reported_by_the_form_read(tmp_dir):
+    prepared = _prepared(tmp_dir, "reported.pdf", "include", ["Total"])
+    fields_read = {f["name"]: f for f in read_form_fields(prepared)["fields"]}
+    assert fields_read["Approval"]["lock"] == {"action": "include", "fields": ["Total"]}
+    assert fields_read["Approval"]["filled"] is False
+    assert "lock" not in fields_read["Total"]
 
 
 # ── refusals ───────────────────────────────────────────────────────────────

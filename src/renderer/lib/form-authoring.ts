@@ -14,6 +14,7 @@
 // `forms` subcommand), which is unchanged by this.
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRef, PDFString } from 'pdf-lib';
 import type { PdfBuffer } from '../state/types';
+import type { FieldLock, LockAction } from './signatures';
 // The spec problems are USER-FACING copy, so they resolve
 // through the catalog. i18n is itself a data module (catalogs + i18next), so
 // this file stays pure over bytes and unit-testable with no DOM.
@@ -46,6 +47,24 @@ export interface NewFieldSpec {
   multiline?: boolean; // text only
   comb?: boolean; // text only; requires maxLength and excludes multiline
   maxLength?: number; // text only
+  /** The `/Lock` seed, signature fields only: what whoever signs this field
+   * later is bound by. Its names may be the document's existing fields or the
+   * batch's own — a form laid out in one pass locks the fields laid out with
+   * it. */
+  lock?: FieldLock | null;
+}
+
+/** Wire action → the PDF name the `/Lock` dictionary carries. A table, not a
+ * computation: an action this build does not know must not become a name. */
+const LOCK_PDF_NAME = {
+  all: 'All',
+  include: 'Include',
+  exclude: 'Exclude',
+} as const satisfies Record<LockAction, string>;
+
+/** Whether this action's meaning depends on the field list. */
+function lockListed(action: LockAction): boolean {
+  return action === 'include' || action === 'exclude';
 }
 
 const CHOICE_TYPES: ReadonlySet<NewFieldType> = new Set(['radio', 'dropdown', 'optionlist']);
@@ -141,9 +160,26 @@ function topLevelFieldNames(doc: PDFDocument): Set<string> {
 // name set grows as the batch is checked, so two specs that would collide with
 // each other are caught here rather than half-way through the writing, where
 // the document would already carry the fields created before the throw.
+/** Every name a lock in this batch may choose from: the document's own fields
+ * plus the batch's, since laying out a form and locking what was laid out is
+ * one gesture. `getFields()` is terminal-only, so the raw top-level walk
+ * contributes the hierarchy parents it cannot see. */
+function lockableNames(doc: PDFDocument, specs: readonly NewFieldSpec[]): Set<string> {
+  const names = topLevelFieldNames(doc);
+  for (const field of doc.getForm().getFields()) names.add(field.getName());
+  for (const spec of specs) {
+    const name = spec.name.trim();
+    if (name) names.add(name);
+  }
+  return names;
+}
+
 function validateSpecs(doc: PDFDocument, specs: readonly NewFieldSpec[]): void {
   const problems: FieldProblem[] = [];
   const taken = topLevelFieldNames(doc);
+  // Only walked when the batch actually carries a lock: the terminal-field walk
+  // is work no other rule needs.
+  const lockable = specs.some((s) => s.lock) ? lockableNames(doc, specs) : new Set<string>();
   const batch = specs.length > 1;
   specs.forEach((spec, index) => {
     const name = spec.name.trim();
@@ -184,6 +220,29 @@ function validateSpecs(doc: PDFDocument, specs: readonly NewFieldSpec[]): void {
         push('refusal.field.maxLengthPositive');
       }
     }
+    const lock = spec.lock ?? null;
+    if (lock) {
+      if (spec.type !== 'signature') {
+        push('refusal.field.lockNotSignature');
+      } else if (lock.action === 'all' && lock.fields.length > 0) {
+        // `/All` ignores the list, so accepting one would discard the choice.
+        push('refusal.field.lockTakesNoFields');
+      } else if (lockListed(lock.action) && lock.fields.length === 0) {
+        // An include-lock of nothing locks nothing and an exclude-lock of
+        // nothing locks everything — opposite meanings for one empty list.
+        push('refusal.field.lockNeedsFields');
+      } else {
+        for (const target of lock.fields) {
+          if (target === name) {
+            push('refusal.field.lockSelf', { name: target });
+          } else if (!lockable.has(target)) {
+            // A name the document does not carry locks nothing under `include`
+            // and everything-but-a-typo under `exclude` — invisible either way.
+            push('refusal.field.lockUnknownField', { name: target });
+          }
+        }
+      }
+    }
     if (name) {
       // Duplicate names would make readers treat two fields as one logical
       // field (or violate sibling /T uniqueness outright). Checked against the
@@ -204,6 +263,22 @@ function validateSpecs(doc: PDFDocument, specs: readonly NewFieldSpec[]): void {
   if (problems.length > 0) throw new FieldSpecError(problems);
 }
 
+/** The `/Lock` (`/SigFieldLock`) dictionary a signature field carries. `all`
+ * writes no `/Fields`: the format ignores one there. */
+function lockDict(doc: PDFDocument, lock: FieldLock): PDFDict {
+  const dict = doc.context.obj({
+    Type: 'SigFieldLock',
+    Action: LOCK_PDF_NAME[lock.action],
+  }) as PDFDict;
+  if (lockListed(lock.action)) {
+    dict.set(
+      PDFName.of('Fields'),
+      doc.context.obj(lock.fields.map((name) => PDFHexString.fromText(name))) as PDFArray,
+    );
+  }
+  return dict;
+}
+
 function addSignatureField(doc: PDFDocument, spec: NewFieldSpec): void {
   // getForm() ensured /AcroForm exists (validateSpec already called it).
   const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)!;
@@ -222,6 +297,9 @@ function addSignatureField(doc: PDFDocument, spec: NewFieldSpec): void {
     P: page.ref,
   }) as PDFDict;
   widget.set(PDFName.of('T'), PDFHexString.fromText(spec.name.trim()));
+  if (spec.lock) {
+    widget.set(PDFName.of('Lock'), doc.context.register(lockDict(doc, spec.lock)));
+  }
   const ref = doc.context.register(widget);
   fields.push(ref);
   let annots = page.node.lookupMaybe(PDFName.of('Annots'), PDFArray);

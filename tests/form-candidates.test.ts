@@ -17,6 +17,7 @@ import {
   selectionState,
   setCheckedAll,
   setCheckedOnPage,
+  setCandidateLock,
   setCandidateMultiline,
   toggleCandidate,
   type DetectedCandidate,
@@ -256,6 +257,62 @@ describe('buildFieldSpecs', () => {
     ]);
     const specs = buildFieldSpecs([resolve(candidates[0], [10, 10, 20, 20])], new Set());
     expect(specs[0].options).toEqual([{ label: 'Option 1', rect: [10, 10, 20, 20] }]);
+  });
+
+  it('carries a signature candidate lock into its spec', () => {
+    const { candidates } = bind([
+      detected({ name: 'Applicant', index: 0 }),
+      detected({ kind: 'signature', name: 'Signature1', index: 1 }),
+    ]);
+    const withLock = setCandidateLock(candidates, candidates[1].id, {
+      action: 'include',
+      fields: ['Applicant'],
+    });
+    const specs = buildFieldSpecs(
+      [
+        resolve(withLock[0], [10, 10, 110, 30]),
+        resolve(withLock[1], [10, 50, 110, 90]),
+      ],
+      new Set(),
+    );
+    expect(specs[0].lock).toBeUndefined();
+    expect(specs[1].lock).toEqual({ action: 'include', fields: ['Applicant'] });
+  });
+
+  it('rewrites a lock target the batch itself renamed', () => {
+    // The document already carries "Applicant", so the candidate of that name
+    // is written as Applicant_2 — a lock naming the original would otherwise
+    // name the document's field rather than the one just created.
+    const { candidates } = bind([
+      detected({ name: 'Applicant', index: 0 }),
+      detected({ kind: 'signature', name: 'Signature1', index: 1 }),
+    ]);
+    const withLock = setCandidateLock(candidates, candidates[1].id, {
+      action: 'include',
+      fields: ['Applicant'],
+    });
+    const specs = buildFieldSpecs(
+      [
+        resolve(withLock[0], [10, 10, 110, 30]),
+        resolve(withLock[1], [10, 50, 110, 90]),
+      ],
+      new Set(['Applicant']),
+    );
+    expect(specs[0].name).toBe('Applicant_2');
+    expect(specs[1].lock).toEqual({ action: 'include', fields: ['Applicant_2'] });
+  });
+
+  it('drops a lock when the candidate stops being a signature field', () => {
+    const { candidates } = bind([detected({ kind: 'signature', name: 'Signature1' })]);
+    const withLock = setCandidateLock(candidates, candidates[0].id, {
+      action: 'all',
+      fields: [],
+    });
+    expect(retypeCandidate(withLock, candidates[0].id, 'text')[0].lock).toBe(null);
+    expect(retypeCandidate(withLock, candidates[0].id, 'signature')[0].lock).toEqual({
+      action: 'all',
+      fields: [],
+    });
   });
 });
 

@@ -8,6 +8,7 @@
 // are the shared contract consumed by the FormsPanel, the canvas overlay
 // (form-overlay.ts), and the fill fingerprint machinery.
 import type { EngineCall } from './engine-call';
+import type { FieldLock } from './signatures';
 
 export type FormFieldType =
   | 'text'
@@ -54,6 +55,9 @@ export interface FormField {
   widgets: FormWidgetPlacement[];
   // signature only: the field already holds a signature (/V present).
   filled?: boolean;
+  // signature only: the `/Lock` the field itself carries — the seed whoever
+  // signs it later is bound by. Null when it carries none.
+  lock?: FieldLock | null;
   // button only: the pushbutton's classified /A action. `reset` runs
   // for real; `uri` is SHOWN (this app deliberately opens no external
   // URLs itself); the rest report their kind honestly.
@@ -107,8 +111,18 @@ interface EngineField {
   required: boolean;
   multiline?: boolean;
   filled?: boolean;
+  lock?: { action?: string; fields?: unknown[] } | null;
   action?: ButtonAction;
   widgets?: EngineWidget[];
+}
+
+/** The engine's lock read, narrowed to the wire vocabulary. An action this
+ * build does not know reports NO lock rather than the nearest one: guessing
+ * would either invent a constraint or discard a real one. */
+function lockOfEngineField(raw: EngineField['lock']): FieldLock | null {
+  const action = raw?.action;
+  if (action !== 'all' && action !== 'include' && action !== 'exclude') return null;
+  return { action, fields: (raw?.fields ?? []).map((n) => String(n)) };
 }
 interface EngineReadResult {
   has_xfa?: boolean;
@@ -164,7 +178,7 @@ export function mapEngineField(ef: EngineField): FormField | null {
     ...(ef.multiline !== undefined ? { multiline: Boolean(ef.multiline) } : {}),
     editable: EDITABLE_TYPES.has(type) && !readOnly,
     widgets,
-    ...(type === 'signature' ? { filled: Boolean(ef.filled) } : {}),
+    ...(type === 'signature' ? { filled: Boolean(ef.filled), lock: lockOfEngineField(ef.lock) } : {}),
     ...(type === 'button' && ef.action ? { action: ef.action } : {}),
   };
 }
