@@ -102,10 +102,12 @@ below were read from those wheels' METADATA):
 | cffi | MIT-0 | <https://github.com/python-cffi/cffi> |
 | charset-normalizer | MIT | <https://github.com/jawah/charset_normalizer> |
 | cryptography | Apache-2.0 OR BSD-3-Clause | <https://github.com/pyca/cryptography> |
+| et_xmlfile | MIT | <https://foss.heptapod.net/openpyxl/et_xmlfile> |
 | fonttools | MIT | <https://github.com/fonttools/fonttools> |
 | idna | BSD-3-Clause | <https://github.com/kjd/idna> |
 | lxml | BSD-3-Clause | <https://github.com/lxml/lxml> |
 | numpy | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | <https://github.com/numpy/numpy> |
+| openpyxl | MIT | <https://foss.heptapod.net/openpyxl/openpyxl> |
 | oscrypto | MIT | <https://github.com/wbond/oscrypto> |
 | packaging | Apache-2.0 OR BSD-2-Clause | <https://github.com/pypa/packaging> |
 | pdfminer.six | MIT | <https://github.com/pdfminer/pdfminer.six> |
@@ -116,12 +118,15 @@ below were read from those wheels' METADATA):
 | pyHanko | MIT | <https://github.com/MatthiasValvekens/pyHanko> |
 | pyhanko-certvalidator | MIT | <https://github.com/MatthiasValvekens/pyHanko/tree/master/pkgs/pyhanko-certvalidator> |
 | python-pkcs11 | MIT | <https://github.com/pyauth/python-pkcs11> |
+| python-pptx | MIT | <https://github.com/scanny/python-pptx> |
 | requests | Apache-2.0 (its NOTICE file ships in its dist-info) | <https://github.com/psf/requests> |
+| typing_extensions | PSF-2.0 | <https://github.com/python/typing_extensions> |
 | tzdata | Apache-2.0 | <https://github.com/python/tzdata> |
 | uharfbuzz | Apache-2.0 (embeds HarfBuzz, MIT-0) | <https://github.com/harfbuzz/uharfbuzz> |
 | tzlocal | MIT | <https://github.com/regebro/tzlocal> |
 | uritools | MIT | <https://github.com/tkem/uritools> |
 | urllib3 | MIT | <https://github.com/urllib3/urllib3> |
+| XlsxWriter | BSD-2-Clause | <https://github.com/jmcnamara/XlsxWriter> |
 
 pikepdf's binary wheel embeds the **qpdf** library (Apache-2.0,
 <https://github.com/qpdf/qpdf>) and the MSVC runtime DLL it needs; the wheel's
