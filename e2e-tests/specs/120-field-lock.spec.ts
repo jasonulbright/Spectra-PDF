@@ -123,7 +123,12 @@ describe('field locks', () => {
     const line = await $('[data-testid="signature-lock"]');
     await line.waitForDisplayed({ timeout: 20_000 });
     expect(await line.getAttribute('data-lock-action')).toBe('include');
-    expect(await line.getText()).toContain('applicant');
+    // textContent, not getText(): the card sits in a scrolling list, and a line
+    // below the fold renders as an empty string to the driver.
+    const lockText = await browser.execute(
+      () => document.querySelector('[data-testid="signature-lock"]')?.textContent ?? '',
+    );
+    expect(lockText).toContain('applicant');
     expect(await $('[data-testid="signature-lock-violation"]').isExisting()).toBe(false);
   });
 
