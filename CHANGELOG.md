@@ -1,6 +1,59 @@
 # Changelog
 
-## 1.0.21 — Prepare Form finds the fields for you
+## 1.0.21 — Prepare Form finds the fields for you, and a document tells you what it carries
+
+### A document tells you what it carries
+
+Before you send a document out, you can now ask what is actually in it. Open
+the Redact tool, choose **Remove Hidden Information**, and the panel lists
+everything the file carries that is not the page you can see: document and page
+metadata, embedded and attached files, bookmarks, comments, form fields and
+their values, JavaScript, hidden layers, text you cannot see, earlier revisions
+of the file, objects nothing points to, links and actions, page thumbnails,
+accessibility tags, and any digital signatures. Every category shows a count
+and opens to name each finding, and a category with nothing in it says so —
+zero and absent never look the same.
+
+**Nothing is removed until you tick it.** There is no clean-everything button
+that skips the report, and the three choices that cost you something — removing
+the form fields, removing the accessibility tags, and removing the invisible
+text that makes a scan searchable — each say what is lost and are never
+pre-ticked. Apply removes exactly what you checked, then reads the document
+again and shows the before and after side by side, so a category that could not
+be fully cleared reports what is left instead of a success message. One undo
+takes the whole pass back.
+
+Four things it finds that no single panel could tell you before:
+
+- **Attached files reached through an annotation.** The Attachments panel only
+  ever saw the ones in the document's own list; a payload attached to a note
+  was invisible to it. Both are found now, and the report says how each one is
+  reached.
+- **Content an earlier revision of the file still holds.** A document that was
+  edited and saved incrementally keeps everything the newest version removed,
+  and anyone with the file and a text editor can read it back. Removing earlier
+  revisions writes the file out whole, and the older text ceases to exist.
+- **A hidden layer's words.** Hiding a layer only stops it being drawn — the
+  text stays in the file and every search and extraction still reads it.
+  Removing the layer removes its content, not just its visibility.
+- **Text you cannot see.** Text drawn in an invisible mode, text the same
+  colour as what is behind it, text covered by something opaque, and text
+  inside a layer that is switched off. Text that is only partly covered is
+  reported and deliberately kept — the visible half is content.
+
+A signed document warns first, naming how many signatures the clean-up will
+break, and a certified one says so distinctly. It still proceeds if you say so:
+the document is yours.
+
+- Both halves have a command-line arm: `spectrapdf audit <file>` prints the
+  report as JSON and writes nothing, and
+  `spectrapdf sanitize <in> <out> --categories …` removes the named categories.
+  `--all-removable` covers everything except the three that cost you something,
+  which must be named explicitly.
+- **Remove Hidden Information** is also a step in a guided action, so a watched
+  folder or a scheduled run can clean every document that passes through it.
+
+### Prepare Form finds the fields for you
 
 Preparing a form used to mean drawing every field by hand and typing every
 name. Open a flat form, pick Prepare Form and choose **Detect fields**: the
