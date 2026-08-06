@@ -85,6 +85,7 @@ import { QueueProvider, useOperationQueue } from './hooks/useOperationQueue';
 import { SearchProvider } from './search/SearchProvider';
 import { SeparationPreviewProvider } from './hooks/useSeparationPreview';
 import { OutputPreviewPanel } from './panels/OutputPreviewPanel';
+import { InkManagerPanel } from './panels/InkManagerPanel';
 import { SettingsPanel, getSettings, ensureGsPath, type PrefCategory } from './panels/SettingsPanel';
 import { MenuBar } from './components/MenuBar';
 import { MainToolbar } from './components/MainToolbar';
@@ -178,7 +179,7 @@ const panels: Record<Operation, React.ComponentType> = {
   convert_cmyk: PrepressPanel, headerfooter: HeaderFooterPanel, pagebox: PageBoxesPanel,
   pagelabels: PageLabelsPanel, attachments: AttachmentsPanel, portfolio: PortfolioPanel, layers: LayersPanel,
   accessibility: AccessibilityPanel, comments: CommentsPanel, preflight: PreflightPanel,
-  outputpreview: OutputPreviewPanel,
+  outputpreview: OutputPreviewPanel, inkmanager: InkManagerPanel,
   links: LinksPanel, tags: TagsPanel, readingorder: ReadingOrderPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
   actions: GuidedActionsPanel, takeoff: TakeoffPanel,

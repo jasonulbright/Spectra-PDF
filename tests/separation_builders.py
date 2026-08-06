@@ -176,7 +176,9 @@ def spot_in_every_paint_pdf(path, spot: str = "Warm Red"):
         b"/CS0 cs 1 scn 10 250 120 40 re f",
         b"/CS0 CS 0.5 SCN 4 w 150 250 m 290 250 l S",
         b"q 100 0 0 60 10 170 cm /Im0 Do Q",
-        b"q 200 0 0 40 10 110 cm /Sh0 sh Q",
+        # `sh` paints the whole CLIP, so an unclipped one would cover the
+        # page in the shading's edge colour and hide everything above it.
+        b"q 10 110 200 40 re W n 200 0 0 40 10 110 cm /Sh0 sh Q",
         b"/Pattern cs /P0 scn 10 20 260 70 re f",
     ]))
     pdf.save(path)
@@ -246,7 +248,7 @@ def inks_everywhere_pdf(path):
         b"/NONE cs 1 scn 140 250 30 30 re f",
         b"q 1 0 0 1 10 200 cm /Fm0 Do Q",
         b"q 60 0 0 60 10 120 cm /Im0 Do Q",
-        b"q 100 0 0 60 120 120 cm /Sh0 sh Q",
+        b"q 120 120 100 60 re W n 100 0 0 60 120 120 cm /Sh0 sh Q",
         b"/Pattern cs /P0 scn 10 20 200 60 re f",
     ]))
 

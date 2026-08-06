@@ -47,6 +47,12 @@ from engine.separations import (
     list_inks,
     render_separations,
 )
+from engine.ink_manager import (
+    alias_ink,
+    compare_tint_transforms,
+    ink_settings_defaults,
+    spot_to_process,
+)
 from engine.links import list_links, set_link_url, delete_link, add_links
 from engine.office_export import export_document, supported_formats
 from engine.image_export import export_images
@@ -181,6 +187,10 @@ def main() -> None:
     server.register("list_inks", list_inks)
     server.register("render_separations", render_separations)
     server.register("composite_separations", composite_separations)
+    server.register("alias_ink", alias_ink)
+    server.register("compare_ink_transforms", compare_tint_transforms)
+    server.register("spot_to_process", spot_to_process)
+    server.register("ink_settings_defaults", ink_settings_defaults)
     server.register("get_struct_tree", get_struct_tree)
     server.register("set_struct_props", set_struct_props)
     server.register("move_struct_node", move_struct_node)

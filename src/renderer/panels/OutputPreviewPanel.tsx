@@ -12,8 +12,10 @@ import {
   MIN_INK_DENSITY,
   MIN_TAC_LIMIT,
   coverageRows,
+  inkRows,
+  orderInks,
   type Ink,
-  type Plate,
+  type InkRow,
 } from '../lib/separation-preview';
 
 /** A stable test handle for an ink row. The ink NAME is document content and
@@ -32,8 +34,8 @@ export function OutputPreviewPanel(): React.ReactElement {
   const { activeFile, openNewFiles } = useActiveFile();
   const {
     armed, setArmed, inks, plates, coverage, hidden, toggleInk, showAllInks, hideAllInks,
-    densities, setDensity, limitPct, setLimitPct, alarm, setAlarm, overprint, setOverprint,
-    stats, busy, error,
+    densities, setDensity, aliases, sequence, limitPct, setLimitPct, alarm, setAlarm,
+    overprint, setOverprint, stats, busy, error,
   } = useSeparationPreview();
 
   if (!activeFile) {
@@ -42,10 +44,13 @@ export function OutputPreviewPanel(): React.ReactElement {
 
   const coverageByName = new Map(coverageRows(coverage).map((row) => [row.name, row.pct]));
   const nonInks: Ink[] = inks.filter((i) => i.kind === 'all' || i.kind === 'none');
-  const processPlates: Plate[] = plates.filter((p) => p.kind === 'process');
-  const spotPlates: Plate[] = plates.filter((p) => p.kind === 'spot');
+  // An aliased colorant is DRAWN as another ink, so it is not a row of its
+  // own — the ink it joined names it instead.
+  const rows = inkRows(orderInks(plates, sequence), aliases);
+  const processRows = rows.filter((r) => r.plate.kind === 'process');
+  const spotRows = rows.filter((r) => r.plate.kind === 'spot');
 
-  const inkRow = (plate: Plate): React.ReactElement => {
+  const inkRow = ({ plate, aliasedFrom }: InkRow): React.ReactElement => {
     const slug = inkSlug(plate.name);
     const pct = coverageByName.get(plate.name);
     const density = densities.get(plate.name) ?? DEFAULT_INK_DENSITY;
@@ -70,6 +75,14 @@ export function OutputPreviewPanel(): React.ReactElement {
         <span className="text-sm text-neutral-200 min-w-0 truncate flex-1" title={plate.name}>
           {plate.name}
         </span>
+        {aliasedFrom.length > 0 && (
+          <span
+            className="text-xs text-amber-400 truncate"
+            data-testid={`output-preview-merged-${slug}`}
+          >
+            {tChrome('panel.outputPreview.merged', { names: aliasedFrom.join(', ') })}
+          </span>
+        )}
         {pct !== undefined && (
           <span
             className="text-xs text-neutral-400 tabular-nums"
@@ -192,13 +205,13 @@ export function OutputPreviewPanel(): React.ReactElement {
       </div>
 
       <div className="flex flex-col gap-1" data-testid="output-preview-ink-list">
-        {processPlates.map(inkRow)}
-        {spotPlates.length > 0 && (
+        {processRows.map(inkRow)}
+        {spotRows.length > 0 && (
           <div className="text-xs uppercase tracking-wide text-neutral-500 mt-2">
             {tChrome('panel.outputPreview.spots')}
           </div>
         )}
-        {spotPlates.map(inkRow)}
+        {spotRows.map(inkRow)}
         {plates.length === 0 && !busy && (
           <div className="text-xs text-neutral-500" data-testid="output-preview-empty">
             {tChrome('panel.outputPreview.noPlates')}
