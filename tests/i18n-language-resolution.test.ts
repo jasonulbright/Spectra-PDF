@@ -5,7 +5,13 @@
 // catalogs for their languages, so a `pt-PT`/`zh-TW`/bare-`zh` system would
 // have fallen through to English under the old exact-or-base-only match.
 import { describe, it, expect } from 'vitest';
-import { resolveLanguage, SHIPPED_LOCALES, LOCALE_NATIVE_NAMES } from '../src/renderer/i18n';
+import {
+  resolveLanguage,
+  ambiguousBases,
+  LANGUAGE_ALIASES,
+  SHIPPED_LOCALES,
+  LOCALE_NATIVE_NAMES,
+} from '../src/renderer/i18n';
 
 describe('resolveLanguage', () => {
   it('takes an exact tag', () => {
@@ -21,13 +27,53 @@ describe('resolveLanguage', () => {
   });
 
   it('takes a base language to a REGIONAL catalog when that is the only one', () => {
-    // Portuguese and Chinese ship as pt-BR / zh-CN only. Every other spelling
-    // of those languages must reach them rather than fall back to English.
+    // Portuguese ships as pt-BR only. Every other spelling of it must reach
+    // that catalog rather than fall back to English.
     expect(resolveLanguage('pt')).toBe('pt-BR');
     expect(resolveLanguage('pt-PT')).toBe('pt-BR');
-    expect(resolveLanguage('zh')).toBe('zh-CN');
-    expect(resolveLanguage('zh-Hans')).toBe('zh-CN');
-    expect(resolveLanguage('zh-TW')).toBe('zh-CN');
+  });
+
+  it('sends the Simplified-Chinese family to zh-CN', () => {
+    for (const tag of ['zh', 'zh-Hans', 'zh-Hans-CN', 'zh-SG', 'zh-CN']) {
+      expect(resolveLanguage(tag), tag).toBe('zh-CN');
+    }
+  });
+
+  it('refuses to serve the Traditional-Chinese family a Simplified catalog', () => {
+    // Traditional is a different catalog, not a regional spelling of zh-CN:
+    // the script differs and so does the terminology. Until zh-TW ships,
+    // English is the honest answer; the alias rows then need no edit.
+    for (const tag of ['zh-Hant', 'zh-Hant-TW', 'zh-TW', 'zh-HK', 'zh-MO']) {
+      expect(resolveLanguage(tag), tag).toBe('en');
+    }
+    for (const prefix of ['zh-hant', 'zh-tw', 'zh-hk', 'zh-mo']) {
+      expect(LANGUAGE_ALIASES[prefix], prefix).toBe('zh-TW');
+    }
+  });
+
+  it('carries the Norwegian and legacy-Hebrew aliases ahead of their catalogs', () => {
+    for (const tag of ['no', 'no-NO', 'nn', 'nn-NO', 'nb', 'nb-NO']) {
+      expect(resolveLanguage(tag), tag).toBe('en');
+    }
+    expect(LANGUAGE_ALIASES['no']).toBe('nb');
+    expect(LANGUAGE_ALIASES['nn']).toBe('nb');
+    expect(resolveLanguage('iw')).toBe('en');
+    expect(resolveLanguage('iw-IL')).toBe('en');
+    expect(LANGUAGE_ALIASES['iw']).toBe('he');
+  });
+
+  it('decides every ambiguous base from the alias table, never from array order', () => {
+    // A second regional catalog for a language makes the base match a coin
+    // flip on `SHIPPED_LOCALES` order. This is the assertion that turns that
+    // into a missing alias row.
+    for (const base of ambiguousBases()) {
+      expect(LANGUAGE_ALIASES[base], `base ${base} has two catalogs and no alias row`)
+        .toBeTruthy();
+    }
+    for (const target of Object.values(LANGUAGE_ALIASES)) {
+      if (!SHIPPED_LOCALES.includes(target)) continue;
+      expect(resolveLanguage(target), `alias target ${target}`).toBe(target);
+    }
   });
 
   it('is case-insensitive about the tag', () => {

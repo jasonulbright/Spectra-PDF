@@ -45,6 +45,19 @@ describe('rankToolMatches', () => {
     expect(rankToolMatches('x', defs).map((t) => t.title)).toEqual(['Apple', 'Zebra']);
   });
 
+  it('breaks ties by the COLLATION of the language it is handed', () => {
+    // Swedish sorts ö after z; English sorts it among the o-vowels. A bare
+    // localeCompare would follow the host locale instead of the UI language,
+    // so the same list comes out in a different order on two machines.
+    const defs = [
+      { id: 'o' as const, title: 'Öppna', description: 'x' },
+      { id: 'z' as const, title: 'Zoom', description: 'x' },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ] as any;
+    expect(rankToolMatches('x', defs, 'sv').map((t) => t.id)).toEqual(['z', 'o']);
+    expect(rankToolMatches('x', defs, 'en').map((t) => t.id)).toEqual(['o', 'z']);
+  });
+
   it('excludes tools that match nowhere', () => {
     expect(rankToolMatches('zzzzznotatool', TOOL_DEFS)).toEqual([]);
   });

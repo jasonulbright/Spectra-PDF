@@ -310,6 +310,17 @@ describe('searchSymbols', () => {
     expect(searchSymbols('door swing', spanish).map((h) => h.symbol.id)).toEqual(['aec-door']);
   });
 
+  it('folds case without locale case mapping, so a dotted I still matches', () => {
+    // Turkish case mapping folds I to U+0131, and a matcher that uses the HOST
+    // locale drops every I-bearing name on a Turkish install — in every UI
+    // language. Both halves are asserted: the fold that must happen, and the
+    // fold that must not.
+    const upper = (_s: SymbolSet, sym: SymbolDef): string =>
+      sym.id === 'aec-door' ? 'DOORWAY INSET' : sym.name;
+    expect(searchSymbols('inset', upper).map((h) => h.symbol.id)).toEqual(['aec-door']);
+    expect('DOORWAY INSET'.toLocaleLowerCase('tr').includes('inset')).toBe(false);
+  });
+
   it('finds nothing for a query nothing matches', () => {
     expect(searchSymbols('zzzz-nothing', shown)).toHaveLength(0);
   });

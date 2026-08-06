@@ -66,8 +66,8 @@ export function OmniSearch(): React.JSX.Element {
 
   // Rank over the LOCALIZED names, not TOOL_DEFS' English. A search box
   // that scores what the user cannot see is a search box that returns nothing
-  // for every query typed in the UI language — the ranking's own tie-break
-  // (`localeCompare`) already assumes the strings are the displayed ones.
+  // for every query typed in the UI language — and the ranking's tie-break
+  // collates in the language it is handed, which must be the displayed one.
   const toolHits: ToolHit[] = useMemo(
     () =>
       rankToolMatches(
@@ -77,6 +77,7 @@ export function OmniSearch(): React.JSX.Element {
           title: tToolTitle(t.id, t.title, language),
           description: tToolDescription(t.id, t.description, language),
         })),
+        language,
       )
         .slice(0, MAX_TOOL_HITS)
         .map((t) => ({
