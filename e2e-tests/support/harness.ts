@@ -947,7 +947,7 @@ export async function setReactInputValue(selector: string, value: string): Promi
         const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
         const tracker = (input as unknown as { _valueTracker?: { setValue(v: string): void } })
           ._valueTracker;
-        if (tracker) tracker.setValue(v + ' '); // force a tracked change
+        if (tracker) tracker.setValue(v + '\u0000'); // force a tracked change
         setter.call(input, v);
         input.dispatchEvent(new Event('input', { bubbles: true }));
         return input.value === v;
@@ -977,7 +977,7 @@ export async function setReactSelectValue(selector: string, value: string): Prom
         )!.set!;
         const tracker = (el as unknown as { _valueTracker?: { setValue(v: string): void } })
           ._valueTracker;
-        if (tracker) tracker.setValue(v + ' '); // force a tracked change
+        if (tracker) tracker.setValue(v + '\u0000'); // force a tracked change
         setter.call(el, v);
         el.dispatchEvent(new Event('change', { bubbles: true }));
         return el.value === v;
