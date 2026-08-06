@@ -1,6 +1,30 @@
 # Changelog
 
-## 1.0.22 — Whole folders at a time
+## 1.0.22 — Whole folders at a time, fields a signature locks, authorities this computer already trusts, and where every byte goes
+
+A signature can settle form fields for good. When you sign you can lock every
+field, only the ones you choose, or everything except the ones you choose,
+picked from the document's own list rather than typed. Afterwards each
+signature says what it locks, and says separately when a locked field has been
+changed since. Filling a locked field is refused rather than warned about.
+
+Two more tools now work on whole folders. Search & Redact runs its search over
+every PDF in a folder and its subfolders, and Prepare Form does the same —
+working out where each form's fields belong from its ruled lines, boxes and
+labels, and creating them. Nothing has to be open, and nothing is opened. Both
+show you what they found before anything is written, write into a destination
+folder by default so your originals are untouched, decide signed documents one
+file at a time, and leave a log of what happened. Both also run unattended,
+inside a guided action or from the command line.
+
+Verifying a signature can now anchor on the certificate authorities this
+computer already records, as well as the ones you added yourself. It stays off
+until you turn it on, it respects the purposes each authority is trusted for,
+and a verified signature says which source vouched for it.
+
+Optimize opens on a breakdown of where a document's size actually goes: every
+byte attributed to one of fourteen categories, largest first, adding up to the
+file size exactly, with each row naming the setting that addresses it.
 
 ### Lock form fields when you sign
 
@@ -136,6 +160,14 @@ expanded to name the individual objects, with the page each sits on.
 
 The breakdown is a read: it never alters the document, it re-runs by itself
 after any change, and it is available on the command line as `audit-space`.
+
+### Fixes
+
+- Filling in a form or commenting on a certified document could leave its
+  certification signature reporting that it no longer covered the whole file,
+  so the app could no longer say whether the change was one the certification
+  permitted. The original signature is now carried through untouched and the
+  verdict reads back as it should.
 
 ## 1.0.21 — Fields found, hidden content named, documents certified, and export to spreadsheets and slides
 
