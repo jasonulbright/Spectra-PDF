@@ -38,3 +38,12 @@ numpy==2.5.1
 # (LGPLv3) and x265 (GPLv2) — ordinary notice rows for an MIT open-source
 # project with a public repository, listed in THIRD-PARTY-LICENSES.md.
 pillow-heif==1.5.0
+# Spreadsheet export: the workbook writer for the xlsx target. A spreadsheet
+# filter cannot write a page-description document, so the cells come from this
+# engine's own table detection and this package writes them. MIT; a
+# `none-any` wheel, so nothing compiles at packaging time.
+openpyxl==3.1.5
+# Presentation export: the deck writer for the pptx target. MIT, `none-any`.
+# Its binary transitive dependencies (lxml, Pillow) already resolve here at the
+# same versions, so nothing is duplicated or upgraded.
+python-pptx==1.0.2
