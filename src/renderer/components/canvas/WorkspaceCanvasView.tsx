@@ -47,6 +47,14 @@ import { useEngine } from '../../hooks/useEngine';
 import { app, dialog } from '../../lib/tauri-bridge';
 import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../SignerSourceFields';
 import type { SignerSource } from '../SignerSourceFields';
+import {
+  certifyParams,
+  CERTIFICATION_LEVEL_LABEL,
+  CERTIFY_LEVELS,
+  DEFAULT_CERTIFY,
+  type CertificationLevel,
+  type CertifyOptions,
+} from '../../lib/signatures';
 import { sourceKeyOf } from '../../search/useSearchIndex';
 import { useSearchContext } from '../../search/SearchProvider';
 import { useFind } from '../../search/useFind';
@@ -752,6 +760,13 @@ export function WorkspaceCanvasView({
   const [sigPassword, setSigPassword] = useState('');
   const [sigReason, setSigReason] = useState('');
   const [sigLocation, setSigLocation] = useState('');
+  // Certification travels beside the signer source and the placement, never
+  // inside either: it is orthogonal to both.
+  const [sigCertify, setSigCertify] = useState<CertifyOptions>(DEFAULT_CERTIFY);
+  // Whether the document the card targets could still take a certification.
+  // Starts false so the offer only ever appears once the read has ANSWERED —
+  // showing it first and withdrawing it is worse than showing it a beat late.
+  const [sigCanCertify, setSigCanCertify] = useState(false);
   const [signingBusy, setSigningBusy] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
   const [signDone, setSignDone] = useState<{ signer: string | null; output: string; ok: boolean } | null>(null);
@@ -1481,8 +1496,9 @@ export function WorkspaceCanvasView({
       // The Signatures PANEL's "visible signature" hand-off — arm the
       // placement mode and seed the canvas sign card with the panel's
       // signer details, so nothing is typed twice.
-      startVisibleSignature: (prefill) => {
+      startVisibleSignature: (prefill, certification) => {
         if (prefill) setSigSource(prefill);
+        setSigCertify(certification ?? DEFAULT_CERTIFY);
         invokeCommand('tools.signature');
       },
       openPageForReading: (pageId) => openPageForReadingRef.current(pageId),
@@ -2199,6 +2215,38 @@ export function WorkspaceCanvasView({
     if (!sigPlacement) return null;
     return docs.some((d) => d.pages.some((p) => p.id === sigPlacement.pageId)) ? sigPlacement : null;
   }, [sigPlacement, docs]);
+
+  // Can the card's target still take a certification? A certification must be
+  // a document's FIRST signature, so this is a structural read of what is
+  // already there.
+  const sigTargetPath = sigFieldTarget?.path ?? liveSigPlacement?.path ?? null;
+  useEffect(() => {
+    if (!sigTargetPath) {
+      setSigCanCertify(false);
+      return;
+    }
+    const workingPath = state.files.get(sigTargetPath)?.workingPath;
+    if (!workingPath) {
+      setSigCanCertify(false);
+      return;
+    }
+    let cancelled = false;
+    void engineCall('signature_policy', { path: workingPath })
+      .then((policy) => {
+        if (cancelled) return;
+        const { signed } = policy as unknown as { signed: boolean };
+        setSigCanCertify(!signed);
+        // A document that cannot be certified must not carry a certify
+        // request left over from an earlier card.
+        if (signed) setSigCertify(DEFAULT_CERTIFY);
+      })
+      .catch(() => {
+        if (!cancelled) setSigCanCertify(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sigTargetPath, state.files, engineCall]);
 
   // Invalidate marks when their file's bytes change underneath them (commit,
   // whole-file op, undo, reopen) or the file closes. PageRef ids are
@@ -4871,6 +4919,7 @@ export function WorkspaceCanvasView({
         ...(sigReason.trim() ? { reason: sigReason.trim() } : {}),
         ...(sigLocation.trim() ? { location: sigLocation.trim() } : {}),
         ...placementParams,
+        ...certifyParams(sigCertify),
       })) as unknown as { signer: string | null; output: string; valid: boolean; intact: boolean; covers_whole_document: boolean };
       setSignDone({ signer: res.signer, output: res.output, ok: res.valid && res.intact && res.covers_whole_document });
       setSigPlacement(null);
@@ -4886,7 +4935,7 @@ export function WorkspaceCanvasView({
       signingRef.current = false;
       setSigningBusy(false);
     }
-  }, [liveSigPlacement, sigFieldTarget, sigSource, sigPassword, sigReason, sigLocation, docs, state.files, state.pageDirtyPaths, engineCall, setTool]);
+  }, [liveSigPlacement, sigFieldTarget, sigSource, sigPassword, sigReason, sigLocation, sigCertify, docs, state.files, state.pageDirtyPaths, engineCall, setTool]);
 
   // Harness bridge (e2e builds only): redaction marks live here, out of the
   // reducer's reach, so the canvas registers its own handlers while mounted.
@@ -5972,6 +6021,44 @@ export function WorkspaceCanvasView({
               className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
             />
           </div>
+          {/* Certification is offered here on the same terms as in the panel:
+              only where it can be the document's first signature. Filling an
+              EXISTING field is still an eligible placement — what disqualifies
+              a document is a signature already on it, not the placement. */}
+          {sigCanCertify ? (
+            <div className="flex flex-col gap-1.5" data-testid="canvas-certify-group">
+              <label className="flex items-center gap-2 text-xs text-neutral-300">
+                <input
+                  data-testid="canvas-sign-certify"
+                  type="checkbox"
+                  checked={sigCertify.certify}
+                  onChange={(e) => setSigCertify((c) => ({ ...c, certify: e.target.checked }))}
+                />
+                {tChrome('panel.sig.certify')}
+              </label>
+              {sigCertify.certify && (
+                <select
+                  data-testid="canvas-sign-certify-level"
+                  value={sigCertify.level}
+                  aria-label={tChrome('panel.sig.certifyLevel')}
+                  onChange={(e) =>
+                    setSigCertify((c) => ({ ...c, level: e.target.value as CertificationLevel }))
+                  }
+                  className="px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
+                >
+                  {CERTIFY_LEVELS.map((level) => (
+                    <option key={level} value={level}>
+                      {tChrome(CERTIFICATION_LEVEL_LABEL[level])}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          ) : (
+            <p data-testid="canvas-certify-unavailable" className="text-[11px] text-neutral-500">
+              {tChrome('panel.sig.certifyUnavailable')}
+            </p>
+          )}
           {signError && <div data-testid="canvas-sign-error" className="text-xs text-red-400">{signError}</div>}
           <div className="flex justify-end gap-2">
             <button
