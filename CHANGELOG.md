@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.21 — Prepare Form finds the fields for you, a document tells you what it carries, and you can certify one
+## 1.0.21 — Prepare Form finds the fields for you, a document tells you what it carries, you can certify one, and export reaches spreadsheets and presentations
 
 ### Certifying a document
 
@@ -130,6 +130,49 @@ silently skipped.
 
 - Detection also has a command-line arm: `spectrapdf detect-fields <file>`
   prints what it found as JSON and writes nothing.
+
+### Export to a spreadsheet, a presentation or plain text
+
+**File ▸ Export** gains three targets beside the ones that were there.
+
+**Spreadsheet (.xlsx)** finds the tables on the page and writes their cells.
+It reads a table however it was drawn: fully ruled, ruled only between the
+rows, or with no rules at all — a column is where cells line up, and rules only
+confirm it. A figure is written as a figure, so the workbook adds up: plain
+numbers, grouped thousands, currency and percentages all arrive with a matching
+cell format, and a date written unambiguously arrives as a date. The
+separators come from the document's own conventions, so `1.200,50` is the same
+number as `1,200.50` whichever language the app is running in. A heading that
+spans two columns comes back as one merged cell rather than two, a page holding
+two different tables produces two sheets, and each sheet is named after the
+table's own caption where it has one.
+
+**It says what it did not export.** A page with no table on it is named, and so
+is the count of lines that sit outside a table — which you can also keep, on a
+sheet of their own. A document with no table anywhere is refused outright
+rather than saved as an empty workbook that reports success.
+
+**Presentation (.pptx)** writes one slide per page. The text lands as real text
+boxes at the positions, sizes and faces the page used, so the deck is editable
+rather than a stack of pictures; everything else on the page — rules, images,
+fills — is rendered underneath it, so nothing is dropped. The slides take the
+document's own page size unless you pick widescreen or standard, and a page of a
+different size is fitted rather than cropped, with the count reported. **The
+export proves itself by counting the slides it wrote**, which is the one check
+that catches a presentation file that opens and is empty.
+
+**Plain text (.txt)** writes the document's text to a file, in reading order or
+keeping the page layout, optionally with a page break between pages. The
+Extract Text pane can save straight to a file now instead of only copying to the
+clipboard. A document with no text layer says so and points at OCR.
+
+- All three have command-line arms:
+  `spectrapdf export <in> -o out.xlsx -f xlsx --sheet-per table --include-untabled`,
+  `-f pptx --slide-size 16:9`, and
+  `-f txt --layout layout --page-breaks`; `spectrapdf extract-text <in> -o out.txt`
+  writes the text directly.
+- **Fixed:** exporting to XHTML produced an empty file for every document. It
+  now writes the page's real text, like the HTML export beside it.
 
 ## 1.0.20 — Redaction that searches and measures, and a PDF from any file
 
