@@ -263,6 +263,15 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <path d="M10 12h4M10 15h4" strokeWidth="1" />
     </>
   ),
+  // Two colour areas meeting, with the overlap drawn as its own thin band —
+  // a trap is the sliver where two inks are made to share an edge.
+  trappresets: (
+    <>
+      <path d="M3 6h9v12H3z" />
+      <path d="M12 6h9v12h-9z" />
+      <path d="M10.5 6v12M13.5 6v12" strokeWidth="1" />
+    </>
+  ),
   // A luggage tag (structure tags).
   tags: (
     <>
