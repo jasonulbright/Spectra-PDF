@@ -57,6 +57,7 @@ from pyhanko.sign.timestamps import HTTPTimeStamper
 from pyhanko.sign.validation import validate_pdf_signature
 
 from engine.docmdp import LEVEL_BY_VALUE, VALUE_BY_LEVEL, certification_of_file
+from engine.docmdp_policy import DIFF_POLICY
 from pyhanko import stamp
 from pyhanko.keys import load_certs_from_pemder_data, load_private_key_from_pemder_data
 from pyhanko_certvalidator import ValidationContext
@@ -160,10 +161,7 @@ def _policy_report(status, certification: dict) -> dict:
     certification policy.
 
     A verdict that CANNOT be made is reported as unmade — never as a pass and
-    never as a failure. The bundled difference policy carries no rules for
-    annotations, so under a certification that permits them every lawfully
-    added annotation is indistinguishable from a suspicious one, and that level
-    is therefore not judged here."""
+    never as a failure."""
     level = status.modification_level
     modification_level = level.name if level is not None else None
     if not certification["certified"]:
@@ -173,7 +171,8 @@ def _policy_report(status, certification: dict) -> dict:
             "policy_judged": True,
             "modification_level": modification_level,
         }
-    if certification["level"] is None or certification["level"] == "annotate":
+    if certification["level"] is None:
+        # A permission level this build does not recognize is not guessed at.
         return _unjudged(modification_level)
     if status.docmdp_ok is None:
         return _unjudged(modification_level)
@@ -196,8 +195,12 @@ def _verify_one(embedded, context: ValidationContext | None = None,
         # for why NOT None (which would consult the OS certificate store). A
         # caller-supplied context carries the USER'S chosen anchors.
         ctx = context if context is not None else _empty_trust_context()
+        # The difference policy is passed EXPLICITLY here, at the one call
+        # site, rather than installed as a library default — no other caller
+        # of the validator inherits it.
         status = validate_pdf_signature(
-            embedded, signer_validation_context=ctx, ts_validation_context=ctx
+            embedded, signer_validation_context=ctx, ts_validation_context=ctx,
+            diff_policy=DIFF_POLICY,
         )
     except Exception as exc:
         # A signature we can't validate at all (malformed CMS, unsupported
