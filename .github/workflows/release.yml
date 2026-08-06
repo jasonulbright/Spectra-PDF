@@ -109,10 +109,17 @@ jobs:
         with:
           python-version: "3.14"
 
+      # One install per step. The default shell on windows runners reports the
+      # step's verdict as the LAST command's exit status, and a native command's
+      # non-zero exit does not abort the block, so a failed install in a
+      # multi-command block reports success and surfaces only as downstream
+      # collection errors. `--require-hashes` is stated explicitly to match what
+      # setup-python-embed.ps1 installs into the shipped runtime.
       - name: Install Python dependencies (the SHIPPED, hash-pinned set)
-        run: |
-          pip install -r scripts/python-requirements.txt
-          pip install pytest
+        run: pip install --require-hashes -r scripts/python-requirements.txt
+
+      - name: Install pytest
+        run: pip install pytest
 
       - name: Engine tests (full suite)
         run: python -m pytest tests/ -q
