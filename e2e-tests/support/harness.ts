@@ -1316,6 +1316,75 @@ export async function diskRedactSnapshot(): Promise<DiskRedactSnapshot | null> {
   });
 }
 
+// --- Tools ▸ Prepare Forms in a Folder ------------------------------------
+
+export interface FormPrepSnapshot {
+  phase: 'setup' | 'detecting' | 'review' | 'applying' | 'done';
+  fileCount: number | null;
+  /** Every candidate key the run may act on. A spec checks a SUBSET of these,
+   * which is what lets it prove an unchecked candidate never became a field. */
+  candidateKeys: string[];
+  files:
+    | {
+        rel: string;
+        candidates: number;
+        existingFields: number;
+        skipReason: string | null;
+        names: string[];
+      }[]
+    | null;
+  report: {
+    cancelled: boolean;
+    results: { rel: string; status: string; fields?: number; reason?: string }[];
+    skippedDirs: string[];
+  } | null;
+  logPath: string | null;
+}
+
+/** Inject source+destination into the open folder form-preparation dialog —
+ * runs the dialog's REAL selection flow, enumeration included. */
+export async function formPrepSetFolders(source: string, dest: string): Promise<void> {
+  const result = await browser.executeAsync<string | null, [string, string]>(
+    function (s, d, done) {
+      (window as any).__SPECTRA_TEST__.formPrepSetFolders(s, d)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    source,
+    dest,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`formPrepSetFolders failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
+/** Run the detection WITHOUT awaiting it — a folder sweep can outlive the
+ * WebDriver script timeout. Poll `formPrepSnapshot()` for the phase. */
+export async function formPrepDetect(): Promise<void> {
+  await browser.execute(function () {
+    void (window as any).__SPECTRA_TEST__.formPrepDetect();
+  });
+}
+
+export async function formPrepCheck(keys: string[]): Promise<void> {
+  await browser.execute(function (k: string[]) {
+    (window as any).__SPECTRA_TEST__.formPrepCheck(k);
+  }, keys);
+}
+
+/** Same non-awaiting shape as the detection. */
+export async function formPrepApply(): Promise<void> {
+  await browser.execute(function () {
+    void (window as any).__SPECTRA_TEST__.formPrepApply();
+  });
+}
+
+export async function formPrepSnapshot(): Promise<FormPrepSnapshot | null> {
+  return await browser.execute<FormPrepSnapshot | null, []>(function () {
+    return (window as any).__SPECTRA_TEST__.formPrepSnapshot();
+  });
+}
+
 // --- Edit ▸ Images ---------------------------------------------------------
 
 export async function editImagePageIds(): Promise<string[]> {
