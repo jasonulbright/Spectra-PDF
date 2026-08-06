@@ -1,6 +1,39 @@
 # Changelog
 
-## 1.0.22 — Signatures can trust what this computer already trusts
+## 1.0.22 — Whole folders at a time
+
+### Prepare a whole folder of forms
+
+Prepare Form has worked one document at a time. Tools ▸ Prepare Forms in a
+Folder… analyses every PDF in a folder and its subfolders, works out where each
+form's fields belong from its ruled lines, boxes and labels, and creates them.
+Nothing has to be open, and nothing is opened: the files are read where they
+sit. Scanned pages are recognised the same way the single-document tool
+recognises them, in the languages you choose.
+
+What was found arrives as a checkable list grouped by file, each row naming the
+field it would create, its type, its page and the label it was read from — and
+nothing is checked for you. A file that already carries fields is not analysed
+twice: what it has is subtracted, and the file still reports itself with the
+count it already carries rather than silently offering nothing.
+
+Any file can be handed to the document view for a closer look — one click opens
+it with Prepare Form, where each suggestion can be moved, renamed, retyped or
+thrown away on the page itself.
+
+By default the prepared documents are written into a destination folder you
+choose, leaving your originals exactly as they were; you can instead add the
+fields to the originals in place, which takes a separate confirmation because
+there is no undo. Signed documents are decided per file: adding a field breaks
+a signature, so signed files are left untouched unless you say to include them,
+and a document certified to allow no changes is refused outright and named in
+the results. Every run writes a log naming what was prepared, how many fields
+each file got, what was copied unchanged, and what was skipped and why.
+
+The same step is available inside a guided action, so a watched folder or a
+scheduled run can do it unattended, and on the command line as `prepare-forms`.
+An unattended run has nobody to ask, so it creates every field it finds — the
+field types it will accept can be narrowed.
 
 ### Search & Redact a whole folder
 
