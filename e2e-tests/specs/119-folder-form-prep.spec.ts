@@ -15,6 +15,8 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import {
   waitForHarness,
   invokeAppCommand,
+  getState,
+  closeAllFiles,
   formPrepSetFolders,
   formPrepDetect,
   formPrepCheck,
@@ -180,5 +182,48 @@ describe('Prepare Forms across a folder', () => {
     const preparedNames = await fieldNames(mirrorPrepared);
     expect(preparedNames).toContain('Already_there');
     expect(preparedNames).toHaveLength(4);
+
+    // The dialog holds its report until it is dismissed; the next case needs
+    // it back at setup.
+    await $('[data-testid="form-prep-close"]').click();
+  });
+
+  it('hands one file to the document flow, where its candidates are reviewable on the page', async function () {
+    this.timeout(120_000);
+    await waitForHarness();
+    await closeAllFiles();
+
+    expect(await invokeAppCommand('tools.formPrepFolder')).toBe(true);
+    await $('[data-testid="form-prep-dialog"]').waitForDisplayed({ timeout: 10_000 });
+    await formPrepSetFolders(src, dest);
+    await browser.waitUntil(async () => (await formPrepSnapshot())?.fileCount === 3, {
+      timeout: 20_000,
+      timeoutMsg: 'enumeration never found the 3 fixture PDFs',
+    });
+    await formPrepDetect();
+    await browser.waitUntil(async () => (await formPrepSnapshot())?.phase === 'review', {
+      timeout: 60_000,
+      interval: 500,
+      timeoutMsg:
+        'the sweep never reached review — snapshot: ' + JSON.stringify(await formPrepSnapshot()),
+    });
+
+    // The escalation is the review affordance a folder cannot offer itself:
+    // it opens the document through the app's one open funnel and arms the
+    // tool that reviews candidates on the page.
+    await $('[data-testid="form-prep-review-alpha.pdf"]').click();
+    await browser.waitUntil(async () => (await getState()).activeFileId === alpha, {
+      timeout: 20_000,
+      timeoutMsg: 'the escalation never opened the file it named',
+    });
+    await browser.waitUntil(async () => (await getState()).activeToolId === 'prepareform', {
+      timeout: 15_000,
+      timeoutMsg: 'the escalation never armed Prepare Form',
+    });
+    // The dialog is gone: its list would be stale against a document the user
+    // is now free to change.
+    expect(await $('[data-testid="form-prep-dialog"]').isExisting()).toBe(false);
+    await $('[data-testid="prepare-form-panel"]').waitForExist({ timeout: 15_000 });
+    await closeAllFiles();
   });
 });
