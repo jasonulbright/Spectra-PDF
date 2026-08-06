@@ -5,8 +5,9 @@
 // with I18N_WRITE=1 (npm run i18n:en) it rewrites the file and passes.
 // Hand-editing the en catalog is what this exists to prevent — English
 // copy lives in the tables, translations live in the other locales, and
-// every other locale's key set must equal en's exactly (no silent
-// fallback in a shipped locale, no dead keys).
+// every other locale's key set must equal en's, expanded to that locale's
+// own CLDR plural categories (no silent fallback in a shipped locale, no
+// dead keys).
 import { describe, it, expect } from 'vitest';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -32,48 +33,85 @@ const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN'];
 
 /**
- * Does this locale's CLDR plural rule set have exactly ONE category?
- *
- * Japanese and Chinese make no grammatical number distinction, so i18next —
- * which resolves plurals through `Intl.PluralRules`, the same CLDR data this
- * asks — selects `_other` for EVERY count and never reads `_one`. The `_one`
- * key still has to EXIST, because key-set parity with en is exact; what it
- * must not do is say something different from `_other`, since that would be a
- * distinction the language does not make and the runtime would never show.
- *
- * So for these locales the plural gate INVERTS: the two forms are required to
- * be identical instead of required to differ. This is derived, not listed —
- * `INVARIANT_PLURALS` below is a per-key translation decision (one noun with
- * no plural inside an inflecting language), while "this language has no
- * plural at all" is a property of the language, and a hand-maintained list of
- * 51 keys per pluralless locale would be a list of the obvious that goes stale
- * the moment a plural key is added.
+ * The plural categories a locale's forms must cover, read from CLDR at gate
+ * time. i18next resolves a count through this same `Intl.PluralRules` data,
+ * so the gate and the runtime cannot disagree about which suffix a count
+ * selects; a hand-maintained per-locale form list would go stale against an
+ * ICU update. A category the locale does not have is a DEAD key: nothing
+ * selects it, so parity rejects it in both directions.
  */
-function isPluralless(locale: string): boolean {
-  return new Intl.PluralRules(locale).resolvedOptions().pluralCategories.length === 1;
+function pluralCategories(locale: string): readonly string[] {
+  return new Intl.PluralRules(locale).resolvedOptions().pluralCategories;
 }
 
 /**
- * Plural bases whose two forms are legitimately IDENTICAL in a locale because
- * the noun the message counts has no plural form in that language.
+ * Per-locale departures from the default plural policy. A row is a
+ * grammatical fact about the target language, never a shortcut around a hard
+ * string.
  *
- * Italian: `file`, `byte` and `tag` are invariant loanwords — "3 file" is the
- * correct plural, and inventing "3 files"/"3 tags" to make the forms differ
- * would be writing Italian wrong to satisfy a test. Every other Italian count
- * inflects and is still gated; where an inflecting synonym was genuinely the
- * right word it was used instead (search results count `documento/documenti`,
- * links count `collegamento/collegamenti`), so this list is the residue, not a
- * shortcut. Adding a row here is a translation decision — it must be a noun
- * with no plural, never a shortcut around a hard string.
+ * `keys` — plural bases whose one/other forms are legitimately IDENTICAL
+ * because the noun the message counts has no plural form in that language.
+ * Italian `file`, `byte` and `tag` are invariant loanwords: 3 file is the
+ * correct plural, and inventing 3 files to make the forms differ would be
+ * writing Italian wrong to satisfy a test. Every other Italian count inflects
+ * and is still gated; where an inflecting synonym was genuinely the right word
+ * it was used instead (search results count documento/documenti, links count
+ * collegamento/collegamenti), so this list is the residue.
+ *
+ * `policy: 'numeral-invariant'` — the language takes the BARE SINGULAR after a
+ * numeral, so `_one` and `_other` are required to be identical and a split is
+ * the defect. Every plural base in this catalog is numeral-prefixed, and
+ * Turkish and Hungarian govern the counted noun that way (1 dosya / 5 dosya,
+ * 1 fájl / 5 fájl). Demanding a difference there means writing the language
+ * wrong to satisfy a test.
+ *
+ * `merged` — category PAIRS that share ONE form across the whole locale, and
+ * are therefore required to be identical rather than merely allowed to be.
+ * CLDR Arabic `zero` (0) and `few` (3–10) take the same broken plural.
  */
-const INVARIANT_PLURALS: Record<string, readonly string[]> = {
-  it: [
-    'dialog.exportImages.fileCount',
-    'dialog.props.bytes',
-    'panel.portfolio.count',
-    'panel.tags.summary',
-  ],
+interface PluralPolicy {
+  readonly policy?: 'numeral-invariant';
+  readonly keys?: readonly string[];
+  readonly merged?: readonly (readonly [string, string])[];
+}
+const INVARIANT_PLURALS: Record<string, PluralPolicy> = {
+  it: {
+    keys: [
+      'dialog.exportImages.fileCount',
+      'dialog.props.bytes',
+      'panel.portfolio.count',
+      'panel.tags.summary',
+    ],
+  },
+  tr: { policy: 'numeral-invariant' },
+  hu: { policy: 'numeral-invariant' },
+  ar: { merged: [['zero', 'few']] },
 };
+
+/** en's key set with every plural base expanded to THIS locale's categories. */
+function expectedKeys(locale: string, enKeys: readonly string[]): string[] {
+  const cats = pluralCategories(locale);
+  const out: string[] = [];
+  for (const k of enKeys) {
+    if (k.endsWith('_other')) continue; // expanded alongside its `_one` sibling
+    if (k.endsWith('_one')) {
+      const base = k.slice(0, -'_one'.length);
+      for (const c of cats) out.push(`${base}_${c}`);
+      continue;
+    }
+    out.push(k);
+  }
+  return out.sort();
+}
+
+/** The en value a locale key's placeholders are compared against. A plural
+ * form en has no counterpart for (`_many`, `_few`, …) compares against en's
+ * `_other`, which carries the same placeholders as every form of its base. */
+function enCounterpart(key: string, en: Record<string, string>): string | undefined {
+  if (key in en) return en[key];
+  const base = key.slice(0, key.lastIndexOf('_'));
+  return `${base}_one` in en ? en[`${base}_other`] : undefined;
+}
 
 function expectedCatalog(): Record<string, string> {
   const out: Record<string, string> = {
@@ -160,13 +198,21 @@ describe('i18n catalogs', () => {
     expect(actual, 'stale en catalog — run npm run i18n:en and commit the diff').toEqual(expected);
   });
 
-  it('every shipped locale has EXACTLY the en key set', () => {
-    const enKeys = Object.keys(JSON.parse(readFileSync(EN_PATH, 'utf8'))).sort();
+  it("every shipped locale has EXACTLY en's key set, expanded to its plural forms", () => {
+    const enKeys = Object.keys(JSON.parse(readFileSync(EN_PATH, 'utf8')));
+    const suffixed = (s: string): string[] =>
+      enKeys.filter((k) => k.endsWith(s)).map((k) => k.slice(0, -s.length)).sort();
+    // `expectedKeys` expands a base from its `_one` key, so an `_other`
+    // without an `_one` sibling would drop out of the expected set unseen.
+    expect(suffixed('_other'), 'an en plural base carries _other without _one').toEqual(
+      suffixed('_one'),
+    );
     for (const locale of SHIPPED_LOCALES) {
-      if (locale === 'en') continue;
       const p = resolve(__dirname, `../src/renderer/locales/${locale}/chrome.json`);
       const keys = Object.keys(JSON.parse(readFileSync(p, 'utf8'))).sort();
-      expect(keys, `locale ${locale} key set diverges from en`).toEqual(enKeys);
+      expect(keys, `locale ${locale} key set diverges from en's`).toEqual(
+        expectedKeys(locale, enKeys),
+      );
     }
   });
 
@@ -183,15 +229,17 @@ describe('i18n catalogs', () => {
       if (locale === 'en') continue;
       const p = resolve(__dirname, `../src/renderer/locales/${locale}/chrome.json`);
       const cat = JSON.parse(readFileSync(p, 'utf8')) as Record<string, string>;
-      for (const [k, v] of Object.entries(en)) {
-        expect(placeholders(cat[k]), `${locale}:${k} placeholders diverge from en`).toBe(
-          placeholders(v),
+      for (const [k, v] of Object.entries(cat)) {
+        const src = enCounterpart(k, en);
+        expect(src, `${locale}:${k} has no en counterpart`).toBeDefined();
+        expect(placeholders(v), `${locale}:${k} placeholders diverge from en`).toBe(
+          placeholders(src ?? ''),
         );
       }
     }
   });
 
-  it("every plural pair is complete and obeys its locale's plural rules", () => {
+  it("every plural form its locale's rules select is authored, and obeys the policy", () => {
     const en = JSON.parse(readFileSync(EN_PATH, 'utf8')) as Record<string, string>;
     const bases = Object.keys(en)
       .filter((k) => k.endsWith('_one'))
@@ -200,16 +248,37 @@ describe('i18n catalogs', () => {
     for (const locale of SHIPPED_LOCALES) {
       const p = resolve(__dirname, `../src/renderer/locales/${locale}/chrome.json`);
       const cat = JSON.parse(readFileSync(p, 'utf8')) as Record<string, string>;
-      const pluralless = isPluralless(locale);
+      const cats = pluralCategories(locale);
+      const declared = INVARIANT_PLURALS[locale] ?? {};
+      // A declaration that names something the locale does not have is a
+      // stale exception, which is how an exception table stops being read.
+      for (const pair of declared.merged ?? []) {
+        for (const c of pair) {
+          expect(cats, `${locale} declares merged category ${c}, which CLDR does not give it`)
+            .toContain(c);
+        }
+      }
+      for (const b of declared.keys ?? []) {
+        expect(bases, `${locale} declares invariant key ${b}, which is not a plural base`)
+          .toContain(b);
+      }
       for (const base of bases) {
-        expect(cat[`${base}_one`], `${locale}:${base}_one missing`).toBeTruthy();
-        expect(cat[`${base}_other`], `${locale}:${base}_other missing`).toBeTruthy();
-        if (pluralless) {
-          // See isPluralless: `_one` is unreachable at run time, so it must
-          // not disagree with the form the runtime will actually show.
+        for (const c of cats) {
+          expect(cat[`${base}_${c}`], `${locale}:${base}_${c} missing`).toBeTruthy();
+        }
+        for (const [a, b] of declared.merged ?? []) {
+          expect(
+            cat[`${base}_${a}`],
+            `${locale}:${base} splits ${a}/${b}, which share one form in ${locale}`,
+          ).toBe(cat[`${base}_${b}`]);
+        }
+        // One category: the runtime shows the single form for every count,
+        // so there is no pair to compare.
+        if (!cats.includes('one')) continue;
+        if (declared.policy === 'numeral-invariant') {
           expect(
             cat[`${base}_one`],
-            `${locale}:${base} splits a plural ${locale} does not have — _one is never selected`,
+            `${locale}:${base} splits a plural a numeral governs in ${locale}`,
           ).toBe(cat[`${base}_other`]);
           continue;
         }
@@ -218,13 +287,18 @@ describe('i18n catalogs', () => {
         // Spanish still inflects it). What is never legitimate is a locale
         // collapsing a distinction the source makes — that is one form
         // pasted over the other. The one honest exception is a target-language
-        // noun that HAS no plural form (INVARIANT_PLURALS below): forcing a
+        // noun that HAS no plural form (INVARIANT_PLURALS above): forcing a
         // difference there would mean writing the language wrong to satisfy a
         // test, so the collapse is declared per locale and per key instead of
         // being hidden.
+        //
+        // The check is scoped to one/other — the pair en itself distinguishes.
+        // A category en has no form for (many, few, two, zero) is required to
+        // be present and non-empty and nothing more: an English source cannot
+        // prove what a target language's fifth form has to say.
         if (
           en[`${base}_one`] !== en[`${base}_other`] &&
-          !(INVARIANT_PLURALS[locale] ?? []).includes(base)
+          !(declared.keys ?? []).includes(base)
         ) {
           expect(
             cat[`${base}_one`] === cat[`${base}_other`],

@@ -398,21 +398,28 @@ export function symbolParts(id: string | undefined): readonly SymbolPart[] | nul
  * localized one for a built-in), so a Spanish user searching "puerta" finds
  * the door — matching the ENGLISH name too, because the id and the authored
  * name are what a shared set file carries.
+ *
+ * Case folding here is locale-INVARIANT. `toLocaleLowerCase()` follows the
+ * HOST locale, and Turkish case mapping folds `I` to U+0131: on a Turkish
+ * install a query of `i` then stops matching every symbol whose name or id
+ * carries an `I`, in every UI language. A matcher is identifier comparison,
+ * not displayed prose — prose is cased by CSS `text-transform`, which follows
+ * `<html lang>` and is right for free.
  */
 export function searchSymbols(
   query: string,
   displayName: (set: SymbolSet, symbol: SymbolDef) => string,
   sets: readonly SymbolSet[] = getSymbolSets(),
 ): SymbolHit[] {
-  const q = query.trim().toLocaleLowerCase();
+  const q = query.trim().toLowerCase();
   const out: SymbolHit[] = [];
   for (const set of sets) {
     for (const symbol of set.symbols) {
       if (
         !q ||
-        displayName(set, symbol).toLocaleLowerCase().includes(q) ||
-        symbol.name.toLocaleLowerCase().includes(q) ||
-        symbol.id.toLocaleLowerCase().includes(q)
+        displayName(set, symbol).toLowerCase().includes(q) ||
+        symbol.name.toLowerCase().includes(q) ||
+        symbol.id.toLowerCase().includes(q)
       ) {
         out.push({ set, symbol });
       }
