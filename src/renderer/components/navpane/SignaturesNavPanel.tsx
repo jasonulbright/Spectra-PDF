@@ -2,10 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { useEngine } from '../../hooks/useEngine';
 import {
   classifySignature,
+  policyVerdict,
+  POLICY_VERDICT_LABEL,
+  signatureKind,
+  SIGNATURE_KIND_LABEL,
   SIGNATURE_STATUS_LABEL,
   type SignatureEntry,
   type VerifyResult,
 } from '../../lib/signatures';
+import { CertificationBanner } from '../CertificationBanner';
 import type { NavPanelComponentProps } from './types';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../../i18n';
@@ -115,8 +120,13 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
             <div className="signatures-nav-count" data-testid="signatures-nav-count">
               {tChromeCount('nav.sig.count', result.signature_count)}
             </div>
+            <CertificationBanner result={result} />
             {result.signatures.map((sig, i) => (
-              <SignatureRow key={sig.field ?? i} sig={sig} />
+              <SignatureRow
+                key={sig.field ?? i}
+                sig={sig}
+                certified={result.certification?.certified === true}
+              />
             ))}
             <div className="signatures-nav-caveat" data-testid="signatures-nav-caveat">
               {tChrome('nav.sig.caveat')}
@@ -138,19 +148,51 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
   );
 }
 
-function SignatureRow({ sig }: { sig: SignatureEntry }): React.ReactElement {
+function SignatureRow({
+  sig,
+  certified,
+}: {
+  sig: SignatureEntry;
+  // The policy line is meaningless on a document that states no policy, so it
+  // is rendered only where there is one to be within or outside of.
+  certified: boolean;
+}): React.ReactElement {
   const status = classifySignature(sig);
+  // Kind and policy are the second axis: shown BESIDE the status, never
+  // instead of it — a certification signature can be valid, modified or
+  // invalid exactly like an approval one.
+  const kind = signatureKind(sig);
+  const verdict = policyVerdict(sig);
   return (
-    <div className="signature-nav-card" data-testid="signature-nav-card" data-status={status}>
+    <div
+      className="signature-nav-card"
+      data-testid="signature-nav-card"
+      data-status={status}
+      data-kind={kind}
+      data-policy={verdict}
+    >
       <div className="signature-nav-head">
         <span className={`signature-nav-dot signature-nav-dot-${status}`} aria-hidden />
         <span className="signature-nav-signer" data-testid="signature-nav-signer" title={sig.signer ?? ''}>
           {sig.signer ?? tChrome('nav.sig.unknownSigner')}
         </span>
       </div>
+      {kind === 'certification' && (
+        <div className="signature-nav-kind" data-testid="signature-nav-kind">
+          {tChrome(SIGNATURE_KIND_LABEL.certification)}
+        </div>
+      )}
       <div className="signature-nav-status" data-testid="signature-nav-status">
         {tChrome(SIGNATURE_STATUS_LABEL[status])}
       </div>
+      {certified && verdict !== 'within-policy' && (
+        <div
+          className={`signature-nav-policy${verdict === 'unjudged' ? ' signature-nav-policy-unjudged' : ''}`}
+          data-testid="signature-nav-policy"
+        >
+          {tChrome(POLICY_VERDICT_LABEL[verdict])}
+        </div>
+      )}
       <div className="signature-nav-detail">
         {/* One key, two finished clauses: the separator's placement is part of
             the sentence, so it lives in the catalog and not in JSX. */}

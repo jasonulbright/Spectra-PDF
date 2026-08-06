@@ -5,16 +5,27 @@ import { useOperations } from '../hooks/useOperations';
 import { dialog } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
-import { TEST_HARNESS_ENABLED, registerSignHandler } from '../testHarness';
+import { TEST_HARNESS_ENABLED, registerSignHandler, type SignatureVerifySnapshot } from '../testHarness';
 import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../components/SignerSourceFields';
 import type { SignerSource } from '../components/SignerSourceFields';
 import { getCanvasServices } from '../commands/context';
 import {
   classifySignature,
+  policyVerdict,
+  POLICY_VERDICT_LABEL,
+  signatureKind,
+  SIGNATURE_KIND_LABEL,
   SIGNATURE_STATUS_LABEL,
+  CERTIFICATION_LEVEL_LABEL,
+  CERTIFY_LEVELS,
+  DEFAULT_CERTIFY,
+  certifyParams,
+  type CertificationLevel,
+  type CertifyOptions,
   type SignatureEntry,
   type VerifyResult,
 } from '../lib/signatures';
+import { CertificationBanner } from '../components/CertificationBanner';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 
@@ -26,6 +37,29 @@ interface SignResult {
   intact: boolean;
   covers_whole_document: boolean;
   signature_count: number;
+  /** Read back out of the written bytes, never echoed from the request. */
+  certified?: boolean;
+  certification_level?: CertificationLevel | null;
+}
+
+const EMPTY_VERIFY_SNAPSHOT: SignatureVerifySnapshot = {
+  signature_count: 0,
+  all_valid: false,
+  certified: false,
+  certification_level: null,
+  any_policy_violation: false,
+  signatures: [],
+};
+
+/** The harness drives the same options the form collects; an omitted certify
+ * flag is the ordinary approval signature. */
+function harnessCertify(params: {
+  certify?: boolean;
+  certifyLevel?: CertificationLevel;
+}): CertifyOptions {
+  return params.certify
+    ? { certify: true, level: params.certifyLevel ?? DEFAULT_CERTIFY.level }
+    : DEFAULT_CERTIFY;
 }
 
 export function SignaturesPanel(): React.ReactElement {
@@ -54,6 +88,11 @@ export function SignaturesPanel(): React.ReactElement {
   const [pades, setPades] = useState(false);
   const [tsaUrl, setTsaUrl] = useState('');
   const [ltv, setLtv] = useState(false);
+  // Certification. Offered only while the document carries no signature at
+  // all: a certification signature must be the first signature in a document,
+  // so on any other document the control is ABSENT with a sentence saying why
+  // rather than present and unusable.
+  const [certify, setCertify] = useState<CertifyOptions>(DEFAULT_CERTIFY);
 
   // Trust management: user-chosen CA anchors, persisted. The OS store is
   // deliberately never consulted (the panel's standing explicit-trust rule);
@@ -115,6 +154,7 @@ export function SignaturesPanel(): React.ReactElement {
     setSource(EMPTY_SIGNER_SOURCE);
     setSignResult(null);
     setSignError(null);
+    setCertify(DEFAULT_CERTIFY);
   }, [path]);
 
   // The core engine call, shared by the UI handler and the e2e harness hook
@@ -129,6 +169,7 @@ export function SignaturesPanel(): React.ReactElement {
       loc?: string,
       appearance?: { page: number; rect: [number, number, number, number] },
       profile?: { pades?: boolean; tsaUrl?: string; ltv?: boolean },
+      certification: CertifyOptions = DEFAULT_CERTIFY,
     ): Promise<SignResult> => {
       if (!activeFile) throw new Error(tChrome('refusal.file.noActiveToSign'));
       return (await call('sign_pdf', {
@@ -143,6 +184,7 @@ export function SignaturesPanel(): React.ReactElement {
         ...(profile?.pades ? { pades: true } : {}),
         ...(profile?.tsaUrl?.trim() ? { tsa_url: profile.tsaUrl.trim() } : {}),
         ...(profile?.ltv ? { embed_revocation: true, ...(trustRoots.length > 0 ? { trust_roots: trustRoots } : {}) } : {}),
+        ...certifyParams(certification),
       })) as unknown as SignResult;
     },
     [activeFile, call, trustRoots],
@@ -171,11 +213,11 @@ export function SignaturesPanel(): React.ReactElement {
     try {
       const dest = await dialog.saveFile({ defaultPath: suggested });
       if (!dest) return; // cancelled — the finally still clears the password
-      const res = await doSign(resolved.params!, password, dest, reason, location, undefined, {
-        pades,
-        tsaUrl,
-        ltv,
-      });
+      const res = await doSign(
+        resolved.params!, password, dest, reason, location, undefined,
+        { pades, tsaUrl, ltv },
+        certify,
+      );
       setSignResult(res);
       setShowSign(false);
     } catch (e: unknown) {
@@ -188,7 +230,7 @@ export function SignaturesPanel(): React.ReactElement {
       signingRef.current = false;
       setSigning(false);
     }
-  }, [activeFile, source, password, reason, location, doSign, pades, tsaUrl, ltv]);
+  }, [activeFile, source, password, reason, location, doSign, pades, tsaUrl, ltv, certify]);
 
   // The core in-place sign, shared by the UI handler and the e2e harness
   // hook (the native .pfx picker is not WebDriver-drivable, exactly as doSign).
@@ -203,6 +245,7 @@ export function SignaturesPanel(): React.ReactElement {
       pw: string,
       rsn?: string,
       loc?: string,
+      certification: CertifyOptions = DEFAULT_CERTIFY,
     ): Promise<VerifyResult> => {
       if (!activeFile) throw new Error(tChrome('refusal.file.noActiveToSign'));
       await performOperation(activeFile.path, 'sign_pdf', {
@@ -217,6 +260,7 @@ export function SignaturesPanel(): React.ReactElement {
         ...(pades ? { pades: true } : {}),
         ...(tsaUrl.trim() ? { tsa_url: tsaUrl.trim() } : {}),
         ...(ltv ? { embed_revocation: true, ...(trustRoots.length > 0 ? { trust_roots: trustRoots } : {}) } : {}),
+        ...certifyParams(certification),
       });
       // The now-signed working copy (same path, new bytes) re-verifies.
       return (await call('verify_signatures', {
@@ -243,7 +287,7 @@ export function SignaturesPanel(): React.ReactElement {
     setSignError(null);
     setSignResult(null);
     try {
-      const v = await doSignInPlace(resolved.params!, password, reason, location);
+      const v = await doSignInPlace(resolved.params!, password, reason, location, certify);
       setResult(v); // the new signature lists immediately
       setShowSign(false);
     } catch (e: unknown) {
@@ -253,7 +297,7 @@ export function SignaturesPanel(): React.ReactElement {
       signInPlaceRef.current = false;
       setSigning(false);
     }
-  }, [activeFile, source, password, reason, location, doSignInPlace]);
+  }, [activeFile, source, password, reason, location, doSignInPlace, certify]);
 
   // e2e-only: register the real sign call so the harness can drive it with
   // injected paths (the native dialogs can't be driven by WebDriver).
@@ -279,6 +323,7 @@ export function SignaturesPanel(): React.ReactElement {
           p.location,
           p.appearance,
           p.pades ? { pades: true } : undefined,
+          harnessCertify(p),
         ),
       signInPlace: (p) =>
         doSignInPlaceRef
@@ -289,6 +334,7 @@ export function SignaturesPanel(): React.ReactElement {
             p.password,
             p.reason,
             p.location,
+            harnessCertify(p),
           )
           .then((v) => ({
             signature_count: v.signature_count,
@@ -296,9 +342,22 @@ export function SignaturesPanel(): React.ReactElement {
           })),
       verifyActive: async () => {
         const wp = workingPathRef.current;
-        if (!wp) return { signature_count: 0, all_valid: false };
+        if (!wp) return EMPTY_VERIFY_SNAPSHOT;
         const v = (await call('verify_signatures', { file: wp })) as unknown as VerifyResult;
-        return { signature_count: v.signature_count, all_valid: v.summary.all_valid };
+        return {
+          signature_count: v.signature_count,
+          all_valid: v.summary.all_valid,
+          certified: v.certification?.certified === true,
+          certification_level: v.certification?.level ?? null,
+          any_policy_violation: v.summary.any_policy_violation === true,
+          signatures: v.signatures.map((s) => ({
+            field: s.field,
+            certification_level: s.certification_level ?? null,
+            policy_ok: s.policy_ok ?? null,
+            policy_judged: s.policy_judged === true,
+            modification_level: s.modification_level ?? null,
+          })),
+        };
       },
     });
     return () => registerSignHandler(null);
@@ -346,11 +405,13 @@ export function SignaturesPanel(): React.ReactElement {
           >
             {tChromeCount('panel.sig.found', result.signature_count)}
           </div>
+          <CertificationBanner result={result} />
           <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pr-1" tabIndex={0} role="region" aria-label={tChrome('panel.sig.listAria')}>
             {result.signatures.map((sig, i) => (
               <SignatureCard
                 key={sig.field ?? i}
                 sig={sig}
+                certified={result.certification?.certified === true}
                 // Jump to the widget's page. jumpToFilePage (not
                 // centerOn) — the bookmark rule: it resolves page number →
                 // live id, partitions included.
@@ -438,7 +499,12 @@ export function SignaturesPanel(): React.ReactElement {
             <button
               data-testid="sign-visible-btn"
               type="button"
-              onClick={() => getCanvasServices()?.startVisibleSignature?.(source)}
+              onClick={() =>
+                getCanvasServices()?.startVisibleSignature?.(
+                  source,
+                  result?.signed ? DEFAULT_CERTIFY : certify,
+                )
+              }
               className="self-start px-2 py-1 text-xs bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded"
               title={tChrome('panel.sig.visibleTitle')}
             >
@@ -511,6 +577,50 @@ export function SignaturesPanel(): React.ReactElement {
             />
             {tChrome('panel.sig.ltv')}
           </label>
+          {/* A certification signature must be the FIRST signature in a
+              document, so on a document that already carries one the control
+              is absent with a sentence saying why — a control that cannot be
+              used and cannot be explained is the shortfall to avoid. */}
+          {result?.signed ? (
+            <p data-testid="certify-unavailable" className="text-[11px] text-neutral-500">
+              {tChrome('panel.sig.certifyUnavailable')}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-1.5" data-testid="certify-group">
+              <label className="flex items-center gap-2 text-xs text-neutral-300">
+                <input
+                  data-testid="sign-certify"
+                  type="checkbox"
+                  checked={certify.certify}
+                  onChange={(e) => setCertify((c) => ({ ...c, certify: e.target.checked }))}
+                />
+                {tChrome('panel.sig.certify')}
+              </label>
+              <p className="text-[11px] text-neutral-500">{tChrome('panel.sig.certifyHint')}</p>
+              {certify.certify && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-neutral-400 w-20 shrink-0">
+                    {tChrome('panel.sig.certifyLevel')}
+                  </span>
+                  <select
+                    data-testid="sign-certify-level"
+                    value={certify.level}
+                    aria-label={tChrome('panel.sig.certifyLevel')}
+                    onChange={(e) =>
+                      setCertify((c) => ({ ...c, level: e.target.value as CertificationLevel }))
+                    }
+                    className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+                  >
+                    {CERTIFY_LEVELS.map((level) => (
+                      <option key={level} value={level}>
+                        {tChrome(CERTIFICATION_LEVEL_LABEL[level])}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
           {signError && <div className="text-xs text-red-400">{signError}</div>}
           <div className="flex justify-end gap-2">
             <button
@@ -552,6 +662,13 @@ export function SignaturesPanel(): React.ReactElement {
           {signResult.valid && signResult.intact && signResult.covers_whole_document
             ? tChrome('panel.sig.signedOk')
             : tChrome('panel.sig.signedBad')}
+          {signResult.certified && (
+            <div data-testid="sign-result-certified" className="text-xs text-green-300/70 mt-0.5">
+              {signResult.certification_level
+                ? tChrome(CERTIFICATION_LEVEL_LABEL[signResult.certification_level])
+                : tChrome('panel.sig.certifiedLevelUnknown')}
+            </div>
+          )}
           <div className="text-xs text-green-300/70 mt-0.5 truncate" title={signResult.output}>
             {tChrome('panel.sig.savedTo', { path: signResult.output })}
           </div>
@@ -564,7 +681,15 @@ export function SignaturesPanel(): React.ReactElement {
   );
 }
 
-function SignatureCard({ sig, onJump }: { sig: SignatureEntry; onJump?: () => void }): React.ReactElement {
+function SignatureCard({
+  sig,
+  certified,
+  onJump,
+}: {
+  sig: SignatureEntry;
+  certified: boolean;
+  onJump?: () => void;
+}): React.ReactElement {
   const status = classifySignature(sig);
   const cls = {
     invalid: 'bg-red-600/20 text-red-300 border-red-600/40',
@@ -572,15 +697,41 @@ function SignatureCard({ sig, onJump }: { sig: SignatureEntry; onJump?: () => vo
     valid: 'bg-green-600/15 text-green-300 border-green-600/40',
   }[status];
   const badge = { text: tChrome(SIGNATURE_STATUS_LABEL[status]), cls };
+  // The second axis, rendered BESIDE the status badge — never instead of it.
+  const kind = signatureKind(sig);
+  const verdict = policyVerdict(sig);
 
   return (
-    <div data-testid="signature-card" className="rounded border border-neutral-800 bg-neutral-900/50 p-3 flex flex-col gap-1.5">
+    <div
+      data-testid="signature-card"
+      data-kind={kind}
+      data-policy={verdict}
+      className="rounded border border-neutral-800 bg-neutral-900/50 p-3 flex flex-col gap-1.5"
+    >
       <div className="flex items-center justify-between gap-2">
         <span data-testid="signature-signer" className="text-sm text-neutral-200 font-medium truncate">
           {sig.signer ?? tChrome('panel.sig.unknownSigner')}
         </span>
-        <span className={`shrink-0 px-2 py-0.5 text-[11px] rounded border ${badge.cls}`}>{badge.text}</span>
+        <span className="flex items-center gap-1.5 shrink-0">
+          {kind === 'certification' && (
+            <span
+              data-testid="signature-certification-badge"
+              className="px-2 py-0.5 text-[11px] rounded border bg-blue-600/15 text-blue-300 border-blue-600/40"
+            >
+              {tChrome(SIGNATURE_KIND_LABEL.certification)}
+            </span>
+          )}
+          <span className={`px-2 py-0.5 text-[11px] rounded border ${badge.cls}`}>{badge.text}</span>
+        </span>
       </div>
+      {certified && verdict !== 'within-policy' && (
+        <div
+          data-testid="signature-policy"
+          className={`text-xs ${verdict === 'unjudged' ? 'text-amber-200/90' : 'text-red-300'}`}
+        >
+          {tChrome(POLICY_VERDICT_LABEL[verdict])}
+        </div>
+      )}
       <div className="text-xs text-neutral-500 flex flex-wrap gap-x-4 gap-y-0.5">
         {sig.field && <span>{tChrome('panel.sig.field', { name: sig.field })}</span>}
         {sig.page !== undefined && (
