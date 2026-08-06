@@ -108,6 +108,35 @@ no certificate store at all, and only anchors you chose can make a signature
 trusted. On the command line, `verify-signatures --system-trust` and
 `sign --system-trust` do the same.
 
+### See where a document's size actually goes
+
+Optimize has offered settings without ever saying which one was worth using.
+It now opens on a breakdown of the file: every byte attributed to one category
+— images, fonts, page content, comments, form fields, attached files,
+bookmarks, named destinations, accessibility tags, document structure,
+metadata, JavaScript, anything left unclassified, and the cross-reference
+machinery and free space that hold the rest together. Largest first, with the
+share each takes.
+
+The rows add up to the file size, exactly, and the table shows that total so it
+can be checked. That is the point: a percentage you cannot add up is a
+decoration, so an object is charged what the file really spends on it — an
+image is measured as it is stored, not as it decodes, and an object packed
+together with others is charged its share of what that package occupies. What
+is left over after every category is the overhead, and it says what it is made
+of: cross-reference tables, revisions the file has superseded but still
+carries, objects nothing can reach any more, and the headers and padding
+between them.
+
+Each row names the setting that addresses it — and only settings that exist. A
+document that is 99% image points at Compress; one that is mostly superseded
+revisions points at re-saving it; fonts, named destinations and the document's
+own structure say plainly that nothing here changes them. Every finding can be
+expanded to name the individual objects, with the page each sits on.
+
+The breakdown is a read: it never alters the document, it re-runs by itself
+after any change, and it is available on the command line as `audit-space`.
+
 ## 1.0.21 — Fields found, hidden content named, documents certified, and export to spreadsheets and slides
 
 Preparing a form stops meaning drawing every box by hand. Open a flat form,

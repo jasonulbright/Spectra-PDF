@@ -72,6 +72,7 @@ from engine.document_js import list_document_js, set_document_js
 from engine.redact import redact
 from engine.search_redact import search_and_redact
 from engine.sanitize import audit_hidden_information, sanitize_pdf
+from engine.space_audit import audit_space_usage
 from engine.watermark import watermark
 from engine.compare import compare_text, compare_visual
 from engine.form_detect import detect_form_fields
@@ -204,6 +205,7 @@ def main() -> None:
     server.register("search_and_redact", search_and_redact)
     server.register("audit_hidden_information", audit_hidden_information)
     server.register("sanitize_pdf", sanitize_pdf)
+    server.register("audit_space_usage", audit_space_usage)
     server.register("watermark", watermark)
     server.register("compare_text", compare_text)
     server.register("compare_visual", compare_visual)

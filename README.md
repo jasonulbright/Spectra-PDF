@@ -99,6 +99,7 @@ spectrapdf decrypt encrypted.pdf -o decrypted.pdf --password secret
 
 # PDF/A, optimize, grayscale, version
 spectrapdf pdfa input.pdf -o archive.pdf --level 2b
+spectrapdf audit-space input.pdf          # where the bytes went, by category (JSON)
 spectrapdf optimize input.pdf -o optimized.pdf --linearize --strip-metadata --compress-streams
 spectrapdf grayscale input.pdf -o grayscale.pdf
 spectrapdf pdf-version input.pdf -o out.pdf --version 1.7
