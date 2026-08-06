@@ -123,7 +123,6 @@ export const PANEL_STRINGS = {
   'panel.optimize.audit.headerCategory': 'Category',
   'panel.optimize.audit.headerBytes': 'Size',
   'panel.optimize.audit.headerShare': 'Share',
-  'panel.optimize.audit.headerKnob': 'Addressed by',
   'panel.optimize.audit.total': 'Whole document',
   'panel.optimize.audit.details': 'Details',
   'panel.optimize.audit.moreRows': 'Only the largest are listed.',
