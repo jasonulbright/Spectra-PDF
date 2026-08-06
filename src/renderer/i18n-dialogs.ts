@@ -289,6 +289,62 @@ export const DIALOG_STRINGS = {
   'dialog.exportImages.exporting': 'Exporting…',
   'dialog.exportImages.export': 'Export…',
 
+  // Format keys and option values (txt / xlsx / pptx, reading / layout,
+  // table / page, 16:9 / 4:3) are protocol identifiers: never localized, never
+  // parsed back from display text.
+  'dialog.exportDoc.aria': 'Export the document',
+  'dialog.exportDoc.title.txt': 'Export as Plain Text',
+  'dialog.exportDoc.title.xlsx': 'Export as a Spreadsheet',
+  'dialog.exportDoc.title.pptx': 'Export as a Presentation',
+  'dialog.exportDoc.pages': 'Pages (e.g. 1,3)',
+  'dialog.exportDoc.pagesPlaceholder': 'All',
+  'dialog.exportDoc.layout': 'Text order',
+  'dialog.exportDoc.layout.reading': 'Reading order',
+  'dialog.exportDoc.layout.layout': 'Preserve the page layout',
+  'dialog.exportDoc.pageBreaks': 'Separate pages with a page break',
+  'dialog.exportDoc.sheetPer': 'Sheets',
+  'dialog.exportDoc.sheetPer.table': 'One sheet per table',
+  'dialog.exportDoc.sheetPer.page': 'One sheet per page',
+  'dialog.exportDoc.includeUntabled': 'Add a sheet with the text outside the tables',
+  'dialog.exportDoc.slideSize': 'Slide size',
+  'dialog.exportDoc.slideSize.page': "The document's own page size",
+  'dialog.exportDoc.slideSize.wide': 'Widescreen (16:9)',
+  'dialog.exportDoc.slideSize.standard': 'Standard (4:3)',
+  'dialog.exportDoc.export': 'Export…',
+  'dialog.exportDoc.exporting': 'Exporting…',
+  'dialog.exportDoc.cancel': 'Cancel',
+  'dialog.exportDoc.close': 'Close',
+  'dialog.exportDoc.doneTxt_one':
+    'Wrote {{chars}} characters from {{count}} page to {{path}}',
+  'dialog.exportDoc.doneTxt_other':
+    'Wrote {{chars}} characters from {{count}} pages to {{path}}',
+  'dialog.exportDoc.emptyPages_one': '{{count}} page carried no text.',
+  'dialog.exportDoc.emptyPages_other': '{{count}} pages carried no text.',
+  'dialog.exportDoc.doneXlsx_one':
+    'Wrote {{count}} table from {{pages}} analyzed pages to {{path}}',
+  'dialog.exportDoc.doneXlsx_other':
+    'Wrote {{count}} tables from {{pages}} analyzed pages to {{path}}',
+  'dialog.exportDoc.pagesWithoutTables_one': 'No table was found on {{count}} page.',
+  'dialog.exportDoc.pagesWithoutTables_other': 'No table was found on {{count}} pages.',
+  'dialog.exportDoc.untabledLines_one':
+    '{{count}} line of text sits outside a table and was not exported.',
+  'dialog.exportDoc.untabledLines_other':
+    '{{count}} lines of text sit outside a table and were not exported.',
+  'dialog.exportDoc.verticalRuns_one':
+    '{{count}} run of vertical text was left out of the column detection.',
+  'dialog.exportDoc.verticalRuns_other':
+    '{{count}} runs of vertical text were left out of the column detection.',
+  'dialog.exportDoc.unresolvedRtl_one':
+    '{{count}} right-to-left cell kept the character order the page drew.',
+  'dialog.exportDoc.unresolvedRtl_other':
+    '{{count}} right-to-left cells kept the character order the page drew.',
+  'dialog.exportDoc.donePptx_one': 'Wrote {{count}} slide to {{path}}',
+  'dialog.exportDoc.donePptx_other': 'Wrote {{count}} slides to {{path}}',
+  'dialog.exportDoc.differingPages_one':
+    '{{count}} page is a different size from the slides and was fitted to them.',
+  'dialog.exportDoc.differingPages_other':
+    '{{count}} pages are a different size from the slides and were fitted to them.',
+
   'dialog.watchers.title': 'Watched Folders',
   'dialog.watchers.blurb':
     'A watched folder runs a saved guided action on every PDF dropped into it: processed copies land in the destination, the originals file into the processed folder. Watching runs while Spectra PDF is open (including minimized to the tray); runs are logged with the batch logs.',
