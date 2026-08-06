@@ -686,12 +686,21 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
             # agree, or the edit exceeds the append-safe tier. /Version is
             # metadata too: a signing append writes it into the catalog
             # while rebuilds normalize it into the header — the original's
-            # own bytes keep whichever it had (live catch: the e2e fixture,
-            # signed by pyHanko, refused every transplant over exactly this).
+            # own bytes keep whichever it had (live catch: a signed fixture
+            # refused every transplant over exactly this).
+            #
+            # /Perms and /DSS are SIGNATURE INFRASTRUCTURE the original owns:
+            # a certification's DocMDP entry and the long-term-validation
+            # store. A page-tier rebuild carries neither, and the transplant
+            # never writes either into the appended revision — so the
+            # original's own bytes keep them, and comparing them would refuse
+            # every edit of a certified or LTV-enabled document, which is the
+            # opposite of preserving it.
             if not _bisim(
                 orig.Root, mod.Root, set(),
                 skip=frozenset(
-                    {"/AcroForm", "/Pages", "/Metadata", "/PieceInfo", "/Version"}
+                    {"/AcroForm", "/Pages", "/Metadata", "/PieceInfo", "/Version",
+                     "/Perms", "/DSS"}
                 ),
             ):
                 return {"applied": False, "reason": "catalog-changed"}
