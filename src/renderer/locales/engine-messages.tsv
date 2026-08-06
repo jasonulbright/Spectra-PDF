@@ -74,6 +74,9 @@ document_js.duplicateDocumentScriptName	pattern	document_js	Duplicate document-s
 document_js.eachDocumentScriptMust	exact	document_js	Each document script must be an object with name and js.
 document_js.eachDocumentScriptNeeds	exact	document_js	Each document script needs a non-empty name.
 fieldmdp.signatureFieldCannotLock	pattern	fieldmdp	Signature field "{{own_name}}" cannot lock itself. A field lock names the form fields that may no longer change, not the field being signed.
+flattener.flatteningRegionDpiWould	pattern	flattener	Flattening region {{region_number}} at {{dpi}} dpi would need {{width}}x{{height}} pixels.
+flattener.ghostscriptRegionRasterizationFailed	pattern	flattener	Ghostscript region rasterization failed: {{detail}}
+flattener.pageMediaBox	exact	flattener	This page has no media box.
 font_fallback.bundledFallbackFontFound	pattern	font_fallback	bundled fallback font not found: {{font_path}}
 font_fallback.bundledMongolianFontExpress	pattern	font_fallback	no bundled Mongolian font can express {{text}}
 font_fallback.bundledRightLeftFont	pattern	font_fallback	no bundled right-to-left font can express {{text}}
@@ -339,7 +342,7 @@ search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a posit
 search_regions.pagesMustListPage	exact	form_detect,search_regions,slide_export,table_export,text_export	pages must be a list of page numbers or "all"
 separations.ghostscriptFoldedSpotColours	pattern	separations	Ghostscript folded {{n}} spot colours into process; raise the spot limit or reduce the document's spots.
 separations.ghostscriptSeparationRenderFailed	pattern	separations	Ghostscript separation render failed: {{v0}}
-separations.pageDocument	pattern	separations	Page {{number}} is not in this document.
+separations.pageDocument	pattern	flattener,separations	Page {{number}} is not in this document.
 separations.pageUsesSpotColours	pattern	separations	This page uses {{n}} spot colours; separation preview supports {{limit}}.
 separations.separationOutputDidMatch	exact	separations	Separation output did not match the document's inks — the preview cannot be trusted.
 separations.separationPlatesPageLonger	exact	separations	The separation plates for this page are no longer available.

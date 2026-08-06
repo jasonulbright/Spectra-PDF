@@ -259,6 +259,11 @@ export type CanvasTool =
   // is what makes `openTool` disarm it: a preview left armed by a closed tool
   // would go silently live on the next document.
   | 'outputpreview'
+  // Flattener preview: the page shows which objects a transparency flatten
+  // would rasterize at the chosen balance. Same class and same reason as
+  // 'outputpreview' — it changes what the page SHOWS and claims no gesture,
+  // so it belongs to no tool and `openTool` is what disarms it.
+  | 'flattenpreview'
   | 'highlight'
   | 'freetext'
   | 'ink'

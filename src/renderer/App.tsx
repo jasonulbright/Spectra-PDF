@@ -84,10 +84,12 @@ import { OperationQueue } from './components/OperationQueue';
 import { QueueProvider, useOperationQueue } from './hooks/useOperationQueue';
 import { SearchProvider } from './search/SearchProvider';
 import { SeparationPreviewProvider } from './hooks/useSeparationPreview';
+import { FlattenerPreviewProvider } from './hooks/useFlattenerPreview';
 import { OutputPreviewPanel } from './panels/OutputPreviewPanel';
 import { InkManagerPanel } from './panels/InkManagerPanel';
 import { PrinterMarksPanel } from './panels/PrinterMarksPanel';
 import { HairlinesPanel } from './panels/HairlinesPanel';
+import { FlattenerPanel } from './panels/FlattenerPanel';
 import { SettingsPanel, getSettings, ensureGsPath, type PrefCategory } from './panels/SettingsPanel';
 import { MenuBar } from './components/MenuBar';
 import { MainToolbar } from './components/MainToolbar';
@@ -182,7 +184,7 @@ const panels: Record<Operation, React.ComponentType> = {
   pagelabels: PageLabelsPanel, attachments: AttachmentsPanel, portfolio: PortfolioPanel, layers: LayersPanel,
   accessibility: AccessibilityPanel, comments: CommentsPanel, preflight: PreflightPanel,
   outputpreview: OutputPreviewPanel, inkmanager: InkManagerPanel,
-  printermarks: PrinterMarksPanel, hairlines: HairlinesPanel,
+  printermarks: PrinterMarksPanel, hairlines: HairlinesPanel, flattener: FlattenerPanel,
   links: LinksPanel, tags: TagsPanel, readingorder: ReadingOrderPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
   actions: GuidedActionsPanel, takeoff: TakeoffPanel,
@@ -2459,7 +2461,9 @@ export function App(): React.ReactElement {
       <AppStateProvider>
         <SearchProvider>
           <SeparationPreviewProvider>
-            <AppContent />
+            <FlattenerPreviewProvider>
+              <AppContent />
+            </FlattenerPreviewProvider>
           </SeparationPreviewProvider>
         </SearchProvider>
       </AppStateProvider>
