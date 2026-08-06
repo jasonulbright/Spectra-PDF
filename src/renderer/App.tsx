@@ -39,6 +39,7 @@ import { PortfolioPanel, PortfolioAutoOpen } from './panels/PortfolioPanel';
 import { GuidedActionsPanel } from './panels/GuidedActionsPanel';
 import { TakeoffPanel } from './panels/TakeoffPanel';
 import { SearchRedactPanel } from './panels/SearchRedactPanel';
+import { SanitizePanel } from './panels/SanitizePanel';
 import { PrepareFormPanel } from './panels/PrepareFormPanel';
 import { LayersPanel } from './panels/LayersPanel';
 import { AccessibilityPanel } from './panels/AccessibilityPanel';
@@ -114,7 +115,8 @@ import { useKeymapDispatcher } from './commands/keymap';
 import { useAppModal } from './hooks/useAppModal';
 import type { AppCommandHandlers } from './commands/types';
 import { useTranslation } from 'react-i18next';
-import { tChrome } from './i18n';
+import { tChrome, tChromeCount } from './i18n';
+import type { SanitizeRequest } from './lib/sanitize-report';
 
 // The Preferences shell — a component (not inline JSX) so it can carry the
 // shared dialog keyboard/focus contract (useAppModal).
@@ -169,6 +171,7 @@ const panels: Record<Operation, React.ComponentType> = {
   actions: GuidedActionsPanel, takeoff: TakeoffPanel,
   search_redact: SearchRedactPanel,
   prepareform: PrepareFormPanel,
+  sanitize: SanitizePanel,
 };
 
 function AppContent(): React.ReactElement {
@@ -959,6 +962,38 @@ function AppContent(): React.ReactElement {
   const handleAddFormField = useCallback(
     async (path: string, spec: NewFieldSpec) => handleAddFormFields(path, [spec]),
     [handleAddFormFields],
+  );
+
+  // Removing hidden information is a full rewrite by construction: collapsing
+  // prior revisions is what drops content an earlier revision still holds, and
+  // an incremental append would add a revision rather than remove one. On a
+  // signed document that breaks the signatures, so the count the report
+  // measured is named BEFORE the choice rather than after it. A certified
+  // document states what may change in it, and this changes more than any
+  // level permits, so it says so distinctly — and still proceeds, because a
+  // tool that refuses to clean a file before it is sent out has failed at the
+  // job it exists for.
+  const handleSanitizeDocument = useCallback(
+    async (path: string, request: SanitizeRequest): Promise<boolean> => {
+      const f = state.files.get(path);
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+      const signed = request.signatures.count + request.signatures.document_timestamps;
+      if (signed > 0) {
+        const certified = request.signatures.certification !== null;
+        const proceed = await showProceedConfirm(
+          tChrome(certified ? 'app.sanitize.certifiedTitle' : 'app.sanitize.title'),
+          tChromeCount(certified ? 'app.sanitize.certified' : 'app.sanitize.signed', signed),
+        );
+        if (!proceed) return false;
+      }
+      await performOperation(path, 'sanitize_pdf', {
+        categories: request.categories,
+        form_fields_mode: request.formFieldsMode,
+        hidden_text_ocr: request.includeOcrLayer,
+      });
+      return true;
+    },
+    [state.files, performOperation, showProceedConfirm],
   );
 
   const handleApplyOcrLayer = useCallback(
@@ -1803,6 +1838,7 @@ function AppContent(): React.ReactElement {
     checkForUpdates: () => setUpdateCheckSignal((n) => n + 1),
     exit: handleExit,
     minimizeToTray: async () => { await app.hideToTray(); },
+    sanitizeDocument: handleSanitizeDocument,
   };
   const commandHandlersRef = useRef(commandHandlers);
   commandHandlersRef.current = commandHandlers;
@@ -1840,6 +1876,7 @@ function AppContent(): React.ReactElement {
       checkForUpdates: () => h.current.checkForUpdates(),
       exit: () => h.current.exit(),
       minimizeToTray: () => h.current.minimizeToTray(),
+      sanitizeDocument: (path, request) => h.current.sanitizeDocument(path, request),
     });
     setCommandStateSource(() => ({ state: stateRef.current, dispatch }));
     return () => {

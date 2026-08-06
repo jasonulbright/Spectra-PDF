@@ -29,6 +29,7 @@ export type GuidedStepOp =
   | 'grayscale'
   | 'convert_pdfa'
   | 'strip_metadata'
+  | 'sanitize'
   | 'watermark'
   | 'ocr_file'
   | 'add_header_footer'
@@ -136,6 +137,40 @@ export const STEP_CATALOG: readonly StepDef[] = [
     ],
   },
   { op: 'strip_metadata', title: 'Strip Metadata', params: [] },
+  {
+    // The categories are named as a comma-separated list rather than picked
+    // from checkboxes: an action runs unattended over a folder, so what it
+    // removes has to be written down in the action itself.
+    op: 'sanitize',
+    title: 'Remove Hidden Information',
+    params: [
+      {
+        key: 'categories',
+        label: 'Categories',
+        kind: 'text',
+        defaultValue: 'metadata,embedded_files,comments,javascript,prior_revisions',
+        required: true,
+        hint: 'metadata, embedded_files, bookmarks, comments, form_fields, javascript, hidden_layers, hidden_text, prior_revisions, unreferenced_objects, links_and_actions, thumbnails, attached_structure',
+      },
+      {
+        key: 'form_fields_mode',
+        label: 'Form fields',
+        kind: 'select',
+        options: [
+          { value: 'remove', label: 'Remove the fields' },
+          { value: 'flatten', label: 'Flatten (keep the look)' },
+        ],
+        defaultValue: 'remove',
+      },
+    ],
+    mapParams: (params) => ({
+      categories: String(params.categories ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
+      form_fields_mode: String(params.form_fields_mode ?? 'remove'),
+    }),
+  },
   {
     op: 'watermark',
     title: 'Watermark',
