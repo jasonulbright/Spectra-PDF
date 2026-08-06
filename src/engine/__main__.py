@@ -111,7 +111,7 @@ from engine.text_paragraphs import (
 )
 from engine.text_runs import convert_text_run, list_text_runs, replace_text_run, restyle_text_run
 from engine.printer import print_pdf, print_preview, print_preview_cleanup
-from engine.incremental import transplant_incremental
+from engine.incremental import signature_policy, transplant_incremental
 from engine.redact_marks import list_redact_annotations, save_redaction_marks
 from engine.signatures import verify_signatures, sign_pdf, generate_signer
 from engine.struct_tree import (
@@ -249,6 +249,7 @@ def main() -> None:
     server.register("sign_pdf", sign_pdf)
     server.register("generate_signer", generate_signer)
     server.register("transplant_incremental", transplant_incremental)
+    server.register("signature_policy", signature_policy)
     server.register("save_redaction_marks", save_redaction_marks)
     server.register("list_redact_annotations", list_redact_annotations)
 
