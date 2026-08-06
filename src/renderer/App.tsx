@@ -2314,12 +2314,16 @@ function AppContent(): React.ReactElement {
       {showFormPrepFolder && (
         <FolderFormPrepDialog
           onClose={() => setShowFormPrepFolder(false)}
-          // The escalation goes through the ONE open funnel and then the tool
-          // command, so a file handed to the document flow arrives exactly as
-          // it would from the menu.
+          // The escalation goes through the ONE open funnel and then seats the
+          // tool the way the docless-tool flow does: the reducer owns the rule
+          // that arms a tool, and a command re-invoked here would re-read a
+          // state React has not flushed yet and refuse itself. The dock opens
+          // deliberately — the gesture asked for the review surface, which is
+          // the panel.
           onReviewInApp={(path) => {
             void openByPaths([path]).then(() => {
-              invokeCommand('tools.open.prepareform');
+              dispatch({ type: 'UI_SET_ACTIVE_OP', op: 'prepareform' });
+              dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
             });
           }}
         />
