@@ -50,6 +50,17 @@
 - Detected signature fields can lock the fields being created alongside them.
 - On the command line as `forms --sig-field NAME --lock` and `--clear-lock`.
 
+### Exporting a folder
+- Export a Folder converts every PDF under a folder to a chosen format in one run.
+- All eleven export targets are offered: Word, rich text, OpenDocument, HTML, XHTML, plain text, spreadsheet, presentation, PNG, JPEG and TIFF.
+- Outputs land in a destination folder at the same place in the tree, with the target's extension.
+- Each target's own options are offered, and only the ones it accepts are sent.
+- A document the chosen format cannot be produced from is reported against its own row; the run continues.
+- The originals are never changed and never opened.
+- A run log records each file, what it produced, and why anything was skipped.
+- Guided actions gain export steps, so watched folders and scheduled runs can export too.
+- On the command line as `export-folder`.
+
 ## 1.0.22
 
 ### Signing
