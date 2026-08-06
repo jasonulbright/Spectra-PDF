@@ -472,3 +472,110 @@ class TestCreatePdfStep:
         good = next(r for r in report["results"] if r["rel"] == "scan.png")
         assert broken["status"] == "error" and "unreadable image" in broken["error"]
         assert good["status"] == "ok"
+
+
+def _text_pdf(path) -> None:
+    """A page carrying real text — an export target has to find something."""
+    doc = pikepdf.new()
+    page = doc.add_blank_page(page_size=(300, 300))
+    font = doc.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name.Font,
+            Subtype=pikepdf.Name.Type1,
+            BaseFont=pikepdf.Name.Helvetica,
+            Encoding=pikepdf.Name.WinAnsiEncoding,
+        )
+    )
+    page.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=font))
+    page.Contents = doc.make_stream(b"BT /F1 12 Tf 50 200 Td (Exportable text) Tj ET")
+    doc.save(str(path))
+    doc.close()
+
+
+@pytest.fixture
+def text_tree(tmp_path):
+    src = tmp_path / "textsrc"
+    (src / "sub").mkdir(parents=True)
+    _text_pdf(src / "a.pdf")
+    _text_pdf(src / "sub" / "b.pdf")
+    return src
+
+
+class TestExportSteps:
+    """A terminal export CONSUMES the document: it must come last, it must name
+    a format, it cannot run in place, and the mirror carries the exported file
+    rather than the PDF the earlier steps ran on."""
+
+    def test_export_must_be_the_last_step(self):
+        with pytest.raises(ValueError, match="must be the last step"):
+            validate_steps([
+                {"op": "export_document", "params": {"fmt": "txt"}},
+                {"op": "strip_metadata"},
+            ])
+
+    def test_export_must_name_a_known_format(self):
+        with pytest.raises(ValueError, match="name the export format"):
+            validate_steps([{"op": "export_document", "params": {}}])
+        with pytest.raises(ValueError, match="unsupported export format"):
+            validate_steps([{"op": "export_document", "params": {"fmt": "wpd"}}])
+        with pytest.raises(ValueError, match="unsupported image format"):
+            validate_steps([{"op": "export_images", "params": {"fmt": "bmp"}}])
+
+    def test_in_place_refuses_an_export(self, tree, tmp_path):
+        with pytest.raises(ValueError, match="cannot end with an export"):
+            run_action(
+                str(tree),
+                "",
+                [{"op": "export_document", "params": {"fmt": "txt"}}],
+                in_place=True,
+                write_log=False,
+            )
+
+    def test_mirrors_the_tree_carrying_only_the_exported_file(self, text_tree, tmp_path):
+        dest = tmp_path / "out"
+        report = run_action(
+            str(text_tree),
+            str(dest),
+            [{"op": "export_document", "params": {"fmt": "txt"}}],
+            write_log=False,
+        )
+        assert report["failed"] == 0
+        assert (dest / "a.txt").is_file()
+        assert (dest / "sub" / "b.txt").is_file()
+        # The intermediate PDF never survives: two trees would make "what did
+        # this run produce" ambiguous.
+        assert not (dest / "a.pdf").exists()
+        assert not (dest / "sub" / "b.pdf").exists()
+        # The originals are untouched.
+        assert (text_tree / "a.pdf").is_file()
+        assert report["results"][0]["output"].endswith(".txt")
+
+    def test_transform_steps_run_before_the_export(self, text_tree, tmp_path):
+        dest = tmp_path / "out"
+        report = run_action(
+            str(text_tree),
+            str(dest),
+            [
+                {"op": "strip_metadata", "params": {}},
+                {"op": "export_document", "params": {"fmt": "txt"}},
+            ],
+            write_log=False,
+        )
+        assert report["failed"] == 0
+        assert report["results"][0]["steps_applied"] == 2
+        assert (dest / "a.txt").is_file()
+        assert not (dest / "a.pdf").exists()
+
+    def test_a_refusal_is_one_files_result(self, text_tree, tmp_path):
+        dest = tmp_path / "out"
+        (text_tree / "broken.pdf").write_bytes(b"not a pdf at all")
+        report = run_action(
+            str(text_tree),
+            str(dest),
+            [{"op": "export_document", "params": {"fmt": "txt"}}],
+            write_log=False,
+        )
+        by_rel = {r["rel"]: r for r in report["results"]}
+        assert by_rel["broken.pdf"]["status"] == "error"
+        assert by_rel["a.pdf"]["status"] == "ok"
+        assert report["ok"] == 2

@@ -168,6 +168,9 @@ pub enum CliCommand {
     DocumentJsSet(DocumentJsSetArgs),
     /// Export a PDF to Word/HTML/RTF/ODT via bundled LibreOffice
     Export(ExportArgs),
+    /// Export every PDF under a folder into a mirror tree (headless; what a
+    /// scheduled run invokes)
+    ExportFolder(ExportFolderArgs),
     /// Export PDF pages as raster images (PNG/JPEG per page, or multi-page TIFF)
     ExportImages(ExportImagesArgs),
     /// Compare the text of two PDFs (JSON diff report)
@@ -1029,6 +1032,56 @@ pub struct ExportArgs {
     /// Slide dimensions: page, 16:9 or 4:3 (pptx only)
     #[arg(long)]
     pub slide_size: Option<String>,
+}
+
+/// Folder-scope export. A folder verb of its own rather than a `batch`
+/// operation, and for the reason `batch-ocr` is one: the whole run is ONE
+/// engine call, so this, a watched folder and a scheduled run behave and log
+/// identically. The engine runs it as a one-step action, so there is a single
+/// implementation of the walk, the mirror and the per-file isolation.
+#[derive(Args)]
+pub struct ExportFolderArgs {
+    /// Folder of PDFs to export (searched recursively)
+    pub source: PathBuf,
+    /// Folder the exports are written to (must be outside SOURCE)
+    #[arg(short, long)]
+    pub dest: PathBuf,
+    /// Target format: docx, rtf, odt, html, xhtml, txt, xlsx, pptx, png, jpeg, tiff
+    #[arg(short, long, default_value = "docx")]
+    pub format: String,
+    /// Page range: "1,3" for the document targets, "1-3,5" for the image ones
+    #[arg(long, default_value = "")]
+    pub pages: String,
+    /// Text ordering: reading or layout (txt only)
+    #[arg(long)]
+    pub layout: Option<String>,
+    /// Write a form feed between pages (txt only)
+    #[arg(long)]
+    pub page_breaks: bool,
+    /// Sheet grouping: table or page (xlsx only)
+    #[arg(long)]
+    pub sheet_per: Option<String>,
+    /// Add a sheet carrying the text no table claimed (xlsx only)
+    #[arg(long)]
+    pub include_untabled: bool,
+    /// Slide dimensions: page, 16:9 or 4:3 (pptx only)
+    #[arg(long)]
+    pub slide_size: Option<String>,
+    /// Render resolution in dpi (image targets only)
+    #[arg(long, default_value_t = 150)]
+    pub dpi: u32,
+    /// Render in grayscale (image targets only)
+    #[arg(long)]
+    pub gray: bool,
+    /// JPEG quality 1-100 (jpeg only)
+    #[arg(long, default_value_t = 90)]
+    pub quality: u32,
+    /// Folder the run log is written to (default: the app's log folder)
+    #[arg(long)]
+    pub log_dir: Option<PathBuf>,
+    /// Print one line per file as the run walks the tree
+    #[arg(short, long)]
+    pub verbose: bool,
 }
 
 #[derive(Args)]
@@ -3291,6 +3344,62 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 params["slide_size"] = json!(slide_size);
             }
             engine.call("export_document", params)
+        }
+
+        CliCommand::ExportFolder(args) => {
+            // An omitted option stays absent rather than defaulting here: the
+            // engine refuses an option the target does not take, and a value
+            // sent unasked would turn every such refusal into a false one.
+            let image = matches!(args.format.as_str(), "png" | "jpeg" | "tiff");
+            let mut params = serde_json::Map::new();
+            params.insert("fmt".into(), json!(args.format));
+            if !args.pages.trim().is_empty() {
+                params.insert(
+                    "pages".into(),
+                    if image { json!(args.pages.trim()) } else { parse_pages(&args.pages) },
+                );
+            }
+            if image {
+                params.insert("dpi".into(), json!(args.dpi));
+                params.insert("gray".into(), json!(args.gray));
+                if args.format == "jpeg" {
+                    params.insert("quality".into(), json!(args.quality));
+                }
+            } else {
+                if let Some(layout) = &args.layout {
+                    params.insert("layout".into(), json!(layout));
+                }
+                if args.page_breaks {
+                    params.insert("page_breaks".into(), json!(true));
+                }
+                if let Some(sheet_per) = &args.sheet_per {
+                    params.insert("sheet_per".into(), json!(sheet_per));
+                }
+                if args.include_untabled {
+                    params.insert("include_untabled".into(), json!(true));
+                }
+                if let Some(slide_size) = &args.slide_size {
+                    params.insert("slide_size".into(), json!(slide_size));
+                }
+            }
+            let op = if image { "export_images" } else { "export_document" };
+            engine.call(
+                "run_action",
+                json!({
+                    "source": abs(&args.source).to_string_lossy(),
+                    "dest": abs(&args.dest).to_string_lossy(),
+                    "steps": [{ "op": op, "params": serde_json::Value::Object(params) }],
+                    "action_name": format!("Export folder to {}", args.format),
+                    "gs_path": resolve_gs().to_string_lossy(),
+                    "soffice_path": resolve_soffice(),
+                    "log_dir": args
+                        .log_dir
+                        .as_ref()
+                        .map(|p| abs(p).to_string_lossy().to_string())
+                        .unwrap_or_default(),
+                    "progress": args.verbose,
+                }),
+            )
         }
 
         CliCommand::ExportImages(args) => {
