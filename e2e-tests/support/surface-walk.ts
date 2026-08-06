@@ -29,7 +29,7 @@ export const TOOL_OPS: readonly (readonly [string, readonly string[]])[] = [
   ['ocr', []],
   ['compare', ['compare']],
   ['protect', ['encrypt', 'decrypt']],
-  ['optimize', ['compress', 'optimize', 'grayscale', 'convert_cmyk', 'pdfa', 'pdf_version']],
+  ['optimize', ['compress', 'optimize', 'grayscale', 'pdfa', 'pdf_version']],
   ['repair', ['repair', 'rebuild', 'recover']],
   ['watermark', ['watermark']],
   ['headerfooter', ['headerfooter']],
@@ -39,7 +39,7 @@ export const TOOL_OPS: readonly (readonly [string, readonly string[]])[] = [
   ['portfolio', ['portfolio']],
   ['layers', ['layers']],
   ['accessibility', ['accessibility', 'tags', 'readingorder']],
-  ['preflight', ['preflight']],
+  ['printproduction', ['outputpreview', 'preflight', 'convert_cmyk']],
   ['links', ['links']],
   ['export', ['extract_text']],
 ] as const;

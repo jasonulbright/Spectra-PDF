@@ -322,6 +322,12 @@ search_regions.expandMustMatchWord	exact	search_regions	expand must be "match", 
 search_regions.giveSearchTermWord	exact	search_regions	give a search term, a word list or a built-in pattern — searching for nothing would mark every page
 search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a positive number
 search_regions.pagesMustListPage	exact	form_detect,search_regions,slide_export,table_export,text_export	pages must be a list of page numbers or "all"
+separations.ghostscriptFoldedSpotColours	pattern	separations	Ghostscript folded {{n}} spot colours into process; raise the spot limit or reduce the document's spots.
+separations.ghostscriptSeparationRenderFailed	pattern	separations	Ghostscript separation render failed: {{v0}}
+separations.pageDocument	pattern	separations	Page {{number}} is not in this document.
+separations.pageUsesSpotColours	pattern	separations	This page uses {{n}} spot colours; separation preview supports {{limit}}.
+separations.separationOutputDidMatch	exact	separations	Separation output did not match the document's inks — the preview cannot be trusted.
+separations.separationPlatesPageLonger	exact	separations	The separation plates for this page are no longer available.
 shaping.fontSVerticalForm	pattern	shaping	this font's vertical form of {{name}} has no advance
 shaping.shapingFontCannotExpress	pattern	shaping	the shaping font cannot express {{text}}
 signatures.certificatesFoundTrustRoot	pattern	signatures	no certificates found in trust root: {{p}}

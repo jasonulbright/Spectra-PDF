@@ -105,6 +105,7 @@ const CANVAS_TOOLS = [
   'select', 'hand', 'highlight', 'freetext', 'ink', 'stamp', 'redact', 'signature', 'forms',
   'formfields', 'edit', 'addtext', 'addimage', 'measuredist', 'measureperim', 'measurearea',
   'measurecal', 'shape', 'callout', 'note', 'inkerase', 'zoommarquee', 'cropdraw', 'count',
+  'outputpreview',
 ] as const;
 
 export const TOOL_TITLES: Record<CanvasTool, string> = {
@@ -115,6 +116,7 @@ export const TOOL_TITLES: Record<CanvasTool, string> = {
   measuredist: 'Distance', measureperim: 'Perimeter', measurearea: 'Area', measurecal: 'Calibrate',
   shape: 'Shape', callout: 'Callout', note: 'Sticky Note', inkerase: 'Eraser',
   zoommarquee: 'Marquee Zoom', cropdraw: 'Draw Crop', count: 'Count',
+  outputpreview: 'Separation Preview',
 };
 
 // CANVAS_TOOLS must be a literal tuple (COMMAND_IDS builds `tools.${t}` from
@@ -328,7 +330,7 @@ export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
   portfolio: [],
   layers: [],
   accessibility: [],
-  preflight: [],
+  printproduction: [],
   links: [],
   export: [],
 };
