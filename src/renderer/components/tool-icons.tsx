@@ -230,6 +230,15 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <circle cx="12" cy="14.5" r="5.5" />
     </>
   ),
+  // Stacked ink swatches over a slider — the inks and what is done to them.
+  inkmanager: (
+    <>
+      <rect x="3" y="4" width="18" height="4" rx="1" />
+      <rect x="3" y="11" width="18" height="4" rx="1" />
+      <path d="M3 19h18" />
+      <circle cx="9" cy="19" r="2" />
+    </>
+  ),
   // A luggage tag (structure tags).
   tags: (
     <>

@@ -19,9 +19,13 @@ import {
   plateCacheKey,
   prunePlateCache,
   previewDpi,
+  aliasIsAllowed,
+  moveInSequence,
+  orderInks,
   type CacheEntry,
   type CompositeResult,
   type Ink,
+  type InkAliases,
   type Plate,
   type PlateSet,
 } from '../lib/separation-preview';
@@ -50,6 +54,14 @@ export interface SeparationPreviewValue {
   hideAllInks: () => void;
   densities: ReadonlyMap<string, number>;
   setDensity: (name: string, density: number) => void;
+  /** Preview aliases: which ink each colorant is DRAWN as. The document is
+   *  untouched — the applied alias is the Ink Manager's own door. */
+  aliases: InkAliases;
+  setAlias: (source: string, target: string | null) => void;
+  /** Print sequence — an application setting, not a document key. It orders
+   *  the plate list and the compositing. */
+  sequence: readonly string[];
+  moveInk: (name: string, delta: number) => void;
   limitPct: number;
   setLimitPct: (limit: number) => void;
   alarm: boolean;
@@ -97,6 +109,8 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
   const [coverage, setCoverage] = useState<Record<string, number>>({});
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set<string>());
   const [densities, setDensities] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const [aliases, setAliases] = useState<InkAliases>(() => new Map());
+  const [sequence, setSequence] = useState<readonly string[]>([]);
   const [limitPct, setLimitPctState] = useState(DEFAULT_TAC_LIMIT);
   const [alarm, setAlarm] = useState(false);
   const [overprint, setOverprint] = useState(true);
@@ -206,6 +220,19 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
     setDensities((prev) => new Map(prev).set(name, density));
   }, []);
 
+  const moveInk = useCallback((name: string, delta: number) => {
+    setSequence((prev) => moveInSequence(prev, name, delta));
+  }, []);
+
+  const setAlias = useCallback((source: string, target: string | null) => {
+    setAliases((prev) => {
+      const next = new Map(prev);
+      if (target === null) next.delete(source);
+      else if (aliasIsAllowed(prev, source, target)) next.set(source, target);
+      return next;
+    });
+  }, []);
+
   // The ink inventory. A read of the working file, so it runs through the
   // GATED call: the preview shows the document as it will print, which means
   // the bytes on disk must already carry the pending page edits.
@@ -259,13 +286,18 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
           if (target.current) {
             setPlates(set.plates);
             setCoverage(set.coverage ?? {});
+            setSequence((prev) => {
+              const known = new Set(prev);
+              const added = set!.plates.map((p) => p.name).filter((n) => !known.has(n));
+              return added.length > 0 ? [...prev, ...added] : prev;
+            });
           }
           // Compositing touches no PDF — it reads the cached plates. It stays
           // off the gated path deliberately: gating it would commit the
           // user's pending page edits on every ink checkbox.
           const composite = (await callRaw('composite_separations', {
             dir: set.dir,
-            inks: compositeRequest(set.plates, hidden, densities),
+            inks: compositeRequest(orderInks(set.plates, sequence), hidden, densities, aliases),
             limit_pct: limitPct,
             alarm,
           })) as unknown as CompositeResult;
@@ -291,7 +323,7 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
     // `wantedKey` stands for the page window: the array's identity changes on
     // every state tick and would restart the run for the same pages.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [armed, wantedKey, overprint, hidden, densities, limitPct, alarm, generation]);
+  }, [armed, wantedKey, overprint, hidden, densities, aliases, sequence, limitPct, alarm, generation]);
 
   // Leaving the mode drops the images. The viewer's own raster was never
   // overwritten, so the page comes back with no re-render.
@@ -316,12 +348,12 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
   const value = useMemo<SeparationPreviewValue>(
     () => ({
       armed, setArmed, inks, plates, coverage, hidden, toggleInk, showAllInks, hideAllInks,
-      densities, setDensity, limitPct, setLimitPct, alarm, setAlarm, overprint, setOverprint,
-      stats, busy, error, invalidate, rasterFor,
+      densities, setDensity, aliases, setAlias, sequence, moveInk, limitPct, setLimitPct,
+      alarm, setAlarm, overprint, setOverprint, stats, busy, error, invalidate, rasterFor,
     }),
     [armed, setArmed, inks, plates, coverage, hidden, toggleInk, showAllInks, hideAllInks,
-      densities, setDensity, limitPct, setLimitPct, alarm, overprint, stats, busy, error,
-      invalidate, rasterFor],
+      densities, setDensity, aliases, setAlias, sequence, moveInk, limitPct, setLimitPct,
+      alarm, overprint, stats, busy, error, invalidate, rasterFor],
   );
 
   return <PreviewContext.Provider value={value}>{children}</PreviewContext.Provider>;

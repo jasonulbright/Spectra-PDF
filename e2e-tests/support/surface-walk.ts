@@ -39,7 +39,7 @@ export const TOOL_OPS: readonly (readonly [string, readonly string[]])[] = [
   ['portfolio', ['portfolio']],
   ['layers', ['layers']],
   ['accessibility', ['accessibility', 'tags', 'readingorder']],
-  ['printproduction', ['outputpreview', 'preflight', 'convert_cmyk']],
+  ['printproduction', ['outputpreview', 'inkmanager', 'preflight', 'convert_cmyk']],
   ['links', ['links']],
   ['export', ['extract_text']],
 ] as const;

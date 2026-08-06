@@ -524,6 +524,37 @@ export const PANEL_STRINGS = {
   'panel.outputPreview.coverageNote':
     'Coverage is the share of the page each process ink covers, averaged over the whole page. The limit above measures the heaviest single pixel instead.',
   'panel.outputPreview.specialInks': 'Not separate plates: {{names}}',
+  'panel.outputPreview.merged': 'with {{names}}',
+
+  'panel.inkManager.open': 'Open a PDF to manage its inks',
+  'panel.inkManager.blurb':
+    'Two spellings of one spot colour print on two plates. Show one ink as another to check the result, then rewrite the document to make it so — or convert a spot to process, exactly, through its own tint transform.',
+  'panel.inkManager.noInks': 'This document declares no inks of its own.',
+  'panel.inkManager.density': 'Density',
+  'panel.inkManager.moveUp': 'Earlier in the print sequence',
+  'panel.inkManager.moveDown': 'Later in the print sequence',
+  'panel.inkManager.settingsNote':
+    'Density and print sequence are settings of this application, not of the document: PDF has no key for either. They decide how dark an ink renders in the preview and the order the plates are listed in.',
+  'panel.inkManager.shownAs': 'shown as {{name}}',
+  'panel.inkManager.aliasHeading': 'Show {{name}} as',
+  'panel.inkManager.aliasTargetAria': 'Ink to show this one as',
+  'panel.inkManager.aliasNone': 'itself',
+  'panel.inkManager.aliasNote':
+    'Showing one ink as another changes the preview only. Applying rewrites the colorant name in the document, so the two land on one plate for real.',
+  'panel.inkManager.compare': 'Compare',
+  'panel.inkManager.applyAlias': 'Apply to the document',
+  'panel.inkManager.applyAnyway': 'Apply anyway',
+  'panel.inkManager.applying': 'Applying the alias…',
+  'panel.inkManager.aliasApplied': '{{source}} now prints on {{target}}.',
+  'panel.inkManager.sameColour': '{{source}} and {{target}} describe the same colour.',
+  'panel.inkManager.differentColour':
+    '{{source}} and {{target}} first differ at {{tint}}% tint.',
+  'panel.inkManager.convertHeading': 'Convert to process',
+  'panel.inkManager.convertNote':
+    'Replaces the spot with its alternate colour space everywhere it is painted — fills, strokes, images, shadings and patterns — through its own tint transform. Total ink rises where one plate becomes several.',
+  'panel.inkManager.convert': 'Convert {{name}} to process',
+  'panel.inkManager.converting': 'Converting…',
+  'panel.inkManager.converted': '{{name}} is now process colour.',
 
   'panel.prepress.open': 'Open a PDF to prepare for print',
   'panel.prepress.blurb':
