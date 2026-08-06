@@ -122,6 +122,9 @@ class _Segment(NamedTuple):
     text: str
     rect: tuple
     size: float
+    # The resource name the run selected its font with. Resolving it to a face
+    # needs the page's resources, which is the caller's to hold.
+    font_name: str = ""
 
 
 class _Shape(NamedTuple):
@@ -157,6 +160,7 @@ def _page_segments(pdf, page) -> list[_Segment]:
         chars: list[str] = []
         rects: list[tuple] = []
         sizes: list[float] = []
+        faces: list[str] = []
 
         def flush() -> None:
             text = "".join(chars).strip()
@@ -168,11 +172,13 @@ def _page_segments(pdf, page) -> list[_Segment]:
                         text,
                         (min(xs), min(ys), max(xs), max(ys)),
                         max(sizes) if sizes else DEFAULT_LABEL_SIZE,
+                        faces[0] if faces else "",
                     )
                 )
             chars.clear()
             rects.clear()
             sizes.clear()
+            faces.clear()
 
         previous = None
         for run in line:
@@ -184,6 +190,8 @@ def _page_segments(pdf, page) -> list[_Segment]:
                 elif gap >= WORD_GAP_FRACTION * previous.space_w and chars:
                     chars.append(" ")
             previous = run
+            if run.state.font_name:
+                faces.append(str(run.state.font_name))
             cap = run.cap
             if not run.measured or cap is None:
                 text = run.text.strip()

@@ -126,7 +126,7 @@ inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 links.linkIndexOutRange	pattern	links	link index {{index}} is out of range (page has {{v1}})
 links.linksAdd	exact	links	no links to add
-links.pageOutRange	pattern	form_detect,links,page_images,page_vectors,redact_marks,search_regions,table_export,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
+links.pageOutRange	pattern	form_detect,links,page_images,page_vectors,redact_marks,search_regions,slide_export,table_export,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
 links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive width and height
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
 links.urlMustEmpty	exact	links	url must not be empty
@@ -305,7 +305,7 @@ sanitize.unknownCategoryCategories	pattern	sanitize	Unknown category {{name}}. T
 search_regions.expandMustMatchWord	exact	search_regions	expand must be "match", "word" or "line"
 search_regions.giveSearchTermWord	exact	search_regions	give a search term, a word list or a built-in pattern — searching for nothing would mark every page
 search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a positive number
-search_regions.pagesMustListPage	exact	form_detect,search_regions,table_export,text_export	pages must be a list of page numbers or "all"
+search_regions.pagesMustListPage	exact	form_detect,search_regions,slide_export,table_export,text_export	pages must be a list of page numbers or "all"
 shaping.fontSVerticalForm	pattern	shaping	this font's vertical form of {{name}} has no advance
 shaping.shapingFontCannotExpress	pattern	shaping	the shaping font cannot express {{text}}
 signatures.certificatesFoundTrustRoot	pattern	signatures	no certificates found in trust root: {{p}}
@@ -341,6 +341,10 @@ signatures.signerNameCommonName	exact	signatures	A signer name (common name) is 
 signatures.trustRootFound	pattern	signatures	trust root not found: {{p}}
 signatures.unknownCertificationLevelChoose	pattern	signatures	Unknown certification level "{{certify_level}}". Choose none, form-fill, or annotate.
 signatures.validityMustBetweenDay	exact	signatures	Validity must be between 1 day and 20 years.
+slide_export.couldRenderPageSlide	pattern	slide_export	Could not render page {{page_number}} for a slide: {{detail}}
+slide_export.ghostscriptAvailableRequiredRender	pattern	slide_export	Ghostscript is not available at {{v0}}; it is required to render a page's graphics onto a slide.
+slide_export.presentationWrittenSlideS	pattern	slide_export	the presentation was written with {{slides}} slide(s) for {{v1}} exported page(s), so it does not carry the document
+slide_export.unknownSlideSizeChoose	pattern	slide_export	unknown slide size {{slide_size}} (choose page, 16:9 or 4:3)
 soffice.documentPasswordProtectedCannot	pattern	soffice	the document is password-protected and cannot be converted without its password: {{src}}
 soffice.libreofficeAvailable	pattern	soffice	LibreOffice is not available at {{soffice_path}}
 soffice.libreofficeCannotConvertAccepted	pattern	soffice	LibreOffice cannot convert {{v0}} (accepted: {{v1}})
