@@ -1214,6 +1214,7 @@ def sign_pdf(
         (s for s in verification["signatures"] if s.get("field") == field_name),
         verification["signatures"][-1] if verification["signatures"] else None,
     )
+    written_lock = (sig or {}).get("lock") or {}
     return {
         "output": str(output_path),
         "field": field_name,
@@ -1227,8 +1228,8 @@ def sign_pdf(
         # Read back from the written signature, never echoed from the request:
         # a field that already carried its own /Lock imposes it whether or not
         # one was asked for.
-        "lock": (sig or {}).get("lock", {}).get("action") if (sig or {}).get("lock") else None,
-        "lock_fields": ((sig or {}).get("lock") or {}).get("fields", []),
+        "lock": written_lock.get("action"),
+        "lock_fields": written_lock.get("fields", []),
     }
 
 
