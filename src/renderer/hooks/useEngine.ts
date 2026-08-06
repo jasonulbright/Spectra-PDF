@@ -31,6 +31,9 @@ export interface EngineResult {
   original_size: number;
   length: number;
   text: string;
+  /** export_document: the file that was written, and how much text it carries. */
+  output: string;
+  characters: number;
   title: string;
   author: string;
   subject: string;
