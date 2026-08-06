@@ -287,6 +287,12 @@ printer.printerSpecified	exact	printer	No printer specified
 printer.unknownExpectedOne	pattern	printer	Unknown {{name}} {{value}} (expected one of {{v2}})
 printer.unknownPaperId	pattern	printer	Unknown paper id {{paper}}
 printer.unknownPrinter	pattern	printer	Unknown printer: '{{printer}}'
+printer_marks.addingPrinterMarksWould	pattern	printer_marks	Adding printer marks would make page {{index}} larger than the 14400-point page limit.
+printer_marks.markOffsetMustZero	exact	printer_marks	Mark offset must be zero or more and mark length must be positive.
+printer_marks.markStyleMustOne	pattern	printer_marks	Mark style must be one of {{styles}}.
+printer_marks.markWeightMustOne	pattern	printer_marks	Mark weight must be one of {{weights}}.
+printer_marks.pageInformationNeedsEmbedded	exact	printer_marks	Page information needs an embedded font and no font directory is available.
+printer_marks.printerMark	pattern	printer_marks	{{kind}} is not a printer mark.
 pubkey_crypt.couldReadCheckFile	pattern	pubkey_crypt	Could not read {{v0}} — check the file and its password.
 pubkey_crypt.keyDoesMatchAny	pattern	pubkey_crypt	The key in {{v0}} does not match any recipient of this document.
 pubkey_crypt.leastOneRecipientCertificate	exact	pubkey_crypt	At least one recipient certificate is required.
