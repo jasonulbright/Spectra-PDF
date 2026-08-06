@@ -576,6 +576,8 @@ export const PANEL_STRINGS = {
   'panel.printerMarks.sourceMedia': 'No trim box: marks are placed against the media box.',
   'panel.printerMarks.sourceDefault': 'This page declares no boxes; a letter page is assumed.',
   'panel.printerMarks.noTrimBox': '{{pages}} page(s) declare no trim box.',
+  'panel.printerMarks.tooLarge':
+    'This growth would push a page past PDF’s 14400 pt limit. Reduce the offset or the length.',
   'panel.printerMarks.present': '{{pages}} page(s) already carry printer marks.',
   'panel.printerMarks.add': 'Add marks',
   'panel.printerMarks.remove': 'Remove marks',
@@ -583,6 +585,24 @@ export const PANEL_STRINGS = {
   'panel.printerMarks.added': 'Printer marks added; every edge gained {{growth}} pt.',
   'panel.printerMarks.removing': 'Removing printer marks…',
   'panel.printerMarks.removed': 'Printer marks removed and the page boxes restored.',
+
+  'panel.hairlines.open': 'Open a PDF to find its hairline strokes',
+  'panel.hairlines.blurb':
+    'A hairline renders fine on screen and breaks up on press. What counts is the width the device draws — the stroke’s own width through the transform above it — so a wide stroke under a small scale is a hairline too. A zero-width stroke always is.',
+  'panel.hairlines.threshold': 'Hairline below (pt)',
+  'panel.hairlines.replacement': 'Raise to (pt)',
+  'panel.hairlines.annotations': 'Include annotation borders',
+  'panel.hairlines.thresholdProblem': 'The threshold must be greater than zero.',
+  'panel.hairlines.replacementProblem':
+    'A replacement below the threshold would leave the strokes it corrected as hairlines.',
+  'panel.hairlines.count':
+    '{{count}} hairline(s): {{strokes}} stroke(s), {{annotations}} annotation border(s).',
+  'panel.hairlines.widthRow': '{{count}} at {{width}} pt',
+  'panel.hairlines.unreadable': 'Page(s) {{pages}} could not be read.',
+  'panel.hairlines.measure': 'Measure again',
+  'panel.hairlines.fix': 'Raise the hairlines',
+  'panel.hairlines.fixing': 'Raising hairline strokes…',
+  'panel.hairlines.fixed': 'Every hairline now draws at {{width}} pt on the device.',
 
   'panel.prepress.open': 'Open a PDF to prepare for print',
   'panel.prepress.blurb':

@@ -118,6 +118,9 @@ guided_actions.stepStepObject	pattern	guided_actions	step {{v0}} is not a step o
 guided_actions.stepUnknownOperation	pattern	guided_actions	step {{v0}}: unknown operation {{op}}
 guided_actions.stepUnknownParameterS	pattern	guided_actions	step {{v0}} ({{op}}): unknown parameter(s) {{unknown}}
 guided_actions.stepUsePlacementsPosition	pattern	guided_actions	step {{v0}} ({{op}}): use placements or position/text, not both
+hairlines.formHairlineDrawnCould	exact	hairlines	The form a hairline is drawn in could not be found.
+hairlines.hairlineThresholdMustGreater	exact	hairlines	The hairline threshold must be greater than zero.
+hairlines.replacementWidthMustLeast	exact	hairlines	The replacement width must be at least the hairline threshold, or the corrected strokes are still hairlines.
 headers.fontSizeMust	pattern	headers	font_size must be >= {{_MIN_FONT_SIZE}}
 headers.leastOnePlacementRequired	exact	headers	at least one placement is required
 headers.positionMustOneGot	pattern	headers	position must be one of {{_POSITIONS}}, got {{pos}}

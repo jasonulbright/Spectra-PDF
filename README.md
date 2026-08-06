@@ -161,6 +161,14 @@ spectrapdf tags-list input.pdf
 spectrapdf tags-set input.pdf -o out.pdf --path 0,0 --type H1 --alt "Chart of quarterly totals"
 spectrapdf preflight input.pdf
 
+# Print production — printer marks and hairline strokes
+spectrapdf printer-marks-list input.pdf                       # boxes, trim source, marks present
+spectrapdf printer-marks input.pdf -o marked.pdf              # the page grows to hold them
+spectrapdf printer-marks input.pdf -o marked.pdf --marks crop,registration --style japanese --weight 0.5
+spectrapdf printer-marks-remove marked.pdf -o plain.pdf       # restores the recorded page boxes
+spectrapdf hairlines-list input.pdf --threshold 0.25          # strokes too thin to print
+spectrapdf hairlines-fix input.pdf -o thicker.pdf --threshold 0.25 --replacement 0.25
+
 # Document-level JavaScript — read it, or replace the whole set
 spectrapdf document-js-list input.pdf
 spectrapdf document-js-set input.pdf -o out.pdf --from-json scripts.json

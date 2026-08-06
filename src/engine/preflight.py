@@ -11,6 +11,10 @@ Font and colour-space discovery walks page /Resources, nested Form XObject
 streams (bounded depth), so a font or a colorant used only inside one of those
 is still found. `walk_page_resources` is that walk, shared with the separation
 inventory.
+
+The hairline row measures effective device stroke widths through
+`engine.hairlines`, which owns both the measurement and the correction — the
+report and the fix cannot disagree about what a hairline is.
 """
 
 import pikepdf
@@ -265,6 +269,15 @@ def preflight(file: str) -> dict:
     def on_transparency():
         has_transparency[0] = True
 
+    # A hairline is a print-readiness failure no proof shows: it renders fine
+    # on screen and at 600 dpi, then breaks up or disappears on a 2400 dpi
+    # imagesetter. Preflight reports it; Fix Hairlines is what raises it. The
+    # measurement runs on its own open, before this one, so the two walks
+    # never share a handle.
+    from engine.hairlines import DEFAULT_THRESHOLD_PT, hairline_check
+
+    hairlines = hairline_check(file)
+
     with pikepdf.open(file) as pdf:
         encrypted = pdf.is_encrypted
         _walk_resources(pdf, on_font, on_colorspace, on_image, on_transparency)
@@ -289,6 +302,14 @@ def preflight(file: str) -> dict:
             "warn" if has_transparency[0] else "pass",
             "Live transparency is present — some RIPs need it flattened." if has_transparency[0]
             else "No transparency detected.",
+        )
+
+        add(
+            "hairlines", "No hairline strokes",
+            "warn" if hairlines["count"] else "pass",
+            f"{hairlines['count']} stroke(s) are thinner than "
+            f"{DEFAULT_THRESHOLD_PT} pt on the device." if hairlines["count"]
+            else f"No stroke is thinner than {DEFAULT_THRESHOLD_PT} pt on the device.",
         )
 
         add(
