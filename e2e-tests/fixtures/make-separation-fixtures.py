@@ -9,8 +9,9 @@ toggles.
 the page was built to carry 340 %.
 
 Both come from the same builders the engine tests use, so the fixture and the
-unit measurements cannot describe different pages. Deterministic and offline;
-a rerun produces the same PDFs and a regeneration is reviewable as a diff.
+unit measurements cannot describe different pages. Offline, and the CONTENT is
+deterministic — a rerun rewrites only the document `/ID`, which qpdf mints per
+save, so a regeneration is reviewable as a diff.
 
 Run with the bundled runtime, from the repo root:
 
