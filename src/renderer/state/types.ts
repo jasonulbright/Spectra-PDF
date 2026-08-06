@@ -251,6 +251,14 @@ export type CanvasTool =
   // page pickup on the board. The second OWNERLESS mode beside 'select' —
   // hand is not a tool's mode, it's the absence of one with a different grip.
   | 'hand'
+  // Separation preview: the pages in view raster through the separation
+  // device instead of the viewer's RGB renderer, because no RGB device
+  // simulates overprint and no RGB raster can show one plate. It changes what
+  // the page LOOKS like and not what a pointer does, so it belongs to no tool
+  // — the OWNERLESS class 'select'/'hand'/'zoommarquee' are in. Being a mode
+  // is what makes `openTool` disarm it: a preview left armed by a closed tool
+  // would go silently live on the next document.
+  | 'outputpreview'
   | 'highlight'
   | 'freetext'
   | 'ink'

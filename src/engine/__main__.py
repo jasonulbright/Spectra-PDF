@@ -42,6 +42,11 @@ from engine.layers import list_layers, set_layer_visibility
 from engine.accessibility import check_accessibility
 from engine.annotations import delete_all_annotations, list_annotations
 from engine.preflight import preflight
+from engine.separations import (
+    composite_separations,
+    list_inks,
+    render_separations,
+)
 from engine.links import list_links, set_link_url, delete_link, add_links
 from engine.office_export import export_document, supported_formats
 from engine.image_export import export_images
@@ -173,6 +178,9 @@ def main() -> None:
     server.register("list_annotations", list_annotations)
     server.register("delete_all_annotations", delete_all_annotations)
     server.register("preflight", preflight)
+    server.register("list_inks", list_inks)
+    server.register("render_separations", render_separations)
+    server.register("composite_separations", composite_separations)
     server.register("get_struct_tree", get_struct_tree)
     server.register("set_struct_props", set_struct_props)
     server.register("move_struct_node", move_struct_node)

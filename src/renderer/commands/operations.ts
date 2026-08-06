@@ -26,7 +26,7 @@ export const OPERATIONS = [
   'encrypt', 'decrypt',
   'extract_text', 'watermark', 'forms', 'compare', 'signatures',
   'document_js', 'convert_cmyk', 'headerfooter', 'pagebox', 'pagelabels', 'attachments', 'portfolio', 'layers', 'accessibility',
-  'comments', 'preflight', 'links', 'tags', 'readingorder', 'actions', 'takeoff',
+  'comments', 'preflight', 'outputpreview', 'links', 'tags', 'readingorder', 'actions', 'takeoff',
   'search_redact', 'prepareform', 'sanitize',
 ] as const;
 
@@ -53,6 +53,7 @@ export const OPERATION_TITLES: Record<Operation, string> = {
   accessibility: 'Accessibility Check',
   comments: 'Comments',
   preflight: 'Preflight',
+  outputpreview: 'Output Preview',
   links: 'Links',
   tags: 'Tags',
   readingorder: 'Reading Order',

@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
-import { BASE_RASTER, dpr, logRenderError, renderBase, renderDetail } from './raster';
+import { BASE_RASTER, dpr, logRenderError, renderBase, renderDetail, renderSeparation } from './raster';
 
 interface PageViewProps {
   pdf: PDFDocumentProxy | null; // null until the file's proxy resolves
@@ -16,6 +16,11 @@ interface PageViewProps {
   displayHeight?: number;
   eager?: boolean;
   detail?: boolean;
+  /** A separation composite standing in for the viewer's raster while Output
+   *  Preview is armed. It paints onto its own canvas above the base, so the
+   *  base still holds the viewer's pixels and dropping this restores the page
+   *  with nothing to re-render. */
+  separationUrl?: string | null;
 }
 
 function PageViewImpl({
@@ -29,12 +34,16 @@ function PageViewImpl({
   displayHeight,
   eager = false,
   detail = true,
+  separationUrl = null,
 }: PageViewProps): React.JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null);
   const baseRef = useRef<HTMLCanvasElement>(null);
   const detailRef = useRef<HTMLCanvasElement>(null);
+  const separationRef = useRef<HTMLCanvasElement>(null);
   const [near, setNear] = useState(eager);
   const [baseReady, setBaseReady] = useState(false);
+  const [separationReady, setSeparationReady] = useState(false);
+  const hasPaintedSeparationRef = useRef(false);
   // Ref mirror of "has ever painted" — read by the render effect without
   // joining its dep array (a state read there would re-trigger renders on
   // the ready flip). Once true, later renders are buffer-swap re-blits and
@@ -83,11 +92,35 @@ function PageViewImpl({
   }, [near, pdf, pageNumber, naturalWidth, naturalHeight]);
 
   useEffect(() => {
+    if (!separationUrl) {
+      setSeparationReady(false);
+      return;
+    }
+    let cancelled = false;
+    void renderSeparation({
+      url: separationUrl,
+      canvasRef: separationRef,
+      isCancelled: () => cancelled,
+      onReady: () => {
+        hasPaintedSeparationRef.current = true;
+        setSeparationReady(true);
+      },
+      reblit: hasPaintedSeparationRef.current,
+    }).catch(logRenderError(`Failed to render separations for page ${pageNumber}`));
+    return () => {
+      cancelled = true;
+    };
+  }, [separationUrl, pageNumber]);
+
+  useEffect(() => {
     if (!near || !pdf) return;
     const root = rootRef.current;
     const detailCanvas = detailRef.current;
     if (!root || !detailCanvas) return;
-    if (!detail) {
+    // The detail canvas is the viewer's own sharper RGB render. It must not
+    // sit on top of a separation composite, which is a different rendering of
+    // the page and the only one that can show overprint.
+    if (!detail || separationUrl) {
       detailCanvas.style.display = 'none';
       return;
     }
@@ -133,7 +166,7 @@ function PageViewImpl({
       cancelled = true;
       task?.cancel();
     };
-  }, [near, version, detail, rotation, pdf, pageNumber, naturalWidth, naturalHeight]);
+  }, [near, version, detail, rotation, pdf, pageNumber, naturalWidth, naturalHeight, separationUrl]);
 
   const swapped = rotation === 90 || rotation === 270;
   const baseStyle: React.CSSProperties | undefined =
@@ -155,6 +188,12 @@ function PageViewImpl({
         style={baseStyle}
       />
       <canvas ref={detailRef} className="pageview-detail" style={{ display: 'none' }} />
+      <canvas
+        ref={separationRef}
+        data-testid={separationReady ? 'pageview-separation' : undefined}
+        className={separationReady ? 'pageview-separation ready' : 'pageview-separation'}
+        style={baseStyle}
+      />
     </div>
   );
 }

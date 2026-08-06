@@ -38,7 +38,7 @@ export type ToolId =
   | 'portfolio'
   | 'layers'
   | 'accessibility'
-  | 'preflight'
+  | 'printproduction'
   | 'links'
   | 'export';
 
@@ -183,8 +183,8 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'optimize',
     title: 'Optimize',
-    description: 'Reduce file size, convert to grayscale, CMYK, or PDF/A.',
-    ops: ['compress', 'optimize', 'grayscale', 'convert_cmyk', 'pdfa', 'pdf_version'],
+    description: 'Reduce file size, convert to grayscale or PDF/A.',
+    ops: ['compress', 'optimize', 'grayscale', 'pdfa', 'pdf_version'],
   },
   {
     id: 'repair',
@@ -245,10 +245,13 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     ops: ['accessibility', 'tags', 'readingorder'],
   },
   {
-    id: 'preflight',
-    title: 'Preflight',
-    description: 'Check fonts, colour, and transparency for print production.',
-    ops: ['preflight'],
+    id: 'printproduction',
+    title: 'Print Production',
+    // Colour conversion moved here out of Optimize: converting a document to
+    // CMYK is a press decision, not a file-size one, and it belongs beside
+    // the tools that inspect the separations it produces.
+    description: 'Preview separations and ink coverage, manage inks, check print readiness, and convert colour.',
+    ops: ['outputpreview', 'preflight', 'convert_cmyk'],
   },
   {
     id: 'links',
