@@ -3805,7 +3805,13 @@
    stays a direct child of the pane's flex column and the reading view's
    geometry is bit-for-bit what shipped — a drafting aid must not perturb the
    layout it draws over. With them on it becomes a two-track grid. */
-.docview-frame { display: contents; }
+/* The reading view is page GEOMETRY, not text flow. The ruler grid's first
+   column is the page origin and a spread pairs by the DOCUMENT's binding, so
+   neither follows the UI language: under `dir=rtl` the grid would place the
+   ruler corner and the recto on the wrong side and misrepresent the file.
+   Document text still sets its own direction, from the document's own
+   analysis. */
+.docview-frame { display: contents; direction: ltr; }
 .docview-frame.with-rulers {
   display: grid;
   position: relative;

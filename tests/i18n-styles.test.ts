@@ -59,6 +59,9 @@ const PHYSICAL_EXCEPTIONS: Record<string, string> = {
   '.page-candidate-handle.is-ne': 'compass resize handle',
   '.page-candidate-handle.is-sw': 'compass resize handle',
   '.page-candidate-handle.is-se': 'compass resize handle',
+  // The reading view's own flow: the ruler grid starts at the page origin and
+  // a spread pairs by the document's binding, so the frame does not mirror.
+  '.docview-frame': 'reading-view page geometry',
   // A ruler measures page geometry from the page origin; ticks, labels and
   // the cursor stay in page order. Guides are drawn in the same space.
   '.docview-ruler-corner': 'ruler geometry',

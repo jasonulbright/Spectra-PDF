@@ -83,6 +83,23 @@ async function rectOfAttr(attr: string, value: string): Promise<Rect | null> {
   )) as Rect | null;
 }
 
+/**
+ * Bring a TOGGLE's surface up. The nav pane and the rulers are toggles whose
+ * state persists across the battery, so invoking the command once is as
+ * likely to turn the surface off as on.
+ */
+async function ensureVisible(command: string, testid: string): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (await $(`[data-testid="${testid}"]`).isExisting()) return;
+    expect(await invokeAppCommand(command)).toBe(true);
+    await browser.pause(400);
+  }
+  await $(`[data-testid="${testid}"]`).waitForDisplayed({
+    timeout: 10_000,
+    timeoutMsg: `${command} never brought ${testid} up`,
+  });
+}
+
 async function dragBy(fromX: number, fromY: number, dx: number): Promise<void> {
   await browser
     .action('pointer', { parameters: { pointerType: 'mouse' } })
@@ -161,13 +178,10 @@ describe('RTL mirroring', () => {
   it('swaps the nav pane and the tool dock to opposite sides', async () => {
     // A computed-style assertion would pass against a stylesheet that changed
     // without the layout moving, so this reads the two panes' actual rects.
-    // `view.navPane` TOGGLES, and the pane's open state persists across the
-    // battery, so this asks for the state rather than assuming it.
-    if (!(await $('[data-testid="nav-pane"]').isExisting())) {
-      expect(await invokeAppCommand('view.navPane')).toBe(true);
-    }
+    // The pane BODY is the test, not the wrapper: the icon strip renders
+    // whether the pane is open or not, so its presence proves nothing.
+    await ensureVisible('view.navPane', 'nav-panel-body');
     expect(await invokeAppCommand('tools.panel.rotate')).toBe(true);
-    await $('[data-testid="nav-pane"]').waitForDisplayed({ timeout: 10_000 });
     await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 10_000 });
 
     await setLanguage('en');
@@ -209,8 +223,10 @@ describe('RTL mirroring', () => {
 
     // A ruler measures page geometry from the page origin, so its corner
     // stays at the minimum x of the ruler strip whatever the UI language is.
-    expect(await invokeAppCommand('view.rulers')).toBe(true);
-    await $('[data-testid="ruler-h"]').waitForDisplayed({ timeout: 10_000 });
+    // The rulers belong to the reading view, which a page op leaves for the
+    // board.
+    await invokeAppCommand('view.documentView');
+    await ensureVisible('view.rulers', 'ruler-h');
     const corner = (await rectOf('.docview-ruler-corner'))!;
     const horizontal = (await rectOf('[data-testid="ruler-h"]'))!;
     const vertical = (await rectOf('[data-testid="ruler-v"]'))!;
@@ -225,16 +241,20 @@ describe('RTL mirroring', () => {
     // logical properties cannot fix pointer arithmetic.
     await setLanguage('qps-rtl');
     await waitForDirection('rtl');
+    await ensureVisible('view.navPane', 'nav-panel-body');
+    if (!(await $('[data-testid="tool-dock"]').isExisting())) {
+      expect(await invokeAppCommand('tools.panel.rotate')).toBe(true);
+    }
     await $('[data-testid="nav-resize-handle"]').waitForDisplayed({ timeout: 10_000 });
     await $('[data-testid="tool-dock-resize"]').waitForDisplayed({ timeout: 10_000 });
 
     // Under rtl the nav pane sits on the right, so it widens as the handle
     // moves LEFT.
-    const navBefore = (await rectOf('[data-testid="nav-pane"]'))!;
+    const navBefore = (await rectOf('[data-testid="nav-panel-body"]'))!;
     const navHandle = (await rectOf('[data-testid="nav-resize-handle"]'))!;
     await dragBy(navHandle.x + navHandle.w / 2, navHandle.y + navHandle.h / 2, -60);
     await browser.waitUntil(
-      async () => (await rectOf('[data-testid="nav-pane"]'))!.w > navBefore.w + 20,
+      async () => (await rectOf('[data-testid="nav-panel-body"]'))!.w > navBefore.w + 20,
       { timeout: 10_000, timeoutMsg: 'the nav pane did not widen under rtl' },
     );
 

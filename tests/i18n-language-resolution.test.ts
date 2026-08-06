@@ -9,6 +9,7 @@ import {
   resolveLanguage,
   ambiguousBases,
   textDirection,
+  formattingLocale,
   LANGUAGE_ALIASES,
   SHIPPED_LOCALES,
   LOCALE_NATIVE_NAMES,
@@ -118,5 +119,23 @@ describe('textDirection', () => {
   it('never throws on a tag Intl cannot parse', () => {
     expect(textDirection('not a tag')).toBe('ltr');
     expect(textDirection('')).toBe('ltr');
+  });
+});
+
+describe('formattingLocale', () => {
+  it('gives the Intl formatters a tag they can parse', () => {
+    // `qps-rtl` is not well-formed BCP-47 (there is no three-letter region),
+    // so every Intl constructor throws RangeError on it — which unmounts the
+    // whole app the first time a ruler label formats a number.
+    expect(() => new Intl.NumberFormat('qps-rtl')).toThrow(RangeError);
+    expect(formattingLocale('qps-rtl')).toBe('en');
+    expect(formattingLocale('qps')).toBe('en');
+    expect(() => new Intl.NumberFormat(formattingLocale('qps-rtl'))).not.toThrow();
+  });
+
+  it('leaves a real language alone', () => {
+    for (const locale of SHIPPED_LOCALES) {
+      expect(formattingLocale(locale), locale).toBe(locale);
+    }
   });
 });
