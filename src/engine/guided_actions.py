@@ -50,6 +50,7 @@ from engine.grayscale import grayscale
 from engine.headers import add_header_footer
 from engine.metadata import strip_metadata
 from engine.pdfa import convert_pdfa
+from engine.sanitize import sanitize_pdf
 from engine.watermark import watermark
 
 # op name -> (callable, allowed data params, needed tool-path params).
@@ -80,6 +81,14 @@ _STEPS: dict = {
     "grayscale": (grayscale, frozenset(), frozenset({"gs_path"})),
     "convert_pdfa": (convert_pdfa, frozenset({"level"}), frozenset({"gs_path"})),
     "strip_metadata": (strip_metadata, frozenset(), frozenset()),
+    # An unattended run is where "clean every document leaving this folder"
+    # actually lives. The category list is a run parameter, never a default:
+    # the step removes exactly what the action names.
+    "sanitize": (
+        sanitize_pdf,
+        frozenset({"categories", "form_fields_mode", "hidden_text_ocr", "all_removable"}),
+        frozenset(),
+    ),
     "watermark": (
         watermark,
         frozenset({"text", "opacity", "angle", "color", "font_size", "layer"}),

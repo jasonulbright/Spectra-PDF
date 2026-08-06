@@ -129,7 +129,7 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     id: 'redact',
     title: 'Redact',
     description: 'Mark text to remove — by hand, or by searching every occurrence — then permanently strip it from the file.',
-    ops: ['search_redact'],
+    ops: ['search_redact', 'sanitize'],
     // It still ARMS the band mode when opened (worksOnPage stays true because
     // it owns a canvas mode), and the Search & Redact panel is one dock click
     // away — the Comment/Takeoff precedent, not a tool that yanks the user off

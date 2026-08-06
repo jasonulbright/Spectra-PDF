@@ -152,6 +152,17 @@ export const WORKBENCH_STRINGS = {
     '"{{field}}" triggers the viewer action "{{action}}", which this app does not map.',
   'app.formButton.unsupported': '"{{field}}" carries an action this app does not support.',
 
+  'app.sanitize.title': 'Document is signed',
+  'app.sanitize.signed_one':
+    'This document carries {{count}} signature. Removing hidden information rewrites the file, which breaks it. Continue?',
+  'app.sanitize.signed_other':
+    'This document carries {{count}} signatures. Removing hidden information rewrites the file, which breaks them. Continue?',
+  'app.sanitize.certifiedTitle': 'Document is certified',
+  'app.sanitize.certified_one':
+    'This document is certified, which states what may change in it, and carries {{count}} signature. Removing hidden information changes more than the certification allows and breaks it. Continue?',
+  'app.sanitize.certified_other':
+    'This document is certified, which states what may change in it, and carries {{count}} signatures. Removing hidden information changes more than the certification allows and breaks them. Continue?',
+
   'app.sendEmail.title': 'Send by Email',
 
   'app.close.unsaved': '"{{name}}" has unsaved changes. Save before closing?',
