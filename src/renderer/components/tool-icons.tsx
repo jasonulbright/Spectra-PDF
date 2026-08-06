@@ -239,6 +239,13 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <circle cx="9" cy="19" r="2" />
     </>
   ),
+  // A sheet's corner crop marks around a trim rectangle.
+  printermarks: (
+    <>
+      <rect x="7" y="7" width="10" height="10" rx="0.5" />
+      <path d="M7 2v3M2 7h3M17 2v3M19 7h3M7 19v3M2 17h3M17 19v3M19 17h3" />
+    </>
+  ),
   // A luggage tag (structure tags).
   tags: (
     <>
