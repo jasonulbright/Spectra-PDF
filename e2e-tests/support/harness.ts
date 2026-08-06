@@ -195,15 +195,20 @@ export async function exportImagesRun(
 
 /** Export via the engine (bypasses the native save dialog). Returns the
  *  string '__SPECTRA_E2E_ERROR__:…' on failure so the spec can assert on it. */
-export async function exportActiveAs(destPath: string, format: string): Promise<unknown> {
-  return await browser.executeAsync<unknown, [string, string]>(
-    function (dest, fmt, done) {
-      (window as any).__SPECTRA_TEST__.exportActiveAs(dest, fmt)
+export async function exportActiveAs(
+  destPath: string,
+  format: string,
+  options?: Record<string, unknown>,
+): Promise<unknown> {
+  return await browser.executeAsync<unknown, [string, string, Record<string, unknown>]>(
+    function (dest, fmt, opts, done) {
+      (window as any).__SPECTRA_TEST__.exportActiveAs(dest, fmt, opts)
         .then((r: unknown) => done(r as any))
         .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
     },
     destPath,
     format,
+    options ?? {},
   );
 }
 
