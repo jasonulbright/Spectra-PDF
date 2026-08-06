@@ -15,6 +15,7 @@ import {
   type MarkKind,
   type MarkStyle,
   type PrinterMarkReport,
+  exceedsPageLimit,
   markGrowth,
   trimSourceKey,
 } from '../lib/printer-marks';
@@ -125,6 +126,11 @@ export function PrinterMarksPanel(): React.ReactElement {
   const marked = report?.marked ?? 0;
   const withoutTrim = report?.without_trim_box ?? 0;
   const firstSource = report?.pages?.[0]?.trim_source ?? 'media';
+  // The engine refuses a growth past PDF's own page limit. The panel says so
+  // first, because a refusal is a poor way to learn that a number was too big.
+  const tooLarge = (report?.pages ?? []).some(
+    (page) => exceedsPageLimit(page.media, offset, length),
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -220,11 +226,16 @@ export function PrinterMarksPanel(): React.ReactElement {
       <p className="text-xs text-neutral-500" data-testid="printer-marks-growth">
         {tChrome('panel.printerMarks.growthNote', { growth: markGrowth(offset, length) })}
       </p>
+      {tooLarge && (
+        <div className="text-xs text-amber-400" data-testid="printer-marks-too-large">
+          {tChrome('panel.printerMarks.tooLarge')}
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         <button
           data-testid="printer-marks-add"
-          disabled={busy || kinds.length === 0}
+          disabled={busy || kinds.length === 0 || tooLarge}
           onClick={() => void addMarks()}
           className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-50"
         >

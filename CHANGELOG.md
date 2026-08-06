@@ -13,6 +13,21 @@
 - Aliasing two inks that describe different colours is refused until you accept the change.
 - A spot converts to process exactly, through its own tint transform, in fills, strokes, images, gradients and patterns.
 - Ink density and print sequence are offered as what they are: settings of the application, not of the file.
+- Add Printer Marks draws crop marks, registration targets, colour bars and page information outside the trim.
+- The page grows to hold them and the crop box grows with it, so no viewer clips the marks away.
+- The trim, bleed and art boxes never move, and removing the marks restores every box exactly as it was.
+- Marks print in registration colour, so they land on every plate rather than on the black one alone.
+- The colour bar carries the four process solids with their tints, an overprint control pair, and a patch for each spot colour in the document.
+- Page information is drawn with an embedded font, in the document's own conventions.
+- Western and Japanese mark styles, three stroke weights, and a stated growth before anything is written.
+- A document with no trim box is marked against its crop or media box, and the panel says which.
+- Fix Hairlines finds strokes too thin to survive printing and raises them to a width that does.
+- Thinness is measured as the width the device draws, so a wide stroke under a small scale is found too.
+- A zero-width stroke is always a hairline, and the correction lands on the device width whatever the transform.
+- Annotation and form-field borders are included, and a border width of zero is left alone because it means no border.
+- The count and the widths found are reported before anything is rewritten.
+- Preflight gains a hairline row, reading the same measurement the fix uses.
+- On the command line as `printer-marks`, `printer-marks-remove`, `printer-marks-list`, `hairlines-list` and `hairlines-fix`.
 
 ### Preparing forms
 - A new signature field can carry the form fields it locks, chosen from the document's own list.
