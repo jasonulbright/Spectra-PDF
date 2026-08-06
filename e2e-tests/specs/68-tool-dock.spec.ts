@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { statSync } from 'node:fs';
 import { expect } from '@wdio/globals';
 import { waitForHarness, openByPaths, setView, invokeAppCommand, addAnnotation } from '../support/harness.js';
 
@@ -47,6 +48,41 @@ describe('right tool dock', () => {
       { timeout: 10_000, timeoutMsg: 'picking a tile never seated its tool in the dock' },
     );
     expect(await $('[data-testid="document-view"]').isDisplayed()).toBe(true);
+  });
+
+  // The optimizer opens on the AUDIT: which setting is worth changing is a
+  // property of the document, and the rows adding up to the file size is what
+  // makes the largest one trustworthy rather than decorative.
+  it('the optimizer opens on a space breakdown that adds up to the file', async () => {
+    expect(await invokeAppCommand('tools.panel.optimize')).toBe(true);
+    await $('[data-testid="tool-dock"] [data-testid="space-audit-table"]').waitForDisplayed({
+      timeout: 20_000,
+      timeoutMsg: 'the Optimize panel never showed the space breakdown',
+    });
+    expect(await $('[data-testid="space-audit-inconsistent"]').isExisting()).toBe(false);
+
+    // The rows account for the whole file — the reader can add the column up.
+    const rows = (await browser.execute(() =>
+      Array.from(document.querySelectorAll('[data-testid^="space-audit-bytes-"]')).map((n) => ({
+        id: n.getAttribute('data-testid') ?? '',
+        bytes: Number(n.getAttribute('data-bytes')),
+      })),
+    )) as { id: string; bytes: number }[];
+    const total = (await browser.execute(
+      () =>
+        Number(
+          document.querySelector('[data-testid="space-audit-total"]')?.getAttribute('data-bytes'),
+        ),
+    )) as number;
+    expect(rows.length).toBe(14);
+    expect(total).toBe(statSync(SAMPLE).size);
+    expect(rows.reduce((acc, r) => acc + r.bytes, 0)).toBe(total);
+    expect(await $('[data-testid="space-audit-total"]').getText()).not.toBe('');
+
+    // Largest first, and the file's biggest cost is content rather than slack.
+    expect(rows[0].id).not.toBe('space-audit-bytes-overhead');
+    expect(rows[0].bytes).toBeGreaterThanOrEqual(rows[rows.length - 1].bytes);
+    expect(await $('[data-testid="space-audit-revisions"]').getText()).toContain('revision');
   });
 
   it('a menu panel command re-opens the closed dock on the doc tab', async () => {
