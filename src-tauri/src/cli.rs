@@ -150,6 +150,8 @@ pub enum CliCommand {
     DetectFields(DetectFieldsArgs),
     /// Inventory the hidden information a PDF carries (JSON report); writes nothing
     Audit(AuditArgs),
+    /// Remove the named categories of hidden information, writing a new file
+    Sanitize(SanitizeArgs),
     /// Read the bookmark tree (JSON), or replace it with --from-json
     Outline(OutlineArgs),
     /// View or set PDF metadata
@@ -1276,6 +1278,29 @@ pub struct AuditArgs {
     /// report says so rather than reporting none.
     #[arg(long)]
     pub no_hidden_text: bool,
+}
+
+#[derive(Args)]
+pub struct SanitizeArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    pub output: PathBuf,
+    /// Comma-separated category ids to remove (from `audit`). Required unless
+    /// --all-removable is given.
+    #[arg(long, default_value = "")]
+    pub categories: String,
+    /// Select every category except the ones that cost the document
+    /// something — form fields, the accessibility structure, and the
+    /// recognized-text layer. Those must be named explicitly.
+    #[arg(long)]
+    pub all_removable: bool,
+    /// What to do with form fields when they are selected
+    #[arg(long, default_value = "remove", value_parser = ["remove", "flatten"])]
+    pub form_fields_mode: String,
+    /// Also remove the invisible text layer that makes a scan searchable
+    #[arg(long)]
+    pub include_ocr_layer: bool,
 }
 
 #[derive(Args)]
@@ -2953,6 +2978,26 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "deep_text": !args.no_hidden_text,
             }),
         ),
+
+        CliCommand::Sanitize(args) => {
+            let categories: Vec<String> = args
+                .categories
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            engine.call(
+                "sanitize_pdf",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "categories": categories,
+                    "all_removable": args.all_removable,
+                    "form_fields_mode": args.form_fields_mode,
+                    "hidden_text_ocr": args.include_ocr_layer,
+                }),
+            )
+        }
 
         CliCommand::DocumentJsList(args) => engine.call(
             "list_document_js",
