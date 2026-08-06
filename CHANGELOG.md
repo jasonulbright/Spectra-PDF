@@ -17,7 +17,7 @@
 - The page grows to hold them and the crop box grows with it, so no viewer clips the marks away.
 - The trim, bleed and art boxes never move, and removing the marks restores every box exactly as it was.
 - Marks print in registration colour, so they land on every plate rather than on the black one alone.
-- The colour bar carries the four process solids with their tints, an overprint control pair, and a patch for each spot colour in the document.
+- The colour bar carries process solids and tints, an overprint pair, and every spot in the document.
 - Page information is drawn with an embedded font, in the document's own conventions.
 - Western and Japanese mark styles, three stroke weights, and a stated growth before anything is written.
 - A document with no trim box is marked against its crop or media box, and the panel says which.
@@ -27,18 +27,19 @@
 - Annotation and form-field borders are included, and a border width of zero is left alone because it means no border.
 - The count and the widths found are reported before anything is rewritten.
 - Preflight gains a hairline row, reading the same measurement the fix uses.
+- Preflight now finds fonts and colorants used only inside patterns, shadings, images or annotations.
 - Flattener Preview marks, on the page itself, which objects a transparency flatten would rasterize.
 - Transparent objects, what sits under them, and every object a region would take in are counted and highlighted per category.
 - Flattening rasterizes only those regions: text and vectors outside them stay live text and live vectors.
-- Region edges land on whole device pixels, so a flattened area and the live content beside it meet without a seam.
+- Region edges land on whole device pixels, so flattened and live content meet without a seam.
 - A raster/vector balance decides how far regions merge — fewer seams at one end, more live content at the other.
 - The regions rasterize at a resolution you choose, and a request too large to render is refused rather than attempted.
 - A page with no transparency is reported as such and left exactly as it was.
 - Trap Presets authors named presets over the standard in-RIP trapping parameters and assigns them to page ranges.
-- Every parameter carries its own type, range and default, and a value outside its range is refused before anything is written.
-- Per-ink overrides are supported, and a preset naming an ink the document does not use is a warning rather than a refusal.
+- Every parameter carries its type, range and default; a value outside its range is refused.
+- Per-ink overrides are supported; a preset naming an unused ink warns rather than refuses.
 - Exporting to PostScript writes each range's parameters into that page's own setup, where a press that traps reads them.
-- The trapping declaration is told truthfully: a document is "unknown" until someone states otherwise, and assigning a preset never claims it is trapped.
+- The trapping declaration stays "unknown" until stated; assigning a preset never claims a document is trapped.
 - PDF/X masters no longer declare every document untrapped; the declaration is yours to make.
 - On the command line as `printer-marks`, `printer-marks-remove`, `printer-marks-list`, `hairlines-list`, `hairlines-fix`, `flatten-list`, `flatten`, `trap-fields`, `trap-list`, `trap-assign` and `export-postscript`.
 
@@ -63,7 +64,7 @@
 
 ### Windows contrast themes
 - The app now responds to the Windows contrast themes setting.
-- Documents are never recoloured by it: pages, annotations, the text over them and thumbnails keep their own colours in every case.
+- Documents are never recoloured: pages, annotations, their text and thumbnails keep their own colours.
 - That protection no longer depends on which app theme is picked; it applies at all times.
 - The window's own chrome follows the system palette, which is what the setting asks for.
 - Selected tools and pressed toolbar buttons show as selected in the system's own highlight colour.
@@ -71,7 +72,7 @@
 - Toolbar and menu separators, and a panel's status box, keep their edges.
 - Colour swatches keep the colour they are offering, with an outline so they still read as buttons.
 - Translucent window bars turn solid, as a contrast theme expects.
-- Preferences states that the system palette is in control while the setting is on, and the theme you chose is remembered untouched.
+- Preferences says the system palette is in control, and remembers the theme you chose untouched.
 
 ## 1.0.22
 
