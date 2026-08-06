@@ -629,6 +629,37 @@ export const PANEL_STRINGS = {
   'panel.flattener.flattening': 'Flattening transparency…',
   'panel.flattener.flattened': 'Transparency flattened; {{regions}} region(s) rasterized.',
 
+  'panel.trapPresets.open': 'Open a PDF to author its trapping presets',
+  'panel.trapPresets.blurb':
+    'Trapping presets are authored over the standard in-RIP trapping parameters and assigned to page ranges. Exporting to PostScript writes each range’s parameters into that page’s own setup, which is where a RIP that traps reads them.',
+  'panel.trapPresets.scope':
+    'The parameters are written for a device to act on; no trap network is added to the document here, so the document is never claimed to be trapped on this account.',
+  'panel.trapPresets.name': 'Preset name',
+  'panel.trapPresets.pages': 'Pages',
+  'panel.trapPresets.pagesTo': 'to',
+  'panel.trapPresets.range.empty': 'Give the preset a page range.',
+  'panel.trapPresets.range.notANumber': 'A page range is two whole page numbers.',
+  'panel.trapPresets.range.inverted': 'The last page comes before the first.',
+  'panel.trapPresets.range.outside': 'That range is not in this document.',
+  'panel.trapPresets.range.overlap': 'Another preset already covers part of that range.',
+  'panel.trapPresets.add': 'Assign to these pages',
+  'panel.trapPresets.remove': 'Remove',
+  'panel.trapPresets.empty': 'No preset is assigned to any page yet.',
+  'panel.trapPresets.row': '{{name}} — pages {{first}} to {{last}}',
+  'panel.trapPresets.uncovered': 'Page(s) {{pages}} have no preset assigned.',
+  'panel.trapPresets.unusedInks':
+    'This document does not use {{inks}}; those overrides will have no effect here.',
+  'panel.trapPresets.trapped': 'Declare the document as trapped',
+  'panel.trapPresets.trappedNote':
+    '“Unknown” is what a document gets until someone states otherwise. Choose “True” only if a trap network was added elsewhere — assigning a preset does not add one.',
+  'panel.trapPresets.apply': 'Save the assignments',
+  'panel.trapPresets.assigning': 'Saving the trapping assignments…',
+  'panel.trapPresets.assigned':
+    '{{count}} assignment(s) saved; the document declares Trapped {{trapped}}.',
+  'panel.trapPresets.export': 'Export PostScript',
+  'panel.trapPresets.exporting': 'Writing PostScript…',
+  'panel.trapPresets.exported': 'PostScript written; {{pages}} page(s) carry trapping setup.',
+
   'panel.prepress.open': 'Open a PDF to prepare for print',
   'panel.prepress.blurb':
     "Converts the document's colours to DeviceCMYK for commercial printing, through a colour-managed (ICC) transform. Writes a new file.",

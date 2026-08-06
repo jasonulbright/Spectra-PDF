@@ -27,7 +27,20 @@
 - Annotation and form-field borders are included, and a border width of zero is left alone because it means no border.
 - The count and the widths found are reported before anything is rewritten.
 - Preflight gains a hairline row, reading the same measurement the fix uses.
-- On the command line as `printer-marks`, `printer-marks-remove`, `printer-marks-list`, `hairlines-list` and `hairlines-fix`.
+- Flattener Preview marks, on the page itself, which objects a transparency flatten would rasterize.
+- Transparent objects, what sits under them, and every object a region would take in are counted and highlighted per category.
+- Flattening rasterizes only those regions: text and vectors outside them stay live text and live vectors.
+- Region edges land on whole device pixels, so a flattened area and the live content beside it meet without a seam.
+- A raster/vector balance decides how far regions merge — fewer seams at one end, more live content at the other.
+- The regions rasterize at a resolution you choose, and a request too large to render is refused rather than attempted.
+- A page with no transparency is reported as such and left exactly as it was.
+- Trap Presets authors named presets over the standard in-RIP trapping parameters and assigns them to page ranges.
+- Every parameter carries its own type, range and default, and a value outside its range is refused before anything is written.
+- Per-ink overrides are supported, and a preset naming an ink the document does not use is a warning rather than a refusal.
+- Exporting to PostScript writes each range's parameters into that page's own setup, where a press that traps reads them.
+- The trapping declaration is told truthfully: a document is "unknown" until someone states otherwise, and assigning a preset never claims it is trapped.
+- PDF/X masters no longer declare every document untrapped; the declaration is yours to make.
+- On the command line as `printer-marks`, `printer-marks-remove`, `printer-marks-list`, `hairlines-list`, `hairlines-fix`, `flatten-list`, `flatten`, `trap-fields`, `trap-list`, `trap-assign` and `export-postscript`.
 
 ### Preparing forms
 - A new signature field can carry the form fields it locks, chosen from the document's own list.
