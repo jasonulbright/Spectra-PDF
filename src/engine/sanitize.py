@@ -30,6 +30,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Name
 
+from engine.docmdp import certification_of_pdf
 from engine.inplace import finish_staged, is_same_file, staging_target
 from engine.sanitize_content import analyze_page, off_ocg_set
 
@@ -607,32 +608,17 @@ def _detect_attached_structure(pdf, page_numbers):
 
 
 def certification_level(pdf) -> str | None:
-    """The DocMDP permission a certification signature asserts, or None when
-    the document is not certified. A certified document states what may change
-    after signing, and a sanitize pass changes more than any level permits."""
-    perms = pdf.Root.get("/Perms")
-    if not isinstance(perms, pikepdf.Dictionary):
+    """The DocMDP permission a certification signature asserts, as the wire
+    level name, or None when the document is not certified. A certified
+    document states what may change after signing, and a sanitize pass changes
+    more than any level permits.
+
+    A certification whose level cannot be read still reports as certified: the
+    warning that matters is the certification's existence, not its degree."""
+    state = certification_of_pdf(pdf)
+    if not state["certified"]:
         return None
-    docmdp = perms.get("/DocMDP")
-    if not isinstance(docmdp, pikepdf.Dictionary):
-        return None
-    refs = docmdp.get("/Reference")
-    if isinstance(refs, pikepdf.Array):
-        for ref in refs:
-            if not isinstance(ref, pikepdf.Dictionary):
-                continue
-            params = ref.get("/TransformParams")
-            if isinstance(params, pikepdf.Dictionary) and "/P" in params:
-                try:
-                    level = int(params["/P"])
-                except (TypeError, ValueError):
-                    continue
-                return {
-                    1: "no_changes",
-                    2: "form_filling",
-                    3: "form_filling_and_annotations",
-                }.get(level, "unknown")
-    return "unknown"
+    return state["level"] or "unknown"
 
 
 def _signature_summary(file: str, pdf) -> dict:

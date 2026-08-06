@@ -229,11 +229,11 @@ describe('the request handed to the apply', () => {
             })
           : category(id),
       ),
-      signatures: { count: 2, document_timestamps: 0, certification: 'no_changes' },
+      signatures: { count: 2, document_timestamps: 0, certification: 'none' },
     });
     const request = buildRequest(r, new Set(['prior_revisions']), 'remove', false);
     expect(request.destroysSignatures).toBe(2);
-    expect(request.signatures.certification).toBe('no_changes');
+    expect(request.signatures.certification).toBe('none');
   });
 
   it('falls back to the signature count when there is no earlier revision', () => {
