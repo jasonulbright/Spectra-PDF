@@ -604,6 +604,31 @@ export const PANEL_STRINGS = {
   'panel.hairlines.fixing': 'Raising hairline strokes…',
   'panel.hairlines.fixed': 'Every hairline now draws at {{width}} pt on the device.',
 
+  'panel.flattener.open': 'Open a PDF to preview its transparency flattening',
+  'panel.flattener.blurb':
+    'Transparency is flattened one region at a time: only the areas where objects composite are rasterized, and everything else — live text, vectors — is left exactly as it is. Region edges land on whole device pixels, so the rasterized area and the live content beside it meet without a seam.',
+  'panel.flattener.preview': 'Show what would be rasterized, on the page',
+  'panel.flattener.balance': 'Raster / vector balance',
+  'panel.flattener.balanceVector': 'More live content',
+  'panel.flattener.balanceRaster': 'Fewer regions',
+  'panel.flattener.balanceValue': '{{percent}}%',
+  'panel.flattener.resolution': 'Rasterize regions at',
+  'panel.flattener.dpiOption': '{{dpi}} dpi',
+  'panel.flattener.regions': '{{regions}} region(s) would be rasterized.',
+  'panel.flattener.categoryTransparent': 'Transparent objects: {{count}}',
+  'panel.flattener.categoryAffected': 'Objects under transparency: {{count}}',
+  'panel.flattener.categoryRasterized': 'Objects inside a region: {{count}}',
+  'panel.flattener.categoryStrokes': 'Strokes inside a region: {{count}}',
+  'panel.flattener.categoryText': 'Text inside a region: {{count}}',
+  'panel.flattener.categoryPatterns': 'Patterns inside a region: {{count}}',
+  'panel.flattener.unreadable': 'Page(s) {{pages}} could not be read.',
+  'panel.flattener.none': 'This document has no live transparency.',
+  'panel.flattener.scope':
+    'A larger balance merges regions, which removes seams and rasterizes more of the page; a smaller one keeps more text and vectors live and produces more regions.',
+  'panel.flattener.apply': 'Flatten transparency',
+  'panel.flattener.flattening': 'Flattening transparency…',
+  'panel.flattener.flattened': 'Transparency flattened; {{regions}} region(s) rasterized.',
+
   'panel.prepress.open': 'Open a PDF to prepare for print',
   'panel.prepress.blurb':
     "Converts the document's colours to DeviceCMYK for commercial printing, through a colour-managed (ICC) transform. Writes a new file.",

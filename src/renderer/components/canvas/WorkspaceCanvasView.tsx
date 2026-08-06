@@ -5379,9 +5379,10 @@ export function WorkspaceCanvasView({
         'canvas-view flex-1 flex flex-col relative overflow-hidden' +
         (drag.committing ? ' committing' : '') +
         (drag.draggingPage ? ' dragging' : '') +
-        // Output Preview draws nothing, so the page must not offer a
-        // draw cursor under it.
+        // Output Preview and the flattener preview draw nothing, so the page
+        // must not offer a draw cursor under either.
         (tool !== 'select' && tool !== 'forms' && tool !== 'outputpreview'
+          && tool !== 'flattenpreview'
           ? ' annotating'
           : '') +
         (tool === 'forms' ? ' forms-mode' : '')

@@ -56,6 +56,8 @@ import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import { PageView } from './PageView';
 import { useSeparationRaster } from '../../hooks/useSeparationPreview';
+import { useFlattenerRegions } from '../../hooks/useFlattenerPreview';
+import FlattenRegionOverlay from './FlattenRegionOverlay';
 import { PageTextLayer } from './PageTextLayer';
 
 // The tool union moved to the ui state slice (commands and the
@@ -1119,6 +1121,9 @@ function PageCellImpl({
   // Null unless Output Preview is armed AND this page has been rastered
   // through the separation device.
   const separation = useSeparationRaster(docId, page.id);
+  // Empty unless the flattener preview is armed and this page belongs to the
+  // file it classified.
+  const flattenMarks = useFlattenerRegions(docId, page.id);
   // Hand is the OTHER non-annotating mode: it must take the same
   // let-the-board-have-it branch as select, or a hand drag on the board
   // preventDefaults the pointerdown (suppressing the derived mouse events d3
@@ -1126,7 +1131,9 @@ function PageCellImpl({
   // of panning (regression, CRITICAL). Output Preview is the third: it
   // changes how the page RENDERS and claims no gesture, so a drag under it
   // would reach the band's default branch and commit a highlight.
-  const annotateMode = tool !== 'select' && tool !== 'hand' && tool !== 'outputpreview';
+  const annotateMode =
+    tool !== 'select' && tool !== 'hand' && tool !== 'outputpreview'
+    && tool !== 'flattenpreview';
   // Rubber band for the annotation tools, in display-normalized coords.
   // Driven by window-level native listeners for the drag's duration — the
   // same pattern as usePageDrag — rather than React synthetic move/up through
@@ -3591,6 +3598,7 @@ function PageCellImpl({
           </div>
         );
       })}
+      <FlattenRegionOverlay rects={flattenMarks} />
       {tool === 'formfields' &&
         (fieldCandidates ?? []).map((candidate) => {
           // A candidate stores the rect it was detected at; a page rotated in

@@ -432,6 +432,17 @@ describe('ui tab/tool actions', () => {
     expect(appReducer(armed, { type: 'UI_OPEN_TOOL', toolId: 'comment' }).ui.tool).toBe('highlight');
     expect(appReducer(armed, { type: 'UI_SET_ACTIVE_OP', op: 'preflight' }).ui.tool).toBe('select');
   });
+
+  // Same class, same reason: the flattener preview highlights what a flatten
+  // would rasterize, and one left armed would mark up the next document.
+  it('opening or closing any tool disarms the flattener preview', () => {
+    const armed = appReducer(initialState, { type: 'UI_SET_TOOL', tool: 'flattenpreview' });
+    expect(armed.ui.tool).toBe('flattenpreview');
+    expect(appReducer(armed, { type: 'UI_OPEN_TOOL', toolId: 'protect' }).ui.tool).toBe('select');
+    expect(appReducer(armed, { type: 'UI_OPEN_TOOL', toolId: 'printproduction' }).ui.tool).toBe('select');
+    expect(appReducer(armed, { type: 'UI_OPEN_TOOL', toolId: null }).ui.tool).toBe('select');
+    expect(appReducer(armed, { type: 'UI_SET_ACTIVE_OP', op: 'preflight' }).ui.tool).toBe('select');
+  });
 });
 
 describe('doc-tab lifecycle', () => {

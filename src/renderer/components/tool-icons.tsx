@@ -254,6 +254,15 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <path d="M3 18h18" strokeWidth="3" />
     </>
   ),
+  // Two overlapping panes, the overlap hatched — the region a flatten
+  // rasterizes is exactly where two things composite.
+  flattener: (
+    <>
+      <rect x="3" y="5" width="11" height="11" rx="1" />
+      <rect x="10" y="8" width="11" height="11" rx="1" />
+      <path d="M10 12h4M10 15h4" strokeWidth="1" />
+    </>
+  ),
   // A luggage tag (structure tags).
   tags: (
     <>
