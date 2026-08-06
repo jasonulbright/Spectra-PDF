@@ -47,8 +47,8 @@ export interface BatchLogRun {
   fatalError?: string;
 }
 
-/** Two digits, zero-padded — the only number shaping this file needs. */
-function pad(n: number, width = 2): string {
+/** Two digits, zero-padded — the only number shaping a log name needs. */
+export function pad(n: number, width = 2): string {
   return String(n).padStart(width, '0');
 }
 

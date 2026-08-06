@@ -224,9 +224,24 @@ export type SignedEditKey =
   | 'app.signedEdit.certifiedWarnAnnotate'
   | 'app.signedEdit.certifiedWarnUnknown';
 
+/** Why an edit was refused or warned about — a stable name, never display
+ * text. A surface renders a catalog string from it; a sweep with no surface
+ * writes it into its per-file report. */
+export type SignedEditReason =
+  | 'signed'
+  | 'certified-no-changes'
+  | 'certified-form-fill'
+  | 'certified-annotate'
+  | 'certified-unknown';
+
 export type SignedEditDecision =
   | { kind: 'proceed' }
-  | { kind: 'refuse' | 'warn'; titleKey: SignedEditKey; bodyKey: SignedEditKey };
+  | {
+      kind: 'refuse' | 'warn';
+      reason: SignedEditReason;
+      titleKey: SignedEditKey;
+      bodyKey: SignedEditKey;
+    };
 
 // A structural edit is never in this table: page removal, reordering, content
 // edits and flattening all fall outside the incremental-append tier, so they
@@ -263,6 +278,7 @@ export function signedEditDecision(
   if (policy.certified && policy.level === 'none') {
     return {
       kind: 'refuse',
+      reason: 'certified-no-changes',
       titleKey: 'app.signedEdit.certifiedTitle',
       bodyKey: 'app.signedEdit.certifiedRefused',
     };
@@ -271,6 +287,7 @@ export function signedEditDecision(
     if (PERMITTED_CLASSES.uncertified.includes(editClass)) return { kind: 'proceed' };
     return {
       kind: 'warn',
+      reason: 'signed',
       titleKey: 'app.signedEdit.title',
       bodyKey: 'app.signedEdit.body',
     };
@@ -280,6 +297,7 @@ export function signedEditDecision(
   if (PERMITTED_CLASSES[key].includes(editClass)) return { kind: 'proceed' };
   return {
     kind: 'warn',
+    reason: `certified-${key}`,
     titleKey: 'app.signedEdit.certifiedTitle',
     bodyKey: CERTIFIED_WARNING[key],
   };
