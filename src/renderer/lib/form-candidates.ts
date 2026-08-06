@@ -10,6 +10,7 @@
 // space and the cell, and a second one here would be a second answer to where
 // a rectangle is.
 import type { NewFieldSpec, NewFieldType } from './form-authoring';
+import type { FieldLock } from './signatures';
 
 export type CandidateKind = 'text' | 'checkbox' | 'radio' | 'signature';
 
@@ -69,6 +70,10 @@ export interface FieldCandidate {
   evidence: string;
   warnings: readonly string[];
   checked: boolean;
+  /** The `/Lock` seed to author onto this field, signature candidates only.
+   * Detection never proposes one — a drawn rule cannot imply what a signature
+   * should bind — so it is null until the reviewer chooses it. */
+  lock: FieldLock | null;
 }
 
 /** The kinds the review surface offers, with anything else falling back to a
@@ -156,18 +161,31 @@ export function retypeCandidate(
 ): FieldCandidate[] {
   return candidates.map((c) => {
     if (c.id !== id) return c;
+    // Only a signature field can carry a lock, so leaving that kind drops it
+    // rather than keeping a seed the write would refuse.
+    const lock = kind === 'signature' ? c.lock : null;
     if (c.group && kind !== 'radio') {
       return {
         ...c,
         kind,
+        lock,
         group: null,
         exportValue: null,
         name: sanitizeFieldName(c.exportValue ?? c.label ?? c.name),
         multiline: false,
       };
     }
-    return { ...c, kind, multiline: kind === 'text' ? c.multiline : false };
+    return { ...c, kind, lock, multiline: kind === 'text' ? c.multiline : false };
   });
+}
+
+/** Set (or clear) the `/Lock` a signature candidate will be authored with. */
+export function setCandidateLock(
+  candidates: readonly FieldCandidate[],
+  id: string,
+  lock: FieldLock | null,
+): FieldCandidate[] {
+  return candidates.map((c) => (c.id === id ? { ...c, lock } : c));
 }
 
 export function setCandidateMultiline(
@@ -206,6 +224,11 @@ export function sanitizeFieldName(label: string | null): string {
     .filter(Boolean)
     .join('_')
     .replace(/^_+|_+$/g, '');
+}
+
+function record(renamed: Map<string, string>, from: string, to: string): string {
+  if (from && !renamed.has(from)) renamed.set(from, to);
+  return to;
 }
 
 function uniqueName(base: string, taken: Set<string>): string {
@@ -260,12 +283,20 @@ const SPEC_TYPE: Record<CandidateKind, NewFieldType> = {
  * buttons, and equal cells of one enclosing rectangle cannot express that.
  * Names are made unique against the document AND within the batch, because a
  * duplicate name aborts the whole write.
+ *
+ * A lock may name a field this same batch creates, and uniquing can rename that
+ * field — so lock targets are rewritten through the batch's own renames after
+ * every name is settled. A name the batch does not create passes through: it is
+ * the document's, and the write validates it there.
  */
 export function buildFieldSpecs(
   resolved: readonly ResolvedCandidate[],
   existingNames: ReadonlySet<string>,
 ): NewFieldSpec[] {
   const taken = new Set(existingNames);
+  // Original candidate name → the name actually written. First occurrence wins:
+  // two candidates offered under one name are already one name to the reviewer.
+  const renamed = new Map<string, string>();
   const specs: NewFieldSpec[] = [];
   const groupOrder: string[] = [];
   const groups = new Map<string, ResolvedCandidate[]>();
@@ -292,7 +323,7 @@ export function buildFieldSpecs(
       const pageIndex = members[0].pageIndex;
       const onPage = members.filter((m) => m.pageIndex === pageIndex);
       specs.push({
-        name: uniqueName(sanitizeFieldName(candidate.name), taken),
+        name: record(renamed, candidate.name, uniqueName(sanitizeFieldName(candidate.name), taken)),
         type: 'radio',
         pageIndex,
         rect: unionRect(onPage.map((m) => m.rect)),
@@ -304,7 +335,7 @@ export function buildFieldSpecs(
       continue;
     }
     const spec: NewFieldSpec = {
-      name: uniqueName(sanitizeFieldName(candidate.name), taken),
+      name: record(renamed, candidate.name, uniqueName(sanitizeFieldName(candidate.name), taken)),
       type: SPEC_TYPE[candidate.kind],
       pageIndex: entry.pageIndex,
       rect: entry.rect,
@@ -316,7 +347,15 @@ export function buildFieldSpecs(
         spec.maxLength = candidate.comb;
       }
     }
+    if (candidate.kind === 'signature' && candidate.lock) spec.lock = candidate.lock;
     specs.push(spec);
+  }
+  for (const spec of specs) {
+    if (!spec.lock) continue;
+    spec.lock = {
+      action: spec.lock.action,
+      fields: spec.lock.fields.map((name) => renamed.get(name) ?? name),
+    };
   }
   return specs;
 }
@@ -360,6 +399,7 @@ export function candidatesFromDetection(
       evidence: row.evidence,
       warnings: row.warnings,
       checked: false,
+      lock: null,
     });
   }
   return { candidates, skipped };

@@ -13,7 +13,9 @@ import pathlib
 import pikepdf
 import pytest
 
-from engine.form_authoring import FieldSpecError
+from engine.acroform import form_field_forest
+from engine.fieldmdp import lock_of_field_dict
+from engine.form_authoring import FieldSpecError, add_form_fields
 from engine.form_detect import detect_form_fields
 from engine.form_prepare import (
     create_detected_fields,
@@ -32,6 +34,54 @@ CORPUS = json.loads(
 @pytest.mark.parametrize("case", CORPUS["cases"], ids=lambda c: c["name"])
 def test_candidates_become_the_specs_the_corpus_names(case):
     assert specs_from_candidates(case["candidates"], case["existing"]) == case["specs"]
+
+
+# ── the /Lock half of the same pin ────────────────────────────────────────
+
+# The wording each corpus condition carries on THIS side. The renderer states
+# the same conditions through its own catalog keys; only the condition crosses.
+LOCK_REFUSAL_TEXT = {
+    "lock_not_signature": "only a signature field can lock form fields",
+    "lock_needs_fields": "needs at least one field name",
+    "lock_takes_no_fields": "takes no field names",
+    "lock_unknown_field": "has no form field named",
+    "lock_self": "cannot lock itself",
+}
+
+
+def _lock_base(path, existing):
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    pdf.save(str(path))
+    if not existing:
+        return str(path)
+    specs = [
+        {
+            "name": name,
+            "type": "text",
+            "page_index": 0,
+            "rect": [72.0, 700.0 - index * 24, 300.0, 714.0 - index * 24],
+        }
+        for index, name in enumerate(existing)
+    ]
+    add_form_fields(str(path), str(path), specs)
+    return str(path)
+
+
+@pytest.mark.parametrize("case", CORPUS["lock_cases"], ids=lambda c: c["name"])
+def test_authored_locks_match_the_corpus(case, tmp_path):
+    src = _lock_base(tmp_path / "base.pdf", case["existing"])
+    out = str(tmp_path / "locked.pdf")
+    if case.get("refuses"):
+        with pytest.raises(FieldSpecError) as excinfo:
+            add_form_fields(src, out, case["specs"])
+        assert LOCK_REFUSAL_TEXT[case["refuses"]] in str(excinfo.value)
+        return
+    add_form_fields(src, out, case["specs"])
+    with pikepdf.open(out) as pdf:
+        forest = form_field_forest(pdf)
+        for name, expected in case["locks"].items():
+            assert lock_of_field_dict(forest[name]) == expected
 
 
 # ── end to end ────────────────────────────────────────────────────────────

@@ -353,5 +353,177 @@
         }
       ]
     }
+  ],
+  "lock_note": "The /Lock a signature field is AUTHORED with. Read by the Python and the TypeScript field writers alike. Each case builds a page carrying a text field per 'existing' name, authors 'specs', then reads back the /Lock of each name in 'locks' -- or requires the refusal 'refuses' names. Refusals are identified by CONDITION, not by message: the two halves speak different vocabularies (engine English, catalog keys) and each pins its own wording in its own suite.",
+  "lock_cases": [
+    {
+      "name": "an include lock names a field the document already carries",
+      "existing": ["applicant", "reviewer"],
+      "specs": [
+        {
+          "name": "Signature1",
+          "type": "signature",
+          "page_index": 0,
+          "rect": [72.0, 500.0, 300.0, 560.0],
+          "lock": { "action": "include", "fields": ["applicant"] }
+        }
+      ],
+      "locks": { "Signature1": { "action": "include", "fields": ["applicant"] } }
+    },
+    {
+      "name": "an exclude lock names the other half of the same document",
+      "existing": ["applicant", "reviewer"],
+      "specs": [
+        {
+          "name": "Signature1",
+          "type": "signature",
+          "page_index": 0,
+          "rect": [72.0, 500.0, 300.0, 560.0],
+          "lock": { "action": "exclude", "fields": ["reviewer"] }
+        }
+      ],
+      "locks": { "Signature1": { "action": "exclude", "fields": ["reviewer"] } }
+    },
+    {
+      "name": "a lock over every form field names none of them",
+      "existing": ["applicant"],
+      "specs": [
+        {
+          "name": "Signature1",
+          "type": "signature",
+          "page_index": 0,
+          "rect": [72.0, 500.0, 300.0, 560.0],
+          "lock": { "action": "all", "fields": [] }
+        }
+      ],
+      "locks": { "Signature1": { "action": "all", "fields": [] } }
+    },
+    {
+      "name": "a signature field authored without one carries no lock",
+      "existing": ["applicant"],
+      "specs": [
+        {
+          "name": "Signature1",
+          "type": "signature",
+          "page_index": 0,
+          "rect": [72.0, 500.0, 300.0, 560.0]
+        }
+      ],
+      "locks": { "Signature1": null }
+    },
+    {
+      "name": "a lock names a field created in the same batch",
+      "existing": [],
+      "specs": [
+        {
+          "name": "applicant",
+          "type": "text",
+          "page_index": 0,
+          "rect": [72.0, 700.0, 300.0, 714.0]
+        },
+        {
+          "name": "Signature1",
+          "type": "signature",
+          "page_index": 0,
+          "rect": [72.0, 500.0, 300.0, 560.0],
+          "lock": { "action": "include", "fields": ["applicant"] }
+        }
+      ],
+      "locks": { "Signature1": { "action": "include", "fields": ["applicant"] } }
+    },
+    {
+      "name": "two signature fields carry different locks",
+      "existing": ["applicant", "reviewer"],
+      "specs": [
+        {
+          "name": "Signature1",
+          "type": "signature",
+          "page_index": 0,
+          "rect": [72.0, 500.0, 300.0, 560.0],
+          "lock": { "action": "include", "fields": ["applicant"] }
+        },
+        {
+          "name": "Signature2",
+          "type": "signature",
+          "page_index": 0,
+          "rect": [72.0, 400.0, 300.0, 460.0],
+          "lock": { "action": "exclude", "fields": ["reviewer"] }
+        }
+      ],
+      "locks": {
+        "Signature1": { "action": "include", "fields": ["applicant"] },
+        "Signature2": { "action": "exclude", "fields": ["reviewer"] }
+      }
+    },
+    {
+      "name": "a lock on a field that is not a signature field refuses",
+      "existing": [],
+      "specs": [
+        {
+          "name": "applicant",
+          "type": "text",
+          "page_index": 0,
+          "rect": [72.0, 700.0, 300.0, 714.0],
+          "lock": { "action": "all", "fields": [] }
+        }
+      ],
+      "refuses": "lock_not_signature"
+    },
+    {
+      "name": "an include lock naming no field refuses",
+      "existing": ["applicant"],
+      "specs": [
+        {
+          "name": "Signature1",
+          "type": "signature",
+          "page_index": 0,
+          "rect": [72.0, 500.0, 300.0, 560.0],
+          "lock": { "action": "include", "fields": [] }
+        }
+      ],
+      "refuses": "lock_needs_fields"
+    },
+    {
+      "name": "a lock over every form field carrying names refuses",
+      "existing": ["applicant"],
+      "specs": [
+        {
+          "name": "Signature1",
+          "type": "signature",
+          "page_index": 0,
+          "rect": [72.0, 500.0, 300.0, 560.0],
+          "lock": { "action": "all", "fields": ["applicant"] }
+        }
+      ],
+      "refuses": "lock_takes_no_fields"
+    },
+    {
+      "name": "a lock naming a field nothing carries refuses",
+      "existing": ["applicant"],
+      "specs": [
+        {
+          "name": "Signature1",
+          "type": "signature",
+          "page_index": 0,
+          "rect": [72.0, 500.0, 300.0, 560.0],
+          "lock": { "action": "include", "fields": ["nobody"] }
+        }
+      ],
+      "refuses": "lock_unknown_field"
+    },
+    {
+      "name": "a signature field's lock naming itself refuses",
+      "existing": ["applicant"],
+      "specs": [
+        {
+          "name": "Signature1",
+          "type": "signature",
+          "page_index": 0,
+          "rect": [72.0, 500.0, 300.0, 560.0],
+          "lock": { "action": "include", "fields": ["Signature1"] }
+        }
+      ],
+      "refuses": "lock_self"
+    }
   ]
 }

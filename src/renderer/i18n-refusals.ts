@@ -81,6 +81,14 @@ export const REFUSAL_STRINGS = {
     'A comb field needs a character count to divide its box into.',
   'refusal.field.combNotMultiline': 'A comb field holds one line, so it cannot be multiline.',
   'refusal.field.maxLengthPositive': 'The character limit must be at least 1.',
+  'refusal.field.lockNotSignature': 'Only a signature field can lock form fields.',
+  'refusal.field.lockTakesNoFields':
+    'A lock covering every form field takes no field names.',
+  'refusal.field.lockNeedsFields': 'Choose at least one form field to lock.',
+  'refusal.field.lockUnknownField':
+    'There is no form field named "{{name}}", so that field cannot be locked.',
+  'refusal.field.lockSelf':
+    'A signature field cannot lock itself: "{{name}}" names the field being signed.',
   // A batch reports every problem at once, so each one says which field it is
   // about; the parts stay separate keys because only the wrapper is a sentence.
   'refusal.field.inField': '{{field}}: {{problem}}',
