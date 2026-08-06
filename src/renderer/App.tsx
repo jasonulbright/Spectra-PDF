@@ -77,7 +77,7 @@ import { OperationsProvider } from './hooks/useOperations';
 import { OperationQueue } from './components/OperationQueue';
 import { QueueProvider, useOperationQueue } from './hooks/useOperationQueue';
 import { SearchProvider } from './search/SearchProvider';
-import { SettingsPanel, getSettings, type PrefCategory } from './panels/SettingsPanel';
+import { SettingsPanel, getSettings, ensureGsPath, type PrefCategory } from './panels/SettingsPanel';
 import { MenuBar } from './components/MenuBar';
 import { MainToolbar } from './components/MainToolbar';
 import { TabStrip } from './components/TabStrip';
@@ -95,6 +95,7 @@ import { CombineDialog } from './components/CombineDialog';
 import { classify as classifySource } from './lib/create-pdf';
 import type { CombineDestination } from './lib/combine';
 import { ExportImagesDialog } from './components/ExportImagesDialog';
+import { ExportDocumentDialog, type DocumentExportFormat } from './components/ExportDocumentDialog';
 import { buildBlankPagePdf } from './lib/blank-page';
 import { insertAnchor } from './state/selectors';
 import { UpdateBar } from './components/UpdateBar';
@@ -219,6 +220,7 @@ function AppContent(): React.ReactElement {
   const showCombineRef = useRef(false);
   showCombineRef.current = showCombine;
   const [showExportImages, setShowExportImages] = useState(false);
+  const [exportDocFormat, setExportDocFormat] = useState<DocumentExportFormat | null>(null);
   const [showCustomizeToolbar, setShowCustomizeToolbar] = useState(false);
   // Full-screen presentation mode (I.6): a transient overlay; `startIndex`
   // is the page to open on, resolved from the page being read.
@@ -1848,6 +1850,7 @@ function AppContent(): React.ReactElement {
       setShowCreatePdf(true);
     },
     openExportImages: () => setShowExportImages(true),
+    openExportDocument: (format) => setExportDocFormat(format),
     openPresentation: () => {
       const doc = stateRef.current.workspace.documents.find(
         (d) => d.path === stateRef.current.activeFileId,
@@ -1894,6 +1897,7 @@ function AppContent(): React.ReactElement {
       openWatchedFolders: () => h.current.openWatchedFolders(),
       openCreatePdf: () => h.current.openCreatePdf(),
       openExportImages: () => h.current.openExportImages(),
+      openExportDocument: (format) => h.current.openExportDocument(format),
       openPresentation: () => h.current.openPresentation(),
       insertBlankPage: () => h.current.insertBlankPage(),
       insertPagesFromFile: () => h.current.insertPagesFromFile(),
@@ -2173,7 +2177,8 @@ function AppContent(): React.ReactElement {
         if (!af) throw new Error('exportActiveDocument: no active file');
         const soffice_path = await app.getSofficePath();
         return call('export_document', {
-          file: af.workingPath, output: destPath, fmt: format, soffice_path, ...(options ?? {}),
+          file: af.workingPath, output: destPath, fmt: format, soffice_path,
+          gs_path: await ensureGsPath(), ...(options ?? {}),
         });
       },
     });
@@ -2326,6 +2331,13 @@ function AppContent(): React.ReactElement {
         <ExportImagesDialog
           file={{ workingPath: activeFile.workingPath, name: activeFile.name }}
           onClose={() => setShowExportImages(false)}
+        />
+      )}
+      {exportDocFormat && activeFile && (
+        <ExportDocumentDialog
+          file={{ workingPath: activeFile.workingPath, name: activeFile.name }}
+          format={exportDocFormat}
+          onClose={() => setExportDocFormat(null)}
         />
       )}
       {presentation && (() => {
