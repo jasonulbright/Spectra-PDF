@@ -64,12 +64,13 @@ _FORMATS = {
     "xhtml": _Target(".xhtml", LIBREOFFICE, "xhtml:XHTML Draw File"),
     "txt": _Target(".txt", ENGINE, options=("pages", "layout", "page_breaks")),
     "xlsx": _Target(".xlsx", ENGINE, options=("pages", "sheet_per", "include_untabled")),
+    "pptx": _Target(".pptx", ENGINE, options=("pages", "slide_size")),
 }
 
 # Every option name any target declares. An option a target does not declare is
 # refused rather than ignored: a silently dropped option is a silently wrong
 # output that still reports success.
-_ALL_OPTIONS = ("pages", "layout", "page_breaks", "sheet_per", "include_untabled")
+_ALL_OPTIONS = ("pages", "layout", "page_breaks", "sheet_per", "include_untabled", "slide_size")
 
 
 def supported_formats() -> dict:
@@ -100,6 +101,8 @@ def export_document(
     page_breaks=None,
     sheet_per=None,
     include_untabled=None,
+    slide_size=None,
+    gs_path: str = "",
 ) -> dict:
     """Export ``file`` to ``output`` in ``fmt``.
 
@@ -115,6 +118,9 @@ def export_document(
         sheet_per: sheet grouping, for the spreadsheet target.
         include_untabled: carry the text no table claimed, for the spreadsheet
             target.
+        slide_size: deck dimensions, for the presentation target.
+        gs_path: path to the Ghostscript executable. Required only by the
+            presentation target, which renders each page's graphics.
     """
     key = str(fmt).lower()
     if key not in _FORMATS:
@@ -126,6 +132,7 @@ def export_document(
         "page_breaks": page_breaks,
         "sheet_per": sheet_per,
         "include_untabled": include_untabled,
+        "slide_size": slide_size,
     }
     _reject_unknown_options(key, target, given)
 
@@ -148,11 +155,11 @@ def export_document(
         raise ValueError("output path is the same file as the input")
 
     if target.producer == ENGINE:
-        return _export_engine(key, input_path, output_path, given)
+        return _export_engine(key, input_path, output_path, given, gs_path)
     return _export_libreoffice(key, target, input_path, output_path, soffice_path)
 
 
-def _export_engine(key, input_path, output_path, given) -> dict:
+def _export_engine(key, input_path, output_path, given, gs_path) -> dict:
     """Targets produced from the document's own text and geometry.
 
     These never touch LibreOffice, so an unprovisioned LibreOffice must not make
@@ -178,6 +185,16 @@ def _export_engine(key, input_path, output_path, given) -> dict:
             pages=pages,
             sheet_per="table" if given["sheet_per"] is None else given["sheet_per"],
             include_untabled=bool(given["include_untabled"]),
+        )
+    if key == "pptx":
+        from engine.slide_export import export_slides
+
+        return export_slides(
+            str(input_path),
+            str(output_path),
+            pages=pages,
+            slide_size="page" if given["slide_size"] is None else given["slide_size"],
+            gs_path=gs_path,
         )
     raise ValueError(f"unsupported export format {key!r} (have {sorted(_FORMATS)})")
 

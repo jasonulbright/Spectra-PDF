@@ -910,10 +910,10 @@ pub struct ExportArgs {
     /// Output file (extension should match the format)
     #[arg(short, long)]
     pub output: PathBuf,
-    /// Target format: docx, rtf, odt, html, xhtml, txt, xlsx
+    /// Target format: docx, rtf, odt, html, xhtml, txt, xlsx, pptx
     #[arg(short, long, default_value = "docx")]
     pub format: String,
-    /// Page range like "1,3" or "all" (txt, xlsx)
+    /// Page range like "1,3" or "all" (txt, xlsx, pptx)
     #[arg(long, default_value = "")]
     pub pages: String,
     /// Text ordering: reading or layout (txt only)
@@ -928,6 +928,9 @@ pub struct ExportArgs {
     /// Add a sheet carrying the text no table claimed (xlsx only)
     #[arg(long)]
     pub include_untabled: bool,
+    /// Slide dimensions: page, 16:9 or 4:3 (pptx only)
+    #[arg(long)]
+    pub slide_size: Option<String>,
 }
 
 #[derive(Args)]
@@ -2750,6 +2753,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "output": abs(&args.output).to_string_lossy(),
                 "fmt": args.format,
                 "soffice_path": resolve_soffice(),
+                "gs_path": resolve_gs().to_string_lossy(),
             });
             // An omitted option stays absent rather than defaulting here: the
             // engine refuses an option the target does not take, and a value
@@ -2768,6 +2772,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             }
             if args.include_untabled {
                 params["include_untabled"] = json!(true);
+            }
+            if let Some(slide_size) = &args.slide_size {
+                params["slide_size"] = json!(slide_size);
             }
             engine.call("export_document", params)
         }
