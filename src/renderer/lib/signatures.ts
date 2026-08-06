@@ -154,3 +154,94 @@ export function modificationLevelLabel(name: string | null | undefined): string 
   if (!name) return null;
   return (MODIFICATION_LEVEL_LABEL as Record<string, string | undefined>)[name] ?? null;
 }
+
+// ── what a document's own signatures permit ────────────────────────────────
+//
+// The decision lives here rather than in the handler that shows the dialog:
+// there is no DOM test environment, so a rule inside a component is a rule
+// with no test.
+
+/** The cheap structural read the edit tier consults before every edit. */
+export interface SignaturePolicy {
+  signed: boolean;
+  count: number;
+  certified: boolean;
+  /** Null both when uncertified and when the recorded permission value is not
+   * one of the three levels; `certified` distinguishes those. */
+  level: CertificationLevel | null;
+}
+
+/** What an edit DOES, in the terms a certification is written in. */
+export type EditClass = 'form-fill' | 'annotate' | 'structural';
+
+/** The catalog keys this decision can name — a literal union, so a consumer's
+ * typed translator accepts them without a cast. */
+export type SignedEditKey =
+  | 'app.signedEdit.title'
+  | 'app.signedEdit.body'
+  | 'app.signedEdit.certifiedTitle'
+  | 'app.signedEdit.certifiedRefused'
+  | 'app.signedEdit.certifiedWarnFormFill'
+  | 'app.signedEdit.certifiedWarnAnnotate'
+  | 'app.signedEdit.certifiedWarnUnknown';
+
+export type SignedEditDecision =
+  | { kind: 'proceed' }
+  | { kind: 'refuse' | 'warn'; titleKey: SignedEditKey; bodyKey: SignedEditKey };
+
+// A structural edit is never in this table: page removal, reordering, content
+// edits and flattening all fall outside the incremental-append tier, so they
+// coalesce the file and break every byte range whatever any policy permits.
+// That is a property of the edit, not of the certification.
+const PERMITTED_CLASSES: Record<string, readonly EditClass[]> = {
+  // No certification in force: the incremental tier preserves both classes
+  // losslessly, so neither breaks a signature.
+  uncertified: ['form-fill', 'annotate'],
+  'form-fill': ['form-fill'],
+  annotate: ['form-fill', 'annotate'],
+  // A level this build does not recognize permits nothing it can name.
+  unknown: [],
+};
+
+const CERTIFIED_WARNING = {
+  'form-fill': 'app.signedEdit.certifiedWarnFormFill',
+  annotate: 'app.signedEdit.certifiedWarnAnnotate',
+  unknown: 'app.signedEdit.certifiedWarnUnknown',
+} as const satisfies Record<string, SignedEditKey>;
+
+/** Whether an edit of this class may proceed against this document's policy.
+ *
+ * A no-changes certification REFUSES rather than warns: the author's policy
+ * forbids every change, the signing machinery itself will not counter-sign
+ * such a file, and every edit produces a document that reports as illegally
+ * modified — so a confirm here would offer a choice whose only outcome is a
+ * broken file. */
+export function signedEditDecision(
+  policy: SignaturePolicy,
+  editClass: EditClass,
+): SignedEditDecision {
+  if (!policy.signed && !policy.certified) return { kind: 'proceed' };
+  if (policy.certified && policy.level === 'none') {
+    return {
+      kind: 'refuse',
+      titleKey: 'app.signedEdit.certifiedTitle',
+      bodyKey: 'app.signedEdit.certifiedRefused',
+    };
+  }
+  if (!policy.certified) {
+    if (PERMITTED_CLASSES.uncertified.includes(editClass)) return { kind: 'proceed' };
+    return {
+      kind: 'warn',
+      titleKey: 'app.signedEdit.title',
+      bodyKey: 'app.signedEdit.body',
+    };
+  }
+  const key: keyof typeof CERTIFIED_WARNING =
+    policy.level === 'form-fill' || policy.level === 'annotate' ? policy.level : 'unknown';
+  if (PERMITTED_CLASSES[key].includes(editClass)) return { kind: 'proceed' };
+  return {
+    kind: 'warn',
+    titleKey: 'app.signedEdit.certifiedTitle',
+    bodyKey: CERTIFIED_WARNING[key],
+  };
+}

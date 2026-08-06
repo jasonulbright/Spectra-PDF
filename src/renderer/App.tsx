@@ -11,6 +11,7 @@ import {
   type ReplacementSource,
 } from './lib/image-replace';
 import { EDIT_DECLINED } from './lib/edit-text';
+import { signedEditDecision, type EditClass, type SignaturePolicy } from './lib/signatures';
 import type { EditImageMaskParam } from './lib/edit-images';
 import type { ParagraphEditOpts } from './lib/edit-paragraphs';
 import { ConfirmDialog, ConfirmResult } from './components/ConfirmDialog';
@@ -310,6 +311,37 @@ function AppContent(): React.ReactElement {
       setConfirmState({ message, kind: 'notice', title, resolve: () => resolve() });
     });
   }, []);
+
+  const editWarnedPathsRef = useRef<Set<string>>(new Set());
+  // What a document's own signatures allow to be changed. The policy is read
+  // every time — a file unsigned at the last check may have been signed
+  // in-session since, and a refusal must hold on every attempt; only the
+  // WARNING is remembered, per file, and only after the user said Continue
+  // (caching the bare "checked once" skipped the warning after an in-session
+  // sign). `signature_policy` is an internal read, so asking the question does
+  // not flush the user's pending annotations to disk.
+  const confirmEditOfSignedDoc = useCallback(
+    async (path: string, workingPath: string, editClass: EditClass): Promise<boolean> => {
+      const policy = (await call('signature_policy', {
+        path: workingPath,
+      })) as unknown as SignaturePolicy;
+      const decision = signedEditDecision(policy, editClass);
+      if (decision.kind === 'proceed') return true;
+      if (decision.kind === 'refuse') {
+        await showNotice(tChrome(decision.titleKey), tChrome(decision.bodyKey));
+        return false;
+      }
+      if (editWarnedPathsRef.current.has(path)) return true;
+      const proceed = await showProceedConfirm(
+        tChrome(decision.titleKey),
+        tChrome(decision.bodyKey),
+      );
+      if (!proceed) return false;
+      editWarnedPathsRef.current.add(path);
+      return true;
+    },
+    [call, showNotice, showProceedConfirm],
+  );
 
   const handleConfirmResult = useCallback((result: ConfirmResult) => {
     if (confirmState) {
@@ -802,9 +834,14 @@ function AppContent(): React.ReactElement {
   // file, so state and file agree by construction.
   const handleSaveRedactionMarks = useCallback(
     async (path: string, regions: { page: number; rect: [number, number, number, number] }[]) => {
+      const f = state.files.get(path);
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+      // Saving marks writes /Redact annotations and removes nothing yet, so
+      // it is annotate-class; applying them is the content change.
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'annotate'))) return;
       await performOperation(path, 'save_redaction_marks', { regions });
     },
-    [performOperation],
+    [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
   // A pushbutton widget clicked in fill mode. Reset runs for REAL (the
@@ -886,17 +923,24 @@ function AppContent(): React.ReactElement {
     [performOperation, showNotice, showProceedConfirm],
   );
 
+  // Link authoring writes /Link annotations, so it is an annotate-class edit:
+  // the incremental tier preserves it, and only a certification that forbids
+  // commenting has anything to say about it.
   const handleAddLinks = useCallback(
     async (path: string, links: { page: number; rect: [number, number, number, number]; url: string }[]) => {
+      const f = state.files.get(path);
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'annotate'))) return;
       await performOperation(path, 'add_links', { links });
     },
-    [performOperation],
+    [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
   const handleFillFormValues = useCallback(
     async (path: string, values: Record<string, FormFieldValue>) => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'form-fill'))) return;
       // Pre/post reads route through the engine — `read_form_fields` is
       // INTERNAL, so neither read runs the commit gate. The pre-read sees the
       // current working copy (== buffer); `file.snapshot` then flushes pending
@@ -932,7 +976,7 @@ function AppContent(): React.ReactElement {
         snapshotPath,
       });
     },
-    [state.files, reloadFile, dispatch, call],
+    [state.files, reloadFile, dispatch, call, confirmEditOfSignedDoc],
   );
 
   // One snapshot, one write, one reload — so N accepted fields are ONE undo
@@ -1006,37 +1050,6 @@ function AppContent(): React.ReactElement {
     [performOperation],
   );
 
-  // --- Edit ▸ Images ----------------------------------------------------
-  // One handler, three actions. Mutations route through performOperation
-  // (gate → snapshot → engine → reload → undoable); extract is a gated read
-  // that writes a NEW image file where the user chose. `opts` lets the e2e
-  // harness inject what the native dialogs would collect.
-  const editWarnedPathsRef = useRef<Set<string>>(new Set());
-  // Content edits invalidate embedded signatures, so warn before the first
-  // mutation. Verification always runs because a file unsigned at the
-  // last check may have been signed in-session since); only the dialog is
-  // remembered, and only after the user said Continue for a file that
-  // actually had signatures (regression: caching the bare "checked
-  // once" skipped the warning after an in-session sign). Shared by image
-  // AND text edits — one warning per file, whichever comes first.
-  const confirmEditOfSignedDoc = useCallback(
-    async (path: string, workingPath: string): Promise<boolean> => {
-      if (editWarnedPathsRef.current.has(path)) return true;
-      const sig = await call('verify_signatures', { file: workingPath });
-      const count = (sig as unknown as { signatures?: unknown[] }).signatures?.length ?? 0;
-      if (count > 0) {
-        const proceed = await showProceedConfirm(
-          'Document is signed',
-          'Editing this document will invalidate its digital signatures. Continue?',
-        );
-        if (!proceed) return false;
-        editWarnedPathsRef.current.add(path);
-      }
-      return true;
-    },
-    [call, showProceedConfirm],
-  );
-
   const handleEditText = useCallback(
     async (
       path: string,
@@ -1047,7 +1060,7 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
       if (opts?.convert) {
         // Render the replacement in the bundled fallback
         // font FAMILY — getEditFontPath returns the fonts DIRECTORY and
@@ -1078,7 +1091,7 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
       await performOperation(path, 'restyle_text_run', {
         page,
         index,
@@ -1100,7 +1113,7 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
       // The fingerprint (member runs + logical text) makes the engine
       // re-derive its grouping and REFUSE if the page changed underneath —
       // a heuristic must never silently retarget.
@@ -1173,7 +1186,7 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
       await performOperation(path, 'merge_paragraph_with_previous', {
         page,
         // The engine addresses the SELECTED paragraph: for the shipped
@@ -1245,7 +1258,7 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
       const params: Record<string, unknown> = {
         page,
         rect,
@@ -1285,7 +1298,7 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
       if (kind === 'transform') {
         if (!opts?.matrix) throw new Error('transform requires a target matrix');
         await performOperation(path, 'transform_page_vector', { page, index, matrix: opts.matrix });
@@ -1304,6 +1317,11 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
+  // --- Edit ▸ Images ----------------------------------------------------
+  // One handler, three actions. Mutations route through performOperation
+  // (gate → snapshot → engine → reload → undoable); extract is a gated read
+  // that writes a NEW image file where the user chose. `opts` lets the e2e
+  // harness inject what the native dialogs would collect.
   const handleEditImage = useCallback(
     async (
       kind: 'delete' | 'replace' | 'extract' | 'transform' | 'crop' | 'opacity',
@@ -1323,7 +1341,7 @@ function AppContent(): React.ReactElement {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
 
-      if (kind !== 'extract' && !(await confirmEditOfSignedDoc(path, f.workingPath))) {
+      if (kind !== 'extract' && !(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) {
         return EDIT_DECLINED;
       }
 
@@ -1481,7 +1499,7 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
       if (kind === 'transform') {
         if (!opts.targets?.length) throw new Error('group transform requires targets');
         await performOperation(path, 'transform_page_images', { page, targets: opts.targets });
@@ -1509,7 +1527,7 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath))) return EDIT_DECLINED;
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
 
       // An SVG (picked or injected) places as REAL vector
       // content — the engine compiles it into a unit-square form and the

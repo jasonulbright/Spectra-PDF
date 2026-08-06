@@ -15,9 +15,12 @@ ones. Five invariants hold it to what the certification actually permits:
     content-stream swap is exactly the change the DocMDP transform exists to
     detect, so a page whose other keys differ is not cleared at all and stays
     suspicious under the standard rules.
-  * A WIDGET annotation is never cleared here. Widgets are form fields, they
-    belong to the form rule, and clearing one here would let a field appear on
-    a page without its ``/AcroForm`` registration ever being vetted.
+  * A WIDGET annotation OBJECT is never cleared here. Widgets are form fields,
+    they belong to the form rules, and clearing one here would let a field
+    appear on a page without its ``/AcroForm`` registration ever being vetted.
+    The rule also stays out of the way entirely on a page whose only membership
+    change is a widget, so that adding a signature field keeps being judged at
+    the level the form rules judge it at.
   * The rule is qualified at the ANNOTATIONS level, so it changes nothing under
     a certification that permits only form filling or no changes at all — those
     verdicts compare the modification level against the permission level, and a
@@ -33,11 +36,16 @@ from pyhanko.pdf_utils import generic
 from pyhanko.pdf_utils.reader import RawPdfPath
 from pyhanko.sign.diff_analysis import (
     DEFAULT_DIFF_POLICY,
+    FormUpdatingRule,
+    GenericFieldModificationRule,
     ModificationLevel,
+    SigFieldCreationRule,
+    SigFieldModificationRule,
     StandardDiffPolicy,
     WhitelistRule,
 )
 from pyhanko.sign.diff_analysis.commons import compare_dicts
+from pyhanko.sign.diff_analysis.policy_api import SuspiciousModification
 from pyhanko.sign.diff_analysis.rules_api import ReferenceUpdate, RelativeContext
 
 # With the annotation rule in force, the library's standing warning that its
@@ -158,21 +166,23 @@ class PageAnnotationRule(WhitelistRule):
             return
         added = [r for r in new_annots if r not in old_annots]
         removed = [r for r in old_annots if r not in new_annots]
-        kept_and_updated = [
-            r for r in new_annots if r in old_annots and r in updated
-        ]
-        if not (added or removed or kept_and_updated or old_array_ref != new_array_ref):
+        kept_and_updated = [r for r in new_annots if r in old_annots and r in updated]
+        # A removed or edited widget is a form-field change wearing an
+        # annotation's clothes; this rule declines the whole page rather than
+        # clear the membership around it.
+        if any(_is_widget(old, r) for r in removed + kept_and_updated):
+            return
+        if any(_is_widget(new, r) for r in kept_and_updated):
+            return
+        annotations = [r for r in added if not _is_widget(new, r)]
+        # Nothing but widgets moved: adding a signature field is judged by the
+        # form rules, at the level they judge it at, and clearing the page here
+        # would raise that level for every certification.
+        if not (annotations or removed or kept_and_updated):
             return
         # Every page key other than /Annots must be untouched, or nothing on
         # this page is cleared.
         if not compare_dicts(old_kid, new_kid, frozenset([_ANNOTS]), raise_exc=False):
-            return
-        # Form fields belong to the form rule at every level.
-        if any(_is_widget(new, r) for r in added):
-            return
-        if any(_is_widget(old, r) for r in removed + kept_and_updated):
-            return
-        if any(_is_widget(new, r) for r in kept_and_updated):
             return
 
         # A page object is reachable from many places in a file and checking
@@ -189,7 +199,9 @@ class PageAnnotationRule(WhitelistRule):
                 new_array_ref,
                 context_checked=RelativeContext(old_ref, RawPdfPath("/Annots")),
             )
-        for ref in added + kept_and_updated:
+        # Membership is cleared above; the widget OBJECTS added alongside are
+        # not, and stay unexplained unless a form rule justifies them.
+        for ref in annotations + kept_and_updated:
             yield ReferenceUpdate(ref)
             yield from self._dependencies(ref, old, new)
 
@@ -207,6 +219,35 @@ class PageAnnotationRule(WhitelistRule):
             yield ReferenceUpdate(dep)
 
 
+class _TolerantSigFieldCreationRule(SigFieldCreationRule):
+    """The signature-field creation rule, minus its refusal to coexist with an
+    annotation it does not model.
+
+    That rule walks the page tree whenever a revision adds a signature field,
+    and REFUSES the whole document when the same revision also added an
+    annotation it does not recognise — which is the ordinary shape of
+    counter-signing a document and then commenting on it. The refusal aborts
+    the entire analysis before any other rule is consulted, so the annotation
+    rule below never gets to adjudicate the comment.
+
+    Stopping at the refusal instead of propagating it is FAIL-CLOSED: every
+    clearance the rule would have produced after that point is simply not
+    produced, so the objects it would have cleared stay unexplained and the
+    revision still reports as suspicious. Nothing is approved that the rule
+    did not approve itself."""
+
+    def apply(self, context):
+        source = super().apply(context)
+        while True:
+            try:
+                update = next(source)
+            except StopIteration:
+                return
+            except SuspiciousModification:
+                return
+            yield update
+
+
 ANNOTATION_RULE = PageAnnotationRule()
 
 
@@ -218,7 +259,13 @@ def build_diff_policy() -> StandardDiffPolicy:
             *DEFAULT_DIFF_POLICY.global_rules,
             ANNOTATION_RULE.as_qualified(ModificationLevel.ANNOTATIONS),
         ],
-        form_rule=DEFAULT_DIFF_POLICY.form_rule,
+        form_rule=FormUpdatingRule(
+            field_rules=[
+                _TolerantSigFieldCreationRule(),
+                SigFieldModificationRule(),
+                GenericFieldModificationRule(),
+            ],
+        ),
     )
 
 

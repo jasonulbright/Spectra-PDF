@@ -155,6 +155,11 @@ const INTERNAL_METHODS = new Set([
   // they drew it (the list_page_geometry hazard). `sanitize_pdf` replaces the
   // file's bytes and stays gated.
   'audit_hidden_information',
+  // What a document's signatures permit. A structural read consulted before
+  // every edit — gating it would flush the user's pending annotations to disk
+  // merely to ask whether the edit may proceed (the audit_hidden_information
+  // hazard). The edit that follows runs the gate itself.
+  'signature_policy',
 ]);
 
 export function isTrackableMethod(method: string): boolean {
