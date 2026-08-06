@@ -1521,6 +1521,8 @@
   "engine.struct_tree.unknownProperties": "unknown properties: {{v0}}",
   "engine.system_fonts.fontFileFound": "font file not found: {{path}}",
   "engine.system_fonts.usableFontFile": "not a usable font file: {{v0}}",
+  "engine.table_export.tableFoundPageS": "no table was found on the {{v0}} page(s) analyzed, so there is nothing to write to a spreadsheet",
+  "engine.table_export.unknownSheetGroupingChoose": "unknown sheet grouping {{sheet_per}} (choose table or page)",
   "engine.takeoff.outputFolderDoesExist": "Output folder does not exist: {{v0}}",
   "engine.text_authoring.boldMustTrueFalse": "bold must be true or false (got {{bold}})",
   "engine.text_authoring.directionalFormattingCharactersCannot": "directional formatting characters cannot be laid out in a text box",
