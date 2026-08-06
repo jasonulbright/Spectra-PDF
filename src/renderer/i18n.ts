@@ -47,16 +47,64 @@ export const LOCALE_NATIVE_NAMES: Record<string, string> = {
   'zh-CN': '简体中文',
 };
 
+/**
+ * Tags whose catalog cannot be decided by the base language alone, mapped to
+ * the catalog that serves them. Keys are lowercased BCP-47 prefixes, matched
+ * longest-first against the wanted tag's own prefixes.
+ *
+ * Two languages ship (or will ship) more than one regional catalog, and a
+ * base-language match returns whichever entry `SHIPPED_LOCALES` happens to
+ * list first — array order silently deciding that `zh-Hant` reads Simplified.
+ * The alias is AUTHORITATIVE: when its target is not shipped the answer is
+ * English, never the sibling catalog, because Traditional/Simplified and
+ * Bokmål/Nynorsk are not substitutes for each other.
+ *
+ * `iw` is the legacy tag some systems still report for Hebrew; `no` is the
+ * macrolanguage over Bokmål and Nynorsk.
+ */
+export const LANGUAGE_ALIASES: Record<string, string> = {
+  'zh-hant': 'zh-TW',
+  'zh-tw': 'zh-TW',
+  'zh-hk': 'zh-TW',
+  'zh-mo': 'zh-TW',
+  'zh-hans': 'zh-CN',
+  'zh-sg': 'zh-CN',
+  'zh-cn': 'zh-CN',
+  zh: 'zh-CN',
+  no: 'nb',
+  nn: 'nb',
+  iw: 'he',
+};
+
+/** The wanted tag's own prefixes, longest first (`zh-hant-tw` → `zh-hant` →
+ * `zh`), which is the order an alias must be matched in. */
+function tagPrefixes(tag: string): string[] {
+  const parts = tag.split('-');
+  return parts.map((_, i) => parts.slice(0, parts.length - i).join('-'));
+}
+
+/** Base languages more than one shipped locale claims — every one of them
+ * needs an alias row, or the catalog is chosen by array order. */
+export function ambiguousBases(): string[] {
+  const counts = new Map<string, number>();
+  for (const l of SHIPPED_LOCALES) {
+    const b = l.toLowerCase().split('-')[0];
+    counts.set(b, (counts.get(b) ?? 0) + 1);
+  }
+  return [...counts].filter(([, n]) => n > 1).map(([b]) => b);
+}
+
 /** Resolve a stored language preference ('system' | code) to a shipped
  * locale. Exported for the Settings panel and for tests.
  *
- * Three steps, in order: exact tag, then the wanted tag's BASE language, then
- * any shipped locale whose base matches. The third step is what a REGIONAL
- * shipped tag needs and a bare one never did: `pt-BR` and `zh-CN` are the only
- * catalogs for their languages, so `navigator.language` of `pt-PT`, `pt`,
- * `zh`, `zh-Hans` or `zh-TW` must land on them rather than fall through to
- * English — which is what happened while the match was exact-or-base-only.
- * (Same rule i18next spells `nonExplicitSupportedLngs`.)
+ * Four steps, in order: exact tag, the alias table, the wanted tag's BASE
+ * language, then the single shipped locale whose base matches. The last step
+ * is what a REGIONAL shipped tag needs and a bare one never did: `pt-BR` is
+ * the only catalog for its language, so `navigator.language` of `pt-PT` or
+ * `pt` must land on it rather than fall through to English. (Same rule
+ * i18next spells `nonExplicitSupportedLngs`.) It applies only when the base
+ * has ONE candidate — with two, the answer comes from the alias table or it
+ * is English, never from whichever catalog was listed first.
  */
 export function resolveLanguage(pref: string): string {
   const want = pref === 'system'
@@ -65,12 +113,15 @@ export function resolveLanguage(pref: string): string {
   const w = want.toLowerCase();
   const exact = SHIPPED_LOCALES.find((l) => l.toLowerCase() === w);
   if (exact) return exact;
+  for (const prefix of tagPrefixes(w)) {
+    const aliased = LANGUAGE_ALIASES[prefix];
+    if (aliased) return SHIPPED_LOCALES.includes(aliased) ? aliased : 'en';
+  }
   const base = w.split('-')[0];
-  return (
-    SHIPPED_LOCALES.find((l) => l.toLowerCase() === base) ??
-    SHIPPED_LOCALES.find((l) => l.toLowerCase().split('-')[0] === base) ??
-    'en'
-  );
+  const bare = SHIPPED_LOCALES.find((l) => l.toLowerCase() === base);
+  if (bare) return bare;
+  const candidates = SHIPPED_LOCALES.filter((l) => l.toLowerCase().split('-')[0] === base);
+  return candidates.length === 1 ? candidates[0] : 'en';
 }
 
 function detectLanguage(): string {
