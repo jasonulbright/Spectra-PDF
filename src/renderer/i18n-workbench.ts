@@ -101,6 +101,10 @@ export const WORKBENCH_STRINGS = {
   // not survive translation (the Settings license-notice precedent).
   'nav.sig.caveat':
     'Signer identity is not verified against a trusted authority — these results confirm cryptographic validity and whether the document changed after signing, not who the signer really is.',
+  'nav.sig.trustVerified':
+    'Signer identity verified against the trust sources configured in the Signatures panel.',
+  'nav.sig.trustFailed':
+    'Signer identity NOT verified: the signer does not chain to any trust source configured in the Signatures panel.',
   'nav.sig.recheck': 'Re-check',
   'nav.sig.unknownSigner': '(unknown signer)',
   'nav.sig.intact': 'integrity intact',
