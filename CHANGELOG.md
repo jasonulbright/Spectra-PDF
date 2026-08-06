@@ -1,6 +1,33 @@
 # Changelog
 
-## 1.0.21 — Prepare Form finds the fields for you, a document tells you what it carries, you can certify one, and export reaches spreadsheets and presentations
+## 1.0.21 — Fields found, hidden content named, documents certified, and export to spreadsheets and slides
+
+Preparing a form stops meaning drawing every box by hand. Open a flat form,
+pick Prepare Form and choose Detect fields, and the rules, boxes, checkboxes
+and radio buttons on the page come back as suggestions — each already named
+from the label beside it and typed by its own shape. You review them on the
+page and nothing is written into the document until you say so. It reads a
+scan as readily as a drawn original.
+
+Before a document leaves your hands, you can ask what it actually carries.
+Remove Hidden Information lists fourteen kinds of content that are in the file
+but not on the page — document and page metadata, attachments, earlier
+revisions, hidden layers, invisible text, scripts, actions, tags and more —
+with a count and a name for every finding. Nothing is removed until you tick
+it, and a pass that could not fully clear a category reports what is left
+rather than claiming success.
+
+A signature can now certify. Certifying states what anyone is allowed to
+change after you sign — nothing at all, filling in the forms, or filling in
+the forms and commenting — and the app reads that statement back. A certified
+document says so, an edit that stays inside what the certification permits
+goes through untouched, and an edit that does not is warned about or refused
+before it can break the file.
+
+File ▸ Export reaches three new targets: a spreadsheet, with the tables read
+off the page and figures written as figures; a presentation, one slide per
+page with editable text over the rendered page; and plain text, in reading
+order or with the page layout kept. All three have command-line arms.
 
 ### Certifying a document
 
@@ -49,6 +76,11 @@ as a pass or a failure.
   with.** A field whose on-page box is stored separately from the field itself —
   the shape most authoring tools produce — had its filled appearance reported as
   an unexplained change on any signed document.
+- **Fixed: applying redactions to a signed document went ahead without
+  warning.** Every other edit to a signed document asked first. Applying
+  redactions rewrites the page, so it now asks too — and on a document
+  certified against changes it is refused, with saving a copy offered instead.
+  Declining leaves your marks on the page rather than clearing them.
 
 ### A document tells you what it carries
 
@@ -173,6 +205,11 @@ clipboard. A document with no text layer says so and points at OCR.
   writes the text directly.
 - **Fixed:** exporting to XHTML produced an empty file for every document. It
   now writes the page's real text, like the HTML export beside it.
+
+### Fixes
+
+- The rotation tooltip on the text toolbar carried a stray internal reference
+  in its wording. It reads as a plain sentence now, in every language.
 
 ## 1.0.20 — Redaction that searches and measures, and a PDF from any file
 
