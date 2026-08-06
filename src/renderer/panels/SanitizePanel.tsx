@@ -308,22 +308,22 @@ export function SanitizePanel(): React.ReactElement {
               </div>
 
               {category.count === 0 && !category.unreadable && (
-                <p className="pl-6 text-xs text-neutral-500">
+                <p className="ps-6 text-xs text-neutral-500">
                   {tChrome('panel.sanitize.clean')}
                 </p>
               )}
               {category.unreadable && (
-                <p className="pl-6 text-xs text-amber-400">
+                <p className="ps-6 text-xs text-amber-400">
                   {tChrome('panel.sanitize.unreadableRow')}
                 </p>
               )}
               {!category.removable && (
-                <p className="pl-6 text-xs text-neutral-500">
+                <p className="ps-6 text-xs text-neutral-500">
                   {tChrome('panel.sanitize.reportedOnly')}
                 </p>
               )}
               {(COSTLY_CATEGORIES as readonly string[]).includes(category.id) && (
-                <p className="pl-6 text-xs text-amber-400">
+                <p className="ps-6 text-xs text-amber-400">
                   {tChrome(
                     category.id === 'form_fields'
                       ? 'panel.sanitize.cost.form_fields'
@@ -332,19 +332,19 @@ export function SanitizePanel(): React.ReactElement {
                 </p>
               )}
               {category.id === 'form_fields' && category.xfa && (
-                <p className="pl-6 text-xs text-amber-400" data-testid="sanitize-xfa">
+                <p className="ps-6 text-xs text-amber-400" data-testid="sanitize-xfa">
                   {tChrome('panel.sanitize.xfa')}
                 </p>
               )}
               {category.id === 'form_fields' && checked && !category.xfa && (
-                <div className="pl-6 pt-1">
+                <div className="ps-6 pt-1">
                   <label className="text-xs text-neutral-400" htmlFor="sanitize-field-mode">
                     {tChrome('panel.sanitize.fieldMode')}
                   </label>
                   <select
                     id="sanitize-field-mode"
                     data-testid="sanitize-field-mode"
-                    className="ml-2 rounded bg-neutral-800 px-2 py-0.5 text-xs"
+                    className="ms-2 rounded bg-neutral-800 px-2 py-0.5 text-xs"
                     value={fieldMode}
                     onChange={(e) => setFieldMode(e.target.value === 'flatten' ? 'flatten' : 'remove')}
                   >
@@ -354,12 +354,12 @@ export function SanitizePanel(): React.ReactElement {
                 </div>
               )}
               {category.id === 'hidden_text' && partialCount > 0 && (
-                <p className="pl-6 text-xs text-neutral-500" data-testid="sanitize-partial">
+                <p className="ps-6 text-xs text-neutral-500" data-testid="sanitize-partial">
                   {tChromeCount('panel.sanitize.partialKept', partialCount)}
                 </p>
               )}
               {category.id === 'hidden_text' && ocrCount > 0 && (
-                <div className="pl-6 pt-1">
+                <div className="ps-6 pt-1">
                   <label className="flex items-center gap-2 text-xs text-neutral-300">
                     <input
                       type="checkbox"
@@ -374,7 +374,7 @@ export function SanitizePanel(): React.ReactElement {
                 </div>
               )}
               {category.id === 'prior_revisions' && revisions && category.count > 0 && (
-                <p className="pl-6 text-xs text-neutral-400" data-testid="sanitize-revisions">
+                <p className="ps-6 text-xs text-neutral-400" data-testid="sanitize-revisions">
                   {tChromeCount('panel.sanitize.revisions', category.count, {
                     bytes: revisions.recoverable_bytes ?? 0,
                   })}
@@ -383,7 +383,7 @@ export function SanitizePanel(): React.ReactElement {
 
               {open && (
                 <ul
-                  className="pl-6 pt-1 text-xs text-neutral-400"
+                  className="ps-6 pt-1 text-xs text-neutral-400"
                   data-testid={`sanitize-detail-${category.id}`}
                 >
                   {category.detail.map((detail, i) => (

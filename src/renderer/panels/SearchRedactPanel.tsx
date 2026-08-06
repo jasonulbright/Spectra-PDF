@@ -604,7 +604,7 @@ export function SearchRedactPanel(): React.ReactElement {
                       return (
                         <div
                           key={key}
-                          className="flex items-start gap-1.5 pl-4 py-0.5 text-sm hover:bg-neutral-800 rounded"
+                          className="flex items-start gap-1.5 ps-4 py-0.5 text-sm hover:bg-neutral-800 rounded"
                         >
                           <input
                             type="checkbox"
@@ -618,7 +618,7 @@ export function SearchRedactPanel(): React.ReactElement {
                           <button
                             type="button"
                             onClick={() => getCanvasServices()?.jumpToFilePage(file.path, hit.page)}
-                            className="flex-1 min-w-0 text-left"
+                            className="flex-1 min-w-0 text-start"
                             title={tChrome('panel.searchRedact.jump')}
                           >
                             <span className="text-neutral-200">{hit.text}</span>
@@ -638,7 +638,7 @@ export function SearchRedactPanel(): React.ReactElement {
                                   )}
                             {hit.rects.some((r) => r.imprecise) && (
                               <span
-                                className="ml-1 text-amber-500"
+                                className="ms-1 text-amber-500"
                                 title={tChrome('panel.searchRedact.impreciseHint')}
                               >
                                 ~

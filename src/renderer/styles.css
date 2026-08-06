@@ -28,6 +28,20 @@
   background: #1a1a1a;
 }
 
+/* ── Direction ───────────────────────────────────────────────────────────
+   A file path, a URL and a key chord are NOTATION, not prose: their parts
+   have a fixed order that bidi reordering scrambles inside a right-to-left
+   line, and a Windows path is the canonical case. `isolate` keeps the
+   surrounding line's own direction intact. Prose never carries this class —
+   prose mirrors.
+   ──────────────────────────────────────────────────────────────────────── */
+
+.ltr-notation {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: start;
+}
+
 /* ── Brand colors ────────────────────────────────────────────────────────
    Override Tailwind defaults with exact brand colors.
    ──────────────────────────────────────────────────────────────────────── */
@@ -220,7 +234,7 @@
    itself keeps its dark literal background otherwise, which is wrong in
    BOTH light presentations (mica frosts it white, solid keeps it black
    behind light-remapped text). */
-[data-theme="light"] .tool-dock { background: #f9fafb; border-left-color: #e5e7eb; }
+[data-theme="light"] .tool-dock { background: #f9fafb; border-inline-start-color: #e5e7eb; }
 [data-theme="light"] .tool-dock-header { border-bottom-color: #e5e7eb; }
 [data-theme="light"] .tool-dock-title { color: #111827; }
 [data-theme="light"] .tool-dock-btn { color: #4b5563; }
@@ -391,7 +405,7 @@
   flex-direction: column;
   gap: 2px;
   padding: 4px;
-  border-right: 1px solid #262626;
+  border-inline-end: 1px solid #262626;
 }
 .nav-icon-btn {
   width: 32px;
@@ -408,7 +422,7 @@
 
 .nav-panel-body {
   position: relative;
-  border-right: 1px solid #262626;
+  border-inline-end: 1px solid #262626;
   min-width: 180px;
 }
 .nav-panel-header {
@@ -424,7 +438,7 @@
 .nav-resize-handle {
   position: absolute;
   top: 0;
-  right: -3px;
+  inset-inline-end: -3px;
   bottom: 0;
   width: 6px;
   cursor: col-resize;
@@ -466,8 +480,7 @@
 .thumb-row.selected .thumb-label { color: #ffffff; }
 .thumb-drop-indicator {
   position: absolute;
-  left: 8px;
-  right: 8px;
+  inset-inline: 8px;
   height: 2px;
   background: var(--accent, #0078d4);
   border-radius: 1px;
@@ -510,7 +523,7 @@
 .bookmark-title-input:focus { background: #262626; border-color: #404040; }
 .bookmark-jump {
   min-width: 22px;
-  text-align: right;
+  text-align: end;
   font-size: 11px;
   color: #6b7280;
   padding: 0 2px;
@@ -520,7 +533,7 @@
 .bookmark-page-input {
   width: 40px;
   padding: 2px 4px;
-  text-align: right;
+  text-align: end;
   background: #262626;
   border: 1px solid #404040;
   border-radius: 3px;
@@ -593,8 +606,9 @@
   align-items: flex-start;
   gap: 1px;
   width: 100%;
-  padding: 4px 10px 4px 16px;
-  text-align: left;
+  padding-block: 4px;
+  padding-inline: 16px 10px;
+  text-align: start;
   cursor: pointer;
 }
 .search-hit:hover { background: #1f1f1f; }
@@ -735,7 +749,7 @@
 [data-theme="light"] .bookmark-add-btn:hover { background: #e5e7eb; }
 
 [data-theme="light"] .nav-icon-strip,
-[data-theme="light"] .nav-panel-body { border-right-color: #e5e7eb; }
+[data-theme="light"] .nav-panel-body { border-inline-end-color: #e5e7eb; }
 [data-theme="light"] .nav-icon-btn { color: #6b7280; }
 [data-theme="light"] .nav-icon-btn:hover { background: #e5e7eb; color: #1f2937; }
 [data-theme="light"] .nav-icon-btn.active { background: #d1d5db; color: #111827; }
@@ -991,7 +1005,7 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  margin-left: auto;
+  margin-inline-start: auto;
   align-self: center;
   /* Keep actions faintly visible so they remain discoverable; hover brightens
      them to full opacity. */
@@ -1563,9 +1577,9 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-left: 6px;
-  padding-left: 6px;
-  border-left: 1px solid var(--border, #3a3a40);
+  margin-inline-start: 6px;
+  padding-inline-start: 6px;
+  border-inline-start: 1px solid var(--border, #3a3a40);
 }
 .secondary-toolbar-hint.error {
   color: #f87171;
@@ -1617,7 +1631,7 @@
 .symbol-palette-popover {
   position: absolute;
   top: calc(100% - 2px);
-  left: 10px;
+  inset-inline-start: 10px;
   z-index: 40;
   width: 320px;
   max-width: calc(100% - 20px);
@@ -1742,7 +1756,7 @@
 .stamp-custom-del {
   position: absolute;
   top: -6px;
-  right: -6px;
+  inset-inline-end: -6px;
   width: 14px;
   height: 14px;
   line-height: 12px;
@@ -1990,7 +2004,7 @@
 }
 .secondary-toolbar-opacity span {
   min-width: 34px;
-  text-align: right;
+  text-align: end;
   font-variant-numeric: tabular-nums;
 }
 /* The blend-mode select beside the opacity slider. */
@@ -2629,7 +2643,7 @@
   align-items: center;
   gap: 9px;
   padding: 8px 10px;
-  text-align: left;
+  text-align: start;
   border: 1px solid #2e2e2e;
   border-radius: 6px;
   background: #1f1f1f;
@@ -2688,7 +2702,7 @@
 .omnisearch-panel {
   position: absolute;
   top: calc(100% + 4px);
-  right: 0;
+  inset-inline-end: 0;
   z-index: 50;
   width: 340px;
   max-height: 420px;
@@ -2718,7 +2732,7 @@
   width: 100%;
   padding: 6px 8px;
   border-radius: 4px;
-  text-align: left;
+  text-align: start;
   font-size: 12px;
   color: #d4d4d8;
   cursor: default;
@@ -2940,8 +2954,9 @@
   grid-template-columns: 34px minmax(0, 1.2fr) minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  padding: 9px 14px 9px 10px;
-  text-align: left;
+  padding-block: 9px;
+  padding-inline: 10px 14px;
+  text-align: start;
   cursor: pointer;
   border-bottom: 1px solid #232328;
   transition: background 100ms;
@@ -2992,13 +3007,13 @@
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  border-left: 1px solid #2e2e2e;
+  border-inline-start: 1px solid #2e2e2e;
   background: #191919;
   min-width: 0;
 }
 .tool-dock-resize {
   position: absolute;
-  left: -2px;
+  inset-inline-start: -2px;
   top: 0;
   bottom: 0;
   width: 5px;
@@ -3261,7 +3276,7 @@
   color: #f87171;
 }
 .properties-bar-close {
-  margin-left: auto;
+  margin-inline-start: auto;
   width: 18px;
   height: 18px;
   line-height: 16px;
@@ -3359,8 +3374,8 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: #a3a3a3;
-  padding-right: 4px;
-  border-right: 1px solid #2e2e2e;
+  padding-inline-end: 4px;
+  border-inline-end: 1px solid #2e2e2e;
 }
 .secondary-toolbar-modes,
 .secondary-toolbar-actions,
@@ -3371,7 +3386,7 @@
 }
 /* Actions sit at the far end — "Close Tool" is an exit, not a peer of the
    modes, and putting it next to them invites a misclick mid-markup. */
-.secondary-toolbar-actions { margin-left: auto; }
+.secondary-toolbar-actions { margin-inline-start: auto; }
 .secondary-tool {
   padding: 3px 9px;
   border-radius: 4px;
@@ -3403,7 +3418,7 @@
   background: #f9fafb;
   border-bottom-color: #e5e7eb;
 }
-[data-theme="light"] .secondary-toolbar-title { color: #6b7280; border-right-color: #e5e7eb; }
+[data-theme="light"] .secondary-toolbar-title { color: #6b7280; border-inline-end-color: #e5e7eb; }
 [data-theme="light"] .secondary-tool { color: #4b5563; }
 [data-theme="light"] .secondary-tool:hover { background: #f3f4f6; color: #111827; }
 [data-theme="light"] .secondary-tool.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
@@ -3430,7 +3445,7 @@
   padding: 5px 9px;
   border-radius: 4px;
   font-size: 12px;
-  text-align: left;
+  text-align: start;
   color: #a3a3a3;
   cursor: default;
 }
@@ -3633,7 +3648,7 @@
 [data-theme="high-contrast"] .bg-neutral-900\/50 { background-color: rgba(0, 0, 0, 0.8); }
 [data-theme="high-contrast"] .bg-neutral-950\/40 { background-color: rgba(26, 26, 26, 0.6); }
 [data-theme="high-contrast"] .bg-neutral-700\/70 { background-color: #1a1a1a; }
-[data-theme="high-contrast"] .tool-dock { background: #000000; border-left-color: #1a1a1a; }
+[data-theme="high-contrast"] .tool-dock { background: #000000; border-inline-start-color: #1a1a1a; }
 [data-theme="high-contrast"] .tool-dock-header { border-bottom-color: #1a1a1a; }
 [data-theme="high-contrast"] .canvas-status-bar { background: #000000; border-top-color: #1a1a1a; }
 [data-theme="high-contrast"] .canvas-status-quiet { color: #ffffff; background: #1a1a1a; border-color: #2e2e2e; }
@@ -3674,7 +3689,7 @@
 [data-theme="high-contrast"] .bookmarks-footer { border-top-color: #1a1a1a; }
 [data-theme="high-contrast"] .bookmark-add-btn { border-color: #2e2e2e; }
 [data-theme="high-contrast"] .bookmark-add-btn:hover { background: #1a1a1a; }
-[data-theme="high-contrast"] .nav-icon-strip, [data-theme="high-contrast"] .nav-panel-body { border-right-color: #1a1a1a; }
+[data-theme="high-contrast"] .nav-icon-strip, [data-theme="high-contrast"] .nav-panel-body { border-inline-end-color: #1a1a1a; }
 [data-theme="high-contrast"] .nav-icon-btn { color: #d0d0d0; }
 [data-theme="high-contrast"] .nav-icon-btn:hover { background: #1a1a1a; color: #ffffff; }
 [data-theme="high-contrast"] .nav-icon-btn.active { background: #2e2e2e; color: #ffffff; }
@@ -3708,7 +3723,7 @@
 [data-theme="high-contrast"] .tool-op:hover { background: #0d0d0d; color: #ffffff; }
 [data-theme="high-contrast"] .tool-op.active { background: #0078d4; color: #000000; }
 [data-theme="high-contrast"] .secondary-toolbar { background: #000000; border-bottom-color: #1a1a1a; }
-[data-theme="high-contrast"] .secondary-toolbar-title { color: #d0d0d0; border-right-color: #1a1a1a; }
+[data-theme="high-contrast"] .secondary-toolbar-title { color: #d0d0d0; border-inline-end-color: #1a1a1a; }
 [data-theme="high-contrast"] .secondary-tool { color: #e6e6e6; }
 [data-theme="high-contrast"] .secondary-tool:hover { background: #0d0d0d; color: #ffffff; }
 [data-theme="high-contrast"] .secondary-tool.active { background: #0078d4; color: #000000; }
@@ -3933,14 +3948,14 @@
   gap: 1px;
 }
 .canvas-status-caret {
-  padding-left: 4px;
-  padding-right: 4px;
+  padding-inline-start: 4px;
+  padding-inline-end: 4px;
   font-size: 10px;
 }
 .canvas-status-snap-popover {
   position: absolute;
   bottom: calc(100% + 6px);
-  right: 0;
+  inset-inline-end: 0;
   min-width: 168px;
   padding: 8px;
   border-radius: 6px;
@@ -3964,7 +3979,7 @@
 }
 .canvas-status-snap-number {
   width: 56px;
-  margin-left: auto;
+  margin-inline-start: auto;
   padding: 1px 4px;
   background: transparent;
   border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.16));
@@ -3973,7 +3988,7 @@
   font-variant-numeric: tabular-nums;
 }
 .canvas-status-snap-select {
-  margin-left: auto;
+  margin-inline-start: auto;
   padding: 1px 4px;
   background: transparent;
   border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.16));

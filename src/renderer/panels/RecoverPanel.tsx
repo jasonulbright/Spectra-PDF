@@ -50,7 +50,7 @@ export function RecoverPanel(): React.ReactElement {
           <div className="text-green-400 mb-1">{tChrome('panel.recover.recoveredPages', { pages: report.recovered_pages.join(', ') })}</div>
           <div className="text-red-400 mb-1">{tChrome('panel.recover.lostPages')}</div>
           {report.lost_pages.map((lp, i: number) => (
-            <div key={i} className="text-red-400 pl-2">
+            <div key={i} className="text-red-400 ps-2">
               {tChrome('panel.recover.lostLine', { page: lp.page, error: lp.error })}
             </div>
           ))}

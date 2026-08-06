@@ -230,7 +230,7 @@ export function TrapPresetsPanel(): React.ReactElement {
           </div>
         )}
 
-        <div className="flex flex-col gap-1 max-h-72 overflow-auto pr-1">
+        <div className="flex flex-col gap-1 max-h-72 overflow-auto pe-1">
           {(vocabulary?.fields ?? [])
             .filter((spec) => spec.type !== 'colorants')
             .map((spec) => (

@@ -263,7 +263,7 @@ function DiffRow({ row }: { row: CompareRow }): React.ReactElement {
   const sign = row.type === 'add' ? '+' : row.type === 'remove' ? '−' : ' ';
   return (
     <div className={`flex gap-2 px-3 py-0.5 ${cls}`}>
-      <span className="w-8 shrink-0 text-right text-neutral-600 select-none">
+      <span className="w-8 shrink-0 text-end text-neutral-600 select-none">
         {row.page != null ? `p${row.page}` : ''}
       </span>
       <span className="w-3 shrink-0 select-none">{sign}</span>
@@ -395,7 +395,7 @@ function VisualPairListItem({
     <button
       data-testid={`compare-visual-pair-${pair.page}`}
       onClick={() => onSelect(pair.page)}
-      className={`w-full text-left px-3 py-1.5 hover:bg-neutral-800 ${
+      className={`w-full text-start px-3 py-1.5 hover:bg-neutral-800 ${
         selected ? 'bg-neutral-700/70 text-neutral-100' : 'text-neutral-300'
       }`}
     >
