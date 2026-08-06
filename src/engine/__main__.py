@@ -54,6 +54,14 @@ from engine.ink_manager import (
     spot_to_process,
 )
 from engine.flattener import flatten_transparency, list_transparency
+from engine.trapping import (
+    assign_presets,
+    emit_trapping_setup,
+    export_postscript,
+    list_trap_presets,
+    trap_preset_defaults,
+    validate_trap_preset,
+)
 from engine.hairlines import fix_hairlines, list_hairlines
 from engine.printer_marks import (
     add_printer_marks,
@@ -205,6 +213,12 @@ def main() -> None:
     server.register("fix_hairlines", fix_hairlines)
     server.register("list_transparency", list_transparency)
     server.register("flatten_transparency", flatten_transparency)
+    server.register("trap_preset_defaults", trap_preset_defaults)
+    server.register("validate_trap_preset", validate_trap_preset)
+    server.register("assign_trap_presets", assign_presets)
+    server.register("list_trap_presets", list_trap_presets)
+    server.register("emit_trapping_setup", emit_trapping_setup)
+    server.register("export_postscript", export_postscript)
     server.register("get_struct_tree", get_struct_tree)
     server.register("set_struct_props", set_struct_props)
     server.register("move_struct_node", move_struct_node)

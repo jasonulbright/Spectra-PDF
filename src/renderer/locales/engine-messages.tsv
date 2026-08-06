@@ -66,7 +66,7 @@ create_pdf.unreadableImage	pattern	create_pdf	unreadable image: {{src_path}} ({{
 distill.alreadyPdfDistillingConverts	exact	distill	this is already a PDF — distilling converts PostScript; use Repair (Tier 2 rebuild) to re-render a PDF
 distill.ghostscriptProducedPdfPages	exact	distill	Ghostscript produced a PDF with no pages
 distill.ghostscriptProducedUnreadablePdf	pattern	distill	Ghostscript produced an unreadable PDF: {{exc}}
-distill.inputFileFound	pattern	create_pdf,distill,office_export,soffice	input file not found: {{file}}
+distill.inputFileFound	pattern	create_pdf,distill,office_export,soffice,trapping	input file not found: {{file}}
 distill.outputMustDifferentFile	exact	distill	output must be a different file from the input
 distill.postscriptFileMissingHeader	exact	distill	not a PostScript file (missing the '%!' header)
 distill.unknownPresetScreenEbook	pattern	distill	unknown preset {{preset}} (screen, ebook, printer, prepress, default)
@@ -264,6 +264,7 @@ prepress.ghostscriptCmykConversionFailed	pattern	prepress	Ghostscript CMYK conve
 prepress.ghostscriptPdfXConversion	pattern	prepress	Ghostscript PDF/X conversion failed: {{v0}}
 prepress.pdfXOutputCarries	exact	prepress	PDF/X output carries no /OutputIntents — conversion failed.
 prepress.renderIntentMustPerceptual	exact	prepress	render_intent must be perceptual, relative, saturation, or absolute.
+prepress.trappedMustOne	pattern	prepress,trapping	Trapped must be one of {{allowed}}.
 prepress.versionMustXX	exact	prepress	version must be 1 (X-1a), 3 (X-3), or 4 (X-4).
 print_layout.failed	pattern	print_layout	{{what}} failed: {{v1}}
 print_layout.posterOverlapMustSmaller	exact	print_layout	Poster overlap must be smaller than the paper
@@ -479,6 +480,19 @@ text_runs.nothingRestyleGiveSize	exact	text_runs	nothing to restyle — give a s
 text_runs.restyleDidApplyRun	exact	text_runs	restyle did not apply (run not found)
 text_runs.sizeMustBetweenPoints	exact	text_runs	size must be between 0.1 and 1000 points
 text_runs.textRunIndexOut	pattern	text_runs	text run index {{index}} is out of range (page has {{count}})
+trapping.colorantzonedetailsMustNameColorant	exact	trapping	ColorantZoneDetails must name a colorant per entry.
+trapping.ghostscriptPostscriptExportFailed	pattern	trapping	Ghostscript PostScript export failed: {{detail}}
+trapping.mustBetween	pattern	trapping	{{field}} must be between {{low}} and {{high}}.
+trapping.mustNumber	pattern	trapping	{{field}} must be a number.
+trapping.mustOne	pattern	trapping	{{field}} must be one of {{choices}}.
+trapping.mustTrueFalse	pattern	trapping	{{field}} must be true or false.
+trapping.mustWholeNumber	pattern	trapping	{{field}} must be a whole number.
+trapping.overridesMustTrappingParameters	pattern	trapping	The overrides for {{name}} must be trapping parameters.
+trapping.pagesDocument	pattern	trapping	Pages {{page_range}} are not in this document.
+trapping.postscriptFilePageStructure	exact	trapping	This PostScript file has no page structure to attach trapping setup to.
+trapping.postscriptLanguageLevelMust	exact	trapping	PostScript language level must be 2 or 3.
+trapping.ripTrappingLanguagelevelFacility	exact	trapping	In-RIP trapping is a LanguageLevel 3 facility and cannot be written into LanguageLevel 2 PostScript.
+trapping.ripTrappingParameter	pattern	trapping	{{field}} is not an In-RIP trapping parameter.
 validate.fileExceedsMbLimit	pattern	validate	File exceeds {{MAX_FILE_SIZE_MB}} MB limit ({{v1}} MB)
 validate.pageCountExceedsLimit	pattern	validate	Page count {{page_count}} exceeds {{MAX_PAGES}} limit
 watermark.colorMustRrggbbGot	pattern	watermark	color must be #rrggbb, got: {{color}}
