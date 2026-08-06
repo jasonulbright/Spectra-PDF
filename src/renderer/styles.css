@@ -3955,6 +3955,38 @@
 }
 .canvas-status-snap-select:disabled { opacity: 0.55; }
 
+/* Flattener preview marks. Each category gets its own tint so the panel's
+   counts and the page agree at a glance; a region is the solid frame, because
+   it is the thing that will actually rasterize and the objects are why. */
+.page-flatten-mark {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 2px;
+}
+.page-flatten-mark.is-region {
+  border: 1.5px solid rgba(59, 130, 246, 0.9);
+  background: rgba(59, 130, 246, 0.08);
+}
+.page-flatten-mark.is-transparent {
+  border: 1px dashed rgba(217, 70, 239, 0.9);
+  background: rgba(217, 70, 239, 0.12);
+}
+.page-flatten-mark.is-affected {
+  border: 1px dashed rgba(234, 179, 8, 0.85);
+}
+.page-flatten-mark.is-rasterized {
+  border: 1px dotted rgba(248, 113, 113, 0.85);
+}
+.page-flatten-mark.is-outlined-text {
+  border: 1px dotted rgba(52, 211, 153, 0.9);
+}
+.page-flatten-mark.is-outlined-strokes {
+  border: 1px dotted rgba(45, 212, 191, 0.9);
+}
+.page-flatten-mark.is-expanded-patterns {
+  border: 1px dotted rgba(167, 139, 250, 0.9);
+}
+
 /* Detected field candidates. A dashed amber frame, deliberately unlike the
    solid widget outline: a candidate has written nothing to the document, and a
    user who cannot tell the two apart has no review step. */
