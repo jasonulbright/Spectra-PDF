@@ -95,13 +95,22 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Install Python dependencies
+      # One install per step. The default shell on windows runners reports the
+      # step's verdict as the LAST command's exit status, and a native command's
+      # non-zero exit does not abort the block, so a failed install in a
+      # multi-command block reports success and surfaces only as downstream
+      # collection errors.
+      - name: Install Python dependencies (shipped, hash-pinned set)
         # The shipped, hash-pinned set rather than a hand-listed subset: a
         # hand-listed one caps what can collect, and installing what ships means
-        # a new test file needs no CI edit.
-        run: |
-          pip install -r scripts/python-requirements.txt
-          pip install pytest
+        # a new test file needs no CI edit. `--require-hashes` is stated
+        # explicitly to match what setup-python-embed.ps1 installs into the
+        # shipped runtime, so this job cannot pass against a set the build
+        # would refuse.
+        run: pip install --require-hashes -r scripts/python-requirements.txt
+
+      - name: Install pytest
+        run: pip install pytest
 
       - name: Run engine tests (full suite)
         run: python -m pytest tests/ -q
@@ -126,10 +135,11 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
       - name: cargo audit
-        run: |
-          cargo install cargo-audit
-          cd src-tauri && cargo audit
+        run: cd src-tauri && cargo audit
 
       # The third dependency graph. npm audit and cargo audit between them
       # cover the renderer and the Rust backend, but the PYTHON engine ships
@@ -142,10 +152,11 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Install pip-audit
+        run: pip install pip-audit
+
       - name: pip audit (bundled engine runtime)
-        run: |
-          pip install pip-audit
-          pip-audit -r scripts/python-requirements.txt --no-deps
+        run: pip-audit -r scripts/python-requirements.txt --no-deps
 
   e2e:
     name: E2E (WebdriverIO + tauri-driver)
@@ -239,16 +250,22 @@ jobs:
         # with 7-Zip (preinstalled on windows runners).
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1
 
-      - name: Vendor native Tesseract + stage OCR models
+      # Vendoring and staging are separate steps: a failed vendoring in a
+      # multi-command block would be masked by the staging command's exit
+      # status and reported as success.
+      - name: Vendor native Tesseract
         # Phase 12 made recognition native and engine-side, so 14-ocr-find and
         # 40-batch-ocr now need the real tesseract.exe and real traineddata —
         # a stub would fail them for a reason that has nothing to do with the
-        # WebView2 experiment this job is testing. Staging MUST follow the
-        # vendoring: the script supplies tessdata/configs (TSV word-box output)
-        # and osd, which sync-ocr-assets.mjs then adds the 47 models beside.
-        run: |
-          powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
-          node scripts/sync-ocr-assets.mjs
+        # WebView2 experiment this job is testing.
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
+        shell: pwsh
+
+      - name: Stage OCR language models
+        # Staging MUST follow the vendoring: the script supplies
+        # tessdata/configs (TSV word-box output) and osd, which
+        # sync-ocr-assets.mjs then adds the 47 models beside.
+        run: node scripts/sync-ocr-assets.mjs
         shell: pwsh
 
       - name: Build Tauri binary (debug, frontend embedded, no installer)
@@ -265,12 +282,19 @@ jobs:
         # — the step's old name said "Edge" and misled a whole investigation.
         # wdio.conf.ts onPrepare re-runs the tool anyway (self-healing rule);
         # this step exists to have the tool compiled + on PATH.
+        # The Push-Location/Pop-Location pair keeps this one step, so each
+        # native command's exit status is checked explicitly: a non-zero exit
+        # does not abort a pwsh block, and only the last command's status
+        # becomes the step's verdict.
         run: |
           cargo install --git https://github.com/chippers/msedgedriver-tool
+          if ($LASTEXITCODE -ne 0) { throw "cargo install msedgedriver-tool exited $LASTEXITCODE" }
           $cargoBin = "$env:USERPROFILE\.cargo\bin"
           Push-Location $cargoBin
           msedgedriver-tool
+          $toolExit = $LASTEXITCODE
           Pop-Location
+          if ($toolExit -ne 0) { throw "msedgedriver-tool exited $toolExit" }
           echo "$cargoBin" >> $env:GITHUB_PATH
         shell: pwsh
 
