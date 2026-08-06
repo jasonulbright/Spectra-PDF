@@ -49,6 +49,7 @@ import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../
 import type { SignerSource } from '../SignerSourceFields';
 import {
   certifyParams,
+  lockNeedsFields,
   lockParams,
   CERTIFICATION_LEVEL_LABEL,
   CERTIFY_LEVELS,
@@ -455,6 +456,7 @@ const NO_EDIT_TEXT: ReadonlyMap<string, EditTextListing> = new Map();
 const NO_PAGE_IDS: ReadonlySet<string> = new Set();
 const NO_WORDS_BY_PAGE: ReadonlyMap<string, OcrWord[]> = new Map();
 const NO_WIDGETS_BY_PAGE: ReadonlyMap<string, OverlayWidget[]> = new Map();
+const NO_LOCK_NAMES: readonly string[] = [];
 const NO_FORM_VALUES: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>> = new Map();
 
 export function WorkspaceCanvasView({
@@ -931,6 +933,9 @@ export function WorkspaceCanvasView({
   const [nfType, setNfType] = useState<NewFieldType>('text');
   const [nfOptions, setNfOptions] = useState('');
   const [nfMultiline, setNfMultiline] = useState(false);
+  // The `/Lock` seed a new SIGNATURE field is authored with — what whoever
+  // signs it later is bound by, placed without the preparer signing anything.
+  const [nfLock, setNfLock] = useState<LockOptions>(DEFAULT_LOCK);
   const [creatingField, setCreatingField] = useState(false);
   const [nfError, setNfError] = useState<string | null>(null);
   const onSetNewFieldRect = useCallback(
@@ -956,6 +961,17 @@ export function WorkspaceCanvasView({
   );
   const onClearNewFieldPlacement = useCallback(() => setNewFieldPlacement(null), []);
 
+  // The names a new signature field's lock can choose from: the placement
+  // document's own fillable fields. Read from the workspace forms index rather
+  // than through a fresh engine call — it is the same read, already settled.
+  const newFieldLockNames = useMemo(() => {
+    const path = newFieldPlacement?.path;
+    if (!path) return NO_LOCK_NAMES;
+    return (workspaceForms.get(path)?.fields ?? [])
+      .filter((f) => f.type !== 'signature')
+      .map((f) => f.name);
+  }, [newFieldPlacement, workspaceForms]);
+
   // Placement whose page still exists (mirrors liveSigPlacement).
   const liveNewFieldPlacement = useMemo(() => {
     if (!newFieldPlacement) return null;
@@ -977,6 +993,7 @@ export function WorkspaceCanvasView({
       type: NewFieldType;
       options?: string[];
       multiline?: boolean;
+      lock?: LockOptions;
     }): Promise<void> => {
       if (creatingFieldRef.current) return; // re-entry: the button is disabled while creating
       const placement = liveNewFieldPlacement;
@@ -1012,6 +1029,17 @@ export function WorkspaceCanvasView({
           rect: built.appearance.rect,
           ...(params.options && params.options.length > 0 ? { options: params.options } : {}),
           ...(params.type === 'text' && params.multiline ? { multiline: true } : {}),
+          // Only a signature field carries one, and only the two list actions
+          // carry names — `all` ignores them, so sending them would discard
+          // what was chosen (the write refuses that pair).
+          ...(params.type === 'signature' && params.lock && params.lock.action !== null
+            ? {
+                lock: {
+                  action: params.lock.action,
+                  fields: lockNeedsFields(params.lock.action) ? params.lock.fields : [],
+                },
+              }
+            : {}),
         });
         // Created — reset the authoring surfaces; stay in forms mode so the
         // new field is immediately fillable.
@@ -1019,6 +1047,7 @@ export function WorkspaceCanvasView({
         setNfName('');
         setNfOptions('');
         setNfMultiline(false);
+        setNfLock(DEFAULT_LOCK);
         // Stay in Prepare Form's own mode, ready to place the next field.
         //
         // NOT 'select' (the widget renders nothing outside a form mode, so the
@@ -1049,8 +1078,9 @@ export function WorkspaceCanvasView({
       type: nfType,
       ...(options ? { options } : {}),
       multiline: nfMultiline,
+      lock: nfLock,
     }).catch(() => undefined); // surfaced via nfError; the card stays open
-  }, [createFieldFromPlacement, nfName, nfType, nfOptions, nfMultiline]);
+  }, [createFieldFromPlacement, nfName, nfType, nfOptions, nfMultiline, nfLock]);
 
   // --- Add Text ------------------------------------------------------
   // Same placement lifecycle as the new-field card (single, transient, dies
@@ -6166,6 +6196,14 @@ export function WorkspaceCanvasView({
               />
               {tChrome('canvas.newfield.multiline')}
             </label>
+          )}
+          {nfType === 'signature' && (
+            <FieldLockControl
+              value={nfLock}
+              onChange={setNfLock}
+              fieldNames={newFieldLockNames}
+              idPrefix="new-field"
+            />
           )}
           {(nfType === 'radio' || nfType === 'dropdown' || nfType === 'optionlist') && (
             <div className="flex items-start gap-2">

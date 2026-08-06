@@ -68,9 +68,8 @@ from engine.docmdp import LEVEL_BY_VALUE, VALUE_BY_LEVEL, certification_of_file
 from engine.docmdp_policy import DIFF_POLICY, LockedFieldModification
 from engine.fieldmdp import (
     ACTION_BY_NAME,
-    ACTION_NAMES,
-    LIST_ACTIONS,
     lock_of_field_dict,
+    validated_lock,
 )
 from pyhanko import stamp
 from pyhanko.keys import load_certs_from_pemder_data, load_private_key_from_pemder_data
@@ -681,54 +680,33 @@ _MDP_ACTION_BY_NAME: dict[str, FieldMDPAction] = {
 }
 
 
-def _validated_lock(file: str, lock: str | None, lock_fields: list | None) -> FieldMDPSpec | None:
+def _validated_lock(
+    file: str, lock: str | None, lock_fields: list | None, own_name: str | None = None
+) -> FieldMDPSpec | None:
     """Validate a field-lock request against the document, and build the spec.
 
-    Every refusal here is a request that would otherwise lock something other
-    than what was asked for: an empty list means opposite things under the two
-    list actions, a list under ``all`` is discarded by the format, and a name
-    the document does not carry locks nothing (``include``) or everything but a
-    typo (``exclude``) — invisibly in both directions.
+    The rules live in ``fieldmdp.validated_lock``, which the preparer-side
+    authoring doors share: a lock means the same thing and refuses the same
+    requests whether it is placed at signing time or seeded onto an unsigned
+    field beforehand.
     """
-    names = [str(n).strip() for n in (lock_fields or []) if str(n).strip()]
-    if lock is None:
-        if names:
-            raise ValueError(
-                "Field names to lock apply only to a field lock. Choose what the "
-                "signature locks, or leave the names unset."
-            )
-        return None
-    if lock not in ACTION_NAMES:
-        raise ValueError(
-            f'Unknown field lock "{lock}". Choose all, include, or exclude.'
-        )
-    if lock == "all" and names:
-        raise ValueError(
-            "A field lock covering every form field takes no field names."
-        )
-    if lock in LIST_ACTIONS and not names:
-        raise ValueError(
-            f'A field lock of type "{lock}" needs at least one field name.'
-        )
-    if names:
+    present = None
+    if lock_fields:
         import pikepdf
 
         try:
             with pikepdf.open(file) as pdf:
                 present = set(form_field_forest(pdf))
         except Exception:
-            # A document that cannot be read has no field list to check against,
-            # and reporting every name as missing would blame the request for
-            # the file's problem. The signing path below fails on its own with
-            # the actual reason.
+            # A document that cannot be read has no field list to check against.
+            # The signing path below fails on its own with the actual reason.
             present = None
-        missing = [n for n in names if n not in present] if present is not None else []
-        if missing:
-            raise ValueError(
-                f'This document has no form field named "{missing[0]}", so that '
-                "field cannot be locked."
-            )
-    return FieldMDPSpec(action=_MDP_ACTION_BY_NAME[lock], fields=names or None)
+    spec = validated_lock(lock, lock_fields, present, own_name)
+    if spec is None:
+        return None
+    return FieldMDPSpec(
+        action=_MDP_ACTION_BY_NAME[spec["action"]], fields=spec["fields"] or None
+    )
 
 
 def _existing_field_lock_refusal(file: str, field_name: str, spec: FieldMDPSpec | None) -> None:
@@ -1075,7 +1053,10 @@ def sign_pdf(
     # Certification is orthogonal to placement, signer source and PAdES
     # profile; only the document's own state can refuse it.
     existing_certification = _certification_refusals(file, certify, certify_level)
-    lock_spec = _validated_lock(file, lock, lock_fields)
+    # A NEW field's name is not in the document yet, so it cannot appear in the
+    # list without refusing as a missing name first; only the existing-field
+    # path can name its own target.
+    lock_spec = _validated_lock(file, lock, lock_fields, existing_field)
 
     signer_cm = _signer_source(
         pfx_path, password, key_path, cert_path,

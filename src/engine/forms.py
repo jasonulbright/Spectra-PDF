@@ -34,6 +34,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Dictionary, Name
 
+from engine.fieldmdp import lock_of_field_dict
 from engine.pdf_metrics import (
     GLYPH_HEIGHT_EM,
     HELVETICA_DESCENT_EM,
@@ -535,6 +536,9 @@ def read_form_fields(file: str) -> dict:
             if ftype == "signature":
                 # The overlay badges a signed vs empty signature field.
                 entry["filled"] = field.attr("/V") is not None
+                # The seed an unsigned field carries binds whoever signs it
+                # later, so the preparer surface reads it from here.
+                entry["lock"] = lock_of_field_dict(field.obj)
             if ftype == "button":
                 action = _button_action(field)
                 if action is not None:

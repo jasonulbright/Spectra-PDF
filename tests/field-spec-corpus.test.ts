@@ -2,13 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  PDFArray,
+  PDFDict,
+  PDFDocument,
+  PDFHexString,
+  PDFName,
+  PDFRef,
+  PDFString,
+} from 'pdf-lib';
+import {
   buildFieldSpecs,
   candidateKind,
   type DetectedCandidate,
   type FieldCandidate,
   type ResolvedCandidate,
 } from '../src/renderer/lib/form-candidates';
-import type { NewFieldSpec } from '../src/renderer/lib/form-authoring';
+import { addFormFields, FieldSpecError, type NewFieldSpec } from '../src/renderer/lib/form-authoring';
+import type { FieldLock } from '../src/renderer/lib/signatures';
 
 // The renderer half of the shared spec pin. The SAME JSON file drives
 // tests/test_form_prepare.py: the canvas builds specs here and the folder and
@@ -33,9 +43,19 @@ interface Case {
   specs: CorpusSpec[];
 }
 
+/** A `/Lock` authoring case: build the base document, author the specs, then
+ * either read the locks back or require the named refusal. */
+interface LockCase {
+  name: string;
+  existing: string[];
+  specs: (CorpusSpec & { lock?: FieldLock })[];
+  locks?: Record<string, FieldLock | null>;
+  refuses?: string;
+}
+
 const corpus = JSON.parse(
   readFileSync(join(__dirname, 'fixtures', 'field-spec-corpus.json'), 'utf8'),
-) as { cases: Case[] };
+) as { cases: Case[]; lock_cases: LockCase[] };
 
 /** A detected row as the canvas holds it. The geometry conversion the canvas
  * does is not exercised here: the corpus works in page space, which is what
@@ -59,6 +79,7 @@ function resolve(row: DetectedCandidate): ResolvedCandidate {
     evidence: row.evidence,
     warnings: row.warnings,
     checked: true,
+    lock: null,
   };
   return {
     candidate,
@@ -100,5 +121,99 @@ describe('field-spec corpus', () => {
   it('covers every kind a spec can carry', () => {
     const kinds = new Set(corpus.cases.flatMap((c) => c.specs.map((s) => s.type)));
     expect(kinds).toEqual(new Set(['text', 'checkbox', 'radio', 'signature']));
+  });
+});
+
+// ── The /Lock half of the same pin ────────────────────────────────────────
+
+/** The wording each corpus condition carries on THIS side. The engine states
+ * the same conditions in its own English; only the condition identity crosses. */
+const REFUSAL_KEY: Record<string, string> = {
+  lock_not_signature: 'refusal.field.lockNotSignature',
+  lock_needs_fields: 'refusal.field.lockNeedsFields',
+  lock_takes_no_fields: 'refusal.field.lockTakesNoFields',
+  lock_unknown_field: 'refusal.field.lockUnknownField',
+  lock_self: 'refusal.field.lockSelf',
+};
+
+async function baseDocument(existing: readonly string[]): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([612, 792]);
+  const form = doc.getForm();
+  existing.forEach((name, i) => {
+    form.createTextField(name).addToPage(page, { x: 72, y: 700 - i * 24, width: 228, height: 14 });
+  });
+  return doc.save();
+}
+
+function asSpec(row: CorpusSpec & { lock?: FieldLock }): NewFieldSpec {
+  return {
+    name: row.name,
+    type: row.type as NewFieldSpec['type'],
+    pageIndex: row.page_index,
+    rect: row.rect as [number, number, number, number],
+    ...(row.lock ? { lock: row.lock } : {}),
+  };
+}
+
+function decodeText(value: unknown): string | null {
+  return value instanceof PDFString || value instanceof PDFHexString ? value.decodeText() : null;
+}
+
+/** The `/Lock` a top-level field carries, in the corpus's own vocabulary. */
+function lockOfField(doc: PDFDocument, fieldName: string): FieldLock | null {
+  const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+  const fields = acro?.lookupMaybe(PDFName.of('Fields'), PDFArray);
+  if (!fields) return null;
+  for (let i = 0; i < fields.size(); i++) {
+    const entry = fields.get(i);
+    const dict = entry instanceof PDFRef ? doc.context.lookup(entry) : entry;
+    if (!(dict instanceof PDFDict)) continue;
+    if (decodeText(dict.get(PDFName.of('T'))) !== fieldName) continue;
+    const lock = dict.lookupMaybe(PDFName.of('Lock'), PDFDict);
+    if (!lock) return null;
+    const action = lock.lookupMaybe(PDFName.of('Action'), PDFName)?.asString();
+    const wire = { '/All': 'all', '/Include': 'include', '/Exclude': 'exclude' }[action ?? ''];
+    if (!wire) return null;
+    const listed = lock.lookupMaybe(PDFName.of('Fields'), PDFArray);
+    const names: string[] = [];
+    for (let j = 0; j < (listed?.size() ?? 0); j++) {
+      const text = decodeText(listed!.get(j));
+      if (text !== null) names.push(text);
+    }
+    return { action: wire as FieldLock['action'], fields: names };
+  }
+  return null;
+}
+
+describe('field-lock corpus', () => {
+  for (const c of corpus.lock_cases) {
+    it(c.name, async () => {
+      const base = await baseDocument(c.existing);
+      const specs = c.specs.map(asSpec);
+      if (c.refuses) {
+        const key = REFUSAL_KEY[c.refuses];
+        expect(key).toBeDefined();
+        await expect(addFormFields(base, specs)).rejects.toThrow(FieldSpecError);
+        const problems = await addFormFields(base, specs).catch((e: unknown) =>
+          e instanceof FieldSpecError ? e.problems.map((p) => p.key) : [],
+        );
+        expect(problems).toContain(key);
+        return;
+      }
+      const written = await addFormFields(base, specs);
+      const doc = await PDFDocument.load(written, { updateMetadata: false });
+      for (const [field, expected] of Object.entries(c.locks ?? {})) {
+        expect(lockOfField(doc, field)).toEqual(expected);
+      }
+    });
+  }
+
+  it('covers both outcomes and every action', () => {
+    const actions = new Set(
+      corpus.lock_cases.flatMap((c) => Object.values(c.locks ?? {}).map((l) => l?.action ?? null)),
+    );
+    expect(actions).toEqual(new Set(['all', 'include', 'exclude', null]));
+    expect(new Set(corpus.lock_cases.map((c) => Boolean(c.refuses)))).toEqual(new Set([true, false]));
   });
 });
