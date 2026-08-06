@@ -251,7 +251,8 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     // CMYK is a press decision, not a file-size one, and it belongs beside
     // the tools that inspect the separations it produces.
     description: 'Preview separations and ink coverage, manage inks, check print readiness, and convert colour.',
-    ops: ['outputpreview', 'inkmanager', 'printermarks', 'hairlines', 'preflight', 'convert_cmyk'],
+    ops: ['outputpreview', 'inkmanager', 'printermarks', 'hairlines', 'flattener',
+      'preflight', 'convert_cmyk'],
   },
   {
     id: 'links',

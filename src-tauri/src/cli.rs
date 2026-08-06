@@ -68,6 +68,12 @@ pub enum CliCommand {
     HairlinesList(HairlinesListArgs),
     /// Raise every hairline stroke to a minimum device width
     HairlinesFix(HairlinesFixArgs),
+    /// Report what a transparency flatten would rasterize, and where (JSON;
+    /// writes nothing)
+    FlattenList(FlattenListArgs),
+    /// Flatten transparency by rasterizing only the regions that composite,
+    /// leaving text and vectors outside them live
+    Flatten(FlattenArgs),
     /// Extract text from a PDF
     ExtractText(ExtractTextArgs),
     /// Delete pages from a PDF
@@ -1280,6 +1286,39 @@ pub struct HairlinesFixArgs {
     /// Skip annotation border widths and appearance-stream strokes
     #[arg(long)]
     pub skip_annotations: bool,
+}
+
+#[derive(Args)]
+pub struct FlattenListArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Raster/vector balance, 0.0 (most live content) to 1.0 (fewest regions)
+    #[arg(long, default_value_t = 0.5)]
+    pub balance: f64,
+    /// Resolution the regions rasterize at, and snap their edges against
+    #[arg(long, default_value_t = 150)]
+    pub dpi: i64,
+    /// Comma-separated 1-based page numbers (omit for all pages)
+    #[arg(long)]
+    pub pages: Option<String>,
+}
+
+#[derive(Args)]
+pub struct FlattenArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Raster/vector balance, 0.0 (most live content) to 1.0 (fewest regions)
+    #[arg(long, default_value_t = 0.5)]
+    pub balance: f64,
+    /// Resolution the regions rasterize at, and snap their edges against
+    #[arg(long, default_value_t = 150)]
+    pub dpi: i64,
+    /// Comma-separated 1-based page numbers (omit for all pages)
+    #[arg(long)]
+    pub pages: Option<String>,
 }
 
 #[derive(Args)]
@@ -2779,6 +2818,32 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 params["pages"] = json!(parse_page_numbers(pages)?);
             }
             engine.call("fix_hairlines", params)
+        }
+
+        CliCommand::FlattenList(args) => {
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "balance": args.balance,
+                "dpi": args.dpi,
+            });
+            if let Some(pages) = &args.pages {
+                params["pages"] = json!(parse_page_numbers(pages)?);
+            }
+            engine.call("list_transparency", params)
+        }
+
+        CliCommand::Flatten(args) => {
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "balance": args.balance,
+                "dpi": args.dpi,
+                "gs_path": resolve_gs().to_string_lossy(),
+            });
+            if let Some(pages) = &args.pages {
+                params["pages"] = json!(parse_page_numbers(pages)?);
+            }
+            engine.call("flatten_transparency", params)
         }
 
         CliCommand::PageBox(args) => {
