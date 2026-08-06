@@ -110,10 +110,13 @@ export function aliasIsAllowed(aliases: InkAliases, source: string, target: stri
 }
 
 /**
- * Print sequence: the order the plates are listed and composited in.
+ * Print sequence: the order the plates are listed in.
  *
  * PDF has no key for it — no colour space or page dictionary carries an ink
  * order — so it is an application setting, and what it drives is this list.
+ * It deliberately does NOT reorder the composite: inks multiply down, and
+ * multiplication commutes, so a claim that the sequence changed the image
+ * would be a claim about nothing.
  * Names the sequence does not mention keep their natural order behind the
  * ones it does, so a sequence recorded for one document does not hide an ink
  * in another.

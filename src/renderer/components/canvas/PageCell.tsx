@@ -1118,7 +1118,7 @@ function PageCellImpl({
     : displayWidthOf(page) * (pageHeight / BASE_PAGE_HEIGHT);
   // Null unless Output Preview is armed AND this page has been rastered
   // through the separation device.
-  const separationUrl = useSeparationRaster(docId, page.id);
+  const separation = useSeparationRaster(docId, page.id);
   // Hand is the OTHER non-annotating mode: it must take the same
   // let-the-board-have-it branch as select, or a hand drag on the board
   // preventDefaults the pointerdown (suppressing the derived mouse events d3
@@ -2871,7 +2871,7 @@ function PageCellImpl({
         rotation={page.rotation}
         displayWidth={displayWidth}
         displayHeight={pageHeight}
-        separationUrl={separationUrl}
+        separation={separation}
       />
       {/* The grid draws UNDER the annotation layer and OVER the raster — it is
           a drafting aid on the paper, never part of it. `forced-color-adjust`

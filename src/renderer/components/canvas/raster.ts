@@ -146,8 +146,8 @@ export async function renderBase({
 }
 
 interface SeparationParams {
-  /** Object URL of the composited separation image for this page. */
-  url: string;
+  /** The composited separation image for this page, as the engine wrote it. */
+  image: Blob;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   isCancelled: () => boolean;
   onReady: () => void;
@@ -164,25 +164,40 @@ interface SeparationParams {
  * renderer, and they are painted onto their own canvas ABOVE the base — so
  * the base keeps the viewer's own pixels the whole time and leaving the mode
  * restores the page with nothing to re-render.
+ *
+ * **`HTMLImageElement` cannot decode here.** Measured in the shipped webview
+ * against a known-good 1×1 PNG: `img.decode()` rejects `EncodingError` and
+ * `onerror` fires, for a blob URL and a data URL alike, while
+ * `createImageBitmap` on the same bytes succeeds. So engine-produced rasters
+ * reach a canvas as a Blob through `createImageBitmap` — which also means
+ * there is no object URL to own and no revoke to get wrong.
  */
 export async function renderSeparation({
-  url,
+  image,
   canvasRef,
   isCancelled,
   onReady,
   reblit = false,
 }: SeparationParams): Promise<void> {
-  const image = new Image();
-  image.src = url;
-  await image.decode();
-  if (isCancelled()) return;
+  const bitmap = await createImageBitmap(image);
+  if (isCancelled()) {
+    bitmap.close();
+    return;
+  }
   const paint = (): void => {
-    if (isCancelled()) return;
+    if (isCancelled()) {
+      bitmap.close();
+      return;
+    }
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
-    canvas.getContext('2d')!.drawImage(image, 0, 0);
+    if (!canvas) {
+      bitmap.close();
+      return;
+    }
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext('2d')!.drawImage(bitmap, 0, 0);
+    bitmap.close();
     onReady();
   };
   if (reblit) scheduleReblit(paint);
