@@ -3058,6 +3058,7 @@
   "panel.settings.startWithWindows": "Avvia con Windows",
   "panel.settings.theme": "Tema",
   "panel.settings.themeDark": "Scuro",
+  "panel.settings.themeForcedColors": "È attivo un tema a contrasto del sistema, quindi la tavolozza di sistema controlla i colori di questa finestra e il tema qui sopra non ha effetto finché non lo disattivi. I documenti mantengono i propri colori in entrambi i casi.",
   "panel.settings.themeHighContrast": "Contrasto elevato",
   "panel.settings.themeLight": "Chiaro",
   "panel.settings.themeSystem": "Sistema",

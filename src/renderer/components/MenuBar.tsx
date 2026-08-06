@@ -30,7 +30,7 @@ function Shortcut({ command }: { command: CommandId }): React.ReactElement | nul
 function renderNodes(nodes: MenuNode[]): React.ReactNode {
   return nodes.map((node, i) => {
     if (node.kind === 'separator') {
-      return <Menubar.Separator key={i} className="h-px bg-neutral-700 my-1" />;
+      return <Menubar.Separator key={i} className="chrome-divider h-px bg-neutral-700 my-1" />;
     }
     if (node.kind === 'command') {
       const cmd = COMMANDS[node.command];

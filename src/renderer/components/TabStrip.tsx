@@ -102,7 +102,7 @@ export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
               <ChromeIcon icon="document" size={13} className="opacity-70 shrink-0" />
               <span className="truncate">{f.name}</span>
               {dirty && (
-                <span data-testid={`tab-dirty-${i}`} className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                <span data-testid={`tab-dirty-${i}`} className="status-dot w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
               )}
               <button
                 type="button"
@@ -151,7 +151,7 @@ export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
                   >
                     <ChromeIcon icon="document" size={13} className="opacity-70 shrink-0" />
                     <span className="truncate flex-1">{f.name}</span>
-                    {isFileDirty(path) && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />}
+                    {isFileDirty(path) && <span className="status-dot w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />}
                     {active && <span className="text-[11px] text-blue-300">●</span>}
                   </DropdownMenu.Item>
                 );

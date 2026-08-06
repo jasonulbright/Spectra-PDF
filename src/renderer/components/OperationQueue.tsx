@@ -71,7 +71,7 @@ export function OperationQueue({ items, onClear }: OperationQueueProps): React.R
         >
           {items.map((item) => (
             <div key={item.id} className="flex items-center gap-3 text-xs">
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+              <span className={`status-dot w-1.5 h-1.5 rounded-full shrink-0 ${
                 item.status === 'running' ? 'bg-blue-500 animate-pulse' :
                 item.status === 'done' ? 'bg-emerald-500' : 'bg-red-500'
               }`} />

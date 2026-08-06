@@ -152,7 +152,7 @@ export function MainToolbar(): React.ReactElement {
     >
       {nodes.map((node, i) => {
         if (node.kind === 'separator') {
-          return <div key={i} className="w-px h-5 bg-neutral-700 mx-1" />;
+          return <div key={i} className="chrome-divider w-px h-5 bg-neutral-700 mx-1" />;
         }
         commandIdx += 1;
         const idx = commandIdx;
