@@ -171,7 +171,7 @@ export function MainToolbar(): React.ReactElement {
       {/* The universal search box lives in this row, pushed right — it is
           fixed chrome, NOT a catalog item, because the customizable catalog is
           a set of glyph buttons and a text field is not one of those. */}
-      <div className="ml-auto pl-2">
+      <div className="ms-auto ps-2">
         <OmniSearch />
       </div>
       {menuAt && (

@@ -362,7 +362,7 @@ export function PrepareFormPanel(): React.ReactElement {
       )}
 
       {result && result.unoffered.length > 0 && (
-        <ul className="text-xs text-neutral-400 list-disc pl-4" data-testid="prepare-form-unoffered">
+        <ul className="text-xs text-neutral-400 list-disc ps-4" data-testid="prepare-form-unoffered">
           {result.unoffered.map((row) => (
             <li key={`${row.page}-${row.reason}`}>
               {tChrome(REASON_KEYS[row.reason] ?? 'panel.prepareForm.reasonOther', {

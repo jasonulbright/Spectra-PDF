@@ -251,7 +251,7 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
             data-testid="search-choose-folder"
             onClick={() => void chooseFolder()}
             title={folder ?? undefined}
-            className="ml-auto px-2 py-0.5 rounded border bg-neutral-900 text-neutral-300 border-neutral-700 hover:bg-neutral-700 truncate max-w-[140px]"
+            className="ms-auto px-2 py-0.5 rounded border bg-neutral-900 text-neutral-300 border-neutral-700 hover:bg-neutral-700 truncate max-w-[140px]"
           >
             {folder ? baseName(folder) : tChrome('nav.search.chooseFolder')}
           </button>

@@ -493,7 +493,9 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
           </button>
           <span
             data-testid="pref-batch-log-dir"
-            className="text-sm text-neutral-300 truncate"
+            className={`text-sm text-neutral-300 truncate${
+              settings.batchLogDir ? ' ltr-notation' : ''
+            }`}
             title={settings.batchLogDir || undefined}
           >
             {settings.batchLogDir || tChrome('panel.settings.defaultLogDir')}
@@ -597,7 +599,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       </label>
 
       {settings.minimizeToTray && (
-        <label className="flex items-center gap-2 cursor-pointer ml-4">
+        <label className="flex items-center gap-2 cursor-pointer ms-4">
           <input
             type="checkbox"
             checked={settings.startMinimized}

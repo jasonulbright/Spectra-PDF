@@ -215,7 +215,7 @@ export function DocumentJsPanel(): React.ReactElement {
                 <button
                   data-testid={`docjs-item-${i}`}
                   onClick={() => setSelected(i)}
-                  className={`w-full text-left px-2 py-1 text-xs rounded truncate ${
+                  className={`w-full text-start px-2 py-1 text-xs rounded truncate ${
                     i === selected
                       ? 'bg-neutral-700 text-neutral-100'
                       : 'text-neutral-400 hover:bg-neutral-800'

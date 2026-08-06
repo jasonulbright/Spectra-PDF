@@ -250,13 +250,13 @@ export function CommentsPanel(): React.ReactElement {
               <div
                 key={e.annotationId}
                 data-testid="comment-item"
-                className="px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded border-l-2"
+                className="px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded border-s-2"
                 style={{ borderLeftColor: e.color }}
               >
                 <button
                   type="button"
                   data-testid={`comment-jump-${e.annotationId}`}
-                  className="w-full text-left"
+                  className="w-full text-start"
                   title={tChrome('panel.comments.jumpTitle')}
                   onClick={() => getCanvasServices()?.openPageForReading(e.pageId)}
                 >
@@ -320,7 +320,7 @@ export function CommentsPanel(): React.ReactElement {
                   <button
                     type="button"
                     data-testid={`comment-delete-${e.annotationId}`}
-                    className="ml-auto text-xs px-1.5 py-0.5 rounded text-neutral-400 hover:bg-red-600 hover:text-white"
+                    className="ms-auto text-xs px-1.5 py-0.5 rounded text-neutral-400 hover:bg-red-600 hover:text-white"
                     onClick={() =>
                       dispatch({
                         type: 'REMOVE_ANNOTATION',

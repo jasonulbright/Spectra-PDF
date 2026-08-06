@@ -464,7 +464,7 @@ export function SignaturesPanel(): React.ReactElement {
             {tChromeCount('panel.sig.found', result.signature_count)}
           </div>
           <CertificationBanner result={result} />
-          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pr-1" tabIndex={0} role="region" aria-label={tChrome('panel.sig.listAria')}>
+          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pe-1" tabIndex={0} role="region" aria-label={tChrome('panel.sig.listAria')}>
             {result.signatures.map((sig, i) => (
               <SignatureCard
                 key={sig.field ?? i}
@@ -623,7 +623,7 @@ export function SignaturesPanel(): React.ReactElement {
               value={tsaUrl}
               placeholder={tChrome('panel.sig.tsaPlaceholder')}
               onChange={(e) => setTsaUrl(e.target.value)}
-              className="flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+              className="ltr-notation flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
             />
           </div>
           <label className={`flex items-center gap-2 text-xs ${pades ? 'text-neutral-300' : 'text-neutral-600'}`}>

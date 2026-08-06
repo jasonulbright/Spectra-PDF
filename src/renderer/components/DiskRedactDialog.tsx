@@ -882,7 +882,7 @@ function FileGroup({
       )}
       {groupByPage(file.hits).map((group) => (
         <div key={group.page} className="mb-1">
-          <div className="text-xs text-neutral-500 pl-4">
+          <div className="text-xs text-neutral-500 ps-4">
             {tChrome('panel.searchRedact.page', { page: group.page })}
           </div>
           {group.hits.map((hit) => {
@@ -890,7 +890,7 @@ function FileGroup({
             return (
               <label
                 key={key}
-                className="flex items-start gap-1.5 pl-6 py-0.5 text-sm hover:bg-neutral-800 rounded"
+                className="flex items-start gap-1.5 ps-6 py-0.5 text-sm hover:bg-neutral-800 rounded"
               >
                 <input
                   type="checkbox"

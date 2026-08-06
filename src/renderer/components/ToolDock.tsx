@@ -9,8 +9,9 @@ import { ExtractTextPanel } from '../panels/ExtractTextPanel';
 import { ToolIcon } from './tool-icons';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tOperationTitle, tToolTitle } from '../i18n';
+import { inlineExtent } from '../lib/inline-direction';
 
-// The right tool dock.
+// The tool dock on the inline-end side.
 // Ops-tool panels render HERE, beside an always-visible document, instead of
 // on the full-page Tools tab (which survives as a redundant-but-working
 // legacy surface). The dock shows the active operation's panel
@@ -39,8 +40,9 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
   // the cursor.
   const [resizing, setResizing] = useState(false);
 
-  // Anchored at the RIGHT edge: width = right − pointerX (the NavPane drag
-  // mirrored). Window-level listeners, detached on unmount mid-drag.
+  // Anchored at the INLINE-END edge: the width is the pointer's extent from
+  // that edge (the NavPane drag mirrored), which is the left edge under
+  // `dir=rtl`. Window-level listeners, detached on unmount mid-drag.
   const bodyRef = useRef<HTMLDivElement>(null);
   const resizeCleanup = useRef<(() => void) | null>(null);
   useEffect(() => () => resizeCleanup.current?.(), []);
@@ -48,9 +50,13 @@ export function ToolDock({ panels, extractPage, onConsumeExtractPage }: ToolDock
     (e: React.PointerEvent) => {
       e.preventDefault();
       setResizing(true);
-      const right = bodyRef.current?.getBoundingClientRect().right ?? window.innerWidth;
+      const bounds = bodyRef.current?.getBoundingClientRect()
+        ?? { left: 0, right: window.innerWidth };
       const onMove = (ev: PointerEvent) => {
-        dispatch({ type: 'UI_SET_TOOL_DOCK_WIDTH', width: right - ev.clientX });
+        dispatch({
+          type: 'UI_SET_TOOL_DOCK_WIDTH',
+          width: inlineExtent(bounds, ev.clientX, 'end'),
+        });
       };
       const detach = () => {
         window.removeEventListener('pointermove', onMove);
