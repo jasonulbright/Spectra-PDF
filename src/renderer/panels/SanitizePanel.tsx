@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
@@ -105,16 +105,18 @@ export function SanitizePanel(): React.ReactElement {
   const buffer = activeFile?.buffer ?? null;
 
   const audit = useCallback(
-    async (target: string): Promise<AuditReport | null> => {
+    async (target: string): Promise<AuditReport> =>
       // The read is deliberately ungated: it re-runs on every buffer change,
       // and gating it would commit pending page edits merely for looking.
-      const result = (await callRaw('audit_hidden_information', {
-        file: target,
-      })) as unknown as AuditReport;
-      return result;
-    },
+      (await callRaw('audit_hidden_information', { file: target })) as unknown as AuditReport,
     [callRaw],
   );
+
+  // The report an apply was measured against, held until the re-audit that
+  // follows it can be compared to it. The apply changes the buffer, and the
+  // buffer change is what re-audits — so the comparison is published by that
+  // ONE audit rather than by a second one racing it.
+  const pendingRef = useRef<{ report: AuditReport; categories: string[] } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!workingPath) return;
@@ -123,7 +125,18 @@ export function SanitizePanel(): React.ReactElement {
     try {
       const next = await audit(workingPath);
       setReport(next);
+      const pending = pendingRef.current;
+      if (pending) {
+        pendingRef.current = null;
+        setComparison(compare(pending.report, next, pending.categories));
+        setSelection(emptySelection());
+        setStatus(tChromeCount('panel.sanitize.done', pending.categories.length));
+      } else {
+        setComparison(null);
+        setStatus('');
+      }
     } catch (e: unknown) {
+      pendingRef.current = null;
       setReport(null);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -134,10 +147,11 @@ export function SanitizePanel(): React.ReactElement {
   useEffect(() => {
     // A buffer change means the report describes bytes the document no longer
     // has, so it is replaced rather than shown beside a different file.
-    setComparison(null);
-    setStatus('');
     if (!buffer || !workingPath) {
+      pendingRef.current = null;
       setReport(null);
+      setComparison(null);
+      setStatus('');
       return;
     }
     void refresh();
@@ -166,26 +180,21 @@ export function SanitizePanel(): React.ReactElement {
       const request = buildRequest(report, selection, fieldMode, includeOcr);
       const handlers = getCommandContext()?.app;
       if (!handlers) return;
-      const applied = await handlers.sanitizeDocument(path, request);
-      if (!applied) {
-        setStatus(tChrome('panel.sanitize.declined'));
-        return;
-      }
       // The re-audit is automatic on purpose: a category the remover could not
       // fully clear shows a non-zero count instead of a success message.
-      const after = workingPath ? await audit(workingPath) : null;
-      if (after) {
-        setComparison(compare(report, after, request.categories));
-        setReport(after);
-        setSelection(emptySelection());
-        setStatus(tChromeCount('panel.sanitize.done', request.categories.length));
+      pendingRef.current = { report, categories: request.categories };
+      const applied = await handlers.sanitizeDocument(path, request);
+      if (!applied) {
+        pendingRef.current = null;
+        setStatus(tChrome('panel.sanitize.declined'));
       }
     } catch (e: unknown) {
+      pendingRef.current = null;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [audit, chosen.length, fieldMode, includeOcr, path, report, selection, workingPath]);
+  }, [chosen.length, fieldMode, includeOcr, path, report, selection]);
 
   if (!activeFile) {
     return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.sanitize.open')} />;
