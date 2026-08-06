@@ -246,6 +246,14 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <path d="M7 2v3M2 7h3M17 2v3M19 7h3M7 19v3M2 17h3M17 19v3M19 17h3" />
     </>
   ),
+  // Three rules of increasing weight — the thinnest is the one that vanishes.
+  hairlines: (
+    <>
+      <path d="M3 6h18" strokeWidth="0.5" />
+      <path d="M3 12h18" strokeWidth="1.5" />
+      <path d="M3 18h18" strokeWidth="3" />
+    </>
+  ),
   // A luggage tag (structure tags).
   tags: (
     <>

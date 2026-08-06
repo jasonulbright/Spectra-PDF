@@ -26,7 +26,7 @@ export const OPERATIONS = [
   'encrypt', 'decrypt',
   'extract_text', 'watermark', 'forms', 'compare', 'signatures',
   'document_js', 'convert_cmyk', 'headerfooter', 'pagebox', 'pagelabels', 'attachments', 'portfolio', 'layers', 'accessibility',
-  'comments', 'preflight', 'outputpreview', 'inkmanager', 'printermarks', 'links', 'tags', 'readingorder', 'actions', 'takeoff',
+  'comments', 'preflight', 'outputpreview', 'inkmanager', 'printermarks', 'hairlines', 'links', 'tags', 'readingorder', 'actions', 'takeoff',
   'search_redact', 'prepareform', 'sanitize',
 ] as const;
 
@@ -56,6 +56,7 @@ export const OPERATION_TITLES: Record<Operation, string> = {
   outputpreview: 'Output Preview',
   inkmanager: 'Ink Manager',
   printermarks: 'Add Printer Marks',
+  hairlines: 'Fix Hairlines',
   links: 'Links',
   tags: 'Tags',
   readingorder: 'Reading Order',

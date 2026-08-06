@@ -9,11 +9,14 @@ to the crop box and would hide the marks that were just drawn. `/TrimBox`,
 `/BleedBox` and `/ArtBox` are never touched: they still describe the same
 paper, which is the whole point of growing the other two.
 
-The original boxes, the original `/Contents` and the original `/Resources`
-are recorded on the page under one private key, so `remove_printer_marks`
-restores exactly what was there — values and object identity, not a
-reconstruction. A second `add` removes first, so two runs leave one mark set
-and one growth.
+The original boxes, `/Contents` and `/Resources` are recorded on the page
+under one private key, so `remove_printer_marks` restores exactly what was
+there — values and object identity, not a reconstruction. The boxes always
+come from that record; the contents and resources do only while they are
+still the objects the add wrote, because a wholesale restore over an edit
+made since would silently revert it. Anything else takes the surgical path
+and strips the mark draw out of what the page carries now. A second `add`
+removes first, so two runs leave one mark set and one growth.
 
 Crop marks, registration targets and page information paint in
 `/Separation /All`, never in `0 0 0 1 k`. The separation device gives `/All`
@@ -445,13 +448,97 @@ def _record(page):
     return value if isinstance(value, pikepdf.Dictionary) else None
 
 
-def _restore(page) -> bool:
-    """Put back exactly what the add replaced. False when nothing is
-    recorded — a page with no marks is not an error."""
+def _same_object(a, b) -> bool:
+    """Both indirect and the same object. Two direct objects are never the
+    same one for this purpose — the question is whether something replaced
+    what the add wrote, and only an indirect reference can answer it."""
+    try:
+        if not (a.is_indirect and b.is_indirect):
+            return False
+        return a.objgen == b.objgen
+    except AttributeError:
+        return False
+
+
+def _untouched_since_add(page, record) -> bool:
+    """Are the page's contents and resources still exactly what the add
+    wrote? Anything that rewrote the page between the add and the remove —
+    another content edit, a resource registration — makes a wholesale restore
+    a silent revert of that work, so the removal takes the surgical path
+    instead."""
+    wrote = record.get("/Wrote")
+    if wrote is None or len(wrote) < 3:
+        return False
+    contents = page.obj.get("/Contents")
+    if not isinstance(contents, pikepdf.Array) or len(contents) < 2:
+        return False
+    return (
+        _same_object(contents[0], wrote[0])
+        and _same_object(contents[len(contents) - 1], wrote[1])
+        and _same_object(page.obj.get("/Resources"), wrote[2])
+    )
+
+
+def _strip_marks(pdf, page) -> None:
+    """Remove the mark draw and its XObject from whatever the page carries
+    now, leaving every other edit in place.
+
+    A page that inherited its `/Resources` keeps the own copy the add gave it,
+    minus the mark entry — the alternative is deleting a dictionary another
+    edit may since have added to.
+    """
+    kept: list = []
+    instructions = list(pikepdf.parse_content_stream(page))
+    drop: set = set()
+    for index, instruction in enumerate(instructions):
+        if str(instruction.operator) != "Do" or not instruction.operands:
+            continue
+        if str(instruction.operands[0]) != MARK_XOBJECT:
+            continue
+        drop.add(index)
+        # The add draws the marks inside their own `q … Q`; dropping the frame
+        # with the draw keeps the stream balanced.
+        if index > 0 and str(instructions[index - 1].operator) == "q":
+            drop.add(index - 1)
+        if index + 1 < len(instructions) and str(instructions[index + 1].operator) == "Q":
+            drop.add(index + 1)
+    for index, instruction in enumerate(instructions):
+        if index not in drop:
+            kept.append(instruction)
+    page.obj[Name("/Contents")] = pdf.make_stream(pikepdf.unparse_content_stream(kept))
+
+    resources = page.obj.get("/Resources")
+    if resources is None:
+        return
+    fresh = Dictionary()
+    for key in resources.keys():
+        fresh[key] = resources[key]
+    xobjects = fresh.get("/XObject")
+    if xobjects is not None:
+        pruned = Dictionary()
+        for key in xobjects.keys():
+            if str(key) != MARK_XOBJECT:
+                pruned[key] = xobjects[key]
+        fresh[Name("/XObject")] = pruned
+    page.obj[Name("/Resources")] = pdf.make_indirect(fresh)
+
+
+def _restore(pdf, page) -> bool:
+    """Put the page back. False when nothing is recorded — a page with no
+    marks is not an error.
+
+    The BOXES always come from the record, values and numeric types intact:
+    the growth is what the add did to them and the recorded originals are the
+    only exact answer. Contents and resources are restored wholesale only
+    while they are still the objects the add wrote; otherwise the marks are
+    stripped out of what is there now, so an edit made between the add and
+    the remove survives.
+    """
     record = _record(page)
     if record is None:
         return False
-    for key in ("/MediaBox", "/CropBox", "/Contents", "/Resources"):
+    exact = _untouched_since_add(page, record)
+    for key in ("/MediaBox", "/CropBox"):
         if record.get(key) is not None:
             page.obj[key] = record[key]
         else:
@@ -459,6 +546,17 @@ def _restore(page) -> bool:
                 del page.obj[key]
             except (KeyError, AttributeError):
                 pass
+    if exact:
+        for key in ("/Contents", "/Resources"):
+            if record.get(key) is not None:
+                page.obj[key] = record[key]
+            else:
+                try:
+                    del page.obj[key]
+                except (KeyError, AttributeError):
+                    pass
+    else:
+        _strip_marks(pdf, page)
     del page.obj[RECORD_KEY]
     return True
 
@@ -550,7 +648,7 @@ def add_printer_marks(
                 spot_spaces = _spot_spaces([p for _i, p in targets])
 
         for index, page in targets:
-            _restore(page)
+            _restore(pdf, page)
             media = _box(page, "/MediaBox")
             if media is None:
                 skipped.append({"page": index, "reason": "no media box"})
@@ -598,10 +696,17 @@ def add_printer_marks(
             resources[Name("/XObject")] = xobjects
 
             streams = _content_streams(page)
+            # The original content keeps its own balanced frame: a producer
+            # that leaves `q` unmatched would otherwise carry its state into
+            # the mark draw.
             pre = pdf.make_stream(b"q\n")
             post = pdf.make_stream(f"\nQ\nq\n{MARK_XOBJECT} Do\nQ\n".encode("ascii"))
+            written_resources = pdf.make_indirect(resources)
             page.obj[Name("/Contents")] = Array([pre] + streams + [post])
-            page.obj[Name("/Resources")] = resources
+            page.obj[Name("/Resources")] = written_resources
+            # What the add wrote, so the removal can tell an untouched page
+            # from one something else has edited since.
+            record[Name("/Wrote")] = Array([pre, post, written_resources])
             page.obj[Name("/MediaBox")] = Array(list(new_media))
             crop = _box(page, "/CropBox")
             if crop is not None:
@@ -658,7 +763,7 @@ def remove_printer_marks(file: str, output: str, pages: list | None = None) -> d
         for index, page in enumerate(pdf.pages, start=1):
             if wanted is not None and index not in wanted:
                 continue
-            if _restore(page):
+            if _restore(pdf, page):
                 removed += 1
             else:
                 unmarked.append(index)
