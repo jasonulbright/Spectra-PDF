@@ -133,7 +133,7 @@ export function WatermarkPanel(): React.ReactElement {
                 key={c}
                 title={c}
                 onClick={() => setColor(c)}
-                className="w-5 h-5 rounded-full"
+                className={'color-swatch w-5 h-5 rounded-full' + (color === c ? ' is-selected' : '')}
                 style={{
                   backgroundColor: c,
                   outline: color === c ? '2px solid white' : '1px solid rgba(255,255,255,0.3)',

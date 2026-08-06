@@ -61,6 +61,18 @@
 - Guided actions gain export steps, so watched folders and scheduled runs can export too.
 - On the command line as `export-folder`.
 
+### Windows contrast themes
+- The app now responds to the Windows contrast themes setting.
+- Documents are never recoloured by it: pages, annotations, the text over them and thumbnails keep their own colours in every case.
+- That protection no longer depends on which app theme is picked; it applies at all times.
+- The window's own chrome follows the system palette, which is what the setting asks for.
+- Selected tools and pressed toolbar buttons show as selected in the system's own highlight colour.
+- Buttons, text fields and lists regain their outlines, so a control is visible as a control.
+- Toolbar and menu separators, and a panel's status box, keep their edges.
+- Colour swatches keep the colour they are offering, with an outline so they still read as buttons.
+- Translucent window bars turn solid, as a contrast theme expects.
+- Preferences states that the system palette is in control while the setting is on, and the theme you chose is remembered untouched.
+
 ## 1.0.22
 
 ### Signing

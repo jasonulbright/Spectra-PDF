@@ -3058,6 +3058,7 @@
   "panel.settings.startWithWindows": "Mit Windows starten",
   "panel.settings.theme": "Design",
   "panel.settings.themeDark": "Dunkel",
+  "panel.settings.themeForcedColors": "Ein Kontrastdesign des Systems ist aktiv. Die Systempalette bestimmt daher die Farben dieses Fensters, und das Design oben bleibt ohne Wirkung, bis Sie es ausschalten. Dokumente behalten in beiden Fällen ihre eigenen Farben.",
   "panel.settings.themeHighContrast": "Hoher Kontrast",
   "panel.settings.themeLight": "Hell",
   "panel.settings.themeSystem": "System",
