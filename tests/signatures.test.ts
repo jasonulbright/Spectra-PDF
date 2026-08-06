@@ -220,6 +220,22 @@ describe('signedEditDecision', () => {
     }
   });
 
+  it('a structural edit never proceeds silently on a signed document', () => {
+    // The property every content-rewriting call site depends on: page
+    // surgery, content edits and applying redactions all coalesce the file
+    // and break every byte range, whatever any certification permits.
+    const states: Partial<SignaturePolicy>[] = [
+      {},
+      { certified: true, level: 'none' },
+      { certified: true, level: 'form-fill' },
+      { certified: true, level: 'annotate' },
+      { certified: true, level: null },
+    ];
+    for (const state of states) {
+      expect(signedEditDecision(policy(state), 'structural').kind).not.toBe('proceed');
+    }
+  });
+
   it('a certification on a document reporting no filled field is still honoured', () => {
     const decision = signedEditDecision(
       policy({ signed: false, count: 0, certified: true, level: 'none' }),
