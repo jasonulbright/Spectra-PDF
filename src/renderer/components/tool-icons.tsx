@@ -222,6 +222,14 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <path d="M7.5 10.5l2 2 3.5-3.5" />
     </>
   ),
+  // Three overlapping process-ink circles — the separation the preview shows.
+  outputpreview: (
+    <>
+      <circle cx="9.5" cy="9.5" r="5.5" />
+      <circle cx="14.5" cy="9.5" r="5.5" />
+      <circle cx="12" cy="14.5" r="5.5" />
+    </>
+  ),
   // A luggage tag (structure tags).
   tags: (
     <>

@@ -96,7 +96,7 @@ export const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = 
   portfolio: 'portfolio',
   layers: 'layers',
   accessibility: 'accessibility',
-  preflight: 'preflight',
+  printproduction: 'preflight',
   links: 'links',
   export: 'extract_text',
 };

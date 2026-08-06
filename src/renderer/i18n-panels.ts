@@ -503,6 +503,28 @@ export const PANEL_STRINGS = {
   'panel.preflight.images_other': '{{count}} images',
   'panel.preflight.colour': ' · colour: {{families}}',
 
+  'panel.outputPreview.open': 'Open a PDF to preview its separations',
+  'panel.outputPreview.blurb':
+    'Rasters the pages you are reading through the separation device instead of the screen renderer, so overprint and individual plates are visible. The document is not changed.',
+  'panel.outputPreview.arm': 'Show separations',
+  'panel.outputPreview.disarm': 'Show the page',
+  'panel.outputPreview.overprint': 'Simulate overprint',
+  'panel.outputPreview.alarm': 'Highlight ink over',
+  'panel.outputPreview.limitAria': 'Total ink limit, percent',
+  'panel.outputPreview.maxTac': 'Heaviest pixel: {{pct}}% total ink',
+  'panel.outputPreview.overLimit': '{{pct}}% of the page is over {{limit}}%',
+  'panel.outputPreview.withinLimit': 'Nothing on the page is over {{limit}}%',
+  'panel.outputPreview.inks': 'Inks',
+  'panel.outputPreview.spots': 'Spot colours',
+  'panel.outputPreview.showAll': 'All',
+  'panel.outputPreview.hideAll': 'None',
+  'panel.outputPreview.noPlates': 'No separations yet — turn the preview on to raster this page.',
+  'panel.outputPreview.density': 'Density',
+  'panel.outputPreview.coverageValue': '{{pct}}%',
+  'panel.outputPreview.coverageNote':
+    'Coverage is the share of the page each process ink covers, averaged over the whole page. The limit above measures the heaviest single pixel instead.',
+  'panel.outputPreview.specialInks': 'Not separate plates: {{names}}',
+
   'panel.prepress.open': 'Open a PDF to prepare for print',
   'panel.prepress.blurb':
     "Converts the document's colours to DeviceCMYK for commercial printing, through a colour-managed (ICC) transform. Writes a new file.",
