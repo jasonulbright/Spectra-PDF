@@ -1521,6 +1521,8 @@
   "engine.struct_tree.unknownProperties": "不明なプロパティです：{{v0}}",
   "engine.system_fonts.fontFileFound": "フォントファイルが見つかりません：{{path}}",
   "engine.system_fonts.usableFontFile": "使用できるフォントファイルではありません：{{v0}}",
+  "engine.table_export.tableFoundPageS": "解析した {{v0}} ページに表が見つからなかったため、スプレッドシートに書き出すものがありません。",
+  "engine.table_export.unknownSheetGroupingChoose": "不明なシートの分け方 {{sheet_per}} です。table または page を選んでください。",
   "engine.takeoff.outputFolderDoesExist": "出力フォルダーがありません：{{v0}}",
   "engine.text_authoring.boldMustTrueFalse": "bold は true または false にしてください（指定値：{{bold}}）",
   "engine.text_authoring.directionalFormattingCharactersCannot": "書字方向の制御文字はテキストボックス内で組版できません",

@@ -126,7 +126,7 @@ inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 links.linkIndexOutRange	pattern	links	link index {{index}} is out of range (page has {{v1}})
 links.linksAdd	exact	links	no links to add
-links.pageOutRange	pattern	form_detect,links,page_images,page_vectors,redact_marks,search_regions,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
+links.pageOutRange	pattern	form_detect,links,page_images,page_vectors,redact_marks,search_regions,table_export,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
 links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive width and height
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
 links.urlMustEmpty	exact	links	url must not be empty
@@ -305,7 +305,7 @@ sanitize.unknownCategoryCategories	pattern	sanitize	Unknown category {{name}}. T
 search_regions.expandMustMatchWord	exact	search_regions	expand must be "match", "word" or "line"
 search_regions.giveSearchTermWord	exact	search_regions	give a search term, a word list or a built-in pattern — searching for nothing would mark every page
 search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a positive number
-search_regions.pagesMustListPage	exact	form_detect,search_regions,text_export	pages must be a list of page numbers or "all"
+search_regions.pagesMustListPage	exact	form_detect,search_regions,table_export,text_export	pages must be a list of page numbers or "all"
 shaping.fontSVerticalForm	pattern	shaping	this font's vertical form of {{name}} has no advance
 shaping.shapingFontCannotExpress	pattern	shaping	the shaping font cannot express {{text}}
 signatures.certificatesFoundTrustRoot	pattern	signatures	no certificates found in trust root: {{p}}
@@ -360,6 +360,8 @@ struct_tree.typeMustEmpty	exact	struct_tree	type must not be empty
 struct_tree.unknownProperties	pattern	struct_tree	unknown properties: {{v0}}
 system_fonts.fontFileFound	pattern	system_fonts	font file not found: {{path}}
 system_fonts.usableFontFile	pattern	system_fonts	not a usable font file: {{v0}}
+table_export.tableFoundPageS	pattern	table_export	no table was found on the {{v0}} page(s) analyzed, so there is nothing to write to a spreadsheet
+table_export.unknownSheetGroupingChoose	pattern	table_export	unknown sheet grouping {{sheet_per}} (choose table or page)
 takeoff.outputFolderDoesExist	pattern	takeoff	Output folder does not exist: {{v0}}
 text_authoring.boldMustTrueFalse	pattern	text_authoring	bold must be true or false (got {{bold}})
 text_authoring.directionalFormattingCharactersCannot	exact	text_authoring	directional formatting characters cannot be laid out in a text box

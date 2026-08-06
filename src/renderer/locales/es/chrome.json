@@ -1521,6 +1521,8 @@
   "engine.struct_tree.unknownProperties": "propiedades desconocidas: {{v0}}",
   "engine.system_fonts.fontFileFound": "archivo de fuente no encontrado: {{path}}",
   "engine.system_fonts.usableFontFile": "no es un archivo de fuente utilizable: {{v0}}",
+  "engine.table_export.tableFoundPageS": "No se encontró ninguna tabla en las {{v0}} página(s) analizadas, así que no hay nada que escribir en una hoja de cálculo.",
+  "engine.table_export.unknownSheetGroupingChoose": "Agrupación de hojas desconocida {{sheet_per}} (elige table o page).",
   "engine.takeoff.outputFolderDoesExist": "La carpeta de destino no existe: {{v0}}",
   "engine.text_authoring.boldMustTrueFalse": "bold debe ser true o false (se recibió {{bold}})",
   "engine.text_authoring.directionalFormattingCharactersCannot": "los caracteres de formato direccional no se pueden componer en un cuadro de texto",

@@ -1521,6 +1521,8 @@
   "engine.struct_tree.unknownProperties": "propriétés inconnues : {{v0}}",
   "engine.system_fonts.fontFileFound": "fichier de police introuvable : {{path}}",
   "engine.system_fonts.usableFontFile": "n’est pas un fichier de police utilisable : {{v0}}",
+  "engine.table_export.tableFoundPageS": "Aucun tableau n’a été trouvé sur les {{v0}} page(s) analysées : il n’y a donc rien à écrire dans un classeur.",
+  "engine.table_export.unknownSheetGroupingChoose": "Regroupement de feuilles inconnu {{sheet_per}} (choisissez table ou page).",
   "engine.takeoff.outputFolderDoesExist": "Le dossier de sortie n’existe pas : {{v0}}",
   "engine.text_authoring.boldMustTrueFalse": "bold doit valoir true ou false (reçu {{bold}})",
   "engine.text_authoring.directionalFormattingCharactersCannot": "les caractères de formatage directionnel ne peuvent pas être mis en page dans une zone de texte",

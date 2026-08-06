@@ -63,12 +63,13 @@ _FORMATS = {
     # zero-byte file.
     "xhtml": _Target(".xhtml", LIBREOFFICE, "xhtml:XHTML Draw File"),
     "txt": _Target(".txt", ENGINE, options=("pages", "layout", "page_breaks")),
+    "xlsx": _Target(".xlsx", ENGINE, options=("pages", "sheet_per", "include_untabled")),
 }
 
 # Every option name any target declares. An option a target does not declare is
 # refused rather than ignored: a silently dropped option is a silently wrong
 # output that still reports success.
-_ALL_OPTIONS = ("pages", "layout", "page_breaks")
+_ALL_OPTIONS = ("pages", "layout", "page_breaks", "sheet_per", "include_untabled")
 
 
 def supported_formats() -> dict:
@@ -97,6 +98,8 @@ def export_document(
     pages=None,
     layout=None,
     page_breaks=None,
+    sheet_per=None,
+    include_untabled=None,
 ) -> dict:
     """Export ``file`` to ``output`` in ``fmt``.
 
@@ -109,14 +112,22 @@ def export_document(
         pages: list of 1-based page numbers, or 'all'.
         layout: text ordering, for the plain-text target.
         page_breaks: write a form feed between pages, for the plain-text target.
+        sheet_per: sheet grouping, for the spreadsheet target.
+        include_untabled: carry the text no table claimed, for the spreadsheet
+            target.
     """
     key = str(fmt).lower()
     if key not in _FORMATS:
         raise ValueError(f"unsupported export format {fmt!r} (have {sorted(_FORMATS)})")
     target = _FORMATS[key]
-    _reject_unknown_options(
-        key, target, {"pages": pages, "layout": layout, "page_breaks": page_breaks}
-    )
+    given = {
+        "pages": pages,
+        "layout": layout,
+        "page_breaks": page_breaks,
+        "sheet_per": sheet_per,
+        "include_untabled": include_untabled,
+    }
+    _reject_unknown_options(key, target, given)
 
     input_path = Path(file)
     output_path = Path(output)
@@ -137,25 +148,36 @@ def export_document(
         raise ValueError("output path is the same file as the input")
 
     if target.producer == ENGINE:
-        return _export_engine(key, input_path, output_path, pages, layout, page_breaks)
+        return _export_engine(key, input_path, output_path, given)
     return _export_libreoffice(key, target, input_path, output_path, soffice_path)
 
 
-def _export_engine(key, input_path, output_path, pages, layout, page_breaks) -> dict:
+def _export_engine(key, input_path, output_path, given) -> dict:
     """Targets produced from the document's own text and geometry.
 
     These never touch LibreOffice, so an unprovisioned LibreOffice must not make
     them fail and must not be named in anything they raise.
     """
+    pages = "all" if given["pages"] is None else given["pages"]
     if key == "txt":
         from engine.text_export import export_text
 
         return export_text(
             str(input_path),
             str(output_path),
-            pages="all" if pages is None else pages,
-            layout="reading" if layout is None else layout,
-            page_breaks=bool(page_breaks),
+            pages=pages,
+            layout="reading" if given["layout"] is None else given["layout"],
+            page_breaks=bool(given["page_breaks"]),
+        )
+    if key == "xlsx":
+        from engine.table_export import export_tables
+
+        return export_tables(
+            str(input_path),
+            str(output_path),
+            pages=pages,
+            sheet_per="table" if given["sheet_per"] is None else given["sheet_per"],
+            include_untabled=bool(given["include_untabled"]),
         )
     raise ValueError(f"unsupported export format {key!r} (have {sorted(_FORMATS)})")
 
