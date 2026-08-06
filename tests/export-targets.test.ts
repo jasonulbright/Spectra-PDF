@@ -1,12 +1,15 @@
-// The export targets the engine produces itself: what each one takes, and what
-// it says about what it produced.
+// Every export target: which door produces it, what it takes, what name its
+// output gets, and what it says about what it produced.
 import { describe, it, expect } from 'vitest';
 import {
   DOCUMENT_EXPORT_FORMATS,
+  EXPORT_FORMATS,
   EXPORT_TARGETS,
   exportParams,
+  exportRel,
   exportSummary,
   parsePages,
+  producedText,
 } from '../src/renderer/lib/export-targets';
 import { COMMANDS, COMMAND_IDS } from '../src/renderer/commands/registry';
 import { MENUS, type MenuNode } from '../src/renderer/commands/menus';
@@ -37,6 +40,10 @@ describe('the export targets', () => {
     expect(EXPORT_TARGETS.xlsx.options).toEqual(['pages', 'sheet_per', 'include_untabled']);
     expect(EXPORT_TARGETS.pptx.options).toEqual(['pages', 'slide_size']);
     expect(DOCUMENT_EXPORT_FORMATS).toEqual(['txt', 'xlsx', 'pptx']);
+    // Every target the two engine doors offer is in the one table.
+    expect(EXPORT_FORMATS).toEqual([
+      'docx', 'rtf', 'odt', 'html', 'xhtml', 'txt', 'xlsx', 'pptx', 'png', 'jpeg', 'tiff',
+    ]);
   });
 
   it('sends only the options the target declares', () => {
@@ -62,6 +69,35 @@ describe('the export targets', () => {
     expect(exportParams('txt', { ...DEFAULTS, layout: 'layout' }).layout).toBe('layout');
     expect(exportParams('xlsx', { ...DEFAULTS, sheetPer: 'page' }).sheet_per).toBe('page');
     expect(exportParams('pptx', { ...DEFAULTS, slideSize: '16:9' }).slide_size).toBe('16:9');
+  });
+
+  it('sends nothing but the format to a target that declares no options', () => {
+    // The bridged word-processing targets refuse every option; a page scope
+    // sent there would turn a correct refusal into a false one.
+    for (const format of ['docx', 'rtf', 'odt', 'html', 'xhtml'] as const) {
+      expect(exportParams(format, { ...DEFAULTS, pages: '1,2' })).toEqual({ fmt: format });
+    }
+  });
+
+  it('sends the image door its own page spelling and its render settings', () => {
+    // The image door validates '1-3,5' text itself; the document door takes a
+    // parsed list. Sending one shape to the other silently changes the scope.
+    expect(exportParams('png', { ...DEFAULTS, pages: ' 1-3,5 ', dpi: 300, gray: true })).toEqual({
+      fmt: 'png',
+      pages: '1-3,5',
+      dpi: 300,
+      gray: true,
+    });
+    expect(exportParams('jpeg', DEFAULTS).quality).toBe(90);
+    expect(exportParams('tiff', DEFAULTS)).not.toHaveProperty('quality');
+  });
+
+  it('names the mirror output by the target, keeping a non-PDF name whole', () => {
+    expect(exportRel('sub\\report.pdf', 'xlsx')).toBe('sub\\report.xlsx');
+    expect(exportRel('report.PDF', 'jpeg')).toBe('report.jpg');
+    // A source that does not end in .pdf GAINS the extension: dropping its
+    // last segment would collide two differently named sources.
+    expect(exportRel('notes.v2', 'txt')).toBe('notes.v2.txt');
   });
 
   it('reads a page scope, or all of them', () => {
@@ -161,5 +197,22 @@ describe('the export summary', () => {
     // the shape a caller sees only when the counters genuinely disagree.
     const lines = exportSummary('xlsx', { output: 'C:/out/empty.xlsx', pages_analyzed: [1, 2] });
     expect(lines[0]).toContain('0 tables');
+  });
+});
+
+describe('what one export produced, for the run log', () => {
+  it('counts what each producer reports, in the engine-side English', () => {
+    expect(producedText('txt', { output: 'a.txt', pages_extracted: [1], characters: 1 })).toBe(
+      '1 page, 1 character',
+    );
+    expect(
+      producedText('xlsx', { output: 'a.xlsx', tables: [{}, {}], pages_analyzed: [1, 2, 3] }),
+    ).toBe('2 tables from 3 pages');
+    expect(producedText('pptx', { output: 'a.pptx', slides: 4 })).toBe('4 slides');
+    expect(producedText('png', { outputs: ['a-1.png', 'a-2.png'] })).toBe('2 images');
+  });
+
+  it('says something true for a target that reports no counters', () => {
+    expect(producedText('docx', { output: 'a.docx' })).toBe('written');
   });
 });

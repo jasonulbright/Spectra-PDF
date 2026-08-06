@@ -1130,15 +1130,17 @@ fn batch_log_dir(app: &AppHandle, configured: Option<&str>) -> Result<std::path:
 /// True only for names this app itself writes. Deliberately strict: the prune
 /// below DELETES what this matches, and the standing rule after a session wiped
 /// archived installers with a glob is that a delete names exactly what it takes.
-/// Four exact prefixes: batch-OCR runs, guided-action folder runs (the
+/// Five exact prefixes: batch-OCR runs, guided-action folder runs (the
 /// engine writes `action-run-*.log` into the same folder), disk-scope
-/// Search & Redact sweeps and folder form-preparation sweeps. Retention must
-/// sweep all of them or the logs it does not match accumulate forever.
+/// Search & Redact sweeps, folder form-preparation sweeps and folder-scope
+/// export sweeps. Retention must sweep all of them or the logs it does not
+/// match accumulate forever.
 fn is_batch_log_name(name: &str) -> bool {
     (name.starts_with("batch-ocr-")
         || name.starts_with("action-run-")
         || name.starts_with("search-redact-")
-        || name.starts_with("form-prep-"))
+        || name.starts_with("form-prep-")
+        || name.starts_with("folder-export-"))
         && name.ends_with(".log")
         && !name.contains('/')
         && !name.contains('\\')
@@ -1413,6 +1415,7 @@ mod tests {
             "action-run-2026-01-02_030405.log",
             "search-redact-2026-01-02_030405.log",
             "form-prep-2026-01-02_030405.log",
+            "folder-export-2026-01-02_030405.log",
         ] {
             assert!(is_batch_log_name(name), "{name} should be swept");
         }

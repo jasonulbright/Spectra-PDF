@@ -2,14 +2,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next';
 import { useEngine } from '../hooks/useEngine';
 import { FolderRow, RunningView, SweepShell } from './FolderSweepUi';
-import { dialog, batch, app } from '../lib/tauri-bridge';
+import { useSweepFolders } from '../hooks/useSweepFolders';
+import { useSweepLog } from '../hooks/useSweepLog';
+import { dialog, app } from '../lib/tauri-bridge';
 import { FindModeToggles } from '../search/FindModeToggles';
 import { RedactionPropertiesFields } from './RedactionPropertiesFields';
 import { tChrome, tChromeCount } from '../i18n';
-import { getSettings } from '../lib/app-settings';
 import { TEST_HARNESS_ENABLED, registerDiskRedact } from '../testHarness';
 import type { SearchOptions } from '../search/normalize';
-import type { BatchPdfEntry } from '../lib/tauri-bridge';
 import {
   EXPAND_MODES,
   PATTERN_IDS,
@@ -39,7 +39,6 @@ import {
   type SignedNote,
 } from '../lib/disk-redact';
 import { createDiskRedactIo } from '../lib/disk-redact-io';
-import { destConflictsWithSource } from '../lib/batch-ocr';
 import { diskRedactLogFileName, formatDiskRedactLog } from '../lib/disk-redact-log';
 
 // Tools ▸ Search & Redact Folder…: the disk scope of Search & Redact.
@@ -87,11 +86,19 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
   const { callRaw } = useEngine();
 
   const [phase, setPhase] = useState<Phase>('setup');
-  const [source, setSource] = useState<string | null>(null);
-  const [dest, setDest] = useState<string | null>(null);
-  const [entries, setEntries] = useState<BatchPdfEntry[] | null>(null);
-  const [skippedDirs, setSkippedDirs] = useState<string[]>([]);
-  const [scanning, setScanning] = useState(false);
+  const {
+    source,
+    dest,
+    setDest,
+    selectSource,
+    entries,
+    skippedDirs,
+    scanning,
+    conflict,
+    identityConflict,
+    error,
+    setError,
+  } = useSweepFolders();
 
   const [query, setQuery] = useState('');
   const [options, setOptions] = useState<SearchOptions>({});
@@ -114,9 +121,7 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
   const [report, setReport] = useState<DiskRedactReport | null>(null);
   const [progress, setProgress] = useState<DiskProgress | null>(null);
   const [stopping, setStopping] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [logPath, setLogPath] = useState<string | null>(null);
-  const [logError, setLogError] = useState<string | null>(null);
+  const { logPath, logError, write: writeSweepLog, reset: resetLog } = useSweepLog();
 
   const cancelledRef = useRef(false);
   const phaseRef = useRef<Phase>('setup');
@@ -140,58 +145,6 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
     else if (phase === 'done') doneCloseBtnRef.current?.focus();
     else sourceBtnRef.current?.focus();
   }, [phase]);
-
-  // Monotonic token: re-picking the source mid-scan starts a second
-  // enumeration, and a slow first response landing last would otherwise
-  // replace the displayed folder's listing with another folder's files.
-  const scanTokenRef = useRef(0);
-  const selectSource = useCallback(async (path: string): Promise<void> => {
-    const token = ++scanTokenRef.current;
-    setError(null);
-    setSource(path);
-    setEntries(null);
-    setSkippedDirs([]);
-    setScanning(true);
-    try {
-      const listing = await batch.listPdfsRecursive(path);
-      if (scanTokenRef.current !== token) return;
-      setEntries(listing.files);
-      setSkippedDirs(listing.skippedDirs);
-    } catch (e: unknown) {
-      if (scanTokenRef.current !== token) return;
-      setSource(null);
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      if (scanTokenRef.current === token) setScanning(false);
-    }
-  }, []);
-
-  // Two-layer conflict guard, the batch one: the string check catches the
-  // everyday case synchronously; the filesystem identity check catches
-  // aliased spellings of one physical folder that no string comparison sees.
-  const [identityConflict, setIdentityConflict] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    if (source === null || dest === null || destConflictsWithSource(source, dest)) {
-      setIdentityConflict(false);
-      return;
-    }
-    void batch
-      .pathsSameFile(source, dest)
-      .then((same) => {
-        if (!cancelled) setIdentityConflict(same);
-      })
-      .catch(() => {
-        if (!cancelled) setIdentityConflict(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [source, dest]);
-
-  const conflict =
-    (source !== null && dest !== null && destConflictsWithSource(source, dest)) ||
-    identityConflict;
 
   const buildRequest = useCallback(
     (text: string): SearchRequest => ({
@@ -226,35 +179,22 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
 
   const writeLog = useCallback(
     async (startedAt: Date, rep: DiskRedactReport, fatalError?: string): Promise<void> => {
-      const settings = getSettings();
-      if (!settings.batchLogEnabled) return;
-      try {
-        const path = await batch.writeLog(
-          diskRedactLogFileName(startedAt),
-          formatDiskRedactLog({
-            startedAt,
-            finishedAt: new Date(),
-            sourceRoot: source ?? '',
-            destRoot: inPlace ? '' : (dest ?? ''),
-            searchLabel,
-            marksOnly,
-            includeSigned,
-            report: rep,
-            ...(fatalError ? { fatalError } : {}),
-          }),
-          settings.batchLogDir,
-        );
-        setLogPath(path);
-        setLogError(null);
-        await batch
-          .pruneLogs(settings.batchLogRetentionDays, settings.batchLogDir)
-          .catch(() => {});
-      } catch (e: unknown) {
-        setLogPath(null);
-        setLogError(e instanceof Error ? e.message : String(e));
-      }
+      await writeSweepLog(
+        diskRedactLogFileName(startedAt),
+        formatDiskRedactLog({
+          startedAt,
+          finishedAt: new Date(),
+          sourceRoot: source ?? '',
+          destRoot: inPlace ? '' : (dest ?? ''),
+          searchLabel,
+          marksOnly,
+          includeSigned,
+          report: rep,
+          ...(fatalError ? { fatalError } : {}),
+        }),
+      );
     },
-    [source, dest, inPlace, searchLabel, marksOnly, includeSigned],
+    [source, dest, inPlace, searchLabel, marksOnly, includeSigned, writeSweepLog],
   );
 
   const makeIo = useCallback(
@@ -314,8 +254,7 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
     setError(null);
     setProgress(null);
     setStopping(false);
-    setLogPath(null);
-    setLogError(null);
+    resetLog();
     cancelledRef.current = false;
     const startedAt = new Date();
     try {
@@ -344,7 +283,7 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
       );
       setPhase('review');
     }
-  }, [searchReport, selected, inPlace, dest, marksOnly, includeSigned, makeIo, writeLog]);
+  }, [searchReport, selected, inPlace, dest, marksOnly, includeSigned, makeIo, writeLog, resetLog]);
 
   const stop = useCallback((): void => {
     setStopping(true);
@@ -357,10 +296,9 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
     setSelected(new Set());
     setProgress(null);
     setStopping(false);
-    setLogPath(null);
-    setLogError(null);
+    resetLog();
     setPhase('setup');
-  }, []);
+  }, [resetLog]);
 
   // Test harness: the native folder pickers cannot be WebDriver-driven, so
   // the harness injects paths into the same selectSource/setDest flow the

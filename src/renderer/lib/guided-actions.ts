@@ -15,6 +15,9 @@ import { OCR_LANGUAGES } from '../ocr/languages';
 // itself a data module (catalogs + i18next), so the helpers below stay
 // unit-testable with no DOM.
 import { tChrome, tStepParam, tStepTitle } from '../i18n';
+// The export targets' table is the one declaration of what each target takes;
+// a second list here would drift from the engine's own refusals.
+import { EXPORT_TARGETS, exportParams, type ExportFormat } from './export-targets';
 
 // Slice 2 grew the catalog: OCR (the batch pipeline's single-file arm),
 // header/footer (one positioned text per step — several positions compose as
@@ -35,7 +38,9 @@ export type GuidedStepOp =
   | 'watermark'
   | 'ocr_file'
   | 'add_header_footer'
-  | 'encrypt';
+  | 'encrypt'
+  | 'export_document'
+  | 'export_images';
 
 export interface GuidedStep {
   op: GuidedStepOp;
@@ -78,6 +83,8 @@ export interface StepDef {
   needsFontDir?: boolean;
   /** The step's engine call takes tesseract_path (OCR). */
   needsTesseract?: boolean;
+  /** The step's engine call takes soffice_path (the bridged export targets). */
+  needsSoffice?: boolean;
   /** The step writes a NEW file picked at run time instead of the working
    * copy (encrypt); must be the LAST step and never mutates the open doc. */
   terminalOutput?: boolean;
@@ -389,6 +396,153 @@ export const STEP_CATALOG: readonly StepDef[] = [
     ],
   },
   {
+    // The two steps that CONSUME the document: they write a file of another
+    // kind, so nothing can follow them — the terminal shape encrypt already
+    // wears. The form offers every option any target takes and `mapParams`
+    // emits only the ones the CHOSEN target declares, because the engine
+    // refuses an undeclared option rather than ignoring it.
+    op: 'export_document',
+    title: 'Export to a document format',
+    terminalOutput: true,
+    needsGs: true,
+    needsSoffice: true,
+    params: [
+      {
+        key: 'fmt',
+        label: 'Format',
+        kind: 'select',
+        options: [
+          { value: 'docx', label: 'Word processor document (.docx)' },
+          { value: 'rtf', label: 'Rich text (.rtf)' },
+          { value: 'odt', label: 'OpenDocument text (.odt)' },
+          { value: 'html', label: 'Web page (.html)' },
+          { value: 'xhtml', label: 'Web page, XHTML (.xhtml)' },
+          { value: 'txt', label: 'Plain text (.txt)' },
+          { value: 'xlsx', label: 'Spreadsheet (.xlsx)' },
+          { value: 'pptx', label: 'Presentation (.pptx)' },
+        ],
+        defaultValue: 'docx',
+      },
+      {
+        key: 'pages',
+        label: 'Pages',
+        kind: 'text',
+        defaultValue: '',
+        hint: 'Blank is every page. Read by the text, spreadsheet and presentation targets only.',
+      },
+      {
+        key: 'layout',
+        label: 'Text order (plain text)',
+        kind: 'select',
+        options: [
+          { value: 'reading', label: 'Reading order' },
+          { value: 'layout', label: 'Preserve the page layout' },
+        ],
+        defaultValue: 'reading',
+      },
+      {
+        key: 'page_breaks',
+        label: 'Page breaks (plain text)',
+        kind: 'select',
+        options: [
+          { value: 'no', label: 'Run the pages together' },
+          { value: 'yes', label: 'Separate pages with a page break' },
+        ],
+        defaultValue: 'no',
+      },
+      {
+        key: 'sheet_per',
+        label: 'Sheets (spreadsheet)',
+        kind: 'select',
+        options: [
+          { value: 'table', label: 'One sheet per table' },
+          { value: 'page', label: 'One sheet per page' },
+        ],
+        defaultValue: 'table',
+      },
+      {
+        key: 'include_untabled',
+        label: 'Text outside the tables (spreadsheet)',
+        kind: 'select',
+        options: [
+          { value: 'no', label: 'Leave it out' },
+          { value: 'yes', label: 'Add a sheet carrying it' },
+        ],
+        defaultValue: 'no',
+      },
+      {
+        key: 'slide_size',
+        label: 'Slide size (presentation)',
+        kind: 'select',
+        options: [
+          { value: 'page', label: 'The document’s own page size' },
+          { value: '16:9', label: 'Widescreen (16:9)' },
+          { value: '4:3', label: 'Standard (4:3)' },
+        ],
+        defaultValue: 'page',
+      },
+    ],
+    mapParams: (params) =>
+      exportParams(String(params.fmt ?? 'docx') as ExportFormat, {
+        pages: String(params.pages ?? ''),
+        layout: String(params.layout ?? 'reading'),
+        pageBreaks: String(params.page_breaks ?? 'no') === 'yes',
+        sheetPer: String(params.sheet_per ?? 'table'),
+        includeUntabled: String(params.include_untabled ?? 'no') === 'yes',
+        slideSize: String(params.slide_size ?? 'page'),
+      }),
+  },
+  {
+    op: 'export_images',
+    title: 'Export the pages as images',
+    terminalOutput: true,
+    needsGs: true,
+    params: [
+      {
+        key: 'fmt',
+        label: 'Format',
+        kind: 'select',
+        options: [
+          { value: 'png', label: 'PNG images — one per page' },
+          { value: 'jpeg', label: 'JPEG images — one per page' },
+          { value: 'tiff', label: 'TIFF — one multi-page file per document' },
+        ],
+        defaultValue: 'png',
+      },
+      {
+        key: 'pages',
+        label: 'Pages',
+        kind: 'text',
+        defaultValue: '',
+        hint: 'Blank is every page. Ranges like 1-3,5 are read as written.',
+      },
+      { key: 'dpi', label: 'Resolution (dpi)', kind: 'number', defaultValue: 150, min: 18, max: 1200, step: 1 },
+      {
+        key: 'gray',
+        label: 'Colour',
+        kind: 'select',
+        options: [
+          { value: 'no', label: 'Colour' },
+          { value: 'yes', label: 'Grayscale' },
+        ],
+        defaultValue: 'no',
+      },
+      { key: 'quality', label: 'JPEG quality', kind: 'number', defaultValue: 90, min: 1, max: 100, step: 1 },
+    ],
+    mapParams: (params) =>
+      exportParams(String(params.fmt ?? 'png') as ExportFormat, {
+        pages: String(params.pages ?? ''),
+        layout: 'reading',
+        pageBreaks: false,
+        sheetPer: 'table',
+        includeUntabled: false,
+        slideSize: 'page',
+        dpi: Number(params.dpi ?? 150),
+        gray: String(params.gray ?? 'no') === 'yes',
+        quality: Number(params.quality ?? 90),
+      }),
+  },
+  {
     // LAST in the catalog even though it is always FIRST in an
     // action: `AddStepPicker` defaults to `STEP_CATALOG[0]`, and making the
     // rarest step the default "Add step" would be a regression for every
@@ -548,6 +702,24 @@ export function validateAction(action: GuidedAction): string | null {
   return null;
 }
 
+/** The name a terminal step's save dialog opens on. Read from the step's own
+ * chosen target, so an export offers the extension it is about to write rather
+ * than a name the user has to correct. */
+export function terminalOutputName(step: GuidedStep): string {
+  if (step.op === 'export_document' || step.op === 'export_images') {
+    const target = EXPORT_TARGETS[String(step.params.fmt) as ExportFormat];
+    if (target) return `export.${target.ext}`;
+  }
+  return 'encrypted.pdf';
+}
+
+/** Does this action END by exporting to another format? The engine refuses an
+ * in-place folder run of one, and so does the editor. */
+export function exportsItsResult(action: GuidedAction): boolean {
+  const last = action.steps[action.steps.length - 1];
+  return last !== undefined && (last.op === 'export_document' || last.op === 'export_images');
+}
+
 /** Does this action START by creating its own document? */
 export function createsItsOwnSource(action: GuidedAction): boolean {
   const first = action.steps[0];
@@ -575,6 +747,14 @@ export function openDocumentBlocker(action: GuidedAction): string | null {
  * "replace `report.docx` with a PDF still called `report.docx`" is a
  * destroyed source with a misleading name, not an in-place edit. */
 export function inPlaceBlocker(action: GuidedAction): string | null {
+  if (exportsItsResult(action)) {
+    // The engine refuses this too. Replacing `report.pdf` with a spreadsheet
+    // still called `report.pdf` is a destroyed source under a misleading name.
+    const def = stepDefFor(action.steps[action.steps.length - 1].op);
+    return tChrome('refusal.action.exportNotInPlace', {
+      step: tStepTitle(def.op, def.title),
+    });
+  }
   if (!createsItsOwnSource(action)) return null;
   const def = stepDefFor(action.steps[0].op);
   return tChrome('refusal.action.sourceNotInPlace', {

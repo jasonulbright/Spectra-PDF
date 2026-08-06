@@ -83,6 +83,16 @@ def supported_formats() -> dict:
     }
 
 
+def target_extension(fmt: str) -> str:
+    """The extension a target writes, dot included. The one place a caller
+    building an output name reads it from — a folder sweep that spelled the
+    extension itself would drift the moment a target's changed."""
+    key = str(fmt).lower()
+    if key not in _FORMATS:
+        raise ValueError(f"unsupported export format {fmt!r} (have {sorted(_FORMATS)})")
+    return _FORMATS[key].ext
+
+
 def _reject_unknown_options(key: str, target: _Target, given: dict) -> None:
     for name in _ALL_OPTIONS:
         if given.get(name) is None:

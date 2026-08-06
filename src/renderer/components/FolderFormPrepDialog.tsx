@@ -1,15 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEngine } from '../hooks/useEngine';
-import { dialog, batch, app } from '../lib/tauri-bridge';
+import { dialog, app } from '../lib/tauri-bridge';
 import { FolderRow, RunningView, SweepShell } from './FolderSweepUi';
+import { useSweepFolders } from '../hooks/useSweepFolders';
+import { useSweepLog } from '../hooks/useSweepLog';
 import { tChrome, tChromeCount, tOcrLanguage } from '../i18n';
-import { getSettings } from '../lib/app-settings';
 import { OCR_LANGUAGES, DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
 import { toTesseractLang, describeLanguages } from '../ocr/language-selection';
 import { ghostscriptPath, tesseractPath } from '../lib/ocr-recognize';
 import { TEST_HARNESS_ENABLED, registerFormPrep } from '../testHarness';
-import type { BatchPdfEntry } from '../lib/tauri-bridge';
 import {
   candidateKey,
   kindCounts,
@@ -26,7 +26,6 @@ import {
 } from '../lib/folder-prep';
 import { fileIsEligible, ineligibleReason, type SignedNote } from '../lib/folder-sweep';
 import { createFolderPrepIo } from '../lib/folder-prep-io';
-import { destConflictsWithSource } from '../lib/batch-ocr';
 import { formatPrepLog, prepLogFileName } from '../lib/folder-prep-log';
 
 // Tools ▸ Prepare Forms in a Folder…: the folder scope of Prepare Form.
@@ -97,11 +96,19 @@ export function FolderFormPrepDialog({
   const { callRaw } = useEngine();
 
   const [phase, setPhase] = useState<Phase>('setup');
-  const [source, setSource] = useState<string | null>(null);
-  const [dest, setDest] = useState<string | null>(null);
-  const [entries, setEntries] = useState<BatchPdfEntry[] | null>(null);
-  const [skippedDirs, setSkippedDirs] = useState<string[]>([]);
-  const [scanning, setScanning] = useState(false);
+  const {
+    source,
+    dest,
+    setDest,
+    selectSource,
+    entries,
+    skippedDirs,
+    scanning,
+    conflict,
+    identityConflict,
+    error,
+    setError,
+  } = useSweepFolders();
 
   const [scan, setScan] = useState<ScanMode>('auto');
   const [langs, setLangs] = useState<string[]>([DEFAULT_OCR_LANGUAGE]);
@@ -118,9 +125,7 @@ export function FolderFormPrepDialog({
   const [report, setReport] = useState<PrepReport | null>(null);
   const [progress, setProgress] = useState<PrepProgress | null>(null);
   const [stopping, setStopping] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [logPath, setLogPath] = useState<string | null>(null);
-  const [logError, setLogError] = useState<string | null>(null);
+  const { logPath, logError, write: writeSweepLog, reset: resetLog } = useSweepLog();
 
   const cancelledRef = useRef(false);
   const phaseRef = useRef<Phase>('setup');
@@ -145,58 +150,6 @@ export function FolderFormPrepDialog({
     else sourceBtnRef.current?.focus();
   }, [phase]);
 
-  // Monotonic token: re-picking the source mid-scan starts a second
-  // enumeration, and a slow first response landing last would otherwise
-  // replace the displayed folder's listing with another folder's files.
-  const scanTokenRef = useRef(0);
-  const selectSource = useCallback(async (path: string): Promise<void> => {
-    const token = ++scanTokenRef.current;
-    setError(null);
-    setSource(path);
-    setEntries(null);
-    setSkippedDirs([]);
-    setScanning(true);
-    try {
-      const listing = await batch.listPdfsRecursive(path);
-      if (scanTokenRef.current !== token) return;
-      setEntries(listing.files);
-      setSkippedDirs(listing.skippedDirs);
-    } catch (e: unknown) {
-      if (scanTokenRef.current !== token) return;
-      setSource(null);
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      if (scanTokenRef.current === token) setScanning(false);
-    }
-  }, []);
-
-  // Two-layer conflict guard, the batch one: the string check catches the
-  // everyday case synchronously; the filesystem identity check catches
-  // aliased spellings of one physical folder that no string comparison sees.
-  const [identityConflict, setIdentityConflict] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    if (source === null || dest === null || destConflictsWithSource(source, dest)) {
-      setIdentityConflict(false);
-      return;
-    }
-    void batch
-      .pathsSameFile(source, dest)
-      .then((same) => {
-        if (!cancelled) setIdentityConflict(same);
-      })
-      .catch(() => {
-        if (!cancelled) setIdentityConflict(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [source, dest]);
-
-  const conflict =
-    (source !== null && dest !== null && destConflictsWithSource(source, dest)) ||
-    identityConflict;
-
   const ready =
     phase === 'setup' &&
     !scanning &&
@@ -212,34 +165,21 @@ export function FolderFormPrepDialog({
 
   const writeLog = useCallback(
     async (startedAt: Date, rep: PrepReport, fatalError?: string): Promise<void> => {
-      const settings = getSettings();
-      if (!settings.batchLogEnabled) return;
-      try {
-        const path = await batch.writeLog(
-          prepLogFileName(startedAt),
-          formatPrepLog({
-            startedAt,
-            finishedAt: new Date(),
-            sourceRoot: source ?? '',
-            destRoot: inPlace ? '' : (dest ?? ''),
-            scanLabel,
-            includeSigned,
-            report: rep,
-            ...(fatalError ? { fatalError } : {}),
-          }),
-          settings.batchLogDir,
-        );
-        setLogPath(path);
-        setLogError(null);
-        await batch
-          .pruneLogs(settings.batchLogRetentionDays, settings.batchLogDir)
-          .catch(() => {});
-      } catch (e: unknown) {
-        setLogPath(null);
-        setLogError(e instanceof Error ? e.message : String(e));
-      }
+      await writeSweepLog(
+        prepLogFileName(startedAt),
+        formatPrepLog({
+          startedAt,
+          finishedAt: new Date(),
+          sourceRoot: source ?? '',
+          destRoot: inPlace ? '' : (dest ?? ''),
+          scanLabel,
+          includeSigned,
+          report: rep,
+          ...(fatalError ? { fatalError } : {}),
+        }),
+      );
     },
-    [source, dest, inPlace, scanLabel, includeSigned],
+    [source, dest, inPlace, scanLabel, includeSigned, writeSweepLog],
   );
 
   const makeIo = useCallback(async () => {
@@ -304,8 +244,7 @@ export function FolderFormPrepDialog({
     setError(null);
     setProgress(null);
     setStopping(false);
-    setLogPath(null);
-    setLogError(null);
+    resetLog();
     cancelledRef.current = false;
     const startedAt = new Date();
     try {
@@ -333,7 +272,7 @@ export function FolderFormPrepDialog({
       );
       setPhase('review');
     }
-  }, [detectReport, selected, inPlace, dest, includeSigned, makeIo, writeLog]);
+  }, [detectReport, selected, inPlace, dest, includeSigned, makeIo, writeLog, resetLog]);
 
   const stop = useCallback((): void => {
     setStopping(true);
@@ -346,10 +285,9 @@ export function FolderFormPrepDialog({
     setSelected(new Set());
     setProgress(null);
     setStopping(false);
-    setLogPath(null);
-    setLogError(null);
+    resetLog();
     setPhase('setup');
-  }, []);
+  }, [resetLog]);
 
   const toggleOne = useCallback((key: string): void => {
     setSelected((prev) => {

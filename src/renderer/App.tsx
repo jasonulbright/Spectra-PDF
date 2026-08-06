@@ -104,6 +104,7 @@ import { PrintDialog } from './components/PrintDialog';
 import { BatchOcrDialog } from './components/BatchOcrDialog';
 import { DiskRedactDialog } from './components/DiskRedactDialog';
 import { FolderFormPrepDialog } from './components/FolderFormPrepDialog';
+import { FolderExportDialog } from './components/FolderExportDialog';
 import { ScheduledRunsDialog } from './components/ScheduledRunsDialog';
 import { WatchedFoldersDialog } from './components/WatchedFoldersDialog';
 import { CreatePdfDialog } from './components/CreatePdfDialog';
@@ -226,6 +227,7 @@ function AppContent(): React.ReactElement {
   const [showBatchOcr, setShowBatchOcr] = useState(false);
   const [showDiskRedact, setShowDiskRedact] = useState(false);
   const [showFormPrepFolder, setShowFormPrepFolder] = useState(false);
+  const [showFolderExport, setShowFolderExport] = useState(false);
   const [showSchedules, setShowSchedules] = useState(false);
   const [showWatchers, setShowWatchers] = useState(false);
   const [showCreatePdf, setShowCreatePdf] = useState(false);
@@ -1894,6 +1896,7 @@ function AppContent(): React.ReactElement {
     openBatchOcr: () => setShowBatchOcr(true),
     openDiskRedact: () => setShowDiskRedact(true),
     openFormPrepFolder: () => setShowFormPrepFolder(true),
+    openFolderExport: () => setShowFolderExport(true),
     openScheduledRuns: () => setShowSchedules(true),
     openWatchedFolders: () => setShowWatchers(true),
     openCreatePdf: () => {
@@ -1947,6 +1950,7 @@ function AppContent(): React.ReactElement {
       openBatchOcr: () => h.current.openBatchOcr(),
       openDiskRedact: () => h.current.openDiskRedact(),
       openFormPrepFolder: () => h.current.openFormPrepFolder(),
+      openFolderExport: () => h.current.openFolderExport(),
       openScheduledRuns: () => h.current.openScheduledRuns(),
       openWatchedFolders: () => h.current.openWatchedFolders(),
       openCreatePdf: () => h.current.openCreatePdf(),
@@ -2375,6 +2379,7 @@ function AppContent(): React.ReactElement {
           }}
         />
       )}
+      {showFolderExport && <FolderExportDialog onClose={() => setShowFolderExport(false)} />}
       {showSchedules && <ScheduledRunsDialog onClose={() => setShowSchedules(false)} />}
       {showWatchers && <WatchedFoldersDialog onClose={() => setShowWatchers(false)} />}
       {showCreatePdf && (

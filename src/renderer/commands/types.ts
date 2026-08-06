@@ -86,6 +86,7 @@ export interface AppCommandHandlers {
    * Folder…). Needs no open document: it analyses a picked folder tree by
    * path, entirely outside the workspace. */
   openFormPrepFolder(): void;
+  openFolderExport(): void;
   openScheduledRuns(): void;
   /** Open the Watched Folders dialog (Tools ▸ Watched Folders…). */
   openWatchedFolders(): void;

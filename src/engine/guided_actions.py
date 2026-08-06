@@ -46,6 +46,8 @@ from engine.compress import compress
 from engine.create_pdf import accepted_suffixes as create_pdf_suffixes
 from engine.create_pdf import create_pdf
 from engine.encrypt import encrypt
+from engine.image_export import export_images, image_extension
+from engine.office_export import export_document, target_extension
 from engine.grayscale import grayscale
 from engine.headers import add_header_footer
 from engine.metadata import strip_metadata
@@ -167,7 +169,36 @@ _STEPS: dict = {
         ),
         frozenset({"gs_path", "soffice_path"}),
     ),
+    # The two steps that CONSUME the document instead of transforming it. They
+    # write a different kind of file at a different extension, so nothing can
+    # follow them and `run_action` handles them directly rather than through
+    # `_apply_steps` (every other step is `fn(file=p, output=p)`).
+    "export_document": (
+        export_document,
+        frozenset(
+            {
+                "fmt",
+                "pages",
+                "layout",
+                "page_breaks",
+                "sheet_per",
+                "include_untabled",
+                "slide_size",
+            }
+        ),
+        frozenset({"gs_path", "soffice_path"}),
+    ),
+    "export_images": (
+        export_images,
+        frozenset({"fmt", "dpi", "pages", "gray", "quality"}),
+        frozenset({"gs_path"}),
+    ),
 }
+
+# The steps that end a sequence by producing a non-PDF. Named once: the
+# validation, the in-place refusal and the output naming all ask the same
+# question.
+EXPORT_STEPS = ("export_document", "export_images")
 
 # Everything a create_pdf-led run walks BEYOND the PDFs `_list_sources`
 # always takes. Derived from the engine's own accepted set, never re-listed —
@@ -178,6 +209,22 @@ CREATE_PDF_EXTRA_SUFFIXES = tuple(s for s in create_pdf_suffixes() if s != ".pdf
 def creates_its_own_source(steps) -> bool:
     """Does this (validated) step list START by creating the document?"""
     return bool(steps) and steps[0]["op"] == "create_pdf"
+
+
+def exports_its_result(steps) -> bool:
+    """Does this (validated) step list END by exporting to another format?"""
+    return bool(steps) and steps[-1]["op"] in EXPORT_STEPS
+
+
+def _export_out_path(dest_root: Path, rel: str, step: dict) -> Path:
+    """The mirror path a terminal export writes: the source's own tree position
+    with the target's extension in place of the PDF's."""
+    if step["op"] == "export_images":
+        ext = image_extension(step["params"].get("fmt", "png"))
+    else:
+        ext = target_extension(step["params"].get("fmt", "docx"))
+    stem = rel[:-4] if rel.lower().endswith(".pdf") else rel
+    return dest_root / f"{stem}{ext}"
 
 
 def validate_steps(steps) -> list[dict]:
@@ -220,6 +267,27 @@ def validate_steps(steps) -> list[dict]:
                     "MRC compression must come after OCR — OCR reads the page image, "
                     "and MRC replaces it"
                 )
+        if op in EXPORT_STEPS:
+            # The target names the output's extension, so a run cannot be
+            # planned without it. Refused at validation rather than per file:
+            # a missing format is a broken action, not a broken document.
+            fmt = str(params.get("fmt") or "").strip()
+            if not fmt:
+                raise ValueError(f"step {i + 1} ({op}): name the export format")
+            if op == "export_images":
+                image_extension(fmt)
+            else:
+                target_extension(fmt)
+            params["fmt"] = fmt
+        if op in EXPORT_STEPS and i != len(steps) - 1:
+            # ORDER, enforced rather than documented (the create_pdf
+            # precedent): an export CONSUMES the document and writes another
+            # kind of file, so a step after it would be handed something that
+            # is no longer a PDF.
+            raise ValueError(
+                f"{op} must be the last step -- it writes a different kind of "
+                "file, and nothing can run on that"
+            )
         if op == "create_pdf" and i != 0:
             # ORDER, enforced rather than documented (the MRC-after-OCR
             # precedent): create_pdf PRODUCES the document the rest of the
@@ -249,6 +317,16 @@ def _apply_steps(path: str, steps: list[dict], tool_paths: dict) -> int:
             kwargs[key] = tool_paths.get(key, "")
         fn(file=path, output=path, **kwargs)
     return len(steps)
+
+
+def _run_export(source: Path, output: Path, step: dict, tool_paths: dict) -> None:
+    """The terminal export: `fn(file=source, output=output)` across a change of
+    format, which is why it cannot go through `_apply_steps`."""
+    fn, _allowed, needed = _STEPS[step["op"]]
+    kwargs = dict(step["params"])
+    for key in needed:
+        kwargs[key] = tool_paths.get(key, "")
+    fn(file=str(source), output=str(output), **kwargs)
 
 
 def _readable_output(path: Path) -> bool:
@@ -318,6 +396,15 @@ def run_action(
             )
     clean_steps = validate_steps(steps)
     creates = creates_its_own_source(clean_steps)
+    exports = exports_its_result(clean_steps)
+    if exports and in_place:
+        # An export writes a different kind of file. Replacing `report.pdf`
+        # with a spreadsheet that is still called `report.pdf` is a destroyed
+        # source under a misleading name, not an in-place edit.
+        raise ValueError(
+            "In-place mode cannot end with an export -- the exported document is a "
+            "new file, not a replacement for its source."
+        )
     if creates and in_place:
         # The converted document is a NEW file — replacing `report.docx` with
         # a PDF that is still called `report.docx` is not an in-place edit,
@@ -342,6 +429,12 @@ def run_action(
         source_path, False, CREATE_PDF_EXTRA_SUFFIXES if creates else ()
     )
     results: list[dict] = []
+    # A terminal export CONSUMES the document; everything before it transforms
+    # a copy of it, which is the shape `_apply_steps` speaks.
+    transform_steps = clean_steps[:-1] if exports else clean_steps
+    # An export-only action never stages: reading each source directly is the
+    # difference between one pass and a full copy of every file in the tree.
+    stages = bool(transform_steps)
     for index, (abs_path, rel) in enumerate(entries):
         if progress:
             print(f"[{index + 1}/{len(entries)}] {rel}", flush=True)
@@ -357,6 +450,7 @@ def run_action(
             out_path = dest_path / f"{rel}.pdf"
         else:
             out_path = dest_path / rel
+        export_path = _export_out_path(dest_path, rel, clean_steps[-1]) if exports else None
         try:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             if creates:
@@ -367,10 +461,12 @@ def run_action(
                     soffice_path=soffice_path,
                     **clean_steps[0]["params"],
                 )
-                applied = 1 + _apply_steps(str(out_path), clean_steps[1:], tool_paths)
-            else:
+                applied = 1 + _apply_steps(str(out_path), transform_steps[1:], tool_paths)
+            elif stages:
                 shutil.copy2(abs_path, out_path)
-                applied = _apply_steps(str(out_path), clean_steps, tool_paths)
+                applied = _apply_steps(str(out_path), transform_steps, tool_paths)
+            else:
+                applied = 0
             if in_place:
                 if not _readable_output(out_path):
                     raise ValueError(
@@ -379,10 +475,28 @@ def run_action(
                     )
                 os.replace(out_path, abs_path)
             row: dict = {"rel": rel, "status": "ok", "steps_applied": applied}
+            # The move gate reads the PROCESSED copy, so it is answered before a
+            # terminal export consumes and removes it.
+            processed_readable = (
+                _readable_output(out_path) if move_processed_root and stages else True
+            )
+            if exports:
+                export_path.parent.mkdir(parents=True, exist_ok=True)
+                _run_export(
+                    out_path if stages else abs_path, export_path, clean_steps[-1], tool_paths
+                )
+                if stages:
+                    # The mirror carries the exported document, not the PDF the
+                    # steps ran on: leaving both would double the tree and make
+                    # "what did this run produce" ambiguous.
+                    out_path.unlink()
+                applied += 1
+                row["steps_applied"] = applied
+                row["output"] = str(export_path)
             if move_processed_root:
                 # Only after the mirror copy fully processed — a failed file
                 # stays in the intake for the next attempt.
-                if not _readable_output(out_path):
+                if not processed_readable:
                     raise ValueError(
                         "the processed copy could not be read back -- the original "
                         "stays in the source folder"
@@ -393,12 +507,16 @@ def run_action(
                     row["move_error"] = str(exc)
             results.append(row)
         except Exception as exc:  # noqa: BLE001 — per-file isolation is the contract
-            # Never leave a half-processed file in the mirror (or staging litter).
-            try:
-                if out_path.exists():
-                    out_path.unlink()
-            except OSError:
-                pass
+            # Never leave a half-processed file in the mirror (or staging litter),
+            # and never leave the partial output of an export that failed.
+            for litter in (out_path if stages or in_place else None, export_path):
+                if litter is None:
+                    continue
+                try:
+                    if litter.exists():
+                        litter.unlink()
+                except OSError:
+                    pass
             results.append({"rel": rel, "status": "error", "error": str(exc)})
     finished_at = datetime.now()
 
