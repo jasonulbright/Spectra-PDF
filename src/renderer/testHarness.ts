@@ -664,6 +664,24 @@ export function registerCanvasMerge(handlers: CanvasMergeHandlers | null): void 
  * here while mounted. The harness injects the paths + password and exercises
  * the exact `call('sign_pdf', …)` path the UI runs.
  */
+/** What a read-only verify reports to a spec: the counts, plus the
+ * document-level certification and each signature's policy verdict — the
+ * shape the two signature surfaces render. */
+export interface SignatureVerifySnapshot {
+  signature_count: number;
+  all_valid: boolean;
+  certified: boolean;
+  certification_level: string | null;
+  any_policy_violation: boolean;
+  signatures: {
+    field: string | null;
+    certification_level: string | null;
+    policy_ok: boolean | null;
+    policy_judged: boolean;
+    modification_level: string | null;
+  }[];
+}
+
 export interface SignHandler {
   sign: (params: {
     // Signer source: a .pfx path, OR a PEM key+cert pair.
@@ -679,12 +697,17 @@ export interface SignHandler {
     appearance?: { page: number; rect: [number, number, number, number] };
     /** PAdES (ETSI.CAdES.detached) profile. */
     pades?: boolean;
+    /** Apply an author (certification) signature at this level. */
+    certify?: boolean;
+    certifyLevel?: 'none' | 'form-fill' | 'annotate';
   }) => Promise<{
     output: string;
     signer: string | null;
     valid: boolean;
     intact: boolean;
     covers_whole_document: boolean;
+    certified?: boolean;
+    certification_level?: string | null;
   }>;
   // Sign the ACTIVE document in place (undoable performOperation flow);
   // no output path. Returns the post-sign verification summary.
@@ -695,10 +718,12 @@ export interface SignHandler {
     password: string;
     reason?: string;
     location?: string;
+    certify?: boolean;
+    certifyLevel?: 'none' | 'form-fill' | 'annotate';
   }) => Promise<{ signature_count: number; all_valid: boolean }>;
   // Verify the active working copy's signatures (read-only) — lets an
   // e2e confirm an undo restored the pre-sign, unsigned state.
-  verifyActive: () => Promise<{ signature_count: number; all_valid: boolean }>;
+  verifyActive: () => Promise<SignatureVerifySnapshot>;
 }
 
 let signHandler: SignHandler | null = null;
@@ -970,12 +995,16 @@ export interface TestHarness {
     location?: string;
     appearance?: { page: number; rect: [number, number, number, number] };
     pades?: boolean;
+    certify?: boolean;
+    certifyLevel?: 'none' | 'form-fill' | 'annotate';
   }) => Promise<{
     output: string;
     signer: string | null;
     valid: boolean;
     intact: boolean;
     covers_whole_document: boolean;
+    certified?: boolean;
+    certification_level?: string | null;
   }>;
   /** Sign the active document IN PLACE (undoable); no output path. */
   signActiveFileInPlace: (params: {
@@ -985,9 +1014,12 @@ export interface TestHarness {
     password: string;
     reason?: string;
     location?: string;
+    certify?: boolean;
+    certifyLevel?: 'none' | 'form-fill' | 'annotate';
   }) => Promise<{ signature_count: number; all_valid: boolean }>;
-  /** Read-only signature verify of the active working copy. */
-  verifyActiveSignatures: () => Promise<{ signature_count: number; all_valid: boolean }>;
+  /** Read-only signature verify of the active working copy, including the
+   * document-level certification and each signature's policy verdict. */
+  verifyActiveSignatures: () => Promise<SignatureVerifySnapshot>;
   /** Set the active document's JavaScript (undoable), and read it back. */
   documentJsSet: (scripts: { name: string; js: string }[]) => Promise<void>;
   documentJsList: () => Promise<{ name: string; js: string }[]>;

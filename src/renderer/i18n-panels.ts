@@ -670,6 +670,21 @@ export const PANEL_STRINGS = {
   'panel.sig.changesFormFilling': 'form fields filled in',
   'panel.sig.changesAnnotations': 'annotations changed',
   'panel.sig.changesOther': 'other changes',
+  'panel.sig.changesUnknown': 'a change of an unreported kind',
+  'panel.sig.certifiedBy': 'Certified by {{signer}}',
+  'panel.sig.certifiedLevelUnknown':
+    'This document states what may change in it in a way this version does not recognise.',
+  'panel.sig.certificationViolated':
+    'The signature in field {{field}} reports a change the certification does not allow: {{change}}.',
+  'panel.sig.certificationUnreadable':
+    'This document carries a certification that could not be read: {{message}}',
+  'panel.sig.unnamedField': '(unnamed)',
+  'panel.sig.certify': 'Certify this document',
+  'panel.sig.certifyHint':
+    'A certification signature records what may change in the document afterwards. It must be the first signature in the document, and the level cannot be changed later.',
+  'panel.sig.certifyLevel': 'Permitted changes',
+  'panel.sig.certifyUnavailable':
+    'This document is already signed, so it cannot be certified — a certification signature must be the first signature in a document.',
 
   'panel.settings.catGeneral': 'General',
   'panel.settings.catAppearance': 'Appearance',

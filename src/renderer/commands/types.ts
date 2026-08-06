@@ -175,9 +175,13 @@ export interface CanvasServices {
    * the snap-preference store. */
   clearGuides(): void;
   /** Arm the canvas's visible-signature placement from a PANEL, with the
-   * panel's signer details prefilled into the canvas sign card. Optional —
-   * present only while the canvas view is mounted with a document. */
-  startVisibleSignature?(prefill?: import('../components/SignerSourceFields').SignerSource): void;
+   * panel's signer details and certification choice prefilled into the canvas
+   * sign card. Optional — present only while the canvas view is mounted with a
+   * document. */
+  startVisibleSignature?(
+    prefill?: import('../components/SignerSourceFields').SignerSource,
+    certification?: import('../lib/signatures').CertifyOptions,
+  ): void;
   /**
    * The Search & Redact panel's seam onto the canvas's redaction
    * marks.
