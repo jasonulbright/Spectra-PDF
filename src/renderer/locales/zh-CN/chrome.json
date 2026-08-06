@@ -1521,6 +1521,8 @@
   "engine.struct_tree.unknownProperties": "未知的属性：{{v0}}",
   "engine.system_fonts.fontFileFound": "找不到字体文件：{{path}}",
   "engine.system_fonts.usableFontFile": "不是可用的字体文件：{{v0}}",
+  "engine.table_export.tableFoundPageS": "在分析的 {{v0}} 页中未找到表格，因此没有可写入电子表格的内容。",
+  "engine.table_export.unknownSheetGroupingChoose": "未知的工作表分组方式 {{sheet_per}}。请选择 table 或 page。",
   "engine.takeoff.outputFolderDoesExist": "输出文件夹不存在：{{v0}}",
   "engine.text_authoring.boldMustTrueFalse": "bold 必须是 true 或 false（实际为 {{bold}}）",
   "engine.text_authoring.directionalFormattingCharactersCannot": "方向控制字符无法在文本框中排版",
