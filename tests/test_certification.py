@@ -594,6 +594,107 @@ def test_a_counter_signature_does_not_make_a_permitted_comment_a_violation(tmp_d
     ]
 
 
+def test_a_rebuild_that_drops_the_certification_entry_still_transplants(tmp_dir, pki):
+    """The page-tier rebuild carries no ``/Perms``; the transplant writes the
+    original bytes verbatim, so the certification survives by construction.
+    Comparing that catalog key would refuse every edit of a certified document
+    and fall back to the rewrite, which destroys the very thing it protects."""
+    certified, _ = _certify(tmp_dir, pki, "annotate", name="carry.pdf")
+
+    def drop_perms_and_annotate(pdf):
+        del pdf.Root["/Perms"]
+        _add_square(pdf)
+
+    modified = _rewritten(
+        certified, os.path.join(tmp_dir, "mod-carry.pdf"), drop_perms_and_annotate
+    )
+    out = os.path.join(tmp_dir, "carried.pdf")
+    assert transplant_incremental(certified, modified, out)["applied"] is True
+    verdict = verify_signatures(out)
+    assert verdict["certification"]["level"] == "annotate"
+    assert verdict["signatures"][0]["intact"] is True
+    assert verdict["signatures"][0]["policy_ok"] is True
+
+
+# ── a widget held under the field's /Kids ─────────────────────────────────
+
+def _kids_form_pdf(path):
+    """A text field whose widget is a separate ``/Kids`` entry — the shape a
+    merged field-widget test never exercises."""
+    pdf = pikepdf.new()
+    font = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name("/Font"), Subtype=pikepdf.Name("/Type1"),
+        BaseFont=pikepdf.Name("/Helvetica"), Encoding=pikepdf.Name("/WinAnsiEncoding"),
+    ))
+    page = pdf.add_blank_page(page_size=(400, 400))
+    pdf.add_blank_page(page_size=(400, 400))
+    widget = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/Widget"),
+        Rect=pikepdf.Array([40, 300, 260, 324]), F=4,
+    ))
+    field = pdf.make_indirect(pikepdf.Dictionary(
+        FT=pikepdf.Name("/Tx"), T=pikepdf.String("applicant"),
+        DA=pikepdf.String("/Helv 10 Tf 0 g"), Kids=pikepdf.Array([widget]),
+    ))
+    widget["/Parent"] = field
+    page.obj["/Annots"] = pdf.make_indirect(pikepdf.Array([widget]))
+    pdf.Root["/AcroForm"] = pdf.make_indirect(pikepdf.Dictionary(
+        Fields=pikepdf.Array([field]), DA=pikepdf.String("/Helv 10 Tf 0 g"),
+        DR=pikepdf.Dictionary(Font=pikepdf.Dictionary(Helv=font)),
+    ))
+    pdf.save(path)
+    return path
+
+
+@pytest.mark.parametrize("level,expected_ok", [("none", False), ("form-fill", True),
+                                               ("annotate", True)])
+def test_filling_a_kids_widget_is_judged_as_form_filling(tmp_dir, pki, level, expected_ok):
+    from engine.forms import fill_form_fields
+
+    src = _kids_form_pdf(os.path.join(tmp_dir, f"kids-{level}.pdf"))
+    certified, _ = _certify(tmp_dir, pki, level, name=f"kids-cert-{level}.pdf", src=src)
+    out = os.path.join(tmp_dir, f"kids-filled-{level}.pdf")
+    fill_form_fields(certified, out, {"applicant": "filled"})
+    _field, ok, modification = _rows_under(out, DIFF_POLICY)[0]
+    assert modification == "FORM_FILLING"
+    assert ok is expected_ok
+
+
+def test_a_kids_widget_moved_while_filling_is_not_cleared(tmp_dir, pki):
+    src = _kids_form_pdf(os.path.join(tmp_dir, "kids-move.pdf"))
+    certified, _ = _certify(tmp_dir, pki, "annotate", name="kids-move-cert.pdf", src=src)
+
+    def fill_and_move(pdf):
+        field = pdf.Root["/AcroForm"]["/Fields"][0]
+        field["/V"] = pikepdf.String("filled")
+        widget = field["/Kids"][0]
+        widget["/Rect"] = pikepdf.Array([10, 10, 230, 34])
+        widget["/AP"] = pikepdf.Dictionary(N=pdf.make_stream(b"1 0 0 rg 0 0 10 10 re f"))
+
+    modified = _rewritten(certified, os.path.join(tmp_dir, "kids-moved.pdf"), fill_and_move)
+    out = os.path.join(tmp_dir, "kids-moved-out.pdf")
+    assert transplant_incremental(certified, modified, out)["applied"] is True
+    _field, ok, modification = _rows_under(out, DIFF_POLICY)[0]
+    assert modification == "OTHER"
+    assert ok is False
+
+
+def test_a_kids_widget_appearance_rewritten_without_a_fill_is_not_cleared(tmp_dir, pki):
+    src = _kids_form_pdf(os.path.join(tmp_dir, "kids-noval.pdf"))
+    certified, _ = _certify(tmp_dir, pki, "annotate", name="kids-noval-cert.pdf", src=src)
+
+    def restyle_only(pdf):
+        widget = pdf.Root["/AcroForm"]["/Fields"][0]["/Kids"][0]
+        widget["/AP"] = pikepdf.Dictionary(N=pdf.make_stream(b"0 0 1 rg 0 0 40 40 re f"))
+
+    modified = _rewritten(certified, os.path.join(tmp_dir, "kids-restyled.pdf"), restyle_only)
+    out = os.path.join(tmp_dir, "kids-restyled-out.pdf")
+    assert transplant_incremental(certified, modified, out)["applied"] is True
+    _field, ok, modification = _rows_under(out, DIFF_POLICY)[0]
+    assert modification == "OTHER"
+    assert ok is False
+
+
 def test_adding_a_signature_field_alone_stays_at_the_form_level(tmp_dir, pki):
     """Counter-signing a form-filling certification must not be re-levelled by
     the annotation rule."""

@@ -722,6 +722,9 @@ export interface SignParams {
   appearance?: { page: number; rect: [number, number, number, number] };
   /** PAdES (ETSI.CAdES.detached) profile. */
   pades?: boolean;
+  /** Apply an author (certification) signature at this level. */
+  certify?: boolean;
+  certifyLevel?: CertifyLevel;
 }
 
 export interface SignSummary {
@@ -730,6 +733,28 @@ export interface SignSummary {
   valid: boolean;
   intact: boolean;
   covers_whole_document: boolean;
+  certified?: boolean;
+  certification_level?: string | null;
+}
+
+/** Wire values, never localized. */
+export type CertifyLevel = 'none' | 'form-fill' | 'annotate';
+
+/** What a read-only verify reports: the counts, the document-level
+ * certification and each signature's policy verdict. */
+export interface SignatureVerifySnapshot {
+  signature_count: number;
+  all_valid: boolean;
+  certified: boolean;
+  certification_level: string | null;
+  any_policy_violation: boolean;
+  signatures: {
+    field: string | null;
+    certification_level: string | null;
+    policy_ok: boolean | null;
+    policy_judged: boolean;
+    modification_level: string | null;
+  }[];
 }
 
 export async function signActiveFile(params: SignParams): Promise<SignSummary> {
@@ -754,6 +779,8 @@ export interface SignInPlaceParams {
   password: string;
   reason?: string;
   location?: string;
+  certify?: boolean;
+  certifyLevel?: CertifyLevel;
 }
 
 /** Sign the ACTIVE document in place (no output path) via the undoable
@@ -776,14 +803,8 @@ export async function signActiveFileInPlace(
 }
 
 /** Read-only verify of the active working copy's signatures. */
-export async function verifyActiveSignatures(): Promise<{
-  signature_count: number;
-  all_valid: boolean;
-}> {
-  const result = await browser.executeAsync<
-    { signature_count: number; all_valid: boolean } | string,
-    []
-  >(function (done) {
+export async function verifyActiveSignatures(): Promise<SignatureVerifySnapshot> {
+  const result = await browser.executeAsync<SignatureVerifySnapshot | string, []>(function (done) {
     (window as any).__SPECTRA_TEST__.verifyActiveSignatures()
       .then((res: unknown) => done(res as any))
       .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
