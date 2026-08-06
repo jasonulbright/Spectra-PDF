@@ -1228,6 +1228,16 @@ pub struct SignArgs {
     /// Private-key label on the token (defaults to the certificate label)
     #[arg(long, requires = "pkcs11_module")]
     pub key_label: Option<String>,
+    /// Apply a CERTIFICATION (author) signature, which records what may change
+    /// in the document afterwards. At most one per document, and it must be the
+    /// document's first signature.
+    #[arg(long)]
+    pub certify: bool,
+    /// What the certification permits: none (no changes) | form-fill (form
+    /// filling and signing) | annotate (form filling, signing and commenting).
+    /// Defaults to form-fill.
+    #[arg(long, requires = "certify", value_parser = ["none", "form-fill", "annotate"])]
+    pub certify_level: Option<String>,
 }
 
 #[derive(Args)]
@@ -2900,6 +2910,14 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             }
             if args.lta {
                 params["lta"] = json!(true);
+            }
+            // The wire carries level NAMES; clap's value_parser rejects any
+            // other spelling, and the engine re-validates.
+            if args.certify {
+                params["certify"] = json!(true);
+            }
+            if let Some(level) = &args.certify_level {
+                params["certify_level"] = json!(level);
             }
             if !args.trust_roots.is_empty() {
                 let roots: Vec<String> = args
