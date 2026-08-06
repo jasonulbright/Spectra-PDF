@@ -547,3 +547,60 @@ def test_a_plain_annotation_added_the_same_way_is_cleared(tmp_dir, pki):
     _field, ok, modification = _rows_under(out, DIFF_POLICY)[0]
     assert modification == "ANNOTATIONS"
     assert ok is True
+
+
+def test_an_unregistered_widget_smuggled_beside_a_plain_annotation_is_still_caught(
+    tmp_dir, pki
+):
+    certified, _ = _certify(tmp_dir, pki, "annotate", name="smuggle.pdf")
+
+    def add_both(writer):
+        page = _first_page(writer)
+        for subtype, extra in (
+            ("/Square", {}),
+            ("/Widget", {"/FT": generic.pdf_name("/Tx"),
+                         "/T": generic.TextStringObject("smuggled")}),
+        ):
+            entries = {
+                generic.pdf_name("/Type"): generic.pdf_name("/Annot"),
+                generic.pdf_name("/Subtype"): generic.pdf_name(subtype),
+                generic.pdf_name("/Rect"): generic.ArrayObject(
+                    [generic.NumberObject(x) for x in (100, 300, 200, 360)]
+                ),
+                generic.pdf_name("/F"): generic.NumberObject(4),
+            }
+            for key, value in extra.items():
+                entries[generic.pdf_name(key)] = value
+            _append_to_annots(writer, page, writer.add_object(
+                generic.DictionaryObject(entries)
+            ))
+
+    out = _appended(certified, os.path.join(tmp_dir, "smuggled.pdf"), add_both)
+    _field, ok, modification = _rows_under(out, DIFF_POLICY)[0]
+    assert modification == "OTHER"
+    assert ok is False
+
+
+def test_a_counter_signature_does_not_make_a_permitted_comment_a_violation(tmp_dir, pki):
+    certified, _ = _certify(tmp_dir, pki, "annotate", name="cs-base.pdf")
+    countersigned = os.path.join(tmp_dir, "cs.pdf")
+    sign_pdf(certified, countersigned, pfx_path=pki["pfx"], password="pw")
+    out = _edited(tmp_dir, countersigned, "annotate", "cs")
+    verdict = verify_signatures(out)
+    assert verdict["summary"]["any_policy_violation"] is False
+    assert all(s["policy_judged"] and s["policy_ok"] for s in verdict["signatures"])
+    assert [s["modification_level"] for s in verdict["signatures"]] == [
+        "ANNOTATIONS", "ANNOTATIONS",
+    ]
+
+
+def test_adding_a_signature_field_alone_stays_at_the_form_level(tmp_dir, pki):
+    """Counter-signing a form-filling certification must not be re-levelled by
+    the annotation rule."""
+    certified, _ = _certify(tmp_dir, pki, "form-fill", name="cs2-base.pdf")
+    out = os.path.join(tmp_dir, "cs2.pdf")
+    sign_pdf(certified, out, pfx_path=pki["pfx"], password="pw")
+    rows = _rows_under(out, DIFF_POLICY)
+    author = next(r for r in rows if r[0] == "Signature1")
+    assert author[1] is True
+    assert author[2] == "FORM_FILLING"
