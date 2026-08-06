@@ -184,7 +184,7 @@ export function ReadingOrderPanel(): React.ReactElement {
                     data-testid={`order-item-${i}`}
                     className="flex items-center gap-2 px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded"
                   >
-                    <span className="text-xs text-neutral-500 w-6 text-right shrink-0">{i + 1}.</span>
+                    <span className="text-xs text-neutral-500 w-6 text-end shrink-0">{i + 1}.</span>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm text-neutral-200">
                         &lt;{entry.node.type}&gt;

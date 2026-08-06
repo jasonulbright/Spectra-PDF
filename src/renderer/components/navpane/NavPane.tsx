@@ -5,8 +5,9 @@ import { NAV_PANEL_DEFS, navPanelDef } from './registry';
 import type { NavPanelComponentProps } from './types';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tNavPanelTitle } from '../../i18n';
+import { inlineExtent } from '../../lib/inline-direction';
 
-// The left navigation pane: a thin, always-docked icon strip
+// The navigation pane on the inline-start side: a thin, always-docked icon strip
 // (one button per AVAILABLE panel) + the active panel body at the persisted
 // width, shown while the pane is open. The strip is chrome (frame under Mica);
 // the body is content (opaque). F4 / the strip toggle open; clicking a strip
@@ -28,8 +29,9 @@ export function NavPane(props: NavPaneProps): React.ReactElement {
   const ActivePanel = activeDef.Component;
 
   // Drag-resize (window-level pointer listeners, the canvas pattern). The pane
-  // is anchored at its left edge; width = pointerX − left. The reducer clamps
-  // to the minimum.
+  // is anchored at its INLINE-START edge, so the width is the pointer's extent
+  // from that edge — which is the right edge under `dir=rtl`. The reducer
+  // clamps to the minimum.
   const bodyRef = useRef<HTMLDivElement>(null);
   // Detach an in-flight resize's window listeners if the pane unmounts mid-drag
   // (e.g. a tab switch) — otherwise they leak.
@@ -38,9 +40,12 @@ export function NavPane(props: NavPaneProps): React.ReactElement {
   const onResizeDown = useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault();
-      const left = bodyRef.current?.getBoundingClientRect().left ?? 0;
+      const bounds = bodyRef.current?.getBoundingClientRect() ?? { left: 0, right: 0 };
       const onMove = (ev: PointerEvent) => {
-        dispatch({ type: 'UI_SET_NAV_PANE_WIDTH', width: ev.clientX - left });
+        dispatch({
+          type: 'UI_SET_NAV_PANE_WIDTH',
+          width: inlineExtent(bounds, ev.clientX, 'start'),
+        });
       };
       const detach = () => {
         window.removeEventListener('pointermove', onMove);

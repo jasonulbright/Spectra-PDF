@@ -245,12 +245,12 @@ export function TakeoffPanel(): React.ReactElement {
                   aria-pressed={armed?.name === g.name}
                   title={tChrome('panel.takeoff.armTitle')}
                   onClick={() => armCountGroup(g)}
-                  className="flex items-center gap-2 flex-1 text-left"
+                  className="flex items-center gap-2 flex-1 text-start"
                 >
                   <CountSymbolGlyph symbol={g.symbol} color={g.color} />
                   <span className="text-sm text-neutral-100 truncate">{g.name}</span>
                   <span
-                    className="ml-auto text-sm tabular-nums text-neutral-300"
+                    className="ms-auto text-sm tabular-nums text-neutral-300"
                     data-testid={`takeoff-count-${g.name}`}
                   >
                     {tNumber(countOf(g.name))}
@@ -334,9 +334,9 @@ export function TakeoffPanel(): React.ReactElement {
           <table className="w-full text-xs text-neutral-300">
             <thead className="text-neutral-500">
               <tr>
-                <th className="text-left font-normal">{tChrome('panel.takeoff.colGroup')}</th>
-                <th className="text-left font-normal">{tChrome('panel.takeoff.colPage')}</th>
-                <th className="text-right font-normal">{tChrome('panel.takeoff.colCount')}</th>
+                <th className="text-start font-normal">{tChrome('panel.takeoff.colGroup')}</th>
+                <th className="text-start font-normal">{tChrome('panel.takeoff.colPage')}</th>
+                <th className="text-end font-normal">{tChrome('panel.takeoff.colCount')}</th>
               </tr>
             </thead>
             <tbody>
@@ -344,7 +344,7 @@ export function TakeoffPanel(): React.ReactElement {
                 <tr key={`${r.group}-${r.page}`}>
                   <td className="truncate">{r.group}</td>
                   <td className="tabular-nums">{tNumber(r.page)}</td>
-                  <td className="text-right tabular-nums">{tNumber(r.count)}</td>
+                  <td className="text-end tabular-nums">{tNumber(r.count)}</td>
                 </tr>
               ))}
             </tbody>

@@ -612,4 +612,37 @@ describe('qps pseudo-locale leak sweep', () => {
       { timeout: 10_000, timeoutMsg: 'the chrome never returned to English' },
     );
   });
+
+  // `qps-rtl` is the same generated catalog under a right-to-left direction.
+  // Coverage is a property of the CATALOG and must not depend on direction, so
+  // this re-sweeps the docless chrome rather than restating it: a surface that
+  // swapped in a hardcoded string for the mirrored layout would leak here and
+  // nowhere else. The mirroring itself is spec 127's subject, not this one's.
+  it('the docless chrome renders no bare English under qps-rtl either', async () => {
+    await waitForHarness();
+    await qps('qps-rtl');
+    const leaks: string[] = [];
+    const check = (label: string, text: string): void => {
+      if (!text.startsWith('[')) leaks.push(`${label}: "${text}"`);
+    };
+    try {
+      expect(await browser.execute(() => document.documentElement.dir)).toBe('rtl');
+      for (const id of ['file', 'edit', 'view', 'document', 'tools', 'window', 'help']) {
+        check(`menu ${id}`, await $(`[data-testid="menu-${id}"]`).getText());
+      }
+      await sweep('[data-testid="menubar"]', leaks);
+      await $('[data-testid="tab-home"]').click();
+      await $('[data-testid="home-tab"]').waitForDisplayed({ timeout: 10_000 });
+      await sweep('[data-testid="home-tab"]', leaks);
+      await sweep('[data-testid="main-toolbar"]', leaks);
+      await sweep('[data-testid="tab-strip"]', leaks);
+      expect(leaks).toEqual([]);
+    } finally {
+      await qps('en');
+    }
+    await browser.waitUntil(
+      async () => (await browser.execute(() => document.documentElement.dir)) === 'ltr',
+      { timeout: 10_000, timeoutMsg: 'the chrome never returned to left-to-right' },
+    );
+  });
 });

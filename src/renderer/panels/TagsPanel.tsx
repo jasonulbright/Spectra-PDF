@@ -326,7 +326,7 @@ export function TagsPanel(): React.ReactElement {
             data-testid={`tag-select-${key}`}
             aria-pressed={isSelected}
             onClick={() => setSelectedKey(key)}
-            className="flex-1 min-w-0 flex items-center gap-2 text-left"
+            className="flex-1 min-w-0 flex items-center gap-2 text-start"
           >
             <span className="text-sm text-neutral-200">&lt;{node.type}&gt;</span>
             {node.title && <span className="text-xs text-neutral-400 truncate">{node.title}</span>}
@@ -343,7 +343,7 @@ export function TagsPanel(): React.ReactElement {
           </button>
         </div>
         {isOpen && node.children.length > 0 && (
-          <ul className="pl-4 border-l border-neutral-800 ml-2 flex flex-col gap-0.5">
+          <ul className="ps-4 border-l border-neutral-800 ms-2 flex flex-col gap-0.5">
             {node.children.map(renderNode)}
           </ul>
         )}

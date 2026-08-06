@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   resolveLanguage,
   ambiguousBases,
+  textDirection,
   LANGUAGE_ALIASES,
   SHIPPED_LOCALES,
   LOCALE_NATIVE_NAMES,
@@ -96,5 +97,26 @@ describe('resolveLanguage', () => {
     for (const locale of SHIPPED_LOCALES) {
       expect(LOCALE_NATIVE_NAMES[locale], `${locale} has no native name`).toBeTruthy();
     }
+  });
+});
+
+describe('textDirection', () => {
+  it('reads direction from CLDR rather than a list of locales', () => {
+    for (const tag of ['ar', 'ar-EG', 'he', 'he-IL', 'fa', 'ur', 'ckb']) {
+      expect(textDirection(tag), tag).toBe('rtl');
+    }
+    for (const tag of [...SHIPPED_LOCALES, 'ru', 'el', 'ko', 'zh-TW', 'tr']) {
+      expect(textDirection(tag), tag).toBe('ltr');
+    }
+  });
+
+  it('answers for the pseudo-locales, which have no BCP-47 identity', () => {
+    expect(textDirection('qps')).toBe('ltr');
+    expect(textDirection('qps-rtl')).toBe('rtl');
+  });
+
+  it('never throws on a tag Intl cannot parse', () => {
+    expect(textDirection('not a tag')).toBe('ltr');
+    expect(textDirection('')).toBe('ltr');
   });
 });

@@ -582,7 +582,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               <span className="text-sm text-neutral-300">{tChrome('dialog.batch.mrc')}</span>
             </label>
             {mrc && (
-              <div className="flex flex-col gap-2 pl-6">
+              <div className="flex flex-col gap-2 ps-6">
                 <label className="flex items-center gap-2 text-sm">
                   <span className="text-neutral-400">{tChrome('dialog.batch.mrcPreset')}</span>
                   <select

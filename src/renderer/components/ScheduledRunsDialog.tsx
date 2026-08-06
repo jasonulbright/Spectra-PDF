@@ -613,7 +613,11 @@ function FolderField({
         >
           {tChrome('dialog.common.choose')}
         </button>
-        <span data-testid={testid} className="text-sm text-neutral-300 truncate" title={value}>
+        <span
+          data-testid={testid}
+          className={`text-sm text-neutral-300 truncate${value ? ' ltr-notation' : ''}`}
+          title={value}
+        >
           {value || tChrome('dialog.common.notSet')}
         </span>
         {onClear && value !== '' && (

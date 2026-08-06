@@ -185,7 +185,7 @@ export function FormsPanel(): React.ReactElement {
         <div className="text-sm text-neutral-500">{tChrome('panel.forms.noFields')}</div>
       ) : (
         <>
-          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pr-1" tabIndex={0} role="region" aria-label={tChrome('panel.forms.fieldsAria')}>
+          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pe-1" tabIndex={0} role="region" aria-label={tChrome('panel.forms.fieldsAria')}>
             {fields.map((f) => (
               <FieldRow
                 key={f.name}

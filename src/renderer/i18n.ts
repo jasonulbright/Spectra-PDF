@@ -136,7 +136,13 @@ function detectLanguage(): string {
 /** qps — the DEV/e2e pseudo-locale: every en string bracketed
  * and vowel-stretched, so a covered surface shows [Ẽẽxãã...] and a bare
  * English leak stands out. Generated from en at init — never authored,
- * never shipped (not in SHIPPED_LOCALES, absent from the Settings list). */
+ * never shipped (not in SHIPPED_LOCALES, absent from the Settings list).
+ *
+ * `qps-rtl` is the SAME catalog under an RTL direction. `qps` cannot prove a
+ * surface mirrors, because it is left-to-right; the RTL sibling makes the
+ * mirroring spec possible before any RTL catalog exists, and remains the
+ * regression guard afterwards — a panel that hardcodes a physical margin
+ * fails under it without anyone needing to read Arabic. */
 function pseudo(catalog: Record<string, string>): Record<string, string> {
   const stretch = (s: string): string =>
     s.replace(/\{\{[^}]*\}\}/g, (m) => `\u0000${m}\u0000`)
@@ -167,30 +173,75 @@ void i18next.use(initReactI18next).init({
     ja: { chrome: jaChrome },
     'zh-CN': { chrome: zhCnChrome },
     ...(import.meta.env.DEV || import.meta.env.VITE_E2E
-      ? { qps: { chrome: pseudo(enChrome as Record<string, string>) } }
+      ? {
+          qps: { chrome: pseudo(enChrome as Record<string, string>) },
+          'qps-rtl': { chrome: pseudo(enChrome as Record<string, string>) },
+        }
       : {}),
   },
   interpolation: { escapeValue: false }, // React escapes; double-escaping corrupts
   returnEmptyString: false,
 });
 
+/** The DEV/e2e pseudo-locales and the direction each one proves. They have no
+ * BCP-47 identity, so their direction cannot be derived and is stated here —
+ * acceptable only because they never enter SHIPPED_LOCALES. */
+const PSEUDO_DIRECTIONS: Record<string, 'ltr' | 'rtl'> = {
+  qps: 'ltr',
+  'qps-rtl': 'rtl',
+};
+
+/** Locales whose direction the runtime must not be trusted to know. This is a
+ * last-resort FLOOR, not the mechanism: a new RTL catalog is derived from CLDR
+ * and must never require editing a list. */
+const RTL_FLOOR = new Set(['ar', 'he']);
+
+interface TextInfoLocale {
+  getTextInfo?: () => { direction?: string };
+  textInfo?: { direction?: string };
+}
+
 /**
- * Keep `<html lang>` in step with the UI language.
+ * A language's writing direction, read from CLDR.
+ *
+ * The accessor was renamed mid-standardization (`textInfo` → `getTextInfo()`)
+ * and this repo does not pin the webview runtime, so both spellings are tried
+ * before the floor answers. An unparseable tag throws out of `Intl.Locale`,
+ * which is why the whole read is guarded rather than the call.
+ */
+export function textDirection(lng: string): 'ltr' | 'rtl' {
+  const pseudo = PSEUDO_DIRECTIONS[lng];
+  if (pseudo) return pseudo;
+  try {
+    const loc = new Intl.Locale(lng) as unknown as TextInfoLocale;
+    const direction = loc.getTextInfo?.().direction ?? loc.textInfo?.direction;
+    if (direction === 'rtl' || direction === 'ltr') return direction;
+  } catch {
+    // Not a BCP-47 tag; the floor below answers.
+  }
+  return RTL_FLOOR.has(lng.toLowerCase().split('-')[0]) ? 'rtl' : 'ltr';
+}
+
+/**
+ * Keep `<html lang>` and `<html dir>` in step with the UI language.
  *
  * `index.html` ships `lang="en"` and nothing updated it, so a Spanish UI
  * still announced itself as English: a screen reader picked English
  * pronunciation rules for Spanish text, and the platform's own hyphenation
- * and spell-check heuristics keyed off the wrong language. Found by the
- * slice-E RTL spot-check — the attribute is also where a future RTL locale
- * would carry `dir`, but nothing sets `dir` today and nothing should until a
- * mirrored layout exists — half-mirroring is worse than not mirroring.
+ * and spell-check heuristics keyed off the wrong language.
+ *
+ * `dir` on the root element is the ONE place UI direction is set. No component
+ * sets `dir` on itself except the paragraph editor's document-text case, which
+ * reads the DOCUMENT's own analysis: an Arabic UI must not flip an English
+ * document, and an English UI must not flip Arabic chrome. The two facts are
+ * set together and neither is derived from the other's DOM value.
  */
 function syncDocumentLanguage(lng: string): void {
   if (typeof document === 'undefined') return;
-  // qps is a DEV pseudo-locale with no BCP-47 identity; leave the document
-  // marked as its English source rather than claiming a language that is not
-  // one.
-  document.documentElement.lang = lng === 'qps' ? 'en' : lng;
+  // A pseudo-locale is marked as its English source rather than claiming a
+  // language that is not one; its direction still comes from the table above.
+  document.documentElement.lang = lng in PSEUDO_DIRECTIONS ? 'en' : lng;
+  document.documentElement.dir = textDirection(lng);
 }
 syncDocumentLanguage(i18next.language ?? 'en');
 i18next.on('languageChanged', syncDocumentLanguage);
@@ -199,7 +250,7 @@ i18next.on('languageChanged', syncDocumentLanguage);
  * calls this; react-i18next re-renders every hooked component). */
 export function setAppLanguage(pref: string): void {
   void i18next.changeLanguage(
-    pref === 'qps' ? 'qps' : resolveLanguage(pref),
+    pref in PSEUDO_DIRECTIONS ? pref : resolveLanguage(pref),
   );
 }
 

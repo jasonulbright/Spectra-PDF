@@ -255,7 +255,9 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
               <span data-testid="props-size">{formatBytes(byteLengthOf(activeFile.buffer))}</span>
             </Row>
             <Row label={tChrome('dialog.props.location')}>
-              <span className="break-all" data-testid="props-path">{activeFile.path}</span>
+              <span className="break-all ltr-notation" data-testid="props-path">
+                {activeFile.path}
+              </span>
             </Row>
           </>
         )}
