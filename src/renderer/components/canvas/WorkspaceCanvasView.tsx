@@ -163,8 +163,10 @@ interface WorkspaceCanvasViewProps {
   onExtractText: (path: string, pageNumber: number) => void;
   // Run the engine's redact on one file — App routes this through
   // performOperation, so the commit gate flushes pending page edits, a
-  // snapshot lands on the undo chain, and the buffer reloads after.
-  onRedactFile: (path: string, regions: RedactionRegion[]) => Promise<void>;
+  // snapshot lands on the undo chain, and the buffer reloads after. Resolves
+  // FALSE when the document's own signature policy declined the edit, which
+  // is not a failure and must not clear the marks it did not apply.
+  onRedactFile: (path: string, regions: RedactionRegion[]) => Promise<boolean>;
   // Persist the pending marks as the file's /Redact annotation set
   // (same performOperation shape — undoable; the reload re-seeds).
   onSaveRedactionMarks: (path: string, regions: RedactionRegion[]) => Promise<void>;
@@ -4497,9 +4499,10 @@ export function WorkspaceCanvasView({
       const failures: string[] = [];
       for (const payload of payloads) {
         try {
-          await onRedactFile(payload.path, payload.regions);
-          const applied = new Set(payload.markIds);
-          setMarks((prev) => prev.filter((m) => !applied.has(m.id)));
+          if (await onRedactFile(payload.path, payload.regions)) {
+            const applied = new Set(payload.markIds);
+            setMarks((prev) => prev.filter((m) => !applied.has(m.id)));
+          }
         } catch (err) {
           const name = payload.path.split(/[\\/]/).pop() || payload.path;
           failures.push(

@@ -821,11 +821,21 @@ function AppContent(): React.ReactElement {
     }
   }, [state.files, call, reloadFile, dispatch]);
 
+  // Applying redactions REWRITES the page content, so it is a structural-class
+  // edit however small the band: the append tier cannot carry it, every byte
+  // range breaks, and a certification that forbids the change is refused
+  // rather than warned about. Returns whether the redaction ran — the caller
+  // clears the applied marks, and clearing them after a declined edit would
+  // lose the user's markup with nothing to show for it.
   const handleRedactFile = useCallback(
-    async (path: string, regions: { page: number; rect: [number, number, number, number] }[]) => {
+    async (path: string, regions: { page: number; rect: [number, number, number, number] }[]): Promise<boolean> => {
+      const f = state.files.get(path);
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return false;
       await performOperation(path, 'redact', { regions });
+      return true;
     },
-    [performOperation],
+    [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
   // Persist the pending marks as the file's /Redact set — undoable,
