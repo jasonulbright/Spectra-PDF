@@ -355,7 +355,7 @@ export function summaryRows(pages: readonly (readonly PageAnnotation[])[]): Coun
   pages.forEach((annotations, index) => {
     for (const m of countMarksOf(annotations)) {
       const group = groupOf(m);
-      const key = `${group} ${index}`;
+      const key = `${group}\u0000${index}`;
       const row = buckets.get(key);
       if (row) {
         row.count += 1;
