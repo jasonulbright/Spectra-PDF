@@ -5,15 +5,20 @@ import {
   MAX_PREVIEW_DPI,
   MIN_PREVIEW_DPI,
   alarmTripped,
+  aliasIsAllowed,
   clampDensity,
   clampLimit,
   compositePixel,
   compositeRequest,
   coverageRows,
+  inkRows,
   isToggleableInk,
+  moveInSequence,
+  orderInks,
   plateCacheKey,
   previewDpi,
   prunePlateCache,
+  resolveAlias,
   totalInk,
   visiblePlates,
   type CacheEntry,
@@ -69,6 +74,92 @@ describe('which inks the preview offers', () => {
     expect(clampLimit(1000)).toBe(400);
     expect(clampLimit(287.4)).toBe(287);
     expect(clampLimit(Number.NaN)).toBe(DEFAULT_TAC_LIMIT);
+  });
+});
+
+describe('preview aliases', () => {
+  const plates = [CYAN, BLACK, SPOT];
+
+  it('draws an aliased colorant with the target’s colour, off its own plate', () => {
+    const request = compositeRequest(
+      plates,
+      new Set(),
+      new Map(),
+      new Map([['PANTONE 185 C', 'Black']]),
+    );
+    const aliased = request.find((r) => r.name === 'PANTONE 185 C');
+    // The plate FILE is still the spot's own — that is what the device wrote.
+    expect(aliased?.name).toBe('PANTONE 185 C');
+    expect(aliased?.display_rgb).toEqual(BLACK.display_rgb);
+  });
+
+  it('hides an aliased colorant when its target hides', () => {
+    const request = compositeRequest(
+      plates,
+      new Set(['Black']),
+      new Map(),
+      new Map([['PANTONE 185 C', 'Black']]),
+    );
+    expect(request.map((r) => r.name)).toEqual(['Cyan']);
+  });
+
+  it('takes the target’s density, not its own', () => {
+    const request = compositeRequest(
+      plates,
+      new Set(),
+      new Map([['Black', 0.5], ['PANTONE 185 C', 1.5]]),
+      new Map([['PANTONE 185 C', 'Black']]),
+    );
+    expect(request.find((r) => r.name === 'PANTONE 185 C')?.density).toBe(0.5);
+  });
+
+  it('falls back to the plate’s own identity when the target is not on this page', () => {
+    const request = compositeRequest(
+      plates,
+      new Set(),
+      new Map(),
+      new Map([['PANTONE 185 C', 'Warm Red']]),
+    );
+    expect(request.find((r) => r.name === 'PANTONE 185 C')?.display_rgb)
+      .toEqual(SPOT.display_rgb);
+  });
+
+  it('refuses an alias onto itself or onto an already-aliased ink', () => {
+    const aliases = new Map([['PANTONE 185 C', 'Black']]);
+    expect(aliasIsAllowed(aliases, 'Cyan', 'Cyan')).toBe(false);
+    expect(aliasIsAllowed(aliases, 'Cyan', 'PANTONE 185 C')).toBe(false);
+    expect(aliasIsAllowed(aliases, 'Cyan', 'Black')).toBe(true);
+  });
+
+  it('resolves one hop and no further', () => {
+    const aliases = new Map([['a', 'b'], ['b', 'c']]);
+    expect(resolveAlias(aliases, 'a')).toBe('b');
+    expect(resolveAlias(aliases, 'z')).toBe('z');
+  });
+
+  it('lists one row per drawn ink, naming what was merged onto it', () => {
+    const rows = inkRows([...plates, ALL], new Map([['PANTONE 185 C', 'Black']]));
+    expect(rows.map((r) => r.plate.name)).toEqual(['Cyan', 'Black']);
+    expect(rows.find((r) => r.plate.name === 'Black')?.aliasedFrom)
+      .toEqual(['PANTONE 185 C']);
+    expect(rows.find((r) => r.plate.name === 'Cyan')?.aliasedFrom).toEqual([]);
+  });
+});
+
+describe('the print sequence', () => {
+  it('orders by the sequence and leaves the rest behind it', () => {
+    const items = [{ name: 'Cyan' }, { name: 'Black' }, { name: 'Spot' }];
+    expect(orderInks(items, ['Black', 'Cyan']).map((i) => i.name))
+      .toEqual(['Black', 'Cyan', 'Spot']);
+    expect(orderInks(items, []).map((i) => i.name)).toEqual(['Cyan', 'Black', 'Spot']);
+  });
+
+  it('moves one ink and clamps at the ends', () => {
+    const sequence = ['Cyan', 'Magenta', 'Yellow'];
+    expect(moveInSequence(sequence, 'Yellow', -1)).toEqual(['Cyan', 'Yellow', 'Magenta']);
+    expect(moveInSequence(sequence, 'Cyan', -1)).toEqual(sequence);
+    expect(moveInSequence(sequence, 'Yellow', 1)).toEqual(sequence);
+    expect(moveInSequence(sequence, 'Nowhere', 1)).toEqual(sequence);
   });
 });
 
