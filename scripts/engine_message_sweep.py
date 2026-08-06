@@ -66,6 +66,10 @@ PUBLIC_EXCEPTIONS = frozenset(
         "KeyError",
         "NotImplementedError",
         "PermissionError",
+        # A named public subclass carrying structured detail beside its
+        # message: the message still reaches the renderer through the bridge,
+        # so it still needs a row.
+        "FieldSpecError",
     }
 )
 

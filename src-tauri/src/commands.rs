@@ -1130,14 +1130,15 @@ fn batch_log_dir(app: &AppHandle, configured: Option<&str>) -> Result<std::path:
 /// True only for names this app itself writes. Deliberately strict: the prune
 /// below DELETES what this matches, and the standing rule after a session wiped
 /// archived installers with a glob is that a delete names exactly what it takes.
-/// Three exact prefixes: batch-OCR runs, guided-action folder runs (the
-/// engine writes `action-run-*.log` into the same folder) and disk-scope
-/// Search & Redact sweeps. Retention must sweep all of them or the logs it
-/// does not match accumulate forever.
+/// Four exact prefixes: batch-OCR runs, guided-action folder runs (the
+/// engine writes `action-run-*.log` into the same folder), disk-scope
+/// Search & Redact sweeps and folder form-preparation sweeps. Retention must
+/// sweep all of them or the logs it does not match accumulate forever.
 fn is_batch_log_name(name: &str) -> bool {
     (name.starts_with("batch-ocr-")
         || name.starts_with("action-run-")
-        || name.starts_with("search-redact-"))
+        || name.starts_with("search-redact-")
+        || name.starts_with("form-prep-"))
         && name.ends_with(".log")
         && !name.contains('/')
         && !name.contains('\\')
@@ -1402,8 +1403,30 @@ pub async fn set_startup_enabled(
 
 #[cfg(test)]
 mod tests {
-    use super::is_managed_member_path;
+    use super::{is_batch_log_name, is_managed_member_path};
     use std::path::Path;
+
+    #[test]
+    fn log_retention_matches_every_prefix_this_app_writes_and_nothing_else() {
+        for name in [
+            "batch-ocr-2026-01-02_030405.log",
+            "action-run-2026-01-02_030405.log",
+            "search-redact-2026-01-02_030405.log",
+            "form-prep-2026-01-02_030405.log",
+        ] {
+            assert!(is_batch_log_name(name), "{name} should be swept");
+        }
+        // The predicate scopes a DELETE, so anything it does not itself write
+        // stays out — including a traversal wearing a known prefix.
+        for name in [
+            "notes.log",
+            "batch-ocr-2026.txt",
+            "../form-prep-2026-01-02_030405.log",
+            r"sub\form-prep-2026-01-02_030405.log",
+        ] {
+            assert!(!is_batch_log_name(name), "{name} should not be swept");
+        }
+    }
 
     #[test]
     fn member_open_scope_is_the_managed_dir_only() {

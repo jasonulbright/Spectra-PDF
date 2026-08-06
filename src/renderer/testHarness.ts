@@ -271,6 +271,48 @@ export function registerDiskRedact(handlers: DiskRedactHandlers | null): void {
   diskRedact = handlers;
 }
 
+/**
+ * Folder form preparation: the folder pickers are native dialogs, so e2e
+ * injects the paths into the same flow the buttons run and then drives the
+ * REAL detect and apply. `check` takes candidate keys from the snapshot,
+ * which is what lets a spec accept a SUBSET and prove the rest were not
+ * created.
+ */
+export interface FormPrepHandlers {
+  setSource: (path: string) => Promise<void>;
+  setDest: (path: string) => void;
+  detect: () => Promise<void>;
+  check: (keys: string[]) => void;
+  apply: () => Promise<void>;
+  snapshot: () => {
+    phase: 'setup' | 'detecting' | 'review' | 'applying' | 'done';
+    fileCount: number | null;
+    /** Every candidate key the run may act on, in file then detection order. */
+    candidateKeys: string[];
+    files:
+      | {
+          rel: string;
+          candidates: number;
+          existingFields: number;
+          skipReason: string | null;
+          names: string[];
+        }[]
+      | null;
+    report: {
+      cancelled: boolean;
+      results: { rel: string; status: string; fields?: number; reason?: string }[];
+      skippedDirs: string[];
+    } | null;
+    logPath: string | null;
+  };
+}
+
+let formPrep: FormPrepHandlers | null = null;
+
+export function registerFormPrep(handlers: FormPrepHandlers | null): void {
+  formPrep = handlers;
+}
+
 import type { Orientation as CreatePdfOrientation, PageSize as CreatePdfPageSize } from './lib/create-pdf';
 
 /**
@@ -1072,6 +1114,13 @@ export interface TestHarness {
   diskRedactCheck: (keys: string[]) => void;
   diskRedactApply: () => Promise<void>;
   diskRedactSnapshot: () => ReturnType<DiskRedactHandlers['snapshot']> | null;
+  /** Folder form preparation injectors (dialog must be open —
+   * `tools.formPrepFolder`). */
+  formPrepSetFolders: (source: string, dest: string) => Promise<void>;
+  formPrepDetect: () => Promise<void>;
+  formPrepCheck: (keys: string[]) => void;
+  formPrepApply: () => Promise<void>;
+  formPrepSnapshot: () => ReturnType<FormPrepHandlers['snapshot']> | null;
   scheduleCreate: (profile: Record<string, unknown>, actionJson?: string) => Promise<string>;
   scheduleList: () => Promise<unknown[]>;
   scheduleRemove: (name: string) => Promise<void>;
@@ -1929,6 +1978,55 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     diskRedactSnapshot: () => diskRedact?.snapshot() ?? null,
+    formPrepSetFolders: async (source, dest) => {
+      if (!formPrep) {
+        const msg = 'formPrepSetFolders: folder form preparation dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await formPrep.setSource(source);
+        formPrep.setDest(dest);
+      } catch (err) {
+        captureError('formPrepSetFolders', err);
+        throw err;
+      }
+    },
+    formPrepDetect: async () => {
+      if (!formPrep) {
+        const msg = 'formPrepDetect: folder form preparation dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await formPrep.detect();
+      } catch (err) {
+        captureError('formPrepDetect', err);
+        throw err;
+      }
+    },
+    formPrepCheck: (keys) => {
+      if (!formPrep) {
+        const msg = 'formPrepCheck: folder form preparation dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      formPrep.check(keys);
+    },
+    formPrepApply: async () => {
+      if (!formPrep) {
+        const msg = 'formPrepApply: folder form preparation dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await formPrep.apply();
+      } catch (err) {
+        captureError('formPrepApply', err);
+        throw err;
+      }
+    },
+    formPrepSnapshot: () => formPrep?.snapshot() ?? null,
     scheduleCreate: async (profile, actionJson) => {
       if (!scheduledRuns) throw new Error('scheduleCreate: Scheduled Runs dialog not mounted');
       return scheduledRuns.create(profile, actionJson);

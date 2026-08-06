@@ -11,7 +11,7 @@
 // path unquoted, then the honesty note. What is redacted is the one thing a
 // reader needs to count, so a written file always states its rectangle count.
 
-import { formatDuration, formatTimestamp, pad } from './batch-log';
+import { formatDuration, formatTimestamp, sweepLogFileName } from './batch-log';
 import type { DiskFileResult, DiskRedactReport } from './disk-redact';
 import { summarize } from './disk-redact';
 
@@ -33,11 +33,7 @@ export interface DiskRedactLogRun {
  * sorts chronologically, and carries its own prefix so the retention sweep
  * matches it by name like the others. */
 export function diskRedactLogFileName(startedAt: Date): string {
-  const d = startedAt;
-  return (
-    `search-redact-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-    `_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.log`
-  );
+  return sweepLogFileName('search-redact-', startedAt);
 }
 
 function fileLine(r: DiskFileResult): string {

@@ -82,6 +82,10 @@ export interface AppCommandHandlers {
    * Folder…). Needs no open document: it sweeps a picked folder tree by
    * path, entirely outside the workspace. */
   openDiskRedact(): void;
+  /** Open the folder form-preparation dialog (Tools ▸ Prepare Forms in a
+   * Folder…). Needs no open document: it analyses a picked folder tree by
+   * path, entirely outside the workspace. */
+  openFormPrepFolder(): void;
   openScheduledRuns(): void;
   /** Open the Watched Folders dialog (Tools ▸ Watched Folders…). */
   openWatchedFolders(): void;
