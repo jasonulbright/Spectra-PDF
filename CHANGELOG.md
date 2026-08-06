@@ -1,6 +1,54 @@
 # Changelog
 
-## 1.0.21 — Prepare Form finds the fields for you, and a document tells you what it carries
+## 1.0.21 — Prepare Form finds the fields for you, a document tells you what it carries, and you can certify one
+
+### Certifying a document
+
+A signature can now do more than say who signed: it can state what anyone is
+allowed to change afterwards. Open the Signatures panel on a document that has
+not been signed yet, tick **Certify this document**, and choose what the
+certification permits — no changes at all, filling in the forms and signing, or
+filling in the forms, signing and commenting. The choice is written into the
+document and cannot be changed later, so it is spelled out in full rather than
+named by a number. Certifying works with everything signing already did: an
+invisible signature or a visible stamp you draw on the page, a signature file, a
+hardware token, and the long-term validation profiles.
+
+Opening a certified document now says so. The Signatures panel and the
+signatures side panel both show who certified it and what the certification
+allows, and the signature that carries it is marked as the certifying one beside
+its ordinary validity badge. If something in the document has gone beyond what
+the certification permits, the panel says which signature reports it and what
+kind of change it was.
+
+**A certified document is treated as what it says it is.** Filling a form on a
+document certified for form filling goes through with no interruption and the
+document still reports as intact afterwards; adding a comment to one certified
+for commenting does the same. A change the certification does not cover warns
+first and names what the certification does allow. A document certified with no
+changes at all is not edited here — the app says so and points you at saving a
+copy, because every edit to such a document produces a file that reports itself
+as broken.
+
+Where the certification cannot be judged, the panel says that instead of
+guessing: a permission level this version does not recognise, or a
+certification entry that cannot be read, is reported as unchecked rather than
+as a pass or a failure.
+
+- **Certifying has a command-line arm:**
+  `spectrapdf sign <in> -o <out> --pfx signer.pfx --certify --certify-level
+  form-fill` (levels: `none`, `form-fill`, `annotate`).
+- **`verify-signatures` reports it too**, as a document-level certification
+  block plus, per signature, which one certified the document and whether the
+  changes since stay within what it permits.
+- **Fixed: a certified or long-term-validated document could not be edited
+  without breaking it.** Adding a comment or filling a field on one rebuilt the
+  whole file instead of appending to it, which destroyed both the certification
+  and the signature. Both now append, and the document keeps verifying.
+- **Fixed: filling a form field could report a valid document as tampered
+  with.** A field whose on-page box is stored separately from the field itself —
+  the shape most authoring tools produce — had its filled appearance reported as
+  an unexplained change on any signed document.
 
 ### A document tells you what it carries
 
