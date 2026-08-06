@@ -59,6 +59,7 @@ const noopHandlers = (): AppCommandHandlers => ({
   sendToEmail: vi.fn(async () => {}),
   exportDocument: vi.fn(async () => {}),
   openExportImages: vi.fn(),
+  openExportDocument: vi.fn(),
   openPresentation: vi.fn(),
   closeFile: vi.fn(async () => {}),
   closeAll: vi.fn(async () => {}),
