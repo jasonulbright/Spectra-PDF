@@ -131,12 +131,12 @@ describe('Search & Redact across a folder', () => {
     expect(byRel.get('clean.pdf')?.hits).toBe(0);
     // Three hits are offered and NONE is checked: the run pre-consents to
     // nothing.
-    expect(reviewed?.hitKeys).toHaveLength(3);
-
-    // Check a subset across two files — alpha page 1 and beta page 1 —
-    // deliberately leaving alpha page 2 alone.
-    const checked = (reviewed?.hitKeys ?? []).filter((key) => !key.endsWith(' 2 1'));
-    expect(checked).toHaveLength(2);
+    const keys = reviewed?.hitKeys ?? [];
+    expect(keys).toHaveLength(3);
+    // The keys arrive in file, then page, then hit order, so the middle one is
+    // alpha's second page — the occurrence this run deliberately leaves alone.
+    expect(keys[1]).toContain('alpha.pdf');
+    const checked = [keys[0], keys[2]];
     await diskRedactCheck(checked);
 
     await diskRedactApply();
