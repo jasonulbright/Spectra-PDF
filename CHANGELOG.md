@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.23
+
+### Preparing forms
+- A new signature field can carry the form fields it locks, chosen from the document's own list.
+- Whoever signs that field is bound by the lock without asking for one.
+- Prepare Form lists the document's signature fields and edits the lock on any unsigned one.
+- A signed field's lock is shown but cannot be changed.
+- Detected signature fields can lock the fields being created alongside them.
+- On the command line as `forms --sig-field NAME --lock` and `--clear-lock`.
+
 ## 1.0.22
 
 ### Signing
