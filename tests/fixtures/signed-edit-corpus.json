@@ -1,0 +1,108 @@
+{
+  "note": [
+    "The pin that keeps ONE signed-edit decision honest across two",
+    "implementations: engine/incremental.signed_edit_decision (the headless",
+    "arm, which has no dialog to ask with) and renderer/lib/signatures.ts",
+    "signedEditDecision (the surfaces that do). Read by",
+    "tests/test_signed_edit.py and tests/signed-edit-corpus.test.ts, which",
+    "must agree case for case.",
+    "",
+    "`policy` is what signature_policy reports. `reason` is a stable enum",
+    "name, never display text: one side renders a catalog string from it and",
+    "the other writes it into a report. A `proceed` case carries no reason."
+  ],
+  "cases": [
+    {
+      "name": "an unsigned document permits every class",
+      "policy": { "signed": false, "count": 0, "certified": false, "level": null },
+      "class": "structural",
+      "kind": "proceed"
+    },
+    {
+      "name": "an unsigned document permits an annotation",
+      "policy": { "signed": false, "count": 0, "certified": false, "level": null },
+      "class": "annotate",
+      "kind": "proceed"
+    },
+    {
+      "name": "signed but uncertified: an annotation rides the incremental tier",
+      "policy": { "signed": true, "count": 1, "certified": false, "level": null },
+      "class": "annotate",
+      "kind": "proceed"
+    },
+    {
+      "name": "signed but uncertified: a form fill rides the incremental tier",
+      "policy": { "signed": true, "count": 2, "certified": false, "level": null },
+      "class": "form-fill",
+      "kind": "proceed"
+    },
+    {
+      "name": "signed but uncertified: a structural edit warns",
+      "policy": { "signed": true, "count": 1, "certified": false, "level": null },
+      "class": "structural",
+      "kind": "warn",
+      "reason": "signed"
+    },
+    {
+      "name": "certified to allow no changes: an annotation is refused",
+      "policy": { "signed": true, "count": 1, "certified": true, "level": "none" },
+      "class": "annotate",
+      "kind": "refuse",
+      "reason": "certified-no-changes"
+    },
+    {
+      "name": "certified to allow no changes: a structural edit is refused",
+      "policy": { "signed": true, "count": 1, "certified": true, "level": "none" },
+      "class": "structural",
+      "kind": "refuse",
+      "reason": "certified-no-changes"
+    },
+    {
+      "name": "certified for form filling: a form fill proceeds",
+      "policy": { "signed": true, "count": 1, "certified": true, "level": "form-fill" },
+      "class": "form-fill",
+      "kind": "proceed"
+    },
+    {
+      "name": "certified for form filling: an annotation warns",
+      "policy": { "signed": true, "count": 1, "certified": true, "level": "form-fill" },
+      "class": "annotate",
+      "kind": "warn",
+      "reason": "certified-form-fill"
+    },
+    {
+      "name": "certified for form filling: a structural edit warns",
+      "policy": { "signed": true, "count": 1, "certified": true, "level": "form-fill" },
+      "class": "structural",
+      "kind": "warn",
+      "reason": "certified-form-fill"
+    },
+    {
+      "name": "certified for annotation: an annotation proceeds",
+      "policy": { "signed": true, "count": 1, "certified": true, "level": "annotate" },
+      "class": "annotate",
+      "kind": "proceed"
+    },
+    {
+      "name": "certified for annotation: a structural edit warns",
+      "policy": { "signed": true, "count": 1, "certified": true, "level": "annotate" },
+      "class": "structural",
+      "kind": "warn",
+      "reason": "certified-annotate"
+    },
+    {
+      "name": "a certification level this build cannot name permits nothing",
+      "policy": { "signed": true, "count": 1, "certified": true, "level": null },
+      "class": "form-fill",
+      "kind": "warn",
+      "reason": "certified-unknown"
+    },
+    {
+      "name": "a certification with no live signature field still governs",
+      "policy": { "signed": false, "count": 0, "certified": true, "level": "annotate" },
+      "class": "structural",
+      "kind": "warn",
+      "reason": "certified-annotate"
+    }
+  ]
+}

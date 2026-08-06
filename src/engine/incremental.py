@@ -140,6 +140,54 @@ def signature_policy(path: str) -> dict:
     }
 
 
+# A structural edit appears in no row: page removal, reordering, content edits
+# and flattening all fall outside the incremental-append tier, so they coalesce
+# the file and break every byte range whatever a policy permits. That is a
+# property of the edit, not of the certification.
+_PERMITTED_CLASSES: dict = {
+    "uncertified": ("form-fill", "annotate"),
+    "form-fill": ("form-fill",),
+    "annotate": ("form-fill", "annotate"),
+    "unknown": (),
+}
+
+EDIT_CLASSES = ("form-fill", "annotate", "structural")
+
+
+def signed_edit_decision(policy: dict, edit_class: str) -> dict:
+    """Whether an edit of this class may proceed against this document's policy.
+
+    ``{"kind": "proceed"}`` or ``{"kind": "refuse"|"warn", "reason": <enum>}``.
+    The reason is a stable name, never display text -- a headless caller reports
+    it and a surface renders it.
+
+    A no-changes certification REFUSES rather than warns: the author's policy
+    forbids every change, the signing machinery will not counter-sign such a
+    file, and every edit produces a document that reports as illegally
+    modified.
+
+    The twin of this table lives in the renderer (``lib/signatures.ts``); the
+    two are pinned case for case against ``tests/fixtures/signed-edit-corpus.json``.
+    """
+    if edit_class not in EDIT_CLASSES:
+        raise ValueError('edit class must be "form-fill", "annotate" or "structural"')
+    signed = bool(policy.get("signed"))
+    certified = bool(policy.get("certified"))
+    level = policy.get("level")
+    if not signed and not certified:
+        return {"kind": "proceed"}
+    if certified and level == "none":
+        return {"kind": "refuse", "reason": "certified-no-changes"}
+    if not certified:
+        if edit_class in _PERMITTED_CLASSES["uncertified"]:
+            return {"kind": "proceed"}
+        return {"kind": "warn", "reason": "signed"}
+    key = level if level in ("form-fill", "annotate") else "unknown"
+    if edit_class in _PERMITTED_CLASSES[key]:
+        return {"kind": "proceed"}
+    return {"kind": "warn", "reason": "certified-" + key}
+
+
 # ---------------------------------------------------------------------------
 # Structural bisimulation over pikepdf objects
 # ---------------------------------------------------------------------------

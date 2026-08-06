@@ -1255,6 +1255,67 @@ export async function batchOcrSnapshot(): Promise<BatchOcrSnapshot | null> {
   });
 }
 
+// --- Search & Redact folder -------------------------------------------------
+
+export interface DiskRedactSnapshot {
+  phase: 'setup' | 'searching' | 'review' | 'applying' | 'done';
+  fileCount: number | null;
+  /** Every hit key the run may act on. A spec checks a SUBSET of these, which
+   * is what lets it prove an unchecked occurrence survived. */
+  hitKeys: string[];
+  files: { rel: string; hits: number; skipReason: string | null }[] | null;
+  report: {
+    cancelled: boolean;
+    results: { rel: string; status: string; regions?: number; reason?: string }[];
+    skippedDirs: string[];
+  } | null;
+  logPath: string | null;
+}
+
+/** Inject source+destination into the open Search & Redact folder dialog —
+ * runs the dialog's REAL selection flow, enumeration included. */
+export async function diskRedactSetFolders(source: string, dest: string): Promise<void> {
+  const result = await browser.executeAsync<string | null, [string, string]>(
+    function (s, d, done) {
+      (window as any).__SPECTRA_TEST__.diskRedactSetFolders(s, d)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    source,
+    dest,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`diskRedactSetFolders failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
+/** Run the search WITHOUT awaiting it — a folder sweep can outlive the
+ * WebDriver script timeout. Poll `diskRedactSnapshot()` for the phase. */
+export async function diskRedactSearch(query: string): Promise<void> {
+  await browser.execute(function (q: string) {
+    void (window as any).__SPECTRA_TEST__.diskRedactSearch(q);
+  }, query);
+}
+
+export async function diskRedactCheck(keys: string[]): Promise<void> {
+  await browser.execute(function (k: string[]) {
+    (window as any).__SPECTRA_TEST__.diskRedactCheck(k);
+  }, keys);
+}
+
+/** Same non-awaiting shape as the search. */
+export async function diskRedactApply(): Promise<void> {
+  await browser.execute(function () {
+    void (window as any).__SPECTRA_TEST__.diskRedactApply();
+  });
+}
+
+export async function diskRedactSnapshot(): Promise<DiskRedactSnapshot | null> {
+  return await browser.execute<DiskRedactSnapshot | null, []>(function () {
+    return (window as any).__SPECTRA_TEST__.diskRedactSnapshot();
+  });
+}
+
 // --- Edit ▸ Images ---------------------------------------------------------
 
 export async function editImagePageIds(): Promise<string[]> {

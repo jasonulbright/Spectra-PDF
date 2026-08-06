@@ -1130,11 +1130,14 @@ fn batch_log_dir(app: &AppHandle, configured: Option<&str>) -> Result<std::path:
 /// True only for names this app itself writes. Deliberately strict: the prune
 /// below DELETES what this matches, and the standing rule after a session wiped
 /// archived installers with a glob is that a delete names exactly what it takes.
-/// Two exact prefixes: batch-OCR runs and guided-action folder runs (the
-/// engine writes `action-run-*.log` into the same folder; retention must
-/// sweep both or action logs would accumulate forever).
+/// Three exact prefixes: batch-OCR runs, guided-action folder runs (the
+/// engine writes `action-run-*.log` into the same folder) and disk-scope
+/// Search & Redact sweeps. Retention must sweep all of them or the logs it
+/// does not match accumulate forever.
 fn is_batch_log_name(name: &str) -> bool {
-    (name.starts_with("batch-ocr-") || name.starts_with("action-run-"))
+    (name.starts_with("batch-ocr-")
+        || name.starts_with("action-run-")
+        || name.starts_with("search-redact-"))
         && name.ends_with(".log")
         && !name.contains('/')
         && !name.contains('\\')
