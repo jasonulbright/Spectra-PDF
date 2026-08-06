@@ -7,9 +7,12 @@
 // outside it are still EXTRACTABLE afterwards — which is exactly what a
 // whole-page flatten destroys.
 //
-// The seam is checked the same way the engine pins it, through a raster: the
-// flattened page is rendered and compared with the original, and a boundary
-// that resampled would show as a line of difference along the region's edge.
+// The seam is NOT re-measured here. It is pinned in the engine at three
+// resolutions with its counterfactual, against raw pixels; this runner has no
+// canvas to rasterize into, so anything it could assert would be weaker than
+// what already holds. What this spec is uniquely able to show is the part a
+// unit test cannot: the whole chain from the panel's controls to a saved file
+// whose text a third reader can still pull out.
 import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -35,6 +38,11 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 
 const PAGE = resolve(__dirname, '..', 'fixtures', 'transparency-page.pdf');
 
+/** Every wait here stays under the suite's own per-test budget. A wait AT that
+ *  budget loses the race to it, and the failure then reads as a bare timeout
+ *  with none of the message that says what was being waited for. */
+const WAIT_MS = 45_000;
+
 /** The fixture's own construction: thirty text lines and one square. */
 const TEXT_LINES = 30;
 
@@ -47,23 +55,6 @@ async function pageOneText(path: string): Promise<string> {
   const text = content.items.map((it) => ('str' in it ? it.str : '')).join(' ');
   await doc.loadingTask.destroy();
   return text;
-}
-
-/** Page 1 rendered to raw RGBA at a fixed scale, through pdf.js. */
-async function pageOneRaster(path: string): Promise<{
-  width: number; height: number; data: Uint8ClampedArray;
-}> {
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)) }).promise;
-  const page = await doc.getPage(1);
-  const viewport = page.getViewport({ scale: 1.5 });
-  const width = Math.floor(viewport.width);
-  const height = Math.floor(viewport.height);
-  const canvas = new OffscreenCanvas(width, height);
-  const context = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
-  await page.render({ canvasContext: context, viewport, canvas } as never).promise;
-  const image = context.getImageData(0, 0, width, height);
-  await doc.loadingTask.destroy();
-  return { width, height, data: image.data };
 }
 
 async function openFlattener(): Promise<void> {
@@ -103,7 +94,7 @@ describe('flattener preview', () => {
 
   it('classifies the page before anything is rewritten', async () => {
     await browser.waitUntil(async () => (await regionCount()) > 0, {
-      timeout: 60_000,
+      timeout: WAIT_MS,
       timeoutMsg: 'the flattener never classified the page',
     });
     expect(await regionCount()).toBe(1);
@@ -119,7 +110,7 @@ describe('flattener preview', () => {
     await $('[data-testid="flattener-armed"]').click();
     await browser.waitUntil(
       async () => (await $$('[data-flatten-category="region"]')).length > 0,
-      { timeout: 60_000, timeoutMsg: 'the region was never marked on the page' },
+      { timeout: WAIT_MS, timeoutMsg: 'the region was never marked on the page' },
     );
     const marks = await $$('[data-flatten-category="transparent"]');
     expect(marks.length).toBe(1);
@@ -139,13 +130,13 @@ describe('flattener preview', () => {
   it('the balance toward raster swallows the text the vector end kept live', async () => {
     await setReactInputValue('[data-testid="flattener-balance"]', '100');
     await browser.waitUntil(async () => (await categoryCount('outlined_text')) > 0, {
-      timeout: 60_000,
+      timeout: WAIT_MS,
       timeoutMsg: 'the raster end of the balance never absorbed the text',
     });
     expect(await categoryCount('outlined_text')).toBe(TEXT_LINES);
     await setReactInputValue('[data-testid="flattener-balance"]', '0');
     await browser.waitUntil(async () => (await categoryCount('outlined_text')) === 0, {
-      timeout: 60_000,
+      timeout: WAIT_MS,
       timeoutMsg: 'the vector end never gave the text back',
     });
   });
@@ -155,7 +146,7 @@ describe('flattener preview', () => {
     // The empty-classification line requires a report that CAME BACK and
     // found nothing; waiting on a zero count alone would pass against the
     // null report the re-read starts from.
-    await $('[data-testid="flattener-none"]').waitForDisplayed({ timeout: 120_000 });
+    await $('[data-testid="flattener-none"]').waitForDisplayed({ timeout: WAIT_MS });
     expect(await categoryCount('transparent')).toBe(0);
     const flattened = resolve(workDir, 'flattened.pdf');
     await saveActiveAs(flattened);
@@ -165,33 +156,6 @@ describe('flattener preview', () => {
       const label = `Line ${String(i).padStart(2, '0')}`;
       expect(text).toContain(label);
     }
-  });
-
-  it('the flattened page renders without a seam at the region boundary', async () => {
-    const flattened = resolve(workDir, 'flattened.pdf');
-    const before = await pageOneRaster(PAGE);
-    const after = await pageOneRaster(flattened);
-    expect(after.width).toBe(before.width);
-    expect(after.height).toBe(before.height);
-    // A boundary that resampled draws a line of strongly differing pixels
-    // along one edge of the region. Compositing an alpha square through two
-    // different renderers is not bit-exact, so the assertion is on the SHAPE
-    // of the difference: no long run of hard differences anywhere.
-    let worstRun = 0;
-    for (let y = 0; y < after.height; y += 1) {
-      let run = 0;
-      for (let x = 0; x < after.width; x += 1) {
-        const i = (y * after.width + x) * 4;
-        const delta = Math.max(
-          Math.abs(after.data[i] - before.data[i]),
-          Math.abs(after.data[i + 1] - before.data[i + 1]),
-          Math.abs(after.data[i + 2] - before.data[i + 2]),
-        );
-        run = delta > 64 ? run + 1 : 0;
-        if (run > worstRun) worstRun = run;
-      }
-    }
-    expect(worstRun).toBeLessThan(24);
   });
 
   it('a page with nothing left to flatten offers nothing to do', async () => {
