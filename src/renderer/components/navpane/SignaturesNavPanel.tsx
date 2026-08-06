@@ -10,6 +10,12 @@ import {
   type SignatureEntry,
   type VerifyResult,
 } from '../../lib/signatures';
+import {
+  loadTrustConfig,
+  trustSummary,
+  trustVerifyParams,
+  type TrustConfig,
+} from '../../lib/trust-store';
 import { CertificationBanner } from '../CertificationBanner';
 import type { NavPanelComponentProps } from './types';
 import { useTranslation } from 'react-i18next';
@@ -25,6 +31,10 @@ import { tChrome, tChromeCount } from '../../i18n';
 // signatures are invisible — they cover the whole document and sit on no page —
 // and a visible-signature page jump would need the widget's /P from the engine
 // (is renderer-only). Explicitly absent, not overlooked.
+//
+// Verifies under the SAME trust configuration the signing panel uses
+// (lib/trust-store). Reading it here is what stops one surface calling a
+// document trusted while this one still shows the never-verified caveat.
 //
 // Auto-verifies on the working file's BYTE identity (its buffer reference), so
 // editing + committing a signed file flips the badge but a Save (which doesn't
@@ -59,6 +69,10 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
   // result ever renders; the cost is one extra engine round-trip in that flow.
   const buffer = activeFile?.buffer ?? null;
   const workingPath = activeFile?.workingPath ?? null;
+  // Re-read on every verification rather than caching at mount: the
+  // configuration is edited in the signing panel, so a copy taken at mount
+  // would describe a verification that used different anchors.
+  const [trust, setTrust] = useState(loadTrustConfig);
   useEffect(() => {
     if (!workingPath) {
       setResult(null);
@@ -70,7 +84,9 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
     setBusy(true);
     setStatus('');
     setResult(null);
-    call('verify_signatures', { file: workingPath })
+    const config = loadTrustConfig();
+    setTrust(config);
+    call('verify_signatures', { file: workingPath, ...trustVerifyParams(config) })
       .then((res) => {
         if (!cancelled) setResult(res as unknown as VerifyResult);
       })
@@ -128,9 +144,7 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
                 certified={result.certification?.certified === true}
               />
             ))}
-            <div className="signatures-nav-caveat" data-testid="signatures-nav-caveat">
-              {tChrome('nav.sig.caveat')}
-            </div>
+            <TrustLine trust={trust} result={result} />
           </>
         )}
       </div>
@@ -144,6 +158,35 @@ export function SignaturesNavPanel({ activeFile }: NavPanelComponentProps): Reac
           {tChrome('nav.sig.recheck')}
         </button>
       </div>
+    </div>
+  );
+}
+
+/** The trust footer. With no trust source configured this is the standing
+ * identity caveat; with one, it reports whether the chains reached it. Keeps
+ * the caveat's testid in the no-source case, which is what it describes. */
+function TrustLine({
+  trust,
+  result,
+}: {
+  trust: TrustConfig;
+  result: VerifyResult;
+}): React.ReactElement {
+  const summary = trustSummary(trust, result);
+  if (summary === 'none') {
+    return (
+      <div className="signatures-nav-caveat" data-testid="signatures-nav-caveat">
+        {tChrome('nav.sig.caveat')}
+      </div>
+    );
+  }
+  return (
+    <div
+      className="signatures-nav-caveat"
+      data-testid="signatures-nav-trust"
+      data-trust={summary}
+    >
+      {summary === 'failed' ? tChrome('nav.sig.trustFailed') : tChrome('nav.sig.trustVerified')}
     </div>
   );
 }

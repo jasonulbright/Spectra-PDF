@@ -26,12 +26,18 @@ CRITICAL — trust context: we pass an EXPLICIT EMPTY trust context
 Passing None does NOT mean "no anchor": pyHanko's SimpleTrustManager.build
 treats ``trust_roots is None`` as "load the operating system's certificate
 store" (oscrypto `trust_list.get_list()` — ~dozens of real CA roots on
-Windows). Under None, a PDF signed by any commercial CA (DigiCert, GlobalSign,
-…) would come back ``trusted=True``, machine-dependent, silently contradicting
-this slice's whole promise. An explicit empty ``trust_roots=[]`` (a non-None
-value, so no OS fallback) makes ``trusted`` deterministically False regardless
-of the host's trust store. Regression-tested by monkeypatching the OS store to
-contain the signer cert and asserting ``trusted`` stays False.
+Windows). Under None, a PDF signed by any commercial CA would come back
+``trusted=True``, machine-dependent, silently contradicting the explicit-trust
+promise. An explicit empty ``trust_roots=[]`` (a non-None value, so no OS
+fallback) makes ``trusted`` deterministically False regardless of the host's
+trust store. Regression-tested by monkeypatching the OS store to contain the
+signer cert and asserting ``trusted`` stays False.
+
+The OS store IS reachable, but only as an explicit opt-in (``system_trust``),
+never as a fallback: it goes through ``engine.os_trust``, which respects the
+store's per-purpose (EKU) restrictions and is not read at all while the option
+is off. Which anchor set a chain reached is reported per signature as
+``trust_source``.
 
 Uses pyHanko (MIT) — the ByteRange / CMS / incremental-update handling is
 exactly the security-critical plumbing not to hand-roll.
@@ -56,6 +62,7 @@ from pyhanko.sign.general import SigningError
 from pyhanko.sign.timestamps import HTTPTimeStamper
 from pyhanko.sign.validation import validate_pdf_signature
 
+from engine import os_trust
 from engine.docmdp import LEVEL_BY_VALUE, VALUE_BY_LEVEL, certification_of_file
 from engine.docmdp_policy import DIFF_POLICY
 from pyhanko import stamp
@@ -105,6 +112,87 @@ def _trust_context(trust_roots: list | None, allow_fetching: bool = False) -> Va
         allow_fetching=allow_fetching,
         retroactive_revinfo=True,
     )
+
+
+def _fingerprints(certs: list) -> set:
+    return {c.sha256 for c in certs}
+
+
+class _TrustSources:
+    """The anchors in force for one verification, and which set each came from.
+
+    Two contexts, not one: a signature validation builds a signer chain and a
+    timestamp chain, and the OS store records a DIFFERENT purpose set for each.
+    ``validate_pdf_signature`` already takes the two contexts separately.
+
+    With ``system_trust`` off nothing here reads the OS store, and the contexts
+    collapse to the single user-anchored (or empty) context of the original
+    explicit-trust posture.
+    """
+
+    def __init__(self, trust_roots: list | None, system_trust: bool):
+        user = _load_trust_roots(trust_roots or [])
+        self.user_prints = _fingerprints(user)
+        self.system_prints: set = set()
+        self.system_requested = bool(system_trust)
+        self.system_available = os_trust.available() if system_trust else False
+        if not system_trust:
+            ctx = _trust_context(trust_roots) if trust_roots else None
+            self.signer_context = ctx
+            self.timestamp_context = ctx
+            self.system_anchor_count = 0
+            return
+        signer_anchors = os_trust.anchors(os_trust.SIGNER_PURPOSES)
+        timestamp_anchors = os_trust.anchors(os_trust.TIMESTAMP_PURPOSES)
+        intermediates = os_trust.intermediates()
+        # The union, not the signer set: a report of how many anchors the store
+        # contributed to this verification at all.
+        self.system_prints = _fingerprints(signer_anchors) | _fingerprints(timestamp_anchors)
+        self.system_anchor_count = len(self.system_prints)
+        self.signer_context = ValidationContext(
+            trust_roots=[*user, *signer_anchors],
+            other_certs=intermediates,
+            allow_fetching=False,
+            retroactive_revinfo=True,
+        )
+        self.timestamp_context = ValidationContext(
+            trust_roots=[*user, *timestamp_anchors],
+            other_certs=intermediates,
+            allow_fetching=False,
+            retroactive_revinfo=True,
+        )
+
+    @property
+    def anchored(self) -> bool:
+        """Whether any anchor at all is in force — the precondition for a
+        trusted verdict being meaningful."""
+        return bool(self.user_prints) or bool(self.system_prints)
+
+    def source_of(self, status) -> str | None:
+        """Which anchor set the validated path terminated at.
+
+        The user's own set is checked first: a certificate present in both was
+        chosen explicitly, and that is what the result should say.
+        """
+        path = getattr(status, "validation_path", None)
+        if path is None:
+            return None
+        try:
+            anchor = path[0]
+        except Exception:
+            return None
+        if anchor.sha256 in self.user_prints:
+            return "user"
+        if anchor.sha256 in self.system_prints:
+            return "system"
+        return None
+
+    def report(self) -> dict:
+        return {
+            "requested": self.system_requested,
+            "available": self.system_available,
+            "anchor_count": self.system_anchor_count,
+        }
 
 
 def _make_timestamper(tsa_url: str):
@@ -183,7 +271,7 @@ def _policy_report(status, certification: dict) -> dict:
     }
 
 
-def _verify_one(embedded, context: ValidationContext | None = None,
+def _verify_one(embedded, sources: "_TrustSources | None" = None,
                 certification: dict | None = None) -> dict:
     certification = certification or {"certified": False, "level": None}
     field = getattr(embedded, "field_name", None)
@@ -192,14 +280,20 @@ def _verify_one(embedded, context: ValidationContext | None = None,
     is_pades = subfilter == "/ETSI.CAdES.detached"
     try:
         # Explicit empty trust context by default — see the module docstring
-        # for why NOT None (which would consult the OS certificate store). A
-        # caller-supplied context carries the USER'S chosen anchors.
-        ctx = context if context is not None else _empty_trust_context()
+        # for why NOT None (which would consult the OS certificate store). The
+        # caller's sources carry the user's chosen anchors, and the OS store
+        # only when it was explicitly asked for.
+        signer_ctx = sources.signer_context if sources is not None else None
+        ts_ctx = sources.timestamp_context if sources is not None else None
+        if signer_ctx is None:
+            signer_ctx = _empty_trust_context()
+        if ts_ctx is None:
+            ts_ctx = _empty_trust_context()
         # The difference policy is passed EXPLICITLY here, at the one call
         # site, rather than installed as a library default — no other caller
         # of the validator inherits it.
         status = validate_pdf_signature(
-            embedded, signer_validation_context=ctx, ts_validation_context=ctx,
+            embedded, signer_validation_context=signer_ctx, ts_validation_context=ts_ctx,
             diff_policy=DIFF_POLICY,
         )
     except Exception as exc:
@@ -212,6 +306,7 @@ def _verify_one(embedded, context: ValidationContext | None = None,
             "valid": False,
             "intact": False,
             "trusted": False,
+            "trust_source": None,
             "coverage": "UNKNOWN",
             "covers_whole_document": False,
             "modified_after_signing": True,
@@ -235,10 +330,14 @@ def _verify_one(embedded, context: ValidationContext | None = None,
         "valid": bool(status.valid),
         # The bytes the signature covers are unmodified (document integrity).
         "intact": bool(status.intact),
-        # Deterministically false: we validate against an EXPLICIT empty trust
-        # context, so no certificate ever chains to an anchor. Reported (not
-        # hidden) so the UI can state the identity caveat honestly.
+        # False unless an anchor set was supplied: with no user anchors and no
+        # opt-in to the OS store, validation runs against an EXPLICIT empty
+        # trust context and no certificate can chain. Reported (not hidden) so
+        # the UI can state the identity caveat honestly.
         "trusted": bool(status.trusted),
+        # WHICH anchor set the path terminated at, so a trusted result can say
+        # whether the user vouched for the chain or the machine did.
+        "trust_source": sources.source_of(status) if sources is not None and status.trusted else None,
         "coverage": coverage,
         "covers_whole_document": coverage == "ENTIRE_FILE",
         # Content was added/changed after this signature was applied.
@@ -262,17 +361,22 @@ def _verify_one(embedded, context: ValidationContext | None = None,
     }
 
 
-def verify_signatures(file: str, trust_roots: list | None = None) -> dict:
+def verify_signatures(
+    file: str, trust_roots: list | None = None, system_trust: bool = False
+) -> dict:
     """Verify every embedded signature in a PDF (read-only).
 
     Args:
         file: PDF path.
         trust_roots: optional CA certificate files (PEM/DER) the USER trusts.
-            When given, ``trusted`` is validated against exactly these anchors
-            (never the OS store); without them it stays deterministically
-            False, the original explicit-trust posture.
+            When given, ``trusted`` is validated against exactly these anchors;
+            without them, and without ``system_trust``, it stays
+            deterministically False — the explicit-trust posture.
+        system_trust: also anchor on the operating system's certificate store,
+            per purpose (``engine.os_trust``). OFF by default and read only
+            when True, so the default costs no store enumeration.
     """
-    context = _trust_context(trust_roots) if trust_roots else None
+    sources = _TrustSources(trust_roots, system_trust)
     # /Perms /DocMDP is a CATALOG property, so the certification is
     # document-level; the per-signature level below says which signature wrote
     # it. Read first: every signature's policy verdict is relative to it.
@@ -283,7 +387,7 @@ def verify_signatures(file: str, trust_roots: list | None = None) -> dict:
         # different animal (it seals the DSS, it doesn't sign content) and
         # validate_pdf_signature would misreport it as a broken signature.
         signatures = [
-            _verify_one(esig, context, certification)
+            _verify_one(esig, sources, certification)
             for esig in reader.embedded_regular_signatures
         ]
         doc_timestamps = len(reader.embedded_timestamp_signatures)
@@ -337,6 +441,10 @@ def verify_signatures(file: str, trust_roots: list | None = None) -> dict:
         "ltv_info_present": has_dss,
         # PAdES B-LTA document timestamps sealing the file (0 = none).
         "document_timestamps": doc_timestamps,
+        # What the OS store contributed. `available` false with `requested`
+        # true is a platform with no readable store — reported as such rather
+        # than as an empty store, which would read as a failed chain.
+        "system_trust": sources.report(),
         "certification": {
             "certified": bool(certification["certified"]),
             "level": certification["level"],
@@ -348,8 +456,10 @@ def verify_signatures(file: str, trust_roots: list | None = None) -> dict:
             # Every signature is both crypto-valid AND covers intact bytes.
             "all_valid": bool(signatures) and all(s["valid"] and s["intact"] for s in signatures),
             "any_modified_after_signing": any(s["modified_after_signing"] for s in signatures),
-            # True only when validated against user-supplied anchors.
-            "trust_verified": bool(trust_roots) and bool(signatures)
+            # True only when an anchor set was actually in force — otherwise
+            # every signature is trivially untrusted and "not verified" would
+            # be indistinguishable from "no anchors configured".
+            "trust_verified": sources.anchored and bool(signatures)
             and all(s["trusted"] for s in signatures),
             "certified": bool(certification["certified"]),
             # An UNJUDGED signature is not a violation; only a judged failure is.
@@ -724,6 +834,7 @@ def sign_pdf(
     embed_revocation: bool = False,
     lta: bool = False,
     trust_roots: list | None = None,
+    system_trust: bool = False,
     pkcs11_module: str | None = None,
     pkcs11_token: str | None = None,
     pkcs11_pin: str = "",
@@ -777,6 +888,10 @@ def sign_pdf(
         key_path / cert_path: PEM/DER signer files (alternative to pfx_path).
         appearance: Optional visible-stamp placement (see above).
         existing_field: Name of an existing empty signature field to fill.
+        trust_roots: CA certificate files anchoring the signer's own chain
+            while revocation material is gathered for the DSS.
+        system_trust: also anchor that gathering on the operating system's
+            certificate store. Off by default, read only when True.
         certify: Apply an AUTHOR (certification) signature, which records in
             the catalog what may change in the document afterwards. At most one
             per document, and it must be the document's first signature.
@@ -853,9 +968,12 @@ def sign_pdf(
             meta_kwargs["subfilter"] = SigSeedSubFilter.PADES
         if embed_revocation:
             # Validating the signer's own chain is a precondition for gathering
-            # the revinfo that goes into the DSS. Anchors: the user's roots, or —
-            # for a self-signed signer — its own certificate.
+            # the revinfo that goes into the DSS. Anchors: the user's roots,
+            # plus the OS store when opted in, or — for a self-signed signer —
+            # its own certificate.
             anchors = _load_trust_roots(trust_roots or [])
+            if system_trust:
+                anchors = [*anchors, *os_trust.anchors(os_trust.SIGNER_PURPOSES)]
             if not anchors:
                 anchors = [signer.signing_cert, *signer.cert_registry]
             meta_kwargs["embed_validation_info"] = True

@@ -610,11 +610,22 @@ export const PANEL_STRINGS = {
   'panel.sig.found_other': '{{count}} signatures found.',
   'panel.sig.listAria': 'Signatures',
   'panel.sig.trustCaveat':
-    'Signer identity is not verified against a trusted authority — these results confirm cryptographic validity and whether the document was changed after signing, not who the signer really is. Add a trust anchor below to verify identity against a CA you trust.',
+    'Signer identity is not verified against a trusted authority — these results confirm cryptographic validity and whether the document was changed after signing, not who the signer really is. Choose a trust source below: add a CA certificate you trust, or turn on the system certificate store.',
   'panel.sig.trustVerified_one': 'Signer identity verified against your {{count}} trust anchor.',
   'panel.sig.trustVerified_other': 'Signer identity verified against your {{count}} trust anchors.',
-  'panel.sig.trustFailed': 'The signer does not chain to any of your trust anchors.',
+  'panel.sig.trustFailed': 'The signer does not chain to any of your trust sources.',
+  'panel.sig.trustVerifiedSystem':
+    'Signer identity verified against the system certificate store.',
+  'panel.sig.trustVerifiedMixed':
+    'Signer identity verified — against your trust anchors and the system certificate store.',
   'panel.sig.trustAnchors': 'Trust anchors',
+  'panel.sig.systemStore': 'Also trust the system certificate store',
+  'panel.sig.systemStoreHint':
+    'Off by default. When on, a signer whose certificate authority this computer already trusts for document signing verifies as trusted here too.',
+  'panel.sig.systemStoreUnavailable':
+    'This computer exposes no certificate store to read, so only your own trust anchors apply.',
+  'panel.sig.trustedViaAnchor': 'identity trusted (your anchor)',
+  'panel.sig.trustedViaSystem': 'identity trusted (system store)',
   'panel.sig.addCa': 'Add CA certificate…',
   'panel.sig.removeAnchor': 'Remove trust anchor {{path}}',
   'panel.sig.signHeading': 'Sign this document',
