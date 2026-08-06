@@ -420,6 +420,17 @@ describe('qps pseudo-locale leak sweep', () => {
       await sweep('[data-testid="disk-redact-dialog"]', leaks);
       await $('[data-testid="disk-redact-x"]').click();
 
+      // ── DIALOG 6: Prepare Forms in a Folder. Same reason as DIALOG 5 —
+      // its setup phase carries the scan modes, the language list and the two
+      // consent surfaces, and nothing else in this spec renders it.
+      expect(await invokeAppCommand('tools.formPrepFolder')).toBe(true);
+      await $('[data-testid="form-prep-dialog"]').waitForDisplayed({
+        timeout: 15_000,
+        timeoutMsg: 'the folder form-preparation dialog never opened',
+      });
+      await sweep('[data-testid="form-prep-dialog"]', leaks);
+      await $('[data-testid="form-prep-x"]').click();
+
       expect(leaks).toEqual([]);
     } finally {
       await qps('en');
