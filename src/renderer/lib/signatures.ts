@@ -147,12 +147,39 @@ export const MODIFICATION_LEVEL_LABEL = {
   OTHER: 'panel.sig.changesOther',
 } as const satisfies Record<string, string>;
 
+export type ModificationLevelKey = (typeof MODIFICATION_LEVEL_LABEL)[keyof typeof MODIFICATION_LEVEL_LABEL];
+
 /** The catalog key for a reported modification level, or null when the engine
  * reported none (difference analysis unavailable) or a name this build does
  * not know — which is shown as nothing rather than as a guess. */
-export function modificationLevelLabel(name: string | null | undefined): string | null {
+export function modificationLevelLabel(
+  name: string | null | undefined,
+): ModificationLevelKey | null {
   if (!name) return null;
-  return (MODIFICATION_LEVEL_LABEL as Record<string, string | undefined>)[name] ?? null;
+  return (
+    (MODIFICATION_LEVEL_LABEL as Record<string, ModificationLevelKey | undefined>)[name] ?? null
+  );
+}
+
+// ── authoring a certification ─────────────────────────────────────────────
+
+/** The certification half of a sign request. Orthogonal to the signer source,
+ * the placement and the PAdES profile, so it travels beside them rather than
+ * inside any of them — both sign surfaces carry the same pair. */
+export interface CertifyOptions {
+  certify: boolean;
+  level: CertificationLevel;
+}
+
+export const DEFAULT_CERTIFY: CertifyOptions = { certify: false, level: 'form-fill' };
+
+export const CERTIFY_LEVELS: readonly CertificationLevel[] = ['none', 'form-fill', 'annotate'];
+
+/** Engine params for a certification request. The level is sent only WITH the
+ * certify flag: a level alone would write a policy entry onto an approval
+ * signature that most readers disregard, which the engine refuses. */
+export function certifyParams(options: CertifyOptions): Record<string, unknown> {
+  return options.certify ? { certify: true, certify_level: options.level } : {};
 }
 
 // ── what a document's own signatures permit ────────────────────────────────
