@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   CERTIFICATION_LEVEL_LABEL,
   classifySignature,
+  isFieldLocked,
+  LOCK_ACTION_LABEL,
+  LOCK_ACTIONS,
+  lockNeedsFields,
+  lockParams,
   MODIFICATION_LEVEL_LABEL,
   modificationLevelLabel,
   policyVerdict,
@@ -12,6 +17,8 @@ import {
   SIGNATURE_STATUS_LABEL,
   type CertificationLevel,
   type EditClass,
+  type FieldLock,
+  type LockAction,
   type SignatureEntry,
   type SignaturePolicy,
   type SignedEditKey,
@@ -253,7 +260,53 @@ describe('signedEditDecision', () => {
       'app.signedEdit.certifiedWarnFormFill',
       'app.signedEdit.certifiedWarnAnnotate',
       'app.signedEdit.certifiedWarnUnknown',
+      'app.signedEdit.lockedTitle',
+      'app.signedEdit.lockedRefused',
     ];
     for (const key of keys) expect(WORKBENCH_STRINGS[key]).toBeTruthy();
+  });
+});
+
+describe('field locks', () => {
+  const lock = (action: LockAction, fields: string[] = []): FieldLock => ({ action, fields });
+
+  it('an all lock covers every name', () => {
+    expect(isFieldLocked(lock('all'), 'Anything')).toBe(true);
+  });
+
+  it('the two list actions are exact inverses of one another', () => {
+    for (const name of ['Total', 'Name']) {
+      expect(isFieldLocked(lock('include', ['Total']), name)).toBe(
+        !isFieldLocked(lock('exclude', ['Total']), name),
+      );
+    }
+  });
+
+  it('a scoped name covers its subtree but not a name that merely starts alike', () => {
+    expect(isFieldLocked(lock('include', ['Buyer']), 'Buyer.Name')).toBe(true);
+    expect(isFieldLocked(lock('include', ['Buyer']), 'BuyerName')).toBe(false);
+  });
+
+  it('names travel only with a list action', () => {
+    expect(lockParams({ action: null, fields: ['Total'] })).toEqual({});
+    expect(lockParams({ action: 'all', fields: ['Total'] })).toEqual({
+      lock: 'all',
+      lock_fields: [],
+    });
+    expect(lockParams({ action: 'include', fields: ['Total'] })).toEqual({
+      lock: 'include',
+      lock_fields: ['Total'],
+    });
+  });
+
+  it('only the list actions need names', () => {
+    expect(lockNeedsFields(null)).toBe(false);
+    expect(lockNeedsFields('all')).toBe(false);
+    expect(lockNeedsFields('include')).toBe(true);
+    expect(lockNeedsFields('exclude')).toBe(true);
+  });
+
+  it('every action has a catalog label', () => {
+    for (const action of LOCK_ACTIONS) expect(PANEL_STRINGS[LOCK_ACTION_LABEL[action]]).toBeTruthy();
   });
 });

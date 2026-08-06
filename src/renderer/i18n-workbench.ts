@@ -179,6 +179,9 @@ export const WORKBENCH_STRINGS = {
     'This document is certified, and only filling in its forms, signing it and commenting on it are allowed. This change goes further than that and will break the certification. Continue?',
   'app.signedEdit.certifiedWarnUnknown':
     'This document is certified, but it states what may change in it in a way this version does not recognise. This change may break the certification. Continue?',
+  'app.signedEdit.lockedTitle': 'Form fields are locked',
+  'app.signedEdit.lockedRefused':
+    'A signature on this document locks these form fields against further change: {{fields}}. Filling them would produce a file that reports as altered. Save a copy and fill that instead — the copy is no longer the signed document.',
 
   'app.sendEmail.title': 'Send by Email',
 

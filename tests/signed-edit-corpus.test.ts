@@ -14,6 +14,7 @@ interface Case {
   name: string;
   policy: SignaturePolicy;
   class: EditClass;
+  fields?: string[];
   kind: 'proceed' | 'warn' | 'refuse';
   reason?: string;
 }
@@ -25,7 +26,7 @@ const corpus = JSON.parse(
 describe('signed-edit corpus', () => {
   for (const c of corpus.cases) {
     it(c.name, () => {
-      const decision = signedEditDecision(c.policy, c.class);
+      const decision = signedEditDecision(c.policy, c.class, c.fields ?? null);
       expect(decision.kind).toBe(c.kind);
       expect(decision.kind === 'proceed' ? undefined : decision.reason).toBe(c.reason);
     });

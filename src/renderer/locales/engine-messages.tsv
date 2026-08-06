@@ -328,8 +328,12 @@ signatures.documentAlreadyCarriesSignature	pattern	signatures	This document alre
 signatures.documentAlreadyCertifiedLevel	pattern	signatures	This document is already certified at level "{{existing_level}}". A document can carry at most one certification signature.
 signatures.documentCertifiedChangesAllowed	exact	signatures	This document is certified with no changes allowed, so it cannot be signed again. Save a copy and sign that instead.
 signatures.documentCouldSignedOwn	exact	signatures	This document could not be signed — its own signature policy forbids the change.
+signatures.documentFormFieldNamed	pattern	signatures	This document has no form field named "{{v0}}", so that field cannot be locked.
 signatures.embeddingRevocationInfoLtv	exact	signatures	Embedding revocation info (LTV) requires PAdES mode.
 signatures.emptySignatureFieldNamed	pattern	signatures	No empty signature field named "{{field_name}}" exists in this PDF.
+signatures.fieldLockCoveringEvery	exact	signatures	A field lock covering every form field takes no field names.
+signatures.fieldLockTypeNeeds	pattern	signatures	A field lock of type "{{lock}}" needs at least one field name.
+signatures.fieldNamesLockApply	exact	signatures	Field names to lock apply only to a field lock. Choose what the signature locks, or leave the names unset.
 signatures.fileAlreadyExistsChoose	exact	signatures	That file already exists. Choose a different name, or explicitly allow overwriting.
 signatures.invalidSignatureAppearanceExpected	exact	signatures	Invalid signature appearance: expected {page, rect:[x0,y0,x1,y1]}.
 signatures.invalidSignatureAppearancePage	pattern	signatures	Invalid signature appearance: page {{page}} is out of range (1-{{page_count}}).
@@ -340,6 +344,7 @@ signatures.passwordRequiredPfxWill	exact	signatures	A password is required — t
 signatures.pemSignerNeedsBoth	exact	signatures	A PEM signer needs both the key file and the certificate file.
 signatures.pkcsModuleFoundGiven	exact	signatures	PKCS#11 module not found at the given path.
 signatures.pkcsSignerNeedsModule	exact	signatures	A PKCS#11 signer needs the module path, the token label, and the certificate label.
+signatures.signatureFieldAlreadyLocks	pattern	signatures	Signature field "{{field_name}}" already locks form fields on its own terms, and a signature cannot replace that. Sign it as it stands, or use a different field.
 signatures.signatureFieldAlreadySigned	pattern	signatures	Signature field "{{field_name}}" is already signed.
 signatures.signedOutputMustDifferent	exact	signatures	The signed output must be a different file from the input.
 signatures.signerCertificateFileFound	exact	signatures	Signer certificate file not found.
@@ -349,6 +354,7 @@ signatures.signerKeyFileFound	exact	signatures	Signer key file not found.
 signatures.signerNameCommonName	exact	signatures	A signer name (common name) is required.
 signatures.trustRootFound	pattern	signatures	trust root not found: {{p}}
 signatures.unknownCertificationLevelChoose	pattern	signatures	Unknown certification level "{{certify_level}}". Choose none, form-fill, or annotate.
+signatures.unknownFieldLockChoose	pattern	signatures	Unknown field lock "{{lock}}". Choose all, include, or exclude.
 signatures.validityMustBetweenDay	exact	signatures	Validity must be between 1 day and 20 years.
 slide_export.couldRenderPageSlide	pattern	slide_export	Could not render page {{page_number}} for a slide: {{detail}}
 slide_export.ghostscriptAvailableRequiredRender	pattern	slide_export	Ghostscript is not available at {{v0}}; it is required to render a page's graphics onto a slide.

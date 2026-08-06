@@ -18,9 +18,23 @@ export interface DiskEntry {
   rel: string;
 }
 
+/** The reasons a sweep can produce. A sweep rewrites whole files — it decides
+ * at the annotate and structural classes only — so the form-fill-only reason
+ * is not among them, and the vocabularies below stay total rather than
+ * carrying an unreachable row. */
+export type SweepSignedReason = Exclude<SignedEditReason, 'fields-locked'>;
+
+/** A decision's reason as a sweep records it. The excluded reason cannot arrive
+ * from the classes a sweep decides at; it maps to the generic signed warning
+ * rather than being asserted away, so a future sweep that does fill forms
+ * reports something true instead of crashing. */
+export function sweepReason(reason: SignedEditReason): SweepSignedReason {
+  return reason === 'fields-locked' ? 'signed' : reason;
+}
+
 /** What a file's own signatures said about the write a run intends. */
 export interface SignedNote {
-  reason: SignedEditReason;
+  reason: SweepSignedReason;
   count: number;
   /** The decision refuses outright — no consent makes this file writable. */
   refused: boolean;

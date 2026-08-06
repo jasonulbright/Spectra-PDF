@@ -1334,6 +1334,15 @@ pub struct SignArgs {
     /// Defaults to form-fill.
     #[arg(long, requires = "certify", value_parser = ["none", "form-fill", "annotate"])]
     pub certify_level: Option<String>,
+    /// Lock form fields against further change after signing: all | include
+    /// (only those named by --lock-field) | exclude (all but those named).
+    /// Independent of --certify.
+    #[arg(long, value_parser = ["all", "include", "exclude"])]
+    pub lock: Option<String>,
+    /// A form field the lock names; repeatable. Fully qualified, and a name
+    /// that scopes a subtree locks everything beneath it.
+    #[arg(long = "lock-field", requires = "lock")]
+    pub lock_field: Vec<String>,
 }
 
 #[derive(Args)]
@@ -3108,6 +3117,10 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             }
             if let Some(level) = &args.certify_level {
                 params["certify_level"] = json!(level);
+            }
+            if let Some(action) = &args.lock {
+                params["lock"] = json!(action);
+                params["lock_fields"] = json!(args.lock_field);
             }
             if !args.trust_roots.is_empty() {
                 let roots: Vec<String> = args
