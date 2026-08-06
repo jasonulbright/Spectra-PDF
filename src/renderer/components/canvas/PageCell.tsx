@@ -55,6 +55,7 @@ import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import { PageView } from './PageView';
+import { useSeparationRaster } from '../../hooks/useSeparationPreview';
 import { PageTextLayer } from './PageTextLayer';
 
 // The tool union moved to the ui state slice (commands and the
@@ -1115,12 +1116,17 @@ function PageCellImpl({
   const displayWidth = textLayer
     ? displayWidthAt(page, pageHeight)
     : displayWidthOf(page) * (pageHeight / BASE_PAGE_HEIGHT);
+  // Null unless Output Preview is armed AND this page has been rastered
+  // through the separation device.
+  const separationUrl = useSeparationRaster(docId, page.id);
   // Hand is the OTHER non-annotating mode: it must take the same
   // let-the-board-have-it branch as select, or a hand drag on the board
   // preventDefaults the pointerdown (suppressing the derived mouse events d3
   // pans with) and falls through to the band — painting a HIGHLIGHT instead
-  // of panning (regression, CRITICAL).
-  const annotateMode = tool !== 'select' && tool !== 'hand';
+  // of panning (regression, CRITICAL). Output Preview is the third: it
+  // changes how the page RENDERS and claims no gesture, so a drag under it
+  // would reach the band's default branch and commit a highlight.
+  const annotateMode = tool !== 'select' && tool !== 'hand' && tool !== 'outputpreview';
   // Rubber band for the annotation tools, in display-normalized coords.
   // Driven by window-level native listeners for the drag's duration — the
   // same pattern as usePageDrag — rather than React synthetic move/up through
@@ -2865,6 +2871,7 @@ function PageCellImpl({
         rotation={page.rotation}
         displayWidth={displayWidth}
         displayHeight={pageHeight}
+        separationUrl={separationUrl}
       />
       {/* The grid draws UNDER the annotation layer and OVER the raster — it is
           a drafting aid on the paper, never part of it. `forced-color-adjust`

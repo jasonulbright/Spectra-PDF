@@ -6,8 +6,11 @@ red flag), is there live transparency, and is the document encrypted in a way
 that blocks printing. It REPORTS; the Convert-to-CMYK / grayscale / optimize
 tools do the fixing.
 
-Font and colour-space discovery walks page /Resources AND nested Form XObject
-/Resources (bounded depth), so a font used only inside a form is still found.
+Font and colour-space discovery walks page /Resources, nested Form XObject
+/Resources, patterns, shadings, image colour spaces and annotation appearance
+streams (bounded depth), so a font or a colorant used only inside one of those
+is still found. `walk_page_resources` is that walk, shared with the separation
+inventory.
 """
 
 import pikepdf
@@ -16,10 +19,76 @@ from pikepdf import Name
 _MAX_DEPTH = 12
 
 
-def _walk_resources(pdf, on_font, on_colorspace, on_image, on_transparency):
+def _noop(*_args):
+    return None
+
+
+def walk_page_resources(
+    page,
+    *,
+    on_font=_noop,
+    on_colorspace=_noop,
+    on_image=_noop,
+    on_transparency=_noop,
+) -> None:
+    """Visit everything one page can paint through.
+
+    Page `/Resources` and nested Form XObjects, plus `/Pattern` (a tiling
+    pattern's own resources, a shading pattern's shading), `/Shading`, image
+    `/ColorSpace`, and annotation appearance streams. A colorant reached only
+    through a pattern or an image is still a colorant on the plate, so the
+    walk must reach all of them.
+
+    `on_colorspace(cs, category)` carries the route the space was reached by —
+    one of `content`, `image`, `shading`, `pattern`, `annotation`. Every
+    callback is guarded: a malformed object skips its branch instead of
+    sinking the walk.
+    """
     seen: set = set()
 
-    def visit_res(res, depth):
+    def mark(obj) -> bool:
+        """False when this object has already been visited on this page."""
+        ident = obj.objgen if getattr(obj, "is_indirect", False) else id(obj)
+        if ident in seen:
+            return False
+        seen.add(ident)
+        return True
+
+    def visit_shading(sh, depth):
+        if sh is None or depth > _MAX_DEPTH:
+            return
+        try:
+            cs = sh.get("/ColorSpace")
+        except Exception:
+            return
+        if cs is not None:
+            try:
+                on_colorspace(cs, "shading")
+            except Exception:
+                pass
+
+    def visit_pattern(pat, depth, origin):
+        if pat is None or depth > _MAX_DEPTH:
+            return
+        try:
+            ptype = int(pat.get("/PatternType") or 1)
+        except (TypeError, ValueError):
+            ptype = 1
+        if ptype == 2:
+            try:
+                sh = pat.get("/Shading")
+            except Exception:
+                sh = None
+            if sh is not None:
+                visit_shading(sh, depth + 1)
+            return
+        try:
+            res = pat.get("/Resources")
+        except Exception:
+            res = None
+        visit_res(res, depth + 1, origin)
+
+    def visit_res(res, depth, origin):
         if res is None or depth > _MAX_DEPTH:
             return
         fonts = res.get("/Font")
@@ -33,26 +102,47 @@ def _walk_resources(pdf, on_font, on_colorspace, on_image, on_transparency):
         if cs is not None:
             for key in list(cs.keys()):
                 try:
-                    on_colorspace(cs[key])
+                    on_colorspace(cs[key], origin)
                 except Exception:
                     pass
+        sh = res.get("/Shading")
+        if sh is not None:
+            for key in list(sh.keys()):
+                try:
+                    visit_shading(sh[key], depth)
+                except Exception:
+                    continue
+        pat = res.get("/Pattern")
+        if pat is not None:
+            for key in list(pat.keys()):
+                try:
+                    obj = pat[key]
+                    if not mark(obj):
+                        continue
+                    visit_pattern(obj, depth, origin)
+                except Exception:
+                    continue
         xo = res.get("/XObject")
         if xo is not None:
             for key in list(xo.keys()):
                 try:
                     obj = xo[key]
-                    ident = obj.objgen if getattr(obj, "is_indirect", False) else id(obj)
-                    if ident in seen:
+                    if not mark(obj):
                         continue
-                    seen.add(ident)
                     sub = str(obj.get("/Subtype"))
                     if sub == "/Image":
                         on_image(obj)
+                        img_cs = obj.get("/ColorSpace")
+                        if img_cs is not None:
+                            try:
+                                on_colorspace(img_cs, "image")
+                            except Exception:
+                                pass
                     elif sub == "/Form":
                         grp = obj.get("/Group")
                         if grp is not None and str(grp.get("/S")) == "/Transparency":
                             on_transparency()
-                        visit_res(obj.get("/Resources"), depth + 1)
+                        visit_res(obj.get("/Resources"), depth + 1, origin)
                 except Exception:
                     continue
         eg = res.get("/ExtGState")
@@ -69,8 +159,40 @@ def _walk_resources(pdf, on_font, on_colorspace, on_image, on_transparency):
                 except Exception:
                     continue
 
+    visit_res(page.obj.get("/Resources"), 0, "content")
+
+    try:
+        annots = page.obj.get("/Annots")
+    except Exception:
+        annots = None
+    if annots is not None:
+        for annot in list(annots):
+            try:
+                ap = annot.get("/AP")
+                if ap is None:
+                    continue
+                for ap_key in list(ap.keys()):
+                    entry = ap[ap_key]
+                    streams = [entry]
+                    if not isinstance(entry, pikepdf.Stream):
+                        streams = [entry[k] for k in list(entry.keys())]
+                    for stream in streams:
+                        if not mark(stream):
+                            continue
+                        visit_res(stream.get("/Resources"), 1, "annotation")
+            except Exception:
+                continue
+
+
+def _walk_resources(pdf, on_font, on_colorspace, on_image, on_transparency):
     for page in pdf.pages:
-        visit_res(page.obj.get("/Resources"), 0)
+        walk_page_resources(
+            page,
+            on_font=on_font,
+            on_colorspace=lambda cs, _category: on_colorspace(cs),
+            on_image=on_image,
+            on_transparency=on_transparency,
+        )
 
 
 def _font_embedded(font) -> bool:

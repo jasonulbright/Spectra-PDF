@@ -145,6 +145,50 @@ export async function renderBase({
   }
 }
 
+interface SeparationParams {
+  /** Object URL of the composited separation image for this page. */
+  url: string;
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
+  isCancelled: () => boolean;
+  onReady: () => void;
+  /** True when this canvas already shows a separation (an ink toggle or a
+   *  threshold change); routes the blit through the shared batcher so a
+   *  strip of pages swaps in one visual step rather than rippling. */
+  reblit?: boolean;
+}
+
+/**
+ * The THIRD raster source, beside the two the viewer already blits.
+ *
+ * The pixels come from the separation device rather than from the viewer's
+ * renderer, and they are painted onto their own canvas ABOVE the base — so
+ * the base keeps the viewer's own pixels the whole time and leaving the mode
+ * restores the page with nothing to re-render.
+ */
+export async function renderSeparation({
+  url,
+  canvasRef,
+  isCancelled,
+  onReady,
+  reblit = false,
+}: SeparationParams): Promise<void> {
+  const image = new Image();
+  image.src = url;
+  await image.decode();
+  if (isCancelled()) return;
+  const paint = (): void => {
+    if (isCancelled()) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    canvas.getContext('2d')!.drawImage(image, 0, 0);
+    onReady();
+  };
+  if (reblit) scheduleReblit(paint);
+  else paint();
+}
+
 interface DetailGeometry {
   rect: DOMRect;
   layoutW: number;

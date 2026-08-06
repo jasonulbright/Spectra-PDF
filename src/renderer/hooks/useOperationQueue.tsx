@@ -64,6 +64,8 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   // Same property: only whitelisted (non-secret) fields reach the queue
   // label; the .pfx password stays out of every sink.
   generate_signer: 'Create Signer',
+  list_inks: 'Read Inks',
+  render_separations: 'Render Separations',
   set_field_lock: 'Set Field Lock',
   set_document_js: 'Edit Document JavaScript',
   set_struct_props: 'Edit Tag',
@@ -165,6 +167,11 @@ const INTERNAL_METHODS = new Set([
   // merely to ask whether the edit may proceed (the audit_hidden_information
   // hazard). The edit that follows runs the gate itself.
   'signature_policy',
+  // Compositing cached separation plates into a preview image. It names a
+  // PLATE DIRECTORY, not a document — there is nothing for the commit gate to
+  // gate, and routing it through would commit the user's pending page edits
+  // on every ink checkbox.
+  'composite_separations',
 ]);
 
 export function isTrackableMethod(method: string): boolean {

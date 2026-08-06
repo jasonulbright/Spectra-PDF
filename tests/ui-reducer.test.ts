@@ -419,6 +419,19 @@ describe('ui tab/tool actions', () => {
     const next = appReducer(initialState, { type: 'UI_SET_ACTIVE_OP', op: 'compress' });
     expect(next.ui.activeOp).toBe('compress');
   });
+
+  // The separation preview belongs to no tool, so nothing but this disarms
+  // it — and a preview left armed by a closed tool would go silently live on
+  // the next document, rendering it through the separation device.
+  it('opening or closing any tool disarms the separation preview', () => {
+    const armed = appReducer(initialState, { type: 'UI_SET_TOOL', tool: 'outputpreview' });
+    expect(armed.ui.tool).toBe('outputpreview');
+    expect(appReducer(armed, { type: 'UI_OPEN_TOOL', toolId: 'protect' }).ui.tool).toBe('select');
+    expect(appReducer(armed, { type: 'UI_OPEN_TOOL', toolId: 'printproduction' }).ui.tool).toBe('select');
+    expect(appReducer(armed, { type: 'UI_OPEN_TOOL', toolId: null }).ui.tool).toBe('select');
+    expect(appReducer(armed, { type: 'UI_OPEN_TOOL', toolId: 'comment' }).ui.tool).toBe('highlight');
+    expect(appReducer(armed, { type: 'UI_SET_ACTIVE_OP', op: 'preflight' }).ui.tool).toBe('select');
+  });
 });
 
 describe('doc-tab lifecycle', () => {

@@ -1225,6 +1225,22 @@
   left: 0;
 }
 
+/* The separation composite stands in for the viewer's raster while Output
+   Preview is armed. It sits above the base, which keeps the viewer's own
+   pixels so leaving the mode restores the page with nothing to re-render. */
+.pageview-separation {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pageview-separation.ready {
+  opacity: 1;
+}
+
 .page-number {
   position: absolute;
   bottom: 6px;
@@ -3693,6 +3709,7 @@
 /* The DOCUMENT stays the document: page rasters render file content and
    must never be re-tinted by the shell theme. */
 [data-theme="high-contrast"] .pageview-base,
+[data-theme="high-contrast"] .pageview-separation,
 [data-theme="high-contrast"] .pageview-detail {
   forced-color-adjust: none;
   filter: none;
