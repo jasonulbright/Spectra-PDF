@@ -86,6 +86,7 @@ import { SearchProvider } from './search/SearchProvider';
 import { SeparationPreviewProvider } from './hooks/useSeparationPreview';
 import { OutputPreviewPanel } from './panels/OutputPreviewPanel';
 import { InkManagerPanel } from './panels/InkManagerPanel';
+import { PrinterMarksPanel } from './panels/PrinterMarksPanel';
 import { SettingsPanel, getSettings, ensureGsPath, type PrefCategory } from './panels/SettingsPanel';
 import { MenuBar } from './components/MenuBar';
 import { MainToolbar } from './components/MainToolbar';
@@ -180,6 +181,7 @@ const panels: Record<Operation, React.ComponentType> = {
   pagelabels: PageLabelsPanel, attachments: AttachmentsPanel, portfolio: PortfolioPanel, layers: LayersPanel,
   accessibility: AccessibilityPanel, comments: CommentsPanel, preflight: PreflightPanel,
   outputpreview: OutputPreviewPanel, inkmanager: InkManagerPanel,
+  printermarks: PrinterMarksPanel,
   links: LinksPanel, tags: TagsPanel, readingorder: ReadingOrderPanel,
   repair: RepairPanel, rebuild: RebuildPanel, recover: RecoverPanel,
   actions: GuidedActionsPanel, takeoff: TakeoffPanel,

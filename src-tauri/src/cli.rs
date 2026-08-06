@@ -56,6 +56,13 @@ pub enum CliCommand {
     ConvertCmyk(ConvertCmykArgs),
     /// Produce a PDF/X print master with an output intent
     ConvertPdfx(ConvertPdfxArgs),
+    /// Draw printer marks outside the trim (the page grows to hold them)
+    PrinterMarks(PrinterMarksArgs),
+    /// Remove printer marks and restore the recorded page boxes
+    PrinterMarksRemove(PrinterMarksRemoveArgs),
+    /// Report each page's boxes, its trim source, and whether it carries
+    /// printer marks (JSON; writes nothing)
+    PrinterMarksList(AccessibilityArgs),
     /// Extract text from a PDF
     ExtractText(ExtractTextArgs),
     /// Delete pages from a PDF
@@ -1194,6 +1201,46 @@ pub struct HeaderFooterArgs {
 }
 
 #[derive(Args)]
+pub struct PrinterMarksArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Comma-separated marks: crop, registration, colorbars, pageinfo
+    #[arg(long, default_value = "crop,registration,colorbars,pageinfo")]
+    pub marks: String,
+    /// Mark style: western or japanese
+    #[arg(long, default_value = "western")]
+    pub style: String,
+    /// Stroke weight in points: 0.125, 0.25 or 0.5
+    #[arg(long, default_value_t = 0.25)]
+    pub weight: f64,
+    /// Gap between the trim edge and the start of a mark, in points
+    #[arg(long, default_value_t = 9.0)]
+    pub offset: f64,
+    /// How far a mark runs outward from the offset, in points. The page grows
+    /// by offset + length on every edge
+    #[arg(long, default_value_t = 18.0)]
+    pub length: f64,
+    /// Comma-separated 1-based page numbers (omit for all pages)
+    #[arg(long)]
+    pub pages: Option<String>,
+}
+
+#[derive(Args)]
+pub struct PrinterMarksRemoveArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Comma-separated 1-based page numbers (omit for all pages)
+    #[arg(long)]
+    pub pages: Option<String>,
+}
+
+#[derive(Args)]
 pub struct PageBoxArgs {
     /// Input PDF file
     pub input: PathBuf,
@@ -1806,6 +1853,21 @@ fn resolve_tesseract() -> PathBuf {
 /// then refused, never crashed.
 fn resolve_fonts() -> PathBuf {
     exe_dir().join("fonts")
+}
+
+/// A `--pages` value as 1-based page numbers. An empty list is refused: the
+/// engine reads `[]` as "no pages", so an empty flag would silently do nothing
+/// where the user meant every page (which is the flag's own absence).
+fn parse_page_numbers(pages: &str) -> Result<Vec<i64>, String> {
+    let parsed: Vec<i64> = pages
+        .split(',')
+        .map(|s| s.trim().parse::<i64>())
+        .collect::<Result<Vec<i64>, _>>()
+        .map_err(|_| format!("--pages requires comma-separated page numbers, got: {pages}"))?;
+    if parsed.is_empty() {
+        return Err("--pages requires at least one page number".to_string());
+    }
+    Ok(parsed)
 }
 
 /// LibreOffice's `soffice` for Office export. Prefers the vendored copy
@@ -2611,6 +2673,45 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             }
             engine.call("add_header_footer", params)
         }
+
+        CliCommand::PrinterMarks(args) => {
+            let marks: Vec<String> = args
+                .marks
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "marks": marks,
+                "style": args.style,
+                "weight": args.weight,
+                "offset": args.offset,
+                "length": args.length,
+                "font_dir": resolve_fonts().to_string_lossy().to_string(),
+            });
+            if let Some(pages) = &args.pages {
+                params["pages"] = json!(parse_page_numbers(pages)?);
+            }
+            engine.call("add_printer_marks", params)
+        }
+
+        CliCommand::PrinterMarksRemove(args) => {
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+            });
+            if let Some(pages) = &args.pages {
+                params["pages"] = json!(parse_page_numbers(pages)?);
+            }
+            engine.call("remove_printer_marks", params)
+        }
+
+        CliCommand::PrinterMarksList(args) => engine.call(
+            "list_printer_marks",
+            json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
 
         CliCommand::PageBox(args) => {
             let mut params = json!({
