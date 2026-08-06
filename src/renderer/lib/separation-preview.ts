@@ -85,18 +85,116 @@ export interface InkRequest {
   density: number;
 }
 
-/** What the engine is asked to composite: the visible plates, each carrying
- *  the display colour and density the panel currently holds. */
+/**
+ * A PREVIEW alias: which ink each colorant is shown as.
+ *
+ * The document is untouched — the plates are still separate, and the preview
+ * simply draws them as one ink. The applied alias is a different door: it
+ * rewrites the colorant name in the file, and the separation device then
+ * plates them together for real.
+ */
+export type InkAliases = ReadonlyMap<string, string>;
+
+/** The ink a colorant is shown as, following one hop only — an alias chain
+ *  is not a plate, and resolving one would let a cycle hang the panel. */
+export function resolveAlias(aliases: InkAliases, name: string): string {
+  return aliases.get(name) ?? name;
+}
+
+/** Would adding this alias point an ink at one that is itself aliased away,
+ *  or at itself? Either makes the target something the preview cannot draw. */
+export function aliasIsAllowed(aliases: InkAliases, source: string, target: string): boolean {
+  if (source === target) return false;
+  if (aliases.has(target)) return false;
+  return true;
+}
+
+/**
+ * Print sequence: the order the plates are listed and composited in.
+ *
+ * PDF has no key for it — no colour space or page dictionary carries an ink
+ * order — so it is an application setting, and what it drives is this list.
+ * Names the sequence does not mention keep their natural order behind the
+ * ones it does, so a sequence recorded for one document does not hide an ink
+ * in another.
+ */
+export function orderInks<T extends { name: string }>(
+  items: readonly T[],
+  sequence: readonly string[],
+): T[] {
+  const rank = new Map(sequence.map((name, index) => [name, index]));
+  return [...items].sort((a, b) => {
+    const ra = rank.get(a.name);
+    const rb = rank.get(b.name);
+    if (ra === undefined && rb === undefined) return 0;
+    if (ra === undefined) return 1;
+    if (rb === undefined) return -1;
+    return ra - rb;
+  });
+}
+
+/** Move one ink up or down the print sequence, clamped at the ends. */
+export function moveInSequence(
+  sequence: readonly string[],
+  name: string,
+  delta: number,
+): string[] {
+  const from = sequence.indexOf(name);
+  if (from < 0) return [...sequence];
+  const to = Math.min(sequence.length - 1, Math.max(0, from + delta));
+  if (to === from) return [...sequence];
+  const next = [...sequence];
+  next.splice(from, 1);
+  next.splice(to, 0, name);
+  return next;
+}
+
+export interface InkRow {
+  plate: Plate;
+  /** Colorants shown as this one. Empty for an ink nothing points at. */
+  aliasedFrom: string[];
+}
+
+/** The panel's ink list: one row per ink actually drawn, each naming the
+ *  colorants merged onto it. */
+export function inkRows(plates: readonly Plate[], aliases: InkAliases): InkRow[] {
+  const shown = plates.filter((p) => isToggleableInk(p) && !aliases.has(p.name));
+  return shown.map((plate) => ({
+    plate,
+    aliasedFrom: plates
+      .filter((p) => aliases.get(p.name) === plate.name)
+      .map((p) => p.name),
+  }));
+}
+
+/**
+ * What the engine is asked to composite.
+ *
+ * A plate is found by ITS OWN name — that is the file the device wrote — but
+ * it takes the colour and density of the ink it is shown as, and it hides
+ * when that ink hides. An alias whose target is not a plate on this page
+ * falls back to the plate's own identity rather than vanishing.
+ */
 export function compositeRequest(
   plates: readonly Plate[],
   hidden: ReadonlySet<string>,
   densities: ReadonlyMap<string, number>,
+  aliases: InkAliases = new Map(),
 ): InkRequest[] {
-  return visiblePlates(plates, hidden).map((p) => ({
-    name: p.name,
-    display_rgb: p.display_rgb,
-    density: clampDensity(densities.get(p.name) ?? DEFAULT_INK_DENSITY),
-  }));
+  const byName = new Map(plates.map((p) => [p.name, p]));
+  const out: InkRequest[] = [];
+  for (const plate of plates) {
+    if (!isToggleableInk(plate)) continue;
+    const shownAs = resolveAlias(aliases, plate.name);
+    const target = byName.get(shownAs) ?? plate;
+    if (hidden.has(target.name)) continue;
+    out.push({
+      name: plate.name,
+      display_rgb: target.display_rgb,
+      density: clampDensity(densities.get(target.name) ?? DEFAULT_INK_DENSITY),
+    });
+  }
+  return out;
 }
 
 export function clampDensity(value: number): number {

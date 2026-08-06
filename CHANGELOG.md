@@ -2,6 +2,18 @@
 
 ## 1.0.23
 
+### Print production
+- A new Print Production tool holds preflight, colour conversion, and the two new ink tools.
+- Output Preview renders the pages you are reading as separations, on the document itself.
+- Overprint is simulated, which no screen rendering of a page can show.
+- Every ink switches off and on, and the page redraws without rendering again.
+- The heaviest pixel's total ink is reported, with an editable limit and an on-page highlight.
+- Per-ink page coverage is shown for what it is: an average over the whole page.
+- Ink Manager shows one spot colour as another, then rewrites the document so both print on one plate.
+- Aliasing two inks that describe different colours is refused until you accept the change.
+- A spot converts to process exactly, through its own tint transform, in fills, strokes, images, gradients and patterns.
+- Ink density and print sequence are offered as what they are: settings of the application, not of the file.
+
 ### Preparing forms
 - A new signature field can carry the form fields it locks, chosen from the document's own list.
 - Whoever signs that field is bound by the lock without asking for one.

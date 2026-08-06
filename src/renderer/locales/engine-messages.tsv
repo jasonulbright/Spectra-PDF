@@ -134,6 +134,12 @@ incremental.objectGraphTooDeep	exact	incremental	Object graph too deep to materi
 incremental.pageSignedOriginalStructural	pattern	incremental	Page {{v0}} of the signed original has no structural match in the edited file (removed, reordered, or its content changed) — that edit cannot be appended without invalidating
 incremental.refusingOverwriteSignedOriginal	exact	incremental	Refusing to overwrite the signed original in place
 incremental.unsupportedObjectTypeTransplant	pattern	incremental	Unsupported object type for transplant: {{v0}}
+ink_manager.describeDifferentColoursAliasing	pattern	ink_manager	"{{source}}" and "{{target}}" describe different colours; aliasing them will change the document's appearance.
+ink_manager.inkDeclaresAlternateColour	pattern	ink_manager	Ink "{{name}}" declares no alternate colour space.
+ink_manager.inkUsedDocument	pattern	ink_manager	Ink "{{name}}" is not used in this document.
+ink_manager.inkUsedPatternTool	pattern	ink_manager	Ink "{{name}}" is used by a pattern this tool cannot rewrite.
+ink_manager.nameLeastOneInk	exact	ink_manager	Name at least one ink to convert.
+ink_manager.processInksCannotAliased	exact	ink_manager	Process inks cannot be aliased to a spot colour.
 inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 links.linkIndexOutRange	pattern	links	link index {{index}} is out of range (page has {{v1}})
