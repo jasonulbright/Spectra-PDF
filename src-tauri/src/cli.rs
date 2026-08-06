@@ -64,6 +64,10 @@ pub enum CliCommand {
     Redact(RedactArgs),
     /// Find a term, a word list or a built-in pattern and report GLYPH-ACCURATE page rectangles
     SearchRegions(SearchRegionsArgs),
+    /// Find a term, a word list or a built-in pattern and redact EVERY hit
+    /// (no review step exists headlessly). Use `--marks-only` to write
+    /// reviewable /Redact annotations instead of removing content
+    SearchRedact(SearchRedactArgs),
     /// Stamp a translucent text watermark across pages
     Watermark(WatermarkArgs),
     /// Add headers, footers, page numbers, and Bates numbering
@@ -616,6 +620,65 @@ pub struct SearchRegionsArgs {
     /// Stop after this many hits (the result reports the truncation)
     #[arg(long, default_value_t = 50000)]
     pub max_hits: u32,
+}
+
+#[derive(Args)]
+pub struct SearchRedactArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Search term (combinable with --term and --pattern)
+    #[arg(short, long, default_value = "")]
+    pub query: String,
+    /// A word-list term; repeatable. Terms are OR-ed into one search.
+    #[arg(long = "term")]
+    pub terms: Vec<String>,
+    /// A built-in pattern id; repeatable (phone, email, credit_card, ssn,
+    /// date, iban, nhs_uk, sin_ca). Additive to --query, never a replacement.
+    #[arg(long = "pattern")]
+    pub patterns: Vec<String>,
+    /// Pages to search, e.g. "1,3,5" or "all"
+    #[arg(long, default_value = "all")]
+    pub pages: String,
+    /// Treat the query as a regular expression
+    #[arg(long, default_value_t = false)]
+    pub regex: bool,
+    /// Match case
+    #[arg(long, default_value_t = false)]
+    pub case_sensitive: bool,
+    /// Match whole words only
+    #[arg(long, default_value_t = false)]
+    pub whole_word: bool,
+    /// What each hit's rectangle covers: match | word | line
+    #[arg(long, default_value = "match")]
+    pub expand: String,
+    /// Stop after this many hits (the result reports the truncation)
+    #[arg(long, default_value_t = 50000)]
+    pub max_hits: u32,
+    /// Write /Redact annotations for review instead of removing content
+    #[arg(long, default_value_t = false)]
+    pub marks_only: bool,
+    /// Proceed on a document whose signatures this edit invalidates. A
+    /// certification allowing no changes still refuses.
+    #[arg(long, default_value_t = false)]
+    pub include_signed: bool,
+    /// Box fill colour as #rrggbb (the /IC key). Default black.
+    #[arg(long, default_value = "#000000")]
+    pub fill: String,
+    /// Text drawn over each box (the /OverlayText key) — e.g. an exemption code
+    #[arg(long, default_value = "")]
+    pub overlay_text: String,
+    /// Tile the overlay text to fill the box (the /Repeat key)
+    #[arg(long, default_value_t = false)]
+    pub repeat_overlay: bool,
+    /// Overlay alignment (the /Q key): 0 left, 1 centred, 2 right
+    #[arg(long, default_value_t = 0)]
+    pub overlay_align: u8,
+    /// Overlay font size in points; 0 fits the box
+    #[arg(long, default_value_t = 0.0)]
+    pub overlay_size: f64,
 }
 
 #[derive(Args)]
@@ -2370,6 +2433,44 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "whole_word": args.whole_word,
                     "expand": args.expand,
                     "max_hits": args.max_hits,
+                }),
+            )
+        }
+
+        CliCommand::SearchRedact(args) => {
+            // Only the properties the caller actually set are sent: "no
+            // overlay" and "an overlay of nothing" stay distinguishable
+            // through the file, and the engine refuses a key it does not know
+            // rather than dropping it.
+            let mut properties = json!({});
+            let fill = parse_hex_rgb(&args.fill)?;
+            if args.fill.trim().to_ascii_lowercase() != "#000000" {
+                properties["fill"] = json!(fill);
+            }
+            if !args.overlay_text.is_empty() {
+                properties["overlay_text"] = json!(args.overlay_text);
+                properties["repeat_overlay"] = json!(args.repeat_overlay);
+                properties["align"] = json!(args.overlay_align);
+                properties["font_size"] = json!(args.overlay_size);
+            }
+            engine.call(
+                "search_and_redact",
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "query": args.query,
+                    "terms": args.terms,
+                    "patterns": args.patterns,
+                    "pages": parse_pages(&args.pages),
+                    "regex": args.regex,
+                    "case_sensitive": args.case_sensitive,
+                    "whole_word": args.whole_word,
+                    "expand": args.expand,
+                    "max_hits": args.max_hits,
+                    "marks_only": args.marks_only,
+                    "allow_signed": args.include_signed,
+                    "properties": properties,
+                    "font_dir": resolve_fonts().to_string_lossy().to_string(),
                 }),
             )
         }

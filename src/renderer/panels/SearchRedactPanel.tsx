@@ -517,6 +517,18 @@ export function SearchRedactPanel(): React.ReactElement {
         )}
       </div>
 
+      {/* The disk scope is a dialog of its own — it needs no open document and
+          its results become files rather than marks — so this is the door to
+          it from the surface someone reached for first. */}
+      <button
+        type="button"
+        onClick={() => invokeCommand('tools.diskRedact')}
+        data-testid="search-redact-folder"
+        className="self-start text-xs text-neutral-400 hover:text-neutral-200 underline"
+      >
+        {tChrome('dialog.diskRedact.openPanel')}
+      </button>
+
       {stale && (
         <div className="text-xs text-amber-400" data-testid="search-redact-stale">
           {tChrome('panel.searchRedact.stale')}

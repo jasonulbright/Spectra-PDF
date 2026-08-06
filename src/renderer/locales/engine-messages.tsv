@@ -116,6 +116,7 @@ image_export.dpiMustNumberGot	pattern	image_export	dpi must be a number, got {{d
 image_export.ghostscriptReportedSuccessExpected	pattern	image_export	Ghostscript reported success but {{v0}} expected output file(s) are missing (first: {{v1}})
 image_export.outputPathDirectoryFile	pattern	create_pdf,extract_text,image_export,office_export,soffice	output path is a directory, not a file: {{output}}
 image_export.unsupportedImageFormat	pattern	image_export	unsupported image format {{fmt}} (have {{v1}})
+incremental.editClassMustForm	exact	incremental	edit class must be "form-fill", "annotate" or "structural"
 incremental.incrementalTransplantFailed	pattern	incremental	Incremental transplant failed: {{e}}
 incremental.incrementalWriteDidPreserve	exact	incremental	Incremental write did not preserve the original bytes verbatim — refusing to emit a signature-breaking file
 incremental.objectGraphTooDeep	exact	incremental	Object graph too deep to materialize
@@ -302,6 +303,10 @@ sanitize.documentContainsXmlForm	exact	sanitize	This document contains an XML fo
 sanitize.formFieldsModeMust	exact	sanitize	form_fields_mode must be 'remove' or 'flatten'.
 sanitize.reportedNeverRemovedTake	pattern	sanitize	{{name}} is reported and never removed — take it out of the selection.
 sanitize.unknownCategoryCategories	pattern	sanitize	Unknown category {{name}}. The categories are: {{v1}}.
+search_redact.documentCertifiedAllowChanges	exact	search_redact	this document is certified to allow no changes, so redacting it would produce a file that reports as illegally modified
+search_redact.documentSignedEditInvalidates	exact	search_redact	this document is signed and this edit invalidates its signatures -- the run must state that signed documents are included before it will touch one
+search_redact.searchCouldCompiled	pattern	search_redact	the search could not be compiled: {{v0}}
+search_redact.unknownRedactionProperty	pattern	search_redact	unknown redaction property: {{v0}}
 search_regions.expandMustMatchWord	exact	search_regions	expand must be "match", "word" or "line"
 search_regions.giveSearchTermWord	exact	search_regions	give a search term, a word list or a built-in pattern — searching for nothing would mark every page
 search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a positive number

@@ -78,6 +78,10 @@ export interface AppCommandHandlers {
    * Needs no open document: the dialog operates on a picked folder tree,
    * entirely outside the workspace. */
   openBatchOcr(): void;
+  /** Open the Search & Redact folder dialog (Tools ▸ Search & Redact
+   * Folder…). Needs no open document: it sweeps a picked folder tree by
+   * path, entirely outside the workspace. */
+  openDiskRedact(): void;
   openScheduledRuns(): void;
   /** Open the Watched Folders dialog (Tools ▸ Watched Folders…). */
   openWatchedFolders(): void;

@@ -51,6 +51,7 @@ from engine.headers import add_header_footer
 from engine.metadata import strip_metadata
 from engine.pdfa import convert_pdfa
 from engine.sanitize import sanitize_pdf
+from engine.search_redact import search_and_redact
 from engine.watermark import watermark
 
 # op name -> (callable, allowed data params, needed tool-path params).
@@ -88,6 +89,29 @@ _STEPS: dict = {
         sanitize_pdf,
         frozenset({"categories", "form_fields_mode", "hidden_text_ocr", "all_removable"}),
         frozenset(),
+    ),
+    # No review step exists in a folder run, so this redacts every hit the
+    # request finds. `marks_only` is the reviewable half: it writes /Redact
+    # annotations and removes nothing.
+    "search_redact": (
+        search_and_redact,
+        frozenset(
+            {
+                "query",
+                "terms",
+                "patterns",
+                "pages",
+                "regex",
+                "case_sensitive",
+                "whole_word",
+                "expand",
+                "max_hits",
+                "marks_only",
+                "allow_signed",
+                "properties",
+            }
+        ),
+        frozenset({"font_dir"}),
     ),
     "watermark": (
         watermark,

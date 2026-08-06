@@ -30,6 +30,7 @@ export type GuidedStepOp =
   | 'convert_pdfa'
   | 'strip_metadata'
   | 'sanitize'
+  | 'search_redact'
   | 'watermark'
   | 'ocr_file'
   | 'add_header_footer'
@@ -170,6 +171,86 @@ export const STEP_CATALOG: readonly StepDef[] = [
         .filter((s) => s.length > 0),
       form_fields_mode: String(params.form_fields_mode ?? 'remove'),
     }),
+  },
+  {
+    // A folder run has no review step, so this redacts every hit. The
+    // reviewable half is the marks mode, which writes /Redact annotations and
+    // removes nothing.
+    op: 'search_redact',
+    title: 'Search & Redact',
+    needsFontDir: true,
+    params: [
+      { key: 'query', label: 'Search for', kind: 'text', defaultValue: '' },
+      {
+        key: 'terms',
+        label: 'Word list',
+        kind: 'text',
+        defaultValue: '',
+        hint: 'Comma-separated. Combined with the search term and the patterns.',
+      },
+      {
+        key: 'patterns',
+        label: 'Patterns',
+        kind: 'text',
+        defaultValue: '',
+        hint: 'Comma-separated: phone, email, credit_card, ssn, date, iban, nhs_uk, sin_ca',
+      },
+      {
+        key: 'expand',
+        label: 'Each hit covers',
+        kind: 'select',
+        options: [
+          { value: 'match', label: 'The matched text' },
+          { value: 'word', label: 'The whole word' },
+          { value: 'line', label: 'The whole line' },
+        ],
+        defaultValue: 'match',
+      },
+      {
+        key: 'mode',
+        label: 'Mode',
+        kind: 'select',
+        options: [
+          { value: 'apply', label: 'Remove the content' },
+          { value: 'marks', label: 'Mark for review (removes nothing)' },
+        ],
+        defaultValue: 'apply',
+      },
+      {
+        key: 'overlay_text',
+        label: 'Overlay text',
+        kind: 'text',
+        defaultValue: '',
+        hint: 'Drawn over each box — e.g. an exemption code. Empty draws a plain box.',
+      },
+      {
+        key: 'signed',
+        label: 'Signed documents',
+        kind: 'select',
+        options: [
+          { value: 'skip', label: 'Refuse (leave them untouched)' },
+          { value: 'include', label: 'Redact anyway (their signatures break)' },
+        ],
+        defaultValue: 'skip',
+      },
+    ],
+    mapParams: (params) => {
+      const list = (value: string | number | undefined): string[] =>
+        String(value ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+      const overlay = String(params.overlay_text ?? '');
+      return {
+        query: String(params.query ?? ''),
+        terms: list(params.terms),
+        patterns: list(params.patterns),
+        expand: String(params.expand ?? 'match'),
+        marks_only: String(params.mode ?? 'apply') === 'marks',
+        allow_signed: String(params.signed ?? 'skip') === 'include',
+        ...(overlay ? { properties: { overlay_text: overlay } } : {}),
+      };
+    },
   },
   {
     op: 'watermark',
