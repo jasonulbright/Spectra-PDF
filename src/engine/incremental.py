@@ -57,6 +57,7 @@ from pyhanko.pdf_utils import generic
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 
 from .docmdp import certification_of_file
+from .fieldmdp import locked_fields, locks_of_file
 from .validate import validate_pdf
 
 MAX_FIELD_DEPTH = 32
@@ -120,15 +121,19 @@ def has_live_signatures(path: str) -> bool:
 def signature_policy(path: str) -> dict:
     """What this document's own signatures allow to be changed.
 
-    ``{"signed": bool, "count": int, "certified": bool, "level": str|None}``.
-    The same presence-only read as ``has_live_signatures`` plus the catalog's
-    certification entry — no cryptography and no difference analysis, so it
-    stays cheap enough to consult before every edit.
+    ``{"signed": bool, "count": int, "certified": bool, "level": str|None,
+    "locks": [{"action": str, "fields": [str]}]}``. The same presence-only read
+    as ``has_live_signatures`` plus the catalog's certification entry and the
+    live signatures' field locks — no cryptography and no difference analysis,
+    so it stays cheap enough to consult before every edit.
 
     ``level`` is None both for an uncertified document and for a certification
     recording a permission value outside the three defined levels; ``certified``
     is what distinguishes those, and an unrecognized level is treated by callers
     as an unknown one rather than as an absent one.
+
+    ``locks`` is per SIGNATURE, not per document: a certification and a later
+    approval signature can disagree about the same field.
     """
     certification = certification_of_file(path)
     count = _live_sig_count(path)
@@ -137,6 +142,7 @@ def signature_policy(path: str) -> dict:
         "count": count,
         "certified": bool(certification["certified"]),
         "level": certification["level"],
+        "locks": locks_of_file(path),
     }
 
 
@@ -154,17 +160,48 @@ _PERMITTED_CLASSES: dict = {
 EDIT_CLASSES = ("form-fill", "annotate", "structural")
 
 
-def signed_edit_decision(policy: dict, edit_class: str) -> dict:
+def _lock_refusal(policy: dict, edit_class: str, fields) -> dict | None:
+    """The field-lock verdict for a form fill, or None when no lock bites.
+
+    A locked field's update is rejected by the difference analysis whether or
+    not the document is certified, so the file an edit like this produces
+    reports as illegally modified in every reader -- which is why this refuses
+    rather than warns, the same posture as a no-changes certification.
+
+    Targets the caller cannot name are still decidable against a lock covering
+    ALL fields: whatever such a fill touches, that lock covers it.
+    """
+    if edit_class != "form-fill":
+        return None
+    locks = policy.get("locks") or []
+    if not locks:
+        return None
+    if fields is None:
+        if any(lock.get("action") == "all" for lock in locks):
+            return {"kind": "refuse", "reason": "fields-locked", "fields": []}
+        return None
+    hit = locked_fields(locks, list(fields))
+    if not hit:
+        return None
+    return {"kind": "refuse", "reason": "fields-locked", "fields": hit}
+
+
+def signed_edit_decision(policy: dict, edit_class: str, fields=None) -> dict:
     """Whether an edit of this class may proceed against this document's policy.
 
     ``{"kind": "proceed"}`` or ``{"kind": "refuse"|"warn", "reason": <enum>}``.
     The reason is a stable name, never display text -- a headless caller reports
-    it and a surface renders it.
+    it and a surface renders it. A ``fields-locked`` refusal also carries the
+    field names it stopped.
+
+    ``fields`` names what a form fill targets, or None when the caller cannot
+    name them.
 
     A no-changes certification REFUSES rather than warns: the author's policy
     forbids every change, the signing machinery will not counter-sign such a
     file, and every edit produces a document that reports as illegally
-    modified.
+    modified. It is decided FIRST because it refuses the whole edit rather than
+    one field of it.
 
     The twin of this table lives in the renderer (``lib/signatures.ts``); the
     two are pinned case for case against ``tests/fixtures/signed-edit-corpus.json``.
@@ -178,6 +215,9 @@ def signed_edit_decision(policy: dict, edit_class: str) -> dict:
         return {"kind": "proceed"}
     if certified and level == "none":
         return {"kind": "refuse", "reason": "certified-no-changes"}
+    locked = _lock_refusal(policy, edit_class, fields)
+    if locked is not None:
+        return locked
     if not certified:
         if edit_class in _PERMITTED_CLASSES["uncertified"]:
             return {"kind": "proceed"}
@@ -624,7 +664,7 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
             "the edit added a form where the signed original had none"
         )
 
-    def walk(fields, prefix, out, depth=0):
+    def walk(fields, prefix, out, inherited_ft=None, depth=0):
         if depth > MAX_FIELD_DEPTH or fields is None:
             return
         if not isinstance(fields, pikepdf.Array):
@@ -634,10 +674,11 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
                 continue
             t = f.get("/T")
             name = (prefix + "." if prefix else "") + (str(t) if t is not None else "")
-            out.setdefault(name, []).append(f)
+            ft = _effective_ft(f, inherited_ft, depth)
+            out.setdefault(name, []).append((f, ft))
             kids = f.get("/Kids")
             if kids is not None and isinstance(kids, pikepdf.Array) and len(kids) > 0:
-                walk(kids, name, out, depth + 1)
+                walk(kids, name, out, ft, depth + 1)
 
     orig_fields: dict[str, list] = {}
     mod_fields: dict[str, list] = {}
@@ -652,8 +693,17 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
                 f"the edit added form field '{name}' — form structure "
                 "changes cannot be appended to a signed document"
             )
-        for pos, m in enumerate(mods):
-            o = origs[pos]
+        for pos, (m, _mod_ft) in enumerate(mods):
+            o, orig_ft = origs[pos]
+            # A signature field that already carries a value is never part of
+            # a fill delta, and comparing one is not merely wasted work: a
+            # signature carrying a /FieldMDP transform reaches the document
+            # CATALOG through its /Reference /Data entry, so it compares
+            # unequal to itself after any edit anywhere in the file. Rewriting
+            # it into the appended revision drops the signature's coverage
+            # below a whole revision and makes every later verdict unjudgeable.
+            if orig_ft == pikepdf.Name("/Sig") and o.get("/V") is not None:
+                continue
             if _bisim(o, m, set()):
                 continue
             if not o.is_indirect:

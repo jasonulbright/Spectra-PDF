@@ -42,7 +42,23 @@ export interface SignatureEntry {
   policy_judged?: boolean;
   /** Stable enum NAME of how far the document moved since signing. */
   modification_level?: string | null;
+  /** Which form fields THIS signature locks; null when it locks none.
+   * Per signature, unlike the document's certification. */
+  lock?: FieldLock | null;
+  /** The locked fields a change since signing touched. A third fact beside
+   * validity and the certification verdict, never folded into either. */
+  lock_violation?: { fields: string[] } | null;
   error?: string;
+}
+
+/** Wire values, never localized and never parsed from display text. */
+export type LockAction = 'all' | 'include' | 'exclude';
+
+/** A signature's `/FieldMDP` policy. `fields` is empty for the `all` action,
+ * which names none. */
+export interface FieldLock {
+  action: LockAction;
+  fields: string[];
 }
 
 /** Wire values, never localized and never parsed from display text. */
@@ -85,6 +101,7 @@ export interface VerifyResult {
     trust_verified: boolean;
     certified?: boolean;
     any_policy_violation?: boolean;
+    any_lock_violation?: boolean;
   };
 }
 
@@ -141,6 +158,14 @@ export const POLICY_VERDICT_LABEL = {
   unjudged: 'panel.sig.policyUnjudged',
 } as const satisfies Record<PolicyVerdict, string>;
 
+/** Plain-language wording for what a lock covers. The field names travel as a
+ * value into the two list actions; nothing is glued together with `+`. */
+export const LOCK_ACTION_LABEL = {
+  all: 'panel.sig.lockAll',
+  include: 'panel.sig.lockIncluded',
+  exclude: 'panel.sig.lockExcluded',
+} as const satisfies Record<LockAction, string>;
+
 /** Plain-language wording for each level — the format's own meaning, not its
  * wire value, which is never shown. */
 export const CERTIFICATION_LEVEL_LABEL = {
@@ -194,6 +219,51 @@ export function certifyParams(options: CertifyOptions): Record<string, unknown> 
   return options.certify ? { certify: true, certify_level: options.level } : {};
 }
 
+// ── authoring a field lock ────────────────────────────────────────────────
+
+/** The field-lock half of a sign request. Independent of the certification: a
+ * lock binds with no certification present, and one signature carries both. */
+export interface LockOptions {
+  /** Null when the signature locks nothing. */
+  action: LockAction | null;
+  /** The names the two list actions carry; ignored by `all`. */
+  fields: string[];
+}
+
+export const DEFAULT_LOCK: LockOptions = { action: null, fields: [] };
+
+export const LOCK_ACTIONS: readonly LockAction[] = ['all', 'include', 'exclude'];
+
+/** Whether this action needs field names to mean anything. An empty list means
+ * opposite things under the two of them, which is why the engine refuses one. */
+export function lockNeedsFields(action: LockAction | null): boolean {
+  return action === 'include' || action === 'exclude';
+}
+
+/** Engine params for a lock request. Names travel only with a list action —
+ * `all` ignores them, and sending them would discard the user's choice
+ * silently, which the engine refuses. */
+export function lockParams(options: LockOptions): Record<string, unknown> {
+  if (options.action === null) return {};
+  return {
+    lock: options.action,
+    lock_fields: lockNeedsFields(options.action) ? options.fields : [],
+  };
+}
+
+/** Whether a lock covers a field. A scoped name covers its whole subtree —
+ * locking a parent locks every field beneath it — which is the format's rule and
+ * the one the validating engine applies, so the two must not answer
+ * differently. */
+export function isFieldLocked(lock: FieldLock, fieldName: string): boolean {
+  if (lock.action === 'all') return true;
+  const listed = lock.action === 'include';
+  for (const scoped of lock.fields) {
+    if (fieldName === scoped || fieldName.startsWith(scoped + '.')) return listed;
+  }
+  return !listed;
+}
+
 // ── what a document's own signatures permit ────────────────────────────────
 //
 // The decision lives here rather than in the handler that shows the dialog:
@@ -208,6 +278,10 @@ export interface SignaturePolicy {
   /** Null both when uncertified and when the recorded permission value is not
    * one of the three levels; `certified` distinguishes those. */
   level: CertificationLevel | null;
+  /** What the document's LIVE signatures lock, one entry per locking
+   * signature. An unsigned field's own `/Lock` is absent: it binds nothing
+   * until that field is signed. */
+  locks?: FieldLock[];
 }
 
 /** What an edit DOES, in the terms a certification is written in. */
@@ -222,7 +296,9 @@ export type SignedEditKey =
   | 'app.signedEdit.certifiedRefused'
   | 'app.signedEdit.certifiedWarnFormFill'
   | 'app.signedEdit.certifiedWarnAnnotate'
-  | 'app.signedEdit.certifiedWarnUnknown';
+  | 'app.signedEdit.certifiedWarnUnknown'
+  | 'app.signedEdit.lockedTitle'
+  | 'app.signedEdit.lockedRefused';
 
 /** Why an edit was refused or warned about — a stable name, never display
  * text. A surface renders a catalog string from it; a sweep with no surface
@@ -232,7 +308,8 @@ export type SignedEditReason =
   | 'certified-no-changes'
   | 'certified-form-fill'
   | 'certified-annotate'
-  | 'certified-unknown';
+  | 'certified-unknown'
+  | 'fields-locked';
 
 export type SignedEditDecision =
   | { kind: 'proceed' }
@@ -241,6 +318,9 @@ export type SignedEditDecision =
       reason: SignedEditReason;
       titleKey: SignedEditKey;
       bodyKey: SignedEditKey;
+      /** The locked field names a `fields-locked` refusal stopped; empty on
+       * every other reason. */
+      fields?: string[];
     };
 
 // A structural edit is never in this table: page removal, reordering, content
@@ -263,7 +343,47 @@ const CERTIFIED_WARNING = {
   unknown: 'app.signedEdit.certifiedWarnUnknown',
 } as const satisfies Record<string, SignedEditKey>;
 
+/** The field-lock verdict for a form fill, or null when no lock bites.
+ *
+ * A locked field's update is rejected by the difference analysis whether or not
+ * the document is certified, so the file such an edit produces reports as
+ * illegally modified in every reader — which is why this refuses rather than
+ * warns, the same posture as a no-changes certification.
+ *
+ * Targets the caller cannot name are still decidable against a lock covering
+ * ALL fields: whatever such a fill touches, that lock covers it. */
+function lockRefusal(
+  policy: SignaturePolicy,
+  editClass: EditClass,
+  fields: readonly string[] | null,
+): SignedEditDecision | null {
+  if (editClass !== 'form-fill') return null;
+  const locks = policy.locks ?? [];
+  if (locks.length === 0) return null;
+  let hit: string[];
+  if (fields === null) {
+    if (!locks.some((lock) => lock.action === 'all')) return null;
+    hit = [];
+  } else {
+    hit = fields.filter(
+      (name, index) =>
+        fields.indexOf(name) === index && locks.some((lock) => isFieldLocked(lock, name)),
+    );
+    if (hit.length === 0) return null;
+  }
+  return {
+    kind: 'refuse',
+    reason: 'fields-locked',
+    titleKey: 'app.signedEdit.lockedTitle',
+    bodyKey: 'app.signedEdit.lockedRefused',
+    fields: hit,
+  };
+}
+
 /** Whether an edit of this class may proceed against this document's policy.
+ *
+ * `fields` names what a form fill targets, or null when the caller cannot name
+ * them.
  *
  * A no-changes certification REFUSES rather than warns: the author's policy
  * forbids every change, the signing machinery itself will not counter-sign
@@ -273,6 +393,7 @@ const CERTIFIED_WARNING = {
 export function signedEditDecision(
   policy: SignaturePolicy,
   editClass: EditClass,
+  fields: readonly string[] | null = null,
 ): SignedEditDecision {
   if (!policy.signed && !policy.certified) return { kind: 'proceed' };
   if (policy.certified && policy.level === 'none') {
@@ -283,6 +404,8 @@ export function signedEditDecision(
       bodyKey: 'app.signedEdit.certifiedRefused',
     };
   }
+  const locked = lockRefusal(policy, editClass, fields);
+  if (locked) return locked;
   if (!policy.certified) {
     if (PERMITTED_CLASSES.uncertified.includes(editClass)) return { kind: 'proceed' };
     return {

@@ -57,14 +57,21 @@ from pathlib import Path
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.sign import fields, signers
-from pyhanko.sign.fields import MDPPerm, SigSeedSubFilter
+from pyhanko.sign.fields import FieldMDPAction, FieldMDPSpec, MDPPerm, SigSeedSubFilter
 from pyhanko.sign.general import SigningError
 from pyhanko.sign.timestamps import HTTPTimeStamper
 from pyhanko.sign.validation import validate_pdf_signature
 
 from engine import os_trust
+from engine.acroform import form_field_forest
 from engine.docmdp import LEVEL_BY_VALUE, VALUE_BY_LEVEL, certification_of_file
-from engine.docmdp_policy import DIFF_POLICY
+from engine.docmdp_policy import DIFF_POLICY, LockedFieldModification
+from engine.fieldmdp import (
+    ACTION_BY_NAME,
+    ACTION_NAMES,
+    LIST_ACTIONS,
+    lock_of_field_dict,
+)
 from pyhanko import stamp
 from pyhanko.keys import load_certs_from_pemder_data, load_private_key_from_pemder_data
 from pyhanko_certvalidator import ValidationContext
@@ -236,6 +243,32 @@ def _signature_certification_level(embedded) -> str | None:
     return LEVEL_BY_VALUE.get(getattr(level, "value", None))
 
 
+def _signature_lock(embedded) -> dict | None:
+    """The field lock THIS signature imposes, or None. Per signature, unlike the
+    document's certification: a certification and a later approval signature can
+    lock different sets."""
+    try:
+        spec = embedded.fieldmdp
+    except Exception:
+        return None
+    if spec is None:
+        return None
+    action = ACTION_BY_NAME.get(str(getattr(spec.action, "value", "")))
+    if action is None:
+        return None
+    return {"action": action, "fields": [] if action == "all" else [str(f) for f in spec.fields or ()]}
+
+
+def _lock_violation(status) -> dict | None:
+    """The locked fields a change since signing touched, or None. Read off the
+    difference analysis as structured data — the library's own refusal names an
+    object number, which is not user information."""
+    result = getattr(status, "diff_result", None)
+    if isinstance(result, LockedFieldModification):
+        return {"fields": list(result.fields)}
+    return None
+
+
 def _unjudged(modification_level: str | None) -> dict:
     return {
         "policy_ok": None,
@@ -318,6 +351,8 @@ def _verify_one(embedded, sources: "_TrustSources | None" = None,
             "timestamp_time": None,
             "timestamp_valid": False,
             "certification_level": _signature_certification_level(embedded),
+            "lock": _signature_lock(embedded),
+            "lock_violation": None,
             **_unjudged(None),
             "error": str(exc),
         }
@@ -357,6 +392,11 @@ def _verify_one(embedded, sources: "_TrustSources | None" = None,
         # a document with one certification and several approvals must show
         # which signature is the author's.
         "certification_level": _signature_certification_level(embedded),
+        # What THIS signature locks, and which of those fields a later change
+        # touched — a third fact beside validity and the certification verdict,
+        # never folded into either.
+        "lock": _signature_lock(embedded),
+        "lock_violation": _lock_violation(status),
         **_policy_report(status, certification),
     }
 
@@ -464,6 +504,7 @@ def verify_signatures(
             "certified": bool(certification["certified"]),
             # An UNJUDGED signature is not a violation; only a judged failure is.
             "any_policy_violation": any(s.get("policy_ok") is False for s in signatures),
+            "any_lock_violation": any(s.get("lock_violation") for s in signatures),
         },
     }
 
@@ -633,6 +674,93 @@ _MDP_PERM_BY_LEVEL: dict[str, MDPPerm] = {
     "annotate": MDPPerm.ANNOTATE,
 }
 
+_MDP_ACTION_BY_NAME: dict[str, FieldMDPAction] = {
+    "all": FieldMDPAction.ALL,
+    "include": FieldMDPAction.INCLUDE,
+    "exclude": FieldMDPAction.EXCLUDE,
+}
+
+
+def _validated_lock(file: str, lock: str | None, lock_fields: list | None) -> FieldMDPSpec | None:
+    """Validate a field-lock request against the document, and build the spec.
+
+    Every refusal here is a request that would otherwise lock something other
+    than what was asked for: an empty list means opposite things under the two
+    list actions, a list under ``all`` is discarded by the format, and a name
+    the document does not carry locks nothing (``include``) or everything but a
+    typo (``exclude``) — invisibly in both directions.
+    """
+    names = [str(n).strip() for n in (lock_fields or []) if str(n).strip()]
+    if lock is None:
+        if names:
+            raise ValueError(
+                "Field names to lock apply only to a field lock. Choose what the "
+                "signature locks, or leave the names unset."
+            )
+        return None
+    if lock not in ACTION_NAMES:
+        raise ValueError(
+            f'Unknown field lock "{lock}". Choose all, include, or exclude.'
+        )
+    if lock == "all" and names:
+        raise ValueError(
+            "A field lock covering every form field takes no field names."
+        )
+    if lock in LIST_ACTIONS and not names:
+        raise ValueError(
+            f'A field lock of type "{lock}" needs at least one field name.'
+        )
+    if names:
+        import pikepdf
+
+        try:
+            with pikepdf.open(file) as pdf:
+                present = set(form_field_forest(pdf))
+        except Exception:
+            # A document that cannot be read has no field list to check against,
+            # and reporting every name as missing would blame the request for
+            # the file's problem. The signing path below fails on its own with
+            # the actual reason.
+            present = None
+        missing = [n for n in names if n not in present] if present is not None else []
+        if missing:
+            raise ValueError(
+                f'This document has no form field named "{missing[0]}", so that '
+                "field cannot be locked."
+            )
+    return FieldMDPSpec(action=_MDP_ACTION_BY_NAME[lock], fields=names or None)
+
+
+def _existing_field_lock_refusal(file: str, field_name: str, spec: FieldMDPSpec | None) -> None:
+    """Refuse to replace a signature field's own ``/Lock``.
+
+    The seed value is a constraint the form's author placed on whoever signs
+    that field, and the signing machinery applies it whether or not the signer
+    asked for one. Overwriting it with a different lock is not the signer's
+    call; asking for the same one is not a change and proceeds."""
+    if spec is None:
+        return
+    import pikepdf
+
+    try:
+        with pikepdf.open(file) as pdf:
+            field = form_field_forest(pdf).get(field_name)
+            existing = lock_of_field_dict(field) if field is not None else None
+    except Exception:
+        return
+    if existing is None:
+        return
+    requested = {
+        "action": next(k for k, v in _MDP_ACTION_BY_NAME.items() if v == spec.action),
+        "fields": list(spec.fields or ()),
+    }
+    if existing != requested:
+        raise ValueError(
+            f'Signature field "{field_name}" already locks form fields on its own '
+            "terms, and a signature cannot replace that. Sign it as it stands, or "
+            "use a different field."
+        )
+
 
 def _filled_signature_fields(file: str) -> list[str]:
     """Names of the signature fields that already carry a value.
@@ -710,6 +838,19 @@ def _raise_mapped_signing_refusal(certify: bool, existing: dict) -> None:
     raise ValueError(
         "This document could not be signed — its own signature policy forbids the change."
     ) from None
+
+
+def _seed_existing_field_lock(writer, field_name: str, spec: FieldMDPSpec) -> None:
+    """Write the ``/Lock`` onto an existing signature field, in the same
+    incremental revision the signature lands in — so the bytes carrying the lock
+    are covered by the signature that declares it."""
+    for name, _value, ref in fields.enumerate_sig_fields(writer):
+        if name != field_name:
+            continue
+        field = ref.get_object()
+        field["/Lock"] = writer.add_object(spec.as_sig_field_lock())
+        writer.update_container(field)
+        return
 
 
 def _stamp_style(reason: str | None, location: str | None) -> "stamp.TextStampStyle":
@@ -842,6 +983,8 @@ def sign_pdf(
     pkcs11_key_label: str | None = None,
     certify: bool = False,
     certify_level: str | None = None,
+    lock: str | None = None,
+    lock_fields: list | None = None,
 ) -> dict:
     """Apply a digital signature (signing APPENDS an incremental
     revision). ``output`` may be a new file OR the
@@ -901,6 +1044,12 @@ def sign_pdf(
             Refuses without ``certify``: the level applies to approval
             signatures too under PDF 2.0, and writing one there produces an
             entry most readers disregard.
+        lock: Which form fields this signature locks — ``"all"`` /
+            ``"include"`` (only those named) / ``"exclude"`` (all but those
+            named). Independent of ``certify``: a lock binds with no
+            certification present, and one signature can carry both.
+        lock_fields: The field names the two list actions name. Fully qualified;
+            a name that scopes a subtree locks everything beneath it.
     """
     input_path = Path(file)
     output_path = Path(output)
@@ -926,6 +1075,7 @@ def sign_pdf(
     # Certification is orthogonal to placement, signer source and PAdES
     # profile; only the document's own state can refuse it.
     existing_certification = _certification_refusals(file, certify, certify_level)
+    lock_spec = _validated_lock(file, lock, lock_fields)
 
     signer_cm = _signer_source(
         pfx_path, password, key_path, cert_path,
@@ -935,6 +1085,7 @@ def sign_pdf(
     placement = _validated_appearance(appearance, file) if appearance is not None else None
     if existing_field is not None:
         _validated_existing_field(file, existing_field)
+        _existing_field_lock_refusal(file, existing_field, lock_spec)
         field_name = existing_field
     else:
         # A NEW signature field — rotate the name off any already-present field
@@ -989,11 +1140,17 @@ def sign_pdf(
         try:
             with open(file, "rb") as inf:
                 writer = IncrementalPdfFileWriter(inf)
+                # A lock rides the signature FIELD, never the metadata: the
+                # signing machinery reads it off the field's /Lock and turns it
+                # into the signature's /FieldMDP transform. So each placement
+                # carries it through that placement's own door.
                 if existing_field is not None:
                     # existing_fields_only is the fail-closed backstop: pyHanko will
                     # refuse to CREATE a field here, so a lookup miss can never
                     # silently turn into a new invisible signature. The stamp style
                     # draws in the field's own widget rect (zero-size -> invisible).
+                    if lock_spec is not None:
+                        _seed_existing_field_lock(writer, field_name, lock_spec)
                     pdf_signer = signers.PdfSigner(
                         meta, signer=signer, stamp_style=_stamp_style(reason, location),
                         timestamper=timestamper,
@@ -1003,7 +1160,9 @@ def sign_pdf(
                     page_ix, box = placement
                     fields.append_signature_field(
                         writer,
-                        sig_field_spec=fields.SigFieldSpec(field_name, on_page=page_ix, box=box),
+                        sig_field_spec=fields.SigFieldSpec(
+                            field_name, on_page=page_ix, box=box, field_mdp_spec=lock_spec
+                        ),
                     )
                     pdf_signer = signers.PdfSigner(
                         meta, signer=signer, stamp_style=_stamp_style(reason, location),
@@ -1011,7 +1170,14 @@ def sign_pdf(
                     )
                     signed = pdf_signer.sign_pdf(writer)
                 else:
-                    signed = signers.sign_pdf(writer, meta, signer=signer, timestamper=timestamper)
+                    signed = signers.sign_pdf(
+                        writer, meta, signer=signer, timestamper=timestamper,
+                        new_field_spec=(
+                            fields.SigFieldSpec(field_name, field_mdp_spec=lock_spec)
+                            if lock_spec is not None
+                            else None
+                        ),
+                    )
         except SigningError:
             _raise_mapped_signing_refusal(certify, existing_certification)
     # Fail closed + atomic: write the signed bytes to a temp beside the output,
@@ -1058,6 +1224,11 @@ def sign_pdf(
         "signature_count": verification["signature_count"],
         "certified": bool(written_certification["certified"]),
         "certification_level": written_certification["level"],
+        # Read back from the written signature, never echoed from the request:
+        # a field that already carried its own /Lock imposes it whether or not
+        # one was asked for.
+        "lock": (sig or {}).get("lock", {}).get("action") if (sig or {}).get("lock") else None,
+        "lock_fields": ((sig or {}).get("lock") or {}).get("fields", []),
     }
 
 

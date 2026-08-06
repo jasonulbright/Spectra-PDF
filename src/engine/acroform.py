@@ -317,6 +317,13 @@ def _forest_names(pdf: pikepdf.Pdf) -> dict:
     return out
 
 
+def form_field_forest(pdf: pikepdf.Pdf) -> dict:
+    """Fully-qualified name → field object for every node of the form, interior
+    nodes included — a name that scopes a subtree is a legal target for anything
+    that addresses fields by name."""
+    return dict(_forest_names(pdf))
+
+
 def _apply_renames(name: str, renamed: dict) -> str:
     """Map a source-side FQ name through add_pages_from's rename report. The
     report renames ROOT names, so a renamed root rewrites every descendant's
