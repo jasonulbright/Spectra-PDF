@@ -63,6 +63,11 @@ pub enum CliCommand {
     /// Report each page's boxes, its trim source, and whether it carries
     /// printer marks (JSON; writes nothing)
     PrinterMarksList(AccessibilityArgs),
+    /// Report strokes thinner than a threshold on the device (JSON; writes
+    /// nothing). Effective width is the `w` operand through the CTM scale
+    HairlinesList(HairlinesListArgs),
+    /// Raise every hairline stroke to a minimum device width
+    HairlinesFix(HairlinesFixArgs),
     /// Extract text from a PDF
     ExtractText(ExtractTextArgs),
     /// Delete pages from a PDF
@@ -1238,6 +1243,43 @@ pub struct PrinterMarksRemoveArgs {
     /// Comma-separated 1-based page numbers (omit for all pages)
     #[arg(long)]
     pub pages: Option<String>,
+}
+
+#[derive(Args)]
+pub struct HairlinesListArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Strokes thinner than this device width (points) are hairlines
+    #[arg(long, default_value_t = 0.25)]
+    pub threshold: f64,
+    /// Comma-separated 1-based page numbers (omit for all pages)
+    #[arg(long)]
+    pub pages: Option<String>,
+    /// Skip annotation border widths and appearance-stream strokes
+    #[arg(long)]
+    pub skip_annotations: bool,
+}
+
+#[derive(Args)]
+pub struct HairlinesFixArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Strokes thinner than this device width (points) are hairlines
+    #[arg(long, default_value_t = 0.25)]
+    pub threshold: f64,
+    /// Device width (points) a corrected stroke lands on; may not be below
+    /// the threshold
+    #[arg(long, default_value_t = 0.25)]
+    pub replacement: f64,
+    /// Comma-separated 1-based page numbers (omit for all pages)
+    #[arg(long)]
+    pub pages: Option<String>,
+    /// Skip annotation border widths and appearance-stream strokes
+    #[arg(long)]
+    pub skip_annotations: bool,
 }
 
 #[derive(Args)]
@@ -2712,6 +2754,32 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             "list_printer_marks",
             json!({ "file": abs(&args.input).to_string_lossy() }),
         ),
+
+        CliCommand::HairlinesList(args) => {
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "threshold_pt": args.threshold,
+                "include_annotations": !args.skip_annotations,
+            });
+            if let Some(pages) = &args.pages {
+                params["pages"] = json!(parse_page_numbers(pages)?);
+            }
+            engine.call("list_hairlines", params)
+        }
+
+        CliCommand::HairlinesFix(args) => {
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "threshold_pt": args.threshold,
+                "replacement_pt": args.replacement,
+                "include_annotations": !args.skip_annotations,
+            });
+            if let Some(pages) = &args.pages {
+                params["pages"] = json!(parse_page_numbers(pages)?);
+            }
+            engine.call("fix_hairlines", params)
+        }
 
         CliCommand::PageBox(args) => {
             let mut params = json!({

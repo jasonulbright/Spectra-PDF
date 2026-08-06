@@ -428,14 +428,16 @@ def _walk_vectors(
                     kind = "stroke"
                 else:
                     kind = "fillstroke"
-                # D-tail: a stroke paints ±half the line width AROUND the path,
-                # so a thin line (zero-extent construction box) still gets a
-                # real, grab-able bbox. Half-width scales into device space by
-                # the CTM's geometric mean scale (√|det|).
+                # The CTM's geometric mean scale — what turns an operand-space
+                # width into the width the device draws. Two readers: the
+                # stroke bbox below, and the `effective_line_width` field.
+                c = state.ctm
+                scale = math.sqrt(abs(c[0] * c[3] - c[1] * c[2]))
+                # A stroke paints ±half the line width AROUND the path, so a
+                # thin line (zero-extent construction box) still gets a real,
+                # grab-able bbox.
                 hw = 0.0
                 if operator not in _PAINT_FILL:
-                    c = state.ctm
-                    scale = math.sqrt(abs(c[0] * c[3] - c[1] * c[2]))
                     hw = max(0.0, line_width) / 2.0 * scale
                 vrect = (min(xs) - hw, min(ys) - hw, max(xs) + hw, max(ys) + hw)
                 geom = {}
@@ -460,9 +462,16 @@ def _walk_vectors(
                         "stroke": _color_rgb(state.stroke_color, resources, pdf)
                         if operator not in _PAINT_FILL
                         else None,
-                        # The effective line width (the width control's seed);
-                        # meaningful for a stroke/fillstroke, informational for a fill.
+                        # The RAW `w` operand (the width control's seed);
+                        # meaningful for a stroke/fillstroke, informational for
+                        # a fill. It is NOT what the device draws: a `1 w`
+                        # under a 0.1 scale paints 0.1 pt.
                         "line_width": round(line_width, 4),
+                        # What the device actually draws — the operand through
+                        # the CTM's geometric mean scale. Anything measuring a
+                        # width against a physical threshold reads THIS one.
+                        "effective_line_width": round(max(0.0, line_width) * scale, 4),
+                        "_scale": scale,
                         "nested": depth > 0,
                         "drop_idxs": construct_idxs + [idx],
                         # The FULL Do chain (page-outward) —
@@ -551,6 +560,10 @@ def _walk_vectors(
                     "fill": None,
                     "stroke": None,
                     "line_width": 0,
+                    "effective_line_width": 0,
+                    "_scale": math.sqrt(abs(
+                        state.ctm[0] * state.ctm[3] - state.ctm[1] * state.ctm[2]
+                    )),
                     "nested": depth > 0,
                     "drop_idxs": (
                         list(range(frame["idx"], idx + 2)) if recognized else [idx]
@@ -593,8 +606,10 @@ def list_page_vectors(file: str, page: int) -> dict:
     target. Page-content AND form-nested paths; each carries a
     device-space `rect` (bbox for selection), the CTM `matrix` (for a
     transform), `kind` (fill/stroke/fillstroke), best-effort `fill`/`stroke`
-    colours, `line_width`, and `nested` (inside a Form XObject)."""
-    _INTERNAL = ("drop_idxs", "_do_chain", "_edit_depth", "_start_ctm", "_sh_frame", "_sh_name")
+    colours, the raw `line_width` operand, the `effective_line_width` the
+    device draws, and `nested` (inside a Form XObject)."""
+    _INTERNAL = ("drop_idxs", "_do_chain", "_edit_depth", "_start_ctm", "_sh_frame",
+                 "_sh_name", "_scale")
     with pikepdf.open(file) as pdf:
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):

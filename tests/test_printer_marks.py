@@ -168,6 +168,83 @@ class TestRemoval:
             assert "/SpectraPrinterMarks" not in names
 
 
+class TestRemovalAfterAnotherEdit:
+    """A wholesale restore over content edited since the add would revert that
+    edit. The removal detects it and strips the marks out of what is there
+    now instead — the boxes still come from the record either way."""
+
+    def _edited(self, path, out):
+        """Rewrite the page's content the way any other content op would."""
+        with pikepdf.open(path) as pdf:
+            page = pdf.pages[0]
+            instructions = list(pikepdf.parse_content_stream(page))
+            page.obj["/Contents"] = pdf.make_stream(
+                pikepdf.unparse_content_stream(instructions) + b"\n0 0 0 1 k 30 30 5 5 re f"
+            )
+            pdf.save(out)
+        return out
+
+    def test_the_boxes_still_come_back_exactly(self, tmp_dir):
+        src = _trimmed_pdf(os.path.join(tmp_dir, "s.pdf"), crop=(10, 10, 390, 390))
+        marked = os.path.join(tmp_dir, "m.pdf")
+        edited = os.path.join(tmp_dir, "e.pdf")
+        back = os.path.join(tmp_dir, "b.pdf")
+        before = _boxes(src)
+        add_printer_marks(src, marked, marks=["crop"])
+        self._edited(marked, edited)
+        assert remove_printer_marks(edited, back)["removed"] == 1
+        assert _boxes(back) == before
+
+    def test_the_edit_made_after_the_add_survives_the_removal(self, tmp_dir):
+        src = _trimmed_pdf(os.path.join(tmp_dir, "s.pdf"))
+        marked = os.path.join(tmp_dir, "m.pdf")
+        edited = os.path.join(tmp_dir, "e.pdf")
+        back = os.path.join(tmp_dir, "b.pdf")
+        add_printer_marks(src, marked, marks=["crop"])
+        self._edited(marked, edited)
+        remove_printer_marks(edited, back)
+        with pikepdf.open(back) as pdf:
+            page = pdf.pages[0]
+            stream = page.obj["/Contents"].read_bytes()
+            assert b"30 30 5 5 re" in stream
+            assert b"/SpectraPrinterMarks Do" not in stream
+            xo = page.obj["/Resources"].get("/XObject")
+            names = set() if xo is None else {str(k) for k in xo.keys()}
+            assert "/SpectraPrinterMarks" not in names
+
+    def test_a_hairline_fix_between_the_two_is_not_reverted(self, tmp_dir):
+        from engine.hairlines import fix_hairlines, list_hairlines
+        from hairline_builders import hairline_ladder_pdf
+
+        src = hairline_ladder_pdf(os.path.join(tmp_dir, "s.pdf"))
+        marked = os.path.join(tmp_dir, "m.pdf")
+        fixed = os.path.join(tmp_dir, "f.pdf")
+        back = os.path.join(tmp_dir, "b.pdf")
+        add_printer_marks(src, marked, marks=["crop"])
+        fix_hairlines(marked, fixed)
+        remove_printer_marks(fixed, back)
+        assert list_hairlines(back)["count"] == 0
+
+    def test_the_stripped_stream_stays_balanced(self, tmp_dir):
+        src = _trimmed_pdf(os.path.join(tmp_dir, "s.pdf"))
+        marked = os.path.join(tmp_dir, "m.pdf")
+        edited = os.path.join(tmp_dir, "e.pdf")
+        back = os.path.join(tmp_dir, "b.pdf")
+        add_printer_marks(src, marked, marks=["crop"])
+        self._edited(marked, edited)
+        remove_printer_marks(edited, back)
+        with pikepdf.open(back) as pdf:
+            depth = 0
+            for instruction in pikepdf.parse_content_stream(pdf.pages[0]):
+                operator = str(instruction.operator)
+                if operator == "q":
+                    depth += 1
+                elif operator == "Q":
+                    depth -= 1
+                assert depth >= 0
+            assert depth == 0
+
+
 class TestIdempotence:
     def test_two_runs_leave_one_mark_set_and_one_growth(self, tmp_dir):
         src = _trimmed_pdf(os.path.join(tmp_dir, "s.pdf"))
