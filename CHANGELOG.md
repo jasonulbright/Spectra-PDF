@@ -74,6 +74,12 @@
 - Translucent window bars turn solid, as a contrast theme expects.
 - Preferences says the system palette is in control, and remembers the theme you chose untouched.
 
+### Languages
+- Spanish, French, Italian and Portuguese counts in the millions now read in that language, not English.
+- Symbol search matches an uppercase I whatever regional format the computer is set to.
+- Tool search results sort by the alphabet of the language on screen.
+- A Traditional Chinese system now reads English rather than a Simplified translation.
+
 ## 1.0.22
 
 ### Signing
