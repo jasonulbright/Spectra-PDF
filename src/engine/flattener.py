@@ -41,6 +41,7 @@ from .content_walk import (
     mat_mult,
     transform_point,
 )
+from .page_images import _save
 from .print_layout import _xobject_for
 from .redact import (
     IDENTITY,
@@ -505,6 +506,33 @@ def _path_points(operator: str, operands: list, ctm) -> list[tuple[float, float]
 # ── regions ────────────────────────────────────────────────────────────────
 
 
+# How fast the merge gap opens as the balance moves. The gap must span "only
+# what a region actually overlaps" to "the whole page", and spreading that
+# range LINEARLY over the control makes almost all of it useless: half a page
+# diagonal already merges everything on a letter page, so every setting above
+# about a tenth rasterizes the lot. Growing it geometrically puts the
+# distances a user cares about — a few points to an inch or two — across the
+# middle of the travel, which is where a control's positions should mean
+# something.
+_MERGE_CURVE = 6.0
+
+
+def merge_gap(balance: float, diagonal: float) -> float:
+    """The distance at which two regions, or a region and an object, merge.
+
+    Zero at one end (nothing merges that does not already overlap) and the
+    page's own diagonal at the other (everything merges), with the useful
+    distances spread across the middle rather than crushed into the first tenth.
+    """
+    balance = max(0.0, min(1.0, float(balance)))
+    if balance <= 0.0:
+        return 0.0
+    if balance >= 1.0:
+        return diagonal
+    span = math.expm1(_MERGE_CURVE) or 1.0
+    return diagonal * math.expm1(_MERGE_CURVE * balance) / span
+
+
 def compute_regions(objects: list[dict], page_box, balance: float, dpi: int) -> dict:
     """The regions that will rasterize, and which object goes into each.
 
@@ -520,7 +548,7 @@ def compute_regions(objects: list[dict], page_box, balance: float, dpi: int) -> 
     """
     balance = max(0.0, min(1.0, float(balance)))
     diagonal = math.hypot(page_box[2] - page_box[0], page_box[3] - page_box[1])
-    gap = balance * diagonal
+    gap = merge_gap(balance, diagonal)
 
     seeds = [dict(rect=list(o["rect"]), members=set())
              for o in objects if o["transparent"] and not o["clipped"]]
@@ -939,7 +967,10 @@ def flatten_transparency(
                     "whole_page": plan["whole_page"],
                     "error": None,
                 })
-            pdf.save(output)
+            # Same-file output takes temp-and-rename: pikepdf refuses to save
+            # over the file it is reading, and the panel's apply routes the
+            # working file back onto itself.
+            _save(pdf, Path(file), Path(output))
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return {

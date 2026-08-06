@@ -31,6 +31,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
+from .page_images import _save
 from .validate import validate_pdf
 
 # The sixteen in-RIP trapping parameters, their types, their defaults and the
@@ -517,7 +518,10 @@ def assign_presets(
         elif Name(_ASSIGNMENT_KEY) in pdf.Root:
             del pdf.Root[Name(_ASSIGNMENT_KEY)]
         pdf.docinfo[Name("/Trapped")] = Name("/" + claim)
-        pdf.save(output)
+        # Same-file output takes temp-and-rename: pikepdf refuses to save over
+        # the file it is reading, and the panel's apply routes the working file
+        # back onto itself.
+        _save(pdf, Path(file), Path(output))
     return {
         "output": str(output),
         "trapped": claim,
