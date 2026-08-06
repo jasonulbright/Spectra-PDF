@@ -163,6 +163,19 @@ export const WORKBENCH_STRINGS = {
   'app.sanitize.certified_other':
     'This document is certified, which states what may change in it, and carries {{count}} signatures. Removing hidden information changes more than the certification allows and breaks them. Continue?',
 
+  'app.signedEdit.title': 'Document is signed',
+  'app.signedEdit.body':
+    'Editing this document will invalidate its digital signatures. Continue?',
+  'app.signedEdit.certifiedTitle': 'Document is certified',
+  'app.signedEdit.certifiedRefused':
+    'This document is certified with no changes allowed, so it cannot be edited here. Save a copy and edit that instead — the copy is no longer the certified document.',
+  'app.signedEdit.certifiedWarnFormFill':
+    'This document is certified, and only filling in its forms and signing it are allowed. This change goes further than that and will break the certification. Continue?',
+  'app.signedEdit.certifiedWarnAnnotate':
+    'This document is certified, and only filling in its forms, signing it and commenting on it are allowed. This change goes further than that and will break the certification. Continue?',
+  'app.signedEdit.certifiedWarnUnknown':
+    'This document is certified, but it states what may change in it in a way this version does not recognise. This change may break the certification. Continue?',
+
   'app.sendEmail.title': 'Send by Email',
 
   'app.close.unsaved': '"{{name}}" has unsaved changes. Save before closing?',

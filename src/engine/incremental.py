@@ -56,6 +56,7 @@ import pikepdf
 from pyhanko.pdf_utils import generic
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 
+from .docmdp import certification_of_file
 from .validate import validate_pdf
 
 MAX_FIELD_DEPTH = 32
@@ -80,15 +81,31 @@ def _effective_ft(node, inherited, depth=0):
     return ft if ft is not None else inherited
 
 
-def _tree_has_live_sig(node, inherited_ft, depth=0) -> bool:
-    """A terminal /FT /Sig field WITH a /V anywhere in this subtree."""
+def _tree_live_sig_count(node, inherited_ft, depth=0) -> int:
+    """Terminal /FT /Sig fields WITH a /V in this subtree."""
     if depth > MAX_FIELD_DEPTH or not isinstance(node, pikepdf.Dictionary):
-        return False
+        return 0
     ft = _effective_ft(node, inherited_ft, depth)
     kids = node.get("/Kids")
     if kids is None or not isinstance(kids, pikepdf.Array) or len(kids) == 0:
-        return ft == pikepdf.Name("/Sig") and node.get("/V") is not None
-    return any(_tree_has_live_sig(k, ft, depth + 1) for k in kids)
+        return 1 if ft == pikepdf.Name("/Sig") and node.get("/V") is not None else 0
+    return sum(_tree_live_sig_count(k, ft, depth + 1) for k in kids)
+
+
+def _live_sig_count(path: str) -> int:
+    try:
+        with pikepdf.open(path) as pdf:
+            acro = pdf.Root.get("/AcroForm")
+            if acro is None:
+                return 0
+            fields = acro.get("/Fields")
+            if fields is None or not isinstance(fields, pikepdf.Array):
+                return 0
+            return sum(_tree_live_sig_count(f, None) for f in fields)
+    except Exception:
+        # An unreadable file cannot be transplanted; let the caller's
+        # rewrite path surface whatever is actually wrong with it.
+        return 0
 
 
 def has_live_signatures(path: str) -> bool:
@@ -97,19 +114,30 @@ def has_live_signatures(path: str) -> bool:
     Presence-only walk (no crypto) — this is the cheap gate deciding
     whether a rewrite must be re-expressed as an incremental append.
     """
-    try:
-        with pikepdf.open(path) as pdf:
-            acro = pdf.Root.get("/AcroForm")
-            if acro is None:
-                return False
-            fields = acro.get("/Fields")
-            if fields is None or not isinstance(fields, pikepdf.Array):
-                return False
-            return any(_tree_has_live_sig(f, None) for f in fields)
-    except Exception:
-        # An unreadable file cannot be transplanted; let the caller's
-        # rewrite path surface whatever is actually wrong with it.
-        return False
+    return _live_sig_count(path) > 0
+
+
+def signature_policy(path: str) -> dict:
+    """What this document's own signatures allow to be changed.
+
+    ``{"signed": bool, "count": int, "certified": bool, "level": str|None}``.
+    The same presence-only read as ``has_live_signatures`` plus the catalog's
+    certification entry — no cryptography and no difference analysis, so it
+    stays cheap enough to consult before every edit.
+
+    ``level`` is None both for an uncertified document and for a certification
+    recording a permission value outside the three defined levels; ``certified``
+    is what distinguishes those, and an unrecognized level is treated by callers
+    as an unknown one rather than as an absent one.
+    """
+    certification = certification_of_file(path)
+    count = _live_sig_count(path)
+    return {
+        "signed": count > 0,
+        "count": count,
+        "certified": bool(certification["certified"]),
+        "level": certification["level"],
+    }
 
 
 # ---------------------------------------------------------------------------

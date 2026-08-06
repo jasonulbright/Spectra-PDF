@@ -7,12 +7,17 @@ import {
   policyVerdict,
   POLICY_VERDICT_LABEL,
   signatureKind,
+  signedEditDecision,
   SIGNATURE_KIND_LABEL,
   SIGNATURE_STATUS_LABEL,
   type CertificationLevel,
+  type EditClass,
   type SignatureEntry,
+  type SignaturePolicy,
+  type SignedEditKey,
 } from '../src/renderer/lib/signatures';
 import { PANEL_STRINGS } from '../src/renderer/i18n-panels';
+import { WORKBENCH_STRINGS } from '../src/renderer/i18n-workbench';
 
 // The one valid/modified/invalid decision shared by the Tools and nav-pane
 // Signatures panels — so they can't disagree on what "valid" is.
@@ -142,5 +147,97 @@ describe('the second axis label maps', () => {
     expect(modificationLevelLabel(undefined)).toBeNull();
     expect(modificationLevelLabel('SOMETHING_NEW')).toBeNull();
     expect(modificationLevelLabel('FORM_FILLING')).toBe(MODIFICATION_LEVEL_LABEL.FORM_FILLING);
+  });
+});
+
+describe('signedEditDecision', () => {
+  const policy = (partial: Partial<SignaturePolicy>): SignaturePolicy => ({
+    signed: true,
+    count: 1,
+    certified: false,
+    level: null,
+    ...partial,
+  });
+  const CLASSES: EditClass[] = ['form-fill', 'annotate', 'structural'];
+
+  it('an unsigned, uncertified document proceeds silently for every class', () => {
+    for (const editClass of CLASSES) {
+      expect(
+        signedEditDecision(policy({ signed: false, count: 0 }), editClass).kind,
+      ).toBe('proceed');
+    }
+  });
+
+  it('a signed, uncertified document warns only for the classes the append tier cannot carry', () => {
+    expect(signedEditDecision(policy({}), 'form-fill').kind).toBe('proceed');
+    expect(signedEditDecision(policy({}), 'annotate').kind).toBe('proceed');
+    const decision = signedEditDecision(policy({}), 'structural');
+    expect(decision.kind).toBe('warn');
+    if (decision.kind !== 'proceed') {
+      expect(decision.bodyKey).toBe('app.signedEdit.body');
+    }
+  });
+
+  it('a no-changes certification refuses every class, and never merely warns', () => {
+    for (const editClass of CLASSES) {
+      const decision = signedEditDecision(
+        policy({ certified: true, level: 'none' }),
+        editClass,
+      );
+      expect(decision.kind).toBe('refuse');
+      if (decision.kind !== 'proceed') {
+        expect(decision.bodyKey).toBe('app.signedEdit.certifiedRefused');
+      }
+    }
+  });
+
+  it('the refusal names the way forward', () => {
+    expect(WORKBENCH_STRINGS['app.signedEdit.certifiedRefused']).toContain('Save a copy');
+  });
+
+  it('a form-filling certification permits filling and warns on the rest', () => {
+    const p = policy({ certified: true, level: 'form-fill' });
+    expect(signedEditDecision(p, 'form-fill').kind).toBe('proceed');
+    expect(signedEditDecision(p, 'annotate').kind).toBe('warn');
+    expect(signedEditDecision(p, 'structural').kind).toBe('warn');
+  });
+
+  it('an annotating certification permits filling and commenting, and warns on structure', () => {
+    const p = policy({ certified: true, level: 'annotate' });
+    expect(signedEditDecision(p, 'form-fill').kind).toBe('proceed');
+    expect(signedEditDecision(p, 'annotate').kind).toBe('proceed');
+    expect(signedEditDecision(p, 'structural').kind).toBe('warn');
+  });
+
+  it('a certification whose level is unrecognised permits nothing and says so', () => {
+    const p = policy({ certified: true, level: null });
+    for (const editClass of CLASSES) {
+      const decision = signedEditDecision(p, editClass);
+      expect(decision.kind).toBe('warn');
+      if (decision.kind !== 'proceed') {
+        expect(decision.bodyKey).toBe('app.signedEdit.certifiedWarnUnknown');
+      }
+    }
+  });
+
+  it('a certification on a document reporting no filled field is still honoured', () => {
+    const decision = signedEditDecision(
+      policy({ signed: false, count: 0, certified: true, level: 'none' }),
+      'annotate',
+    );
+    expect(decision.kind).toBe('refuse');
+  });
+
+  it('every key a decision can name exists in the catalog', () => {
+    const keys: SignedEditKey[] = [
+      'app.signedEdit.title',
+      'app.signedEdit.body',
+      'app.signedEdit.certifiedTitle',
+      'app.signedEdit.certifiedRefused',
+      'app.signedEdit.certifiedWarnFormFill',
+      'app.signedEdit.certifiedWarnAnnotate',
+      'app.signedEdit.certifiedWarnUnknown',
+    ];
+    for (const key of keys) expect(WORKBENCH_STRINGS[key]).toBeTruthy();
   });
 });
