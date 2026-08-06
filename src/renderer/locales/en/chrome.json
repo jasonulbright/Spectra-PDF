@@ -2333,7 +2333,6 @@
   "panel.optimize.audit.details": "Details",
   "panel.optimize.audit.headerBytes": "Size",
   "panel.optimize.audit.headerCategory": "Category",
-  "panel.optimize.audit.headerKnob": "Addressed by",
   "panel.optimize.audit.headerShare": "Share",
   "panel.optimize.audit.inconsistent": "The categories do not add up to the file size, so the breakdown is not shown.",
   "panel.optimize.audit.knob.compress": "Compress ▸ resolution",

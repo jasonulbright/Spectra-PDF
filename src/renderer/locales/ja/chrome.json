@@ -2333,7 +2333,6 @@
   "panel.optimize.audit.details": "詳細",
   "panel.optimize.audit.headerBytes": "サイズ",
   "panel.optimize.audit.headerCategory": "カテゴリ",
-  "panel.optimize.audit.headerKnob": "対応する設定",
   "panel.optimize.audit.headerShare": "割合",
   "panel.optimize.audit.inconsistent": "カテゴリの合計がファイルサイズと一致しないため、内訳は表示しません。",
   "panel.optimize.audit.knob.compress": "圧縮 ▸ 解像度",

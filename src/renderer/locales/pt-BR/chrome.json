@@ -2333,7 +2333,6 @@
   "panel.optimize.audit.details": "Detalhes",
   "panel.optimize.audit.headerBytes": "Tamanho",
   "panel.optimize.audit.headerCategory": "Categoria",
-  "panel.optimize.audit.headerKnob": "Ajustado por",
   "panel.optimize.audit.headerShare": "Proporção",
   "panel.optimize.audit.inconsistent": "As categorias não somam o tamanho do arquivo, então a divisão não é exibida.",
   "panel.optimize.audit.knob.compress": "Comprimir ▸ resolução",
