@@ -146,6 +146,8 @@ export const COMMAND_IDS = [
   'file.exportHtml',
   'file.exportXhtml',
   'file.exportText',
+  'file.exportExcel',
+  'file.exportPowerpoint',
   'file.exportImages',
   'file.close',
   'file.closeAll',
@@ -422,12 +424,23 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
     run: (ctx) => ctx.app!.exportDocument('xhtml'),
   },
-  // Plain text is produced by the engine itself, so it stays available whether
-  // or not LibreOffice is provisioned.
+  // The engine produces these three itself, so they stay available whether or
+  // not LibreOffice is provisioned, and each takes options the others do not —
+  // which is why they open a step rather than going straight to a save dialog.
   'file.exportText': {
     title: 'Plain Text (.txt)…',
     when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
-    run: (ctx) => ctx.app!.exportDocument('txt'),
+    run: (ctx) => ctx.app!.openExportDocument('txt'),
+  },
+  'file.exportExcel': {
+    title: 'Spreadsheet (.xlsx)…',
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    run: (ctx) => ctx.app!.openExportDocument('xlsx'),
+  },
+  'file.exportPowerpoint': {
+    title: 'Presentation (.pptx)…',
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    run: (ctx) => ctx.app!.openExportDocument('pptx'),
   },
   'file.exportImages': {
     title: 'Images (PNG/JPEG/TIFF)…',
