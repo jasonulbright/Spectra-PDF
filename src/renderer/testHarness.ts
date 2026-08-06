@@ -692,6 +692,7 @@ export interface CanvasFormsHandlers {
     type: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'optionlist' | 'signature';
     options?: string[];
     multiline?: boolean;
+    lock?: { action: 'all' | 'include' | 'exclude' | null; fields: string[] };
   }) => Promise<void>;
   // Sign into an existing empty signature field of the ACTIVE file —
   // the sign card's field branch with the dialog paths injected.
@@ -1029,6 +1030,7 @@ export interface TestHarness {
     type: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'optionlist' | 'signature';
     options?: string[];
     multiline?: boolean;
+    lock?: { action: 'all' | 'include' | 'exclude' | null; fields: string[] };
   }) => Promise<void>;
   /** Sign into an existing empty signature field of the active file
    * via the sign card's real field branch, dialog paths injected. */

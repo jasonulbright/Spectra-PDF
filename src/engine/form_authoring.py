@@ -9,7 +9,13 @@ moment nothing compares them.
 A spec is the shape the renderer already speaks::
 
     {"name", "type", "page_index" (0-based), "rect" [x0,y0,x1,y1],
-     "options": [str | {"label", "rect"}], "multiline", "comb", "max_length"}
+     "options": [str | {"label", "rect"}], "multiline", "comb", "max_length",
+     "lock": {"action", "fields"}}
+
+``lock`` belongs to a signature field alone and is the seed whoever signs that
+field later is bound by. Its names are validated against the document AND
+against the batch's own new fields: laying out a form and locking the fields
+being laid out in the same pass is the ordinary case.
 
 Validation is fail-closed and PRE-mutation: every problem in the batch is
 reported at once, each naming the field it belongs to, and nothing is written
@@ -29,7 +35,8 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
-from engine.acroform import refuse_if_xfa
+from engine.acroform import form_field_forest, refuse_if_xfa
+from engine.fieldmdp import lock_dictionary, validated_lock
 from engine.forms import (
     FF_COMBO,
     FF_MULTILINE,
@@ -42,6 +49,8 @@ from engine.validate import validate_pdf
 
 FF_NO_TOGGLE_TO_OFF = 1 << 14
 FF_COMB = 1 << 24
+
+_MAX_PARENT_DEPTH = 32
 
 FIELD_TYPES = ("text", "checkbox", "radio", "dropdown", "optionlist", "signature")
 CHOICE_TYPES = ("radio", "dropdown", "optionlist")
@@ -127,11 +136,23 @@ def _rect_of(spec, key="rect") -> tuple:
     return (x0, y0, x1, y1)
 
 
+def _lock_of(spec: dict) -> dict | None:
+    raw = spec.get("lock")
+    return raw if isinstance(raw, dict) else None
+
+
 def _validate(pdf: pikepdf.Pdf, specs: list) -> None:
     problems: list[str] = []
     taken = _top_level_names(pdf)
     for field in _all_fields(pdf):
         taken.add(field.name)
+    # What a lock may name: the document's fields plus the batch's own, since a
+    # form laid out in one pass locks the fields laid out with it.
+    lockable = set(taken) | {
+        str(s.get("name", "")).strip()
+        for s in specs
+        if isinstance(s, dict) and str(s.get("name", "")).strip()
+    }
     page_count = len(pdf.pages)
     batch = len(specs) > 1
 
@@ -185,6 +206,17 @@ def _validate(pdf: pikepdf.Pdf, specs: list) -> None:
                     problem("a comb field needs a maximum length to divide its box into")
                 if spec.get("multiline"):
                     problem("a comb field cannot also be multiline")
+        lock = _lock_of(spec)
+        if lock is not None:
+            if kind != "signature":
+                problem("only a signature field can lock form fields")
+            else:
+                try:
+                    validated_lock(
+                        lock.get("action"), lock.get("fields"), lockable, name or None
+                    )
+                except ValueError as exc:
+                    problem(str(exc))
         if name:
             if name in taken:
                 problem(f"a field named {name} already exists")
@@ -381,6 +413,10 @@ def _create_signature(pdf: pikepdf.Pdf, page, spec: dict, rect: tuple):
     field["/T"] = String(spec["name"].strip())
     del field["/MK"]
     del field["/BS"]
+    lock = _lock_of(spec)
+    seed = validated_lock(lock.get("action"), lock.get("fields")) if lock is not None else None
+    if seed is not None:
+        field["/Lock"] = lock_dictionary(pdf, seed)
     return pdf.make_indirect(field)
 
 
@@ -533,3 +569,90 @@ def add_form_fields(
     if same_file:
         shutil.move(staged, str(output_path))
     return {"output": str(output_path), "created": len(specs), "names": names}
+
+
+def _effective_ft(field):
+    """A field's ``/FT``, inherited from its ancestors when it carries none."""
+    node = field
+    for _ in range(_MAX_PARENT_DEPTH):
+        if node is None:
+            return None
+        ft = node.get("/FT")
+        if ft is not None:
+            return str(ft)
+        node = node.get("/Parent")
+    return None
+
+
+def set_field_lock(
+    file: str,
+    output: str,
+    field: str = "",
+    lock=None,
+    lock_fields=None,
+    allow_signed: bool = False,
+) -> dict:
+    """Set the ``/Lock`` an UNSIGNED signature field carries, and write ``output``.
+
+    Returns ``{output, field, lock}``. ``lock`` of None removes the field's lock:
+    the door is total, since "this field locks nothing" is a value rather than a
+    separate operation.
+
+    A field that is already SIGNED refuses. Its ``/Lock`` sits inside what the
+    signature covers, so rewriting it both breaks the signature and rewrites a
+    constraint whoever signed accepted.
+    """
+    name = str(field or "").strip()
+    if not name:
+        raise ValueError("Name the signature field whose lock is being set.")
+    validate_pdf(file)
+    decision = signed_edit_decision(signature_policy(file), "structural")
+    if decision["kind"] == "refuse":
+        raise RuntimeError(
+            "this document is certified to allow no changes, so setting a field "
+            "lock would produce a file that reports as illegally modified"
+        )
+    if decision["kind"] == "warn" and not allow_signed:
+        raise RuntimeError(
+            "this document is signed and setting a field lock invalidates its "
+            "signatures -- the run must state that signed documents are "
+            "included before it will touch one"
+        )
+
+    input_path = Path(file)
+    output_path = Path(output)
+    same_file = input_path.resolve() == output_path.resolve()
+    with pikepdf.open(file) as pdf:
+        refuse_if_xfa(pdf, input_path, "setting a field lock")
+        forest = form_field_forest(pdf)
+        target = forest.get(name)
+        if target is None:
+            raise ValueError(f'This document has no form field named "{name}".')
+        if _effective_ft(target) != "/Sig":
+            raise ValueError(
+                f'Form field "{name}" is not a signature field, and only a signature '
+                "field can lock form fields."
+            )
+        if target.get("/V") is not None:
+            raise ValueError(
+                f'Signature field "{name}" is already signed, so its field lock can no '
+                "longer change. Its lock is part of what that signature covers."
+            )
+        seed = validated_lock(lock, lock_fields, set(forest), name)
+        if seed is None:
+            if target.get("/Lock") is not None:
+                del target["/Lock"]
+        else:
+            target["/Lock"] = lock_dictionary(pdf, seed)
+        if same_file:
+            with tempfile.NamedTemporaryFile(
+                suffix=".pdf", delete=False, dir=str(input_path.parent)
+            ) as tmp:
+                staged = tmp.name
+            pdf.save(staged)
+        else:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            pdf.save(output_path)
+    if same_file:
+        shutil.move(staged, str(output_path))
+    return {"output": str(output_path), "field": name, "lock": seed}

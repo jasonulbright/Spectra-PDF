@@ -64,6 +64,7 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   // Same property: only whitelisted (non-secret) fields reach the queue
   // label; the .pfx password stays out of every sink.
   generate_signer: 'Create Signer',
+  set_field_lock: 'Set Field Lock',
   set_document_js: 'Edit Document JavaScript',
   set_struct_props: 'Edit Tag',
   move_struct_node: 'Move Tag',

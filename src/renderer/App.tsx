@@ -11,7 +11,13 @@ import {
   type ReplacementSource,
 } from './lib/image-replace';
 import { EDIT_DECLINED } from './lib/edit-text';
-import { signedEditDecision, type EditClass, type SignaturePolicy } from './lib/signatures';
+import {
+  lockNeedsFields,
+  signedEditDecision,
+  type EditClass,
+  type FieldLock,
+  type SignaturePolicy,
+} from './lib/signatures';
 import type { EditImageMaskParam } from './lib/edit-images';
 import type { ParagraphEditOpts } from './lib/edit-paragraphs';
 import { ConfirmDialog, ConfirmResult } from './components/ConfirmDialog';
@@ -1062,6 +1068,28 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, showProceedConfirm],
   );
 
+  // The preparer's half of field locking: the seed an UNSIGNED signature field
+  // carries, which whoever signs it later is bound by. Writing it rewrites the
+  // file, so it is decided as a structural edit like every other one — and
+  // `allow_signed` says the decision was already taken here rather than making
+  // the engine take it a second time with no way to consent.
+  const handleSetFieldLock = useCallback(
+    async (path: string, field: string, lock: FieldLock | null): Promise<boolean> => {
+      const f = state.files.get(path);
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return false;
+      await performOperation(path, 'set_field_lock', {
+        field,
+        allow_signed: true,
+        ...(lock === null
+          ? {}
+          : { lock: lock.action, lock_fields: lockNeedsFields(lock.action) ? lock.fields : [] }),
+      });
+      return true;
+    },
+    [state.files, performOperation, confirmEditOfSignedDoc],
+  );
+
   const handleApplyOcrLayer = useCallback(
     async (
       path: string,
@@ -1882,6 +1910,7 @@ function AppContent(): React.ReactElement {
     exit: handleExit,
     minimizeToTray: async () => { await app.hideToTray(); },
     sanitizeDocument: handleSanitizeDocument,
+    setFieldLock: handleSetFieldLock,
   };
   const commandHandlersRef = useRef(commandHandlers);
   commandHandlersRef.current = commandHandlers;
@@ -1923,6 +1952,7 @@ function AppContent(): React.ReactElement {
       exit: () => h.current.exit(),
       minimizeToTray: () => h.current.minimizeToTray(),
       sanitizeDocument: (path, request) => h.current.sanitizeDocument(path, request),
+      setFieldLock: (path, field, lock) => h.current.setFieldLock(path, field, lock),
     });
     setCommandStateSource(() => ({ state: stateRef.current, dispatch }));
     return () => {

@@ -27,6 +27,60 @@ LIST_ACTIONS: tuple[str, ...] = ("include", "exclude")
 _MAX_FIELD_DEPTH = 32
 
 
+def validated_lock(lock, lock_fields, present=None, own_name: str | None = None) -> dict | None:
+    """A lock request as the wire dict ``{"action", "fields"}``, or None.
+
+    Every refusal is a request that would otherwise lock something other than
+    what was asked for: an empty list means opposite things under the two list
+    actions, a list under ``all`` is discarded by the format, a name the
+    document does not carry locks nothing (``include``) or everything but a typo
+    (``exclude``), and a field that names ITSELF constrains nothing the
+    signature does not already fix.
+
+    ``present`` is the set of names the request may choose from; None skips the
+    membership check, which is what an unreadable document gets — reporting
+    every name as missing would blame the request for the file's problem.
+    """
+    names = [str(n).strip() for n in (lock_fields or []) if str(n).strip()]
+    if lock is None:
+        if names:
+            raise ValueError(
+                "Field names to lock apply only to a field lock. Choose what the "
+                "signature locks, or leave the names unset."
+            )
+        return None
+    if lock not in ACTION_NAMES:
+        raise ValueError(f'Unknown field lock "{lock}". Choose all, include, or exclude.')
+    if lock == "all" and names:
+        raise ValueError("A field lock covering every form field takes no field names.")
+    if lock in LIST_ACTIONS and not names:
+        raise ValueError(f'A field lock of type "{lock}" needs at least one field name.')
+    if own_name and own_name in names:
+        raise ValueError(
+            f'Signature field "{own_name}" cannot lock itself. A field lock names the '
+            "form fields that may no longer change, not the field being signed."
+        )
+    if names and present is not None:
+        missing = [n for n in names if n not in present]
+        if missing:
+            raise ValueError(
+                f'This document has no form field named "{missing[0]}", so that '
+                "field cannot be locked."
+            )
+    return {"action": lock, "fields": names}
+
+
+def lock_dictionary(pdf, spec: dict):
+    """``spec`` as the ``/Lock`` (``/SigFieldLock``) dictionary a signature field
+    carries. ``all`` writes no ``/Fields``: the format ignores one there."""
+    import pikepdf
+
+    entries = {"Type": pikepdf.Name("/SigFieldLock"), "Action": pikepdf.Name(NAME_BY_ACTION[spec["action"]])}
+    if spec["action"] in LIST_ACTIONS:
+        entries["Fields"] = pikepdf.Array([pikepdf.String(n) for n in spec["fields"]])
+    return pdf.make_indirect(pikepdf.Dictionary(**entries))
+
+
 def is_locked(lock: dict, field_name: str) -> bool:
     """Whether ``lock`` covers ``field_name``.
 

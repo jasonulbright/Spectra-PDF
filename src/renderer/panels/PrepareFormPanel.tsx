@@ -3,9 +3,17 @@ import { useTranslation } from 'react-i18next';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
-import { getCanvasServices, invokeCommand } from '../commands/context';
+import { FieldLockControl } from '../components/FieldLockControl';
+import { getCanvasServices, getCommandContext, invokeCommand } from '../commands/context';
 import { ghostscriptPath, tesseractPath } from '../lib/ocr-recognize';
 import { DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
+import { readFormFields, type FormField } from '../lib/forms';
+import {
+  lockNeedsFields,
+  DEFAULT_LOCK,
+  LOCK_ACTION_LABEL,
+  type LockOptions,
+} from '../lib/signatures';
 import { tChrome, tChromeCount } from '../i18n';
 import {
   candidateKind,
@@ -15,6 +23,7 @@ import {
   renameCandidate,
   retypeCandidate,
   selectionState,
+  setCandidateLock,
   setCandidateMultiline,
   setCheckedAll,
   setCheckedOnPage,
@@ -81,9 +90,17 @@ export function PrepareFormPanel(): React.ReactElement {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState('');
+  // The document's own fields: the names a lock can choose from, and the
+  // signature fields whose seed the properties section below edits.
+  const [fields, setFields] = useState<FormField[]>([]);
+  // Per-field pending lock edits, keyed by field name — an edit is applied
+  // deliberately, never on every keystroke of a checkbox list.
+  const [lockDrafts, setLockDrafts] = useState<Record<string, LockOptions>>({});
+  const [applyingLock, setApplyingLock] = useState<string | null>(null);
 
   const path = activeFile?.path ?? null;
   const workingPath = activeFile?.workingPath ?? null;
+  const buffer = activeFile?.buffer ?? null;
 
   // The canvas owns the candidate set; this mirrors it so an overlay the user
   // drags, or a buffer change that invalidates the whole list, shows here too.
@@ -108,6 +125,32 @@ export function PrepareFormPanel(): React.ReactElement {
     setError(null);
     getCanvasServices()?.formCandidates.clear();
   }, [path]);
+
+  // Re-read whenever the file's bytes change identity — a create, an applied
+  // lock, an undo. `read_form_fields` is an INTERNAL method, so this never
+  // gates a commit of the user's pending page edits.
+  useEffect(() => {
+    let cancelled = false;
+    if (!buffer || !workingPath) {
+      setFields([]);
+      setLockDrafts({});
+      return;
+    }
+    readFormFields(call, workingPath)
+      .then((read) => {
+        if (cancelled) return;
+        setFields(read.fields);
+        // The file is the baseline: a draft that survived the write would show
+        // the document as carrying something it does not.
+        setLockDrafts({});
+      })
+      .catch(() => {
+        if (!cancelled) setFields([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [buffer, workingPath, call]);
 
   const publish = useCallback(
     (next: FieldCandidate[]) => {
@@ -184,6 +227,65 @@ export function PrepareFormPanel(): React.ReactElement {
       setCreating(false);
     }
   }, [candidates]);
+
+  // What a candidate's lock can name: the document's own fillable fields plus
+  // the fields this batch is about to create. A lock governs form fields, so
+  // signature fields are not offered as targets.
+  const lockableNames = useMemo(() => {
+    const names = fields.filter((f) => f.type !== 'signature').map((f) => f.name);
+    for (const candidate of candidates) {
+      if (candidate.kind !== 'signature' && candidate.name && !names.includes(candidate.name)) {
+        names.push(candidate.name);
+      }
+    }
+    return names;
+  }, [fields, candidates]);
+
+  const signatureFields = useMemo(() => fields.filter((f) => f.type === 'signature'), [fields]);
+
+  const lockOf = useCallback(
+    (field: FormField): LockOptions =>
+      lockDrafts[field.name] ??
+      (field.lock ? { action: field.lock.action, fields: [...field.lock.fields] } : DEFAULT_LOCK),
+    [lockDrafts],
+  );
+
+  const applyLock = useCallback(
+    async (field: FormField) => {
+      const draft = lockDrafts[field.name];
+      if (!path || !draft) return;
+      setApplyingLock(field.name);
+      setError(null);
+      try {
+        // Through the app handler, not the engine directly: writing a seed
+        // rewrites the file, and the signed-document decision belongs to the
+        // one place every other edit takes it.
+        const handlers = getCommandContext()?.app;
+        if (!handlers) return;
+        const written = await handlers.setFieldLock(
+          path,
+          field.name,
+          draft.action === null
+            ? null
+            : {
+                action: draft.action,
+                // `all` ignores names; sending them would discard the choice.
+                fields: lockNeedsFields(draft.action) ? draft.fields : [],
+              },
+        );
+        setStatus(
+          written
+            ? tChrome('panel.prepareForm.lockApplied', { field: field.name })
+            : tChrome('panel.prepareForm.lockDeclined'),
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setApplyingLock(null);
+      }
+    },
+    [lockDrafts, path],
+  );
 
   const pages = useMemo(
     () => [...new Set(candidates.map((c) => c.page))].sort((a, b) => a - b),
@@ -392,6 +494,33 @@ export function PrepareFormPanel(): React.ReactElement {
                     </span>
                   )}
                 </div>
+                {candidate.kind === 'signature' && (
+                  <FieldLockControl
+                    value={
+                      candidate.lock
+                        ? { action: candidate.lock.action, fields: [...candidate.lock.fields] }
+                        : DEFAULT_LOCK
+                    }
+                    onChange={(next) =>
+                      publish(
+                        setCandidateLock(
+                          candidates,
+                          candidate.id,
+                          next.action === null
+                            ? null
+                            : {
+                                action: next.action,
+                                // `all` ignores names, so carrying them would
+                                // send a pair the write refuses.
+                                fields: lockNeedsFields(next.action) ? next.fields : [],
+                              },
+                        ),
+                      )
+                    }
+                    fieldNames={lockableNames}
+                    idPrefix={`prepare-form-candidate-${candidate.name}`}
+                  />
+                )}
               </div>
             ))}
           </div>
@@ -410,6 +539,63 @@ export function PrepareFormPanel(): React.ReactElement {
             : tChromeCount('panel.prepareForm.create', checkedCount)}
         </button>
       )}
+
+      <div className="flex flex-col gap-2 border-t border-neutral-700 pt-3" data-testid="prepare-form-sigfields">
+        <div className="text-sm text-neutral-300">{tChrome('panel.prepareForm.sigFields')}</div>
+        <p className="text-xs text-neutral-400">{tChrome('panel.prepareForm.sigFieldsBlurb')}</p>
+        {signatureFields.length === 0 && (
+          <div className="text-xs text-neutral-500" data-testid="prepare-form-sigfields-none">
+            {tChrome('panel.prepareForm.sigFieldsNone')}
+          </div>
+        )}
+        {signatureFields.map((field) => (
+          <div
+            key={field.name}
+            className="flex flex-col gap-1.5 rounded border border-neutral-700 p-2"
+            data-testid={`prepare-form-sigfield-${field.name}`}
+          >
+            <div className="text-xs text-neutral-200 truncate">{field.name}</div>
+            {field.filled ? (
+              <>
+                <div
+                  className="text-[11px] text-neutral-400"
+                  data-testid={`prepare-form-sigfield-locked-${field.name}`}
+                >
+                  {field.lock
+                    ? tChrome(LOCK_ACTION_LABEL[field.lock.action], {
+                        fields: field.lock.fields.join(', '),
+                      })
+                    : tChrome('panel.prepareForm.lockNone')}
+                </div>
+                <div className="text-[11px] text-amber-300">
+                  {tChrome('panel.prepareForm.sigFieldSigned')}
+                </div>
+              </>
+            ) : (
+              <>
+                <FieldLockControl
+                  value={lockOf(field)}
+                  onChange={(next) =>
+                    setLockDrafts((prev) => ({ ...prev, [field.name]: next }))
+                  }
+                  fieldNames={lockableNames}
+                  idPrefix={`prepare-form-sigfield-${field.name}`}
+                />
+                <button
+                  className="self-start bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded px-2 py-1 text-xs"
+                  data-testid={`prepare-form-sigfield-apply-${field.name}`}
+                  disabled={!lockDrafts[field.name] || applyingLock !== null}
+                  onClick={() => void applyLock(field)}
+                >
+                  {applyingLock === field.name
+                    ? tChrome('panel.prepareForm.lockApplying')
+                    : tChrome('panel.prepareForm.lockApply')}
+                </button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
