@@ -2166,13 +2166,15 @@ function AppContent(): React.ReactElement {
       },
       importPagesIntoDoc: (filePath, toDocId, toIndex) =>
         importFilesIntoDoc([filePath], toDocId, toIndex),
-      exportActiveDocument: async (destPath, format) => {
+      exportActiveDocument: async (destPath, format, options) => {
         const af = stateRef.current.activeFileId
           ? stateRef.current.files.get(stateRef.current.activeFileId)
           : null;
         if (!af) throw new Error('exportActiveDocument: no active file');
         const soffice_path = await app.getSofficePath();
-        return call('export_document', { file: af.workingPath, output: destPath, fmt: format, soffice_path });
+        return call('export_document', {
+          file: af.workingPath, output: destPath, fmt: format, soffice_path, ...(options ?? {}),
+        });
       },
     });
   }, [openByPaths, dispatch, importFilesIntoDoc, harnessSetView, setActiveOp, call]);

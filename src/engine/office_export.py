@@ -1,17 +1,26 @@
-"""Export a PDF to an editable Office or web format via LibreOffice.
+"""Export a PDF to an editable Office, web or plain-text format.
+
+The door is one dispatcher over two kinds of producer, and which kind a target
+takes is a property of the FORMAT, not of what happens to be bundled.
 
 LibreOffice is bundled and invoked as an isolated subprocess (the Ghostscript
 model — unmodified upstream, redistributed under MPL-2.0; see
 THIRD-PARTY-LICENSES.md § LibreOffice). It is never linked into this app's code.
 
-Import quirk that shapes this module: LibreOffice imports EVERY PDF as a **Draw**
-document. Draw exports cleanly to web/vector/image targets (HTML, XHTML), but the
-Writer word-processing filters (.docx/.rtf/.odt) cannot write a Draw document —
-`soffice --convert-to docx` on a PDF fails at the write step ("SfxBaseModel::
-impl_store … 0xc10"). So Writer targets go through a two-step bridge: PDF → HTML
-(Draw's own export, which carries the real text) → the Writer format (Writer opens
-the HTML and saves it out). The bridge preserves editable text — verified: a
-born-digital PDF's sentences come back as real ``<w:t>`` runs, not a page image.
+Import quirk that shapes the LibreOffice half: LibreOffice imports EVERY PDF as a
+**Draw** document. Draw exports cleanly to web/vector/image targets (HTML, XHTML),
+but the Writer word-processing filters (.docx/.rtf/.odt) cannot write a Draw
+document — `soffice --convert-to docx` on a PDF fails at the write step
+("SfxBaseModel::impl_store … 0xc10"). So Writer targets go through a two-step
+bridge: PDF → HTML (Draw's own export, which carries the real text) → the Writer
+format (Writer opens the HTML and saves it out). The bridge preserves editable
+text — verified: a born-digital PDF's sentences come back as real ``<w:t>`` runs,
+not a page image.
+
+The same import quirk is why the spreadsheet and presentation targets do NOT go
+through it: the conversion changes the container, not the document model, and a
+spreadsheet filter cannot write a drawing. Those targets are produced from the
+document's own text and geometry instead.
 
 `engine.soffice` provides the isolated offline profile, size-derived timeout,
 and output validation used by conversions in both directions.
@@ -20,40 +29,94 @@ and output validation used by conversions in both directions.
 import os
 import shutil
 import tempfile
+import zipfile
 from pathlib import Path
 
 from engine.soffice import run_convert
 
-# format key -> (extension, soffice --convert-to filter, needs the HTML bridge)
+LIBREOFFICE = "libreoffice"
+ENGINE = "engine"
+
+
+class _Target:
+    """One export target: its extension, its producer, and its option names."""
+
+    __slots__ = ("ext", "producer", "convert_to", "bridged", "options")
+
+    def __init__(self, ext, producer, convert_to=None, bridged=False, options=()):
+        self.ext = ext
+        self.producer = producer
+        self.convert_to = convert_to
+        self.bridged = bridged
+        self.options = tuple(options)
+
+
 # The filter strings are LibreOffice's registered filter names; the Writer ones
 # are only reachable through the bridge (see the module docstring).
 _FORMATS = {
-    "docx": (".docx", "docx:MS Word 2007 XML", True),
-    "rtf": (".rtf", "rtf:Rich Text Format", True),
-    "odt": (".odt", "odt:writer8", True),
-    "html": (".html", "html", False),
-    "xhtml": (".xhtml", "xhtml:XHTML Writer File", False),
+    "docx": _Target(".docx", LIBREOFFICE, "docx:MS Word 2007 XML", True),
+    "rtf": _Target(".rtf", LIBREOFFICE, "rtf:Rich Text Format", True),
+    "odt": _Target(".odt", LIBREOFFICE, "odt:writer8", True),
+    "html": _Target(".html", LIBREOFFICE, "html"),
+    # The DRAW flavour of the XHTML filter, because a PDF imports as a Draw
+    # document: the Writer flavour accepts the job, exits zero and writes a
+    # zero-byte file.
+    "xhtml": _Target(".xhtml", LIBREOFFICE, "xhtml:XHTML Draw File"),
+    "txt": _Target(".txt", ENGINE, options=("pages", "layout", "page_breaks")),
 }
+
+# Every option name any target declares. An option a target does not declare is
+# refused rather than ignored: a silently dropped option is a silently wrong
+# output that still reports success.
+_ALL_OPTIONS = ("pages", "layout", "page_breaks")
 
 
 def supported_formats() -> dict:
     """The export targets this build offers (for the UI + CLI help)."""
-    return {"formats": sorted(_FORMATS.keys())}
+    return {
+        "formats": [
+            {"key": key, "ext": target.ext, "options": list(target.options)}
+            for key, target in sorted(_FORMATS.items())
+        ]
+    }
 
 
-def export_document(file: str, output: str, fmt: str, soffice_path: str) -> dict:
-    """Export ``file`` to ``output`` in ``fmt`` via bundled LibreOffice.
+def _reject_unknown_options(key: str, target: _Target, given: dict) -> None:
+    for name in _ALL_OPTIONS:
+        if given.get(name) is None:
+            continue
+        if name not in target.options:
+            raise ValueError(f"the {key} export takes no {name} option")
+
+
+def export_document(
+    file: str,
+    output: str,
+    fmt: str,
+    soffice_path: str = "",
+    pages=None,
+    layout=None,
+    page_breaks=None,
+) -> dict:
+    """Export ``file`` to ``output`` in ``fmt``.
 
     Args:
         file: input PDF path.
         output: destination path (the caller's chosen name + extension).
         fmt: one of ``supported_formats()``.
-        soffice_path: path to the LibreOffice ``soffice`` executable.
+        soffice_path: path to the LibreOffice ``soffice`` executable. Required
+            only by the LibreOffice-produced targets.
+        pages: list of 1-based page numbers, or 'all'.
+        layout: text ordering, for the plain-text target.
+        page_breaks: write a form feed between pages, for the plain-text target.
     """
     key = str(fmt).lower()
     if key not in _FORMATS:
         raise ValueError(f"unsupported export format {fmt!r} (have {sorted(_FORMATS)})")
-    want_ext, convert_to, bridged = _FORMATS[key]
+    target = _FORMATS[key]
+    _reject_unknown_options(
+        key, target, {"pages": pages, "layout": layout, "page_breaks": page_breaks}
+    )
 
     input_path = Path(file)
     output_path = Path(output)
@@ -72,17 +135,78 @@ def export_document(file: str, output: str, fmt: str, soffice_path: str) -> dict
     # same identity guard the distill/redact family uses.
     if input_path.exists() and output_path.exists() and os.path.samefile(input_path, output_path):
         raise ValueError("output path is the same file as the input")
+
+    if target.producer == ENGINE:
+        return _export_engine(key, input_path, output_path, pages, layout, page_breaks)
+    return _export_libreoffice(key, target, input_path, output_path, soffice_path)
+
+
+def _export_engine(key, input_path, output_path, pages, layout, page_breaks) -> dict:
+    """Targets produced from the document's own text and geometry.
+
+    These never touch LibreOffice, so an unprovisioned LibreOffice must not make
+    them fail and must not be named in anything they raise.
+    """
+    if key == "txt":
+        from engine.text_export import export_text
+
+        return export_text(
+            str(input_path),
+            str(output_path),
+            pages="all" if pages is None else pages,
+            layout="reading" if layout is None else layout,
+            page_breaks=bool(page_breaks),
+        )
+    raise ValueError(f"unsupported export format {key!r} (have {sorted(_FORMATS)})")
+
+
+# What proves a produced file carries a DOCUMENT rather than an empty wrapper.
+# A package format is proven by its body part, a flat format by the element that
+# opens its body. Neither an exit code nor a byte count proves it: a filter that
+# cannot express the source can still write a well-formed, non-empty file with
+# none of the source in it.
+_BODY_PART = {"docx": "word/document.xml", "odt": "content.xml"}
+_BODY_MARKER = {"rtf": b"{\\rtf", "html": b"<body", "xhtml": b"<body"}
+
+
+def _verify_produced(key: str, produced: Path) -> None:
+    part = _BODY_PART.get(key)
+    if part is not None:
+        try:
+            with zipfile.ZipFile(produced) as package:
+                present = part in package.namelist()
+        except (OSError, zipfile.BadZipFile):
+            present = False
+        if not present:
+            raise RuntimeError(
+                f"the conversion wrote a {key} file that carries no document content"
+            )
+        return
+    marker = _BODY_MARKER.get(key)
+    if marker is None:
+        return
+    body = produced.read_bytes()
+    if marker.lower() not in body.lower():
+        raise RuntimeError(
+            f"the conversion wrote a {key} file that carries no document content"
+        )
+
+
+def _export_libreoffice(key, target, input_path, output_path, soffice_path) -> dict:
     if not str(soffice_path).strip():
         raise RuntimeError("LibreOffice is not available (no soffice path)")
 
     work = Path(tempfile.mkdtemp(prefix="lo-export-"))
     try:
-        if bridged:
+        if target.bridged:
             # PDF -> HTML (carries the real text) -> the Writer format.
             html = run_convert(soffice_path, "html", input_path, work, ".html")
-            produced = run_convert(soffice_path, convert_to, html, work, want_ext)
+            produced = run_convert(soffice_path, target.convert_to, html, work, target.ext)
         else:
-            produced = run_convert(soffice_path, convert_to, input_path, work, want_ext)
+            produced = run_convert(
+                soffice_path, target.convert_to, input_path, work, target.ext
+            )
+        _verify_produced(key, produced)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         # A read-only existing target (a re-export over a prior output) must not

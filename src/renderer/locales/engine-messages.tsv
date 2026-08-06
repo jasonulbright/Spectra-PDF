@@ -114,7 +114,7 @@ headers.textContainsCharactersOutside	exact	headers	text contains characters out
 image_export.dpiMustGot	pattern	image_export	dpi must be {{_MIN_DPI}}-{{_MAX_DPI}}, got {{dpi}}
 image_export.dpiMustNumberGot	pattern	image_export	dpi must be a number, got {{dpi}}
 image_export.ghostscriptReportedSuccessExpected	pattern	image_export	Ghostscript reported success but {{v0}} expected output file(s) are missing (first: {{v1}})
-image_export.outputPathDirectoryFile	pattern	create_pdf,image_export,office_export,soffice	output path is a directory, not a file: {{output}}
+image_export.outputPathDirectoryFile	pattern	create_pdf,extract_text,image_export,office_export,soffice	output path is a directory, not a file: {{output}}
 image_export.unsupportedImageFormat	pattern	image_export	unsupported image format {{fmt}} (have {{v1}})
 incremental.incrementalTransplantFailed	pattern	incremental	Incremental transplant failed: {{e}}
 incremental.incrementalWriteDidPreserve	exact	incremental	Incremental write did not preserve the original bytes verbatim — refusing to emit a signature-breaking file
@@ -126,7 +126,7 @@ inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 links.linkIndexOutRange	pattern	links	link index {{index}} is out of range (page has {{v1}})
 links.linksAdd	exact	links	no links to add
-links.pageOutRange	pattern	form_detect,links,page_images,page_vectors,redact_marks,search_regions,text_authoring,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
+links.pageOutRange	pattern	form_detect,links,page_images,page_vectors,redact_marks,search_regions,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
 links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive width and height
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
 links.urlMustEmpty	exact	links	url must not be empty
@@ -156,6 +156,8 @@ mrc_codecs.maskVerificationFailedEmbedded	pattern	mrc_codecs	mask verification f
 mrc_codecs.unknownJbigMode	pattern	mrc_codecs	unknown JBIG2 mode: {{mode}}
 mrc_codecs.unknownMaskCodecExpected	pattern	mrc_codecs	unknown mask codec: {{codec}} (expected one of {{v1}})
 ocr_layer.ocrWordsApply	exact	ocr_layer	No OCR words to apply.
+office_export.conversionWroteFileCarries	pattern	office_export	the conversion wrote a {{key}} file that carries no document content
+office_export.exportTakesOption	pattern	office_export	the {{key}} export takes no {{name}} option
 office_export.inputFileEmpty	pattern	create_pdf,office_export,soffice	the input file is empty: {{file}}
 office_export.libreofficeAvailableSofficePath	exact	office_export,soffice	LibreOffice is not available (no soffice path)
 office_export.libreofficeConversionFailedExit	pattern	soffice	LibreOffice conversion failed (exit {{v0}}): {{v1}}
@@ -303,7 +305,7 @@ sanitize.unknownCategoryCategories	pattern	sanitize	Unknown category {{name}}. T
 search_regions.expandMustMatchWord	exact	search_regions	expand must be "match", "word" or "line"
 search_regions.giveSearchTermWord	exact	search_regions	give a search term, a word list or a built-in pattern — searching for nothing would mark every page
 search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a positive number
-search_regions.pagesMustListPage	exact	form_detect,search_regions	pages must be a list of page numbers or "all"
+search_regions.pagesMustListPage	exact	form_detect,search_regions,text_export	pages must be a list of page numbers or "all"
 shaping.fontSVerticalForm	pattern	shaping	this font's vertical form of {{name}} has no advance
 shaping.shapingFontCannotExpress	pattern	shaping	the shaping font cannot express {{text}}
 signatures.certificatesFoundTrustRoot	pattern	signatures	no certificates found in trust root: {{p}}
@@ -374,6 +376,8 @@ text_authoring.spanSizeOutRange	exact	text_authoring	span size out of range
 text_authoring.spansMustAscendingNon	exact	text_authoring	spans must be ascending and non-overlapping
 text_authoring.styleChangeInsideJoined	exact	text_authoring	a style change inside a joined word cannot be drawn — style whole words in this script
 text_authoring.textAdd	exact	text_authoring	no text to add
+text_export.documentTextLayerThere	exact	text_export	this document has no text layer, so there is nothing to export as text -- run OCR on it first to add one
+text_export.unknownTextLayoutChoose	pattern	text_export	unknown text layout {{layout}} (choose reading or layout)
 text_match.unknownPatternBuiltPatterns	pattern	text_match	unknown pattern {{pattern_id}} — the built-in patterns are: {{known}}
 text_paragraphs.boxLeftMustFinite	exact	text_paragraphs	box left must be a finite number
 text_paragraphs.boxLeftMustNumber	exact	text_paragraphs	box left must be a number
