@@ -38,6 +38,15 @@ _MIN_DPI, _MAX_DPI = 18, 1200
 _TIMEOUT = 600  # a 1,000-page doc at 300 dpi is minutes, not the default 300s
 
 
+def image_extension(fmt: str) -> str:
+    """The extension a raster target writes, dot included. The one place a
+    caller building an output name reads it from."""
+    key = str(fmt).lower()
+    if key not in _FORMATS:
+        raise ValueError(f"unsupported image format {fmt!r} (have {sorted(_FORMATS)})")
+    return _FORMATS[key][2]
+
+
 def _pages_in_spec(spec: str, page_count: int) -> int:
     """How many pages a validated -sPageList spec selects ('' = all)."""
     if not spec:

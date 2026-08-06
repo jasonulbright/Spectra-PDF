@@ -72,6 +72,7 @@ const noopHandlers = (): AppCommandHandlers => ({
   openBatchOcr: vi.fn(),
   openDiskRedact: vi.fn(),
   openFormPrepFolder: vi.fn(),
+  openFolderExport: vi.fn(),
   openScheduledRuns: vi.fn(),
   openWatchedFolders: vi.fn(),
   openCreatePdf: vi.fn(),

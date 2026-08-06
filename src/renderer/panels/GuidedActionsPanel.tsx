@@ -19,6 +19,7 @@ import {
   parseActionFile,
   saveGuidedActions,
   stepDefFor,
+  terminalOutputName,
   validateAction,
   validateRunValues,
   type GuidedAction,
@@ -104,7 +105,7 @@ export function GuidedActionsPanel(): React.ReactElement {
       let terminalOutput: string | null = terminalOverride ?? null;
       const terminalIndex = action.steps.findIndex((s) => stepDefFor(s.op).terminalOutput);
       if (terminalIndex !== -1 && !terminalOutput) {
-        terminalOutput = (await saveFile('encrypted.pdf')) ?? null;
+        terminalOutput = (await saveFile(terminalOutputName(action.steps[terminalIndex]))) ?? null;
         if (!terminalOutput) return;
       }
       setView({ kind: 'run', action });
@@ -120,6 +121,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             if (def.needsGs) extras.gs_path = await ensureGsPath();
             if (def.needsFontDir) extras.font_dir = await app.getEditFontPath();
             if (def.needsTesseract) extras.tesseract_path = await app.getTesseractPath();
+            if (def.needsSoffice) extras.soffice_path = await app.getSofficePath();
             if (def.terminalOutput) {
               // Writes the picked file; the open document is untouched, so
               // there is nothing to snapshot or reload.
