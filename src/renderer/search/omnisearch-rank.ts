@@ -30,7 +30,14 @@ const collators = new Map<string, Intl.Collator>();
 function collator(lng: string): Intl.Collator {
   let c = collators.get(lng);
   if (!c) {
-    c = new Intl.Collator(lng || undefined);
+    try {
+      // A leaf module cannot know which tags its caller considers real: a
+      // malformed one throws RangeError out of the constructor, and a search
+      // box must not take the app down over a sort order.
+      c = new Intl.Collator(lng || undefined);
+    } catch {
+      c = new Intl.Collator();
+    }
     collators.set(lng, c);
   }
   return c;
