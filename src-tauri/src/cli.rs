@@ -159,6 +159,8 @@ pub enum CliCommand {
     Audit(AuditArgs),
     /// Remove the named categories of hidden information, writing a new file
     Sanitize(SanitizeArgs),
+    /// Attribute every byte of a PDF to a category (JSON report); writes nothing
+    AuditSpace(AuditSpaceArgs),
     /// Read the bookmark tree (JSON), or replace it with --from-json
     Outline(OutlineArgs),
     /// View or set PDF metadata
@@ -1423,6 +1425,14 @@ pub struct AuditArgs {
     /// report says so rather than reporting none.
     #[arg(long)]
     pub no_hidden_text: bool,
+}
+
+#[derive(Args)]
+pub struct AuditSpaceArgs {
+    /// Input PDF file. The report always covers the whole document: a
+    /// per-page breakdown could not sum to the file size, and the sum IS the
+    /// report's guarantee.
+    pub input: PathBuf,
 }
 
 #[derive(Args)]
@@ -3228,6 +3238,11 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "pages": parse_pages(&args.pages),
                 "deep_text": !args.no_hidden_text,
             }),
+        ),
+
+        CliCommand::AuditSpace(args) => engine.call(
+            "audit_space_usage",
+            json!({ "file": abs(&args.input).to_string_lossy() }),
         ),
 
         CliCommand::Sanitize(args) => {
