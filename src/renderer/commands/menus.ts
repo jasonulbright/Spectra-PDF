@@ -126,8 +126,9 @@ export const MENUS: MenuDef[] = [
         id: 'file-export',
         label: 'Export',
         // "Text…" is the extract-text pane — the same op the Document menu
-        // reaches; both entry points exist deliberately. The rest are the editable
-        // exports (bundled LibreOffice).
+        // reaches; both entry points exist deliberately. Beside it are the
+        // file-writing targets: the editable Office/web exports (bundled
+        // LibreOffice) and the engine-produced ones.
         items: [
           cmd('tools.panel.extract_text', 'menuitem-file-export-text'),
           sep,
@@ -137,6 +138,7 @@ export const MENUS: MenuDef[] = [
           cmd('file.exportHtml', 'menuitem-file-export-html'),
           cmd('file.exportXhtml', 'menuitem-file-export-xhtml'),
           sep,
+          cmd('file.exportText', 'menuitem-file-export-txt'),
           cmd('file.exportImages', 'menuitem-file-export-images'),
         ],
       },

@@ -123,6 +123,9 @@ export const PANEL_STRINGS = {
   'panel.extractText.extract': 'Extract',
   'panel.extractText.copy': 'Copy',
   'panel.extractText.copied': 'Copied to clipboard',
+  'panel.extractText.save': 'Save as .txt',
+  'panel.extractText.saving': 'Saving text...',
+  'panel.extractText.saved': 'Saved {{chars}} characters to {{path}}',
   'panel.extractText.done': 'Extracted {{chars}} characters from {{pages}} pages',
   'panel.extractText.doneOne': 'Extracted {{chars}} characters from page {{page}}',
 
