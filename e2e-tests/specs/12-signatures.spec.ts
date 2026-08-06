@@ -42,8 +42,8 @@ describe('signatures panel verifies an embedded signature', () => {
     // Cryptographically valid, whole document covered.
     expect(await card.getText()).toContain('Cryptographically valid');
 
-    // The trust caveat must always be present for a signed file — we never
-    // imply verified identity.
+    // With no trust source configured — the default — a signed file always
+    // carries the caveat: verified identity is never implied.
     const caveat = $('[data-testid="trust-caveat"]');
     await caveat.waitForDisplayed({ timeout: 5_000 });
     expect(await caveat.getText()).toContain('not verified against a trusted authority');

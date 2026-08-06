@@ -1176,10 +1176,15 @@ pub struct VerifySignaturesArgs {
     /// PDF file to verify
     pub input: PathBuf,
     /// Trust anchor certificate file(s) (PEM/DER) the signer chain must reach
-    /// (repeatable). Without any, `trusted` is deterministically false — the
-    /// OS certificate store is never consulted.
+    /// (repeatable). Without any, and without --system-trust, `trusted` is
+    /// deterministically false.
     #[arg(long = "trust-root")]
     pub trust_roots: Vec<PathBuf>,
+    /// Also anchor on the operating system's certificate store, respecting the
+    /// purpose (EKU) restrictions it records. Off unless given; the store is
+    /// not read at all without it.
+    #[arg(long)]
+    pub system_trust: bool,
 }
 
 #[derive(Args)]
@@ -1236,6 +1241,10 @@ pub struct SignArgs {
     /// Trust anchor certificate file(s) (PEM/DER) for revocation gathering (repeatable)
     #[arg(long = "trust-root")]
     pub trust_roots: Vec<PathBuf>,
+    /// Also anchor revocation gathering on the operating system's certificate
+    /// store (used with --embed-revocation)
+    #[arg(long)]
+    pub system_trust: bool,
     /// PKCS#11 provider module (.dll) — sign with a hardware token/HSM.
     /// Use with --token-label and --cert-label; --password is the PIN.
     #[arg(long, conflicts_with_all = ["pfx", "key", "cert"], requires_all = ["token_label", "cert_label"])]
@@ -2867,6 +2876,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     .collect();
                 params["trust_roots"] = json!(roots);
             }
+            if args.system_trust {
+                params["system_trust"] = json!(true);
+            }
             engine.call("verify_signatures", params)
         }
 
@@ -2970,6 +2982,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     .map(|p| abs(p).to_string_lossy().to_string())
                     .collect();
                 params["trust_roots"] = json!(roots);
+            }
+            if args.system_trust {
+                params["system_trust"] = json!(true);
             }
             engine.call("sign_pdf", params)
         }

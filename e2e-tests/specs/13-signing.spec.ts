@@ -187,4 +187,57 @@ describe('signing applies a verifiable signature via the panel + engine', () => 
     expect(anchored.signatures[0].trusted).toBe(true);
     expect(anchored.summary.trust_verified).toBe(true);
   });
+
+  it('carries the system-store opt-in from the panel through to the engine', async () => {
+    // The toggle's WIRING, not a trust outcome: nothing here reads or writes
+    // the machine's certificate store, and the test signer is self-signed, so
+    // no store on any host can anchor it. The purpose-filtered store read
+    // itself is proven in the engine suite against an injected store.
+    const { execFileSync } = await import('node:child_process');
+    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+    const off = JSON.parse(
+      execFileSync(binary, ['verify-signatures', output], { encoding: 'utf-8' }),
+    ) as { system_trust: { requested: boolean; available: boolean } };
+    expect(off.system_trust.requested).toBe(false);
+
+    const on = JSON.parse(
+      execFileSync(binary, ['verify-signatures', output, '--system-trust'], {
+        encoding: 'utf-8',
+      }),
+    ) as {
+      system_trust: { requested: boolean; available: boolean; anchor_count: number };
+      signatures: { trusted: boolean; trust_source: string | null }[];
+      summary: { trust_verified: boolean };
+    };
+    expect(on.system_trust.requested).toBe(true);
+    expect(on.system_trust.available).toBe(true);
+    expect(on.system_trust.anchor_count).toBeGreaterThan(0);
+    expect(on.signatures[0].trusted).toBe(false);
+    expect(on.signatures[0].trust_source).toBe(null);
+    expect(on.summary.trust_verified).toBe(false);
+
+    await openByPaths([output]);
+    await setView('operations');
+    await setActiveOp('signatures');
+    await $('[data-testid="signatures-summary"]').waitForDisplayed({ timeout: 20000 });
+    // No trust source configured yet: the standing identity caveat.
+    await $('[data-testid="trust-caveat"]').waitForDisplayed({ timeout: 10000 });
+
+    await $('[data-testid="trust-system-store"]').click();
+    // A source is configured now, so the box becomes a verdict — a failed one,
+    // since a self-signed signer chains to nothing in any store.
+    const box = $('[data-testid="trust-status"]');
+    await box.waitForDisplayed({ timeout: 20000 });
+    expect(await box.getAttribute('data-trust')).toBe('failed');
+
+    // The preference survives a re-mount of the panel.
+    await setActiveOp('rotate');
+    await setActiveOp('signatures');
+    await $('[data-testid="trust-status"]').waitForDisplayed({ timeout: 20000 });
+    expect(await $('[data-testid="trust-system-store"]').isSelected()).toBe(true);
+
+    // Leave the app in its default posture for whatever runs next.
+    await $('[data-testid="trust-system-store"]').click();
+    await $('[data-testid="trust-caveat"]').waitForDisplayed({ timeout: 20000 });
+  });
 });
