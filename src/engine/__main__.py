@@ -53,6 +53,11 @@ from engine.ink_manager import (
     ink_settings_defaults,
     spot_to_process,
 )
+from engine.printer_marks import (
+    add_printer_marks,
+    list_printer_marks,
+    remove_printer_marks,
+)
 from engine.links import list_links, set_link_url, delete_link, add_links
 from engine.office_export import export_document, supported_formats
 from engine.image_export import export_images
@@ -191,6 +196,9 @@ def main() -> None:
     server.register("compare_ink_transforms", compare_tint_transforms)
     server.register("spot_to_process", spot_to_process)
     server.register("ink_settings_defaults", ink_settings_defaults)
+    server.register("add_printer_marks", add_printer_marks)
+    server.register("remove_printer_marks", remove_printer_marks)
+    server.register("list_printer_marks", list_printer_marks)
     server.register("get_struct_tree", get_struct_tree)
     server.register("set_struct_props", set_struct_props)
     server.register("move_struct_node", move_struct_node)
