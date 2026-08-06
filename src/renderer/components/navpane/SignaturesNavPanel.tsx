@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useEngine } from '../../hooks/useEngine';
 import {
   classifySignature,
+  LOCK_ACTION_LABEL,
   policyVerdict,
   POLICY_VERDICT_LABEL,
   signatureKind,
@@ -234,6 +235,27 @@ function SignatureRow({
           data-testid="signature-nav-policy"
         >
           {tChrome(POLICY_VERDICT_LABEL[verdict])}
+        </div>
+      )}
+      {/* The field lock is a third fact beside validity and the policy verdict,
+          and it is rendered HERE as well as on the tools panel: a persistent
+          readout that omits what the other surface shows is two answers to one
+          question. Both read the same label maps. */}
+      {sig.lock && (
+        <div
+          className="signature-nav-detail"
+          data-testid="signature-nav-lock"
+          data-lock-action={sig.lock.action}
+        >
+          {tChrome(LOCK_ACTION_LABEL[sig.lock.action], { fields: sig.lock.fields.join(', ') })}
+        </div>
+      )}
+      {sig.lock_violation && (
+        <div className="signature-nav-policy" data-testid="signature-nav-lock-violation">
+          {tChrome('panel.sig.lockViolated', {
+            field: sig.field ?? tChrome('nav.sig.unknownSigner'),
+            fields: sig.lock_violation.fields.join(', '),
+          })}
         </div>
       )}
       <div className="signature-nav-detail">
