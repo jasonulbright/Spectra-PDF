@@ -56,7 +56,7 @@ from pyhanko.sign.general import SigningError
 from pyhanko.sign.timestamps import HTTPTimeStamper
 from pyhanko.sign.validation import validate_pdf_signature
 
-from engine.docmdp import VALUE_BY_LEVEL, certification_of_file
+from engine.docmdp import LEVEL_BY_VALUE, VALUE_BY_LEVEL, certification_of_file
 from pyhanko import stamp
 from pyhanko.keys import load_certs_from_pemder_data, load_private_key_from_pemder_data
 from pyhanko_certvalidator import ValidationContext
@@ -132,7 +132,61 @@ def _subfilter_of(embedded) -> str | None:
         return None
 
 
-def _verify_one(embedded, context: ValidationContext | None = None) -> dict:
+def _signature_certification_level(embedded) -> str | None:
+    """The certification level THIS signature declares, or None for an approval
+    signature. A permission value outside the three defined levels reads as no
+    declared level rather than a guessed one."""
+    try:
+        level = embedded.docmdp_level
+    except Exception:
+        return None
+    if level is None:
+        return None
+    # The permission enum is ordered but not an int subclass, so its `.value`
+    # is the only integer that can be looked up.
+    return LEVEL_BY_VALUE.get(getattr(level, "value", None))
+
+
+def _unjudged(modification_level: str | None) -> dict:
+    return {
+        "policy_ok": None,
+        "policy_judged": False,
+        "modification_level": modification_level,
+    }
+
+
+def _policy_report(status, certification: dict) -> dict:
+    """Whether the changes since signing stay within the document's own
+    certification policy.
+
+    A verdict that CANNOT be made is reported as unmade — never as a pass and
+    never as a failure. The bundled difference policy carries no rules for
+    annotations, so under a certification that permits them every lawfully
+    added annotation is indistinguishable from a suspicious one, and that level
+    is therefore not judged here."""
+    level = status.modification_level
+    modification_level = level.name if level is not None else None
+    if not certification["certified"]:
+        # No certification policy is in force, so there is nothing to violate.
+        return {
+            "policy_ok": True,
+            "policy_judged": True,
+            "modification_level": modification_level,
+        }
+    if certification["level"] is None or certification["level"] == "annotate":
+        return _unjudged(modification_level)
+    if status.docmdp_ok is None:
+        return _unjudged(modification_level)
+    return {
+        "policy_ok": bool(status.docmdp_ok),
+        "policy_judged": True,
+        "modification_level": modification_level,
+    }
+
+
+def _verify_one(embedded, context: ValidationContext | None = None,
+                certification: dict | None = None) -> dict:
+    certification = certification or {"certified": False, "level": None}
     field = getattr(embedded, "field_name", None)
     ts = getattr(embedded, "self_reported_timestamp", None)
     subfilter = _subfilter_of(embedded)
@@ -165,6 +219,8 @@ def _verify_one(embedded, context: ValidationContext | None = None) -> dict:
             "timestamped": False,
             "timestamp_time": None,
             "timestamp_valid": False,
+            "certification_level": _signature_certification_level(embedded),
+            **_unjudged(None),
             "error": str(exc),
         }
     coverage = status.coverage.name if status.coverage is not None else "UNKNOWN"
@@ -195,6 +251,11 @@ def _verify_one(embedded, context: ValidationContext | None = None) -> dict:
             tsv.timestamp.isoformat() if tsv is not None and tsv.timestamp is not None else None
         ),
         "timestamp_valid": bool(tsv.valid and tsv.intact) if tsv is not None else False,
+        # The level THIS signature declares (None for an approval signature) —
+        # a document with one certification and several approvals must show
+        # which signature is the author's.
+        "certification_level": _signature_certification_level(embedded),
+        **_policy_report(status, certification),
     }
 
 
@@ -209,12 +270,19 @@ def verify_signatures(file: str, trust_roots: list | None = None) -> dict:
             False, the original explicit-trust posture.
     """
     context = _trust_context(trust_roots) if trust_roots else None
+    # /Perms /DocMDP is a CATALOG property, so the certification is
+    # document-level; the per-signature level below says which signature wrote
+    # it. Read first: every signature's policy verdict is relative to it.
+    certification = certification_of_file(file)
     with open(file, "rb") as f:
         reader = PdfFileReader(f)
         # Regular signatures only — a PAdES B-LTA document timestamp is a
         # different animal (it seals the DSS, it doesn't sign content) and
         # validate_pdf_signature would misreport it as a broken signature.
-        signatures = [_verify_one(esig, context) for esig in reader.embedded_regular_signatures]
+        signatures = [
+            _verify_one(esig, context, certification)
+            for esig in reader.embedded_regular_signatures
+        ]
         doc_timestamps = len(reader.embedded_timestamp_signatures)
         # Document Security Store (/DSS) — the PAdES B-LT container for
         # embedded certs + revocation data. Its presence is what makes a
@@ -255,6 +323,10 @@ def verify_signatures(file: str, trust_roots: list | None = None) -> dict:
     except Exception:
         pass
 
+    author_field = next(
+        (s["field"] for s in signatures if s.get("certification_level") is not None), None
+    )
+
     return {
         "signed": len(signatures) > 0,
         "signature_count": len(signatures),
@@ -262,6 +334,13 @@ def verify_signatures(file: str, trust_roots: list | None = None) -> dict:
         "ltv_info_present": has_dss,
         # PAdES B-LTA document timestamps sealing the file (0 = none).
         "document_timestamps": doc_timestamps,
+        "certification": {
+            "certified": bool(certification["certified"]),
+            "level": certification["level"],
+            "level_value": certification["level_value"],
+            "field": author_field,
+            "error": certification["error"],
+        },
         "summary": {
             # Every signature is both crypto-valid AND covers intact bytes.
             "all_valid": bool(signatures) and all(s["valid"] and s["intact"] for s in signatures),
@@ -269,6 +348,9 @@ def verify_signatures(file: str, trust_roots: list | None = None) -> dict:
             # True only when validated against user-supplied anchors.
             "trust_verified": bool(trust_roots) and bool(signatures)
             and all(s["trusted"] for s in signatures),
+            "certified": bool(certification["certified"]),
+            # An UNJUDGED signature is not a violation; only a judged failure is.
+            "any_policy_violation": any(s.get("policy_ok") is False for s in signatures),
         },
     }
 
