@@ -15,11 +15,13 @@ import pikepdf
 import pytest
 
 from engine.flattener import (
+    DEFAULT_BALANCE,
     DEFAULT_DPI,
     compute_regions,
     drop_dead_frames,
     flatten_transparency,
     list_transparency,
+    merge_gap,
     page_objects,
     snap_to_pixel,
 )
@@ -143,6 +145,29 @@ def test_the_snap_only_ever_grows_a_region():
     assert snap_to_pixel(400.0, 150, False) <= 400.0
     assert snap_to_pixel(400.0, 150, True) >= 400.0
     assert snap_to_pixel(480.0, 150, True) == 480.0
+
+
+def test_the_merge_gap_spreads_the_useful_distances_across_the_control():
+    """A linear gap makes almost the whole control useless: half a page
+    diagonal already merges everything on a letter page, so every setting past
+    about a tenth rasterizes the lot."""
+    diagonal = 1000.0
+    assert merge_gap(0.0, diagonal) == 0.0
+    assert merge_gap(1.0, diagonal) == diagonal
+    # The middle of the travel is a distance a page has, not a page and a half.
+    assert 20.0 < merge_gap(0.5, diagonal) < 80.0
+    previous = -1.0
+    for step in range(11):
+        current = merge_gap(step / 10.0, diagonal)
+        assert current > previous
+        previous = current
+
+
+def test_the_default_balance_leaves_text_clear_of_the_region_live(tmp_dir):
+    source = text_and_alpha_square_pdf(os.path.join(tmp_dir, "a.pdf"))
+    page = _page(list_transparency(source, balance=DEFAULT_BALANCE))
+    assert page["counts"]["outlined_text"] == 0
+    assert page["whole_page"] is False
 
 
 def test_balance_toward_vector_keeps_the_regions_apart(tmp_dir):
