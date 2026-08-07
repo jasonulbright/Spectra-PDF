@@ -1586,7 +1586,7 @@
   "engine.printer.mustBetweenGot": "{{name}} は {{lo}} 〜 {{hi}} にしてください（指定値：{{value}}）",
   "engine.printer.mustNumberGot": "{{name}} は数値にしてください（指定値：{{value}}）",
   "engine.printer.mustTrueFalseGot": "{{name}} は true または false にしてください（指定値：{{value}}）",
-  "engine.printer.pageBeyondDocumentPage": "ページ {{end}} は文書の範囲外です（{{page_count}} ページ{{v2}}）",
+  "engine.printer.pageBeyondDocumentPage": "ページ {{end}} は文書の範囲外です（全 {{page_count}} ページ）",
   "engine.printer.pageNumbersBased": "ページ番号は 1 から始まります：'{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "ページの選択が空です（一致するページがありません）",
   "engine.printer.perSheetMustGot": "1 枚あたりの{{label}}は 1 〜 8 にしてください（指定値：{{v}}）",

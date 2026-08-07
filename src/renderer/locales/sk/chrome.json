@@ -1739,7 +1739,7 @@
   "engine.printer.mustBetweenGot": "{{name}} musí byť od {{lo}} do {{hi}}, prijaté {{value}}",
   "engine.printer.mustNumberGot": "{{name}} musí byť číslo, prijaté {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} musí byť true alebo false, prijaté {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "Strana {{end}} je mimo dokumentu ({{page_count}} str.{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "Strana {{end}} je mimo dokumentu (spolu {{page_count}} str.)",
   "engine.printer.pageNumbersBased": "Čísla strán sa počítajú od 1: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "Výber strán je prázdny (žiadna strana nezodpovedá)",
   "engine.printer.perSheetMustGot": "{{label}} na hárok musí byť 1-8, prijaté {{v}}",

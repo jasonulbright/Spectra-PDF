@@ -1739,7 +1739,7 @@
   "engine.printer.mustBetweenGot": "{{name}} musi mieścić się w zakresie od {{lo}} do {{hi}}, otrzymano {{value}}",
   "engine.printer.mustNumberGot": "{{name}} musi być liczbą, otrzymano {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} musi mieć wartość true albo false, otrzymano {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "Strona {{end}} jest poza dokumentem ({{page_count}} str.{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "Strona {{end}} jest poza dokumentem (łącznie {{page_count}} str.)",
   "engine.printer.pageNumbersBased": "Numery stron liczy się od 1: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "Wybór stron jest pusty (żadna strona nie pasuje)",
   "engine.printer.perSheetMustGot": "{{label}} na arkusz musi mieścić się w zakresie 1-8, otrzymano {{v}}",

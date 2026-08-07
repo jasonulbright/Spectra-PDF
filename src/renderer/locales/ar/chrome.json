@@ -1837,7 +1837,7 @@
   "engine.printer.mustBetweenGot": "يجب أن تتراوح قيمة {{name}} بين {{lo}} و {{hi}}، لكن الوارد هو {{value}}",
   "engine.printer.mustNumberGot": "يجب أن تكون قيمة {{name}} عددًا، لكن الوارد هو {{value}}",
   "engine.printer.mustTrueFalseGot": "يجب أن تكون قيمة {{name}} إما true أو false، لكن الوارد هو {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "الصفحة {{end}} تتجاوز حدود المستند، وعدد صفحاته {{page_count}} صفحة {{v2}}",
+  "engine.printer.pageBeyondDocumentPage": "الصفحة {{end}} تتجاوز حدود المستند (إجمالي الصفحات: {{page_count}})",
   "engine.printer.pageNumbersBased": "أرقام الصفحات تبدأ من 1: «{{token}}»",
   "engine.printer.pageSelectionEmptyPages": "تحديد الصفحات فارغ — لا توجد صفحات مطابقة",
   "engine.printer.perSheetMustGot": "يجب أن يتراوح عدد {{label}} في الورقة بين 1 و 8، لكن الوارد هو {{v}}",

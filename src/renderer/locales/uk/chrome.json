@@ -1739,7 +1739,7 @@
   "engine.printer.mustBetweenGot": "{{name}} має бути від {{lo}} до {{hi}}, отримано {{value}}",
   "engine.printer.mustNumberGot": "{{name}} має бути числом, отримано {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} має бути true або false, отримано {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "Сторінка {{end}} перебуває за межами документа ({{page_count}} стор.{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "Сторінка {{end}} перебуває за межами документа (усього {{page_count}} стор.)",
   "engine.printer.pageNumbersBased": "Нумерація сторінок починається з 1: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "Вибір сторінок порожній (жодна сторінка не підходить)",
   "engine.printer.perSheetMustGot": "{{label}} на аркуш має бути 1-8, отримано {{v}}",

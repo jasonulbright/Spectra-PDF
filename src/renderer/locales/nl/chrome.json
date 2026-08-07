@@ -1641,7 +1641,7 @@
   "engine.printer.mustBetweenGot": "{{name}} moet tussen {{lo}} en {{hi}} liggen, maar is {{value}}",
   "engine.printer.mustNumberGot": "{{name}} moet een getal zijn, maar is {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} moet true of false zijn, maar is {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "Pagina {{end}} ligt voorbij het document ({{page_count}} pagina{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "Pagina {{end}} ligt voorbij het document (pagina's in totaal: {{page_count}})",
   "engine.printer.pageNumbersBased": "Paginanummers beginnen bij 1: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "De paginaselectie is leeg (geen pagina's komen overeen)",
   "engine.printer.perSheetMustGot": "{{label}} per vel moet 1-8 zijn, maar is {{v}}",

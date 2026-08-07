@@ -1739,7 +1739,7 @@
   "engine.printer.mustBetweenGot": "{{name}} должно быть от {{lo}} до {{hi}}, получено {{value}}",
   "engine.printer.mustNumberGot": "{{name}} должно быть числом, получено {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} должно быть true или false, получено {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "Страница {{end}} находится за пределами документа ({{page_count}} стр.{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "Страница {{end}} находится за пределами документа (всего {{page_count}} стр.)",
   "engine.printer.pageNumbersBased": "Нумерация страниц начинается с 1: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "Выбор страниц пуст (ни одна страница не подходит)",
   "engine.printer.perSheetMustGot": "{{label}} на лист должно быть 1-8, получено {{v}}",

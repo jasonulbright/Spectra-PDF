@@ -1641,7 +1641,7 @@
   "engine.printer.mustBetweenGot": "{{name}} on oltava välillä {{lo}}–{{hi}}, mutta se on {{value}}",
   "engine.printer.mustNumberGot": "{{name}} on oltava luku, mutta se on {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} on oltava true tai false, mutta se on {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "Sivu {{end}} on asiakirjan ulkopuolella ({{page_count}} sivu{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "Sivu {{end}} on asiakirjan ulkopuolella (sivuja yhteensä: {{page_count}})",
   "engine.printer.pageNumbersBased": "Sivunumerot alkavat numerosta 1: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "Sivuvalinta on tyhjä (yksikään sivu ei vastaa)",
   "engine.printer.perSheetMustGot": "{{label}} arkkia kohti on oltava 1–8, mutta se on {{v}}",
