@@ -122,17 +122,24 @@ export function stripExtension(filename: string): string {
   return filename.replace(/\.(pdf|pdfx)$/i, '');
 }
 
+// `getAttachments` yields a Map of metadata only — the bytes do not ride the
+// worker boundary with it, and `content` is populated only when the catalog
+// already holds them. An entry without `content` needs `getAttachmentContent`
+// keyed by the map key; reading `content` alone recovers no manifest and a
+// .pdfx silently opens as one flat document.
 export async function readManifest(pdf: PDFDocumentProxy): Promise<PdfxManifest | null> {
-  const attachments = (await pdf.getAttachments()) as Record<
+  const attachments = (await pdf.getAttachments()) as Map<
     string,
-    { filename?: string; content: Uint8Array }
+    { filename?: string; content?: Uint8Array | null }
   > | null;
   if (!attachments) return null;
 
-  for (const [key, attachment] of Object.entries(attachments)) {
-    if ((attachment.filename ?? key) !== MANIFEST_NAME) continue;
+  for (const [key, attachment] of attachments) {
+    if (attachment.filename !== MANIFEST_NAME && key !== MANIFEST_NAME) continue;
+    const content = attachment.content ?? (await pdf.getAttachmentContent(key));
+    if (!content) return null;
     try {
-      const manifest = JSON.parse(new TextDecoder().decode(attachment.content)) as PdfxManifest;
+      const manifest = JSON.parse(new TextDecoder().decode(content)) as PdfxManifest;
       const valid =
         manifest &&
         Array.isArray(manifest.documents) &&

@@ -18,7 +18,7 @@
     "axe-core": "4.12.1",
     "cross-env": "^10.1.0",
     "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^6.0.227",
+    "pdfjs-dist": "^6.2.108",
     "ts-node": "^10.9.0",
     "tsx": "^4.23.5",
     "typescript": "^6.0.3"
