@@ -1592,7 +1592,7 @@
   "engine.printer.mustBetweenGot": "{{name}} 必須介於 {{lo}} 與 {{hi}} 之間，卻得到 {{value}}",
   "engine.printer.mustNumberGot": "{{name}} 必須是數字，卻得到 {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} 必須是 true 或 false，卻得到 {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "第 {{end}} 頁超出文件範圍（共 {{page_count}} 頁{{v2}}）",
+  "engine.printer.pageBeyondDocumentPage": "第 {{end}} 頁超出文件範圍（共 {{page_count}} 頁）",
   "engine.printer.pageNumbersBased": "頁碼從 1 開始：'{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "頁面選取為空（沒有相符的頁面）",
   "engine.printer.perSheetMustGot": "每張紙的{{label}}必須介於 1-8，卻得到 {{v}}",

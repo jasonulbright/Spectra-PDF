@@ -1641,7 +1641,7 @@
   "engine.printer.mustBetweenGot": "Το {{name}} πρέπει να είναι μεταξύ {{lo}} και {{hi}}, βρέθηκε {{value}}",
   "engine.printer.mustNumberGot": "Το {{name}} πρέπει να είναι αριθμός, βρέθηκε {{value}}",
   "engine.printer.mustTrueFalseGot": "Το {{name}} πρέπει να είναι true ή false, βρέθηκε {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "Η σελίδα {{end}} είναι πέρα από το έγγραφο ({{page_count}} σελίδα{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "Η σελίδα {{end}} είναι πέρα από το έγγραφο (σύνολο σελίδων: {{page_count}})",
   "engine.printer.pageNumbersBased": "Οι αριθμοί σελίδων ξεκινούν από το 1: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "Η επιλογή σελίδων είναι κενή (καμία σελίδα δεν ταιριάζει)",
   "engine.printer.perSheetMustGot": "Το {{label}} ανά φύλλο πρέπει να είναι 1-8, βρέθηκε {{v}}",

@@ -1739,7 +1739,7 @@
   "engine.printer.mustBetweenGot": "{{name}} mora biti med {{lo}} in {{hi}}, dobljeno {{value}}",
   "engine.printer.mustNumberGot": "{{name}} mora biti število, dobljeno {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} mora biti true ali false, dobljeno {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "Stran {{end}} je zunaj dokumenta ({{page_count}} strani{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "Stran {{end}} je zunaj dokumenta (skupaj strani: {{page_count}})",
   "engine.printer.pageNumbersBased": "Številke strani se štejejo od 1: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "Izbor strani je prazen (nobena stran se ne ujema)",
   "engine.printer.perSheetMustGot": "{{label}} na list mora biti 1-8, dobljeno {{v}}",

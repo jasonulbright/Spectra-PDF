@@ -1684,7 +1684,7 @@
   "engine.printer.mustBetweenGot": "{{name}} doit être compris entre {{lo}} et {{hi}} ; reçu {{value}}",
   "engine.printer.mustNumberGot": "{{name}} doit être un nombre ; reçu {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} doit valoir true ou false ; reçu {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "La page {{end}} dépasse le document ({{page_count}} page{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "La page {{end}} dépasse le document (nombre total de pages : {{page_count}})",
   "engine.printer.pageNumbersBased": "La numérotation des pages commence à 1 : « {{token}} »",
   "engine.printer.pageSelectionEmptyPages": "La sélection de pages est vide (aucune page ne correspond)",
   "engine.printer.perSheetMustGot": "{{label}} par feuille doit être compris entre 1 et 8 ; reçu {{v}}",

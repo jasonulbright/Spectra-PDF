@@ -1641,7 +1641,7 @@
   "engine.printer.mustBetweenGot": "{{name}} måste vara mellan {{lo}} och {{hi}}, men är {{value}}",
   "engine.printer.mustNumberGot": "{{name}} måste vara ett tal, men är {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} måste vara true eller false, men är {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "Sida {{end}} ligger utanför dokumentet ({{page_count}} sida{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "Sida {{end}} ligger utanför dokumentet (sidor totalt: {{page_count}})",
   "engine.printer.pageNumbersBased": "Sidnummer börjar på 1: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "Sidurvalet är tomt (inga sidor matchar)",
   "engine.printer.perSheetMustGot": "{{label}} per ark måste vara 1-8, men är {{v}}",

@@ -95,6 +95,7 @@
 - Arabic page numbers use the same digits the document draws on its pages.
 - File paths, keyboard shortcuts and page ranges stay readable inside right-to-left sentences.
 - A system set to Hebrew under the older "iw" language code now opens in Hebrew.
+- A page range past the last page is refused in the language on screen, with no English plural ending left in the sentence.
 
 ## 1.0.22
 
