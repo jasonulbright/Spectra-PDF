@@ -30,7 +30,7 @@ const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 // Mirrors SHIPPED_LOCALES in src/renderer/i18n.ts — imported indirectly
 // would drag i18next's init (and its DOM expectations) into this node
 // test, so the list is pinned here and a drift fails the parity loop.
-const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl'];
+const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da'];
 
 /**
  * The plural categories a locale's forms must cover, read from CLDR at gate
@@ -83,6 +83,9 @@ const INVARIANT_PLURALS: Record<string, PluralPolicy> = {
       'panel.tags.summary',
     ],
   },
+  // Danish `sprog` is a neuter noun whose plural is identical to its singular
+  // (et sprog / to sprog); no inflecting synonym names a recognition language.
+  da: { keys: ['dialog.ocr.langCount'] },
   tr: { policy: 'numeral-invariant' },
   hu: { policy: 'numeral-invariant' },
   ar: { merged: [['zero', 'few']] },
