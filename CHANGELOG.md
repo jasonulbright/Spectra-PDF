@@ -75,7 +75,7 @@
 - Preferences says the system palette is in control, and remembers the theme you chose untouched.
 
 ### Languages
-- The interface is available in English, Spanish, French, German, Italian, Brazilian Portuguese, Japanese, Simplified Chinese, Traditional Chinese, Korean, Dutch, Danish, Swedish, Norwegian Bokmål, Finnish, Russian, Ukrainian, Polish, Czech, Slovak, Turkish, Hungarian, Greek, Romanian, Slovenian and Catalan.
+- The interface is available in English, Spanish, French, German, Italian, Brazilian Portuguese, Japanese, Simplified Chinese, Traditional Chinese, Korean, Dutch, Danish, Swedish, Norwegian Bokmål, Finnish, Russian, Ukrainian, Polish, Czech, Slovak, Turkish, Hungarian, Greek, Romanian, Slovenian, Catalan, Arabic and Hebrew.
 - Russian, Ukrainian, Polish, Czech and Slovak counts carry all four of their number forms, each with the agreement that form takes.
 - Spanish, French, Italian and Portuguese counts in the millions now read in that language, not English.
 - Symbol search matches an uppercase I whatever regional format the computer is set to.
@@ -88,6 +88,13 @@
 - Slovenian counts use the dual for exactly two, alongside its singular, few and plural forms.
 - Greek headings uppercase without their accents, as Greek is set in capitals.
 - A Traditional Chinese, Hong Kong or Macau system opens in Traditional Chinese.
+- In Arabic and Hebrew the whole interface reads right to left: panels, toolbars, lists and dialog buttons all change sides.
+- The page itself never flips. A page keeps its own corners, resize handles keep the corner you grabbed, and the rulers still measure from the page origin, whatever language the interface is in.
+- Arabic counts carry all six of their number forms, including the dual for two and the plural for three to ten.
+- Hebrew counts carry its singular, dual and plural forms.
+- Arabic page numbers use the same digits the document draws on its pages.
+- File paths, keyboard shortcuts and page ranges stay readable inside right-to-left sentences.
+- A system set to Hebrew under the older "iw" language code now opens in Hebrew.
 
 ## 1.0.22
 
