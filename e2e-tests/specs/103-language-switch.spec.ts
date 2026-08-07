@@ -205,4 +205,66 @@ describe('language switch', () => {
     expect(await browser.execute(() => document.documentElement.lang)).toBe('en');
     await $('[data-testid="prefs-close"]').click();
   });
+
+  // The invariant-form wave. The two CJK anchors are the load-bearing ones:
+  // zh-TW's 檢視 and zh-CN's 视图 are different words for View, not two
+  // spellings of one — a catalog produced by running zh-CN through a
+  // character converter would read 視圖 here and fail. Korean 보기 is a
+  // non-homograph of every other locale's label. The overflow walk runs
+  // again because a Hangul or Traditional label can be wider than the Latin
+  // one it replaced in a fixed-width segment.
+  it('switches to each wave-E locale, and no fixed-width chrome overflows', async () => {
+    await waitForHarness();
+    await browser.keys(['Control', 'k']);
+    await $('[data-testid="prefs-cat-appearance"]').waitForDisplayed({ timeout: 10_000 });
+    await $('[data-testid="prefs-cat-appearance"]').click();
+    await $('[data-testid="prefs-language"]').waitForDisplayed({ timeout: 10_000 });
+
+    for (const [code, viewLabel] of [
+      ['ko', '보기'],
+      ['zh-TW', '檢視'],
+    ] as const) {
+      await $('[data-testid="prefs-language"]').selectByAttribute('value', code);
+      await browser.waitUntil(
+        async () => (await $('[data-testid="menu-view"]').getText()) === viewLabel,
+        { timeout: 10_000, timeoutMsg: `the menu bar never re-rendered in ${code}` },
+      );
+      expect(await browser.execute(() => document.documentElement.lang)).toBe(code);
+
+      const clipped = await browser.execute((l: string) => {
+        const regions = ['prefs-body-appearance', 'canvas-status-bar', 'menubar'];
+        const out: string[] = [];
+        for (const id of regions) {
+          const root = document.querySelector(`[data-testid="${id}"]`);
+          if (!root) continue;
+          for (const el of Array.from(root.querySelectorAll('button, label, option, span'))) {
+            const e = el as HTMLElement;
+            if (!e.offsetParent) continue;
+            const overflow = getComputedStyle(e).overflowX;
+            if (overflow === 'auto' || overflow === 'scroll') continue;
+            if (e.scrollWidth > e.clientWidth + 1) {
+              out.push(`${l} ${id}: ${(e.textContent ?? '').trim().slice(0, 60)}`);
+            }
+          }
+        }
+        return out;
+      }, code);
+      expect(clipped).toEqual([]);
+    }
+
+    // The Simplified catalog is still its own: 视图, not 檢視.
+    await $('[data-testid="prefs-language"]').selectByAttribute('value', 'zh-CN');
+    await browser.waitUntil(
+      async () => (await $('[data-testid="menu-view"]').getText()) === '视图',
+      { timeout: 10_000, timeoutMsg: 'the menu bar never re-rendered in zh-CN' },
+    );
+
+    await $('[data-testid="prefs-language"]').selectByAttribute('value', 'en');
+    await browser.waitUntil(
+      async () => (await $('[data-testid="menu-view"]').getText()) === 'View',
+      { timeout: 10_000, timeoutMsg: 'the menu bar never returned to English' },
+    );
+    expect(await browser.execute(() => document.documentElement.lang)).toBe('en');
+    await $('[data-testid="prefs-close"]').click();
+  });
 });
