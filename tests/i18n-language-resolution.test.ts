@@ -62,9 +62,28 @@ describe('resolveLanguage', () => {
     }
     expect(LANGUAGE_ALIASES['no']).toBe('nb');
     expect(LANGUAGE_ALIASES['nn']).toBe('nb');
-    expect(resolveLanguage('iw')).toBe('en');
-    expect(resolveLanguage('iw-IL')).toBe('en');
+    // `iw` is the legacy tag some systems still report for Hebrew. Its alias
+    // row was authored before the catalog existed and answered English while
+    // the target was unshipped; landing `he` flipped it with no edit to the
+    // table, which is what "the alias is AUTHORITATIVE" buys.
+    expect(resolveLanguage('iw')).toBe('he');
+    expect(resolveLanguage('iw-IL')).toBe('he');
     expect(LANGUAGE_ALIASES['iw']).toBe('he');
+  });
+
+  it('takes the Arabic and Hebrew regional tags to their bare catalogs', () => {
+    // Neither earns an alias row: each base has exactly one catalog, so the
+    // single-candidate base match answers. `ar` ships BARE deliberately — the
+    // regional tags select Arabic-Indic digits, which would then disagree
+    // with the Western digits the document's own page labels are drawn in.
+    for (const tag of ['ar', 'ar-EG', 'ar-SA', 'ar-AE', 'ar-Arab-EG']) {
+      expect(resolveLanguage(tag), tag).toBe('ar');
+    }
+    for (const tag of ['he', 'he-IL']) {
+      expect(resolveLanguage(tag), tag).toBe('he');
+    }
+    expect(LANGUAGE_ALIASES['ar']).toBeUndefined();
+    expect(LANGUAGE_ALIASES['he']).toBeUndefined();
   });
 
   it('decides every ambiguous base from the alias table, never from array order', () => {
@@ -141,7 +160,7 @@ describe('textDirection', () => {
       if (rtl.includes(tag)) continue;
       expect(textDirection(tag), tag).toBe('ltr');
     }
-    expect(SHIPPED_LOCALES.filter((l) => textDirection(l) === 'rtl')).toEqual(['ar']);
+    expect(SHIPPED_LOCALES.filter((l) => textDirection(l) === 'rtl')).toEqual(['ar', 'he']);
   });
 
   it('answers for the pseudo-locales, which have no BCP-47 identity', () => {
