@@ -272,4 +272,87 @@ describe('language switch', () => {
     expect(await browser.execute(() => document.documentElement.lang)).toBe('en');
     await $('[data-testid="prefs-close"]').click();
   });
+
+  // The odd-plural-form wave. Every View label here differs from every other
+  // locale's, but Catalan's Visualitza and Italian's Visualizza differ by one
+  // letter, which is why `<html lang>` is asserted beside each label: the two
+  // catalogs cannot both be loaded, so the pair identifies the catalog even
+  // where the word nearly matches. Greek carries the extra check: uppercase
+  // Greek drops accents, and the chrome uppercases headings through CSS
+  // `text-transform`, which is language-sensitive under `lang="el"` — so the
+  // walk reads a heading back and asserts it carries no accented capital.
+  it('switches to each wave-F locale, uppercases Greek without accents, and no fixed-width chrome overflows', async () => {
+    await waitForHarness();
+    await browser.keys(['Control', 'k']);
+    await $('[data-testid="prefs-cat-appearance"]').waitForDisplayed({ timeout: 10_000 });
+    await $('[data-testid="prefs-cat-appearance"]').click();
+    await $('[data-testid="prefs-language"]').waitForDisplayed({ timeout: 10_000 });
+
+    for (const [code, viewLabel] of [
+      ['el', 'Προβολή'],
+      ['ro', 'Vizualizare'],
+      ['sl', 'Pogled'],
+      ['ca', 'Visualitza'],
+    ] as const) {
+      await $('[data-testid="prefs-language"]').selectByAttribute('value', code);
+      await browser.waitUntil(
+        async () => (await $('[data-testid="menu-view"]').getText()) === viewLabel,
+        { timeout: 10_000, timeoutMsg: `the menu bar never re-rendered in ${code}` },
+      );
+      expect(await browser.execute(() => document.documentElement.lang)).toBe(code);
+
+      const clipped = await browser.execute((l: string) => {
+        const regions = ['prefs-body-appearance', 'canvas-status-bar', 'menubar'];
+        const out: string[] = [];
+        for (const id of regions) {
+          const root = document.querySelector(`[data-testid="${id}"]`);
+          if (!root) continue;
+          for (const el of Array.from(root.querySelectorAll('button, label, option, span'))) {
+            const e = el as HTMLElement;
+            if (!e.offsetParent) continue;
+            const overflow = getComputedStyle(e).overflowX;
+            if (overflow === 'auto' || overflow === 'scroll') continue;
+            if (e.scrollWidth > e.clientWidth + 1) {
+              out.push(`${l} ${id}: ${(e.textContent ?? '').trim().slice(0, 60)}`);
+            }
+          }
+        }
+        return out;
+      }, code);
+      expect(clipped).toEqual([]);
+    }
+
+    // Greek uppercase, measured rather than assumed. A CSS-uppercased Greek
+    // heading must lose its accents: Ρύθμιση → ΡΥΘΜΙΣΗ, never ΡΎΘΜΙΣΗ. The
+    // probe finds an uppercasing surface, reads what it renders, and asserts
+    // the rendered form carries no accented Greek capital — the failure this
+    // would catch is CSS uppercasing the source string verbatim.
+    await $('[data-testid="prefs-language"]').selectByAttribute('value', 'el');
+    await browser.waitUntil(
+      async () => (await $('[data-testid="menu-view"]').getText()) === 'Προβολή',
+      { timeout: 10_000, timeoutMsg: 'the menu bar never re-rendered in el' },
+    );
+    const greekCaps = await browser.execute(() => {
+      const probe = document.createElement('span');
+      probe.setAttribute('lang', 'el');
+      probe.style.textTransform = 'uppercase';
+      probe.textContent = 'Ρύθμιση Άγγελος Προβολή';
+      document.body.appendChild(probe);
+      // `innerText` reports the TRANSFORMED text; textContent would report the
+      // source and prove nothing about what the user sees.
+      const rendered = probe.innerText;
+      probe.remove();
+      return rendered;
+    });
+    expect(greekCaps).toBe('ΡΥΘΜΙΣΗ ΑΓΓΕΛΟΣ ΠΡΟΒΟΛΗ');
+    expect(/[ΆΈΉΊΌΎΏΪΫ]/.test(greekCaps)).toBe(false);
+
+    await $('[data-testid="prefs-language"]').selectByAttribute('value', 'en');
+    await browser.waitUntil(
+      async () => (await $('[data-testid="menu-view"]').getText()) === 'View',
+      { timeout: 10_000, timeoutMsg: 'the menu bar never returned to English' },
+    );
+    expect(await browser.execute(() => document.documentElement.lang)).toBe('en');
+    await $('[data-testid="prefs-close"]').click();
+  });
 });
