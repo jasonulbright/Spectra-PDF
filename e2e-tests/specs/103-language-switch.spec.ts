@@ -148,4 +148,61 @@ describe('language switch', () => {
     expect(await browser.execute(() => document.documentElement.lang)).toBe('en');
     await $('[data-testid="prefs-close"]').click();
   });
+
+  // The four-plural-form Slavic wave. Every View label here is a non-homograph
+  // of the English one, and the two Cyrillic ones (Вид / Вигляд) additionally
+  // prove the catalog is the right one of the pair — the two languages share
+  // most of their vocabulary, so a label they spell differently is what
+  // separates them. The overflow walk runs again: Czech and Slovak compounds
+  // (Náhled sloučení průhlednosti) are as long as the Finnish ones.
+  it('switches to each wave-D locale, and no fixed-width chrome overflows', async () => {
+    await waitForHarness();
+    await browser.keys(['Control', 'k']);
+    await $('[data-testid="prefs-cat-appearance"]').waitForDisplayed({ timeout: 10_000 });
+    await $('[data-testid="prefs-cat-appearance"]').click();
+    await $('[data-testid="prefs-language"]').waitForDisplayed({ timeout: 10_000 });
+
+    for (const [code, viewLabel] of [
+      ['ru', 'Вид'],
+      ['uk', 'Вигляд'],
+      ['pl', 'Widok'],
+      ['cs', 'Zobrazit'],
+      ['sk', 'Zobraziť'],
+    ] as const) {
+      await $('[data-testid="prefs-language"]').selectByAttribute('value', code);
+      await browser.waitUntil(
+        async () => (await $('[data-testid="menu-view"]').getText()) === viewLabel,
+        { timeout: 10_000, timeoutMsg: `the menu bar never re-rendered in ${code}` },
+      );
+      expect(await browser.execute(() => document.documentElement.lang)).toBe(code);
+
+      const clipped = await browser.execute((l: string) => {
+        const regions = ['prefs-body-appearance', 'canvas-status-bar', 'menubar'];
+        const out: string[] = [];
+        for (const id of regions) {
+          const root = document.querySelector(`[data-testid="${id}"]`);
+          if (!root) continue;
+          for (const el of Array.from(root.querySelectorAll('button, label, option, span'))) {
+            const e = el as HTMLElement;
+            if (!e.offsetParent) continue;
+            const overflow = getComputedStyle(e).overflowX;
+            if (overflow === 'auto' || overflow === 'scroll') continue;
+            if (e.scrollWidth > e.clientWidth + 1) {
+              out.push(`${l} ${id}: ${(e.textContent ?? '').trim().slice(0, 60)}`);
+            }
+          }
+        }
+        return out;
+      }, code);
+      expect(clipped).toEqual([]);
+    }
+
+    await $('[data-testid="prefs-language"]').selectByAttribute('value', 'en');
+    await browser.waitUntil(
+      async () => (await $('[data-testid="menu-view"]').getText()) === 'View',
+      { timeout: 10_000, timeoutMsg: 'the menu bar never returned to English' },
+    );
+    expect(await browser.execute(() => document.documentElement.lang)).toBe('en');
+    await $('[data-testid="prefs-close"]').click();
+  });
 });
