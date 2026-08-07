@@ -30,7 +30,7 @@ const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 // Mirrors SHIPPED_LOCALES in src/renderer/i18n.ts — imported indirectly
 // would drag i18next's init (and its DOM expectations) into this node
 // test, so the list is pinned here and a drift fails the parity loop.
-const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv', 'nb', 'fi', 'ru', 'uk', 'pl', 'cs', 'sk', 'ko', 'zh-TW', 'tr', 'hu'];
+const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv', 'nb', 'fi', 'ru', 'uk', 'pl', 'cs', 'sk', 'ko', 'zh-TW', 'tr', 'hu', 'el'];
 
 /**
  * The plural categories a locale's forms must cover, read from CLDR at gate
@@ -135,6 +135,10 @@ const INVARIANT_PLURALS: Record<string, PluralPolicy> = {
   // a link and `зображення` the only word for an image; every other Ukrainian
   // count in this catalog inflects and is still gated.
   uk: { keys: ['panel.links.summary', 'panel.preflight.images'] },
+  // Greek borrows `byte` as an indeclinable neuter: 1 byte / 5 byte. The
+  // native ψηφιολέξη inflects but names a unit no Greek file-size readout
+  // uses. Every other Greek count in this catalog inflects and is still gated.
+  el: { keys: ['dialog.props.bytes'] },
   tr: { policy: 'numeral-invariant' },
   hu: { policy: 'numeral-invariant' },
   ar: { merged: [['zero', 'few']] },
