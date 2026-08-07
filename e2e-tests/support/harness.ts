@@ -1847,3 +1847,60 @@ export async function scheduleRemove(name: string): Promise<void> {
     return (window as any).__SPECTRA_TEST__.scheduleRemove(n);
   }, name);
 }
+
+export interface TableReviewRow {
+  id: string;
+  page: number;
+  caption: string | null;
+  /** Column starts as fractions of the table's own width, ascending. */
+  columns: number[];
+  rows: number;
+  cells: number;
+  accepted: boolean;
+}
+
+/** The detected tables the review is holding. */
+export async function tableReviewList(): Promise<TableReviewRow[]> {
+  return await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.tableReviewList();
+  });
+}
+
+export async function tableReviewToggle(regionId: string): Promise<void> {
+  await browser.execute(function (id: string) {
+    return (window as any).__SPECTRA_TEST__.tableReviewToggle(id);
+  }, regionId);
+}
+
+/** Move a column boundary to `fraction` of the table's own width. */
+export async function tableReviewMoveColumn(
+  regionId: string,
+  index: number,
+  fraction: number,
+): Promise<void> {
+  await browser.execute(
+    function (id: string, i: number, f: number) {
+      return (window as any).__SPECTRA_TEST__.tableReviewMoveColumn(id, i, f);
+    },
+    regionId,
+    index,
+    fraction,
+  );
+}
+
+/** Write the accepted tables (bypasses the native save dialog). Returns the
+ *  string '__SPECTRA_E2E_ERROR__:…' on failure so the spec can assert on it. */
+export async function tableReviewExport(
+  destPath: string,
+  options?: { sheetPer?: string; includeUntabled?: boolean },
+): Promise<unknown> {
+  return await browser.executeAsync<unknown, [string, object]>(
+    function (dest, opts, done) {
+      (window as any).__SPECTRA_TEST__.tableReviewExport(dest, opts)
+        .then((r: unknown) => done(r as any))
+        .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
+    },
+    destPath,
+    options ?? {},
+  );
+}

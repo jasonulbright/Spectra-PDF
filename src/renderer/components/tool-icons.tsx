@@ -305,6 +305,16 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
   ),
   // A document with a brush sweeping across it — what is carried away is what
   // was never on the page.
+  // A grid with one column boundary drawn heavier — the line the review moves.
+  tablereview: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="1" />
+      <path d="M3 9h18" strokeWidth="1" />
+      <path d="M3 14.5h18" strokeWidth="1" />
+      <path d="M9 4v16" strokeWidth="1" />
+      <path d="M15 4v16" />
+    </>
+  ),
   sanitize: (
     <>
       <path d="M7 3h7l4 4v6" />

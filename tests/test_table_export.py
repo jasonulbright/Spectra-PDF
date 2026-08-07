@@ -8,7 +8,12 @@ from openpyxl import load_workbook
 from pikepdf import Array, Dictionary, Name
 
 from engine.office_export import export_document
-from engine.table_export import detect_tables, numeric_convention, parse_cell
+from engine.table_export import (
+    detect_table_regions,
+    detect_tables,
+    numeric_convention,
+    parse_cell,
+)
 
 ROWS = [
     ["Region", "Q1", "Q2", "Q3"],
@@ -425,3 +430,162 @@ def test_the_separator_convention_comes_from_the_document():
     assert numeric_convention(["980", "1,200"]) == "dot"
     assert parse_cell("1.200,50", "comma") == (1200.5, "#,##0.00")
     assert parse_cell("12,5%", "comma") == (0.125, "0.00%")
+
+
+# --------------------------------------------------------------------------
+# The reviewed table set
+# --------------------------------------------------------------------------
+
+
+def _two_table_page(tmp_dir, name="review.pdf"):
+    """One page carrying two tables with a prose line between them."""
+    ops = _cell_ops()
+    ops.append("BT /F1 10 Tf 72 552 Td (Prose between the two tables goes here.) Tj ET")
+    second = [["Item", "Team", "State"], ["Alpha", "Dana", "open"],
+              ["Beta", "Ravi", "closed"], ["Gamma", "Iris", "open"]]
+    ops += _cell_ops(rows=second, col_x=[72.0, 260.0, 420.0],
+                     row_y=[520.0, 496.0, 472.0, 448.0, 424.0])
+    return _write(os.path.join(tmp_dir, name), [ops])
+
+
+def test_detected_geometry_describes_the_table_it_found(tmp_dir):
+    src = _write(os.path.join(tmp_dir, "geom.pdf"), [_rule_ops(True) + _cell_ops()])
+    found = detect_table_regions(src)
+    assert len(found["regions"]) == 1
+    region = found["regions"][0]
+    assert (region["page"], region["index"], region["evidence"]) == (1, 0, "ruled")
+    assert len(region["columns"]) == 4
+    assert len(region["rows"]) == 5
+    assert region["cells"] == 20
+    x0, y0, x1, y1 = region["bounds"]
+    # The bounds enclose every column boundary and every drawn baseline.
+    assert x0 <= min(region["columns"]) and x1 > max(region["columns"])
+    assert y0 <= min(region["rows"]) and y1 > max(region["rows"])
+
+
+def test_the_reported_geometry_handed_back_writes_the_same_workbook(tmp_dir):
+    # The round trip is the contract the review rests on: what the reviewer was
+    # shown, accepted unchanged, must produce what the blind export produced.
+    src = _write(os.path.join(tmp_dir, "trip.pdf"), [_rule_ops(True) + _cell_ops()])
+    blind = os.path.join(tmp_dir, "blind.xlsx")
+    reviewed = os.path.join(tmp_dir, "reviewed.xlsx")
+    export_document(src, blind, "xlsx")
+    found = detect_table_regions(src)
+    result = export_document(src, reviewed, "xlsx", regions=found["regions"])
+    assert _read_back(reviewed) == _read_back(blind) == EXPECTED
+    assert result["tables"][0]["evidence"] == "reviewed"
+
+
+def test_a_rejected_table_does_not_reach_the_workbook(tmp_dir):
+    src = _two_table_page(tmp_dir)
+    found = detect_table_regions(src)
+    assert len(found["regions"]) == 2
+    out = os.path.join(tmp_dir, "one.xlsx")
+    result = export_document(src, out, "xlsx", regions=[found["regions"][1]])
+    assert len(result["tables"]) == 1
+    assert (result["tables"][0]["rows"], result["tables"][0]["columns"]) == (4, 3)
+    assert len(load_workbook(out).worksheets) == 1
+
+
+def test_a_rejected_tables_text_is_carried_rather_than_dropped(tmp_dir):
+    # What the review decides is what is a TABLE, never what the page holds:
+    # the rejected rows stay reachable through the untabled sheet.
+    src = _two_table_page(tmp_dir, "carried.pdf")
+    found = detect_table_regions(src)
+    out = os.path.join(tmp_dir, "carried.xlsx")
+    result = export_document(
+        src, out, "xlsx", regions=[found["regions"][1]], include_untabled=True)
+    spare = load_workbook(out).worksheets[-1]
+    carried = [spare.cell(row=r, column=2).value for r in range(1, result["untabled_lines"] + 1)]
+    assert "Prose between the two tables goes here." in carried
+    assert any(line.startswith("Region") for line in carried)
+
+
+def test_moving_a_column_boundary_moves_the_cells_across_it(tmp_dir):
+    src = _write(os.path.join(tmp_dir, "moved.pdf"), [_rule_ops(True) + _cell_ops()])
+    found = detect_table_regions(src)
+    region = dict(found["regions"][0])
+    # Push the second boundary past the Q1 column's text: those cells now sit
+    # in the first column and the second column is left empty.
+    region["columns"] = [region["columns"][0], 300.0, 350.0, 450.0]
+    out = os.path.join(tmp_dir, "moved.xlsx")
+    export_document(src, out, "xlsx", regions=[region])
+    sheet = load_workbook(out).worksheets[0]
+    assert sheet.cell(row=1, column=1).value == "Region Q1"
+    assert sheet.cell(row=1, column=2).value is None
+    assert sheet.cell(row=1, column=3).value == "Q2"
+
+
+def test_shrinking_the_bounds_drops_the_rows_outside_them(tmp_dir):
+    src = _write(os.path.join(tmp_dir, "shrunk.pdf"), [_rule_ops(True) + _cell_ops()])
+    found = detect_table_regions(src)
+    region = dict(found["regions"][0])
+    x0, _y0, x1, y1 = region["bounds"]
+    # Above the last row's baseline: that row falls outside.
+    region["bounds"] = [x0, ROW_Y[4], x1, y1]
+    out = os.path.join(tmp_dir, "shrunk.xlsx")
+    result = export_document(src, out, "xlsx", regions=[region])
+    assert result["tables"][0]["rows"] == 4
+    sheet = load_workbook(out).worksheets[0]
+    assert sheet.cell(row=5, column=1).value is None
+
+
+def test_an_added_boundary_splits_a_column_the_alignment_merged(tmp_dir):
+    src = _write(os.path.join(tmp_dir, "split.pdf"), [_rule_ops(True) + _cell_ops()])
+    found = detect_table_regions(src)
+    region = dict(found["regions"][0])
+    region["columns"] = sorted(region["columns"] + [150.0])
+    out = os.path.join(tmp_dir, "split.xlsx")
+    result = export_document(src, out, "xlsx", regions=[region])
+    assert result["tables"][0]["columns"] == 5
+
+
+def test_a_reviewed_export_keeps_its_own_caption(tmp_dir):
+    src = _write(os.path.join(tmp_dir, "cap.pdf"),
+                 [["BT /F1 14 Tf 72 716 Td (Regional revenue) Tj ET"]
+                  + _rule_ops(True) + _cell_ops()])
+    found = detect_table_regions(src)
+    assert found["regions"][0]["caption"] == "Regional revenue"
+    out = os.path.join(tmp_dir, "cap.xlsx")
+    export_document(src, out, "xlsx", regions=found["regions"])
+    assert load_workbook(out).sheetnames == ["Regional revenue"]
+
+
+def test_a_reviewed_set_and_a_page_scope_cannot_both_be_given(tmp_dir):
+    src = _write(os.path.join(tmp_dir, "both.pdf"), [_rule_ops(True) + _cell_ops()])
+    found = detect_table_regions(src)
+    with pytest.raises(ValueError, match="cannot both be given"):
+        export_document(src, os.path.join(tmp_dir, "o.xlsx"), "xlsx",
+                        pages=[1], regions=found["regions"])
+
+
+def test_accepting_nothing_refuses_rather_than_writing_an_empty_book(tmp_dir):
+    src = _write(os.path.join(tmp_dir, "none.pdf"), [_rule_ops(True) + _cell_ops()])
+    out = os.path.join(tmp_dir, "none.xlsx")
+    with pytest.raises(ValueError, match="no table was accepted"):
+        export_document(src, out, "xlsx", regions=[])
+    assert not os.path.exists(out)
+
+
+@pytest.mark.parametrize(
+    "mutate,message",
+    [
+        (lambda r: {**r, "columns": r["columns"][:1]}, "column boundary"),
+        (lambda r: {**r, "bounds": []}, "has no area"),
+        (lambda r: {**r, "bounds": [100.0, 100.0, 100.0, 200.0]}, "empty area"),
+        (lambda r: {**r, "bounds": [10.0, 10.0, 40.0, 40.0]}, "covers no text"),
+        (lambda r: {**r, "page": 9}, "out of range"),
+    ],
+)
+def test_an_unusable_reviewed_table_refuses_by_name(tmp_dir, mutate, message):
+    src = _write(os.path.join(tmp_dir, "bad.pdf"), [_rule_ops(True) + _cell_ops()])
+    found = detect_table_regions(src)
+    with pytest.raises(ValueError, match=message):
+        export_document(src, os.path.join(tmp_dir, "o.xlsx"), "xlsx",
+                        regions=[mutate(found["regions"][0])])
+
+
+def test_a_target_that_does_not_declare_regions_refuses_them(tmp_dir):
+    src = _write(os.path.join(tmp_dir, "t.pdf"), [_rule_ops(True) + _cell_ops()])
+    with pytest.raises(ValueError, match="takes no regions option"):
+        export_document(src, os.path.join(tmp_dir, "o.txt"), "txt", regions=[])

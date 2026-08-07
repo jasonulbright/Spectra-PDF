@@ -3,6 +3,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { OpenDocument, PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { FieldCandidate } from '../../lib/form-candidates';
+import type { TableRegion, TableReviewHandlers } from '../../lib/table-review';
 import type { AnnotationTransform } from '../../lib/annotation-manipulation';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import type { EditVectorObject } from '../../lib/edit-vectors';
@@ -48,6 +49,8 @@ interface DocumentRowProps {
   // survives unrelated re-renders.
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   fieldCandidatesByPage: ReadonlyMap<string, FieldCandidate[]>;
+  tableRegionsByPage: ReadonlyMap<string, TableRegion[]>;
+  tableReview?: TableReviewHandlers;
   selectedCandidateId: string | null;
   onSelectCandidate: (candidateId: string) => void;
   onRemoveCandidate: (candidateId: string) => void;
@@ -206,6 +209,8 @@ function DocumentRowImpl({
   onMeasureResult,
   redactionMarksByPage,
   fieldCandidatesByPage,
+  tableRegionsByPage,
+  tableReview,
   selectedCandidateId,
   onSelectCandidate,
   onRemoveCandidate,
@@ -315,6 +320,8 @@ function DocumentRowImpl({
         onMeasureResult={onMeasureResult}
         redactionMarks={redactionMarksByPage.get(page.id)}
         fieldCandidates={fieldCandidatesByPage.get(page.id)}
+        tableRegions={tableRegionsByPage.get(page.id)}
+        tableReview={tableReview}
         selectedCandidateId={selectedCandidateId}
         onSelectCandidate={onSelectCandidate}
         onRemoveCandidate={onRemoveCandidate}
