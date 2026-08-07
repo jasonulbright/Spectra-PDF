@@ -82,4 +82,70 @@ describe('language switch', () => {
     expect(await browser.execute(() => document.documentElement.lang)).toBe('en');
     await $('[data-testid="prefs-close"]').click();
   });
+
+  // The Germanic/Nordic + Finnish wave. The anchor is View again, and every
+  // label here differs from English — Danish and Norwegian share "Vis", which
+  // is fine because `<html lang>` is asserted alongside it and the two
+  // catalogs cannot both be loaded. File is unusable as an anchor for a
+  // second reason now: Danish and Norwegian spell it "Fil", one letter from
+  // English, and a truncated render would read as a pass.
+  //
+  // The overflow walk is the other half. Finnish compounds
+  // (Yksitasoistuksen esikatselu) and Dutch/Norwegian ones are the longest
+  // strings the chrome ever holds, and a fixed-width surface clips them
+  // silently. `scrollWidth > clientWidth` on the fixed-width regions catches
+  // that without a screenshot; the menu bar and toolbar are excluded because
+  // they scroll by design.
+  it('switches to each wave-C locale, and no fixed-width chrome overflows', async () => {
+    await waitForHarness();
+    await browser.keys(['Control', 'k']);
+    await $('[data-testid="prefs-cat-appearance"]').waitForDisplayed({ timeout: 10_000 });
+    await $('[data-testid="prefs-cat-appearance"]').click();
+    await $('[data-testid="prefs-language"]').waitForDisplayed({ timeout: 10_000 });
+
+    for (const [code, viewLabel] of [
+      ['nl', 'Beeld'],
+      ['da', 'Vis'],
+      ['sv', 'Visa'],
+      ['nb', 'Vis'],
+      ['fi', 'Näytä'],
+    ] as const) {
+      await $('[data-testid="prefs-language"]').selectByAttribute('value', code);
+      await browser.waitUntil(
+        async () => (await $('[data-testid="menu-view"]').getText()) === viewLabel,
+        { timeout: 10_000, timeoutMsg: `the menu bar never re-rendered in ${code}` },
+      );
+      expect(await browser.execute(() => document.documentElement.lang)).toBe(code);
+
+      const clipped = await browser.execute((l: string) => {
+        const regions = ['prefs-body-appearance', 'canvas-status-bar', 'menubar'];
+        const out: string[] = [];
+        for (const id of regions) {
+          const root = document.querySelector(`[data-testid="${id}"]`);
+          if (!root) continue;
+          for (const el of Array.from(root.querySelectorAll('button, label, option, span'))) {
+            const e = el as HTMLElement;
+            if (!e.offsetParent) continue;
+            // Only a surface that CANNOT scroll is clipped; a scroller
+            // overflowing is how a scroller works.
+            const overflow = getComputedStyle(e).overflowX;
+            if (overflow === 'auto' || overflow === 'scroll') continue;
+            if (e.scrollWidth > e.clientWidth + 1) {
+              out.push(`${l} ${id}: ${(e.textContent ?? '').trim().slice(0, 60)}`);
+            }
+          }
+        }
+        return out;
+      }, code);
+      expect(clipped).toEqual([]);
+    }
+
+    await $('[data-testid="prefs-language"]').selectByAttribute('value', 'en');
+    await browser.waitUntil(
+      async () => (await $('[data-testid="menu-view"]').getText()) === 'View',
+      { timeout: 10_000, timeoutMsg: 'the menu bar never returned to English' },
+    );
+    expect(await browser.execute(() => document.documentElement.lang)).toBe('en');
+    await $('[data-testid="prefs-close"]').click();
+  });
 });
