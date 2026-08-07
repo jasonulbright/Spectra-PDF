@@ -390,6 +390,26 @@ describe('i18n catalogs', () => {
     expect(registered.has('qqq')).toBe(false);
   });
 
+  // The list above is a MIRROR, and a mirror only gates what it is compared
+  // against. Every check in this file walks the pinned copy, and the resource
+  // check walks it too, so a catalog whose `SHIPPED_LOCALES` row was never
+  // added passes all of them while the Settings list never offers the
+  // language and `resolveLanguage` answers English — the exact silent failure
+  // the resource check exists to prevent, one edit upstream. The two lists are
+  // therefore compared as source text, in both directions.
+  it("the pinned mirror equals i18n.ts's SHIPPED_LOCALES", () => {
+    const src = readFileSync(resolve(__dirname, '../src/renderer/i18n.ts'), 'utf8');
+    const start = src.indexOf('SHIPPED_LOCALES: readonly string[] = [');
+    const block = src.slice(start, src.indexOf('];', start));
+    expect(start).toBeGreaterThan(-1);
+    const declared = [...block.matchAll(/'([A-Za-z-]+)'/g)].map((m) => m[1]);
+    expect(declared, 'SHIPPED_LOCALES in i18n.ts diverges from the mirror above')
+      .toEqual(SHIPPED_LOCALES);
+    // The detector must be able to fail: the parse really read the array.
+    expect(declared).toContain('en');
+    expect(declared).not.toContain('qqq');
+  });
+
   it('no catalog value is empty', () => {
     for (const locale of SHIPPED_LOCALES) {
       const p = resolve(__dirname, `../src/renderer/locales/${locale}/chrome.json`);
