@@ -32,6 +32,7 @@ import csChrome from './locales/cs/chrome.json';
 import skChrome from './locales/sk/chrome.json';
 import koChrome from './locales/ko/chrome.json';
 import zhTwChrome from './locales/zh-TW/chrome.json';
+import trChrome from './locales/tr/chrome.json';
 import { CHROME_STRINGS, type ChromeKey, type ChromePluralKey } from './i18n-chrome';
 import { PANEL_STRINGS, type PanelKey } from './i18n-panels';
 import { DIALOG_STRINGS, type DialogKey } from './i18n-dialogs';
@@ -43,7 +44,7 @@ import { OCR_LANGUAGES } from './ocr/languages';
 
 export const SHIPPED_LOCALES: readonly string[] = [
   'en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv', 'nb', 'fi',
-  'ru', 'uk', 'pl', 'cs', 'sk', 'ko', 'zh-TW',
+  'ru', 'uk', 'pl', 'cs', 'sk', 'ko', 'zh-TW', 'tr',
 ];
 
 /** Each locale's display name in ITS OWN language (the language-picker
@@ -70,6 +71,7 @@ export const LOCALE_NATIVE_NAMES: Record<string, string> = {
   sk: 'Slovenčina',
   ko: '한국어',
   'zh-TW': '繁體中文',
+  tr: 'Türkçe',
 };
 
 /**
@@ -209,6 +211,7 @@ void i18next.use(initReactI18next).init({
     sk: { chrome: skChrome },
     ko: { chrome: koChrome },
     'zh-TW': { chrome: zhTwChrome },
+    tr: { chrome: trChrome },
     ...(import.meta.env.DEV || import.meta.env.VITE_E2E
       ? {
           qps: { chrome: pseudo(enChrome as Record<string, string>) },
