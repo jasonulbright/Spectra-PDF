@@ -90,8 +90,10 @@ describe('resolveLanguage', () => {
   });
 
   it('falls back to English for a language we do not ship', () => {
-    expect(resolveLanguage('sv')).toBe('en');
-    expect(resolveLanguage('ko-KR')).toBe('en');
+    // Icelandic and Afrikaans are outside the locale register entirely, so
+    // these stay unshipped as later waves land (`sv` and `ko` did not).
+    expect(resolveLanguage('is')).toBe('en');
+    expect(resolveLanguage('af-ZA')).toBe('en');
   });
 
   it('names every shipped locale in its own language', () => {
