@@ -20,6 +20,9 @@ import itChrome from './locales/it/chrome.json';
 import ptBrChrome from './locales/pt-BR/chrome.json';
 import jaChrome from './locales/ja/chrome.json';
 import zhCnChrome from './locales/zh-CN/chrome.json';
+import nlChrome from './locales/nl/chrome.json';
+import daChrome from './locales/da/chrome.json';
+import svChrome from './locales/sv/chrome.json';
 import { CHROME_STRINGS, type ChromeKey, type ChromePluralKey } from './i18n-chrome';
 import { PANEL_STRINGS, type PanelKey } from './i18n-panels';
 import { DIALOG_STRINGS, type DialogKey } from './i18n-dialogs';
@@ -30,7 +33,7 @@ import { loadSettings } from './lib/app-settings';
 import { OCR_LANGUAGES } from './ocr/languages';
 
 export const SHIPPED_LOCALES: readonly string[] = [
-  'en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da',
+  'en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv',
 ];
 
 /** Each locale's display name in ITS OWN language (the language-picker
@@ -47,6 +50,7 @@ export const LOCALE_NATIVE_NAMES: Record<string, string> = {
   'zh-CN': '简体中文',
   nl: 'Nederlands',
   da: 'Dansk',
+  sv: 'Svenska',
 };
 
 /**
@@ -174,6 +178,9 @@ void i18next.use(initReactI18next).init({
     'pt-BR': { chrome: ptBrChrome },
     ja: { chrome: jaChrome },
     'zh-CN': { chrome: zhCnChrome },
+    nl: { chrome: nlChrome },
+    da: { chrome: daChrome },
+    sv: { chrome: svChrome },
     ...(import.meta.env.DEV || import.meta.env.VITE_E2E
       ? {
           qps: { chrome: pseudo(enChrome as Record<string, string>) },
