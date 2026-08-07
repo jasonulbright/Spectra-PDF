@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
@@ -58,6 +58,23 @@ const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 /** A collected string: where it was found, and what it said. */
 type Found = [label: string, text: string];
 
+/**
+ * The language picker names every locale in ITS OWN language, so those names
+ * never pass through the catalog. Read out of `i18n.ts` rather than restated:
+ * a hand-copied list goes stale one locale wave at a time, and the failure it
+ * produces (a native name reported as an English leak) reads as a defect in
+ * the sweep rather than as the missing row it is. Importing the module would
+ * drag i18next's init into this node process, so the table is parsed as text.
+ */
+const NATIVE_NAMES: string[] = (() => {
+  const src = readFileSync(resolve(__dirname, '..', '..', 'src', 'renderer', 'i18n.ts'), 'utf8');
+  const block = src.slice(src.indexOf('LOCALE_NATIVE_NAMES'));
+  const names = [...block.slice(0, block.indexOf('};')).matchAll(/:\s*'([^']+)'/g)]
+    .map((m) => m[1]);
+  if (names.length < 8) throw new Error('LOCALE_NATIVE_NAMES could not be read from i18n.ts');
+  return names;
+})();
+
 /** Strings that legitimately never pass through the catalog (see header). */
 const notCatalog = (text: string): boolean => {
   // No Latin letter at all: a number, a glyph, a symbol, punctuation.
@@ -79,11 +96,7 @@ const notCatalog = (text: string): boolean => {
     'pt', 'KB', 'MB', '%',
     'PDF', 'PDF/A', 'PDF/X', 'XFA', 'AcroForm', 'OCR', 'ICC', 'CMYK', 'RGB',
     'Normal', 'Color', 'Serif', 'Sans', 'Mono', 'Radial',
-    // The language picker names every locale in its own language. This list
-    // tracks LOCALE_NATIVE_NAMES in i18n.ts — a wave-1 locale that lands
-    // without its row here fails this sweep, which is the intended nudge.
-    'English', 'Español', 'Français', 'Deutsch', 'Italiano',
-    'Português (Brasil)', '日本語', '简体中文',
+    ...NATIVE_NAMES,
   ]);
   if (exact.has(text)) return true;
   // A REDACTION CODE row: the statutory citation, an em dash,
