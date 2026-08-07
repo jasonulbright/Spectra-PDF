@@ -30,7 +30,7 @@ const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 // Mirrors SHIPPED_LOCALES in src/renderer/i18n.ts — imported indirectly
 // would drag i18next's init (and its DOM expectations) into this node
 // test, so the list is pinned here and a drift fails the parity loop.
-const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da'];
+const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv'];
 
 /**
  * The plural categories a locale's forms must cover, read from CLDR at gate
@@ -86,6 +86,23 @@ const INVARIANT_PLURALS: Record<string, PluralPolicy> = {
   // Danish `sprog` is a neuter noun whose plural is identical to its singular
   // (et sprog / to sprog); no inflecting synonym names a recognition language.
   da: { keys: ['dialog.ocr.langCount'] },
+  // Swedish neuter nouns ending in a consonant take a bare plural: ett fält /
+  // flera fält, ett språk / språk, ett objekt / objekt, ett certifikat /
+  // certifikat, en byte / byte. Every one of these messages is the noun alone
+  // after the numeral, with no participle or predicative adjective to agree —
+  // where one exists the plural IS written (movedCount, pageLabels.applied,
+  // prepareForm.created, formPrep.candidates), so this list is the residue.
+  sv: {
+    keys: [
+      'chrome.status.fillFields',
+      'dialog.formPrep.existingFields',
+      'dialog.ocr.langCount',
+      'dialog.props.bytes',
+      'panel.encrypt.encryptedTo',
+      'panel.optimize.audit.objects',
+      'panel.prepareForm.create',
+    ],
+  },
   tr: { policy: 'numeral-invariant' },
   hu: { policy: 'numeral-invariant' },
   ar: { merged: [['zero', 'few']] },
@@ -310,6 +327,24 @@ describe('i18n catalogs', () => {
         }
       }
     }
+  });
+
+  // A locale can pass every check above and still render English: i18next only
+  // serves a language it was handed a `resources` entry for, and the entry is
+  // a separate edit from the SHIPPED_LOCALES row. The failure is silent — the
+  // fallback IS English — so the two lists are compared as source text here.
+  it('every shipped locale is registered as an i18next resource', () => {
+    const src = readFileSync(resolve(__dirname, '../src/renderer/i18n.ts'), 'utf8');
+    const block = src.slice(src.indexOf('resources: {'), src.indexOf('interpolation:'));
+    expect(block.length).toBeGreaterThan(0);
+    const registered = new Set(
+      [...block.matchAll(/^\s*'?([A-Za-z-]+)'?:\s*\{\s*chrome:/gm)].map((m) => m[1]),
+    );
+    for (const locale of SHIPPED_LOCALES) {
+      expect(registered.has(locale), `${locale} is shipped but has no resources entry`).toBe(true);
+    }
+    // The detector must be able to fail: a name that is not registered.
+    expect(registered.has('qqq')).toBe(false);
   });
 
   it('no catalog value is empty', () => {
