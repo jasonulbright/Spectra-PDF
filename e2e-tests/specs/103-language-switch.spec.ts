@@ -206,13 +206,16 @@ describe('language switch', () => {
     await $('[data-testid="prefs-close"]').click();
   });
 
-  // The invariant-form wave. The two CJK anchors are the load-bearing ones:
+  // The invariant-form wave, both halves of it: ko and zh-TW because CLDR
+  // gives them one plural category, tr and hu because a numeral governs the
+  // bare singular. The two CJK anchors are the load-bearing ones:
   // zh-TW's 檢視 and zh-CN's 视图 are different words for View, not two
   // spellings of one — a catalog produced by running zh-CN through a
   // character converter would read 視圖 here and fail. Korean 보기 is a
   // non-homograph of every other locale's label. The overflow walk runs
   // again because a Hangul or Traditional label can be wider than the Latin
-  // one it replaced in a fixed-width segment.
+  // one it replaced in a fixed-width segment, and Turkish and Hungarian
+  // compounds are the other half of that check.
   it('switches to each wave-E locale, and no fixed-width chrome overflows', async () => {
     await waitForHarness();
     await browser.keys(['Control', 'k']);
@@ -223,6 +226,8 @@ describe('language switch', () => {
     for (const [code, viewLabel] of [
       ['ko', '보기'],
       ['zh-TW', '檢視'],
+      ['tr', 'Görünüm'],
+      ['hu', 'Nézet'],
     ] as const) {
       await $('[data-testid="prefs-language"]').selectByAttribute('value', code);
       await browser.waitUntil(
