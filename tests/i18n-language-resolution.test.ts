@@ -129,12 +129,19 @@ describe('resolveLanguage', () => {
 
 describe('textDirection', () => {
   it('reads direction from CLDR rather than a list of locales', () => {
-    for (const tag of ['ar', 'ar-EG', 'he', 'he-IL', 'fa', 'ur', 'ckb']) {
+    // `fa`, `ur` and `ckb` ship no catalog and are not in the floor, so their
+    // rtl answer can only have come from CLDR — which is the whole claim.
+    const rtl = ['ar', 'ar-EG', 'he', 'he-IL', 'fa', 'ur', 'ckb'];
+    for (const tag of rtl) {
       expect(textDirection(tag), tag).toBe('rtl');
     }
+    // Shipped locales are ltr EXCEPT the right-to-left catalogs, which are
+    // real entries now rather than hypothetical ones.
     for (const tag of [...SHIPPED_LOCALES, 'ru', 'el', 'ko', 'zh-TW', 'tr']) {
+      if (rtl.includes(tag)) continue;
       expect(textDirection(tag), tag).toBe('ltr');
     }
+    expect(SHIPPED_LOCALES.filter((l) => textDirection(l) === 'rtl')).toEqual(['ar']);
   });
 
   it('answers for the pseudo-locales, which have no BCP-47 identity', () => {
