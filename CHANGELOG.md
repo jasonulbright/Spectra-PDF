@@ -76,26 +76,28 @@
 
 ### Languages
 - The interface is available in English, Spanish, French, German, Italian, Brazilian Portuguese, Japanese, Simplified Chinese, Traditional Chinese, Korean, Dutch, Danish, Swedish, Norwegian Bokmål, Finnish, Russian, Ukrainian, Polish, Czech, Slovak, Turkish, Hungarian, Greek, Romanian, Slovenian, Catalan, Arabic and Hebrew.
-- Russian, Ukrainian, Polish, Czech and Slovak counts carry all four of their number forms, each with the agreement that form takes.
+- Russian, Ukrainian, Polish, Czech and Slovak counts carry all four number forms, with matching agreement.
 - Spanish, French, Italian and Portuguese counts in the millions now read in that language, not English.
 - Symbol search matches an uppercase I whatever regional format the computer is set to.
 - Tool search results sort by the alphabet of the language on screen.
-- Traditional Chinese is written for Taiwan, with the terms used there, and is not a character conversion of the Simplified translation.
+- Traditional Chinese is written for Taiwan, not a character conversion of the Simplified translation.
 - Korean and Chinese counts take one form, as those languages do, rather than an invented singular and plural.
 - Turkish and Hungarian counts keep the noun in its plain form after a numeral, which is how those languages count.
-- Turkish and Hungarian wording never attaches an ending to a file or field name, so the ending always agrees with the words around it.
+- Turkish and Hungarian never attach an ending to a file or field name, so endings always agree.
+- Korean never attaches a particle to a file or field name, for the same reason.
 - Romanian counts insert "de" above nineteen, the way Romanian is written.
 - Slovenian counts use the dual for exactly two, alongside its singular, few and plural forms.
 - Greek headings uppercase without their accents, as Greek is set in capitals.
 - A Traditional Chinese, Hong Kong or Macau system opens in Traditional Chinese.
 - In Arabic and Hebrew the whole interface reads right to left: panels, toolbars, lists and dialog buttons all change sides.
-- The page itself never flips. A page keeps its own corners, resize handles keep the corner you grabbed, and the rulers still measure from the page origin, whatever language the interface is in.
-- Arabic counts carry all six of their number forms, including the dual for two and the plural for three to ten.
+- The page itself never flips, whatever language the interface is in.
+- Resize handles keep the corner you grabbed, and rulers still measure from the page origin.
+- Arabic counts carry all six number forms, including the dual and the three-to-ten plural.
 - Hebrew counts carry its singular, dual and plural forms.
 - Arabic page numbers use the same digits the document draws on its pages.
 - File paths, keyboard shortcuts and page ranges stay readable inside right-to-left sentences.
 - A system set to Hebrew under the older "iw" language code now opens in Hebrew.
-- A page range past the last page is refused in the language on screen, with no English plural ending left in the sentence.
+- A page range past the last page is refused fully in the language on screen.
 
 ## 1.0.22
 
