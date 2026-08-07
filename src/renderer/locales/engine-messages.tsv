@@ -285,7 +285,7 @@ printer.layoutNeedsPaperSize	exact	printer	This layout needs the paper size (she
 printer.mustBetweenGot	pattern	printer	{{name}} must be between {{lo}} and {{hi}}, got {{value}}
 printer.mustNumberGot	pattern	printer	{{name}} must be a number, got {{value}}
 printer.mustTrueFalseGot	pattern	printer	{{name}} must be true or false, got {{value}}
-printer.pageBeyondDocumentPage	pattern	printer	Page {{end}} is beyond the document ({{page_count}} page{{v2}})
+printer.pageBeyondDocumentPage	pattern	printer	Page {{end}} is beyond the document ({{page_count}} pages in total)
 printer.pageNumbersBased	pattern	printer	Page numbers are 1-based: '{{token}}'
 printer.pageSelectionEmptyPages	exact	printer	The page selection is empty (no pages match)
 printer.perSheetMustGot	pattern	printer	{{label}} per sheet must be 1-8, got {{v}}

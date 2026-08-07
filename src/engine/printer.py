@@ -155,9 +155,11 @@ def parse_page_spec(spec: str, page_count: int) -> str:
         if end < start:
             raise ValueError(f"Descending page range: '{token}'")
         if end > page_count:
+            # Count-neutral on purpose: an interpolated plural SUFFIX is one
+            # placeholder in the refusal table, so every locale's translation
+            # would re-emit the English "s" verbatim.
             raise ValueError(
-                f"Page {end} is beyond the document ({page_count} page"
-                f"{'s' if page_count != 1 else ''})"
+                f"Page {end} is beyond the document ({page_count} pages in total)"
             )
     return normalized
 

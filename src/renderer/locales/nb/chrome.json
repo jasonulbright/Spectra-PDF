@@ -1641,7 +1641,7 @@
   "engine.printer.mustBetweenGot": "{{name}} må være mellom {{lo}} og {{hi}}, men er {{value}}",
   "engine.printer.mustNumberGot": "{{name}} må være et tall, men er {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} må være true eller false, men er {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "Side {{end}} ligger utenfor dokumentet ({{page_count}} side{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "Side {{end}} ligger utenfor dokumentet (sider totalt: {{page_count}})",
   "engine.printer.pageNumbersBased": "Sidetall begynner på 1: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "Sidevalget er tomt (ingen sider samsvarer)",
   "engine.printer.perSheetMustGot": "{{label}} per ark må være 1-8, men er {{v}}",

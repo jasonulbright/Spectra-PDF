@@ -1641,7 +1641,7 @@
   "engine.printer.mustBetweenGot": "A(z) {{name}} értékének {{lo}} és {{hi}} között kell lennie, érkezett: {{value}}",
   "engine.printer.mustNumberGot": "A(z) {{name}} értékének számnak kell lennie, érkezett: {{value}}",
   "engine.printer.mustTrueFalseGot": "A(z) {{name}} értéke true vagy false lehet, érkezett: {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "A(z) {{end}}. oldal a dokumentumon kívül esik ({{page_count}} oldal{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "A(z) {{end}}. oldal a dokumentumon kívül esik (összesen {{page_count}} oldal)",
   "engine.printer.pageNumbersBased": "Az oldalszámozás 1-től indul: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "Az oldalkijelölés üres (nincs illeszkedő oldal)",
   "engine.printer.perSheetMustGot": "A(z) {{label}} száma ívenként 1-8 lehet, érkezett: {{v}}",

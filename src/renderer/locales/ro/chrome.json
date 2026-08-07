@@ -1690,7 +1690,7 @@
   "engine.printer.mustBetweenGot": "{{name}} trebuie să fie între {{lo}} și {{hi}}, s-a găsit {{value}}",
   "engine.printer.mustNumberGot": "{{name}} trebuie să fie un număr, s-a găsit {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} trebuie să fie true sau false, s-a găsit {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "Pagina {{end}} este dincolo de document ({{page_count}} pagini{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "Pagina {{end}} este dincolo de document (total pagini: {{page_count}})",
   "engine.printer.pageNumbersBased": "Numerele de pagină încep de la 1: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "Selecția de pagini este goală (nicio pagină nu corespunde)",
   "engine.printer.perSheetMustGot": "{{label}} pe coală trebuie să fie 1-8, s-a găsit {{v}}",

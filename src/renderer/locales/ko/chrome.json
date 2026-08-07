@@ -1592,7 +1592,7 @@
   "engine.printer.mustBetweenGot": "{{name}} 값은 {{lo}}에서 {{hi}} 사이여야 하는데 {{value}}입니다",
   "engine.printer.mustNumberGot": "{{name}} 값은 숫자여야 하는데 {{value}}입니다",
   "engine.printer.mustTrueFalseGot": "{{name}} 값은 true 또는 false여야 하는데 {{value}}입니다",
-  "engine.printer.pageBeyondDocumentPage": "{{end}}쪽은 문서 범위를 벗어납니다({{page_count}} 페이지{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "{{end}}쪽은 문서 범위를 벗어납니다(전체 {{page_count}} 페이지)",
   "engine.printer.pageNumbersBased": "페이지 번호는 1부터 시작합니다: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "페이지 선택이 비어 있습니다(일치하는 페이지 없음)",
   "engine.printer.perSheetMustGot": "용지당 {{label}} 수는 1-8 사이여야 하는데 {{v}}입니다",

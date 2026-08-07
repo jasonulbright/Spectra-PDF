@@ -1690,7 +1690,7 @@
   "engine.printer.mustBetweenGot": "{{name}} ha de ser entre {{lo}} i {{hi}}, i s'ha rebut {{value}}",
   "engine.printer.mustNumberGot": "{{name}} ha de ser un nombre, i s'ha rebut {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} ha de ser true o false, i s'ha rebut {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "La pàgina {{end}} és més enllà del document ({{page_count}} pàgines{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "La pàgina {{end}} és més enllà del document (total de pàgines: {{page_count}})",
   "engine.printer.pageNumbersBased": "Els números de pàgina comencen a l'1: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "La selecció de pàgines és buida (no hi coincideix cap pàgina)",
   "engine.printer.perSheetMustGot": "{{label}} per full ha de ser 1-8, i s'ha rebut {{v}}",
