@@ -30,7 +30,7 @@ const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 // Mirrors SHIPPED_LOCALES in src/renderer/i18n.ts — imported indirectly
 // would drag i18next's init (and its DOM expectations) into this node
 // test, so the list is pinned here and a drift fails the parity loop.
-const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv', 'nb', 'fi', 'ru'];
+const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv', 'nb', 'fi', 'ru', 'uk'];
 
 /**
  * The plural categories a locale's forms must cover, read from CLDR at gate
@@ -128,6 +128,13 @@ const INVARIANT_PLURALS: Record<string, PluralPolicy> = {
       'panel.sig.trustVerified',
     ],
   },
+  // Ukrainian neuter nouns in -ння have the same form in the nominative
+  // singular, the nominative plural and the genitive singular, so `one`, `few`
+  // and `other` coincide: 1 посилання / 2 посилання / 1,5 посилання, with
+  // `many` (посилань) the only distinct form. `посилання` is the only word for
+  // a link and `зображення` the only word for an image; every other Ukrainian
+  // count in this catalog inflects and is still gated.
+  uk: { keys: ['panel.links.summary', 'panel.preflight.images'] },
   tr: { policy: 'numeral-invariant' },
   hu: { policy: 'numeral-invariant' },
   ar: { merged: [['zero', 'few']] },
