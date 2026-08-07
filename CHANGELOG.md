@@ -75,12 +75,14 @@
 - Preferences says the system palette is in control, and remembers the theme you chose untouched.
 
 ### Languages
-- The interface is available in English, Spanish, French, German, Italian, Brazilian Portuguese, Japanese, Simplified Chinese, Dutch, Danish, Swedish, Norwegian Bokmål, Finnish, Russian, Ukrainian, Polish, Czech and Slovak.
+- The interface is available in English, Spanish, French, German, Italian, Brazilian Portuguese, Japanese, Simplified Chinese, Traditional Chinese, Korean, Dutch, Danish, Swedish, Norwegian Bokmål, Finnish, Russian, Ukrainian, Polish, Czech and Slovak.
 - Russian, Ukrainian, Polish, Czech and Slovak counts carry all four of their number forms, each with the agreement that form takes.
 - Spanish, French, Italian and Portuguese counts in the millions now read in that language, not English.
 - Symbol search matches an uppercase I whatever regional format the computer is set to.
 - Tool search results sort by the alphabet of the language on screen.
-- A Traditional Chinese system now reads English rather than a Simplified translation.
+- Traditional Chinese is written for Taiwan, with the terms used there, and is not a character conversion of the Simplified translation.
+- Korean and Chinese counts take one form, as those languages do, rather than an invented singular and plural.
+- A Traditional Chinese, Hong Kong or Macau system opens in Traditional Chinese.
 
 ## 1.0.22
 
