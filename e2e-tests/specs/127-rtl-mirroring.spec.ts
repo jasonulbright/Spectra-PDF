@@ -235,6 +235,55 @@ describe('RTL mirroring', () => {
     expect(await invokeAppCommand('view.rulers')).toBe(true);
   });
 
+  it('mirrors for a SHIPPED right-to-left catalog, not only the pseudo-locale', async () => {
+    // `qps-rtl` proves the machinery; it cannot prove that a real catalog
+    // reaches it, because its direction comes from a dev-only table while a
+    // shipped locale's comes from CLDR. This runs the same three claims —
+    // direction, the chrome swapping, the canvas NOT swapping — against `ar`,
+    // whose `lang` must also round-trip as the real tag rather than `en`.
+    await ensureVisible('view.navPane', 'nav-panel-body');
+    if (!(await $('[data-testid="tool-dock"]').isExisting())) {
+      expect(await invokeAppCommand('tools.panel.rotate')).toBe(true);
+    }
+
+    await setLanguage('en');
+    await waitForDirection('ltr');
+    const navLtr = (await rectOf('[data-testid="nav-pane"]'))!;
+    const dockLtr = (await rectOf('[data-testid="tool-dock"]'))!;
+    expect(navLtr.x).toBeLessThan(dockLtr.x);
+
+    await setLanguage('ar');
+    await waitForDirection('rtl');
+    expect(await languageOf()).toBe('ar');
+    const navRtl = (await rectOf('[data-testid="nav-pane"]'))!;
+    const dockRtl = (await rectOf('[data-testid="tool-dock"]'))!;
+    expect(navRtl.x).toBeGreaterThan(dockRtl.x);
+
+    // Page geometry is the document's in every UI language, so the compass
+    // handles keep their compass meaning under a real Arabic UI too.
+    const annot = (await rectOfAttr('data-annot-id', annotationId))!;
+    await browser
+      .action('pointer', { parameters: { pointerType: 'mouse' } })
+      .move({ x: Math.round(annot.x + annot.w / 2), y: Math.round(annot.y + annot.h / 2) })
+      .down()
+      .pause(40)
+      .up()
+      .perform();
+    await $('[data-testid="annot-handle-nw"]').waitForDisplayed({ timeout: 10_000 });
+    const nw = (await rectOf('[data-testid="annot-handle-nw"]'))!;
+    const ne = (await rectOf('[data-testid="annot-handle-ne"]'))!;
+    expect(nw.x).toBeLessThan(ne.x);
+
+    // And English restores the left-to-right shell, which is what makes the
+    // switch a round trip rather than a one-way door.
+    await setLanguage('en');
+    await waitForDirection('ltr');
+    expect(await languageOf()).toBe('en');
+    const navBack = (await rectOf('[data-testid="nav-pane"]'))!;
+    const dockBack = (await rectOf('[data-testid="tool-dock"]'))!;
+    expect(navBack.x).toBeLessThan(dockBack.x);
+  });
+
   it('runs both pane resize drags the way that widens them', async () => {
     // The defect this exists to catch: a drag computing a width from a raw
     // clientX delta narrows the pane when it is dragged to widen it. CSS
