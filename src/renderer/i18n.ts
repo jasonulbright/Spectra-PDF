@@ -38,6 +38,7 @@ import elChrome from './locales/el/chrome.json';
 import roChrome from './locales/ro/chrome.json';
 import slChrome from './locales/sl/chrome.json';
 import caChrome from './locales/ca/chrome.json';
+import arChrome from './locales/ar/chrome.json';
 import { CHROME_STRINGS, type ChromeKey, type ChromePluralKey } from './i18n-chrome';
 import { PANEL_STRINGS, type PanelKey } from './i18n-panels';
 import { DIALOG_STRINGS, type DialogKey } from './i18n-dialogs';
@@ -227,6 +228,7 @@ void i18next.use(initReactI18next).init({
     ro: { chrome: roChrome },
     sl: { chrome: slChrome },
     ca: { chrome: caChrome },
+    ar: { chrome: arChrome },
     ...(import.meta.env.DEV || import.meta.env.VITE_E2E
       ? {
           qps: { chrome: pseudo(enChrome as Record<string, string>) },
