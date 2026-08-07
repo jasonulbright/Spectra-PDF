@@ -75,7 +75,8 @@
 - Preferences says the system palette is in control, and remembers the theme you chose untouched.
 
 ### Languages
-- The interface is available in English, Spanish, French, German, Italian, Brazilian Portuguese, Japanese, Simplified Chinese, Dutch, Danish, Swedish, Norwegian Bokmål and Finnish.
+- The interface is available in English, Spanish, French, German, Italian, Brazilian Portuguese, Japanese, Simplified Chinese, Dutch, Danish, Swedish, Norwegian Bokmål, Finnish, Russian, Ukrainian, Polish, Czech and Slovak.
+- Russian, Ukrainian, Polish, Czech and Slovak counts carry all four of their number forms, each with the agreement that form takes.
 - Spanish, French, Italian and Portuguese counts in the millions now read in that language, not English.
 - Symbol search matches an uppercase I whatever regional format the computer is set to.
 - Tool search results sort by the alphabet of the language on screen.
