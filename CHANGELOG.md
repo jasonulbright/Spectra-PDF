@@ -75,7 +75,7 @@
 - Preferences says the system palette is in control, and remembers the theme you chose untouched.
 
 ### Languages
-- The interface is available in English, Spanish, French, German, Italian, Brazilian Portuguese, Japanese, Simplified Chinese, Traditional Chinese, Korean, Dutch, Danish, Swedish, Norwegian Bokmål, Finnish, Russian, Ukrainian, Polish, Czech, Slovak, Turkish and Hungarian.
+- The interface is available in English, Spanish, French, German, Italian, Brazilian Portuguese, Japanese, Simplified Chinese, Traditional Chinese, Korean, Dutch, Danish, Swedish, Norwegian Bokmål, Finnish, Russian, Ukrainian, Polish, Czech, Slovak, Turkish, Hungarian, Greek, Romanian, Slovenian and Catalan.
 - Russian, Ukrainian, Polish, Czech and Slovak counts carry all four of their number forms, each with the agreement that form takes.
 - Spanish, French, Italian and Portuguese counts in the millions now read in that language, not English.
 - Symbol search matches an uppercase I whatever regional format the computer is set to.
@@ -84,6 +84,9 @@
 - Korean and Chinese counts take one form, as those languages do, rather than an invented singular and plural.
 - Turkish and Hungarian counts keep the noun in its plain form after a numeral, which is how those languages count.
 - Turkish and Hungarian wording never attaches an ending to a file or field name, so the ending always agrees with the words around it.
+- Romanian counts insert "de" above nineteen, the way Romanian is written.
+- Slovenian counts use the dual for exactly two, alongside its singular, few and plural forms.
+- Greek headings uppercase without their accents, as Greek is set in capitals.
 - A Traditional Chinese, Hong Kong or Macau system opens in Traditional Chinese.
 
 ## 1.0.22
