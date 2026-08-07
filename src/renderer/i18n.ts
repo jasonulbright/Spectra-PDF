@@ -28,6 +28,7 @@ import fiChrome from './locales/fi/chrome.json';
 import ruChrome from './locales/ru/chrome.json';
 import ukChrome from './locales/uk/chrome.json';
 import plChrome from './locales/pl/chrome.json';
+import csChrome from './locales/cs/chrome.json';
 import { CHROME_STRINGS, type ChromeKey, type ChromePluralKey } from './i18n-chrome';
 import { PANEL_STRINGS, type PanelKey } from './i18n-panels';
 import { DIALOG_STRINGS, type DialogKey } from './i18n-dialogs';
@@ -39,7 +40,7 @@ import { OCR_LANGUAGES } from './ocr/languages';
 
 export const SHIPPED_LOCALES: readonly string[] = [
   'en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv', 'nb', 'fi',
-  'ru', 'uk', 'pl',
+  'ru', 'uk', 'pl', 'cs',
 ];
 
 /** Each locale's display name in ITS OWN language (the language-picker
@@ -62,6 +63,7 @@ export const LOCALE_NATIVE_NAMES: Record<string, string> = {
   ru: 'Русский',
   uk: 'Українська',
   pl: 'Polski',
+  cs: 'Čeština',
 };
 
 /**
@@ -197,6 +199,7 @@ void i18next.use(initReactI18next).init({
     ru: { chrome: ruChrome },
     uk: { chrome: ukChrome },
     pl: { chrome: plChrome },
+    cs: { chrome: csChrome },
     ...(import.meta.env.DEV || import.meta.env.VITE_E2E
       ? {
           qps: { chrome: pseudo(enChrome as Record<string, string>) },
