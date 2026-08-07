@@ -30,7 +30,7 @@ const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 // Mirrors SHIPPED_LOCALES in src/renderer/i18n.ts — imported indirectly
 // would drag i18next's init (and its DOM expectations) into this node
 // test, so the list is pinned here and a drift fails the parity loop.
-const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv', 'nb'];
+const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv', 'nb', 'fi'];
 
 /**
  * The plural categories a locale's forms must cover, read from CLDR at gate
@@ -114,6 +114,18 @@ const INVARIANT_PLURALS: Record<string, PluralPolicy> = {
       'dialog.props.bytes',
       'panel.searchRedact.found',
       'panel.searchRedact.hitCount',
+    ],
+  },
+  // Finnish inflects the counted noun after a numeral (1 sivu / 3 sivua), so
+  // almost every base differs. These four put the counted noun in an oblique
+  // case — genitive, ablative, allative, and a partitive governed by `vastaan`
+  // — where the numeral takes the SAME singular form at any count.
+  fi: {
+    keys: [
+      'canvas.redact.confirm',
+      'dialog.exportDoc.doneTxt',
+      'panel.encrypt.encryptedTo',
+      'panel.sig.trustVerified',
     ],
   },
   tr: { policy: 'numeral-invariant' },
