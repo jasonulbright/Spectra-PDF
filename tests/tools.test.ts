@@ -107,10 +107,11 @@ describe('tools registry', () => {
 
     // 'select' is the ABSENCE of a tool, 'hand' is that absence with
     // a different grip, 'zoommarquee' is pure navigation, and
-    // 'outputpreview'/'flattenpreview' are rendering states rather than
-    // pointer modes — nothing may claim any of the five.
+    // 'outputpreview'/'flattenpreview'/'tablereview' draw over the page rather
+    // than claiming a pointer vocabulary — nothing may claim any of the six.
     for (const ownerless of
-      ['select', 'hand', 'zoommarquee', 'outputpreview', 'flattenpreview'] as const) {
+      ['select', 'hand', 'zoommarquee', 'outputpreview', 'flattenpreview',
+        'tablereview'] as const) {
       expect(owners.has(ownerless), `'${ownerless}' must belong to no tool`).toBe(false);
       expect(toolForCanvasTool(ownerless)).toBeUndefined();
     }
@@ -118,7 +119,8 @@ describe('tools registry', () => {
     // Every other mode the canvas has resolves to its tool.
     for (const m of CANVAS_MODES) {
       if (m === 'select' || m === 'hand' || m === 'zoommarquee'
-        || m === 'outputpreview' || m === 'flattenpreview') continue;
+        || m === 'outputpreview' || m === 'flattenpreview'
+        || m === 'tablereview') continue;
       expect(toolForCanvasTool(m)?.id, `${m} is owned by no tool`).toBeDefined();
     }
   });

@@ -70,6 +70,7 @@ from engine.printer_marks import (
 )
 from engine.links import list_links, set_link_url, delete_link, add_links
 from engine.office_export import export_document, supported_formats
+from engine.table_export import detect_table_regions
 from engine.image_export import export_images
 from engine.xfdf import export_xfdf, import_xfdf
 from engine.takeoff import export_count_summary
@@ -230,6 +231,7 @@ def main() -> None:
     server.register("add_links", add_links)
     server.register("export_document", export_document)
     server.register("supported_export_formats", supported_formats)
+    server.register("detect_tables", detect_table_regions)
     server.register("export_images", export_images)
     server.register("get_metadata", get_metadata)
     server.register("set_metadata", set_metadata)

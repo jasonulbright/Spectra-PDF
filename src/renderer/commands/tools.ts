@@ -266,8 +266,11 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     // Properties lives here: "what is this document?" is a dialog you
     // ask about the file in front of you (Ctrl+D), not a job you pick from a
     // grid of tools.
-    description: 'Pull the text out of a document.',
-    ops: ['extract_text'],
+    description: 'Pull the text out of a document, and check its tables before they become a spreadsheet.',
+    ops: ['extract_text', 'tablereview'],
+    // The review's own mode is OWNERLESS (the preview class): it is armed by
+    // the panel, not by opening the tool, because a document with no detection
+    // run has nothing to draw.
   },
 ] as const;
 

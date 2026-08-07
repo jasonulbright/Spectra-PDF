@@ -306,6 +306,9 @@ export const DIALOG_STRINGS = {
   'dialog.exportDoc.sheetPer.table': 'One sheet per table',
   'dialog.exportDoc.sheetPer.page': 'One sheet per page',
   'dialog.exportDoc.includeUntabled': 'Add a sheet with the text outside the tables',
+  'dialog.exportDoc.reviewTables': 'Review tables…',
+  'dialog.exportDoc.reviewTablesHint':
+    'See the tables on the page and adjust them before the spreadsheet is written.',
   'dialog.exportDoc.slideSize': 'Slide size',
   'dialog.exportDoc.slideSize.page': "The document's own page size",
   'dialog.exportDoc.slideSize.wide': 'Widescreen (16:9)',

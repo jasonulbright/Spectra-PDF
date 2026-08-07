@@ -48,6 +48,7 @@ import { TakeoffPanel } from './panels/TakeoffPanel';
 import { SearchRedactPanel } from './panels/SearchRedactPanel';
 import { SanitizePanel } from './panels/SanitizePanel';
 import { PrepareFormPanel } from './panels/PrepareFormPanel';
+import { TableReviewPanel } from './panels/TableReviewPanel';
 import { LayersPanel } from './panels/LayersPanel';
 import { AccessibilityPanel } from './panels/AccessibilityPanel';
 import { CommentsPanel } from './panels/CommentsPanel';
@@ -194,6 +195,7 @@ const panels: Record<Operation, React.ComponentType> = {
   search_redact: SearchRedactPanel,
   prepareform: PrepareFormPanel,
   sanitize: SanitizePanel,
+  tablereview: TableReviewPanel,
 };
 
 function AppContent(): React.ReactElement {
@@ -2416,6 +2418,13 @@ function AppContent(): React.ReactElement {
           file={{ workingPath: activeFile.workingPath, name: activeFile.name }}
           format={exportDocFormat}
           onClose={() => setExportDocFormat(null)}
+          // The review is a surface, not a dialog step: it needs the page, so
+          // the dialog closes and the dock opens on the panel that owns it.
+          onReviewTables={() => {
+            setExportDocFormat(null);
+            dispatch({ type: 'UI_SET_ACTIVE_OP', op: 'tablereview' });
+            dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
+          }}
         />
       )}
       {presentation && (() => {

@@ -698,6 +698,155 @@ def detect_tables(file: str, pages="all") -> dict:
     }
 
 
+def _region_bounds(region) -> list[float]:
+    """A region's drawn extent in un-rotated user space.
+
+    The leftmost column boundary is folded in: a right-anchored first column
+    starts at the widest cell that shares its anchor, which can sit left of any
+    single segment's own left edge.
+    """
+    rects = [segment.rect for line in region.lines for segment in line.segments]
+    left = min([r[0] for r in rects] + [column.x for column in region.columns])
+    return [
+        left,
+        min(r[1] for r in rects),
+        max(r[2] for r in rects),
+        max(r[3] for r in rects),
+    ]
+
+
+def _cell_count(region) -> int:
+    rows, _merges, _unresolved = _grid(region)
+    return sum(1 for cells in rows for text in cells if text)
+
+
+def detect_table_regions(file: str, pages="all") -> dict:
+    """Every detected table's GEOMETRY, as data a reviewer can be shown.
+
+    The same detection `export_tables` runs, reported rather than written. The
+    column positions are the ones placement measures against, so a reviewer
+    drags the very numbers the export reads back.
+    """
+    found = detect_tables(file, pages)
+    regions = []
+    for index, region in enumerate(found["regions"]):
+        regions.append(
+            {
+                "page": region.page,
+                "index": index,
+                "bounds": _region_bounds(region),
+                "columns": [column.x for column in region.columns],
+                "rows": [line.baseline for line in region.lines],
+                "evidence": region.evidence,
+                "caption": region.caption,
+                "cells": _cell_count(region),
+            }
+        )
+    return {
+        "pages": found["pages"],
+        "regions": regions,
+        "untabled": {str(k): v for k, v in found["untabled"].items()},
+        "vertical_writing_runs": found["vertical_writing_runs"],
+    }
+
+
+def _reviewed_region(page_no: int, entry: dict, upright: list) -> _Region:
+    """One reviewed table as a region the writing path already takes.
+
+    Region FINDING does not run: the reviewer has already answered the question
+    it exists to guess. What is left is which drawn text the bounds enclose and
+    where the boundaries between columns are — and placement inside a confirmed
+    region is total and nearest-boundary, so a supplied boundary needs no
+    alignment anchor.
+    """
+    bounds = [float(v) for v in entry.get("bounds", [])]
+    if len(bounds) != 4:
+        raise ValueError(f"the table on page {page_no} has no area")
+    x0, y0, x1, y1 = bounds
+    if x1 <= x0 or y1 <= y0:
+        raise ValueError(f"the table on page {page_no} has an empty area")
+
+    boundaries = sorted(float(v) for v in entry.get("columns", []))
+    if len(boundaries) < MIN_REGION_COLUMNS:
+        count = len(boundaries)
+        raise ValueError(
+            f"the table on page {page_no} has {count} column boundary; a table "
+            "needs at least two"
+        )
+
+    inside = [
+        segment
+        for segment in upright
+        if x0 <= (segment.rect[0] + segment.rect[2]) / 2.0 <= x1
+        and y0 <= (segment.rect[1] + segment.rect[3]) / 2.0 <= y1
+    ]
+    if not inside:
+        raise ValueError(f"the table on page {page_no} covers no text")
+
+    caption = entry.get("caption")
+    return _Region(
+        page_no,
+        _cluster_lines(inside),
+        [_Column(x) for x in boundaries],
+        "reviewed",
+        str(caption) if caption else None,
+    )
+
+
+def _reviewed(pdf, entries) -> tuple[list[_Region], list[int], dict[int, list], int]:
+    """(the reviewed regions, their pages, the segments per page, vertical runs).
+
+    The segment cache is returned rather than rebuilt because segment IDENTITY
+    is what tells claimed text from spare: a second read of the same page
+    produces equal objects that are not the same objects.
+    """
+    wanted: list[int] = []
+    for entry in entries:
+        page_no = int(entry.get("page", 0))
+        if not (1 <= page_no <= len(pdf.pages)):
+            raise ValueError(f"page {page_no} is out of range (1-{len(pdf.pages)})")
+        if page_no not in wanted:
+            wanted.append(page_no)
+    wanted.sort()
+
+    lines_cache: dict[int, list] = {}
+    vertical_writing = 0
+    for page_no in wanted:
+        segments = _page_segments(pdf, pdf.pages[page_no - 1])
+        upright = [s for s in segments if not _is_vertical_writing(s)]
+        vertical_writing += len(segments) - len(upright)
+        lines_cache[page_no] = upright
+
+    regions = [
+        _reviewed_region(int(entry["page"]), entry, lines_cache[int(entry["page"])])
+        for entry in entries
+    ]
+    regions.sort(key=lambda r: r.page)
+    return regions, wanted, lines_cache, vertical_writing
+
+
+def _untabled_outside(regions, wanted, lines_cache) -> dict[int, list[str]]:
+    """Per page, the drawn lines no reviewed region claimed.
+
+    A rejected table's text lands here rather than nowhere: the review decides
+    what is a TABLE, never what the page contains.
+    """
+    out: dict[int, list[str]] = {}
+    for number in wanted:
+        claimed = {
+            id(segment)
+            for region in regions
+            if region.page == number
+            for line in region.lines
+            for segment in line.segments
+        }
+        spare = [s for s in lines_cache.get(number, []) if id(s) not in claimed]
+        text = [line.text.strip() for line in _cluster_lines(spare) if line.text.strip()]
+        if text:
+            out[number] = text
+    return out
+
+
 def _sheet_name(wanted: str, taken: set) -> str:
     base = _SHEET_NAME_BANNED.sub(" ", wanted).strip()[:SHEET_NAME_LIMIT].strip() or "Table"
     name = base
@@ -752,15 +901,18 @@ def export_tables(
     pages="all",
     sheet_per: str = "table",
     include_untabled: bool = False,
+    regions=None,
 ) -> dict:
-    """Write ``file``'s detected tables to the workbook at ``output``.
+    """Write ``file``'s tables to the workbook at ``output``.
 
     Args:
         file: input PDF path.
         output: destination ``.xlsx`` path.
         pages: list of 1-based page numbers, or 'all'.
         sheet_per: 'table' (one sheet per region) or 'page'.
-        include_untabled: append a sheet carrying the text no region claimed.
+        include_untabled: append a sheet carrying the text no table claimed.
+        regions: a REVIEWED table set — ``{page, bounds, columns, caption}`` per
+            table. Detection does not run when it is given.
     """
     from openpyxl import Workbook
 
@@ -768,14 +920,31 @@ def export_tables(
     if grouping not in SHEET_PER:
         raise ValueError(f"unknown sheet grouping {sheet_per!r} (choose table or page)")
 
-    found = detect_tables(file, pages)
-    regions = found["regions"]
-    wanted = found["pages"]
-    if not regions:
-        raise ValueError(
-            f"no table was found on the {len(wanted)} page(s) analyzed, so there is "
-            "nothing to write to a spreadsheet"
-        )
+    if regions is not None:
+        if pages is not None and pages != "all":
+            raise ValueError(
+                "pages and regions cannot both be given: a reviewed table set "
+                "names its own pages"
+            )
+        if not regions:
+            raise ValueError(
+                "no table was accepted, so there is nothing to write to a spreadsheet"
+            )
+        with pikepdf.open(str(file)) as pdf:
+            found_regions, wanted, lines_cache, vertical_writing = _reviewed(pdf, regions)
+            untabled = _untabled_outside(found_regions, wanted, lines_cache)
+    else:
+        found = detect_tables(file, pages)
+        found_regions = found["regions"]
+        wanted = found["pages"]
+        untabled = found["untabled"]
+        vertical_writing = found["vertical_writing_runs"]
+        if not found_regions:
+            raise ValueError(
+                f"no table was found on the {len(wanted)} page(s) analyzed, so there is "
+                "nothing to write to a spreadsheet"
+            )
+    regions = found_regions
 
     convention = numeric_convention(
         [segment.text for region in regions for line in region.lines for segment in line.segments]
@@ -810,12 +979,12 @@ def export_tables(
             unresolved += count
             reported.append(_report(region, sheet.title, 1))
 
-    untabled_lines = sum(len(v) for v in found["untabled"].values())
+    untabled_lines = sum(len(v) for v in untabled.values())
     if include_untabled and untabled_lines:
         sheet = book.create_sheet(_sheet_name("Other text", taken))
         row = 1
         for number in wanted:
-            for text in found["untabled"].get(number, []):
+            for text in untabled.get(number, []):
                 sheet.cell(row=row, column=1, value=number)
                 sheet.cell(row=row, column=2, value=logical_text(text)[0])
                 row += 1
@@ -832,7 +1001,7 @@ def export_tables(
         "tables": reported,
         "untabled_lines": untabled_lines,
         "pages_without_tables": [n for n in wanted if not any(r.page == n for r in regions)],
-        "vertical_writing_runs": found["vertical_writing_runs"],
+        "vertical_writing_runs": vertical_writing,
         "unresolved_rtl_cells": unresolved,
         "number_convention": convention,
     }
