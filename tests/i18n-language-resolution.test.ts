@@ -102,6 +102,7 @@ describe('resolveLanguage', () => {
     // Korean ships bare, so `ko-KR` reaches it by the base-match step. It is
     // NOT an ambiguous base — `zh` is the only base with two catalogs.
     expect(resolveLanguage('ko-KR')).toBe('ko');
+    expect(resolveLanguage('tr-TR')).toBe('tr');
   });
 
   it('falls back to English for a language we do not ship', () => {
