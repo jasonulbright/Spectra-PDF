@@ -89,6 +89,15 @@ describe('resolveLanguage', () => {
 
   it('takes a regional tag to its bare catalog', () => {
     expect(resolveLanguage('ja-JP')).toBe('ja');
+    // The Slavic wave ships five bare tags, and the regional forms every
+    // Windows install actually reports have to reach them by the base-match
+    // step alone — an alias row for any of these would be dead weight, and
+    // `uk-UA` is additionally the tag some systems still report for Ukrainian.
+    expect(resolveLanguage('ru-RU')).toBe('ru');
+    expect(resolveLanguage('uk-UA')).toBe('uk');
+    expect(resolveLanguage('pl-PL')).toBe('pl');
+    expect(resolveLanguage('cs-CZ')).toBe('cs');
+    expect(resolveLanguage('sk-SK')).toBe('sk');
   });
 
   it('falls back to English for a language we do not ship', () => {
