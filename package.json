@@ -80,7 +80,7 @@
     "d3-zoom": "3.0.0",
     "i18next": "26.3.6",
     "pdf-lib": "1.17.1",
-    "pdfjs-dist": "6.0.227",
+    "pdfjs-dist": "6.2.108",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-i18next": "17.0.11"

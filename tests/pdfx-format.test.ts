@@ -31,8 +31,21 @@ async function loadPdf(bytes: Uint8Array): Promise<PDFDocumentProxy> {
 
 type AttachmentMap = Record<string, { filename?: string; content: Uint8Array }> | null;
 
+// pdf.js hands back a Map of metadata and serves the bytes separately, so the
+// stub does the same: entries carry no `content` and `getAttachmentContent`
+// answers by map key. A stub that inlines the bytes would pass against a
+// `readManifest` that never fetches them.
 function stubPdf(attachments: AttachmentMap): PDFDocumentProxy {
-  return { getAttachments: async () => attachments } as unknown as PDFDocumentProxy;
+  if (!attachments) {
+    return { getAttachments: async () => null } as unknown as PDFDocumentProxy;
+  }
+  const meta = new Map(
+    Object.entries(attachments).map(([key, entry]) => [key, { filename: entry.filename }]),
+  );
+  return {
+    getAttachments: async () => meta,
+    getAttachmentContent: async (id: string) => attachments[id]?.content ?? null,
+  } as unknown as PDFDocumentProxy;
 }
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);

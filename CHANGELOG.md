@@ -99,6 +99,10 @@
 - A system set to Hebrew under the older "iw" language code now opens in Hebrew.
 - A page range past the last page is refused fully in the language on screen.
 
+### Security
+- The bundled PDF rendering library is updated past GHSA-hq66-cqwq-w95j, where opening a crafted document could run arbitrary code.
+- A build-time test dependency is updated past a reported denial-of-service vulnerability.
+
 ## 1.0.22
 
 ### Signing
