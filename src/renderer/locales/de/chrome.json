@@ -1635,7 +1635,7 @@
   "engine.printer.mustBetweenGot": "{{name}} muss zwischen {{lo}} und {{hi}} liegen, erhalten {{value}}",
   "engine.printer.mustNumberGot": "{{name}} muss eine Zahl sein, erhalten {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} muss true oder false sein, erhalten {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "Seite {{end}} liegt hinter dem Dokumentende ({{page_count}} Seite{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "Seite {{end}} liegt hinter dem Dokumentende (Seiten gesamt: {{page_count}})",
   "engine.printer.pageNumbersBased": "Seitenzahlen beginnen bei 1: „{{token}}“",
   "engine.printer.pageSelectionEmptyPages": "Die Seitenauswahl ist leer (keine Seite passt)",
   "engine.printer.perSheetMustGot": "{{label}} pro Bogen muss zwischen 1 und 8 liegen, erhalten {{v}}",

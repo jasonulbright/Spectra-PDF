@@ -1641,7 +1641,7 @@
   "engine.printer.mustBetweenGot": "{{name}} değeri {{lo}} ile {{hi}} arasında olmalıdır, {{value}} alındı",
   "engine.printer.mustNumberGot": "{{name}} değeri bir sayı olmalıdır, {{value}} alındı",
   "engine.printer.mustTrueFalseGot": "{{name}} değeri true veya false olmalıdır, {{value}} alındı",
-  "engine.printer.pageBeyondDocumentPage": "{{end}} sayfası belgenin dışında ({{page_count}} sayfa{{v2}})",
+  "engine.printer.pageBeyondDocumentPage": "{{end}} sayfası belgenin dışında (toplam {{page_count}} sayfa)",
   "engine.printer.pageNumbersBased": "Sayfa numaraları 1'den başlar: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "Sayfa seçimi boş (eşleşen sayfa yok)",
   "engine.printer.perSheetMustGot": "Yaprak başına {{label}} 1-8 olmalıdır, {{v}} alındı",

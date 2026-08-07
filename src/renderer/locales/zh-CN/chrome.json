@@ -1586,7 +1586,7 @@
   "engine.printer.mustBetweenGot": "{{name}} 必须在 {{lo}} 到 {{hi}} 之间，实际为 {{value}}",
   "engine.printer.mustNumberGot": "{{name}} 必须是数字，实际为 {{value}}",
   "engine.printer.mustTrueFalseGot": "{{name}} 必须是 true 或 false，实际为 {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "第 {{end}} 页超出文档范围（共 {{page_count}} 页{{v2}}）",
+  "engine.printer.pageBeyondDocumentPage": "第 {{end}} 页超出文档范围（共 {{page_count}} 页）",
   "engine.printer.pageNumbersBased": "页码从 1 开始：'{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "页面选择为空（没有匹配的页面）",
   "engine.printer.perSheetMustGot": "每张纸的{{label}}必须在 1 到 8 之间，实际为 {{v}}",

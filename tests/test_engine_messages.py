@@ -138,6 +138,31 @@ def test_placeholder_names_are_interpolatable(table):
             )
 
 
+def test_no_placeholder_is_a_word_suffix(table):
+    """A placeholder glued to the end of a word carries English INFLECTION.
+
+    `... ({{page_count}} page{{v2}})` interpolates "s" or "" — a suffix that
+    exists only in English. The renderer inserts captured values verbatim and
+    passes no `count` to i18next, so no translation can plural-select around
+    one: every non-English catalog re-emits the English suffix. The count
+    phrase must be count-neutral English instead.
+
+    A one-letter stem is a separator (`{{width}}x{{height}}`), not a word
+    taking a suffix, so the stem must be at least two letters.
+    """
+    for row in table:
+        for m in re.finditer(r"\{\{[^}]*\}\}", row.message):
+            stem = re.search(r"[A-Za-z]+\Z", row.message[: m.start()])
+            after = row.message[m.end()] if m.end() < len(row.message) else ""
+            if stem is None or len(stem.group()) < 2 or after.isalnum() or after == "_":
+                continue
+            pytest.fail(
+                f"{row.key}: {m.group()} is glued to the end of {stem.group()!r} — "
+                "an interpolated inflection cannot be translated; reword the "
+                f"message count-neutral: {row.message!r}"
+            )
+
+
 def test_no_pattern_shadows_another(table):
     """Two templates must not be able to claim one message ambiguously.
 

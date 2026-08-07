@@ -1690,7 +1690,7 @@
   "engine.printer.mustBetweenGot": "הערך {{name}} חייב להיות בין {{lo}} לבין {{hi}} — התקבל {{value}}",
   "engine.printer.mustNumberGot": "הערך {{name}} חייב להיות מספר — התקבל {{value}}",
   "engine.printer.mustTrueFalseGot": "הערך {{name}} חייב להיות true או false — התקבל {{value}}",
-  "engine.printer.pageBeyondDocumentPage": "עמוד {{end}} חורג מגבולות המסמך — במסמך יש {{page_count}} עמודים {{v2}}",
+  "engine.printer.pageBeyondDocumentPage": "עמוד {{end}} חורג מגבולות המסמך (סך הכול עמודים: {{page_count}})",
   "engine.printer.pageNumbersBased": "מספרי העמודים מתחילים ב-1: '{{token}}'",
   "engine.printer.pageSelectionEmptyPages": "בחירת העמודים ריקה (אין עמודים תואמים)",
   "engine.printer.perSheetMustGot": "מספר {{label}} בכל גיליון חייב להיות בין 1 לבין 8 — התקבל {{v}}",

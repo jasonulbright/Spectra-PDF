@@ -3258,6 +3258,19 @@ class TestPrintPageSpec:
         with pytest.raises(ValueError, match="beyond the document"):
             parse_page_spec("1-99", 5)
 
+    @pytest.mark.parametrize("page_count", [1, 2, 5])
+    def test_beyond_the_document_wording_is_count_neutral(self, page_count):
+        """The count phrase must not vary with the count.
+
+        A plural suffix chosen here becomes an interpolated placeholder in the
+        refusal table, which every translation would re-emit in English.
+        """
+        with pytest.raises(ValueError) as excinfo:
+            parse_page_spec(str(page_count + 1), page_count)
+        assert str(excinfo.value) == (
+            f"Page {page_count + 1} is beyond the document ({page_count} pages in total)"
+        )
+
 
 class TestPrintArgs:
     def test_exact_argv_fit_all_pages(self):
