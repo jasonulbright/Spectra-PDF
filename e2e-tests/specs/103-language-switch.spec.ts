@@ -355,4 +355,85 @@ describe('language switch', () => {
     expect(await browser.execute(() => document.documentElement.lang)).toBe('en');
     await $('[data-testid="prefs-close"]').click();
   });
+
+  // The right-to-left wave. These two are the only shipped locales whose
+  // direction is not `ltr`, so each row asserts `<html dir>` beside the label
+  // — the same pairing spec 127 makes, here proving that a REAL catalog
+  // reaching the Settings list flips the shell, not just the pseudo-locale.
+  // Arabic additionally carries a check no other locale needs: the chrome
+  // declares no @font-face, so Arabic text is shaped by the platform, and a
+  // shaping failure renders correct characters in disconnected forms that no
+  // text assertion can see. Measured, not assumed, exactly as Greek uppercase
+  // was in wave F.
+  it('switches to each RTL locale, flips <html dir>, and shapes Arabic', async () => {
+    await waitForHarness();
+    await browser.keys(['Control', 'k']);
+    await $('[data-testid="prefs-cat-appearance"]').waitForDisplayed({ timeout: 10_000 });
+    await $('[data-testid="prefs-cat-appearance"]').click();
+    await $('[data-testid="prefs-language"]').waitForDisplayed({ timeout: 10_000 });
+
+    for (const [code, viewLabel] of [
+      ['ar', 'عرض'],
+      ['he', 'תצוגה'],
+    ] as const) {
+      await $('[data-testid="prefs-language"]').selectByAttribute('value', code);
+      await browser.waitUntil(
+        async () => (await $('[data-testid="menu-view"]').getText()) === viewLabel,
+        { timeout: 10_000, timeoutMsg: `the menu bar never re-rendered in ${code}` },
+      );
+      expect(await browser.execute(() => document.documentElement.lang)).toBe(code);
+      expect(await browser.execute(() => document.documentElement.dir)).toBe('rtl');
+
+      const clipped = await browser.execute((l: string) => {
+        const regions = ['prefs-body-appearance', 'canvas-status-bar', 'menubar'];
+        const out: string[] = [];
+        for (const id of regions) {
+          const root = document.querySelector(`[data-testid="${id}"]`);
+          if (!root) continue;
+          for (const el of Array.from(root.querySelectorAll('button, label, option, span'))) {
+            const e = el as HTMLElement;
+            if (!e.offsetParent) continue;
+            const overflow = getComputedStyle(e).overflowX;
+            if (overflow === 'auto' || overflow === 'scroll') continue;
+            if (e.scrollWidth > e.clientWidth + 1) {
+              out.push(`${l} ${id}: ${(e.textContent ?? '').trim().slice(0, 60)}`);
+            }
+          }
+        }
+        return out;
+      }, code);
+      expect(clipped).toEqual([]);
+    }
+
+    // Arabic shaping, measured. Lam followed by alef is a REQUIRED ligature:
+    // a shaping engine draws the two code points as one glyph, so the pair is
+    // narrower than the two letters laid out apart. If the platform handed
+    // back isolated forms the widths would match. The comparison is against
+    // the same two code points separated by a zero-width non-joiner, which
+    // suppresses the ligature while adding no advance of its own.
+    const shaping = await browser.execute(() => {
+      const make = (text: string): number => {
+        const probe = document.createElement('span');
+        probe.setAttribute('lang', 'ar');
+        probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font-size:48px';
+        probe.textContent = text;
+        document.body.appendChild(probe);
+        const w = probe.getBoundingClientRect().width;
+        probe.remove();
+        return w;
+      };
+      return { ligature: make('لا'), apart: make('ل‌ا') };
+    });
+    expect(shaping.ligature).toBeGreaterThan(0);
+    expect(shaping.ligature).toBeLessThan(shaping.apart);
+
+    await $('[data-testid="prefs-language"]').selectByAttribute('value', 'en');
+    await browser.waitUntil(
+      async () => (await $('[data-testid="menu-view"]').getText()) === 'View',
+      { timeout: 10_000, timeoutMsg: 'the menu bar never returned to English' },
+    );
+    expect(await browser.execute(() => document.documentElement.lang)).toBe('en');
+    expect(await browser.execute(() => document.documentElement.dir)).toBe('ltr');
+    await $('[data-testid="prefs-close"]').click();
+  });
 });
