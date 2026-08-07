@@ -30,7 +30,7 @@ import { loadSettings } from './lib/app-settings';
 import { OCR_LANGUAGES } from './ocr/languages';
 
 export const SHIPPED_LOCALES: readonly string[] = [
-  'en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl',
+  'en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da',
 ];
 
 /** Each locale's display name in ITS OWN language (the language-picker
@@ -46,6 +46,7 @@ export const LOCALE_NATIVE_NAMES: Record<string, string> = {
   ja: '日本語',
   'zh-CN': '简体中文',
   nl: 'Nederlands',
+  da: 'Dansk',
 };
 
 /**
