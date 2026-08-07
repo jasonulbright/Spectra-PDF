@@ -103,6 +103,7 @@ describe('resolveLanguage', () => {
     // NOT an ambiguous base — `zh` is the only base with two catalogs.
     expect(resolveLanguage('ko-KR')).toBe('ko');
     expect(resolveLanguage('tr-TR')).toBe('tr');
+    expect(resolveLanguage('hu-HU')).toBe('hu');
   });
 
   it('falls back to English for a language we do not ship', () => {
