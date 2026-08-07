@@ -53,9 +53,11 @@ describe('resolveLanguage', () => {
     }
   });
 
-  it('carries the Norwegian and legacy-Hebrew aliases ahead of their catalogs', () => {
+  it('routes the whole Norwegian family to Bokmål, and legacy Hebrew ahead of its catalog', () => {
+    // `nb` ships, so the macrolanguage and the Nynorsk tags now reach it —
+    // the alias rows were authored before the catalog and did not change.
     for (const tag of ['no', 'no-NO', 'nn', 'nn-NO', 'nb', 'nb-NO']) {
-      expect(resolveLanguage(tag), tag).toBe('en');
+      expect(resolveLanguage(tag), tag).toBe('nb');
     }
     expect(LANGUAGE_ALIASES['no']).toBe('nb');
     expect(LANGUAGE_ALIASES['nn']).toBe('nb');

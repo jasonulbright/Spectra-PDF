@@ -30,7 +30,7 @@ const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 // Mirrors SHIPPED_LOCALES in src/renderer/i18n.ts — imported indirectly
 // would drag i18next's init (and its DOM expectations) into this node
 // test, so the list is pinned here and a drift fails the parity loop.
-const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv'];
+const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv', 'nb'];
 
 /**
  * The plural categories a locale's forms must cover, read from CLDR at gate
@@ -101,6 +101,19 @@ const INVARIANT_PLURALS: Record<string, PluralPolicy> = {
       'panel.encrypt.encryptedTo',
       'panel.optimize.audit.objects',
       'panel.prepareForm.create',
+    ],
+  },
+  // Norwegian Bokmål neuter monosyllables take a bare plural: et treff / flere
+  // treff, et språk / språk, en byte / byte. `treff` is the only word for a
+  // search hit, and every other Norwegian count in this catalog inflects.
+  nb: {
+    keys: [
+      'canvas.find.summary',
+      'dialog.diskRedact.hits',
+      'dialog.ocr.langCount',
+      'dialog.props.bytes',
+      'panel.searchRedact.found',
+      'panel.searchRedact.hitCount',
     ],
   },
   tr: { policy: 'numeral-invariant' },
