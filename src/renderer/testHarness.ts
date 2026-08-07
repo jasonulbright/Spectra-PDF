@@ -11,7 +11,7 @@
  */
 import { app, file, engine } from './lib/tauri-bridge';
 import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
-import { invokeCommand as invokeRegisteredCommand } from './commands/context';
+import { invokeCommand as invokeRegisteredCommand, getCanvasServices } from './commands/context';
 import { COMMANDS, type CommandId } from './commands/registry';
 import { setAppLanguage } from './i18n';
 import { getTakeoffSettings, setTakeoffSettings } from './lib/takeoff-settings';
@@ -891,6 +891,24 @@ export interface TestHarness {
   /** Export the active document to `destPath` in `format` via the engine
    *  (bypasses the native save dialog). Returns the engine result. */
   exportActiveAs: (destPath: string, format: string, options?: Record<string, unknown>) => Promise<unknown>;
+  /** The detected tables under review: what the panel lists and the page
+   *  draws, as data a spec can assert on. */
+  tableReviewList: () => {
+    id: string; page: number; caption: string | null; columns: number[]; rows: number;
+    cells: number; accepted: boolean;
+  }[];
+  /** Accept or reject one table. */
+  tableReviewToggle: (regionId: string) => void;
+  /** Move one column boundary to `fraction` of the table's own width. A
+   *  pointer drag on a two-pixel rule is not reliably WebDriver-drivable, so
+   *  the gesture's RESULT is bridged rather than the gesture. */
+  tableReviewMoveColumn: (regionId: string, index: number, fraction: number) => void;
+  /** Write the accepted tables to `destPath` (bypasses the native save
+   *  dialog). Returns the engine result. */
+  tableReviewExport: (
+    destPath: string,
+    options?: { sheetPer?: string; includeUntabled?: boolean },
+  ) => Promise<unknown>;
   /** Switch the main view (legacy — maps onto the tab model: welcome→Home,
    * operations→Tools, canvas→the active/first document's tab). */
   setView: (view: 'welcome' | 'operations' | 'canvas') => void;
@@ -1576,6 +1594,52 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         return await app.stageSendCopy(snap.activeFile.workingPath, snap.activeFile.name);
       } catch (err) {
         captureError('sendToEmailStage', err);
+        throw err;
+      }
+    },
+    tableReviewList: () =>
+      (getCanvasServices()?.tableReview.list() ?? []).map((r) => ({
+        id: r.id,
+        page: r.page,
+        caption: r.caption,
+        columns: r.columns,
+        rows: r.rows.length,
+        cells: r.cells,
+        accepted: r.accepted,
+      })),
+    tableReviewToggle: (regionId) => {
+      const service = getCanvasServices()?.tableReview;
+      if (!service) return;
+      service.update(
+        service.list().map((r) => (r.id === regionId ? { ...r, accepted: !r.accepted } : r)),
+      );
+    },
+    tableReviewMoveColumn: (regionId, index, fraction) => {
+      const service = getCanvasServices()?.tableReview;
+      if (!service) return;
+      service.update(
+        service.list().map((r) => {
+          if (r.id !== regionId) return r;
+          const columns = [...r.columns];
+          columns[index] = fraction;
+          return { ...r, columns: columns.sort((a, b) => a - b) };
+        }),
+      );
+    },
+    tableReviewExport: async (destPath, options) => {
+      const service = getCanvasServices()?.tableReview;
+      if (!service) {
+        const msg = 'tableReviewExport: the canvas is not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        return await service.exportTo(destPath, {
+          sheetPer: options?.sheetPer ?? 'table',
+          includeUntabled: options?.includeUntabled ?? false,
+        });
+      } catch (err) {
+        captureError('tableReviewExport', err);
         throw err;
       }
     },

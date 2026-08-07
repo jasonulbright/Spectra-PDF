@@ -59,6 +59,16 @@ const PHYSICAL_EXCEPTIONS: Record<string, string> = {
   '.page-candidate-handle.is-ne': 'compass resize handle',
   '.page-candidate-handle.is-sw': 'compass resize handle',
   '.page-candidate-handle.is-se': 'compass resize handle',
+  '.page-table-handle.is-nw': 'compass resize handle',
+  '.page-table-handle.is-ne': 'compass resize handle',
+  '.page-table-handle.is-sw': 'compass resize handle',
+  '.page-table-handle.is-se': 'compass resize handle',
+  // A table's column and row lines span the table in page space. Their
+  // positions come from the detector's own coordinates, already turned to
+  // match the page's rotation, so mirroring them would turn them twice.
+  '.page-table-row.is-y': 'page-anchored overlay',
+  '.page-table-column.is-x': 'page-anchored handle centring',
+  '.page-table-column.is-y': 'page-anchored overlay',
   // The reading view's own flow: the ruler grid starts at the page origin and
   // a spread pairs by the document's binding, so the frame does not mirror.
   '.docview-frame': 'reading-view page geometry',

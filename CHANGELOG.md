@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.24
+
+### Reviewing tables before a spreadsheet
+- Find the tables on a page and see each one drawn on the document itself.
+- Every table is shown with its column boundaries and its rows.
+- A table is included or left out one by one, and nothing is included by default.
+- Drag a table's frame to change what it covers.
+- Drag a column rule to move a boundary, and the cells follow it.
+- Double-click inside a table to add a boundary, or on a rule to remove it.
+- The spreadsheet is written from the tables you kept, at the geometry you left them.
+- Text no table claimed can still be carried to its own sheet.
+- Lines outside every table and text written down the page are counted before you export.
+- The review writes nothing to the document, whatever you change.
+- Export to Excel offers the review, and exporting without it works exactly as before.
+
 ## 1.0.23
 
 ### Print production

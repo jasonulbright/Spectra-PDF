@@ -264,6 +264,12 @@ export type CanvasTool =
   // 'outputpreview' — it changes what the page SHOWS and claims no gesture,
   // so it belongs to no tool and `openTool` is what disarms it.
   | 'flattenpreview'
+  // Table review: the page carries the detected table regions, their column
+  // boundaries and their rows, adjustable before the spreadsheet export reads
+  // them. Same class and same reason as the two previews above — it belongs to
+  // no tool and `openTool` is what disarms it, so a review left armed by a
+  // closed tool cannot go silently live on the next document.
+  | 'tablereview'
   | 'highlight'
   | 'freetext'
   | 'ink'

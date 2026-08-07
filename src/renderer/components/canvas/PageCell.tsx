@@ -7,6 +7,9 @@ import { projectMarkRect, rotateNormalizedPoints, rotateNormalizedRect } from '.
 import type { RedactionMark } from '../../lib/redaction';
 import type { FieldCandidate } from '../../lib/form-candidates';
 import FieldCandidateOverlay from './FieldCandidateOverlay';
+import type { TableRegion, TableReviewHandlers } from '../../lib/table-review';
+import { currentRotation } from '../../lib/table-review';
+import TableRegionOverlay from './TableRegionOverlay';
 import type { OcrWord } from '../../ocr/types';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import { rgb01ToHex, hex01ToRgb, type EditVectorObject } from '../../lib/edit-vectors';
@@ -658,6 +661,11 @@ interface PageCellProps {
     rect: { x: number; y: number; w: number; h: number },
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
+  /** Detected tables on this page, awaiting review. Bounds are
+   * display-normalized at the orientation they were detected in; the interior
+   * lines are user-space fractions and turn with the page at render. */
+  tableRegions?: TableRegion[];
+  tableReview?: TableReviewHandlers;
   /** Edit-mode image placements, display-normalized at baked
    * orientation — pending rotation is applied at render like marks. */
   editImages?: EditImagePlacement[];
@@ -1027,6 +1035,8 @@ function PageCellImpl({
   onSelectCandidate,
   onRemoveCandidate,
   onMoveCandidate,
+  tableRegions,
+  tableReview,
   editImages,
   editSelectedIndexes,
   editImageGroup,
@@ -3624,6 +3634,38 @@ function PageCellImpl({
                   candidate.rotationAtDraw,
                 )
               }
+            />
+          );
+        })}
+      {tool === 'tablereview' &&
+        tableReview &&
+        (tableRegions ?? []).map((region) => {
+          // The bounds were stored in the orientation they were detected at, so
+          // only the delta since then applies to them; the interior lines are
+          // stored in user space and take the whole rotation.
+          const r = rotateNormalizedRect(region.rect, page.rotation - region.rotationAtDraw);
+          return (
+            <TableRegionOverlay
+              key={region.id}
+              id={region.id}
+              rect={r}
+              rotation={currentRotation(region, page.rotation)}
+              columns={region.columns}
+              rows={region.rows}
+              label={region.caption ?? tChrome('canvas.tableReview.untitled')}
+              accepted={region.accepted}
+              selected={tableReview.selectedId === region.id}
+              onSelect={tableReview.onSelect}
+              onToggle={tableReview.onToggle}
+              onMoveBounds={(id, next) =>
+                tableReview.onMoveBounds(
+                  id,
+                  rotateNormalizedRect(next, region.rotationAtDraw - page.rotation),
+                )
+              }
+              onMoveColumn={tableReview.onMoveColumn}
+              onAddColumn={tableReview.onAddColumn}
+              onRemoveColumn={tableReview.onRemoveColumn}
             />
           );
         })}

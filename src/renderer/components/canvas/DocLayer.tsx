@@ -6,6 +6,7 @@ import type { DocPlacement } from '../../canvas/layout';
 import type { PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { FieldCandidate } from '../../lib/form-candidates';
+import type { TableRegion, TableReviewHandlers } from '../../lib/table-review';
 import type { AnnotationTransform } from '../../lib/annotation-manipulation';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import type { EditVectorObject } from '../../lib/edit-vectors';
@@ -41,6 +42,8 @@ interface DocLayerProps {
   onMeasureResult?: (text: string) => void;
   redactionMarksByPage: ReadonlyMap<string, RedactionMark[]>;
   fieldCandidatesByPage: ReadonlyMap<string, FieldCandidate[]>;
+  tableRegionsByPage: ReadonlyMap<string, TableRegion[]>;
+  tableReview?: TableReviewHandlers;
   selectedCandidateId: string | null;
   onSelectCandidate: (candidateId: string) => void;
   onRemoveCandidate: (candidateId: string) => void;
@@ -220,6 +223,8 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               onMeasureResult={props.onMeasureResult}
               redactionMarksByPage={props.redactionMarksByPage}
               fieldCandidatesByPage={props.fieldCandidatesByPage}
+              tableRegionsByPage={props.tableRegionsByPage}
+              tableReview={props.tableReview}
               selectedCandidateId={props.selectedCandidateId}
               onSelectCandidate={props.onSelectCandidate}
               onRemoveCandidate={props.onRemoveCandidate}

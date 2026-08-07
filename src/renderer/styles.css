@@ -4093,6 +4093,120 @@
   cursor: nwse-resize;
 }
 
+/* Detected tables under review. A dashed teal frame with a rule per column
+   boundary and a hairline per row: nothing here is written to the document at
+   all, so the treatment must not read as content or as a candidate field. */
+.page-table-region {
+  position: absolute;
+  background: rgba(20, 160, 150, 0.08);
+  border: 1.5px dashed rgba(45, 200, 190, 0.85);
+  border-radius: 2px;
+  cursor: move;
+}
+.page-table-region.is-accepted {
+  background: rgba(20, 160, 150, 0.16);
+  border-style: solid;
+}
+.page-table-region.is-selected {
+  border-color: var(--accent, #3b82f6);
+}
+.page-table-label {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 1px 3px;
+  font-size: 8px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: rgba(120, 225, 215, 0.95);
+  pointer-events: none;
+}
+.page-table-region.is-selected .page-table-label {
+  color: var(--accent, #3b82f6);
+}
+.page-table-accept {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  width: 12px;
+  height: 12px;
+  line-height: 10px;
+  font-size: 9px;
+  text-align: center;
+  color: #fff;
+  background: rgba(20, 160, 150, 0.9);
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+}
+/* A row is drawn evidence, not a control: it takes no pointer at all. */
+.page-table-row {
+  position: absolute;
+  background: rgba(45, 200, 190, 0.35);
+  pointer-events: none;
+}
+.page-table-row.is-x {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+.page-table-row.is-y {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+.page-table-column {
+  position: absolute;
+  background: rgba(45, 200, 190, 0.95);
+}
+.page-table-column.is-x {
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  cursor: col-resize;
+}
+.page-table-column.is-y {
+  left: 0;
+  right: 0;
+  height: 2px;
+  margin-top: -1px;
+  cursor: row-resize;
+}
+.page-table-column.is-leading {
+  background: rgba(45, 200, 190, 0.45);
+  cursor: move;
+  pointer-events: none;
+}
+.page-table-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: var(--accent, #3b82f6);
+  border: 1px solid #fff;
+  border-radius: 2px;
+}
+.page-table-handle.is-nw {
+  left: -4px;
+  top: -4px;
+  cursor: nwse-resize;
+}
+.page-table-handle.is-ne {
+  right: -4px;
+  top: -4px;
+  cursor: nesw-resize;
+}
+.page-table-handle.is-sw {
+  left: -4px;
+  bottom: -4px;
+  cursor: nesw-resize;
+}
+.page-table-handle.is-se {
+  right: -4px;
+  bottom: -4px;
+  cursor: nwse-resize;
+}
+
 /* ── OS forced colors ─────────────────────────────────────────────────────
    A Windows contrast theme puts the webview into forced-colors mode: every
    author colour is replaced from the system palette, ignoring specificity,
