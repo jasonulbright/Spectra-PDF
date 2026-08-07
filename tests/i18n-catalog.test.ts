@@ -30,7 +30,7 @@ const EN_PATH = resolve(__dirname, '../src/renderer/locales/en/chrome.json');
 // Mirrors SHIPPED_LOCALES in src/renderer/i18n.ts — imported indirectly
 // would drag i18next's init (and its DOM expectations) into this node
 // test, so the list is pinned here and a drift fails the parity loop.
-const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv', 'nb', 'fi', 'ru', 'uk', 'pl', 'cs', 'sk', 'ko', 'zh-TW', 'tr', 'hu', 'el', 'ro', 'sl', 'ca'];
+const SHIPPED_LOCALES = ['en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv', 'nb', 'fi', 'ru', 'uk', 'pl', 'cs', 'sk', 'ko', 'zh-TW', 'tr', 'hu', 'el', 'ro', 'sl', 'ca', 'ar'];
 
 /**
  * The plural categories a locale's forms must cover, read from CLDR at gate
@@ -63,7 +63,14 @@ function pluralCategories(locale: string): readonly string[] {
  * the defect. Every plural base in this catalog is numeral-prefixed, and
  * Turkish and Hungarian govern the counted noun that way (1 dosya / 5 dosya,
  * 1 fájl / 5 fájl). Demanding a difference there means writing the language
- * wrong to satisfy a test.
+ * wrong to satisfy a test. Arabic governs the SAME pair the same way from the
+ * other end of a six-category set: the counted noun is a singular tamyeez
+ * after 1 and again after 100+ and after a fraction, and the two are spelled
+ * identically (1 صفحة / 100 صفحة). Arabic's number agreement is carried by the
+ * categories en has no counterpart for — the dual at 2, the broken plural at
+ * 3–10, the accusative singular at 11–99 — which is why the policy costs
+ * nothing here: those three forms are still required to be present, and
+ * `merged` still pins zero to few.
  *
  * `merged` — category PAIRS that share ONE form across the whole locale, and
  * are therefore required to be identical rather than merely allowed to be.
@@ -141,7 +148,7 @@ const INVARIANT_PLURALS: Record<string, PluralPolicy> = {
   el: { keys: ['dialog.props.bytes'] },
   tr: { policy: 'numeral-invariant' },
   hu: { policy: 'numeral-invariant' },
-  ar: { merged: [['zero', 'few']] },
+  ar: { policy: 'numeral-invariant', merged: [['zero', 'few']] },
 };
 
 /** en's key set with every plural base expanded to THIS locale's categories. */
