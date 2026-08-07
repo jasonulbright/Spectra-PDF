@@ -41,12 +41,13 @@ describe('resolveLanguage', () => {
     }
   });
 
-  it('refuses to serve the Traditional-Chinese family a Simplified catalog', () => {
+  it('sends the Traditional-Chinese family to zh-TW, never to the Simplified catalog', () => {
     // Traditional is a different catalog, not a regional spelling of zh-CN:
-    // the script differs and so does the terminology. Until zh-TW ships,
-    // English is the honest answer; the alias rows then need no edit.
+    // the script differs and so does the terminology. The alias rows were
+    // authored before the catalog and did not change when it landed — the
+    // answer moved from English to zh-TW because the target became shipped.
     for (const tag of ['zh-Hant', 'zh-Hant-TW', 'zh-TW', 'zh-HK', 'zh-MO']) {
-      expect(resolveLanguage(tag), tag).toBe('en');
+      expect(resolveLanguage(tag), tag).toBe('zh-TW');
     }
     for (const prefix of ['zh-hant', 'zh-tw', 'zh-hk', 'zh-mo']) {
       expect(LANGUAGE_ALIASES[prefix], prefix).toBe('zh-TW');
@@ -98,6 +99,9 @@ describe('resolveLanguage', () => {
     expect(resolveLanguage('pl-PL')).toBe('pl');
     expect(resolveLanguage('cs-CZ')).toBe('cs');
     expect(resolveLanguage('sk-SK')).toBe('sk');
+    // Korean ships bare, so `ko-KR` reaches it by the base-match step. It is
+    // NOT an ambiguous base — `zh` is the only base with two catalogs.
+    expect(resolveLanguage('ko-KR')).toBe('ko');
   });
 
   it('falls back to English for a language we do not ship', () => {
