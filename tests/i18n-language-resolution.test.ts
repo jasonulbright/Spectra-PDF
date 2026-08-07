@@ -104,6 +104,13 @@ describe('resolveLanguage', () => {
     expect(resolveLanguage('ko-KR')).toBe('ko');
     expect(resolveLanguage('tr-TR')).toBe('tr');
     expect(resolveLanguage('hu-HU')).toBe('hu');
+    // The odd-plural wave ships four more bare tags. `ca-ES` is the tag a
+    // Catalan Windows install reports and `ca` is the only catalog for its
+    // language, so the base-match step serves it without an alias row.
+    expect(resolveLanguage('el-GR')).toBe('el');
+    expect(resolveLanguage('ro-RO')).toBe('ro');
+    expect(resolveLanguage('sl-SI')).toBe('sl');
+    expect(resolveLanguage('ca-ES')).toBe('ca');
   });
 
   it('falls back to English for a language we do not ship', () => {
