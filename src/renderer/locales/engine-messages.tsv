@@ -414,7 +414,13 @@ struct_tree.typeMustEmpty	exact	struct_tree	type must not be empty
 struct_tree.unknownProperties	pattern	struct_tree	unknown properties: {{v0}}
 system_fonts.fontFileFound	pattern	system_fonts	font file not found: {{path}}
 system_fonts.usableFontFile	pattern	system_fonts	not a usable font file: {{v0}}
+table_export.pagesRegionsCannotBoth	exact	table_export	pages and regions cannot both be given: a reviewed table set names its own pages
+table_export.tableAcceptedThereNothing	exact	table_export	no table was accepted, so there is nothing to write to a spreadsheet
 table_export.tableFoundPageS	pattern	table_export	no table was found on the {{v0}} page(s) analyzed, so there is nothing to write to a spreadsheet
+table_export.tablePageArea	pattern	table_export	the table on page {{page_no}} has no area
+table_export.tablePageColumnBoundary	pattern	table_export	the table on page {{page_no}} has {{count}} column boundary; a table needs at least two
+table_export.tablePageCoversText	pattern	table_export	the table on page {{page_no}} covers no text
+table_export.tablePageEmptyArea	pattern	table_export	the table on page {{page_no}} has an empty area
 table_export.unknownSheetGroupingChoose	pattern	table_export	unknown sheet grouping {{sheet_per}} (choose table or page)
 takeoff.outputFolderDoesExist	pattern	takeoff	Output folder does not exist: {{v0}}
 text_authoring.boldMustTrueFalse	pattern	text_authoring	bold must be true or false (got {{bold}})

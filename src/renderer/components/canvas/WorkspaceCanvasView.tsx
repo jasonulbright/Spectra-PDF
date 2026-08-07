@@ -40,6 +40,22 @@ import {
   type DetectionResult,
   type FieldCandidate,
 } from '../../lib/form-candidates';
+import {
+  acceptedRegions,
+  addColumn,
+  exportRegions,
+  moveColumn,
+  moveRegionBounds,
+  prunedRegions,
+  quarter,
+  regionsFromDetection,
+  removeColumn,
+  toggleRegion,
+  type TableDetectionResult,
+  type TableRegion,
+  type TableReviewHandlers,
+} from '../../lib/table-review';
+import type { ExportDocumentResult } from '../../lib/export-targets';
 import type { PageRef } from '../../state/types';
 import { buildSignatureAppearance } from '../../lib/signature-placement';
 import type { SignaturePlacement } from '../../lib/signature-placement';
@@ -344,6 +360,8 @@ const NO_MARKS: RedactionMark[] = [];
 const NO_MARKS_BY_PAGE: ReadonlyMap<string, RedactionMark[]> = new Map();
 const NO_CANDIDATES: FieldCandidate[] = [];
 const NO_CANDIDATES_BY_PAGE: ReadonlyMap<string, FieldCandidate[]> = new Map();
+const NO_TABLES: TableRegion[] = [];
+const NO_TABLES_BY_PAGE: ReadonlyMap<string, TableRegion[]> = new Map();
 const NO_ANNOTATIONS: readonly PageAnnotation[] = [];
 const NO_ANNOTATION_IDS: readonly string[] = [];
 
@@ -753,6 +771,11 @@ export function WorkspaceCanvasView({
   // touched the document; accepting a candidate is what does.
   const [fieldCandidates, setFieldCandidates] = useState<FieldCandidate[]>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  // Detected tables under review. Same lifetime as the candidates above and
+  // one step further from the document: accepting a table writes nothing at
+  // all, it only decides what the spreadsheet export reads.
+  const [tableRegions, setTableRegions] = useState<TableRegion[]>([]);
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [confirmRedact, setConfirmRedact] = useState(false);
   const [redacting, setRedacting] = useState(false);
   const [redactError, setRedactError] = useState<string | null>(null);
@@ -1602,6 +1625,28 @@ export function WorkspaceCanvasView({
           };
         },
       },
+      tableReview: {
+        publish: async (path, result) =>
+          tableServiceRef.current?.publish(path, result) ?? {
+            shown: 0,
+            skipped: result.regions.length,
+          },
+        list: () => [...liveTableRegionsRef.current],
+        update: (next) => tableServiceRef.current?.update(next),
+        clear: () => tableServiceRef.current?.clear(),
+        focus: (regionId) => tableServiceRef.current?.focus(regionId),
+        exportTo: async (output, options) => {
+          const service = tableServiceRef.current;
+          if (!service) throw new Error(tChrome('panel.tableReview.documentGone'));
+          return service.exportTo(output, options);
+        },
+        subscribe: (listener) => {
+          tableSubscribersRef.current.add(listener);
+          return () => {
+            tableSubscribersRef.current.delete(listener);
+          };
+        },
+      },
     });
     return () => registerCanvasServices(null);
   }, [activeCanvasHandle]);
@@ -2097,6 +2142,57 @@ export function WorkspaceCanvasView({
     setFieldCandidates((prev) => removeCandidate(prev, candidateId));
     setSelectedCandidateId((prev) => (prev === candidateId ? null : prev));
   }, []);
+
+  // The same prune, for the same reason: a region bound to a retired page id
+  // would export a table from a page the document no longer has.
+  const liveTableRegions = useMemo(() => {
+    if (tableRegions.length === 0) return NO_TABLES;
+    const live = new Set<string>();
+    for (const d of docs) for (const p of d.pages) live.add(p.id);
+    const kept = prunedRegions(tableRegions, live);
+    return kept.length === tableRegions.length ? tableRegions : kept;
+  }, [tableRegions, docs]);
+  const liveTableRegionsRef = useRef<TableRegion[]>(NO_TABLES);
+  liveTableRegionsRef.current = liveTableRegions;
+  const tableSubscribersRef = useRef(new Set<() => void>());
+  const tableServiceRef = useRef<{
+    publish: (
+      path: string,
+      result: TableDetectionResult,
+    ) => Promise<{ shown: number; skipped: number }>;
+    update: (next: readonly TableRegion[]) => void;
+    clear: () => void;
+    focus: (regionId: string) => void;
+    exportTo: (
+      output: string,
+      options: { sheetPer: string; includeUntabled: boolean },
+    ) => Promise<ExportDocumentResult>;
+  } | null>(null);
+
+  const tableRegionsByPage = useMemo(() => {
+    if (liveTableRegions.length === 0) return NO_TABLES_BY_PAGE;
+    const map = new Map<string, TableRegion[]>();
+    for (const r of liveTableRegions) {
+      const arr = map.get(r.pageId);
+      if (arr) arr.push(r);
+      else map.set(r.pageId, [r]);
+    }
+    return map;
+  }, [liveTableRegions]);
+
+  const tableReviewHandlers = useMemo<TableReviewHandlers>(
+    () => ({
+      selectedId: selectedTableId,
+      onSelect: setSelectedTableId,
+      onToggle: (id) => setTableRegions((prev) => toggleRegion(prev, id)),
+      onMoveBounds: (id, rect) => setTableRegions((prev) => moveRegionBounds(prev, id, rect)),
+      onMoveColumn: (id, index, fraction) =>
+        setTableRegions((prev) => moveColumn(prev, id, index, fraction)),
+      onAddColumn: (id, fraction) => setTableRegions((prev) => addColumn(prev, id, fraction)),
+      onRemoveColumn: (id, index) => setTableRegions((prev) => removeColumn(prev, id, index)),
+    }),
+    [selectedTableId],
+  );
 
   const onMoveCandidate = useCallback(
     (
@@ -4886,6 +4982,112 @@ export function WorkspaceCanvasView({
     for (const listener of [...candidateSubscribersRef.current]) listener();
   }, [fieldCandidates]);
 
+  // ── Detected tables ───────────────────────────────────────────────────
+  // The candidate seam again, one step safer: the panel owns the review, the
+  // canvas owns the geometry, and the accept side writes no document at all —
+  // it hands the reviewed bounds to the spreadsheet export and nothing else.
+  const publishTables = useCallback(
+    async (path: string, result: TableDetectionResult): Promise<{ shown: number; skipped: number }> => {
+      const doc = docsRef.current.find((d) => d.path === path);
+      if (!doc) return { shown: 0, skipped: result.regions.length };
+      const geometry = new Map<number, PageGeometry>();
+      for (const page of new Set(result.regions.map((r) => r.page))) {
+        const pageRef = doc.pages[page - 1];
+        if (!pageRef) continue;
+        geometry.set(page, await geometryForPage(pageRef));
+      }
+      const { regions, skipped } = regionsFromDetection(
+        result,
+        path,
+        (row) => {
+          const pageRef = doc.pages[row.page - 1];
+          const geo = geometry.get(row.page);
+          if (!pageRef || !geo) return null;
+          const delta = quarter(pageRef.rotation ?? 0);
+          return {
+            pageId: pageRef.id,
+            // Detection reasons in unrotated user space; the projection is
+            // where the page's baked /Rotate and its pending delta apply.
+            rect: pdfRectToDisplay(row.bounds, geo.box, geo.bakedRotate + delta),
+            rotationAtDraw: delta,
+            totalRotationAtDraw: quarter(geo.bakedRotate + delta),
+          };
+        },
+        () => crypto.randomUUID(),
+      );
+      setTableRegions(regions);
+      setSelectedTableId(null);
+      return { shown: regions.length, skipped };
+    },
+    [geometryForPage],
+  );
+
+  const exportReviewedTables = useCallback(
+    async (
+      output: string,
+      options: { sheetPer: string; includeUntabled: boolean },
+    ): Promise<ExportDocumentResult> => {
+      const chosen = acceptedRegions(liveTableRegionsRef.current);
+      if (chosen.length === 0) throw new Error(tChrome('panel.tableReview.nothingAccepted'));
+      const path = chosen[0].path;
+      const doc = docsRef.current.find((d) => d.path === path);
+      if (!doc) throw new Error(tChrome('panel.tableReview.documentGone'));
+      const geometry = new Map<string, { index: number; geo: PageGeometry }>();
+      for (const region of chosen) {
+        if (geometry.has(region.pageId)) continue;
+        const index = doc.pages.findIndex((p) => p.id === region.pageId);
+        if (index < 0) continue;
+        geometry.set(region.pageId, { index, geo: await geometryForPage(doc.pages[index]) });
+      }
+      const { regions, skipped } = exportRegions(chosen, (region) => {
+        const placed = geometry.get(region.pageId);
+        if (!placed) return null;
+        return {
+          // The engine addresses the file's own page order, and a reviewed
+          // table's page is where its bytes are, not where it sits on the board.
+          page: doc.pages[placed.index].sourcePageIndex + 1,
+          bounds: displayRectToPdf(
+            region.rect,
+            placed.geo.box,
+            placed.geo.bakedRotate + region.rotationAtDraw,
+          ),
+        };
+      });
+      // A table whose page has gone is not silently left out of a workbook the
+      // reviewer believes carries it.
+      if (skipped > 0) throw new Error(tChrome('panel.tableReview.pagesGone'));
+      return (await engineCall('export_document', {
+        file: path,
+        output,
+        fmt: 'xlsx',
+        sheet_per: options.sheetPer,
+        ...(options.includeUntabled ? { include_untabled: true } : {}),
+        regions,
+      })) as unknown as ExportDocumentResult;
+    },
+    [engineCall, geometryForPage],
+  );
+
+  tableServiceRef.current = {
+    publish: publishTables,
+    update: (next) => setTableRegions([...next]),
+    clear: () => {
+      setTableRegions(NO_TABLES);
+      setSelectedTableId(null);
+    },
+    focus: (regionId) => {
+      const target = liveTableRegionsRef.current.find((r) => r.id === regionId);
+      if (!target) return;
+      setSelectedTableId(regionId);
+      jumpToPageRef.current(target.pageId);
+    },
+    exportTo: exportReviewedTables,
+  };
+
+  useEffect(() => {
+    for (const listener of [...tableSubscribersRef.current]) listener();
+  }, [tableRegions]);
+
   // Sign the placement's file (visible stamp at the drawn box) or fill the
   // targeted existing empty signature field (the field's own widget
   // rect is the stamp box). Geometry for a placement is read from the
@@ -5507,6 +5709,8 @@ export function WorkspaceCanvasView({
             onMarqueeZoomApplied: syncMarqueeZoom,
             redactionMarksByPage,
             fieldCandidatesByPage,
+            tableRegionsByPage,
+            tableReview: tableReviewHandlers,
             selectedCandidateId,
             onSelectCandidate: setSelectedCandidateId,
             onRemoveCandidate,
@@ -5784,6 +5988,8 @@ export function WorkspaceCanvasView({
           onMeasureResult={setMeasureResult}
           redactionMarksByPage={redactionMarksByPage}
           fieldCandidatesByPage={fieldCandidatesByPage}
+          tableRegionsByPage={tableRegionsByPage}
+          tableReview={tableReviewHandlers}
           selectedCandidateId={selectedCandidateId}
           onSelectCandidate={setSelectedCandidateId}
           onRemoveCandidate={onRemoveCandidate}

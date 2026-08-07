@@ -63,14 +63,18 @@ _FORMATS = {
     # zero-byte file.
     "xhtml": _Target(".xhtml", LIBREOFFICE, "xhtml:XHTML Draw File"),
     "txt": _Target(".txt", ENGINE, options=("pages", "layout", "page_breaks")),
-    "xlsx": _Target(".xlsx", ENGINE, options=("pages", "sheet_per", "include_untabled")),
+    "xlsx": _Target(
+        ".xlsx", ENGINE, options=("pages", "sheet_per", "include_untabled", "regions")
+    ),
     "pptx": _Target(".pptx", ENGINE, options=("pages", "slide_size")),
 }
 
 # Every option name any target declares. An option a target does not declare is
 # refused rather than ignored: a silently dropped option is a silently wrong
 # output that still reports success.
-_ALL_OPTIONS = ("pages", "layout", "page_breaks", "sheet_per", "include_untabled", "slide_size")
+_ALL_OPTIONS = (
+    "pages", "layout", "page_breaks", "sheet_per", "include_untabled", "slide_size", "regions",
+)
 
 
 def supported_formats() -> dict:
@@ -112,6 +116,7 @@ def export_document(
     sheet_per=None,
     include_untabled=None,
     slide_size=None,
+    regions=None,
     gs_path: str = "",
 ) -> dict:
     """Export ``file`` to ``output`` in ``fmt``.
@@ -129,6 +134,8 @@ def export_document(
         include_untabled: carry the text no table claimed, for the spreadsheet
             target.
         slide_size: deck dimensions, for the presentation target.
+        regions: a reviewed table set, for the spreadsheet target. Detection
+            does not run when it is given.
         gs_path: path to the Ghostscript executable. Required only by the
             presentation target, which renders each page's graphics.
     """
@@ -143,6 +150,7 @@ def export_document(
         "sheet_per": sheet_per,
         "include_untabled": include_untabled,
         "slide_size": slide_size,
+        "regions": regions,
     }
     _reject_unknown_options(key, target, given)
 
@@ -192,9 +200,12 @@ def _export_engine(key, input_path, output_path, given, gs_path) -> dict:
         return export_tables(
             str(input_path),
             str(output_path),
-            pages=pages,
+            # A reviewed set names its own pages, so the scope is not defaulted
+            # over it: `pages` reaching the reviewed arm at all is the refusal.
+            pages=given["pages"] if given["regions"] is not None else pages,
             sheet_per="table" if given["sheet_per"] is None else given["sheet_per"],
             include_untabled=bool(given["include_untabled"]),
+            regions=given["regions"],
         )
     if key == "pptx":
         from engine.slide_export import export_slides

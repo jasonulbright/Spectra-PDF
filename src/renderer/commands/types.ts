@@ -278,6 +278,36 @@ export interface CanvasServices {
      * the user also edits overlays on the page. Returns its own unsubscribe. */
     subscribe(listener: () => void): () => void;
   };
+  /**
+   * Detected tables, reviewed on the page before a spreadsheet is written.
+   *
+   * The same division as the candidate seam above, for the same reason: the
+   * bounds of a table are page-space geometry, and the pdf.js proxies and
+   * PageRef rotations that project one live here alone.
+   *
+   * NOTHING here writes to the document at all — `exportTo` writes only the
+   * workbook it is given a path for.
+   */
+  tableReview: {
+    /** Replace the region set from a detection result. */
+    publish(
+      path: string,
+      result: import('../lib/table-review').TableDetectionResult,
+    ): Promise<{ shown: number; skipped: number }>;
+    /** The live set, pruned to pages that still exist. */
+    list(): import('../lib/table-review').TableRegion[];
+    update(next: readonly import('../lib/table-review').TableRegion[]): void;
+    clear(): void;
+    /** Bring a table's page into view and select its overlay. */
+    focus(regionId: string): void;
+    /** Write the accepted tables to `output`. Refuses rather than writing a
+     * workbook whose tables are not the ones that were reviewed. */
+    exportTo(
+      output: string,
+      options: { sheetPer: string; includeUntabled: boolean },
+    ): Promise<import('../lib/export-targets').ExportDocumentResult>;
+    subscribe(listener: () => void): () => void;
+  };
 }
 
 export interface CommandContext {

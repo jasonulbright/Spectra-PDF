@@ -50,10 +50,14 @@ export function ExportDocumentDialog({
   file,
   format,
   onClose,
+  onReviewTables,
 }: {
   file: { workingPath: string; name: string };
   format: DocumentExportFormat;
   onClose: () => void;
+  /** Hand off to the on-page table review. An offer, not a gate: the Export
+   * button beside it still runs the unreviewed export. */
+  onReviewTables?: () => void;
 }): React.JSX.Element {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
@@ -211,6 +215,22 @@ export function ExportDocumentDialog({
                 />
                 {tChrome('dialog.exportDoc.includeUntabled')}
               </label>
+              {onReviewTables && (
+                <div>
+                  <button
+                    type="button"
+                    data-testid="export-doc-review-tables"
+                    className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 rounded text-sm"
+                    disabled={busy}
+                    onClick={onReviewTables}
+                  >
+                    {tChrome('dialog.exportDoc.reviewTables')}
+                  </button>
+                  <p className="mt-1 text-xs text-neutral-400">
+                    {tChrome('dialog.exportDoc.reviewTablesHint')}
+                  </p>
+                </div>
+              )}
             </>
           )}
 

@@ -1333,6 +1333,44 @@ export const PANEL_STRINGS = {
     'Page {{page}}: {{count}} group(s) had no distinct option labels, so each option is offered on its own.',
   'panel.prepareForm.reasonOther': 'Page {{page}}: {{count}} region(s) were not offered.',
 
+  'panel.tableReview.open': 'Open a PDF to check its tables',
+  'panel.tableReview.blurb':
+    'Find the tables on the page, then adjust what each one covers and where its columns fall. Nothing is written until you export.',
+  'panel.tableReview.scope': 'Look at',
+  'panel.tableReview.scopeDocument': 'The whole document',
+  'panel.tableReview.scopePages': 'Certain pages',
+  'panel.tableReview.pagesAria': 'Pages to look at',
+  'panel.tableReview.pagesPlaceholder': 'e.g. 1,3,5-8',
+  'panel.tableReview.noPages': 'Give at least one page number.',
+  'panel.tableReview.noCanvas': 'Open the document on the page to review the tables found.',
+  'panel.tableReview.detect': 'Find tables',
+  'panel.tableReview.detecting': 'Looking…',
+  'panel.tableReview.found_one': '{{count}} table found.',
+  'panel.tableReview.found_other': '{{count}} tables found.',
+  'panel.tableReview.foundNone': 'Nothing on these pages reads as a table.',
+  'panel.tableReview.acceptAll': 'Check all',
+  'panel.tableReview.acceptNone': 'Uncheck all',
+  'panel.tableReview.accepted_one': '{{count}} checked',
+  'panel.tableReview.accepted_other': '{{count}} checked',
+  'panel.tableReview.acceptAria': 'Include this table',
+  'panel.tableReview.pageHead': 'Page {{page}}',
+  'panel.tableReview.shape': '{{rows}}×{{columns}}, {{cells}} cells',
+  'panel.tableReview.show': 'Show the tables on the page',
+  'panel.tableReview.adjustHint':
+    'Drag a frame to change what a table covers, drag a rule to move a column, double-click inside to add one, double-click a rule to remove it.',
+  'panel.tableReview.untabled_one': '{{count}} line of text sits outside every table.',
+  'panel.tableReview.untabled_other': '{{count}} lines of text sit outside every table.',
+  'panel.tableReview.verticalRuns_one':
+    '{{count}} run of vertical text is not part of any column.',
+  'panel.tableReview.verticalRuns_other':
+    '{{count}} runs of vertical text are not part of any column.',
+  'panel.tableReview.export': 'Export to spreadsheet…',
+  'panel.tableReview.exporting': 'Exporting…',
+  'panel.tableReview.nothingAccepted': 'Include at least one table first.',
+  'panel.tableReview.documentGone': 'This document is no longer open.',
+  'panel.tableReview.pagesGone':
+    'A table you included is on a page this document no longer has. Find the tables again.',
+
   'panel.sanitize.open': 'Open a PDF to see what it carries',
   'panel.sanitize.blurb':
     'Everything in this document that is not the page you can see. Nothing is removed until you check it and apply.',
