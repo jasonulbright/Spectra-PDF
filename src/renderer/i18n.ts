@@ -50,7 +50,7 @@ import { OCR_LANGUAGES } from './ocr/languages';
 
 export const SHIPPED_LOCALES: readonly string[] = [
   'en', 'es', 'fr', 'de', 'it', 'pt-BR', 'ja', 'zh-CN', 'nl', 'da', 'sv', 'nb', 'fi',
-  'ru', 'uk', 'pl', 'cs', 'sk', 'ko', 'zh-TW', 'tr', 'hu', 'el', 'ro', 'sl', 'ca',
+  'ru', 'uk', 'pl', 'cs', 'sk', 'ko', 'zh-TW', 'tr', 'hu', 'el', 'ro', 'sl', 'ca', 'ar',
 ];
 
 /** Each locale's display name in ITS OWN language (the language-picker
@@ -83,6 +83,7 @@ export const LOCALE_NATIVE_NAMES: Record<string, string> = {
   ro: 'Română',
   sl: 'Slovenščina',
   ca: 'Català',
+  ar: 'العربية',
 };
 
 /**
