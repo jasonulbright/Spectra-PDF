@@ -177,7 +177,12 @@ export async function watermarkSetPdfSource(path: string, page = 1): Promise<voi
 
 export async function compressRun(
   out: string,
-  opts?: { quality?: string; mrcPreset?: string; verifyText?: boolean },
+  opts?: {
+    quality?: string;
+    mrcPreset?: string;
+    verifyText?: boolean;
+    thenOptimize?: boolean;
+  },
 ): Promise<string> {
   return browser.executeAsync<string, [string, unknown]>(
     function (dest, options, done) {

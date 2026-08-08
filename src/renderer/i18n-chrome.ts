@@ -113,6 +113,21 @@ export const CHROME_STRINGS = {
   'shortcut.key.tab': 'Tab',
   'shortcut.key.escape': 'Esc',
   'shortcut.key.space': 'Space',
+
+  // The effective-resolution summary. Shared copy: Properties ▸ Advanced and
+  // the Compress panel render the same component, so a document cannot be
+  // described one way in one place and another way in the other.
+  'imageres.title': 'Images',
+  'imageres.loading': 'Measuring the images in this document…',
+  'imageres.failed': 'The images in this document could not be measured.',
+  'imageres.none': 'This document draws no images.',
+  'imageres.count_one': '{{count}} image',
+  'imageres.count_other': '{{count}} images',
+  'imageres.single': '{{images}} at {{dpi}} DPI',
+  'imageres.range': '{{images}} from {{min}} to {{max}} DPI, median {{median}}',
+  'imageres.unmeasured': 'Not measurable: {{unmeasured}}',
+  'imageres.scanned': 'Scanned document — {{scanned}} of {{pages}} pages classify as scans.',
+  'imageres.scanPages': '{{scanned}} of {{pages}} pages classify as scans.',
 } as const;
 
 export type ChromeKey = keyof typeof CHROME_STRINGS;

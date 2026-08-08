@@ -3809,5 +3809,22 @@
   "toolbar.group.zoom": "Zoom",
   "tools.heading": "Verktøy",
   "tools.openFirst": "Åpne en PDF først",
-  "tools.sub": "Velg hva du vil gjøre med dokumentet ditt."
+  "tools.sub": "Velg hva du vil gjøre med dokumentet ditt.",
+  "imageres.title": "Bilder",
+  "imageres.loading": "Måler bildene i dette dokumentet…",
+  "imageres.failed": "Bildene i dette dokumentet kunne ikke måles.",
+  "imageres.none": "Dette dokumentet tegner ingen bilder.",
+  "imageres.single": "{{images}} på {{dpi}} DPI",
+  "imageres.range": "{{images}} fra {{min}} til {{max}} DPI, median {{median}}",
+  "imageres.unmeasured": "Kan ikke måles: {{unmeasured}}",
+  "imageres.scanned": "Skannet dokument — {{scanned}} av {{pages}} sider regnes som skanninger.",
+  "imageres.scanPages": "{{scanned}} av {{pages}} sider regnes som skanninger.",
+  "panel.compress.thenOptimize": "Optimaliser deretter resultatet",
+  "panel.compress.thenOptimizeHint": "Kjører optimaliseringen på den komprimerte filen: linearisert for nettet og med objektene pakket i strømmer. Den kjører som en andre operasjon med sin egen linje i køen.",
+  "panel.compress.optimizing": "Optimaliserer...",
+  "panel.compress.optimizeResult": "{{result}} Deretter optimalisert til {{to}} KB ({{ratio}}% samlet reduksjon).",
+  "panel.compress.optimizeFailed": "{{result}} Optimaliseringen av den komprimerte filen mislyktes: {{message}}",
+  "imageres.count_one": "{{count}} bilde",
+  "imageres.count_other": "{{count}} bilder",
+  "opqueue.op.optimize": "Optimaliser"
 }

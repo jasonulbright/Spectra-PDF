@@ -218,3 +218,61 @@ describe('MRC compression, end to end', () => {
     expect(statSync(out).size).toBeLessThan(statSync(SCAN).size);
   });
 });
+
+// Issue #13's second half: the panel's optional second step. It is a SECOND
+// operation on the file the first step wrote, not a compress parameter, so the
+// proof is that the OUTPUT carries what only the optimize pass does —
+// linearization — and that the panel says both halves happened.
+describe('compress, then optimize', () => {
+  const SOURCE = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
+  let tmp: string;
+
+  before(async () => {
+    await waitForHarness();
+    tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-compress-steps-'));
+  });
+
+  after(async () => {
+    await closeAllFiles();
+    if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('runs both steps and the result is linearized', async function () {
+    this.timeout(180_000);
+    await closeAllFiles();
+    await openByPaths([SOURCE]);
+    await setView('operations');
+    await setActiveOp('compress');
+
+    // The Images summary is the DPI control's context, and it renders in this
+    // panel from the same op the Properties dialog reads.
+    await $('[data-testid="compress-image-resolution"]').waitForDisplayed({
+      timeoutMsg: 'the Compress panel never showed an image summary',
+    });
+
+    const out = resolve(tmp, 'compressed-optimized.pdf');
+    expect(await compressRun(out, { quality: 'ebook', thenOptimize: true })).toBe('ok');
+    expect(existsSync(out)).toBe(true);
+    // Both halves reported, in one line: the compression figures and the
+    // optimize figures.
+    const status = await $('[data-testid="status-bar"]').getText();
+    expect(status).toContain('reduction');
+    expect(status).toContain('Then optimized to');
+
+    // Only the second step linearizes, so this is what tells a two-step run
+    // from a compress that ignored the checkbox.
+    await closeAllFiles();
+    await openByPaths([out]);
+    await browser.keys(['Control', 'd']);
+    await $('[data-testid="properties-dialog"]').waitForDisplayed({
+      timeoutMsg: 'Ctrl+D did not open Properties on the two-step output',
+    });
+    await $('[data-testid="props-tab-advanced"]').click();
+    await browser.waitUntil(
+      async () => (await $('[data-testid="props-linearized"]').getText()) === 'Yes',
+      { timeoutMsg: 'the two-step output was not linearized' },
+    );
+    await $('[data-testid="props-close"]').click();
+    await closeAllFiles();
+  });
+});

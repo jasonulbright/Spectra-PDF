@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pikepdf
 
+from engine.inplace import finish_staged, is_same_file, staging_target
+
 
 def _rebrand_xmptk(path: Path) -> None:
     """Replace pikepdf's xmptk attribute. Same byte length to preserve linearization."""
@@ -23,7 +25,7 @@ def optimize(
     """Optimize a PDF without re-rendering.
 
     Args:
-        file: Input PDF path.
+        file: Input PDF path (may equal `output`).
         output: Output PDF path.
         linearize: Enable web-optimized (linearized) output.
         strip_metadata: Remove all XMP and document info metadata.
@@ -31,6 +33,9 @@ def optimize(
     """
     input_path = Path(file)
     output_path = Path(output)
+    # Read the input's size before the save: in-place staging renames over the
+    # output, so afterwards `input_path` IS the result.
+    original_size = input_path.stat().st_size
 
     with pikepdf.open(file) as pdf:
         if strip_metadata:
@@ -47,18 +52,22 @@ def optimize(
             else pikepdf.ObjectStreamMode.preserve
         )
 
-        pdf.save(
-            output_path,
-            linearize=linearize,
-            object_stream_mode=stream_mode,
-        )
+        # pikepdf cannot save over its own open input (engine/inplace.py), and
+        # the Compress panel's second step optimizes the file the first step
+        # just wrote.
+        if is_same_file(file, output):
+            staged = staging_target(output_path)
+            pdf.save(staged, linearize=linearize, object_stream_mode=stream_mode)
+            finish_staged(staged, output_path)
+        else:
+            pdf.save(output_path, linearize=linearize, object_stream_mode=stream_mode)
 
     if strip_metadata:
         _rebrand_xmptk(output_path)
 
     return {
         "output": str(output_path),
-        "original_size": input_path.stat().st_size,
+        "original_size": original_size,
         "output_size": output_path.stat().st_size,
         "linearized": linearize,
         "metadata_stripped": strip_metadata,

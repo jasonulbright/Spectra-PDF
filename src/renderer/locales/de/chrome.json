@@ -3809,5 +3809,22 @@
   "toolbar.group.zoom": "Zoom",
   "tools.heading": "Werkzeuge",
   "tools.openFirst": "Öffnen Sie zuerst ein PDF",
-  "tools.sub": "Wählen Sie, was Sie mit Ihrem Dokument tun möchten."
+  "tools.sub": "Wählen Sie, was Sie mit Ihrem Dokument tun möchten.",
+  "imageres.title": "Bilder",
+  "imageres.loading": "Die Bilder dieses Dokuments werden vermessen…",
+  "imageres.failed": "Die Bilder dieses Dokuments konnten nicht vermessen werden.",
+  "imageres.none": "Dieses Dokument zeichnet keine Bilder.",
+  "imageres.single": "{{images}} mit {{dpi}} DPI",
+  "imageres.range": "{{images}} von {{min}} bis {{max}} DPI, Median {{median}}",
+  "imageres.unmeasured": "Nicht messbar: {{unmeasured}}",
+  "imageres.scanned": "Gescanntes Dokument — {{scanned}} von {{pages}} Seiten gelten als Scan.",
+  "imageres.scanPages": "{{scanned}} von {{pages}} Seiten gelten als Scan.",
+  "panel.compress.thenOptimize": "Ergebnis anschließend optimieren",
+  "panel.compress.thenOptimizeHint": "Führt die Optimierung über die komprimierte Datei aus: linearisiert für das Web, Objekte in Datenströmen gebündelt. Sie läuft als zweiter Vorgang mit eigenem Eintrag in der Warteschlange.",
+  "panel.compress.optimizing": "Wird optimiert...",
+  "panel.compress.optimizeResult": "{{result}} Anschließend auf {{to}} KB optimiert ({{ratio}} % Gesamtreduktion).",
+  "panel.compress.optimizeFailed": "{{result}} Die Optimierung der komprimierten Datei ist fehlgeschlagen: {{message}}",
+  "imageres.count_one": "{{count}} Bild",
+  "imageres.count_other": "{{count}} Bilder",
+  "opqueue.op.optimize": "Optimieren"
 }

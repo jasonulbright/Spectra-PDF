@@ -3809,5 +3809,22 @@
   "toolbar.group.zoom": "Yakınlaştırma",
   "tools.heading": "Araçlar",
   "tools.openFirst": "Önce bir PDF açın",
-  "tools.sub": "Belgenizle ne yapmak istediğinizi seçin."
+  "tools.sub": "Belgenizle ne yapmak istediğinizi seçin.",
+  "imageres.title": "Görüntüler",
+  "imageres.loading": "Bu belgedeki görüntüler ölçülüyor…",
+  "imageres.failed": "Bu belgedeki görüntüler ölçülemedi.",
+  "imageres.none": "Bu belge hiç görüntü çizmiyor.",
+  "imageres.single": "{{images}}, tamamı {{dpi}} DPI",
+  "imageres.range": "{{images}}, {{min}}–{{max}} DPI, ortanca {{median}}",
+  "imageres.unmeasured": "Ölçülemeyen: {{unmeasured}}",
+  "imageres.scanned": "Taranmış belge — {{pages}} sayfadan {{scanned}} tanesi tarama olarak tanınıyor.",
+  "imageres.scanPages": "{{pages}} sayfadan {{scanned}} tanesi tarama olarak tanınıyor.",
+  "panel.compress.thenOptimize": "Ardından sonucu iyileştir",
+  "panel.compress.thenOptimizeHint": "İyileştirmeyi sıkıştırılmış dosya üzerinde çalıştırır: web için doğrusallaştırılır ve nesneler akışlara paketlenir. İkinci bir işlem olarak, kuyrukta kendi satırıyla çalışır.",
+  "panel.compress.optimizing": "İyileştiriliyor...",
+  "panel.compress.optimizeResult": "{{result}} Ardından {{to}} KB boyutuna iyileştirildi (toplam %{{ratio}} azalma).",
+  "panel.compress.optimizeFailed": "{{result}} Sıkıştırılmış dosya iyileştirilemedi: {{message}}",
+  "imageres.count_one": "{{count}} görüntü",
+  "imageres.count_other": "{{count}} görüntü",
+  "opqueue.op.optimize": "İyileştir"
 }

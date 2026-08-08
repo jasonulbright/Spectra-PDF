@@ -141,7 +141,7 @@ const INVARIANT_PLURALS: Record<string, PluralPolicy> = {
   // `many` (посилань) the only distinct form. `посилання` is the only word for
   // a link and `зображення` the only word for an image; every other Ukrainian
   // count in this catalog inflects and is still gated.
-  uk: { keys: ['panel.links.summary', 'panel.preflight.images'] },
+  uk: { keys: ['imageres.count', 'panel.links.summary', 'panel.preflight.images'] },
   // Greek borrows `byte` as an indeclinable neuter: 1 byte / 5 byte. The
   // native ψηφιολέξη inflects but names a unit no Greek file-size readout
   // uses. Every other Greek count in this catalog inflects and is still gated.

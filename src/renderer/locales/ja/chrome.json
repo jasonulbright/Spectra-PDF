@@ -3700,5 +3700,21 @@
   "toolbar.group.zoom": "ズーム",
   "tools.heading": "ツール",
   "tools.openFirst": "先に PDF を開いてください",
-  "tools.sub": "文書に対して行いたい操作を選んでください。"
+  "tools.sub": "文書に対して行いたい操作を選んでください。",
+  "imageres.title": "画像",
+  "imageres.loading": "この文書の画像を測定しています…",
+  "imageres.failed": "この文書の画像を測定できませんでした。",
+  "imageres.none": "この文書は画像を描画していません。",
+  "imageres.single": "{{images}}（{{dpi}} DPI）",
+  "imageres.range": "{{images}}（{{min}}〜{{max}} DPI、中央値 {{median}}）",
+  "imageres.unmeasured": "測定不可: {{unmeasured}}",
+  "imageres.scanned": "スキャン文書 — {{pages}} ページ中 {{scanned}} ページがスキャンと判定されました。",
+  "imageres.scanPages": "{{pages}} ページ中 {{scanned}} ページがスキャンと判定されました。",
+  "panel.compress.thenOptimize": "続けて結果を最適化する",
+  "panel.compress.thenOptimizeHint": "圧縮後のファイルに最適化を実行します。Web 表示用にリニアライズし、オブジェクトをストリームにまとめます。2 番目の操作として実行され、キューに独立した項目が並びます。",
+  "panel.compress.optimizing": "最適化中...",
+  "panel.compress.optimizeResult": "{{result}} 続けて {{to}} KB に最適化しました（合計 {{ratio}}% 削減）。",
+  "panel.compress.optimizeFailed": "{{result}} 圧縮したファイルの最適化に失敗しました：{{message}}",
+  "imageres.count_other": "{{count}} 個の画像",
+  "opqueue.op.optimize": "最適化"
 }

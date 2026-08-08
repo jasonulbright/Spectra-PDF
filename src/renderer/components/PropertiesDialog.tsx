@@ -44,6 +44,11 @@ import {
   parseDocumentFonts,
   type DocumentFont,
 } from '../lib/font-inventory';
+import {
+  parseImageResolution,
+  type ImageResolutionSummary as ImageResolution,
+} from '../lib/image-resolution';
+import { ImageResolutionSummary } from './ImageResolutionSummary';
 import type { PdfBuffer } from '../state/types';
 
 // File ▸ Properties: metadata, security, the fonts the document uses, its
@@ -102,6 +107,8 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
   const [advancedBase, setAdvancedBase] = useState<AdvancedProperties>(DEFAULT_ADVANCED);
   const [fonts, setFonts] = useState<DocumentFont[] | null>(null);
   const [fontsError, setFontsError] = useState<string | null>(null);
+  const [imageRes, setImageRes] = useState<ImageResolution | null>(null);
+  const [imageResError, setImageResError] = useState<string | null>(null);
 
   // Keyed on workingPath (stable per path, unlike the activeFile object, which
   // swaps on every buffer update) — the MetadataPanel's own note.
@@ -200,6 +207,25 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
     })();
     return () => { cancelled = true; };
   }, [tab, fonts, workingPath, call]);
+
+  // The resolution walk parses every page's content stream, so it runs when
+  // the Advanced tab is first shown rather than on mount — the font walk's
+  // reasoning, for the same cost.
+  useEffect(() => {
+    if (tab !== 'advanced' || imageRes !== null || imageResError !== null || !workingPath) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const raw = (await call('summarize_image_resolution', {
+          file: workingPath,
+        })) as unknown as Record<string, unknown>;
+        if (!cancelled) setImageRes(parseImageResolution(raw));
+      } catch (e: unknown) {
+        if (!cancelled) setImageResError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tab, imageRes, imageResError, workingPath, call]);
 
   useEffect(() => {
     if (!originalPath) return;
@@ -446,6 +472,16 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
                         {describePageSize(size.width, size.height, size.count)}
                       </span>
                     ))}
+              </span>
+            </Row>
+            <Row label={tChrome('imageres.title')}>
+              <span data-testid="props-images" className="block">
+                <ImageResolutionSummary
+                  summary={imageRes}
+                  loading={imageRes === null && imageResError === null}
+                  error={imageResError}
+                  testIdPrefix="props-images"
+                />
               </span>
             </Row>
             <Row label={tChrome('dialog.props.size')}>
