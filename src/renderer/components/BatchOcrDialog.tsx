@@ -21,6 +21,7 @@ import {
   type MrcPreset,
   type MrcReport,
 } from '../lib/mrc-presets';
+import type { ScanEnhanceReport } from '../lib/scan-enhance';
 import { TEST_HARNESS_ENABLED, registerBatchOcr } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber, tOcrLanguage } from '../i18n';
@@ -78,6 +79,8 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     normalizeMrcPreset(getSettings().mrcPreset),
   );
   const [mrcVerify, setMrcVerify] = useState(false);
+  const [enhance, setEnhance] = useState(false);
+  const [enhanceOrientation, setEnhanceOrientation] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<BatchProgress | null>(null);
   const [report, setReport] = useState<BatchReport | null>(null);
@@ -299,6 +302,8 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         mrc,
         mrc_preset: mrcPreset,
         mrc_verify_text: mrcVerify,
+        enhance,
+        enhance_orientation: enhanceOrientation,
       })) as unknown as BatchReport & { logPath?: string };
       setReport(rep);
       setLogPath(rep.logPath ?? null);
@@ -350,11 +355,24 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             gs_path: await ghostscriptPath(),
             tesseract_path: await tesseractPath(),
           })) as unknown as MrcReport,
+        // Runs BEFORE the source is read, which is what makes the
+        // enhance-then-recognise order structural. `callRaw` for the same
+        // reason every other engine call in this dialog uses it: batch lives
+        // outside the workspace, so the commit gate must not run.
+        enhanceScan: async (src, out, orientation) =>
+          (await callRaw('enhance_scan', {
+            file: src,
+            output: out,
+            orientation,
+            gs_path: await ghostscriptPath(),
+            tesseract_path: await tesseractPath(),
+          })) as unknown as ScanEnhanceReport,
       });
       const rep = await runBatchOcr(entries, dest, skippedDirs, io, {
         onProgress: setProgress,
         isCancelled: () => cancelledRef.current,
         ...(mrc ? { mrc: { preset: mrcPreset, verifyText: mrcVerify } } : {}),
+        ...(enhance ? { enhance: { orientation: enhanceOrientation } } : {}),
         // All four default to off. Batch OCR's standing guarantee is that it
         // does not modify the source tree; these are the opt-ins that invert
         // it, and nothing turns them on but the user.
@@ -461,6 +479,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   // recognizable text — the mixed-file honesty note (regression).
   const notedOcr = report?.results.filter((r) => r.status === 'ocr' && r.reason) ?? [];
   const notedMrc = report?.results.filter((r) => r.mrc) ?? [];
+  const notedEnhance = report?.results.filter((r) => r.enhance) ?? [];
 
   return (
     <Shell onClose={guardedClose}>
@@ -570,6 +589,40 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               scans is standing in THIS dialog, so the option lives here — and
               it runs AFTER recognition, which is structural rather than
               documented: the file MRC reads is the recognised output. */}
+          {/* Enhancement is the MRC option's mirror image and sits directly
+              above it, in run order: it runs BEFORE recognition because it
+              improves what will be read, where MRC runs after because it
+              replaces what was read. */}
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                data-testid="batch-enhance"
+                checked={enhance}
+                onChange={() => setEnhance(!enhance)}
+                className="rounded bg-neutral-900 border-neutral-600"
+              />
+              <span className="text-sm text-neutral-300">{tChrome('dialog.batch.enhance')}</span>
+            </label>
+            {enhance && (
+              <div className="flex flex-col gap-2 ps-6">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    data-testid="batch-enhance-orientation"
+                    checked={enhanceOrientation}
+                    onChange={() => setEnhanceOrientation(!enhanceOrientation)}
+                    className="rounded bg-neutral-900 border-neutral-600"
+                  />
+                  <span className="text-sm text-neutral-300">
+                    {tChrome('dialog.batch.enhanceOrientation')}
+                  </span>
+                </label>
+                <p className="text-xs text-neutral-500">{tChrome('dialog.batch.enhanceNote')}</p>
+              </div>
+            )}
+          </div>
+
           <div className="flex flex-col gap-2">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
@@ -850,6 +903,18 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               user asked to compress must say what it compressed — a silent
               no-op on a folder of non-scans would read as a saving that never
               happened. */}
+          {notedEnhance.length > 0 && (
+            <div
+              className="max-h-24 overflow-y-auto border border-neutral-800 rounded p-2"
+              data-testid="batch-ocr-enhance-notes"
+            >
+              {notedEnhance.map((r) => (
+                <p key={r.rel} className="text-xs text-neutral-400">
+                  {tChrome('dialog.batch.rowEnhance', { rel: r.rel, note: r.enhance ?? '' })}
+                </p>
+              ))}
+            </div>
+          )}
           {notedMrc.length > 0 && (
             <div
               className="max-h-24 overflow-y-auto border border-neutral-800 rounded p-2"

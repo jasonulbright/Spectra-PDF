@@ -386,15 +386,15 @@ function canvasModeAfterOpening(ui: UiState, owner: ToolDef | undefined): Canvas
   // It drives the canvas: arm the first mode it owns.
   const mode = armedModeOf(owner);
   if (mode) return mode;
-  // It has a form to fill on the TOOLS TAB and no canvas mode, so it replaces
-  // whatever you were doing — and you left the document to reach it anyway.
-  if (owner.ops.length > 0) return 'select';
-  // Neither: it lives on the document but isn't a mode (Scan & OCR — it just
-  // opens Find). It has no opinion about the canvas, so it doesn't get one:
-  // taking away the user's Highlight to show them a search box would be
-  // gratuitous. Left alone deliberately; this is the third distinct answer and
-  // the reason this isn't a one-liner.
-  return ui.tool;
+  // It has a pane and no canvas mode, so it replaces whatever you were doing.
+  //
+  // There used to be a third answer here — a tool with NEITHER ops nor a mode
+  // kept `ui.tool` untouched, and Scan & OCR was the only tool that was ever
+  // true of. It now owns the Scan Enhancement pane, so it answers on this
+  // line, and `tools.test.ts` requires every tool to have ops or a mode: the
+  // third branch was unreachable, and a branch nothing can reach describing a
+  // tool that no longer behaves that way is worse than no branch at all.
+  return 'select';
 }
 
 export function appReducer(state: AppState, action: AppAction): AppState {

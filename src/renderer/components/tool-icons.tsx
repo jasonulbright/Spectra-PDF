@@ -315,6 +315,15 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <path d="M15 4v16" />
     </>
   ),
+  // A sheet standing off square inside its own frame, with the specks the
+  // pass takes out — the two defects the enhancement is named for.
+  scanenhance: (
+    <>
+      <rect x="3" y="3" width="18" height="18" rx="1" />
+      <path d="M7.2 17.4L9.4 6.6l7.4 1.5-2.2 10.8z" strokeWidth="1" />
+      <path d="M6 6.5h.01M18.5 15h.01M17 5.5h.01" strokeWidth="1.5" />
+    </>
+  ),
   sanitize: (
     <>
       <path d="M7 3h7l4 4v6" />

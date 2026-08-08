@@ -103,6 +103,7 @@ function fileLine(r: BatchFileResult): string {
   // The size saving — or the reason there was none — is the whole point
   // of having asked for MRC, so it is never left to inference. Byte-identical
   // to engine/batch_ocr.py's `_file_line`, like every other field here.
+  if (r.enhance) line += ` [${r.enhance}]`;
   if (r.mrc) line += ` [${r.mrc}]`;
   if (r.repaired) {
     line += r.repairedOriginalReplaced
