@@ -11,6 +11,7 @@ import {
   MRC_PRESETS,
   isMrcQuality,
   mrcCodecFellBack,
+  mrcPagesOffSharedDictionary,
   mrcCompressParams,
   normalizeMrcPreset,
   type MrcPreset,
@@ -271,6 +272,10 @@ function describeMrc(report: MrcReport): string {
     }),
   ];
   if (mrcCodecFellBack(report)) parts.push(tChrome('panel.compress.mrcFallbackNotice'));
+  const offShared = mrcPagesOffSharedDictionary(report);
+  if (offShared > 0) {
+    parts.push(tChromeCount('panel.compress.mrcMixedCodecNotice', offShared, { pages: offShared }));
+  }
   if (report.verify_text) {
     parts.push(
       report.pages_reverted > 0

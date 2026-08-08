@@ -1,11 +1,15 @@
 """MRC layer codec regression coverage.
 
-These cases verify four constraints that a size-and-renders check cannot prove:
+These cases verify six constraints that a size-and-renders check cannot prove:
 
   1. multi-strip group 4 (decodes progressively wrong, LOOKS like erosion)
   2. stencil polarity (renders solid black; OCR still returns words from it)
   3. refinement coding (crashes the industry-standard reader)
   4. symbol substitution (a lossless-sounding preset silently altering glyphs)
+  5. grain routed away from the shared symbol dictionary (a document whose
+     stencils are grain costs the SQUARE of its marks in symbol mode)
+  6. every arm degrades rather than refuses (a codec is a preference;
+     finishing is not)
 
 The decode-back pins are skip-if-absent on Ghostscript (the standing
 precedent), and the JBIG2 pins are skip-if-absent on the vendored encoder.
@@ -14,17 +18,23 @@ precedent), and the JBIG2 pins are skip-if-absent on the vendored encoder.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
 from engine import budget
+from engine import mrc_codecs
 from engine.mrc_codecs import (
     CCITT_G4,
     JBIG2_GENERIC,
     JBIG2_SYMBOL,
+    MASK_CODEC_MIXED,
     MASK_CODECS,
+    SYMBOL_MIN_MARK_AREA,
+    MaskProfile,
     encode_layer_jpeg,
     encode_layer_jpx,
     encode_mask,
@@ -34,6 +44,7 @@ from engine.mrc_codecs import (
     jbig2_candidates,
     mask_ink_fraction,
     resolve_jbig2,
+    symbol_mode_suits,
     verify_mask_stream,
 )
 
@@ -57,6 +68,32 @@ def make_mask(seed: int = 0) -> Image.Image:
         y += 70
     d.ellipse([80, H - 260, 300, H - 60], fill=0)
     return im
+
+
+def grain_mask(seed: int, marks: int = 9000) -> Image.Image:
+    """A stencil of `marks` individually-unique little blobs — grain, not type.
+
+    IRREGULAR on purpose: a field of rectangles of a given size correlates
+    perfectly with every other rectangle of that size, so jbig2enc collapses it
+    to a few dozen templates and the fixture would measure nothing about a
+    dictionary that grows. Random 6x6 bit patterns each become their own
+    template, which is exactly what a page of sensor grain does.
+    """
+    rng = np.random.default_rng(seed)
+    ink = np.zeros((H, W), dtype=bool)
+    ys = rng.integers(2, H - 8, marks)
+    xs = rng.integers(2, W - 8, marks)
+    pats = rng.random((marks, 6, 6)) < 0.6
+    for y, x, pat in zip(ys.tolist(), xs.tolist(), pats):
+        ink[y : y + 6, x : x + 6] |= pat
+    return Image.fromarray(np.logical_not(ink))
+
+
+#: Profiles for the two fixture populations, at the fixtures' own resolution.
+#: Written as multiples of the floor so the pins state the RELATION they are
+#: about rather than restating the constant.
+TYPE_PROFILE = MaskProfile(mark_area_mean=SYMBOL_MIN_MARK_AREA * 8, dpi=300)
+GRAIN_PROFILE = MaskProfile(mark_area_mean=SYMBOL_MIN_MARK_AREA / 4, dpi=300)
 
 
 def gray_page() -> Image.Image:
@@ -266,6 +303,220 @@ class TestCodecSelection:
                 jbig2_path="C:/definitely/not/here/jbig2.exe",
                 allow_fallback=False,
             )
+
+
+class TestSymbolRouting:
+    """Rule 5. Grain never enters the shared symbol dictionary.
+
+    Symbol mode's cost is the SQUARE of the document's unmatched marks, and the
+    quadratic term lives in the DOCUMENT, not the page — which is why no
+    per-page timeout catches it and why the routing is measured against the
+    mark SIZE rather than the mark count.
+    """
+
+    def test_the_floor_is_an_area_so_it_scales_with_the_square_of_dpi(self):
+        # An ink area measured at 600 dpi is four times the same mark's area at
+        # 300; a floor that did not square would demote every high-resolution
+        # scan in the corpus this feature exists for.
+        at_300 = MaskProfile(mark_area_mean=SYMBOL_MIN_MARK_AREA * 1.5, dpi=300)
+        same_mark_at_600 = MaskProfile(mark_area_mean=at_300.mark_area_mean * 4, dpi=600)
+        assert symbol_mode_suits(at_300)
+        assert symbol_mode_suits(same_mark_at_600)
+        # ...and the same PIXEL count at 600 dpi is a quarter-size mark.
+        assert not symbol_mode_suits(MaskProfile(at_300.mark_area_mean, dpi=600))
+
+    def test_an_empty_stencil_stays_with_the_document(self):
+        # A blank page has no marks to route and must not split the codec
+        # report on its own.
+        assert symbol_mode_suits(MaskProfile(mark_area_mean=0.0, dpi=300))
+
+    def test_a_profile_per_mask_is_required_or_it_refuses(self):
+        with pytest.raises(ValueError, match="one mask profile per mask"):
+            encode_mask(
+                [make_mask(), make_mask(1)], codec=CCITT_G4, profiles=[TYPE_PROFILE]
+            )
+
+    @needs_jbig2
+    def test_grain_is_routed_off_the_shared_dictionary_and_type_is_not(self):
+        grain = [grain_mask(i) for i in range(3)]
+        streams, used = encode_mask(
+            grain, codec=JBIG2_SYMBOL, profiles=[GRAIN_PROFILE] * 3
+        )
+        assert used == JBIG2_GENERIC
+        assert [s.codec for s in streams] == [JBIG2_GENERIC] * 3
+        assert all(s.globals_data is None for s in streams)
+
+        typed = [make_mask(i) for i in range(3)]
+        streams, used = encode_mask(typed, codec=JBIG2_SYMBOL, profiles=[TYPE_PROFILE] * 3)
+        assert used == JBIG2_SYMBOL
+        assert [s.codec for s in streams] == [JBIG2_SYMBOL] * 3
+
+    @needs_jbig2
+    def test_a_mixed_document_keeps_page_order_and_reports_mixed(self):
+        # The partition reassembles by index, and an off-by-one there would
+        # hand a page someone else's stencil — which renders as a plausible
+        # page of the wrong words.
+        masks = [make_mask(0), grain_mask(1), make_mask(2), grain_mask(3)]
+        profiles = [TYPE_PROFILE, GRAIN_PROFILE, TYPE_PROFILE, GRAIN_PROFILE]
+        streams, used = encode_mask(masks, codec=JBIG2_SYMBOL, profiles=profiles)
+        assert used == MASK_CODEC_MIXED
+        assert [s.codec for s in streams] == [
+            JBIG2_SYMBOL, JBIG2_GENERIC, JBIG2_SYMBOL, JBIG2_GENERIC
+        ]
+        assert [(s.width, s.height) for s in streams] == [(W, H)] * 4
+        for stream, mask in zip(streams, masks):
+            assert stream.ink_fraction == pytest.approx(mask_ink_fraction(mask))
+
+    @needs_jbig2
+    def test_routing_grain_off_the_dictionary_is_the_faster_arm(self):
+        # The measurement the routing exists for, at a size a suite can afford.
+        # The gap is quadratic in the page count, so three pages understates it
+        # by two orders against the reported 272-page document; a factor of two
+        # is asserted because a loaded CI box is not a stopwatch.
+        grain = [grain_mask(i) for i in range(3)]
+        t0 = time.perf_counter()
+        encode_mask(grain, codec=JBIG2_SYMBOL, profiles=[GRAIN_PROFILE] * 3)
+        routed = time.perf_counter() - t0
+        t0 = time.perf_counter()
+        encode_mask(grain, codec=JBIG2_SYMBOL)
+        unrouted = time.perf_counter() - t0
+        assert routed * 2 < unrouted
+
+    @needs_jbig2
+    def test_generic_mode_is_never_routed_because_it_has_no_dictionary(self):
+        grain = [grain_mask(i) for i in range(2)]
+        streams, used = encode_mask(
+            grain, codec=JBIG2_GENERIC, profiles=[GRAIN_PROFILE] * 2
+        )
+        assert used == JBIG2_GENERIC and len(streams) == 2
+
+
+class TestDegradationLadder:
+    """Rule 6. A codec is a preference; finishing is not.
+
+    A 272-page photographic scan spent two hours inside one symbol-mode
+    invocation and then lost every page to the timeout — with CCITT G4, which
+    encodes the same stencils in milliseconds, available the whole time.
+    """
+
+    @pytest.fixture
+    def starve(self, monkeypatch):
+        """Give an arm a budget nothing can finish inside."""
+
+        def apply(*, symbol: bool = False, generic: bool = False) -> None:
+            if symbol:
+                monkeypatch.setattr(mrc_codecs, "SYMBOL_BASE", 1e-6)
+                monkeypatch.setattr(mrc_codecs, "SYMBOL_PER_MB", 0.0)
+                monkeypatch.setattr(mrc_codecs, "SYMBOL_PER_PAGE", 0.0)
+                monkeypatch.setattr(mrc_codecs, "SYMBOL_CAP", 1e-6)
+            if generic:
+                monkeypatch.setattr(mrc_codecs, "GENERIC_BASE", 1e-6)
+                monkeypatch.setattr(mrc_codecs, "GENERIC_PER_MB", 0.0)
+                monkeypatch.setattr(mrc_codecs, "GENERIC_CAP", 1e-6)
+
+        return apply
+
+    @needs_jbig2
+    def test_a_starved_symbol_run_completes_in_generic_and_says_so(self, starve):
+        starve(symbol=True)
+        masks = [make_mask(i) for i in range(3)]
+        streams, used = encode_mask(masks, codec=JBIG2_SYMBOL, profiles=[TYPE_PROFILE] * 3)
+        assert used == JBIG2_GENERIC
+        assert [s.codec for s in streams] == [JBIG2_GENERIC] * 3
+        assert all(s.data for s in streams)
+
+    @needs_jbig2
+    def test_a_starved_run_still_produces_a_smaller_stencil_than_the_bitmap(self, starve):
+        # "It completed" is not the claim — the output has to be worth having.
+        starve(symbol=True, generic=True)
+        mask = make_mask()
+        streams, used = encode_mask([mask], codec=JBIG2_SYMBOL, profiles=[TYPE_PROFILE])
+        assert used == CCITT_G4
+        assert len(streams[0].data) < (W * H) // 8
+
+    @needs_jbig2
+    def test_the_bottom_rung_needs_no_subprocess_and_cannot_time_out(self, starve):
+        starve(symbol=True, generic=True)
+        masks = [make_mask(i) for i in range(2)]
+        streams, used = encode_mask(masks, codec=JBIG2_SYMBOL, profiles=[TYPE_PROFILE] * 2)
+        assert used == CCITT_G4
+        # G4's polarity pairing is the measured one, not the deduced one — a
+        # degraded page must embed as correctly as a chosen one.
+        assert streams[0].decode == (1, 0)
+        assert streams[0].decode_parms["BlackIs1"] is False
+
+    @needs_jbig2
+    def test_a_breach_degrades_where_a_broken_encoder_still_refuses(self, monkeypatch):
+        # The distinction the exception type exists for: a budget is a
+        # judgement about time, a non-zero exit is a fault, and swallowing the
+        # second would ship whatever the encoder half-wrote.
+        import subprocess
+
+        real = mrc_codecs.budget.run
+
+        def fail(cmd, **kw):
+            result = real(cmd, **kw)
+            return subprocess.CompletedProcess(cmd, 1, b"", b"synthetic encoder fault")
+
+        monkeypatch.setattr(mrc_codecs.budget, "run", fail)
+        with pytest.raises(RuntimeError, match="The JBIG2 encoder failed"):
+            encode_mask([make_mask()], codec=JBIG2_SYMBOL, profiles=[TYPE_PROFILE])
+
+    def test_a_timeout_is_its_own_exception_type(self):
+        # Control flow matches the TYPE, never the message text.
+        err = budget.timed_out("The JBIG2 encoder", 7200.0, size_bytes=202 << 20, pages=272)
+        assert isinstance(err, budget.TimeBudgetExceeded)
+        assert isinstance(err, RuntimeError)
+
+    def test_the_symbol_budget_is_bounded_far_below_the_shared_cap(self):
+        # The reported document: 272 pages, ~193 MB of 1-bit samples. It was
+        # given the family's 7200 s cap and spent all of it before reporting.
+        allowed = budget.derive(
+            base=mrc_codecs.SYMBOL_BASE,
+            size_bytes=202 << 20,
+            pages=272,
+            per_mb=mrc_codecs.SYMBOL_PER_MB,
+            per_page=mrc_codecs.SYMBOL_PER_PAGE,
+            cap=mrc_codecs.SYMBOL_CAP,
+        )
+        assert allowed < 1200.0
+
+    @needs_jbig2
+    def test_the_symbol_budget_still_clears_honest_work_by_an_order(self):
+        masks = [make_mask(i) for i in range(4)]
+        t0 = time.perf_counter()
+        encode_masks_jbig2(masks, mode=JBIG2_SYMBOL)
+        spent = time.perf_counter() - t0
+        allowed = budget.derive(
+            base=mrc_codecs.SYMBOL_BASE,
+            size_bytes=sum(m.width * m.height for m in masks) // 8,
+            pages=len(masks),
+            per_mb=mrc_codecs.SYMBOL_PER_MB,
+            per_page=mrc_codecs.SYMBOL_PER_PAGE,
+            cap=mrc_codecs.SYMBOL_CAP,
+        )
+        assert allowed > spent * 10
+
+    @needs_jbig2
+    def test_generic_mode_charges_each_page_its_own_budget(self, monkeypatch):
+        # One budget shared across every generic invocation would let an early
+        # page spend what a later one needs — and generic mode carries no
+        # cross-page state that could justify the sharing.
+        seen: list[float] = []
+        real = mrc_codecs.budget.run
+
+        def record(cmd, **kw):
+            seen.append(kw["budget"])
+            return real(cmd, **kw)
+
+        monkeypatch.setattr(mrc_codecs.budget, "run", record)
+        encode_masks_jbig2([make_mask(0), make_mask(1)], mode=JBIG2_GENERIC)
+        assert len(seen) == 2 and seen[0] == seen[1]
+        one_page = budget.derive(
+            base=mrc_codecs.GENERIC_BASE, size_bytes=(W * H) // 8, pages=1,
+            per_mb=mrc_codecs.GENERIC_PER_MB, cap=mrc_codecs.GENERIC_CAP,
+        )
+        assert seen[0] == pytest.approx(one_page)
 
 
 class TestContinuousToneLayers:

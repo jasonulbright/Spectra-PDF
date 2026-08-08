@@ -50,6 +50,10 @@ export const PANEL_STRINGS = {
   'panel.compress.mrcResult': '{{pages}} scanned page(s) layered, {{untouched}} left as they were.',
   'panel.compress.mrcFallbackNotice':
     'The JBIG2 encoder was not available, so the stencil uses CCITT G4 and the file is larger than the preset promises.',
+  'panel.compress.mrcMixedCodecNotice_one':
+    '{{pages}} page held too little type for the shared stencil dictionary and was compressed on its own.',
+  'panel.compress.mrcMixedCodecNotice_other':
+    '{{pages}} pages held too little type for the shared stencil dictionary and were compressed on their own.',
   'panel.compress.mrcVerifyResult': 'Text verified: {{similarity}}% of the words survived on the worst page.',
   'panel.compress.mrcVerifyBelowThreshold':
     '{{pages}} page(s) kept their original scan because the text did not survive.',

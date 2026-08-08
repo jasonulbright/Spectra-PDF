@@ -27,6 +27,7 @@ What is pinned, and why each pin exists rather than being obvious:
 from __future__ import annotations
 
 import difflib
+import io
 import os
 import re
 import shutil
@@ -109,6 +110,49 @@ def photo_scan(tmp_dir):
         pytest.skip("scan-photo.pdf not generated")
     dest = os.path.join(tmp_dir, src.name)
     shutil.copy2(src, dest)
+    return dest
+
+
+def _grain_scan(dest: str, pages: int = 2, dpi: int = 150) -> str:
+    """A scan whose every page is continuous tone — grain, and no type at all.
+
+    The class that cost a reported 272-page document two hours and then the
+    whole run: a stencil made of individually-unique specks is what makes
+    symbol mode's shared dictionary quadratic. Built here rather than checked
+    in because the pin is about the SEGMENTATION of such a page, and a
+    committed JPEG would freeze one encoder's artefacts as well.
+
+    150 dpi keeps the fixture affordable while staying a real page: the mark
+    area floor scales with the square of the resolution, so the routing answer
+    does not depend on the dpi the fixture happens to use.
+    """
+    w, h = int(612 * dpi / 72), int(792 * dpi / 72)
+    rng = np.random.default_rng(20260808)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    base = 40.0 + 170.0 * (0.5 + 0.5 * np.sin(xx / 45.0) * np.cos(yy / 35.0))
+    pdf = pikepdf.Pdf.new()
+    for _ in range(pages):
+        arr = np.clip(base + rng.normal(0.0, 12.0, (h, w)).astype(np.float32), 0, 255)
+        img = Image.fromarray(np.stack([arr] * 3, axis=-1).astype(np.uint8), "RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80, progressive=False)
+        st = pikepdf.Stream(pdf, buf.getvalue())
+        st["/Type"] = pikepdf.Name("/XObject")
+        st["/Subtype"] = pikepdf.Name("/Image")
+        st["/Width"] = w
+        st["/Height"] = h
+        st["/ColorSpace"] = pikepdf.Name("/DeviceRGB")
+        st["/BitsPerComponent"] = 8
+        st["/Filter"] = pikepdf.Name("/DCTDecode")
+        st = pdf.make_indirect(st)
+        page = pikepdf.Dictionary(
+            Type=pikepdf.Name("/Page"),
+            MediaBox=[0, 0, 612, 792],
+            Resources=pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=st)),
+            Contents=pdf.make_stream(b"q 612 0 0 792 0 0 cm /Im0 Do Q"),
+        )
+        pdf.pages.append(pikepdf.Page(pdf.make_indirect(page)))
+    pdf.save(dest)
     return dest
 
 
@@ -1008,6 +1052,19 @@ class TestReport:
         assert report["mask_codec"] == CCITT_G4
         assert report["requested_mask_codec"] == CCITT_G4
 
+    def test_every_layered_page_names_the_codec_its_own_stencil_got(
+        self, text_scan, tmp_dir, gs_path
+    ):
+        out = os.path.join(tmp_dir, "mrc.pdf")
+        report = mrc_compress(text_scan, out, gs_path=gs_path)
+        row = report["pages"][0]
+        assert row["mask_codec"] == report["mask_codec"]
+        assert report["mask_codec_pages"] == {row["mask_codec"]: 1}
+        assert report["pages_mask_fallback"] == 0
+        # The measurement the routing reads, reported so a slow document can be
+        # explained without re-running it.
+        assert row["marks"] > 0 and row["mark_area_mean"] > 0
+
     def test_a_mixed_document_reports_both_decisions(self, text_scan, sample_pdf, tmp_dir, gs_path):
         mixed = os.path.join(tmp_dir, "mixed.pdf")
         with pikepdf.open(text_scan) as scan_pdf, pikepdf.open(sample_pdf) as other:
@@ -1022,3 +1079,71 @@ class TestReport:
         # The pages MRC did not touch still come through.
         with pikepdf.open(out) as pdf:
             assert len(pdf.pages) == 3
+
+
+class TestGrainRouting:
+    """A page of grain never enters the shared symbol dictionary, and a
+    document made of them still finishes."""
+
+    def test_grain_and_type_land_on_opposite_sides_of_the_floor(
+        self, text_scan, tmp_dir
+    ):
+        from engine.mrc_codecs import SYMBOL_MIN_MARK_AREA, MaskProfile, symbol_mode_suits
+
+        grain = _grain_scan(os.path.join(tmp_dir, "grain.pdf"), pages=1)
+        with pikepdf.open(grain) as pdf:
+            candidate, _reason = _classify_page(pdf, pdf.pages[0], 1)
+            image = _lift_image(pdf, pdf.pages[0], candidate)
+        _ink, _pict, grain_stats = segment(
+            np.asarray(image.convert("L"), dtype=np.uint8),
+            dpi=candidate.source_dpi,
+            k=float(PRESETS[DEFAULT_PRESET]["sauvola_k"]),
+        )
+        with pikepdf.open(text_scan) as pdf:
+            typed_candidate, _reason = _classify_page(pdf, pdf.pages[0], 1)
+            typed_image = _lift_image(pdf, pdf.pages[0], typed_candidate)
+        _ink, _pict, typed_stats = segment(
+            np.asarray(typed_image.convert("L"), dtype=np.uint8),
+            dpi=typed_candidate.source_dpi,
+            k=float(PRESETS[DEFAULT_PRESET]["sauvola_k"]),
+        )
+        assert not symbol_mode_suits(
+            MaskProfile(grain_stats["mark_area_mean"], candidate.source_dpi)
+        )
+        assert symbol_mode_suits(
+            MaskProfile(typed_stats["mark_area_mean"], typed_candidate.source_dpi)
+        )
+        # Stated as a ratio: the pin is about the SEPARATION the floor sits in,
+        # so a fixture that drifted a little still fails for the right reason.
+        assert typed_stats["mark_area_mean"] > SYMBOL_MIN_MARK_AREA * 3
+        assert grain_stats["mark_area_mean"] < SYMBOL_MIN_MARK_AREA / 2
+
+    def test_an_all_grain_document_completes_off_the_shared_dictionary(
+        self, tmp_dir, gs_path
+    ):
+        grain = _grain_scan(os.path.join(tmp_dir, "grain.pdf"), pages=2)
+        out = os.path.join(tmp_dir, "mrc.pdf")
+        report = mrc_compress(grain, out, gs_path=gs_path)
+        assert report["pages_mrc"] == 2
+        assert report["mask_codec"] != JBIG2_SYMBOL
+        assert report["compressed_size"] < report["original_size"]
+        with pikepdf.open(out) as pdf:
+            assert len(pdf.pages) == 2
+
+    def test_a_document_of_both_reports_mixed_and_names_each_page(
+        self, text_scan, tmp_dir, gs_path
+    ):
+        grain = _grain_scan(os.path.join(tmp_dir, "grain.pdf"), pages=1)
+        both = os.path.join(tmp_dir, "both.pdf")
+        with pikepdf.open(text_scan) as scan_pdf, pikepdf.open(grain) as grain_pdf:
+            scan_pdf.pages.extend(grain_pdf.pages)
+            scan_pdf.save(both)
+        out = os.path.join(tmp_dir, "mrc.pdf")
+        report = mrc_compress(both, out, gs_path=gs_path)
+        assert report["pages_mrc"] == 2
+        assert report["mask_codec"] == "mixed"
+        codecs = {row["page"]: row["mask_codec"] for row in report["pages"]}
+        assert codecs[1] == JBIG2_SYMBOL
+        assert codecs[2] == JBIG2_GENERIC
+        assert report["pages_mask_fallback"] == 1
+        assert report["mask_codec_pages"] == {JBIG2_SYMBOL: 1, JBIG2_GENERIC: 1}

@@ -216,6 +216,7 @@ mrc_codecs.jpegRateMustGot	pattern	mrc_codecs	a JPEG2000 rate must be >= 1, got 
 mrc_codecs.maskMustBitImage	pattern	mrc_codecs	a mask must be a 1-bit image (Pillow mode '1'), got mode {{v0}}
 mrc_codecs.maskVerificationCouldDecode	pattern	mrc_codecs	mask verification could not decode the stencil: {{detail}}
 mrc_codecs.maskVerificationFailedEmbedded	pattern	mrc_codecs	mask verification failed: the embedded {{v0}} stencil decodes to {{got}} ink coverage, the mask it came from has {{v2}}.
+mrc_codecs.oneMaskProfilePer	pattern	mrc_codecs	one mask profile per mask is required, got {{v0}} for {{v1}} mask(s)
 mrc_codecs.unknownJbigMode	pattern	mrc_codecs	unknown JBIG2 mode: {{mode}}
 mrc_codecs.unknownMaskCodecExpected	pattern	mrc_codecs	unknown mask codec: {{codec}} (expected one of {{v1}})
 ocr_layer.ocrWordsApply	exact	ocr_layer	No OCR words to apply.
