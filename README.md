@@ -74,6 +74,8 @@ spectrapdf compress input.pdf -o compressed.pdf --quality ebook
 # Merge / split / rotate / delete
 spectrapdf merge a.pdf b.pdf c.pdf -o merged.pdf
 spectrapdf split input.pdf -o output_dir/ --ranges "1-3,5-7"
+spectrapdf split manual.pdf -o chapters/ --mode bookmarks   # also: --mode every-n --every-n 10
+spectrapdf split big.pdf -o parts/ --mode size --max-mb 5
 spectrapdf rotate input.pdf -o rotated.pdf --angle 90 --pages 1,3,5
 spectrapdf delete input.pdf -o trimmed.pdf --pages 3,7
 

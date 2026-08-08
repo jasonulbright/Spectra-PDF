@@ -37,6 +37,7 @@ import pikepdf
 from pikepdf import Dictionary, Name
 
 from engine.attachments import _save, list_attachments
+from engine.fs_names import safe_file_name, unique_name, unique_path
 from engine.pdf_metrics import text_width_em
 from engine.watermark import _escape_pdf_text, _n
 
@@ -45,9 +46,6 @@ _PAGE_H = 792.0
 
 _VIEW_NAMES = {"/D": "details", "/T": "tile", "/H": "hidden"}
 
-# Windows-illegal filename characters (plus the path separators every OS
-# rejects in a NAME). Member names are author-controlled strings, not paths.
-_ILLEGAL_NAME_CHARS = '<>:"/\\|?*'
 
 
 def get_portfolio(file: str) -> dict:
@@ -94,7 +92,7 @@ def create_portfolio(output: str, sources: list, title: str = "") -> dict:
         members = []
         used = set()
         for p in src_paths:
-            name = _dedupe_name(p.name, used)
+            name = unique_name(p.name, used)
             used.add(name.lower())
             data = p.read_bytes()
             mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
@@ -163,31 +161,11 @@ def extract_member_to_dir(file: str, name: str, dest_dir: str) -> dict:
             raise ValueError(f"no member named {name!r}")
         data = pdf.attachments[name].get_file().read_bytes()
 
-    safe = "".join(
-        "_" if (c in _ILLEGAL_NAME_CHARS or ord(c) < 0x20) else c for c in name
-    ).strip().strip(".")
-    if not safe:
-        safe = "member"
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
-    target = dest / safe
-    stem, suffix = target.stem, target.suffix
-    n = 2
-    while target.exists():
-        target = dest / f"{stem} ({n}){suffix}"
-        n += 1
+    target = unique_path(dest, safe_file_name(name, "member"))
     target.write_bytes(data)
     return {"output": str(target), "name": name, "size": len(data)}
-
-
-def _dedupe_name(name: str, used: set) -> str:
-    if name.lower() not in used:
-        return name
-    stem, suffix = Path(name).stem, Path(name).suffix
-    n = 2
-    while f"{stem} ({n}){suffix}".lower() in used:
-        n += 1
-    return f"{stem} ({n}){suffix}"
 
 
 def _draw_cover(pdf: "pikepdf.Pdf", member_count: int) -> None:
