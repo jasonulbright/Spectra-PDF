@@ -4,25 +4,34 @@
 
 ### Knowing what resolution a document's images are
 - Document Properties ▸ Advanced gains an **Images** row: how many images the document draws, and at what effective resolution.
-- The figure is measured, not assumed: an image's resolution is its pixels over the space it is placed in, so the same picture drawn twice at different sizes reports two.
+- The figure is measured: an image's resolution is its pixels over the space it is placed in.
+- The same picture drawn twice at different sizes therefore reports two resolutions, not one.
 - A document whose images share one resolution says so; a spread reports its lowest, its highest and its middle value.
-- A page rotated on the sheet measures by the edges it is actually drawn at, so a tilted photograph is not reported as coarser than it is.
+- A tilted image is measured by the edges it is drawn at, so its resolution is not understated.
 - An image whose placement collapses to nothing is counted apart rather than folded into the figures.
 - A document read from paper says so, with how many of its pages are scans.
-- The Compress panel shows the same summary above its resolution control, so a downsample target is chosen against what the document actually has.
+- The Compress panel shows the same summary above its resolution control.
+- A downsample target is then chosen against the resolution the document actually has.
 - A document that draws no images says that, instead of reporting a resolution it has none of.
 
 ### Compressing and optimizing in one pass
 - The Compress panel gains **Then optimize the result**: compression, then the optimize pass over what it produced.
-- The two run as separate operations, each with its own line in the operation queue and its own place in the result.
+- The two run as separate operations, each with its own line in the operation queue.
 - The result reports both halves: the compression figures, then the size after optimizing and the total reduction.
 - If optimizing fails, the message says the compressed file was still written, and why the second step did not finish.
 
 ### Fixes
-- Cropping by dragging a rectangle on the page works again in the document view. The rectangle now stays on the page as a dashed mark of the region to keep, and the Top/Bottom/Left/Right margins in the Crop & Page Boxes panel fill in from it. Previously the rectangle could be drawn but nothing came of it.
+- Cropping by dragging a rectangle on the page now works in the document view, where the drag committed nothing.
+- The drawn rectangle stays on the page as a dashed mark of the region to keep.
+- The Top/Bottom/Left/Right margins in the Crop & Page Boxes panel fill in from it.
 - Drawing an article box on the page adds it to the selected article, the same way.
-- Large photographic scans now finish compressing. A long document of pages photographed with a phone could run for hours and then end with nothing to show for it, because pages that are more picture than type were being fed to a text-shape compressor that they make grow without limit. Such pages are now recognised and compressed on their own, which is both far faster and, on those pages, smaller.
-- Compression never abandons a run over a slow page. If any part of the stencil compression runs long, that part falls back to a simpler, faster method and the document still finishes; the result says how many pages that happened to.
+- Large photographic scans now finish compressing, instead of running for hours and ending with nothing.
+- Pages that are more picture than type no longer go to the stencil compressor they made grow without limit.
+- Such pages are compressed on their own, which is faster and, on those pages, smaller.
+- Compression never abandons a run over a slow page.
+- A part of the stencil compression that runs long falls back to a simpler, faster method.
+- The result says how many pages that happened to.
+- The Optimize operation now reads as **Optimize** in the operation queue rather than a raw internal name.
 
 ## 1.0.25
 
