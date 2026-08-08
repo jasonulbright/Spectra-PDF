@@ -105,6 +105,14 @@ form_prepare.unknownFieldKindChoose	pattern	form_prepare	unknown field kind: {{v
 forms.acroformFieldTreeNested	exact	forms	AcroForm field tree nested too deeply
 forms.couldnTRegenerateAppearance	pattern	forms	couldn't regenerate the appearance for {{v0}}: {{exc}}
 forms.valueContainsCharactersOutside	exact	forms	value contains characters outside the form font's encoding (WinAnsi)
+glyph_outlines.fontProgramProducedCurve	exact	glyph_outlines	A font program produced a curve segment with an unexpected number of points.
+glyph_outlines.fontProgramProducedQuadratic	exact	glyph_outlines	A font program produced a quadratic curve segment the outline emitter cannot place.
+glyph_outlines.pageDrawsTextBundled	pattern	glyph_outlines	Page {{page}} draws text in {{name}}, and no bundled face can express one of its characters.
+glyph_outlines.pageDrawsTextOne	pattern	glyph_outlines	Page {{page}} draws text in {{name}}, and one of its codes spells nothing a bundled face could be matched to.
+glyph_outlines.pageDrawsTextThrough	pattern	glyph_outlines	Page {{page}} draws text in {{name}} through the encoding {{shown}}, which this engine cannot resolve to glyphs.
+glyph_outlines.pageDrawsTextType	pattern	glyph_outlines	Page {{page}} draws text in the Type 3 font {{name}}, whose glyphs are content streams rather than outlines.
+glyph_outlines.pageDrawsTextWhich	pattern	glyph_outlines	Page {{page}} draws text in {{name}}, which is not embedded in this document and no bundled face could stand in for it.
+glyph_outlines.pageDrawsTextWhose	pattern	glyph_outlines	Page {{page}} draws text in {{name}}, whose embedded font program could not be read.
 grayscale.ghostscriptGrayscaleConversionFailed	pattern	grayscale	Ghostscript grayscale conversion failed: {{v0}}
 guided_actions.actionSteps	exact	guided_actions	the action has no steps
 guided_actions.createPdfMustFirst	exact	guided_actions	create_pdf must be the first step — it produces the document the rest of the action works on
@@ -198,6 +206,9 @@ outline.bookmarkTargetsPage	pattern	outline	bookmark '{{title}}' targets page {{
 outline.malformedOutlineActionPayload	exact	outline	malformed outline action payload
 outline.outlineActionPayloadNested	exact	outline	outline action payload nested too deeply
 outline.outlineDeeperThanLevels	pattern	outline	outline deeper than {{MAX_DEPTH}} levels
+outlines.pageDrawsTextThrough	pattern	outlines	Page {{page}} draws text through the font resource {{name}}, which the page does not define.
+outlines.pageDrawsZeroWidth	pattern	outlines	Page {{page}} draws a zero-width line, which has no fixed width to outline.
+outlines.pageNestsFormXobjects	pattern	outlines	Page {{page}} nests form XObjects deeper than {{cap}} levels.
 page_boxes.boxMustOneGot	pattern	page_boxes	box must be one of {{v0}}, got {{box}}
 page_images.cropRectDegenerateNothing	exact	page_images	crop rect is degenerate (nothing would remain visible)
 page_images.cropRectMustLie	exact	page_images	crop rect must lie within the image (unit coordinates 0..1)
@@ -346,7 +357,7 @@ search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a posit
 search_regions.pagesMustListPage	exact	form_detect,search_regions,slide_export,table_export,text_export	pages must be a list of page numbers or "all"
 separations.ghostscriptFoldedSpotColours	pattern	separations	Ghostscript folded {{n}} spot colours into process; raise the spot limit or reduce the document's spots.
 separations.ghostscriptSeparationRenderFailed	pattern	separations	Ghostscript separation render failed: {{v0}}
-separations.pageDocument	pattern	flattener,separations	Page {{number}} is not in this document.
+separations.pageDocument	pattern	flattener,outlines,separations	Page {{number}} is not in this document.
 separations.pageUsesSpotColours	pattern	separations	This page uses {{n}} spot colours; separation preview supports {{limit}}.
 separations.separationOutputDidMatch	exact	separations	Separation output did not match the document's inks — the preview cannot be trusted.
 separations.separationPlatesPageLonger	exact	separations	The separation plates for this page are no longer available.

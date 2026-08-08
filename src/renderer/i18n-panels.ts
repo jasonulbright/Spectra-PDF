@@ -621,6 +621,17 @@ export const PANEL_STRINGS = {
   'panel.flattener.categoryStrokes': 'Strokes inside a region: {{count}}',
   'panel.flattener.categoryText': 'Text inside a region: {{count}}',
   'panel.flattener.categoryPatterns': 'Patterns inside a region: {{count}}',
+  'panel.flattener.outlineText': 'Convert all text to outlines',
+  'panel.flattener.outlineTextNote':
+    'Converted text can no longer be selected, searched or extracted.',
+  'panel.flattener.outlineStrokes': 'Convert all strokes to outlines',
+  'panel.flattener.outlineReport':
+    'Would convert {{runs}} text run(s) and {{strokes}} stroked path(s).',
+  'panel.flattener.outlineInvisible':
+    '{{runs}} of those run(s) draw nothing and are simply removed, including any text layer left by recognition.',
+  'panel.flattener.outlineSubstituted':
+    'Text whose font this document does not embed takes its outlines from: {{faces}}',
+  'panel.flattener.outlineRefusals': 'Cannot convert: {{reasons}}',
   'panel.flattener.unreadable': 'Page(s) {{pages}} could not be read.',
   'panel.flattener.none': 'This document has no live transparency.',
   'panel.flattener.scope':

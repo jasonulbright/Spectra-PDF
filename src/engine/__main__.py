@@ -54,6 +54,7 @@ from engine.ink_manager import (
     spot_to_process,
 )
 from engine.flattener import flatten_transparency, list_transparency
+from engine.outlines import list_outlines
 from engine.trapping import (
     assign_presets,
     emit_trapping_setup,
@@ -214,6 +215,7 @@ def main() -> None:
     server.register("fix_hairlines", fix_hairlines)
     server.register("list_transparency", list_transparency)
     server.register("flatten_transparency", flatten_transparency)
+    server.register("list_outlines", list_outlines)
     server.register("trap_preset_defaults", trap_preset_defaults)
     server.register("validate_trap_preset", validate_trap_preset)
     server.register("assign_trap_presets", assign_presets)

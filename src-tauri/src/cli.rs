@@ -74,6 +74,9 @@ pub enum CliCommand {
     /// Flatten transparency by rasterizing only the regions that composite,
     /// leaving text and vectors outside them live
     Flatten(FlattenArgs),
+    /// Report what converting text and strokes to outlines would do, and what
+    /// it would refuse (JSON; writes nothing)
+    OutlinesList(OutlinesListArgs),
     /// Report the in-RIP trapping vocabulary: every parameter, its type, its
     /// range and its initial value (JSON; writes nothing)
     TrapFields,
@@ -1369,6 +1372,15 @@ pub struct FlattenListArgs {
 }
 
 #[derive(Args)]
+pub struct OutlinesListArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Comma-separated 1-based page numbers (omit for all pages)
+    #[arg(long)]
+    pub pages: Option<String>,
+}
+
+#[derive(Args)]
 pub struct FlattenArgs {
     /// Input PDF file
     pub input: PathBuf,
@@ -1384,6 +1396,14 @@ pub struct FlattenArgs {
     /// Comma-separated 1-based page numbers (omit for all pages)
     #[arg(long)]
     pub pages: Option<String>,
+    /// Replace every surviving glyph run with its outlines. Converted text can
+    /// no longer be selected, searched or extracted
+    #[arg(long)]
+    pub outline_text: bool,
+    /// Replace every surviving stroke with the filled outline of the region
+    /// the pen covered
+    #[arg(long)]
+    pub outline_strokes: bool,
 }
 
 #[derive(Args)]
@@ -2949,11 +2969,25 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "balance": args.balance,
                 "dpi": args.dpi,
                 "gs_path": resolve_gs().to_string_lossy(),
+                "outline_text": args.outline_text,
+                "outline_strokes": args.outline_strokes,
+                "font_dir": resolve_fonts().to_string_lossy().to_string(),
             });
             if let Some(pages) = &args.pages {
                 params["pages"] = json!(parse_page_numbers(pages)?);
             }
             engine.call("flatten_transparency", params)
+        }
+
+        CliCommand::OutlinesList(args) => {
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "font_dir": resolve_fonts().to_string_lossy().to_string(),
+            });
+            if let Some(pages) = &args.pages {
+                params["pages"] = json!(parse_page_numbers(pages)?);
+            }
+            engine.call("list_outlines", params)
         }
 
         CliCommand::TrapFields => engine.call("trap_preset_defaults", json!({})),

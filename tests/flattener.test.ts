@@ -2,16 +2,22 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_FLATTEN_BALANCE,
   DEFAULT_FLATTEN_DPI,
+  NO_OUTLINES,
+  canApply,
   clampBalance,
   clampDpi,
   highlightRects,
+  outlineRefusals,
+  outlinesArmed,
   pageReport,
   regionCount,
+  substitutedFaces,
   totals,
   unreadablePages,
   type FlattenCategory,
   type FlattenPageReport,
   type FlattenReport,
+  type OutlineReport,
 } from '../src/renderer/lib/flattener';
 
 function page(overrides: Partial<FlattenPageReport> = {}): FlattenPageReport {
@@ -150,5 +156,70 @@ describe('flattener highlights', () => {
   it('tolerates a rect whose corners arrive in either order', () => {
     const rects = highlightRects(page({ regions: [[150, 400, 50, 300]] }), ALL);
     expect(rects[0]).toMatchObject({ x: 0.25, y: 0, w: 0.5, h: 0.25 });
+  });
+});
+
+// ── the outline conversions ────────────────────────────────────────────────
+
+function outlineReport(overrides: Partial<OutlineReport> = {}): OutlineReport {
+  return {
+    pages: [],
+    text_runs: 0,
+    strokes: 0,
+    invisible_runs: 0,
+    refusals: [],
+    substituted: [],
+    ...overrides,
+  };
+}
+
+describe('outlinesArmed', () => {
+  it('is false only when neither conversion is on', () => {
+    expect(outlinesArmed(NO_OUTLINES)).toBe(false);
+    expect(outlinesArmed({ text: true, strokes: false })).toBe(true);
+    expect(outlinesArmed({ text: false, strokes: true })).toBe(true);
+    expect(outlinesArmed({ text: true, strokes: true })).toBe(true);
+  });
+});
+
+describe('canApply', () => {
+  const empty = report([page()]);
+  const withRegion = report([page({ regions: [[0, 0, 10, 10]] })]);
+
+  it('needs a region while flattening is the only transform', () => {
+    expect(canApply(empty, NO_OUTLINES)).toBe(false);
+    expect(canApply(withRegion, NO_OUTLINES)).toBe(true);
+  });
+
+  it('needs no transparency at all once a conversion is armed', () => {
+    expect(canApply(empty, { text: true, strokes: false })).toBe(true);
+    expect(canApply(empty, { text: false, strokes: true })).toBe(true);
+    expect(canApply(null, { text: true, strokes: true })).toBe(true);
+  });
+});
+
+describe('outlineRefusals', () => {
+  const refused = outlineReport({ refusals: ['Page 1 draws text in a Type 3 font.'] });
+
+  it('surfaces what the conversion would refuse', () => {
+    expect(outlineRefusals(refused, { text: true, strokes: false })).toHaveLength(1);
+  });
+
+  it('says nothing about a conversion the user switched off', () => {
+    expect(outlineRefusals(refused, NO_OUTLINES)).toEqual([]);
+    expect(outlineRefusals(null, { text: true, strokes: true })).toEqual([]);
+  });
+});
+
+describe('substitutedFaces', () => {
+  const substituted = outlineReport({ substituted: ['LiberationSans-Regular.ttf'] });
+
+  it('names the bundled faces the text would come from', () => {
+    expect(substitutedFaces(substituted, { text: true, strokes: false }))
+      .toEqual(['LiberationSans-Regular.ttf']);
+  });
+
+  it('is silent when only strokes convert — a stroke has no font', () => {
+    expect(substitutedFaces(substituted, { text: false, strokes: true })).toEqual([]);
   });
 });
