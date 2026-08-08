@@ -37,6 +37,20 @@ Correctness constraints:
    character-substitution class. It is selectable, never the silent default of
    a lossless-sounding preset, and `MaskStream.codec` records which arm ran so
    the caller can say so.
+5. **Symbol mode costs the SQUARE of the document's unmatched marks, so a
+   stencil made of grain rather than type must never enter the shared
+   dictionary.** Every mark that matches no template becomes a template that
+   every later mark is compared against, and a page of sensor grain matches
+   nothing. Measured on eight DISTINCT pages of 2550x3300 stencils: 2 000
+   unique marks per page encode in 7.5 s, 8 000 in 54.7 s, 16 000 in 183 s —
+   against 0.08 s per page for generic mode and 0.03 s for G4, both flat. The
+   quadratic term is in the DOCUMENT, not the page, which is why a 272-page
+   run can spend hours and why no per-page timeout would have caught it.
+6. **A codec is a preference; finishing is not.** Every arm degrades rather
+   than refuses: symbol falls to generic, generic falls to G4 per page, and
+   `MaskStream.codec` says which ran. Refusing a whole document because one
+   stencil was expensive throws away every page that encoded correctly, and a
+   safe slower codec was available the whole time.
 """
 
 from __future__ import annotations
@@ -45,6 +59,7 @@ import io
 import os
 import subprocess
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,6 +74,11 @@ JBIG2_GENERIC = "jbig2_generic"
 CCITT_G4 = "ccitt_g4"
 MASK_CODECS = (JBIG2_SYMBOL, JBIG2_GENERIC, CCITT_G4)
 
+#: The document-level answer when the pages did not all get the same codec.
+#: Not a member of MASK_CODECS — nothing encodes with it, and a caller must
+#: never be able to ASK for it; it is only ever a report.
+MASK_CODEC_MIXED = "mixed"
+
 # jbig2enc's own default classification threshold. Exposed because Archival
 # never uses symbol mode at all and Smallest wants it looser.
 DEFAULT_SYMBOL_THRESHOLD = 0.92
@@ -66,6 +86,62 @@ DEFAULT_SYMBOL_THRESHOLD = 0.92
 #: the encoder with a message about a flag our callers never wrote, so the
 #: range is restated here and refused in OUR words.
 MIN_SYMBOL_THRESHOLD, MAX_SYMBOL_THRESHOLD = 0.40, 0.97
+
+# --------------------------------------------------------------------------
+# Routing (rule 5) and the budgets each arm gets (rule 6)
+# --------------------------------------------------------------------------
+#: Mean INK PIXELS per connected mark, at 300 dpi, below which a stencil is
+#: grain rather than type and does not enter the shared symbol dictionary.
+#:
+#: MARK SIZE, not mark count, and the difference is the whole test: 12 960
+#: repeating glyph components encode in 0.34 s while 16 000 unique specks take
+#: 7.5 s, so a count ceiling would demote a dense text page and still admit a
+#: photograph. Measured over type down to 5 pt in three columns, clean and
+#: noisy, the tightest LEGITIMATE page averages 112 px of ink per mark; a
+#: full-page photograph's surviving grain averages 5.1 px. The floor sits at
+#: 24 px — 4.7x below the tightest type and 4.7x above the grain, the centre of
+#: that gap in ratio.
+SYMBOL_MIN_MARK_AREA = 24.0
+#: The resolution `SYMBOL_MIN_MARK_AREA` is stated at. Ink area is an AREA, so
+#: a stencil at another resolution scales by the square.
+SYMBOL_MARK_AREA_DPI = 300.0
+
+#: Symbol mode's budget, and it is a DOCUMENT budget because the dictionary is.
+#: Measured: 32 pages of 2550x3300 text stencils (33.7 MB of bitmap) encode in
+#: 3.9 s, so 2 s per megabyte and 2 s per page is about fiftyfold headroom over
+#: honest work on this hardware. The cap matters more than the coefficients: at
+#: the shared 7200 s a pathological corpus burned two hours before anything was
+#: reported, and since a breach now DEGRADES rather than refuses, the cap is
+#: the bound on wasted waiting, not a judgement about honest runs.
+SYMBOL_BASE, SYMBOL_PER_MB, SYMBOL_PER_PAGE, SYMBOL_CAP = 60.0, 2.0, 2.0, 1800.0
+#: Generic mode runs one process per page, so its budget is a PAGE budget.
+#: Measured at 0.08 s per page; the floor is process startup, not the encode.
+GENERIC_BASE, GENERIC_PER_MB, GENERIC_CAP = 30.0, 2.0, 300.0
+
+
+@dataclass(frozen=True)
+class MaskProfile:
+    """What the segmentation measured about one stencil, for codec routing.
+
+    Carried from the caller rather than re-derived here: connected components
+    are `engine/mrc.py`'s answer to give, and that module imports this one.
+    """
+
+    #: Mean INK pixels per connected mark in the stencil.
+    mark_area_mean: float
+    #: The stencil's own resolution, which `mark_area_mean` is measured in.
+    dpi: int
+
+
+def symbol_mode_suits(profile: MaskProfile) -> bool:
+    """Whether this stencil may join the shared symbol dictionary (rule 5)."""
+    if profile.mark_area_mean <= 0:
+        # An empty stencil costs nothing either way; keep it with the document
+        # so a blank page does not split the codec report on its own.
+        return True
+    scale = max(float(profile.dpi), 1.0) / SYMBOL_MARK_AREA_DPI
+    return profile.mark_area_mean >= SYMBOL_MIN_MARK_AREA * scale * scale
+
 
 # How far a decoded stencil's ink coverage may sit from the mask it came from.
 # Both G4 and JBIG2 generic are LOSSLESS with respect to the bitmap, so the
@@ -250,16 +326,6 @@ def encode_masks_jbig2(
     for mask in masks:
         _as_mask(mask)
 
-    pixels = sum(m.width * m.height for m in masks)
-    # Derived, not fixed: the encoder's work is proportional to pixel
-    # count, and a 600-dpi multi-page scan is the case the feature exists for.
-    # ~4 MB of 1-bit samples per megapixel-page is the scale, so the budget is
-    # expressed against the uncompressed bitmap size.
-    bitmap_bytes = pixels // 8
-    allowed = budget.derive(
-        base=60.0, size_bytes=bitmap_bytes, pages=len(masks), per_mb=20.0, per_page=15.0
-    )
-
     with tempfile.TemporaryDirectory(prefix="spectrapdf_jbig2_") as work:
         wd = Path(work)
         inputs = []
@@ -269,9 +335,19 @@ def encode_masks_jbig2(
             inputs.append(png)
 
         if mode == JBIG2_SYMBOL:
+            # Derived, not fixed: the encoder's work is proportional to pixel
+            # count, and a 600-dpi multi-page scan is the case the feature
+            # exists for. ~4 MB of 1-bit samples per megapixel-page is the
+            # scale, so the budget is expressed against the uncompressed
+            # bitmap size — of the WHOLE group, because the dictionary is.
+            bitmap_bytes = sum(m.width * m.height for m in masks) // 8
+            allowed = budget.derive(
+                base=SYMBOL_BASE, size_bytes=bitmap_bytes, pages=len(masks),
+                per_mb=SYMBOL_PER_MB, per_page=SYMBOL_PER_PAGE, cap=SYMBOL_CAP,
+            )
             streams = _run_symbol(exe, wd, inputs, symbol_threshold, allowed, bitmap_bytes)
         else:
-            streams = _run_generic(exe, wd, inputs, allowed, bitmap_bytes)
+            streams = _run_generic(exe, wd, inputs, masks)
 
     return [
         MaskStream(
@@ -297,21 +373,29 @@ def _jbig2_failed(result: subprocess.CompletedProcess) -> RuntimeError:
 
 
 def _run_generic(
-    exe: str, wd: Path, inputs: list[Path], allowed: float, bitmap_bytes: int
+    exe: str, wd: Path, inputs: list[Path], masks: list[Image.Image]
 ) -> list[tuple[bytes, bytes | None]]:
     """One invocation per page; the embedded stream arrives on stdout.
 
     `-p` is PDF-ready output (embedded segment format, no file header). `-r`
     is never passed — rule 3.
+
+    The budget is per PAGE because the invocation is: generic mode carries no
+    cross-page state, so charging one page against the whole document's
+    allowance would let an early page spend what a later one needs.
     """
     out: list[tuple[bytes, bytes | None]] = []
     for i, png in enumerate(inputs):
+        page_bytes = (masks[i].width * masks[i].height) // 8
         result = budget.run(
             [exe, "-p", str(png)],
             what="The JBIG2 encoder",
-            budget=allowed,
-            size_bytes=bitmap_bytes,
-            pages=len(inputs),
+            budget=budget.derive(
+                base=GENERIC_BASE, size_bytes=page_bytes, pages=1,
+                per_mb=GENERIC_PER_MB, cap=GENERIC_CAP,
+            ),
+            size_bytes=page_bytes,
+            pages=1,
             cwd=wd,
         )
         if result.returncode != 0:
@@ -359,6 +443,23 @@ def _run_symbol(
     return out
 
 
+def _generic_ladder(masks: list[Image.Image], jbig2_path: str) -> list[MaskStream]:
+    """Generic mode, page by page, each page falling to G4 on a breach.
+
+    The bottom two rungs of rule 6. Generic mode has no cross-page state, so a
+    page that outlives its budget can be re-encoded alone without disturbing
+    any other — and CCITT G4 has no subprocess at all, so the bottom rung
+    cannot itself time out.
+    """
+    out: list[MaskStream] = []
+    for mask in masks:
+        try:
+            out.extend(encode_masks_jbig2([mask], mode=JBIG2_GENERIC, jbig2_path=jbig2_path))
+        except budget.TimeBudgetExceeded:
+            out.append(encode_mask_ccitt_g4(mask))
+    return out
+
+
 def encode_mask(
     masks: list[Image.Image],
     *,
@@ -366,6 +467,7 @@ def encode_mask(
     jbig2_path: str = "",
     symbol_threshold: float = DEFAULT_SYMBOL_THRESHOLD,
     allow_fallback: bool = True,
+    profiles: Sequence[MaskProfile] | None = None,
 ) -> tuple[list[MaskStream], str]:
     """Encode a document's stencils with `codec`, reporting what actually ran.
 
@@ -374,21 +476,64 @@ def encode_mask(
     codec name says so, because a silent swap would make the size claim untrue.
     When the caller asked for a codec BY NAME (`allow_fallback=False`) it
     refuses instead of substituting.
+
+    `profiles`, one per mask, is what routes a grain stencil away from the
+    shared symbol dictionary before a second of it is spent (rule 5). Without
+    them nothing is routed and the ladder of rule 6 is the only protection,
+    which is why the routing is an OPTIMISATION and the ladder is the guarantee.
+
+    The returned codec name is the DOCUMENT's: the one every page got, or
+    `MASK_CODEC_MIXED` when they differ. Per-page truth is `MaskStream.codec`,
+    and it is the only thing a size claim may be made against.
     """
     if codec not in MASK_CODECS:
         raise ValueError(f"unknown mask codec: {codec} (expected one of {', '.join(MASK_CODECS)})")
+    if profiles is not None and len(profiles) != len(masks):
+        raise ValueError(
+            f"one mask profile per mask is required, got {len(profiles)} for {len(masks)} mask(s)"
+        )
     if codec == CCITT_G4:
         return [encode_mask_ccitt_g4(m) for m in masks], CCITT_G4
     if not jbig2_available(jbig2_path):
         if not allow_fallback:
             _require_jbig2(jbig2_path)  # raises the named refusal
         return [encode_mask_ccitt_g4(m) for m in masks], CCITT_G4
-    return (
-        encode_masks_jbig2(
-            masks, mode=codec, jbig2_path=jbig2_path, symbol_threshold=symbol_threshold
-        ),
-        codec,
-    )
+    if not masks:
+        return [], codec
+    if codec == JBIG2_GENERIC:
+        streams = _generic_ladder(masks, jbig2_path)
+        used = {s.codec for s in streams}
+        return streams, (used.pop() if len(used) == 1 else MASK_CODEC_MIXED)
+
+    shared: list[int] = list(range(len(masks)))
+    alone: list[int] = []
+    if profiles is not None:
+        suits = [symbol_mode_suits(p) for p in profiles]
+        shared = [i for i in shared if suits[i]]
+        alone = [i for i, ok in enumerate(suits) if not ok]
+
+    # Keyed by INDEX so the two arms reassemble into the caller's page order.
+    # A dictionary rather than a pre-sized list with holes: a missing index is
+    # then a crash at the lookup, where a hole would hand a page someone else's
+    # stencil — which renders as a plausible page of the wrong words.
+    by_index: dict[int, MaskStream] = {}
+    if shared:
+        group = [masks[i] for i in shared]
+        try:
+            streams = encode_masks_jbig2(
+                group, mode=codec, jbig2_path=jbig2_path, symbol_threshold=symbol_threshold
+            )
+        except budget.TimeBudgetExceeded:
+            # The corpus has answered the question the profiles only estimated.
+            # Everything the dictionary was building is discarded — it is the
+            # dictionary that was expensive — and the pages encode on their own.
+            streams = _generic_ladder(group, jbig2_path)
+        by_index.update(zip(shared, streams))
+    by_index.update(zip(alone, _generic_ladder([masks[i] for i in alone], jbig2_path)))
+
+    ordered = [by_index[i] for i in range(len(masks))]
+    used = {s.codec for s in ordered}
+    return ordered, (used.pop() if len(used) == 1 else MASK_CODEC_MIXED)
 
 
 # --------------------------------------------------------------------------

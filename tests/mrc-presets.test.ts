@@ -18,7 +18,9 @@ import {
   mrcBatchNote,
   mrcCodecFellBack,
   mrcCompressParams,
+  mrcPagesOffSharedDictionary,
   normalizeMrcPreset,
+  MRC_MASK_CODEC_MIXED,
   type MrcReport,
 } from '../src/renderer/lib/mrc-presets';
 
@@ -107,6 +109,43 @@ describe('mrcCodecFellBack', () => {
     expect(
       mrcCodecFellBack(report({ mask_codec: 'ccitt_g4', requested_mask_codec: 'jbig2_symbol' })),
     ).toBe(true);
+  });
+
+  it('does not claim a missing encoder when the document was merely mixed', () => {
+    // The two notices say different things — a machine missing a tool, versus
+    // a scan that did not suit a shared dictionary — and the provisioning one
+    // would be a false statement about the user's install.
+    expect(
+      mrcCodecFellBack(
+        report({ mask_codec: MRC_MASK_CODEC_MIXED, pages_mask_fallback: 2 }),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('mrcPagesOffSharedDictionary', () => {
+  it('counts the pages encoded on their own, and only for a mixed document', () => {
+    expect(
+      mrcPagesOffSharedDictionary(
+        report({ mask_codec: MRC_MASK_CODEC_MIXED, pages_mask_fallback: 2 }),
+      ),
+    ).toBe(2);
+    expect(mrcPagesOffSharedDictionary(report())).toBe(0);
+    // A whole-document provisioning fallback is uniform, not mixed: it is the
+    // OTHER notice's business, and counting it here would show both.
+    expect(
+      mrcPagesOffSharedDictionary(
+        report({
+          mask_codec: 'ccitt_g4',
+          requested_mask_codec: 'jbig2_symbol',
+          pages_mask_fallback: 3,
+        }),
+      ),
+    ).toBe(0);
+  });
+
+  it('reads an engine report that predates the field as no fallback', () => {
+    expect(mrcPagesOffSharedDictionary(report({ mask_codec: MRC_MASK_CODEC_MIXED }))).toBe(0);
   });
 });
 

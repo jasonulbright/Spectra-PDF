@@ -66,6 +66,7 @@ from .mrc_codecs import (
     CCITT_G4,
     JBIG2_GENERIC,
     JBIG2_SYMBOL,
+    MaskProfile,
     encode_layer_jpeg,
     encode_layer_jpx,
     encode_mask,
@@ -704,6 +705,12 @@ def segment(
         "picture_components": 0,
         "halftone_blocks": 0,
         "picture_blocks": 0,
+        # What SURVIVED into the stencil, which is a different population from
+        # `components` (that one is counted before the speckle and pictorial
+        # clears). The mask codec routes on these two — see `mrc_codecs`
+        # rule 5 — so they describe the bitmap that is actually encoded.
+        "marks": 0,
+        "mark_area_mean": 0.0,
     }
     if comp.count == 0:
         stats["text_height"] = max(int(round(12 * scale)), 4)
@@ -759,6 +766,17 @@ def segment(
     # background whether or not it survived as its own component.
     pictorial |= picture_area & ink
     ink &= ~picture_area
+
+    # RECOUNTED, not bookkept from `comp2`: clearing a picture block can split
+    # one component into several and erase parts of others, so the surviving
+    # population is not a subset of any mask over `comp2`. One more run-labelled
+    # pass over a stencil that is now sparse costs about 0.09 s on a 300-dpi
+    # page, against the hours the routing it feeds exists to save.
+    final = components(ink)
+    stats["marks"] = final.count
+    stats["mark_area_mean"] = (
+        float(final.area.sum()) / final.count if final.count else 0.0
+    )
     return ink, pictorial, stats
 
 
@@ -939,6 +957,11 @@ def mrc_compress(
     dictionary across pages, and that sharing is a large part of the
     multi-page win — a per-page pass throws it away.
 
+    A page whose stencil is grain rather than type is kept OUT of that shared
+    dictionary and encoded on its own (`mrc_codecs` rules 5 and 6), so the
+    report's `mask_codec` can be `mixed` and every layered page names the codec
+    it actually got. No codec question ever costs the run: the arms degrade.
+
     Signed documents: this is a full content rewrite, which
     `engine/incremental.py`'s transplant explicitly does not cover, so there
     is no append path and none is invented. The panel writes to a NEW file
@@ -1053,6 +1076,13 @@ def mrc_compress(
             jbig2_path=jbig2_path,
             symbol_threshold=float(settings["symbol_threshold"]),
             allow_fallback=allow_fallback,
+            profiles=[
+                MaskProfile(
+                    mark_area_mean=float(item[2]["mark_area_mean"]),
+                    dpi=item[0].source_dpi,
+                )
+                for item in prepared
+            ],
         )
 
         applied = 0
@@ -1062,8 +1092,11 @@ def mrc_compress(
             page = pdf.pages[candidate.page_number - 1]
             try:
                 # Rule 4 — in the PRODUCTION path, not only in the tests.
+                # The tolerance follows THIS stream's codec, never the
+                # document's: only symbol mode substitutes shapes, and a
+                # document can now carry both arms at once.
                 verify_mask_stream(
-                    stream, gs_path, tolerance=0.005 if used_codec == JBIG2_SYMBOL else 0.001
+                    stream, gs_path, tolerance=0.005 if stream.codec == JBIG2_SYMBOL else 0.001
                 )
             except RuntimeError as exc:
                 pages.append(
@@ -1176,6 +1209,7 @@ def mrc_compress(
                 {
                     "page": candidate.page_number,
                     "decision": DECISION_MRC,
+                    "mask_codec": stream.codec,
                     "mask_bytes": len(stream.data),
                     "bg_bytes": len(bg_bytes),
                     "fg_bytes": len(fg_bytes),
@@ -1183,6 +1217,8 @@ def mrc_compress(
                     "bg_div": page_bg_div,
                     "fg_div": fg_divisor,
                     "text_height": stats["text_height"],
+                    "marks": stats["marks"],
+                    "mark_area_mean": round(stats["mark_area_mean"], 1),
                     "window": stats["window"],
                     "picture_components": stats["picture_components"],
                     "picture_blocks": stats["picture_blocks"],
@@ -1209,6 +1245,15 @@ def mrc_compress(
         _save(pdf, input_path, output_path)
 
     pages.sort(key=lambda row: row["page"])
+    # Counted over the pages that were actually LAYERED — a page left untouched
+    # has no stencil and cannot have a codec. `used_codec` is the document's
+    # answer for the pages that were encoded, which is a larger set: a page can
+    # encode and then be reverted by the text check.
+    codec_pages: dict[str, int] = {}
+    for row in pages:
+        name = row.get("mask_codec")
+        if name:
+            codec_pages[name] = codec_pages.get(name, 0) + 1
     return {
         "output": str(output_path),
         "original_size": original_size,
@@ -1218,6 +1263,8 @@ def mrc_compress(
         "preset": settings["name"],
         "mask_codec": used_codec,
         "requested_mask_codec": codec,
+        "mask_codec_pages": codec_pages,
+        "pages_mask_fallback": sum(n for name, n in codec_pages.items() if name != codec),
         "pdfa_safe": bool(pdfa_safe),
         "verify_text": bool(verify_text),
         "verify_threshold": verify_threshold if verify_text else None,
