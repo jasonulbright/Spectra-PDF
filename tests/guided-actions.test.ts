@@ -220,7 +220,16 @@ describe('action files (export/import)', () => {
       steps: [
         {
           op: 'watermark',
-          params: { text: 'DRAFT', image: '', opacity: 0.15, angle: 45, scale: 1, position: 'center' },
+          params: {
+            text: 'DRAFT',
+            image: '',
+            pdf_source: '',
+            pdf_page: 1,
+            opacity: 0.15,
+            angle: 45,
+            scale: 1,
+            position: 'center',
+          },
         },
         { op: 'encrypt', params: {} },
       ],
