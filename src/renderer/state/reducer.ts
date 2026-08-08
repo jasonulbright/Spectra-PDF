@@ -97,6 +97,7 @@ export const initialUiState: UiState = {
   docViewMode: 'document',
   pageLayout: 'single',
   twoUpCover: true,
+  spreadDirection: 'l2r',
   readingMode: false,
   propertiesBar: false,
   splitView: 'off',
@@ -1568,6 +1569,24 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, ui: { ...state.ui, twoUpCover: !state.ui.twoUpCover } };
     case 'UI_TOGGLE_READING_MODE':
       return { ...state, ui: { ...state.ui, readingMode: !state.ui.readingMode } };
+    case 'UI_APPLY_INITIAL_VIEW': {
+      // One act, so a document that states a layout AND a page mode cannot
+      // land as two renders with a half-applied view in between. A null field
+      // is the document saying nothing — the user's current setting stands.
+      const { plan } = action;
+      const ui = { ...state.ui, spreadDirection: plan.spreadDirection };
+      if (plan.pageLayout !== null) ui.pageLayout = plan.pageLayout;
+      if (plan.twoUpCover !== null) ui.twoUpCover = plan.twoUpCover;
+      if (plan.readingMode !== null) ui.readingMode = plan.readingMode;
+      if (plan.navPane !== null) {
+        ui.navPane = {
+          ...ui.navPane,
+          open: plan.navPane.open,
+          panel: plan.navPane.panel ?? ui.navPane.panel,
+        };
+      }
+      return { ...state, ui };
+    }
     case 'UI_TOGGLE_PROPERTIES_BAR':
       return { ...state, ui: { ...state.ui, propertiesBar: !state.ui.propertiesBar } };
     case 'UI_TOGGLE_SPLIT_VIEW':

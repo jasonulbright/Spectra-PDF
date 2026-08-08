@@ -68,6 +68,8 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   render_separations: 'Render Separations',
   set_field_lock: 'Set Field Lock',
   set_document_js: 'Edit Document JavaScript',
+  set_initial_view: 'Set Initial View',
+  set_advanced_properties: 'Set Document Properties',
   set_struct_props: 'Edit Tag',
   move_struct_node: 'Move Tag',
   delete_struct_node: 'Delete Tag',
@@ -89,6 +91,14 @@ const INTERNAL_METHODS = new Set([
   'check_encrypted',
   'get_metadata',
   'get_pdf_version',
+  // The Properties dialog's three read-only tabs. Same hazard as
+  // `get_pdf_version`: the dialog runs the commit gate ONCE on open, and a
+  // per-read gate would flush pending page edits every time a tab is clicked.
+  // The initial-view read also runs on every OPEN, where gating would commit
+  // another document's pending edits merely because a file was opened.
+  'get_initial_view',
+  'get_advanced_properties',
+  'list_document_fonts',
   'get_outline',
   // Reading the document's JavaScript is a pure lookup — trackable would
   // route it through the commit gate and flush pending page edits just for

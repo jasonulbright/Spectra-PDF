@@ -74,6 +74,7 @@ import { usePdfProxies } from './hooks/usePdfProxies';
 import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
 import { commitPageEdits } from './lib/workspace-commit';
 import { setCommitGate, runCommitGate } from './lib/commit-gate';
+import { initialViewPlan, parseInitialView, planIsInert } from './lib/initial-view';
 import { readFormFields } from './lib/forms';
 import type { FormFieldValue } from './lib/forms';
 import { resolveFillTargets } from './lib/form-overlay';
@@ -552,6 +553,43 @@ function AppContent(): React.ReactElement {
   const stateRef = useRef(state);
   stateRef.current = state;
 
+  // A newly opened document's own initial view: the layout, navigation pane
+  // and reading mode land as one reducer act; the opening page and its
+  // magnification are applied to the canvas once the document has indexed.
+  // A catalog this cannot read never blocks an open — the document appears
+  // with the workbench's own view, which is what a reader without the
+  // preference does.
+  const applyInitialView = useCallback(
+    async (path: string, workingPath: string) => {
+      let view;
+      try {
+        view = parseInitialView(
+          (await call('get_initial_view', { file: workingPath })) as unknown as Record<string, unknown>,
+        );
+      } catch {
+        return;
+      }
+      const plan = initialViewPlan(view);
+      if (!planIsInert(plan, stateRef.current.ui.spreadDirection)) {
+        dispatch({ type: 'UI_APPLY_INITIAL_VIEW', plan });
+      }
+      if (plan.page === null) return;
+      // The OPEN_FILE dispatch and the workspace index land over the next
+      // renders, so poll the (idempotent) jump and stop on the first success —
+      // `openPathAtPage`'s own bounded shape, for the same reason.
+      let landed = false;
+      for (let i = 0; i < 15 && !landed; i++) {
+        landed = getCanvasServices()?.jumpToFilePage(path, plan.page) ?? false;
+        if (!landed) await new Promise((r) => setTimeout(r, 120));
+      }
+      if (!landed) return;
+      const canvas = getCanvasServices()?.canvas();
+      if (plan.zoomPercent !== null) canvas?.setZoomPercent?.(plan.zoomPercent);
+      else if (plan.fitWidth) canvas?.fitWidth?.();
+    },
+    [call, dispatch],
+  );
+
   // Open files, then focus the last opened document's tab (opening a file is
   // an explicit request to view it). Already-open files are
   // re-activated. Recent list accumulates once so a multi-open batch doesn't
@@ -566,6 +604,10 @@ function AppContent(): React.ReactElement {
   const openByPaths = useCallback(async (paths: string[], opts?: { focus?: boolean }) => {
     let recent = stateRef.current.ui.recentFiles;
     let lastOpened: string | null = null;
+    // The file that was really OPENED (not re-activated) and became the
+    // landing tab. Only a fresh open applies an initial view: re-activating a
+    // tab must not undo a layout the user chose while it was open.
+    let freshlyOpened: { path: string; workingPath: string } | null = null;
     let changed = false;
     try {
       // THE PATH-IDENTITY GATE. File identity is the raw path string
@@ -611,6 +653,7 @@ function AppContent(): React.ReactElement {
           dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
           recent = withRecent(recent, filePath, Date.now()); // only on success — a cancel/throw
           lastOpened = filePath;                  // must not pollute Recent (regression)
+          freshlyOpened = null;
           changed = true;
           continue;
         }
@@ -631,6 +674,7 @@ function AppContent(): React.ReactElement {
         dispatch({ type: 'OPEN_FILE', path: filePath, ...prepared });
         recent = withRecent(recent, filePath, Date.now());
         lastOpened = filePath;
+        freshlyOpened = { path: filePath, workingPath: prepared.workingPath };
         changed = true;
       }
     } finally {
@@ -639,7 +683,12 @@ function AppContent(): React.ReactElement {
       if (changed) dispatch({ type: 'UI_SET_RECENT_FILES', files: recent });
       if (lastOpened && opts?.focus !== false) dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: lastOpened } });
     }
-  }, [dispatch, prepareFileBytes]);
+    // Outside the finally: an initial view is a courtesy on top of a
+    // completed open, never a reason for the open itself to report a failure.
+    if (freshlyOpened && lastOpened === freshlyOpened.path && opts?.focus !== false) {
+      await applyInitialView(freshlyOpened.path, freshlyOpened.workingPath);
+    }
+  }, [dispatch, prepareFileBytes, applyInitialView]);
 
   // Import one or more files' pages INTO an existing document at an index (the
   // add-page ghost and per-position drops). Each file is registered
@@ -2253,7 +2302,11 @@ function AppContent(): React.ReactElement {
   }, [focusedTab, activeOp, state.ui.tool, state.ui.activeToolId, state.files, state.activeFileId, activeFile?.dirty, activeFile?.pageCount]);
 
   return (
-    <OperationsProvider performOperation={performOperation} addFormFields={handleAddFormFields}>
+    <OperationsProvider
+      performOperation={performOperation}
+      addFormFields={handleAddFormFields}
+      confirmSignedEdit={confirmEditOfSignedDoc}
+    >
     <DropZone onFilesDropped={handleFilesDropped}>
     <div className="app-shell h-screen bg-neutral-900 text-neutral-100 flex flex-col overflow-hidden">
       <MenuBar />

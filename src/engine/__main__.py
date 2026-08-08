@@ -89,6 +89,13 @@ from engine.portfolio import (
     update_portfolio_member,
 )
 from engine.metadata import get_metadata, set_metadata, strip_metadata
+from engine.doc_properties import (
+    get_advanced_properties,
+    get_initial_view,
+    set_advanced_properties,
+    set_initial_view,
+)
+from engine.font_inventory import list_document_fonts
 from engine.reversion import get_pdf_version, set_pdf_version
 from engine.inspect import get_page_count, get_page_info, check_encrypted, unlock
 from engine.repair import repair
@@ -240,6 +247,11 @@ def main() -> None:
     server.register("strip_metadata", strip_metadata)
     server.register("get_pdf_version", get_pdf_version)
     server.register("set_pdf_version", set_pdf_version)
+    server.register("get_initial_view", get_initial_view)
+    server.register("set_initial_view", set_initial_view)
+    server.register("get_advanced_properties", get_advanced_properties)
+    server.register("set_advanced_properties", set_advanced_properties)
+    server.register("list_document_fonts", list_document_fonts)
     server.register("get_page_count", get_page_count)
     server.register("get_page_info", get_page_info)
     server.register("check_encrypted", check_encrypted)
