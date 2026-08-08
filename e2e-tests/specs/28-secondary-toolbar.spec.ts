@@ -158,12 +158,16 @@ describe('secondary toolbar', () => {
     await $('[data-testid="tools-center"]').waitForDisplayed({
       timeoutMsg: 'no tile grid on Home with nothing open',
     });
-    // Work-on-the-page tools: disabled. A form tool: still live (its panel
-    // prompts for a file).
-    for (const id of ['comment', 'redact', 'ocr', 'fillsign', 'prepareform']) {
+    // Work-on-the-page tools: disabled. Ops tools: still live (their panes
+    // prompt for a file). Scan & OCR belongs to the second group — it owns no
+    // canvas mode and its Enhance Scans pane runs the picker-first flow, so a
+    // docless tile is a live click, not a dead one.
+    for (const id of ['comment', 'redact', 'fillsign', 'prepareform']) {
       await expect($(`[data-testid="tool-tile-${id}"]`)).toBeDisabled();
     }
-    await expect($('[data-testid="tool-tile-protect"]')).toBeEnabled();
+    for (const id of ['protect', 'ocr']) {
+      await expect($(`[data-testid="tool-tile-${id}"]`)).toBeEnabled();
+    }
   });
 
   it('an ops-less tool left open outlives its document without a dead end', async () => {
