@@ -2,6 +2,18 @@
 
 ## 1.0.24
 
+### Splitting a document four ways
+- Split still takes page ranges, and now also a number of pages, a maximum file size, or the document's top-level bookmarks.
+- Every N pages writes as many files as it takes, the last one holding the remainder.
+- Splitting by size measures each file as it is really written, so the limit is the size on disk and not an estimate.
+- A single page larger than the limit is written to a file of its own and reported, rather than stopping the whole job.
+- Splitting at bookmarks writes one file per top-level bookmark, from that bookmark to the next.
+- Each file is named after the bookmark it starts at, with characters the filesystem refuses replaced.
+- Pages ahead of the first bookmark are kept, in a file named after the document.
+- A document with no top-level bookmarks says so before you run it, and refuses by name if you do.
+- Form fields survive every mode: each output carries the fields its own pages own, and no others.
+- Command line: `split --mode every-n|size|bookmarks`, with the option each mode needs and a refusal for the ones it does not.
+
 ### Converting text and strokes to outlines
 - The flattener converts all text to outlines, replacing each glyph with the font's own shape at the same place.
 - It converts all strokes to outlines, replacing each line with the shape the pen covered.
