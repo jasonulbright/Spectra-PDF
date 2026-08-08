@@ -1,0 +1,134 @@
+/**
+ * On-canvas article-bead draw.
+ *
+ * An article thread is an ordered list of rectangles ("beads") across pages;
+ * the engine (`engine/threads.py`) wants each one in PDF user space against
+ * the UNROTATED page. The band arrives display-normalised (0..1 of the drawn
+ * frame, y from the TOP — the frame every other banded gesture uses), so a
+ * conversion sits between them, and it is here rather than in a component
+ * because there is no DOM test environment: the arithmetic is where the
+ * mistakes live, so the arithmetic is what gets pinned.
+ *
+ * The rotation half is `crop-draw.ts`'s, reused rather than restated —
+ * `insetsFromBand` already answers "which page edges did this band trim, given
+ * the page was displayed turned", and a rect against the page box is those
+ * insets read from the other side. Two implementations of that quarter-turn
+ * rule is exactly how a landscape scan gets its beads on the wrong axis.
+ */
+
+import { insetsFromBand, type NormRect } from './crop-draw';
+
+/** A bead as the engine takes it: 1-based page, rect in PDF user space. */
+export interface Bead {
+  page: number;
+  rect: [number, number, number, number];
+}
+
+/** An article as `list_threads` reports it and `set_threads` takes it. */
+export interface Article {
+  title: string;
+  author: string;
+  subject: string;
+  keywords: string;
+  beads: Bead[];
+}
+
+/**
+ * The page-space rect a band covers, given the page's own view box
+ * `[x0, y0, x1, y1]` and the turn it was displayed at. `/R` is in DEFAULT
+ * user space, so the box's origin is added back — a page whose crop box does
+ * not start at (0, 0) would otherwise put every bead one offset away.
+ * Returns null for a band with no area: a click is not a box.
+ */
+export function beadRectFromBand(
+  band: NormRect,
+  view: readonly [number, number, number, number],
+  rotation = 0,
+): [number, number, number, number] | null {
+  const [vx0, vy0, vx1, vy1] = view;
+  const pageW = vx1 - vx0;
+  const pageH = vy1 - vy0;
+  if (!(pageW > 0) || !(pageH > 0)) return null;
+  const turned = rotation === 90 || rotation === 270;
+  const insets = insetsFromBand(band, turned ? pageH : pageW, turned ? pageW : pageH, rotation);
+  if (!insets) return null;
+  const x0 = vx0 + insets.left;
+  const y0 = vy0 + insets.bottom;
+  const x1 = vx1 - insets.right;
+  const y1 = vy1 - insets.top;
+  if (!(x1 > x0) || !(y1 > y0)) return null;
+  const r = (v: number): number => Number(v.toFixed(2));
+  return [r(x0), r(y0), r(x1), r(y1)];
+}
+
+/** A fresh, empty article. Titles are the user's; the rest stays blank until
+ * they fill it, because writing an /I entry nobody asked for makes every
+ * document look authored. */
+export function emptyArticle(title: string): Article {
+  return { title, author: '', subject: '', keywords: '', beads: [] };
+}
+
+/** Move a bead within its article. Returns the same array when the move would
+ * fall off either end, so a caller can compare identity for "nothing to do". */
+export function moveBead(beads: Bead[], index: number, delta: number): Bead[] {
+  const target = index + delta;
+  if (index < 0 || index >= beads.length || target < 0 || target >= beads.length) return beads;
+  const next = [...beads];
+  const [moved] = next.splice(index, 1);
+  next.splice(target, 0, moved);
+  return next;
+}
+
+/**
+ * The bead a next/previous step lands on. Threads are CIRCULAR — the last
+ * bead's next is the first — so the walk wraps rather than stopping, which is
+ * what following an article to its end actually does.
+ */
+export function stepBead(count: number, current: number, delta: number): number {
+  if (count <= 0) return 0;
+  return ((current + delta) % count + count) % count;
+}
+
+/**
+ * The drawn bead, from the canvas to the Articles panel.
+ *
+ * A module channel rather than a prop chain, for the reason `crop-draw.ts`
+ * gives for the same handoff: two surfaces that do not contain each other, one
+ * transient request, and no place for it in app state. Nothing is committed by
+ * publishing — the panel appends the box and the user still presses Save.
+ */
+export interface DrawnBead extends Bead {
+  /** The document the band belongs to; a stale publish must not append a box
+   * to an article the user has since switched away from. */
+  path: string;
+}
+
+let drawn: DrawnBead | null = null;
+const beadListeners = new Set<(bead: DrawnBead) => void>();
+
+export function publishDrawnBead(bead: DrawnBead): void {
+  drawn = bead;
+  for (const fn of beadListeners) fn(bead);
+}
+
+/**
+ * Read the pending bead AND clear it — consume-once, the `consumeDrawnCrop`
+ * rule: a panel remount must not silently re-append a box the user already
+ * has.
+ */
+export function consumeDrawnBead(): DrawnBead | null {
+  const bead = drawn;
+  drawn = null;
+  return bead;
+}
+
+export function subscribeDrawnBead(fn: (bead: DrawnBead) => void): () => void {
+  beadListeners.add(fn);
+  return () => beadListeners.delete(fn);
+}
+
+/** Test seam. */
+export function __resetDrawnBead(): void {
+  drawn = null;
+  beadListeners.clear();
+}

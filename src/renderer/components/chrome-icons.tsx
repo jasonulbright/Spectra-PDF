@@ -24,6 +24,7 @@ export type ChromeIconId =
   | 'document'
   | 'pages'
   | 'bookmarks'
+  | 'articles'
   | 'signatures'
   | 'attachments'
   | 'layers'
@@ -171,6 +172,17 @@ const GLYPHS: Record<ChromeIconId, React.JSX.Element> = {
     <>
       <path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z" />
       <circle cx="7.5" cy="7.5" r="1.5" />
+    </>
+  ),
+  // Two columns of text with a flow arrow between them (nav-pane Articles
+  // panel): an article is boxes read in an order the page layout does not give.
+  articles: (
+    <>
+      <path d="M3 4h7v6H3z" />
+      <path d="M14 14h7v6h-7z" />
+      <path d="M3 13h7M3 16h5" />
+      <path d="M14 4h7M14 7h5" />
+      <path d="M10.5 10.5l3 3" />
     </>
   ),
 };

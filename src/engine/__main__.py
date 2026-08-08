@@ -69,7 +69,15 @@ from engine.printer_marks import (
     list_printer_marks,
     remove_printer_marks,
 )
-from engine.links import list_links, set_link_url, delete_link, add_links
+from engine.links import (
+    add_links,
+    create_links_from_urls,
+    delete_link,
+    find_url_links,
+    list_links,
+    set_link_url,
+)
+from engine.threads import list_threads, set_threads
 from engine.office_export import export_document, supported_formats
 from engine.table_export import detect_table_regions
 from engine.image_export import export_images
@@ -103,6 +111,7 @@ from engine.rebuild import rebuild
 from engine.recover import recover
 from engine.check import check
 from engine.outline import get_outline, set_outline
+from engine.derived_nav import outline_from_structure, preview_structure_outline
 from engine.document_js import list_document_js, set_document_js
 from engine.redact import redact
 from engine.search_redact import search_and_redact
@@ -263,6 +272,12 @@ def main() -> None:
     server.register("check", check)
     server.register("get_outline", get_outline)
     server.register("set_outline", set_outline)
+    server.register("preview_structure_outline", preview_structure_outline)
+    server.register("outline_from_structure", outline_from_structure)
+    server.register("find_url_links", find_url_links)
+    server.register("create_links_from_urls", create_links_from_urls)
+    server.register("list_threads", list_threads)
+    server.register("set_threads", set_threads)
     server.register("list_document_js", list_document_js)
     server.register("set_document_js", set_document_js)
     server.register("redact", redact)

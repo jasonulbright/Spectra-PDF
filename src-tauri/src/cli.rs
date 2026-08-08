@@ -157,6 +157,12 @@ pub enum CliCommand {
     LinkDelete(LinkDeleteArgs),
     /// Create a URL link over a rectangle (PDF user space)
     LinkAdd(LinkAddArgs),
+    /// Create links over every web/email address found in the text
+    LinkFromUrls(LinkFromUrlsArgs),
+    /// List article threads (JSON)
+    Articles(ArticlesArgs),
+    /// Build the bookmark tree from the document's tagged headings
+    OutlineFromStructure(OutlineFromStructureArgs),
     /// List the structure-tag tree (JSON; paths address tags for tags-*)
     TagsList(AccessibilityArgs),
     /// Set a tag's type / title / alt text / actual text / language
@@ -652,7 +658,7 @@ pub struct SearchRegionsArgs {
     #[arg(long = "term")]
     pub terms: Vec<String>,
     /// A built-in pattern id; repeatable (phone, email, credit_card, ssn,
-    /// date, iban, nhs_uk, sin_ca). Additive to --query, never a replacement.
+    /// date, iban, nhs_uk, sin_ca, url). Additive to --query, never a replacement.
     #[arg(long = "pattern")]
     pub patterns: Vec<String>,
     /// Pages to search, e.g. "1,3,5" or "all"
@@ -689,7 +695,7 @@ pub struct SearchRedactArgs {
     #[arg(long = "term")]
     pub terms: Vec<String>,
     /// A built-in pattern id; repeatable (phone, email, credit_card, ssn,
-    /// date, iban, nhs_uk, sin_ca). Additive to --query, never a replacement.
+    /// date, iban, nhs_uk, sin_ca, url). Additive to --query, never a replacement.
     #[arg(long = "pattern")]
     pub patterns: Vec<String>,
     /// Pages to search, e.g. "1,3,5" or "all"
@@ -1241,6 +1247,59 @@ pub struct LinkDeleteArgs {
     /// 0-based link index on the page
     #[arg(long)]
     pub index: i64,
+}
+
+#[derive(Args)]
+pub struct LinkFromUrlsArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file (omit with --preview to only report what was found)
+    #[arg(short, long, required_unless_present = "preview")]
+    pub output: Option<PathBuf>,
+    /// Pages to scan, e.g. "1,3,5" or "all"
+    #[arg(long, default_value = "all")]
+    pub pages: String,
+    /// Do not link bare email addresses
+    #[arg(long)]
+    pub no_emails: bool,
+    /// Also link an address an existing link already covers
+    #[arg(long)]
+    pub relink_existing: bool,
+    /// Report what would be linked and write nothing
+    #[arg(long)]
+    pub preview: bool,
+}
+
+#[derive(Args)]
+pub struct ArticlesArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file (required with --from-json; omit to just read)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+    /// Replace the articles from a JSON file ('-' reads stdin). Accepts the
+    /// same shape `articles <input>` prints ({"threads": [...]} or a bare
+    /// array of {title, author, beads: [{page, rect}]} items).
+    #[arg(long = "from-json", value_name = "FILE")]
+    pub from_json: Option<String>,
+}
+
+#[derive(Args)]
+pub struct OutlineFromStructureArgs {
+    /// Input PDF file (tagged, unless --autotag is given)
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Keep the existing bookmarks and add the derived ones after them
+    #[arg(long)]
+    pub append: bool,
+    /// Deepest heading level to turn into a bookmark (1-6)
+    #[arg(long, default_value_t = 6)]
+    pub levels: u32,
+    /// Tag the document automatically first when it carries no tags
+    #[arg(long)]
+    pub autotag: bool,
 }
 
 #[derive(Args)]
@@ -2351,6 +2410,20 @@ fn parse_hex_rgb(value: &str) -> Result<Vec<f64>, String> {
         component(2).map_err(|e| e.to_string())?,
         component(4).map_err(|e| e.to_string())?,
     ])
+}
+
+/// A `--from-json` argument's bytes: a file, or stdin when it is `-`.
+fn read_json_source(source: &str) -> Result<String, String> {
+    if source == "-" {
+        use std::io::Read;
+        let mut s = String::new();
+        std::io::stdin()
+            .read_to_string(&mut s)
+            .map_err(|e| format!("failed to read JSON from stdin: {}", e))?;
+        Ok(s)
+    } else {
+        std::fs::read_to_string(source).map_err(|e| format!("failed to read {}: {}", source, e))
+    }
 }
 
 fn parse_pages(pages: &str) -> Value {
@@ -3693,6 +3766,86 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             }),
         ),
 
+        CliCommand::LinkFromUrls(args) => {
+            let input = abs(&args.input).to_string_lossy().to_string();
+            let pages = parse_pages(&args.pages);
+            if args.preview {
+                return engine.call(
+                    "find_url_links",
+                    json!({ "file": input, "pages": pages, "emails": !args.no_emails }),
+                );
+            }
+            let output = match &args.output {
+                Some(p) => abs(p).to_string_lossy().to_string(),
+                None => return Err("link-from-urls: -o/--output is required".to_string()),
+            };
+            engine.call(
+                "create_links_from_urls",
+                json!({
+                    "file": input,
+                    "output": output,
+                    "pages": pages,
+                    "emails": !args.no_emails,
+                    "skip_existing": !args.relink_existing,
+                }),
+            )
+        }
+
+        CliCommand::Articles(args) => {
+            let input = abs(&args.input).to_string_lossy().to_string();
+            match &args.from_json {
+                None => engine.call("list_threads", json!({ "file": input })),
+                Some(source) => {
+                    let output = match &args.output {
+                        Some(p) => abs(p).to_string_lossy().to_string(),
+                        None => {
+                            return Err(
+                                "articles: -o/--output is required with --from-json".to_string()
+                            )
+                        }
+                    };
+                    let raw = read_json_source(source)?;
+                    let parsed: Value = serde_json::from_str(&raw)
+                        .map_err(|e| format!("invalid articles JSON: {}", e))?;
+                    // Accept both the `articles <input>` output shape and a
+                    // bare array, the `outline --from-json` convention.
+                    let threads = match parsed {
+                        Value::Array(items) => Value::Array(items),
+                        Value::Object(ref map) => match map.get("threads") {
+                            Some(Value::Array(items)) => Value::Array(items.clone()),
+                            _ => {
+                                return Err(
+                                    "invalid articles JSON: expected an array or {\"threads\": [...]}"
+                                        .to_string(),
+                                )
+                            }
+                        },
+                        _ => {
+                            return Err(
+                                "invalid articles JSON: expected an array or {\"threads\": [...]}"
+                                    .to_string(),
+                            )
+                        }
+                    };
+                    engine.call(
+                        "set_threads",
+                        json!({ "file": input, "threads": threads, "output": output }),
+                    )
+                }
+            }
+        }
+
+        CliCommand::OutlineFromStructure(args) => engine.call(
+            "outline_from_structure",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "mode": if args.append { "append" } else { "replace" },
+                "max_level": args.levels,
+                "tag_if_untagged": args.autotag,
+            }),
+        ),
+
         CliCommand::CommentsDeleteAll(args) => engine.call(
             "delete_all_annotations",
             json!({
@@ -4043,17 +4196,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                             )
                         }
                     };
-                    let raw = if source == "-" {
-                        use std::io::Read;
-                        let mut s = String::new();
-                        std::io::stdin()
-                            .read_to_string(&mut s)
-                            .map_err(|e| format!("failed to read JSON from stdin: {}", e))?;
-                        s
-                    } else {
-                        std::fs::read_to_string(source)
-                            .map_err(|e| format!("failed to read {}: {}", source, e))?
-                    };
+                    let raw = read_json_source(source)?;
                     let parsed: Value = serde_json::from_str(&raw)
                         .map_err(|e| format!("invalid outline JSON: {}", e))?;
                     // Accept both the `outline <input>` output shape and a bare array.

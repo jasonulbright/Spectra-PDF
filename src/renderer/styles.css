@@ -4301,3 +4301,96 @@
     background: Canvas;
   }
 }
+
+/* Article bead band — the box an article visits. Unfilled like the crop band
+   (the rectangle marks a region of the page, not a mark drawn on it) and in
+   the accent so it cannot be mistaken for a crop, which is the other unfilled
+   band a user can have armed. */
+.page-annot-band.band-beaddraw {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: var(--accent);
+  border-style: dashed;
+}
+
+/* Bookmarks-from-structure: the preview sits between the tree and the footer,
+   so what is about to be written is read directly above the button that
+   writes it. */
+.bookmarks-derive {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid #262626;
+  flex-shrink: 0;
+}
+.bookmarks-derive-state { font-size: 11px; color: var(--text-dim); }
+.bookmarks-derive-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.bookmarks-derive-actions { display: flex; gap: 6px; }
+
+/* Articles nav panel. */
+.navpanel-note {
+  padding: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+  border-bottom: 1px solid #262626;
+}
+.article-row {
+  padding: 6px 8px;
+  border-bottom: 1px solid #1f1f1f;
+}
+.article-row-active { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.article-head { display: flex; align-items: center; gap: 6px; }
+.article-title-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 2px 4px;
+  color: inherit;
+}
+.article-title-input:focus { border-color: #404040; background: #171717; outline: none; }
+.article-beads {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-block: 4px 0;
+  padding-inline: 22px 0;
+}
+.article-bead-empty { font-size: 11px; color: var(--text-dim); }
+.article-bead-row { display: flex; align-items: center; gap: 4px; }
+.article-bead-jump {
+  flex: 1;
+  min-width: 0;
+  text-align: start;
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.article-bead-jump:hover { color: var(--text); background: #262626; }
+.articles-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-top: 1px solid #262626;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.bookmark-add-btn.is-armed { color: var(--accent-text); border-color: var(--accent); }
+
+[data-theme="light"] .navpanel-note { border-bottom-color: #e5e7eb; }
+[data-theme="light"] .article-row { border-bottom-color: #f3f4f6; }
+[data-theme="light"] .articles-footer { border-top-color: #e5e7eb; }
+[data-theme="light"] .bookmarks-derive { border-top-color: #e5e7eb; }
+[data-theme="light"] .article-title-input:focus { border-color: #d1d5db; background: #ffffff; }
+[data-theme="light"] .article-bead-jump:hover { background: #f3f4f6; }

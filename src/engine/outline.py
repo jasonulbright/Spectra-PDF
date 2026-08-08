@@ -89,8 +89,12 @@ def _deserialize_obj(data, depth: int = 0):
     raise ValueError("malformed outline action payload")
 
 
-def _resolve_dest_page(pdf: pikepdf.Pdf, item) -> int | None:
-    """Best-effort 0-based page index for an outline item's target."""
+def _resolve_dest_array(pdf: pikepdf.Pdf, item):
+    """The explicit destination array behind an outline item, or None.
+
+    A named destination is resolved through the document's name tree first, so
+    the caller sees one shape whichever way the document spelled it.
+    """
     dest = None
     try:
         if item.destination is not None:
@@ -117,10 +121,49 @@ def _resolve_dest_page(pdf: pikepdf.Pdf, item) -> int | None:
             return None
     if dest is None or not isinstance(dest, pikepdf.Array) or len(dest) == 0:
         return None
+    return dest
+
+
+def _resolve_dest_page(pdf: pikepdf.Pdf, dest) -> int | None:
+    """Best-effort 0-based page index for a resolved destination array."""
+    if dest is None:
+        return None
     try:
         return pikepdf.Page(dest[0]).index
     except Exception:
         return None
+
+
+def _dest_view(dest) -> dict:
+    """The `/XYZ left top zoom` parameters of a destination array, as far as it
+    carries them. `null` means "leave this coordinate as it is" and is
+    reported as None, so a round trip writes back the null rather than
+    silently pinning the view to the page's origin.
+
+    Other fit styles carry no position to preserve — a `/Fit` destination IS
+    "the whole page" — so they report nothing and rebuild as the plain page
+    destination they already were.
+    """
+    view: dict = {}
+    if dest is None or len(dest) < 2:
+        return view
+    try:
+        if str(dest[1]) != "/XYZ":
+            return view
+    except Exception:
+        return view
+    for index, key in ((2, "left"), (3, "top"), (4, "zoom")):
+        if index >= len(dest):
+            continue
+        raw = dest[index]
+        if raw is None:
+            view[key] = None
+            continue
+        try:
+            view[key] = float(raw)
+        except (TypeError, ValueError):
+            view[key] = None
+    return view
 
 
 def _read_items(pdf: pikepdf.Pdf, items, depth: int, budget: list[int]) -> list[dict]:
@@ -131,13 +174,20 @@ def _read_items(pdf: pikepdf.Pdf, items, depth: int, budget: list[int]) -> list[
         if budget[0] <= 0:
             break
         budget[0] -= 1
-        page = _resolve_dest_page(pdf, item)
+        dest = _resolve_dest_array(pdf, item)
+        page = _resolve_dest_page(pdf, dest)
         entry = {
             "title": str(item.title) if item.title is not None else "",
             # 1-based for symmetry with every other page-facing op
             "page": page + 1 if page is not None else None,
             "children": _read_items(pdf, item.children, depth + 1, budget),
         }
+        if page is not None:
+            # The view parameters travel with the item. Without them the
+            # panel's ordinary get -> edit -> set round trip (set_outline is a
+            # full REPLACE) flattened every positioned bookmark in the document
+            # to a whole-page destination.
+            entry.update(_dest_view(dest))
         if page is None:
             # Preserve the raw action (URI, JavaScript, Named, GoToR, or a
             # named destination that didn't resolve) so a get→edit→set round
@@ -172,7 +222,26 @@ def _count(items: list[dict]) -> int:
     return sum(1 + _count(i.get("children", [])) for i in items)
 
 
-def _build_items(entries: list[dict], page_count: int, depth: int) -> list[OutlineItem]:
+_VIEW_KEYS = ("left", "top", "zoom")
+
+
+def _has_view(entry: dict) -> bool:
+    return any(entry.get(key) is not None for key in _VIEW_KEYS)
+
+
+def _xyz_destination(pdf: pikepdf.Pdf, page_index: int, entry: dict):
+    """`[page /XYZ left top zoom]`, built by hand so an absent coordinate stays
+    a PDF null. pikepdf's own destination builder substitutes 0 for a missing
+    argument, and `0` is a coordinate while `null` means "unchanged" — writing
+    the first where the document said the second moves the view."""
+    values = []
+    for key in _VIEW_KEYS:
+        raw = entry.get(key)
+        values.append(None if raw is None else float(raw))
+    return pikepdf.Array([pdf.pages[page_index].obj, pikepdf.Name.XYZ, *values])
+
+
+def _build_items(pdf: pikepdf.Pdf, entries: list[dict], page_count: int, depth: int) -> list[OutlineItem]:
     if depth > MAX_DEPTH:
         raise ValueError(f"outline deeper than {MAX_DEPTH} levels")
     built = []
@@ -183,7 +252,10 @@ def _build_items(entries: list[dict], page_count: int, depth: int) -> list[Outli
             page = int(page)
             if not (1 <= page <= page_count):
                 raise ValueError(f"bookmark '{title}' targets page {page} of {page_count}")
-            item = OutlineItem(title, page - 1)
+            if _has_view(entry):
+                item = OutlineItem(title, _xyz_destination(pdf, page - 1, entry))
+            else:
+                item = OutlineItem(title, page - 1)
         elif entry.get("action") is not None:
             # Round-trip a preserved raw action (see _read_items).
             action = _deserialize_obj(entry["action"])
@@ -198,7 +270,7 @@ def _build_items(entries: list[dict], page_count: int, depth: int) -> list[Outli
         else:
             item = OutlineItem(title)
         item.children.extend(
-            _build_items(entry.get("children", []), page_count, depth + 1)
+            _build_items(pdf, entry.get("children", []), page_count, depth + 1)
         )
         built.append(item)
     return built
@@ -211,7 +283,7 @@ def set_outline(file: str, outline: list[dict], output: str) -> dict:
     same_file = input_path.resolve() == output_path.resolve()
 
     with pikepdf.open(file) as pdf:
-        items = _build_items(outline or [], len(pdf.pages), 0)
+        items = _build_items(pdf, outline or [], len(pdf.pages), 0)
         with pdf.open_outline() as ol:
             ol.root.clear()
             ol.root.extend(items)

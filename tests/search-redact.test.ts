@@ -220,6 +220,7 @@ describe('the catalogues the panel offers', () => {
       'iban',
       'nhs_uk',
       'sin_ca',
+      'url',
     ]);
   });
 

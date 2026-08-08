@@ -107,6 +107,7 @@ class TestPatterns:
         assert set(PATTERN_IDS) == set(PATTERNS)
         assert PATTERN_IDS == [
             "phone", "email", "credit_card", "ssn", "date", "iban", "nhs_uk", "sin_ca",
+            "url",
         ]
 
     # ── credit_card: Luhn is what makes it a pattern ──────────────────────

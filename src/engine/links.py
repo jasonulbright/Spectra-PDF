@@ -194,6 +194,181 @@ def delete_link(file: str, output: str, page: int, index: int) -> dict:
     return out
 
 
+# ── links derived from the text ───────────────────────────────────────────
+
+# How much of a candidate an existing /Link must cover for the candidate to
+# count as already linked. Half, not containment: a hand-drawn link box rarely
+# matches a glyph slice exactly, and "the user already linked this" is the
+# question being asked.
+_ALREADY_LINKED_FRACTION = 0.5
+
+
+def _bbox(rects: list[dict]) -> list[float]:
+    xs0 = [r["rect"][0] for r in rects]
+    ys0 = [r["rect"][1] for r in rects]
+    xs1 = [r["rect"][2] for r in rects]
+    ys1 = [r["rect"][3] for r in rects]
+    return [min(xs0), min(ys0), max(xs1), max(ys1)]
+
+
+def _overlap_area(a: list[float], b: list[float]) -> float:
+    w = min(a[2], b[2]) - max(a[0], b[0])
+    h = min(a[3], b[3]) - max(a[1], b[1])
+    return w * h if (w > 0 and h > 0) else 0.0
+
+
+def _contains(outer: list[float], inner: list[float]) -> bool:
+    return (
+        outer[0] <= inner[0] + 0.01
+        and outer[1] <= inner[1] + 0.01
+        and outer[2] >= inner[2] - 0.01
+        and outer[3] >= inner[3] - 0.01
+    )
+
+
+def _existing_link_rects(file: str) -> dict[int, list[list[float]]]:
+    by_page: dict[int, list[list[float]]] = {}
+    with pikepdf.open(file) as pdf:
+        for pi, page in enumerate(pdf.pages):
+            rects = [r for r in (_rect(a) for a in _links_on(page)) if r is not None]
+            if rects:
+                by_page[pi + 1] = rects
+    return by_page
+
+
+def _candidates(file: str, pages, emails: bool) -> tuple[list[dict], list[int]]:
+    """Every web (and, when asked, email) address in the text, with the
+    glyph-accurate rects `search_text_regions` computed for it.
+
+    The geometry is that module's verbatim — it is the rect authority and its
+    docstring says why nothing else may be. One rect PER RUN, so an address
+    that wraps a line links both lines rather than the margin between them.
+    """
+    from engine.search_regions import search_text_regions
+    from engine.text_match import email_target, url_target
+
+    wanted = ["url", "email"] if emails else ["url"]
+    found = search_text_regions(file, pages=pages, patterns=wanted)
+    raw: list[dict] = []
+    for hit in found["hits"]:
+        rects = hit.get("rects") or []
+        if not rects:
+            continue
+        text = str(hit.get("text") or "").strip()
+        if not text:
+            continue
+        source = hit.get("source")
+        url = url_target(text) if source == "url" else email_target(text)
+        raw.append(
+            {
+                "page": int(hit["page"]),
+                "text": text,
+                "url": url,
+                "kind": "url" if source == "url" else "email",
+                "rects": [list(r["rect"]) for r in rects],
+                "box": _bbox(rects),
+            }
+        )
+    # A `mailto:` address matches both patterns, and a path containing an @
+    # matches the email one inside the URL. One address is one link, so a
+    # candidate whose box sits inside another's is the same address seen
+    # twice — the WIDER match is the address.
+    keep: list[dict] = []
+    for i, candidate in enumerate(raw):
+        swallowed = False
+        for j, other in enumerate(raw):
+            if i == j or other["page"] != candidate["page"]:
+                continue
+            if _contains(other["box"], candidate["box"]) and not _contains(
+                candidate["box"], other["box"]
+            ):
+                swallowed = True
+                break
+        if not swallowed:
+            keep.append(candidate)
+    return keep, list(found.get("pages_without_text") or [])
+
+
+def _mark_already_linked(candidates: list[dict], existing: dict[int, list[list[float]]]) -> None:
+    for candidate in candidates:
+        boxes = existing.get(candidate["page"], [])
+        linked = False
+        for rect in candidate["rects"]:
+            area = max((rect[2] - rect[0]) * (rect[3] - rect[1]), 1e-9)
+            for box in boxes:
+                if _overlap_area(box, rect) / area >= _ALREADY_LINKED_FRACTION:
+                    linked = True
+                    break
+            if linked:
+                break
+        candidate["existing"] = linked
+
+
+def find_url_links(file: str, pages="all", emails: bool = True) -> dict:
+    """Every address the text carries, and whether each one is already linked.
+
+    Reads only. The panel states this count before the apply — the hairlines
+    contract — and the apply calls the SAME collector, so a preview and a run
+    cannot disagree about what the document contains.
+    """
+    candidates, without_text = _candidates(file, pages, bool(emails))
+    _mark_already_linked(candidates, _existing_link_rects(file))
+    return {
+        "candidates": candidates,
+        "count": len(candidates),
+        "already_linked": sum(1 for c in candidates if c["existing"]),
+        "pages_without_text": without_text,
+    }
+
+
+def create_links_from_urls(
+    file: str,
+    output: str,
+    pages="all",
+    emails: bool = True,
+    skip_existing: bool = True,
+) -> dict:
+    """Author a /Link with a URI action over every address found in the text.
+
+    Built through `add_links`, so the invisible border and the signed-document
+    incremental append come free rather than being re-implemented here.
+    """
+    candidates, _without_text = _candidates(file, pages, bool(emails))
+    if not candidates:
+        raise ValueError("No web addresses or email addresses were found in the text.")
+    _mark_already_linked(candidates, _existing_link_rects(file))
+    skipped = 0
+    specs: list[dict] = []
+    for candidate in candidates:
+        if skip_existing and candidate["existing"]:
+            skipped += 1
+            continue
+        for rect in candidate["rects"]:
+            specs.append({"page": candidate["page"], "rect": rect, "url": candidate["url"]})
+    if not specs:
+        # Everything found is already linked. That is a RESULT, not a failure:
+        # the document is in the state the user asked for.
+        if str(Path(file).resolve()) != str(Path(output).resolve()):
+            shutil.copyfile(file, output)
+        return {
+            "output": str(Path(output)),
+            "added": 0,
+            "annotations": 0,
+            "skipped_existing": skipped,
+            "candidates": len(candidates),
+        }
+    result = add_links(file, output, specs)
+    added = len(candidates) - skipped
+    return {
+        "output": result["output"],
+        "added": added,
+        "annotations": result["added"],
+        "skipped_existing": skipped,
+        "candidates": len(candidates),
+        **({"signatures_preserved": True} if result.get("signatures_preserved") else {}),
+    }
+
+
 def _save(pdf, input_path: Path, output_path: Path, same_file: bool) -> bool:
     """Land the rewrite; on a SIGNED input the landed bytes become an
     incremental append instead, so link edits never break the
