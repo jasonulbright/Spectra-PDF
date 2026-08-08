@@ -284,7 +284,9 @@ describe('i18n catalogs', () => {
   // key) cannot regress them silently. A dropped `{{name}}` is the worst
   // class of translation bug: the sentence still reads, and the value it was
   // supposed to name simply vanishes.
-  it('every locale carries EXACTLY en\'s interpolation placeholders per key', () => {
+  // Sweeps every key of every shipped catalog; runtime grows with the locale
+  // count and outruns vitest's 5s default on slower machines.
+  it('every locale carries EXACTLY en\'s interpolation placeholders per key', { timeout: 30000 }, () => {
     const en = JSON.parse(readFileSync(EN_PATH, 'utf8')) as Record<string, string>;
     const placeholders = (s: string): string =>
       [...s.matchAll(/\{\{([^}]*)\}\}/g)].map((m) => m[1].trim()).sort().join(',');
@@ -302,7 +304,7 @@ describe('i18n catalogs', () => {
     }
   });
 
-  it("every plural form its locale's rules select is authored, and obeys the policy", () => {
+  it("every plural form its locale's rules select is authored, and obeys the policy", { timeout: 30000 }, () => {
     const en = JSON.parse(readFileSync(EN_PATH, 'utf8')) as Record<string, string>;
     const bases = Object.keys(en)
       .filter((k) => k.endsWith('_one'))
@@ -410,7 +412,7 @@ describe('i18n catalogs', () => {
     expect(declared).not.toContain('qqq');
   });
 
-  it('no catalog value is empty', () => {
+  it('no catalog value is empty', { timeout: 30000 }, () => {
     for (const locale of SHIPPED_LOCALES) {
       const p = resolve(__dirname, `../src/renderer/locales/${locale}/chrome.json`);
       const cat = JSON.parse(readFileSync(p, 'utf8')) as Record<string, string>;
