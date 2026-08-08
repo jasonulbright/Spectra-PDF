@@ -9,17 +9,22 @@ import React, {
 import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { showableDocuments } from '../state/selectors';
 import { useEngine } from './useEngine';
+import { app } from '../lib/tauri-bridge';
 import {
   DEFAULT_FLATTEN_BALANCE,
   DEFAULT_FLATTEN_DPI,
   FLATTEN_CATEGORIES,
+  NO_OUTLINES,
   clampBalance,
   clampDpi,
   highlightRects,
+  outlinesArmed,
   pageReport,
   type FlattenCategory,
   type FlattenReport,
   type HighlightRect,
+  type OutlineOptions,
+  type OutlineReport,
 } from '../lib/flattener';
 
 /**
@@ -44,6 +49,10 @@ export interface FlattenerPreviewValue {
   setDpi: (dpi: number) => void;
   shown: ReadonlySet<FlattenCategory>;
   toggleCategory: (category: FlattenCategory) => void;
+  /** The two outline conversions, and what they would do to this document. */
+  outlines: OutlineOptions;
+  setOutlines: (options: OutlineOptions) => void;
+  outlineReport: OutlineReport | null;
   busy: boolean;
   error: string;
   /** Throw the classification away — an applied flatten is a document change. */
@@ -85,6 +94,8 @@ export function FlattenerPreviewProvider({
   const [shown, setShown] = useState<ReadonlySet<FlattenCategory>>(
     () => new Set<FlattenCategory>(FLATTEN_CATEGORIES),
   );
+  const [outlines, setOutlines] = useState<OutlineOptions>(NO_OUTLINES);
+  const [outlineReport, setOutlineReport] = useState<OutlineReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [generation, setGeneration] = useState(0);
@@ -112,6 +123,7 @@ export function FlattenerPreviewProvider({
 
   const invalidate = useCallback(() => {
     setReport(null);
+    setOutlineReport(null);
     setGeneration((n) => n + 1);
   }, []);
 
@@ -154,9 +166,39 @@ export function FlattenerPreviewProvider({
     };
   }, [open, sourcePath, balance, dpi, generation, call]);
 
+  // The conversion report is its own read, and it runs only when one of the
+  // two options is armed: it opens every font in the document, which is work
+  // no flatten that is not converting anything should pay for.
+  const armedOutlines = outlinesArmed(outlines);
+  useEffect(() => {
+    if (!open || !sourcePath || !armedOutlines) {
+      setOutlineReport(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await call('list_outlines', {
+          file: sourcePath,
+          font_dir: await app.getEditFontPath(),
+        });
+        if (!cancelled) setOutlineReport(res as unknown as OutlineReport);
+      } catch (e: unknown) {
+        if (!cancelled) {
+          setOutlineReport(null);
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, sourcePath, armedOutlines, generation, call]);
+
   useEffect(() => {
     if (!open) {
       setReport(null);
+      setOutlineReport(null);
       setError('');
     }
   }, [open]);
@@ -189,10 +231,12 @@ export function FlattenerPreviewProvider({
   const value = useMemo<FlattenerPreviewValue>(
     () => ({
       armed, setArmed, report, balance, setBalance, dpi, setDpi, shown,
-      toggleCategory, busy, error, invalidate, rectsFor,
+      toggleCategory, outlines, setOutlines, outlineReport, busy, error,
+      invalidate, rectsFor,
     }),
     [armed, setArmed, report, balance, setBalance, dpi, setDpi, shown,
-      toggleCategory, busy, error, invalidate, rectsFor],
+      toggleCategory, outlines, outlineReport, busy, error, invalidate,
+      rectsFor],
   );
 
   return <FlattenerContext.Provider value={value}>{children}</FlattenerContext.Provider>;

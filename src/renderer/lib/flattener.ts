@@ -60,6 +60,71 @@ export interface FlattenReport {
   transparent_pages: number[];
 }
 
+/** What converting text and strokes to outlines would do, per page. */
+export interface OutlinePageReport {
+  page: number;
+  text_runs: number;
+  invisible_runs: number;
+  glyphs: number;
+  strokes: number;
+  fonts: string[];
+  substituted: Record<string, string>;
+  error: string | null;
+}
+
+export interface OutlineReport {
+  pages: OutlinePageReport[];
+  text_runs: number;
+  strokes: number;
+  invisible_runs: number;
+  refusals: string[];
+  substituted: string[];
+}
+
+/** The two conversions, as the panel holds them. */
+export interface OutlineOptions {
+  text: boolean;
+  strokes: boolean;
+}
+
+export const NO_OUTLINES: OutlineOptions = { text: false, strokes: false };
+
+/** Whether either conversion is armed — the question three separate places
+ *  were about to answer for themselves. */
+export function outlinesArmed(options: OutlineOptions): boolean {
+  return options.text || options.strokes;
+}
+
+/**
+ * Whether Apply has anything to do.
+ *
+ * Regions alone was the rule while flattening was the only transform. A
+ * conversion needs no transparency at all, so a document with none must still
+ * reach the button once either option is on.
+ */
+export function canApply(report: FlattenReport | null, options: OutlineOptions): boolean {
+  return regionCount(report) > 0 || outlinesArmed(options);
+}
+
+/** The refusals the conversion reported, empty when nothing is armed — a
+ *  refusal for a conversion the user switched off is not their problem. */
+export function outlineRefusals(
+  report: OutlineReport | null,
+  options: OutlineOptions,
+): string[] {
+  if (!report || !outlinesArmed(options)) return [];
+  return report.refusals;
+}
+
+/** The bundled faces that would supply glyphs the document does not embed. */
+export function substitutedFaces(
+  report: OutlineReport | null,
+  options: OutlineOptions,
+): string[] {
+  if (!report || !options.text) return [];
+  return report.substituted;
+}
+
 export interface HighlightRect {
   /** Display-normalized 0…1, y measured from the TOP — the convention every
    *  page-space overlay on this canvas already uses. */
