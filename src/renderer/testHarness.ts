@@ -434,6 +434,22 @@ export function registerCompress(handlers: CompressHandlers | null): void {
 }
 
 /**
+ * Split panel: BOTH destination pickers are native (a save dialog in range
+ * mode, a folder picker in every other), so e2e injects the destination and
+ * the panel's own state drives the rest — the compress bridge's shape.
+ */
+export interface SplitHandlers {
+  run: (outputDir: string) => Promise<void>;
+  setMode: (mode: string) => void;
+}
+
+let split: SplitHandlers | null = null;
+
+export function registerSplit(handlers: SplitHandlers | null): void {
+  split = handlers;
+}
+
+/**
  * Trap Presets: the PostScript export's save dialog is native, so e2e injects
  * the destination and the panel's OWN state drives everything else — the same
  * shape the compress bridge uses, and for the same reason.
@@ -1254,6 +1270,9 @@ export interface TestHarness {
     output: string,
     opts?: { quality?: string; mrcPreset?: string; verifyText?: boolean },
   ) => Promise<string>;
+  /** Split run with an injected output FOLDER (panel must be mounted). The
+   * panel's own mode and field state decide what runs. */
+  splitRun: (outputDir: string) => Promise<void>;
   /** Trap Presets PostScript export (panel must be mounted). Runs the real
    * engine call the Export button runs, with an injected output path. */
   trapExportPostscript: (output: string) => Promise<unknown>;
@@ -2263,6 +2282,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
       if (!compress) throw new Error('compressRun: panel unmounted mid-run');
       return compress.run(output);
+    },
+    splitRun: async (outputDir) => {
+      if (!split) {
+        const msg = 'splitRun: panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return split.run(outputDir);
     },
     trapExportPostscript: async (output) => {
       if (!trapPresets) {

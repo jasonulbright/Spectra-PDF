@@ -177,6 +177,23 @@ export async function compressRun(
   );
 }
 
+/** Split run with an injected output FOLDER (panel must be open).
+ *
+ * Both of the panel's destination pickers are native and undrivable, so the
+ * harness supplies the folder and the panel's OWN state — the mode select, the
+ * ranges/N/size fields, the parameter assembly and the real engine call — is
+ * everything a click would reach. */
+export async function splitRun(outDir: string): Promise<string> {
+  return browser.executeAsync<string, [string]>(
+    function (dest, done) {
+      (window as any).__SPECTRA_TEST__.splitRun(dest)
+        .then(() => done(''))
+        .catch((err: unknown) => done(`error: ${String(err)}`));
+    },
+    outDir,
+  );
+}
+
 /** Image export via the dialog's harness bridge (dialog must be open). */
 export async function exportImagesRun(
   out: string,

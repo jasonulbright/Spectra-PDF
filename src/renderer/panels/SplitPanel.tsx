@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { dialog } from '../lib/tauri-bridge';
@@ -6,6 +6,7 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
+import { TEST_HARNESS_ENABLED, registerSplit } from '../testHarness';
 
 type SplitMode = 'ranges' | 'every_n' | 'size' | 'bookmarks';
 
@@ -53,6 +54,34 @@ export function SplitPanel(): React.ReactElement {
     };
   }, [mode, path, call]);
 
+  const performSplit = useCallback(async (outputDir: string) => {
+    if (!activeFile) return;
+    setBusy(true);
+    setStatus(tChrome('panel.split.splitting'));
+    try {
+      const r = await call('split', {
+        file: activeFile.workingPath,
+        output_dir: outputDir,
+        mode,
+        ...(mode === 'ranges' ? { ranges } : {}),
+        ...(mode === 'every_n' ? { every_n: everyN } : {}),
+        ...(mode === 'size' ? { max_mb: maxMb } : {}),
+      });
+      const parts = (r as unknown as { parts: number }).parts;
+      const over = (r as unknown as { oversize: unknown[] }).oversize ?? [];
+      setStatus(
+        mode === 'ranges'
+          ? tChrome('panel.split.done', { count: r.pages_extracted })
+          : tChromeCount('panel.split.doneParts', parts, { pages: r.pages_extracted }) +
+            (over.length > 0 ? ' ' + tChromeCount('panel.split.oversize', over.length) : ''),
+      );
+    } catch (e: unknown) {
+      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setBusy(false);
+    }
+  }, [activeFile, mode, ranges, everyN, maxMb, call]);
+
   const handleSplit = useCallback(async () => {
     if (!activeFile) return;
     if (mode === 'ranges' && !ranges.trim()) {
@@ -79,31 +108,22 @@ export function SplitPanel(): React.ReactElement {
       if (!picked) return;
       outputDir = picked;
     }
-    setBusy(true);
-    setStatus(tChrome('panel.split.splitting'));
-    try {
-      const r = await call('split', {
-        file: activeFile.workingPath,
-        output_dir: outputDir,
-        mode,
-        ...(mode === 'ranges' ? { ranges } : {}),
-        ...(mode === 'every_n' ? { every_n: everyN } : {}),
-        ...(mode === 'size' ? { max_mb: maxMb } : {}),
-      });
-      const parts = (r as unknown as { parts: number }).parts;
-      const over = (r as unknown as { oversize: unknown[] }).oversize ?? [];
-      setStatus(
-        mode === 'ranges'
-          ? tChrome('panel.split.done', { count: r.pages_extracted })
-          : tChromeCount('panel.split.doneParts', parts, { pages: r.pages_extracted }) +
-            (over.length > 0 ? ' ' + tChromeCount('panel.split.oversize', over.length) : ''),
-      );
-    } catch (e: unknown) {
-      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      setBusy(false);
-    }
-  }, [activeFile, mode, ranges, everyN, maxMb, call, saveFile]);
+    await performSplit(outputDir);
+  }, [activeFile, mode, ranges, everyN, maxMb, saveFile, performSplit]);
+
+  // Both destination pickers are native and undrivable, so e2e injects the
+  // folder and the panel's OWN state drives everything else — the same shape
+  // the compress bridge uses, and for the same reason.
+  const harnessRef = useRef({ performSplit, setMode });
+  harnessRef.current = { performSplit, setMode };
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerSplit({
+      run: (output) => harnessRef.current.performSplit(output),
+      setMode: (value) => harnessRef.current.setMode(value as SplitMode),
+    });
+    return () => registerSplit(null);
+  }, []);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.split.open')} />;
 

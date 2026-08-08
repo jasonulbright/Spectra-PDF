@@ -16,7 +16,40 @@ import {
   getState,
   saveActiveAs,
   setReactInputValue,
+  setReactSelectValue,
 } from '../support/harness.js';
+
+/** Click Apply and wait for the run to REALLY finish, by looking for the
+ * stamp in the saved bytes.
+ *
+ * No panel signal settles this on its own. The dirty flag and the final
+ * status line are both left behind by the case before ("Watermarked 2
+ * pages" is the same sentence every time), so either would pass before the
+ * engine round trip started; the transient "Applying …" is set and cleared
+ * inside one poll interval on a two-page document. The document itself is
+ * the only thing that changes, and each case stamps its own marker. */
+async function applyAndSettle(dest: string, marker: string): Promise<void> {
+  await $('[data-testid="watermark-apply"]').click();
+  await browser.waitUntil(
+    async () => {
+      await saveActiveAs(dest);
+      return (await pageItems(dest)).some((it) => it.includes(marker));
+    },
+    { timeout: 30_000, interval: 500, timeoutMsg: `the ${marker} stamp never landed` },
+  );
+}
+
+/** A checkbox driven to a STATE rather than toggled — a case that ran before
+ * this one may have left it either way. */
+async function setChecked(selector: string, on: boolean): Promise<void> {
+  const box = await $(selector);
+  await box.waitForDisplayed({ timeout: 10_000 });
+  if ((await box.isSelected()) !== on) await box.click();
+  await browser.waitUntil(async () => (await $(selector).isSelected()) === on, {
+    timeout: 5_000,
+    timeoutMsg: `${selector} never reached ${on}`,
+  });
+}
 
 const require = createRequire(import.meta.url);
 pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
@@ -31,6 +64,24 @@ async function makeTextFixture(path: string): Promise<void> {
     page.drawText(`BODY TEXT PAGE ${i}`, { x: 50, y: 400, size: 18, font });
   }
   writeFileSync(path, await doc.save());
+}
+
+/** The raw text ITEMS of one page. A tiled stamp overlaps itself, and pdf.js
+ * splits and reorders the overlapping runs — the joined string of a page
+ * carrying six copies of "TILEME" reads "LEME TILEM LEME TILEM …", so a
+ * substring count of the whole word finds none. Counting the ITEMS that carry
+ * any part of the word is the claim that survives fragmentation. */
+async function pageItems(path: string, page = 1): Promise<string[]> {
+  const pdf = await pdfjs.getDocument({
+    data: new Uint8Array(readFileSync(path)),
+    isEvalSupported: false,
+  }).promise;
+  const content = (await (await pdf.getPage(page)).getTextContent()) as {
+    items: { str?: string }[];
+  };
+  const items = content.items.map((it) => it.str ?? '').filter((s) => s.trim().length > 0);
+  await pdf.loadingTask.destroy();
+  return items;
 }
 
 async function pageTexts(path: string): Promise<string[]> {
@@ -90,5 +141,75 @@ describe('watermark panel stamps text through the real engine round trip', () =>
       expect(text).toContain('E2E-WATERMARK');
       expect(text).toContain(`BODY TEXT PAGE ${i + 1}`);
     }
+  });
+
+  it('the source toggle swaps the text field for the image picker', async () => {
+    await waitForHarness();
+    await openByPaths([source]);
+    await setView('operations');
+    await setActiveOp('watermark');
+
+    await setReactSelectValue('[data-testid="watermark-source"]', 'text');
+    expect(await $('[data-testid="watermark-text"]').isExisting()).toBe(true);
+    expect(await $('[data-testid="watermark-pick-image"]').isExisting()).toBe(false);
+
+    await setReactSelectValue('[data-testid="watermark-source"]', 'image');
+    await browser.waitUntil(
+      async () => $('[data-testid="watermark-pick-image"]').isExisting(),
+      { timeout: 5_000, timeoutMsg: 'image mode never showed its picker' },
+    );
+    // The text field and the colour swatches belong to the text source only.
+    expect(await $('[data-testid="watermark-text"]').isExisting()).toBe(false);
+    expect(await $('[data-testid="watermark-image-name"]').getText()).not.toBe('');
+
+    // Applying with no image chosen refuses in the panel, before the engine.
+    await $('[data-testid="watermark-apply"]').click();
+    await browser.waitUntil(
+      async () => (await $('[data-testid="status-bar"]').getText()).includes('image'),
+      { timeout: 5_000, timeoutMsg: 'no-image refusal never surfaced' },
+    );
+  });
+
+  it('tiling stamps the text many times on one page', async () => {
+    const tiled = resolve(tmp, 'tiled.pdf');
+    await waitForHarness();
+    await openByPaths([source]);
+    await setView('operations');
+    await setActiveOp('watermark');
+
+    // The panel is not remounted between opens, so the source a previous case
+    // left is still selected — every case names the source it wants.
+    await setReactSelectValue('[data-testid="watermark-source"]', 'text');
+    await setReactInputValue('[data-testid="watermark-text"]', 'TILEME');
+    await setReactInputValue('[data-testid="watermark-angle"]', '0');
+    await setReactInputValue('[data-testid="watermark-scale"]', '0.25');
+    await setChecked('[data-testid="watermark-tile"]', true);
+    // A tiled stamp is fragmented by pdf.js, so the settle marker is a
+    // fragment the reorder cannot destroy.
+    await applyAndSettle(tiled, 'ILEM');
+
+    // Tiling is the one placement claim a text extractor can settle: several
+    // copies of the stamp on ONE page. Where each copy LANDS is proved by
+    // raster diff in the engine suite, which a text layer cannot show.
+    const items = await pageItems(tiled);
+    const stamps = items.filter((it) => /TILE|ILEM|LEME/.test(it));
+    expect(stamps.length).toBeGreaterThan(2);
+    expect(items.join(' ')).toContain('BODY TEXT PAGE 1');
+  });
+
+  it('a corner position keeps the stamp on the page', async () => {
+    const cornered = resolve(tmp, 'cornered.pdf');
+    await waitForHarness();
+    await openByPaths([source]);
+    await setView('operations');
+    await setActiveOp('watermark');
+
+    await setReactSelectValue('[data-testid="watermark-source"]', 'text');
+    await setReactInputValue('[data-testid="watermark-text"]', 'CORNERED');
+    await setReactInputValue('[data-testid="watermark-angle"]', '0');
+    await setChecked('[data-testid="watermark-tile"]', false);
+    await setReactSelectValue('[data-testid="watermark-position"]', 'bottom-right');
+    await applyAndSettle(cornered, 'CORNERED');
+    expect((await pageTexts(cornered))[0]).toContain('CORNERED');
   });
 });

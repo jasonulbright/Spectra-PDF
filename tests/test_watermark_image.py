@@ -415,6 +415,27 @@ class TestTextArmUnchanged:
         with pikepdf.open(out) as pdf:
             assert _forms(pdf.pages[0])[0].read_bytes().count(b"BT ") == result["tiles_per_page"]
 
+    def test_scale_multiplies_the_text_arm_s_auto_size(self, tmp_dir):
+        """A panel control that does nothing in one of its two modes is the
+        defect this pins: `scale` sizes the text stamp exactly as it sizes
+        the image one."""
+        src = os.path.join(tmp_dir, "in.pdf")
+        _pages(src, count=1)
+        sizes = {}
+        for scale in (0.5, 1.0):
+            out = os.path.join(tmp_dir, f"s{scale}.pdf")
+            sizes[scale] = watermark(
+                file=src, output=out, text="SCALED", angle=0, scale=scale
+            )["font_size_applied"]
+        assert sizes[0.5] == pytest.approx(sizes[1.0] / 2, rel=1e-3)
+
+    def test_an_explicit_font_size_is_not_scaled(self, tmp_dir):
+        src = os.path.join(tmp_dir, "in.pdf")
+        out = os.path.join(tmp_dir, "out.pdf")
+        _pages(src, count=1)
+        result = watermark(file=src, output=out, text="FIXED", font_size=18, scale=0.25)
+        assert result["font_size_applied"] == pytest.approx(18.0)
+
     def test_a_corner_position_moves_the_text_matrix(self, tmp_dir):
         src = os.path.join(tmp_dir, "in.pdf")
         _pages(src, count=1)
