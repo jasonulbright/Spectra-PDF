@@ -81,6 +81,23 @@ describe('batch OCR folder mirror', () => {
     if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
 
+  // Each test dismisses the dialog on its LAST line, so a test that fails
+  // earlier leaves it standing — and a standing dialog showing a finished run's
+  // report has none of the form controls the next test opens it to drive. That
+  // turns one real failure into a run of "element not displayed" failures that
+  // name the wrong surface. Cleanup here so a failure stays one failure.
+  afterEach(async () => {
+    const dialog = $('[data-testid="batch-ocr-dialog"]');
+    if (!(await dialog.isExisting())) return;
+    for (const id of ['batch-ocr-close', 'batch-ocr-cancel']) {
+      const button = $(`[data-testid="${id}"]`);
+      if (!(await button.isExisting())) continue;
+      await button.click().catch(() => {});
+      break;
+    }
+    await dialog.waitForExist({ reverse: true, timeout: 10_000 }).catch(() => {});
+  });
+
   it('mirrors a folder: OCRs the scanned file, copies the born-digital one, reports the broken one', async function () {
     this.timeout(240_000); // real in-webview OCR (first run loads core+lang)
     await waitForHarness();
@@ -113,7 +130,14 @@ describe('batch OCR folder mirror', () => {
     expect(report).toBeTruthy();
     expect(report!.cancelled).toBe(false);
     const byRel = new Map(report!.results.map((r) => [r.rel, r]));
-    expect(byRel.get('a\\scan.pdf')?.status).toBe('ocr');
+    // Status AND reason: every way this entry can miss lands on `skipped` with
+    // the cause in `reason` (a load classification, or whatever recognition
+    // threw). Asserting the status alone throws that cause away and leaves
+    // "expected ocr, received skipped" as the whole record of the failure.
+    // A passing `ocr` can carry a reason of its own (pages with no recognizable
+    // text), so only a MISS spends the reason on the failure text.
+    const scan = byRel.get('a\\scan.pdf');
+    expect(scan?.status === 'ocr' ? 'ocr' : `${scan?.status} — ${scan?.reason ?? ''}`).toBe('ocr');
     expect(byRel.get('born.pdf')?.status).toBe('copied');
     expect(byRel.get('broken.pdf')?.status).toBe('skipped');
 

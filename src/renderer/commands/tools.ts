@@ -318,8 +318,11 @@ export function armedModeOf(tool: ToolDef): CanvasTool | undefined {
  * Is this tool's work ON the document, rather than in a form on the Tools tab?
  *
  * True if it owns a canvas mode (Comment, Redact, Fill & Sign, Prepare Form) or
- * has no operations at all (Scan & OCR — not a mode, but its surface is Find,
- * which lives on the page). This is where opening the tool takes you.
+ * has no operations at all. This is where opening the tool takes you, and it is
+ * also what gates the command: a false answer means the tool opens with no
+ * document, through the picker-first flow. Giving an ops-less tool its first op
+ * therefore flips its Home tile from greyed to live; Scan & OCR is live because
+ * the Enhance Scans pane is its first op.
  *
  * Note Fill & Sign and Prepare Form have BOTH: ops (their panes) and modes.
  * Testing ops first sent them to the Tools tab, i.e. away from the page they had
