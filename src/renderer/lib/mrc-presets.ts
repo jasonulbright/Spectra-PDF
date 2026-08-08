@@ -76,6 +76,10 @@ export function mrcCompressParams(
   return params;
 }
 
+/** `mask_codec` when the document's pages did not all get the same codec.
+ * Matches `MASK_CODEC_MIXED` in `engine/mrc_codecs.py`. */
+export const MRC_MASK_CODEC_MIXED = 'mixed';
+
 /** The shape `compress(quality="mrc")` returns (engine/mrc.py `mrc_compress`). */
 export interface MrcReport {
   original_size: number;
@@ -83,6 +87,10 @@ export interface MrcReport {
   preset: string;
   mask_codec: string;
   requested_mask_codec: string;
+  /** Layered pages per stencil codec, keyed by the engine's codec ids. */
+  mask_codec_pages?: Record<string, number>;
+  /** Layered pages that did not get the requested codec. */
+  pages_mask_fallback?: number;
   pages_mrc: number;
   pages_reverted: number;
   pages_untouched: number;
@@ -90,11 +98,25 @@ export interface MrcReport {
   min_text_similarity: number | null;
 }
 
-/** True when the encoder the preset asked for was unavailable and the pass
- * fell back to CCITT G4. Never silent: a swapped codec makes the size claim
- * untrue, so the surfaces say so. */
+/** True when the encoder the preset asked for was unavailable and the WHOLE
+ * document fell back to CCITT G4. Never silent: a swapped codec makes the size
+ * claim untrue, so the surfaces say so.
+ *
+ * A mixed document is deliberately not this case. Both are reported, but they
+ * mean different things to whoever reads the line — one is a machine that is
+ * missing a tool, the other is a scan that did not suit a shared dictionary —
+ * and one notice covering both would be true of neither. */
 export function mrcCodecFellBack(report: MrcReport): boolean {
-  return report.mask_codec !== report.requested_mask_codec;
+  return (
+    report.mask_codec !== MRC_MASK_CODEC_MIXED &&
+    report.mask_codec !== report.requested_mask_codec
+  );
+}
+
+/** Pages whose stencil was encoded on its own rather than through the shared
+ * symbol dictionary — 0 when the document is uniform. */
+export function mrcPagesOffSharedDictionary(report: MrcReport): number {
+  return report.mask_codec === MRC_MASK_CODEC_MIXED ? (report.pages_mask_fallback ?? 0) : 0;
 }
 
 /** The batch-log note for one MRC'd file.

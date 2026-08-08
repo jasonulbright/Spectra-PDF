@@ -64,9 +64,19 @@ def describe(budget: float, *, size_bytes: int = 0, pages: int = 0) -> str:
     return ", ".join(parts)
 
 
-def timed_out(what: str, budget: float, *, size_bytes: int = 0, pages: int = 0) -> RuntimeError:
+class TimeBudgetExceeded(RuntimeError):
+    """A run that outlived its derived budget.
+
+    Its own type, not a bare RuntimeError: a caller that has a SAFE SLOWER
+    CODEC to fall back to must be able to catch a breach without also catching
+    a malformed input or a crashed tool, and matching on the message text would
+    be the string-matching this repo bans in control flow.
+    """
+
+
+def timed_out(what: str, budget: float, *, size_bytes: int = 0, pages: int = 0) -> TimeBudgetExceeded:
     """The refusal a caller raises when `subprocess.TimeoutExpired` fires."""
-    return RuntimeError(
+    return TimeBudgetExceeded(
         f"{what} did not finish within the derived budget "
         f"({describe(budget, size_bytes=size_bytes, pages=pages)})."
     )
