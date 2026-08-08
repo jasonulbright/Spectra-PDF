@@ -3809,5 +3809,22 @@
   "toolbar.group.zoom": "Zoomen",
   "tools.heading": "Gereedschappen",
   "tools.openFirst": "Open eerst een PDF",
-  "tools.sub": "Kies wat u met uw document wilt doen."
+  "tools.sub": "Kies wat u met uw document wilt doen.",
+  "imageres.title": "Afbeeldingen",
+  "imageres.loading": "Bezig met meten van de afbeeldingen in dit document…",
+  "imageres.failed": "De afbeeldingen in dit document konden niet worden gemeten.",
+  "imageres.none": "Dit document tekent geen afbeeldingen.",
+  "imageres.single": "{{images}} op {{dpi}} DPI",
+  "imageres.range": "{{images}} van {{min}} tot {{max}} DPI, mediaan {{median}}",
+  "imageres.unmeasured": "Niet meetbaar: {{unmeasured}}",
+  "imageres.scanned": "Gescand document — {{scanned}} van de {{pages}} pagina’s worden als scan herkend.",
+  "imageres.scanPages": "{{scanned}} van de {{pages}} pagina’s worden als scan herkend.",
+  "panel.compress.thenOptimize": "Het resultaat daarna optimaliseren",
+  "panel.compress.thenOptimizeHint": "Voert de optimalisatie uit op het gecomprimeerde bestand: gelineariseerd voor het web, met de objecten gebundeld in stromen. Dit loopt als tweede bewerking, met een eigen regel in de wachtrij.",
+  "panel.compress.optimizing": "Bezig met optimaliseren...",
+  "panel.compress.optimizeResult": "{{result}} Daarna geoptimaliseerd naar {{to}} KB ({{ratio}}% totale reductie).",
+  "panel.compress.optimizeFailed": "{{result}} Het optimaliseren van het gecomprimeerde bestand is mislukt: {{message}}",
+  "imageres.count_one": "{{count}} afbeelding",
+  "imageres.count_other": "{{count}} afbeeldingen",
+  "opqueue.op.optimize": "Optimaliseren"
 }

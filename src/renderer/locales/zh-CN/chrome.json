@@ -3700,5 +3700,21 @@
   "toolbar.group.zoom": "缩放",
   "tools.heading": "工具",
   "tools.openFirst": "请先打开一个 PDF",
-  "tools.sub": "选择你想对文档做什么。"
+  "tools.sub": "选择你想对文档做什么。",
+  "imageres.title": "图像",
+  "imageres.loading": "正在测量此文档中的图像…",
+  "imageres.failed": "无法测量此文档中的图像。",
+  "imageres.none": "此文档未绘制任何图像。",
+  "imageres.single": "{{images}}，均为 {{dpi}} DPI",
+  "imageres.range": "{{images}}，{{min}}–{{max}} DPI，中位数 {{median}}",
+  "imageres.unmeasured": "无法测量：{{unmeasured}}",
+  "imageres.scanned": "扫描文档 — {{pages}} 页中有 {{scanned}} 页判定为扫描页。",
+  "imageres.scanPages": "{{pages}} 页中有 {{scanned}} 页判定为扫描页。",
+  "panel.compress.thenOptimize": "随后优化结果",
+  "panel.compress.thenOptimizeHint": "对压缩后的文件执行优化：为网页浏览进行线性化，并将对象打包进对象流。它作为第二项操作运行，在队列中占有独立条目。",
+  "panel.compress.optimizing": "正在优化...",
+  "panel.compress.optimizeResult": "{{result}} 随后优化至 {{to}} KB（总计缩减 {{ratio}}%）。",
+  "panel.compress.optimizeFailed": "{{result}} 优化压缩后的文件失败：{{message}}",
+  "imageres.count_other": "{{count}} 张图像",
+  "opqueue.op.optimize": "优化"
 }

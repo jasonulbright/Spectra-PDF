@@ -2,6 +2,22 @@
 
 ## 1.0.26
 
+### Knowing what resolution a document's images are
+- Document Properties ▸ Advanced gains an **Images** row: how many images the document draws, and at what effective resolution.
+- The figure is measured, not assumed: an image's resolution is its pixels over the space it is placed in, so the same picture drawn twice at different sizes reports two.
+- A document whose images share one resolution says so; a spread reports its lowest, its highest and its middle value.
+- A page rotated on the sheet measures by the edges it is actually drawn at, so a tilted photograph is not reported as coarser than it is.
+- An image whose placement collapses to nothing is counted apart rather than folded into the figures.
+- A document read from paper says so, with how many of its pages are scans.
+- The Compress panel shows the same summary above its resolution control, so a downsample target is chosen against what the document actually has.
+- A document that draws no images says that, instead of reporting a resolution it has none of.
+
+### Compressing and optimizing in one pass
+- The Compress panel gains **Then optimize the result**: compression, then the optimize pass over what it produced.
+- The two run as separate operations, each with its own line in the operation queue and its own place in the result.
+- The result reports both halves: the compression figures, then the size after optimizing and the total reduction.
+- If optimizing fails, the message says the compressed file was still written, and why the second step did not finish.
+
 ### Fixes
 - Cropping by dragging a rectangle on the page works again in the document view. The rectangle now stays on the page as a dashed mark of the region to keep, and the Top/Bottom/Left/Right margins in the Crop & Page Boxes panel fill in from it. Previously the rectangle could be drawn but nothing came of it.
 - Drawing an article box on the page adds it to the selected article, the same way.

@@ -436,11 +436,17 @@ export interface CompressHandlers {
   setQuality: (quality: string) => void;
   setMrcPreset: (preset: string) => void;
   setVerifyText: (on: boolean) => void;
+  setThenOptimize: (on: boolean) => void;
   /** What the panel currently HAS. The run reads panel state, so the harness
    * waits on this rather than on a timer — a fixed sleep between the setters
    * and the run is a race that fails on a slow machine and passes on a fast
    * one, which is the worst kind of flake. */
-  snapshot: () => { quality: string; mrcPreset: string; verifyText: boolean };
+  snapshot: () => {
+    quality: string;
+    mrcPreset: string;
+    verifyText: boolean;
+    thenOptimize: boolean;
+  };
 }
 
 let compress: CompressHandlers | null = null;
@@ -1311,7 +1317,12 @@ export interface TestHarness {
    * controls, then runs the real engine call with an injected output path. */
   compressRun: (
     output: string,
-    opts?: { quality?: string; mrcPreset?: string; verifyText?: boolean },
+    opts?: {
+      quality?: string;
+      mrcPreset?: string;
+      verifyText?: boolean;
+      thenOptimize?: boolean;
+    },
   ) => Promise<string>;
   /** Split run with an injected output FOLDER (panel must be mounted). The
    * panel's own mode and field state decide what runs. */
@@ -2328,13 +2339,15 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       if (opts?.quality !== undefined) compress.setQuality(opts.quality);
       if (opts?.mrcPreset !== undefined) compress.setMrcPreset(opts.mrcPreset);
       if (opts?.verifyText !== undefined) compress.setVerifyText(opts.verifyText);
+      if (opts?.thenOptimize !== undefined) compress.setThenOptimize(opts.thenOptimize);
       for (let i = 0; i < 200; i++) {
         const now = compress?.snapshot();
         if (
           now &&
           (opts?.quality === undefined || now.quality === opts.quality) &&
           (opts?.mrcPreset === undefined || now.mrcPreset === opts.mrcPreset) &&
-          (opts?.verifyText === undefined || now.verifyText === opts.verifyText)
+          (opts?.verifyText === undefined || now.verifyText === opts.verifyText) &&
+          (opts?.thenOptimize === undefined || now.thenOptimize === opts.thenOptimize)
         ) {
           break;
         }

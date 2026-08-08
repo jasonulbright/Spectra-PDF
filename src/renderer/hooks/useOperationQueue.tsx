@@ -30,6 +30,7 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   rotate: 'Rotate',
   delete: 'Delete Pages',
   compress: 'Compress',
+  optimize: 'Optimize',
   convert_pdfa: 'PDF/A',
   encrypt: 'Encrypt',
   decrypt: 'Decrypt',
@@ -181,6 +182,12 @@ const INTERNAL_METHODS = new Set([
   // merely to ask whether the edit may proceed (the audit_hidden_information
   // hazard). The edit that follows runs the gate itself.
   'signature_policy',
+  // The effective-resolution summary behind the Images row and the Compress
+  // panel's DPI context. A pure read that walks every page's content stream,
+  // and one the Compress panel refetches on every buffer change — gating it
+  // would commit the user's pending page edits merely for looking (the
+  // audit_space_usage hazard).
+  'summarize_image_resolution',
   // Compositing cached separation plates into a preview image. It names a
   // PLATE DIRECTORY, not a document — there is nothing for the commit gate to
   // gate, and routing it through would commit the user's pending page edits
