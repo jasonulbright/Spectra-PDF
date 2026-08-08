@@ -33,6 +33,12 @@ export interface CanvasHandle {
   zoomToPageRect?(pageId: string, rect: { x: number; y: number; w: number; h: number }): number | null;
   /** Clamped absolute zoom set — the sibling half of zoomToPageRect. */
   setZoomAbsolute?(zoom: number): void;
+  /** Magnify to a PERCENTAGE of actual size, where 100 renders 1pt as 1 CSS
+   * px. Not the same quantity as `setZoomAbsolute`, whose argument is the
+   * view's internal zoom: actual size is a function of the current page's
+   * height, so only the view can solve it. The seam a document's /XYZ open
+   * magnification lands on. Reading view only. */
+  setZoomPercent?(percent: number): void;
 }
 
 interface CanvasHandleArgs {

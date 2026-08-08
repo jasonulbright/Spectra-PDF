@@ -1,5 +1,6 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import type { NewFieldSpec } from '../lib/form-authoring';
+import type { EditClass } from '../lib/signatures';
 
 /** An undoable in-place workspace operation: snapshot the working copy, run the
  * engine op writing back to it, reload, and push an UPDATE_FILE undo entry.
@@ -22,9 +23,22 @@ export type AddFormFields = (
   specs: readonly NewFieldSpec[],
 ) => Promise<void>;
 
+/** What a document's own signatures permit — App's `confirmEditOfSignedDoc`,
+ * the same instance the canvas edit handlers use. A dialog that authors a
+ * document change needs the SAME answer the canvas gets, so the decision has
+ * one implementation rather than a second one per surface. Resolves false when
+ * the edit is refused or the user declines. */
+export type ConfirmSignedEdit = (
+  filePath: string,
+  workingPath: string,
+  editClass: EditClass,
+  fields?: readonly string[] | null,
+) => Promise<boolean>;
+
 interface OperationsValue {
   performOperation: PerformOperation;
   addFormFields: AddFormFields;
+  confirmSignedEdit: ConfirmSignedEdit;
 }
 
 const OperationsContext = createContext<OperationsValue | null>(null);
@@ -32,14 +46,16 @@ const OperationsContext = createContext<OperationsValue | null>(null);
 export function OperationsProvider({
   performOperation,
   addFormFields,
+  confirmSignedEdit,
   children,
 }: {
   performOperation: PerformOperation;
   addFormFields: AddFormFields;
+  confirmSignedEdit: ConfirmSignedEdit;
   children: ReactNode;
 }): React.ReactElement {
   return (
-    <OperationsContext.Provider value={{ performOperation, addFormFields }}>
+    <OperationsContext.Provider value={{ performOperation, addFormFields, confirmSignedEdit }}>
       {children}
     </OperationsContext.Provider>
   );

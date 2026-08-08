@@ -22,7 +22,7 @@ import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
-import type { ShapeType } from '../../state/types';
+import type { ShapeType, SpreadDirection } from '../../state/types';
 import type { MeasureScale } from '../../lib/measure';
 import type { CanvasHandle } from '../../canvas/canvas-handle';
 import { displayWidthAt } from '../../canvas/layout';
@@ -90,6 +90,10 @@ export interface DocumentViewProps {
   pageLayout?: PageLayout;
   /** Two-up only: show the first page alone (the book/cover convention). */
   twoUpCover?: boolean;
+  /** Facing-page order, from the open document's /ViewerPreferences
+   * /Direction. Reverses which side of a spread the leading page takes;
+   * a single-page column has no facing order, so it is inert there. */
+  spreadDirection?: SpreadDirection;
   /** Rotate View's render-only quarter-turn for this file; composed
    * with each page's own pending rotation for every display/capture read. */
   viewRotation?: 0 | 90 | 180 | 270;
@@ -267,7 +271,14 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
   props,
   ref,
 ): React.JSX.Element {
-  const { doc, proxies, viewRotation = 0, pageLayout = 'single', twoUpCover = false } = props;
+  const {
+    doc,
+    proxies,
+    viewRotation = 0,
+    pageLayout = 'single',
+    twoUpCover = false,
+    spreadDirection = 'l2r',
+  } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [zoomState, setZoom] = useState(1);
   const [scrollTop, setScrollTop] = useState(0);
@@ -601,6 +612,18 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
     setZoom(clampZoom(actualSizeZoom(page, READING_BASE_HEIGHT), rowCountRef.current, widestAtBaseRef.current));
   }, [currentPage]);
 
+  const setZoomPercent = useCallback((percent: number) => {
+    const page = currentPage();
+    if (!page || !Number.isFinite(percent) || percent <= 0) return;
+    setZoom(
+      clampZoom(
+        actualSizeZoom(page, READING_BASE_HEIGHT) * (percent / 100),
+        rowCountRef.current,
+        widestAtBaseRef.current,
+      ),
+    );
+  }, [currentPage]);
+
   const fitWidth = useCallback(() => {
     const page = currentPage();
     const el = scrollRef.current;
@@ -669,7 +692,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           let rowW = 0;
           for (const i of idxs) {
             const w = displayWidthAt(viewPages[i], READING_BASE_HEIGHT) * z;
-            if (i < idx) before += w + PAGE_GAP * z;
+            // Which pages lie to the LEFT of this one, which is the reading
+            // order only while the row is not reversed.
+            const leftOf = spreadDirection === 'r2l' ? i > idx : i < idx;
+            if (leftOf) before += w + PAGE_GAP * z;
             rowW += w;
           }
           rowW += PAGE_GAP * z * (idxs.length - 1);
@@ -680,7 +706,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       );
       return z;
     },
-    [doc.pages, viewPages, pageLayout, twoUpCover],
+    [doc.pages, viewPages, pageLayout, twoUpCover, spreadDirection],
   );
 
   useImperativeHandle(
@@ -704,8 +730,9 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
       zoomToPageRect,
       setZoomAbsolute: (z: number) =>
         setZoom(clampZoom(z, rowCountRef.current, widestAtBaseRef.current)),
+      setZoomPercent,
     }),
-    [centerOn, actualSize, fitWidth, zoomToPageRect],
+    [centerOn, actualSize, fitWidth, zoomToPageRect, setZoomPercent],
   );
 
   // ── Rulers and guides ─────────────────────────────────────────────────
@@ -1037,6 +1064,13 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           left: '50%',
           marginLeft: -width / 2,
           display: 'flex',
+          // Reversing the ROW reverses which side of a spread the leading
+          // page takes without touching the row math: `pagesInRow` still
+          // answers reading order and the row's total width is unchanged, so
+          // the vertical virtualizer is untouched. The one HORIZONTAL
+          // consumer (the marquee zoom's scroll-left) reads the same
+          // direction and walks the row the matching way.
+          flexDirection: spreadDirection === 'r2l' ? 'row-reverse' : 'row',
           alignItems: 'flex-start',
           gap: innerGap,
         }}

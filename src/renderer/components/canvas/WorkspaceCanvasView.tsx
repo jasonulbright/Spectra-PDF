@@ -5691,6 +5691,7 @@ export function WorkspaceCanvasView({
             onCreateLinks: createLinks,
             pageLayout: state.ui.pageLayout,
             twoUpCover: state.ui.twoUpCover,
+            spreadDirection: state.ui.spreadDirection,
             doc: focusedDoc,
             viewRotation: state.ui.viewRotationByPath[focusedDoc.path] ?? 0,
             proxies,
