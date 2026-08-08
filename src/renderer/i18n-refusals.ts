@@ -37,9 +37,9 @@ export const REFUSAL_STRINGS = {
     '{{step}} creates a new document, so this action cannot replace the original files.',
   'refusal.action.exportNotInPlace':
     '{{step}} writes a file of another kind, so this action cannot replace the original files.',
-  'refusal.action.paramOneOf': 'Step {{index}} ({{step}}): set {{params}} — one of them, not both.',
+  'refusal.action.paramOneOf': 'Step {{index}} ({{step}}): set {{params}} — exactly one of them.',
   'refusal.action.runParamRequired': '{{step}}: {{param}} is required.',
-  'refusal.action.runParamOneOf': '{{step}}: set {{params}} — one of them, not both.',
+  'refusal.action.runParamOneOf': '{{step}}: set {{params}} — exactly one of them.',
   'refusal.action.encryptNeedsPassword': 'Encrypt: set an open or an owner password.',
 
   // ── Guided actions: importing an action FILE ─────────────────────────

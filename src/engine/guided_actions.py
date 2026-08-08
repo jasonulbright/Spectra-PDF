@@ -122,6 +122,8 @@ _STEPS: dict = {
             {
                 "text",
                 "image",
+                "pdf_source",
+                "pdf_page",
                 "opacity",
                 "angle",
                 "color",
@@ -274,10 +276,12 @@ def validate_steps(steps) -> list[dict]:
             # action file reaches this validator without passing through the
             # editor at all, and `watermark` itself would refuse a pair only
             # after the run had already started.
-            sources = [k for k in ("text", "image") if str(params.get(k, "")).strip()]
+            sources = [
+                k for k in ("text", "image", "pdf_source") if str(params.get(k, "")).strip()
+            ]
             if len(sources) != 1:
                 raise ValueError(
-                    f"step {i + 1} ({op}): set text or image, one of them and not both"
+                    f"step {i + 1} ({op}): set text, image or pdf_source, exactly one of them"
                 )
         if op == "compress" and str(params.get("quality", "")).strip().lower() == "mrc":
             # ORDER, enforced rather than documented: recognition

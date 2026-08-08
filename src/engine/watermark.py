@@ -1,8 +1,9 @@
-"""Watermark: stamp translucent text OR an image across pages.
+"""Watermark: stamp translucent text, an image OR a PDF page across pages.
 
 Approach (per page): author a small Form XObject carrying the stamp ops and
-its OWN private /Resources (standard-14 Helvetica or the shared image
-XObject, plus an /ExtGState with the requested alpha), then attach it with
+its OWN private /Resources (standard-14 Helvetica, the shared image
+XObject, or the shared lifted-page form, plus an /ExtGState with the
+requested alpha), then attach it with
 pikepdf's ``Page.add_overlay`` / ``add_underlay``. Using the library's
 overlay API instead of hand-editing
 ``page.Contents`` sidesteps two traps the redaction review taught us:
@@ -33,21 +34,24 @@ via pdf_tree.walk_inheritable, the one shared /Parent-chain walk that
 redact's resource lookup also uses (one implementation, so a fix propagates
 to every consumer).
 
-The IMAGE source embeds ONCE per call: the picture is decoded and encoded a
-single time before the page loop and made indirect, and every page's form
-references that one XObject through its own /Resources.
+The IMAGE and PDF-PAGE sources embed ONCE per call: the picture is decoded
+and encoded, or the source page is lifted, a single time before the page loop
+and made indirect, and every page's form references that one XObject through
+its own /Resources.
 
-Placement (position, tiling) is shared by both sources — one helper decides
-where the stamp centres go, and each source only knows how to draw itself at
-a centre.
+Placement (position, tiling) is shared by all three sources — one helper
+decides where the stamp centres go, and each source only knows how to draw
+itself at a centre.
 
 Deliberately NOT Ghostscript: a gs pdfwrite round-trip regenerates the
 whole file to add one stream per page, and GS-backed ops don't run in dev
 until the bundle script has been run.
 """
 
+import contextlib
 import io
 import math
+import os
 import re
 import shutil
 import tempfile
@@ -371,6 +375,14 @@ def _embed_image(pdf: pikepdf.Pdf, path: str) -> tuple[pikepdf.Object, int, int,
     if src_path.stat().st_size == 0:
         raise ValueError(f"watermark image is empty: {path}")
     suffix = src_path.suffix.lower()
+    if suffix == ".pdf":
+        # Named apart from the generic type refusal: a PDF handed to the image
+        # source is a caller who wants the PDF-PAGE source, not a caller who
+        # picked an unsupported picture format.
+        raise ValueError(
+            f"a PDF page is a watermark source of its own — set the PDF source "
+            f"instead of the image source: {path}"
+        )
     if suffix not in create_pdf_mod.IMAGE_SUFFIXES:
         raise ValueError(
             f"watermark image type not supported: {suffix or '(none)'} "
@@ -409,6 +421,12 @@ def _embed_image(pdf: pikepdf.Pdf, path: str) -> tuple[pikepdf.Object, int, int,
     except (OSError, ValueError) as exc:
         raise ValueError(f"unreadable watermark image: {path} ({exc})") from None
 
+    # Outside the decode's try: a degenerate size is the caller's picture, not
+    # an unreadable file, and a raise the surrounding except re-labels would
+    # reach the user under the wrong sentence.
+    if px_w <= 0 or px_h <= 0:
+        raise ValueError("the watermark image has no pixels")
+
     with pikepdf.open(io.BytesIO(data)) as wrapper:
         xobjects = wrapper.pages[0].obj.get("/Resources", {}).get("/XObject", {})
         source = None
@@ -436,6 +454,191 @@ def _embed_image(pdf: pikepdf.Pdf, path: str) -> tuple[pikepdf.Object, int, int,
             if value is not None:
                 image[key] = _plain(value)
     return pdf.make_indirect(image), px_w, px_h, frames
+
+
+def _same_path(a: str, b: str) -> bool:
+    """Whether two paths name the same file ON DISK.
+
+    Identity, never a string compare: two spellings of one file (a junction, a
+    short name, a differently-cased drive letter) are the same file, and the
+    recursion guard exists to catch exactly that. `samefile` needs both to
+    exist, so a not-yet-written output falls back to the resolved paths.
+    """
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        try:
+            return Path(a).resolve() == Path(b).resolve()
+        except OSError:
+            return False
+
+
+def _page_content_bytes(page: pikepdf.Page) -> bytes:
+    """The page's content stream(s), concatenated in order.
+
+    A /Contents ARRAY is one stream split across objects and a token may
+    straddle the split, so the parts join with a newline rather than being
+    parsed and re-emitted.
+    """
+    contents = page.obj.get("/Contents")
+    if contents is None:
+        return b""
+    if isinstance(contents, pikepdf.Array):
+        return b"\n".join(bytes(part.read_bytes()) for part in contents)
+    return bytes(contents.read_bytes())
+
+
+def _source_matrix(
+    x0: float, y0: float, width: float, height: float, rotate: int
+) -> tuple[tuple[float, float, float, float, float, float], tuple[float, float]]:
+    """(/Matrix, displayed size) placing a lifted page's own space so the form
+    occupies [0 0 disp_w disp_h] under an identity CTM.
+
+    The form's /BBox stays the source's crop box — clipping belongs in the
+    source's own coordinates — and this matrix folds the crop origin away and
+    turns the content by the source page's /Rotate, so the stamp shows what the
+    source's own reader sees. /Rotate turns the page CLOCKWISE, which is why 90
+    maps (x, y) to (y, W - x).
+    """
+    r = ((int(rotate) % 360) + 360) % 360
+    if r == 90:
+        return (0.0, -1.0, 1.0, 0.0, -y0, width + x0), (height, width)
+    if r == 180:
+        return (-1.0, 0.0, 0.0, -1.0, width + x0, height + y0), (width, height)
+    if r == 270:
+        return (0.0, 1.0, -1.0, 0.0, height + y0, -x0), (height, width)
+    return (1.0, 0.0, 0.0, 1.0, -x0, -y0), (width, height)
+
+
+def _appearance_ops(page: pikepdf.Page, resources: Dictionary) -> bytes:
+    """Draw ops for the visible annotations on `page`, into `resources`.
+
+    A Form XObject carries CONTENT only, so a page lifted without this loses
+    whatever it draws as an annotation — a stamp, a freetext note, a filled
+    widget — silently. The placement is the full appearance algorithm: the
+    appearance /BBox is transformed by its own /Matrix, the bounding box of the
+    result is mapped onto /Rect, and the two compose. The identity-/Matrix
+    shortcut is not available here because a freetext appearance counter-rotates
+    through exactly that key.
+
+    /Popup (a reader's note window) and /Link (a navigation region) are not page
+    artwork and are skipped, as is anything flagged Hidden or NoView.
+    """
+    annots = page.obj.get("/Annots")
+    if not isinstance(annots, pikepdf.Array):
+        return b""
+    from engine.forms import AF_HIDDEN, AF_NOVIEW  # noqa: PLC0415
+
+    xobjects = Dictionary(resources.get("/XObject") or Dictionary())
+    ops: list[bytes] = []
+    for index, annot in enumerate(annots):
+        if not isinstance(annot, pikepdf.Dictionary):
+            continue
+        if str(annot.get("/Subtype", "")) in ("/Popup", "/Link"):
+            continue
+        try:
+            flags = int(annot.get("/F", 0))
+        except (TypeError, ValueError):
+            flags = 0
+        if flags & (AF_HIDDEN | AF_NOVIEW):
+            continue
+        appearance = annot.get("/AP")
+        if not isinstance(appearance, pikepdf.Dictionary):
+            continue
+        normal = appearance.get("/N")
+        if isinstance(normal, pikepdf.Dictionary) and not isinstance(normal, pikepdf.Stream):
+            state = annot.get("/AS")
+            normal = normal.get(state) if state is not None else None
+        if not isinstance(normal, pikepdf.Stream):
+            continue
+        rect = annot.get("/Rect")
+        if rect is None or len(rect) != 4:
+            continue
+        try:
+            values = [float(v) for v in rect]
+            bbox = [float(v) for v in (normal.get("/BBox") or [0, 0, 1, 1])]
+            m = [float(v) for v in (normal.get("/Matrix") or [1, 0, 0, 1, 0, 0])]
+        except (TypeError, ValueError):
+            continue
+        rx0, rx1 = min(values[0], values[2]), max(values[0], values[2])
+        ry0, ry1 = min(values[1], values[3]), max(values[1], values[3])
+        xs, ys = [], []
+        for cx, cy in (
+            (bbox[0], bbox[1]), (bbox[2], bbox[1]), (bbox[2], bbox[3]), (bbox[0], bbox[3])
+        ):
+            xs.append(m[0] * cx + m[2] * cy + m[4])
+            ys.append(m[1] * cx + m[3] * cy + m[5])
+        span_x = (max(xs) - min(xs)) or 1.0
+        span_y = (max(ys) - min(ys)) or 1.0
+        sx = (rx1 - rx0) / span_x
+        sy = (ry1 - ry0) / span_y
+        name = f"/WmAp{index}"
+        xobjects[Name(name)] = normal
+        ops.append(
+            (
+                f"q {_n(sx)} 0 0 {_n(sy)} "
+                f"{_n(rx0 - min(xs) * sx)} {_n(ry0 - min(ys) * sy)} cm {name} Do Q"
+            ).encode("latin-1")
+        )
+    if not ops:
+        return b""
+    resources["/XObject"] = xobjects
+    return b"\n".join(ops)
+
+
+def _lift_page(
+    source_pdf: pikepdf.Pdf, index: int, path: str, page_number: int
+) -> tuple[pikepdf.Object, float, float]:
+    """The source page as ONE Form XObject in `source_pdf`: (object, displayed
+    width, displayed height). The caller copy_foreigns it into the target.
+
+    Built BY HAND rather than through `Page.as_form_xobject()`. That helper
+    returns a stream whose data provider still reads the PAGE's contents at
+    write time — measured on pikepdf 10.11.0 / libqpdf 12.3.2, where the
+    returned object's objgen DIFFERS from the page's content stream and its
+    BYTES still follow a later replacement of it. An object-identity check
+    reports "not aliased" and is wrong. It also boxes the form on the media box
+    and does not fold a non-zero crop origin.
+
+    The form carries /Group << /S /Transparency >>: an /ExtGState alpha applies
+    per painting operation, so without a group two overlapping opaque objects
+    inside a lifted page composite twice and the overlap comes out twice as
+    dark. A group makes the alpha apply to the artwork as a whole, which is what
+    "this letterhead at 15%" means. The group is minimal — non-isolated,
+    non-knockout, and NO /CS: an isolated group would require one, and naming a
+    blending space pushes CMYK artwork through it on the way to the page.
+    """
+    page = source_pdf.pages[index]
+    try:
+        x0, y0, x1, y1 = _resolve_box(page)
+    except ValueError:
+        raise ValueError(
+            f"watermark PDF page {page_number} has no /CropBox or /MediaBox: {path}"
+        ) from None
+    width, height = x1 - x0, y1 - y0
+    if width <= 0 or height <= 0:
+        raise ValueError(f"watermark PDF page {page_number} has no area: {path}")
+    matrix, (disp_w, disp_h) = _source_matrix(x0, y0, width, height, _resolve_rotate(page))
+
+    # A COPY of the resolved (inheritance-aware) resource dict, and a copy of
+    # its /XObject sub-dictionary: registering the annotation appearances must
+    # not mutate the source document.
+    inherited = walk_inheritable(page, "/Resources")
+    resources = Dictionary(inherited) if inherited is not None else Dictionary()
+    body = b"q\n" + _page_content_bytes(page) + b"\nQ"
+    appearances = _appearance_ops(page, resources)
+    if appearances:
+        body += b"\n" + appearances
+
+    form = source_pdf.make_stream(body)
+    form.Type = Name.XObject
+    form.Subtype = Name.Form
+    form.FormType = 1
+    form.BBox = pikepdf.Array([x0, y0, x1, y1])
+    form.Matrix = pikepdf.Array(list(matrix))
+    form.Resources = resources
+    form.Group = Dictionary(Type=Name.Group, S=Name.Transparency)
+    return source_pdf.make_indirect(form), disp_w, disp_h
 
 
 def _text_draw(
@@ -479,55 +682,64 @@ def _text_draw(
     return out, font_obj, em_width
 
 
-def _image_draw_size(
-    px: tuple[int, int],
+def _stamp_draw_size(
+    src_w: float,
+    src_h: float,
     disp_w: float,
     disp_h: float,
     angle: float,
     scale: float,
 ) -> tuple[float, float]:
-    """The drawn width and height of the picture, in points.
+    """The drawn width and height of a src_w x src_h stamp, in points.
 
-    Auto fit is the size at which the image's ROTATED bounding box fills
+    Auto fit is the size at which the stamp's ROTATED bounding box fills
     AUTO_FIT_FRACTION of the DISPLAYED page box, aspect preserved — the same
     fraction and the same displayed-orientation reasoning `_auto_font_size`
-    uses, so `scale` 1.0 means the same thing to a reader for either source.
+    uses, so `scale` 1.0 means the same thing to a reader for every source.
     `scale` multiplies that; above 1 it may overflow the page, which is what
     a bleed watermark asks for.
 
-    The image's stored DPI is deliberately not consulted: a watermark is
-    placed relative to the page it stamps, so the same logo at 72 and at 600
-    dpi must land identically.
+    src_w/src_h are the picture's PIXELS or the lifted page's DISPLAYED
+    points — only their ratio is read, and neither is a physical size. An
+    image's stored DPI is deliberately not consulted: a watermark is placed
+    relative to the page it stamps, so the same logo at 72 and at 600 dpi must
+    land identically.
     """
-    px_w, px_h = px
-    if px_w <= 0 or px_h <= 0:
-        raise ValueError("the watermark image has no pixels")
-    hw, hh = _rotated_extent(float(px_w), float(px_h), angle)
+    hw, hh = _rotated_extent(src_w, src_h, angle)
     fit = min(
         AUTO_FIT_FRACTION * disp_w / (2.0 * hw),
         AUTO_FIT_FRACTION * disp_h / (2.0 * hh),
     )
     k = fit * scale
-    return (px_w * k, px_h * k)
+    return (src_w * k, src_h * k)
 
 
-def _image_draw(
-    draw_w: float, draw_h: float, theta: float, centers: list[tuple[float, float]]
+def _xobject_draw(
+    draw_w: float,
+    draw_h: float,
+    theta: float,
+    centers: list[tuple[float, float]],
+    name: str,
+    unit: tuple[float, float] = (1.0, 1.0),
 ) -> bytes:
-    """Content ops placing the shared /Im0 at each centre.
+    """Content ops placing the shared XObject `name` at each centre.
 
-    The image XObject's own space is the unit square, so one `cm` carries the
-    size, the rotation and the translation together.
+    One `cm` carries the size, the rotation and the translation together, with
+    the XObject's own extent normalized into it: an Image XObject's space IS
+    the unit square (`unit` (1, 1), and the emission is then byte-identical to
+    the arithmetic the image arm shipped), while a lifted page's form spans its
+    own displayed box.
     """
+    unit_w, unit_h = unit
     cos_t, sin_t = math.cos(theta), math.sin(theta)
-    a, b = draw_w * cos_t, draw_w * sin_t
-    c, d = -draw_h * sin_t, draw_h * cos_t
+    a, b = draw_w * cos_t / unit_w, draw_w * sin_t / unit_w
+    c, d = -draw_h * sin_t / unit_h, draw_h * cos_t / unit_h
     out = b""
     for cx, cy in centers:
         e = cx - (draw_w * cos_t) / 2.0 + (draw_h * sin_t) / 2.0
         f = cy - (draw_w * sin_t) / 2.0 - (draw_h * cos_t) / 2.0
         out += (
-            f"q {_n(a)} {_n(b)} {_n(c)} {_n(d)} {_n(e)} {_n(f)} cm /Im0 Do Q"
+            f"q {_n(a)} {_n(b)} {_n(c)} {_n(d)} {_n(e)} {_n(f)} cm {name} Do Q"
         ).encode("latin-1")
     return out
 
@@ -566,13 +778,15 @@ def watermark(
     pages: list | None = None,
     font_dir: str = "",
     image: str = "",
+    pdf_source: str = "",
+    pdf_page: int = 1,
     scale: float = 1.0,
     position: str = "center",
     margin: float = DEFAULT_MARGIN,
     tile: bool = False,
     tile_gap: float = DEFAULT_TILE_GAP,
 ) -> dict:
-    """Stamp translucent text or an image across pages.
+    """Stamp translucent text, an image or a PDF page across pages.
 
     Args:
         file: Input PDF path.
@@ -592,9 +806,15 @@ def watermark(
             CLI's --pages parse rejects garbage for the same reason).
             Out-of-range entries are ignored (same convention as redact).
         image: Path to a picture to stamp INSTEAD of text — exactly one of
-            ``text`` and ``image`` is the source. Accepted extensions are
-            Create PDF's own image set. The picture embeds ONCE per call and
-            every page references that one XObject.
+            ``text``, ``image`` and ``pdf_source`` is the source. Accepted
+            extensions are Create PDF's own image set. The picture embeds ONCE
+            per call and every page references that one XObject.
+        pdf_source: Path to a PDF whose page is stamped as VECTOR artwork —
+            a letterhead, a pre-drawn stamp. The page is lifted as one Form
+            XObject, embedded ONCE per call, and nothing is rasterized. The
+            source's own /Rotate is honoured and its visible annotations are
+            drawn with it.
+        pdf_page: 1-based page of ``pdf_source`` to lift (default 1).
         scale: Multiplier on the auto fit (the size at which the stamp's
             rotated bounding box fills ~65% of the displayed page box).
             Values above 1 may overflow the page, which is a real request.
@@ -606,10 +826,11 @@ def watermark(
     """
     has_text = bool(text and text.strip())
     has_image = bool(image and str(image).strip())
-    if has_text and has_image:
-        raise ValueError("a watermark needs either text or an image, not both")
-    if not has_text and not has_image:
-        raise ValueError("a watermark needs text or an image")
+    has_pdf = bool(pdf_source and str(pdf_source).strip())
+    if sum((has_text, has_image, has_pdf)) > 1:
+        raise ValueError("a watermark has one source: give text, an image or a PDF page")
+    if not (has_text or has_image or has_pdf):
+        raise ValueError("a watermark needs text, an image or a PDF page")
     if not 0 < float(opacity) <= 1:
         raise ValueError(f"opacity must be in (0, 1], got {opacity}")
     if layer not in ("over", "under"):
@@ -636,6 +857,30 @@ def watermark(
     output_path = Path(output)
     same_file = input_path.resolve() == output_path.resolve()
 
+    source_path = ""
+    page_number = 1
+    if has_pdf:
+        source_path = str(pdf_source).strip()
+        page_number = int(pdf_page)
+        if page_number < 1:
+            raise ValueError(
+                f"watermark page number must be 1 or greater, got {pdf_page}"
+            )
+        source_file = Path(source_path)
+        if not source_file.is_file():
+            raise ValueError(f"watermark PDF not found: {source_path}")
+        if source_file.stat().st_size == 0:
+            raise ValueError(f"watermark PDF is empty: {source_path}")
+        # The recursion guard, by IDENTITY: a document whose every page carries
+        # a copy of itself is nobody's request, and a source that IS the output
+        # is about to be overwritten by the thing that reads it.
+        if _same_path(source_path, str(input_path)):
+            raise ValueError(f"a PDF cannot be its own watermark source: {source_path}")
+        if _same_path(source_path, str(output_path)):
+            raise ValueError(
+                f"the watermark PDF and the output are the same file: {source_path}"
+            )
+
     wanted: set[int] | None = None
     if pages is not None:
         wanted = {int(p) for p in pages}
@@ -644,7 +889,9 @@ def watermark(
     font_size_applied = 0.0
     tiles_per_page = 0
     image_frames = 0
-    with pikepdf.open(file) as pdf:
+    pdf_page_count = 0
+    with contextlib.ExitStack() as stack:
+        pdf = stack.enter_context(pikepdf.open(file))
         # A non-Latin-1 stamp is drawn with a subsetted Type0 font SHARED
         # across pages (the text is constant), else the WinAnsi Helvetica path
         # (uni=None, byte-identical). Resolve the FACE upfront (cheap, no
@@ -678,10 +925,41 @@ def watermark(
         # however many pages reference it. Doing it here also means a bad
         # image refuses before any page is touched.
         image_obj = None
-        image_px: tuple[int, int] = (0, 0)
+        stamp_px: tuple[float, float] = (0.0, 0.0)
         if has_image:
             image_obj, px_w, px_h, image_frames = _embed_image(pdf, str(image).strip())
-            image_px = (px_w, px_h)
+            stamp_px = (float(px_w), float(px_h))
+
+        # The lifted page embeds ONCE, on the same rule and for the same
+        # reason. The source document is entered on the STACK, so it outlives
+        # the copy_foreign and stays open through this document's save.
+        source_obj = None
+        source_unit: tuple[float, float] = (1.0, 1.0)
+        if has_pdf:
+            try:
+                source_pdf_doc = stack.enter_context(pikepdf.open(source_path))
+            except pikepdf.PasswordError:
+                raise ValueError(
+                    f"the watermark PDF is password protected: {source_path}"
+                ) from None
+            except pikepdf.PdfError as exc:
+                raise ValueError(
+                    f"unreadable watermark PDF: {source_path} ({exc})"
+                ) from None
+            pdf_page_count = len(source_pdf_doc.pages)
+            if pdf_page_count == 0:
+                raise ValueError(f"the watermark PDF has no pages: {source_path}")
+            if page_number > pdf_page_count:
+                raise ValueError(
+                    f"watermark PDF page {page_number} is out of range — "
+                    f"{source_path} has {pdf_page_count} pages"
+                )
+            lifted, src_w, src_h = _lift_page(
+                source_pdf_doc, page_number - 1, source_path, page_number
+            )
+            source_obj = pdf.copy_foreign(lifted)
+            stamp_px = (src_w, src_h)
+            source_unit = (src_w, src_h)
 
         uni: tuple | None = None
         auto_em: float | None = None
@@ -701,16 +979,22 @@ def watermark(
             # orientation, which is what it is documented to mean.
             disp_w, disp_h = _displayed_box(width, height, rotate)
             theta = math.radians(angle)
-            if has_image:
-                draw_w, draw_h = _image_draw_size(
-                    image_px, disp_w, disp_h, float(angle), scale_value
+            if has_image or has_pdf:
+                draw_w, draw_h = _stamp_draw_size(
+                    stamp_px[0], stamp_px[1], disp_w, disp_h, float(angle), scale_value
                 )
                 centers = _centers(
                     disp_w, disp_h, float(angle), draw_w, draw_h,
                     position, margin_value, bool(tile), gap_value,
                 )
-                body = _image_draw(draw_w, draw_h, theta, centers)
-                resources = Dictionary(XObject=Dictionary(Im0=image_obj))
+                if has_image:
+                    body = _xobject_draw(draw_w, draw_h, theta, centers, "/Im0")
+                    resources = Dictionary(XObject=Dictionary(Im0=image_obj))
+                else:
+                    body = _xobject_draw(
+                        draw_w, draw_h, theta, centers, "/Fm0", unit=source_unit
+                    )
+                    resources = Dictionary(XObject=Dictionary(Fm0=source_obj))
                 size = 0.0
             else:
                 if needs_unicode and uni is None:
@@ -778,8 +1062,10 @@ def watermark(
         "pages_watermarked": pages_watermarked,
         "font_size_applied": round(font_size_applied, 2),
         "layer": layer,
-        "source": "image" if has_image else "text",
+        "source": "pdf" if has_pdf else ("image" if has_image else "text"),
         "image_frames": image_frames,
+        "pdf_pages": pdf_page_count,
+        "pdf_page_used": page_number if has_pdf else 0,
         "scale_applied": round(scale_value, 4),
         "tiles_per_page": tiles_per_page,
     }

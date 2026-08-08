@@ -1,9 +1,10 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { file, app, dialog } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
+import { TEST_HARNESS_ENABLED, registerWatermark } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 
@@ -23,7 +24,7 @@ const POSITIONS = [
   'bottom-right',
 ] as const;
 
-type WatermarkSource = 'text' | 'image';
+type WatermarkSource = 'text' | 'image' | 'pdf';
 
 export function WatermarkPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -33,6 +34,8 @@ export function WatermarkPanel(): React.ReactElement {
   const [source, setSource] = useState<WatermarkSource>('text');
   const [text, setText] = useState('CONFIDENTIAL');
   const [imagePath, setImagePath] = useState('');
+  const [pdfPath, setPdfPath] = useState('');
+  const [pdfPage, setPdfPage] = useState(1);
   const [opacity, setOpacity] = useState(0.15);
   const [angle, setAngle] = useState(45);
   const [color, setColor] = useState(WATERMARK_COLORS[0]);
@@ -51,6 +54,11 @@ export function WatermarkPanel(): React.ReactElement {
     if (picked) setImagePath(picked);
   }, []);
 
+  const pickPdf = useCallback(async () => {
+    const picked = await dialog.pickWatermarkPdf();
+    if (picked) setPdfPath(picked);
+  }, []);
+
   const handleApply = useCallback(async () => {
     if (!activeFile) return;
     if (source === 'text' && !text.trim()) {
@@ -59,6 +67,10 @@ export function WatermarkPanel(): React.ReactElement {
     }
     if (source === 'image' && !imagePath.trim()) {
       setStatus(tChrome('panel.watermark.noImage'));
+      return;
+    }
+    if (source === 'pdf' && !pdfPath.trim()) {
+      setStatus(tChrome('panel.watermark.noPdf'));
       return;
     }
     const pages =
@@ -82,10 +94,12 @@ export function WatermarkPanel(): React.ReactElement {
       const result = await call('watermark', {
         file: activeFile.workingPath,
         output: activeFile.workingPath,
-        // Exactly one source reaches the engine; the other stays empty, which
-        // is how the engine's own either/or refusal is expressed.
+        // Exactly one source reaches the engine; the others stay empty, which
+        // is how the engine's own one-source refusal is expressed.
         text: source === 'text' ? text.trim() : '',
         image: source === 'image' ? imagePath.trim() : '',
+        pdf_source: source === 'pdf' ? pdfPath.trim() : '',
+        pdf_page: pdfPage,
         opacity,
         angle,
         color,
@@ -116,7 +130,24 @@ export function WatermarkPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [activeFile, source, text, imagePath, opacity, angle, color, layer, scale, position, margin, tile, tileGap, pageInput, call, dispatch]);
+  }, [activeFile, source, text, imagePath, pdfPath, pdfPage, opacity, angle, color, layer, scale, position, margin, tile, tileGap, pageInput, call, dispatch]);
+
+  // The pickers are native and undrivable, so e2e injects the chosen path
+  // through the panel's OWN setter — the state an injected run reaches is the
+  // state a clicked one reaches (the compress-panel precedent).
+  const harnessRef = useRef({ setSource, setPdfPath, setPdfPage });
+  harnessRef.current = { setSource, setPdfPath, setPdfPage };
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerWatermark({
+      setPdfSource: (path, page) => {
+        harnessRef.current.setSource('pdf');
+        harnessRef.current.setPdfPath(path);
+        harnessRef.current.setPdfPage(page);
+      },
+    });
+    return () => registerWatermark(null);
+  }, []);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.watermark.open')} />;
 
@@ -136,6 +167,7 @@ export function WatermarkPanel(): React.ReactElement {
         >
           <option value="text">{tChrome('panel.watermark.sourceText')}</option>
           <option value="image">{tChrome('panel.watermark.sourceImage')}</option>
+          <option value="pdf">{tChrome('panel.watermark.sourcePdf')}</option>
         </select>
       </div>
       {source === 'text' ? (
@@ -153,7 +185,7 @@ export function WatermarkPanel(): React.ReactElement {
             {tChrome('panel.watermark.scriptsNote')}
           </p>
         </div>
-      ) : (
+      ) : source === 'image' ? (
         <div>
           <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.imageLabel')}</label>
           <div className="flex items-center gap-2">
@@ -169,6 +201,36 @@ export function WatermarkPanel(): React.ReactElement {
             </span>
           </div>
           <p className="text-xs text-neutral-500 mt-1">{tChrome('panel.watermark.imageNote')}</p>
+        </div>
+      ) : (
+        <div>
+          <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.pdfLabel')}</label>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              data-testid="watermark-pick-pdf"
+              onClick={pickPdf}
+              className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded text-sm"
+            >
+              {tChrome('panel.watermark.choosePdf')}
+            </button>
+            <span data-testid="watermark-pdf-name" className="text-sm text-neutral-300 truncate max-w-xs">
+              {pdfPath ? pdfPath.replace(/^.*[\\/]/, '') : tChrome('panel.watermark.noPdfChosen')}
+            </span>
+            <label className="text-sm text-neutral-400 flex items-center gap-2" htmlFor="watermark-pdf-page">
+              {tChrome('panel.watermark.pdfPage')}
+              <input
+                id="watermark-pdf-page"
+                data-testid="watermark-pdf-page"
+                type="number"
+                min={1}
+                step={1}
+                value={pdfPage}
+                onChange={(e) => setPdfPage(Number(e.target.value))}
+                className="w-20 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+              />
+            </label>
+          </div>
+          <p className="text-xs text-neutral-500 mt-1">{tChrome('panel.watermark.pdfNote')}</p>
         </div>
       )}
       <div className="flex gap-6 items-end flex-wrap">

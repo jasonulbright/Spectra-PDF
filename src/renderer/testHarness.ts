@@ -374,6 +374,22 @@ export function registerCreatePdf(handlers: CreatePdfHandlers | null): void {
 }
 
 /**
+ * Watermark panel: the PDF-source picker is native and undrivable, so e2e
+ * injects the chosen path through the panel's own setters and then drives the
+ * REAL Apply button. Every other control is an ordinary input the spec sets
+ * directly.
+ */
+export interface WatermarkHandlers {
+  setPdfSource: (path: string, page: number) => void;
+}
+
+let watermarkPanel: WatermarkHandlers | null = null;
+
+export function registerWatermark(handlers: WatermarkHandlers | null): void {
+  watermarkPanel = handlers;
+}
+
+/**
  * Combine Files: same shape and the same reason — the source
  * picker and the save dialog are native, so e2e injects the LIST and the
  * output and the REAL assembly runs.
@@ -1264,6 +1280,9 @@ export interface TestHarness {
     output: string,
     options?: CombineRunOptions,
   ) => Promise<{ output: string; pages: number } | null>;
+  /** Watermark panel (panel must be mounted): select the PDF source and set
+   * the file and page a native picker would have set. Apply is still clicked. */
+  watermarkSetPdfSource: (path: string, page?: number) => void;
   /** Compress panel (panel must be mounted). Sets the panel's own
    * controls, then runs the real engine call with an injected output path. */
   compressRun: (
@@ -2247,6 +2266,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       return createPdf.run(sources, output, options);
+    },
+    watermarkSetPdfSource: (path, page) => {
+      if (!watermarkPanel) {
+        const msg = 'watermarkSetPdfSource: panel not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      watermarkPanel.setPdfSource(path, page ?? 1);
     },
     combineRun: async (sources, output, options) => {
       if (!combine) {
