@@ -411,6 +411,13 @@ soffice.libreofficeAvailable	pattern	soffice	LibreOffice is not available at {{s
 soffice.libreofficeCannotConvertAccepted	pattern	soffice	LibreOffice cannot convert {{v0}} (accepted: {{v1}})
 soffice.libreofficeProducedPdfCannot	pattern	soffice	LibreOffice produced a PDF that cannot be read: {{exc}}
 soffice.libreofficeReportedSuccessPdf	exact	soffice	LibreOffice reported success but the PDF it wrote has no pages
+split.documentTopLevelBookmarks	exact	split	this document has no top-level bookmarks to split at
+split.maximumFileSizeMust	pattern	split	maximum file size must be a number, got {{max_mb}}
+split.maximumFileSizeMust2	pattern	split	maximum file size must be greater than 0, got {{max_mb}}
+split.pagesPerFileMust	pattern	split	pages per file must be a whole number, got {{every_n}}
+split.pagesPerFileMust2	pattern	split	pages per file must be at least 1, got {{every_n}}
+split.splitModeMustOne	pattern	split	split mode must be one of {{v0}}, got {{mode}}
+split.splitNeedsOutputFolder	exact	split	split needs an output folder
 struct_tree.directionMustOneUp	exact	struct_tree	direction must be one of up, down, indent, outdent, to
 struct_tree.directionNeedsIndex	exact	struct_tree	direction 'to' needs an index
 struct_tree.documentStructureTreeUntagged	exact	struct_tree	document has no structure tree (it is untagged)
