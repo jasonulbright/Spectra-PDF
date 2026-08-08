@@ -357,6 +357,32 @@ describe('qps pseudo-locale leak sweep', () => {
         timeoutMsg: 'the Properties dialog never opened',
       });
       await sweep('[data-testid="properties-dialog"]', leaks);
+      // Its four other tabs. Each mounts a body the landing tab never shows —
+      // the fonts list, the initial-view form's selects, the advanced rows —
+      // so a sweep that stopped at Description would miss most of the dialog.
+      for (const tab of ['security', 'fonts', 'initialView', 'advanced']) {
+        await $(`[data-testid="props-tab-${tab}"]`).click();
+        await $(`[data-testid="props-body-${tab}"]`).waitForDisplayed({ timeout: 10_000 });
+        if (tab === 'fonts') {
+          // The walk is async; reading mid-flight would read the loading line
+          // instead of the surface it stands in for. The tab is then checked
+          // DIRECTLY rather than through `sweep`: it renders paragraphs, which
+          // the collector (labels, headings, controls) does not read, and this
+          // fixture draws no text so the surface that renders is the empty
+          // state — a catalog string, and the one this document can prove.
+          await $('[data-testid="props-fonts-loading"]').waitForDisplayed({
+            reverse: true,
+            timeout: 10_000,
+            timeoutMsg: 'the font list never resolved',
+          });
+          check(
+            'props fonts empty',
+            await $('[data-testid="props-fonts-empty"]').getText(),
+          );
+          continue;
+        }
+        await sweep(`[data-testid="props-body-${tab}"]`, leaks);
+      }
       await $('[data-testid="props-close"]').click();
 
       // ── DIALOG 3: Create PDF. 33 new strings in one dialog, and two
