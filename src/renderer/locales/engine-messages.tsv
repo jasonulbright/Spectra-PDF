@@ -82,6 +82,17 @@ doc_properties.zoomPercentNeedsZoom	exact	doc_properties	zoom 'percent' needs a 
 document_js.duplicateDocumentScriptName	pattern	document_js	Duplicate document-script name: {{name}}.
 document_js.eachDocumentScriptMust	exact	document_js	Each document script must be an object with name and js.
 document_js.eachDocumentScriptNeeds	exact	document_js	Each document script needs a non-empty name.
+enhance_scan.backgroundStrengthMustGot	pattern	enhance_scan	the background strength must be 0-1, got {{strength}}
+enhance_scan.enhancementAskedTurnDeskew	exact	enhance_scan	no enhancement was asked for — turn on deskew, despeckle, background removal or orientation detection
+enhance_scan.jpegQualityMustGot	pattern	enhance_scan	the JPEG quality must be 1-100, got {{quality}}
+enhance_scan.maximumSkewMustDegrees	pattern	enhance_scan	the maximum skew must be 0.1-{{MAX_SKEW_LIMIT}} degrees, got {{max_skew}}
+enhance_scan.minimumSkewMustDegrees	pattern	enhance_scan	the minimum skew must be 0-{{max_skew}} degrees, got {{min_skew}}
+enhance_scan.ocrEngineAvailableTesseract	pattern	enhance_scan	The OCR engine is not available: no tesseract.exe at {{v0}}. Turn off orientation detection or run scripts/bundle-tesseract.ps1.
+enhance_scan.orientationConfidenceFloorCannot	pattern	enhance_scan	the orientation confidence floor cannot be negative, got {{confidence}}
+enhance_scan.pageSelected	exact	enhance_scan	no page was selected
+enhance_scan.selectedPageDocumentScanned	exact	enhance_scan	no selected page in this document is a scanned image — scan enhancement has nothing to work on
+enhance_scan.speckGapMustInches	pattern	enhance_scan	the speck gap must be 0-0.5 inches, got {{gap_in}}
+enhance_scan.speckSizeMustInches	pattern	enhance_scan	the speck size must be 0.001-0.05 inches, got {{size_in}}
 fieldmdp.signatureFieldCannotLock	pattern	fieldmdp	Signature field "{{own_name}}" cannot lock itself. A field lock names the form fields that may no longer change, not the field being signed.
 flattener.flatteningRegionDpiWould	pattern	flattener	Flattening region {{region_number}} at {{dpi}} dpi would need {{width}}x{{height}} pixels.
 flattener.ghostscriptRegionRasterizationFailed	pattern	flattener	Ghostscript region rasterization failed: {{detail}}
@@ -134,6 +145,8 @@ guided_actions.placeModeCannotEnd	exact	guided_actions	In-place mode cannot end 
 guided_actions.placeModeCannotStart	exact	guided_actions	In-place mode cannot start with create_pdf -- the converted document is a new file, not a replacement for its source.
 guided_actions.processedOriginalsFolderMust	exact	guided_actions	The processed-originals folder must be outside the destination folder.
 guided_actions.processedOriginalsFolderMust2	exact	guided_actions	The processed-originals folder must be outside the source folder.
+guided_actions.scanEnhancementMustCome	exact	guided_actions	scan enhancement must come before MRC compression — MRC replaces the page image with reconstructed layers, and enhancing those enhances a reconstruction
+guided_actions.scanEnhancementMustCome2	exact	guided_actions	scan enhancement must come before OCR — enhancement moves the ink, and an OCR layer written first would sit over where it used to be
 guided_actions.stepNameExportFormat	pattern	guided_actions	step {{v0}} ({{op}}): name the export format
 guided_actions.stepParamsMustObject	pattern	guided_actions	step {{v0}} ({{op}}): params must be an object
 guided_actions.stepPositionTextGo	pattern	guided_actions	step {{v0}} ({{op}}): position and text go together
@@ -171,7 +184,7 @@ inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 links.linkIndexOutRange	pattern	links	link index {{index}} is out of range (page has {{v1}})
 links.linksAdd	exact	links	no links to add
-links.pageOutRange	pattern	form_detect,links,page_images,page_vectors,redact_marks,search_regions,slide_export,table_export,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
+links.pageOutRange	pattern	enhance_scan,form_detect,links,page_images,page_vectors,redact_marks,search_regions,slide_export,table_export,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
 links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive width and height
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
 links.urlMustEmpty	exact	links	url must not be empty
@@ -339,7 +352,7 @@ recognize.ocrProducedWordBoxes	exact	recognize	OCR produced no word boxes: tessd
 recognize.ocrRasteriserDidProduce	exact	recognize	OCR rasteriser did not produce a PNG
 recognize.ocrRasteriserProducedZero	exact	recognize	OCR rasteriser produced a zero-sized page image
 recognize.pageMustBased	exact	recognize	page must be 1-based
-recognize.tessdataBesideRunScripts	pattern	recognize	No tessdata beside {{exe}}; run scripts/bundle-tesseract.ps1.
+recognize.tessdataBesideRunScripts	pattern	enhance_scan,recognize	No tessdata beside {{exe}}; run scripts/bundle-tesseract.ps1.
 recover.cannotOpenFileRecovery	pattern	recover	Cannot open file for recovery: {{e}}. File may be completely unreadable.
 recover.pagesCouldRecoveredFile	exact	recover	No pages could be recovered. File is completely unreadable.
 recover.pdfEncryptedDecryptBefore	exact	recover	PDF is encrypted -- decrypt before recovery
@@ -364,7 +377,7 @@ search_redact.unknownRedactionProperty	pattern	search_redact	unknown redaction p
 search_regions.expandMustMatchWord	exact	search_regions	expand must be "match", "word" or "line"
 search_regions.giveSearchTermWord	exact	search_regions	give a search term, a word list or a built-in pattern — searching for nothing would mark every page
 search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a positive number
-search_regions.pagesMustListPage	exact	form_detect,search_regions,slide_export,table_export,text_export	pages must be a list of page numbers or "all"
+search_regions.pagesMustListPage	exact	enhance_scan,form_detect,search_regions,slide_export,table_export,text_export	pages must be a list of page numbers or "all"
 separations.ghostscriptFoldedSpotColours	pattern	separations	Ghostscript folded {{n}} spot colours into process; raise the spot limit or reduce the document's spots.
 separations.ghostscriptSeparationRenderFailed	pattern	separations	Ghostscript separation render failed: {{v0}}
 separations.pageDocument	pattern	flattener,outlines,separations	Page {{number}} is not in this document.

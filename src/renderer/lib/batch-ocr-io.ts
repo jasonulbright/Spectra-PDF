@@ -7,6 +7,7 @@ import { loadDocument } from './pdfRenderer';
 import { extractPageText } from '../search/extract';
 import { batch } from './tauri-bridge';
 import { mrcBatchNote, type MrcReport } from './mrc-presets';
+import { enhanceBatchNote, type ScanEnhanceReport } from './scan-enhance';
 import type { BatchIo, BatchPdfDoc } from './batch-ocr';
 import type { OcrApplyPage } from './ocr-apply';
 import type { OcrResult } from '../ocr/types';
@@ -55,6 +56,14 @@ export function createBatchIo(
      * the engine's own report so the note can be shaped here rather than in
      * the pure driver. */
     compressMrc: (path: string, preset: string, verifyText: boolean) => Promise<MrcReport>;
+    /** `enhance_scan` over `source` into `output`. Resolves to the engine's
+     * own report so the note can be shaped here rather than in the pure
+     * driver — the `compressMrc` split, for the same reason. */
+    enhanceScan: (
+      source: string,
+      output: string,
+      orientation: boolean,
+    ) => Promise<ScanEnhanceReport>;
   },
 ): BatchIo {
   return {
@@ -99,6 +108,22 @@ export function createBatchIo(
         throw err;
       }
       return scratch;
+    },
+    async enhanceToScratch(src, orientation) {
+      const scratch = await batch.createScratch('enhance');
+      try {
+        const report = await engine.enhanceScan(src, scratch, orientation);
+        // `written: false` means every scanned page measured square, clean and
+        // upright, so the engine wrote nothing and there is no scratch file to
+        // read. Recognition then reads the ORIGINAL — handing it a path that
+        // does not exist would fail the whole entry over an enhancement that
+        // correctly decided to do nothing.
+        if (!report.written) return { path: null, note: enhanceBatchNote(report) };
+        return { path: scratch, note: enhanceBatchNote(report) };
+      } catch (err) {
+        await batch.deleteScratch(scratch).catch(() => {});
+        throw err;
+      }
     },
     discardScratch: (path) => batch.deleteScratch(path),
   };

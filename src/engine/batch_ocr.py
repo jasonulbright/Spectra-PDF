@@ -35,6 +35,7 @@ from engine.compress import compress
 # where its multi-frame data loss hid; it is now a first-class engine arm and
 # this module is a consumer like any other.
 from engine.create_pdf import IMAGE_SUFFIXES, image_to_pdf
+from engine.enhance_scan import enhance_scan
 from engine.ocr_layer import apply_ocr_layer
 from engine.recognize import recognize
 from engine.repair import repair
@@ -89,6 +90,38 @@ def _mrc_step(
             f"{note}; {report['pages_reverted']} page(s) reverted by text verification"
         )
     return True, note
+
+
+def _enhance_step(
+    source: Path, gs_path: str, tesseract_path: str, orientation: bool
+) -> tuple[bool, str]:
+    """Deskew/despeckle/whiten one file IN PLACE, BEFORE it is recognised.
+
+    The mirror image of `_mrc_step`, and the order is structural for the same
+    reason stated the other way round: recognition rasterises from the page, so
+    enhancement AFTER it would improve a page nobody is going to read again,
+    while enhancement first is exactly what raises recognition accuracy — a
+    page two degrees off square recognises as ragged lines, and a page fed in
+    sideways recognises as nothing at all.
+
+    A failure NEVER fails the file. A document with no scanned page refuses by
+    name from the engine, and for a mixed folder that refusal is the ordinary
+    case — it is reported as a note, not as an error, and the file keeps the
+    bytes it already had.
+    """
+    try:
+        report = enhance_scan(
+            str(source),
+            str(source),
+            orientation=orientation,
+            gs_path=gs_path,
+            tesseract_path=tesseract_path,
+        )
+    except Exception as exc:  # noqa: BLE001 - per-file isolation, as above
+        return False, f"Scan enhancement did not apply: {exc}"
+    if not report["written"]:
+        return False, "Scan enhancement found nothing to correct"
+    return True, f"Enhanced {report['pages_enhanced']} scanned page(s)"
 
 
 def _pages_needing_ocr(path: str, pdf: pikepdf.Pdf) -> list[int]:
@@ -299,6 +332,8 @@ def ocr_file(
     mrc: bool = False,
     mrc_preset: str = "balanced",
     mrc_verify_text: bool = False,
+    enhance: bool = False,
+    enhance_orientation: bool = True,
 ) -> dict:
     """Make ONE file searchable — the single-file arm of the batch pipeline.
 
@@ -312,8 +347,11 @@ def ocr_file(
     A file with nothing that looks like a scan is reported, not rewritten:
     in-place → no write at all; to a distinct output → a byte copy.
 
-    `mrc` MRC-compresses the recognised result afterwards — recognition
-    first, always. It never fails the file; the note rides the result.
+    `enhance` runs scan enhancement BEFORE recognition and `mrc`
+    MRC-compresses AFTER it, and the two orders are the same fact seen from
+    both ends: recognition rasterises from the page, so the pass that IMPROVES
+    what it will read has to run first and the pass that REPLACES what it read
+    has to run last. Neither ever fails the file; both notes ride the result.
     """
     input_path = Path(file)
     output_path = Path(output)
@@ -322,7 +360,34 @@ def ocr_file(
     except OSError:
         same = False
 
+    # Where everything downstream READS from. Enhancement is the one step that
+    # moves it: the source is never modified in mirror mode, so the enhanced
+    # bytes are staged at the deliverable path and recognition reads those.
+    source_path = input_path
+    enhance_note = ""
+    enhance_applied = False
+    if enhance:
+        if not same:
+            _copy_file(input_path, output_path)
+        enhance_applied, enhance_note = _enhance_step(
+            output_path, gs_path, tesseract_path, enhance_orientation
+        )
+        source_path = output_path
+
+    def _deliver() -> None:
+        """Put the un-recognised deliverable at `output_path`."""
+        if not same and source_path != output_path:
+            _copy_file(input_path, output_path)
+
+    def _enhance_tail(result: dict) -> dict:
+        if enhance:
+            result["enhance"] = enhance_note
+            if enhance_applied:
+                result["enhanceApplied"] = True
+        return result
+
     def _mrc_tail(result: dict) -> dict:
+        result = _enhance_tail(result)
         if not mrc:
             return result
         # Every branch above has already put the deliverable at `output_path`
@@ -339,13 +404,12 @@ def ocr_file(
             result["output"] = str(output_path)
         return result
 
-    with pikepdf.open(file) as pdf:
+    with pikepdf.open(str(source_path)) as pdf:
         total = len(pdf.pages)
-        needing = _pages_needing_ocr(file, pdf)
+        needing = _pages_needing_ocr(str(source_path), pdf)
 
     if not needing:
-        if not same:
-            _copy_file(input_path, output_path)
+        _deliver()
         return _mrc_tail({
             "output": str(output_path),
             "pages_total": total,
@@ -355,14 +419,13 @@ def ocr_file(
 
     pages: list[dict] = []
     for i in needing:
-        got = recognize(file, i + 1, language, tesseract_path, gs_path)
-        words = _to_pdf_rects(file, i, got["words"])
+        got = recognize(str(source_path), i + 1, language, tesseract_path, gs_path)
+        words = _to_pdf_rects(str(source_path), i, got["words"])
         if words:
             pages.append({"page": i + 1, "words": words})
 
     if not pages:
-        if not same:
-            _copy_file(input_path, output_path)
+        _deliver()
         return _mrc_tail({
             "output": str(output_path),
             "pages_total": total,
@@ -370,7 +433,7 @@ def ocr_file(
             "skipped": "no text recognized",
         })
 
-    apply_ocr_layer(file, str(output_path), pages)
+    apply_ocr_layer(str(source_path), str(output_path), pages)
     return _mrc_tail({
         "output": str(output_path),
         "pages_total": total,
@@ -396,6 +459,8 @@ def batch_ocr(
     mrc: bool = False,
     mrc_preset: str = "balanced",
     mrc_verify_text: bool = False,
+    enhance: bool = False,
+    enhance_orientation: bool = True,
 ) -> dict:
     """Mirror a folder of PDFs into searchable copies — or, with `in_place`,
     REPLACE each original with its searchable version (in-place batch
@@ -423,7 +488,12 @@ def batch_ocr(
     option that could just compress automatically": the user with a folder of
     smartphone scans is standing in this run. A file MRC declines — anything
     that is not a scan — keeps the bytes it already had and says so; MRC
-    never fails a file whose searchable copy already succeeded."""
+    never fails a file whose searchable copy already succeeded.
+
+    `enhance` deskews, despeckles, whitens and re-orients each file BEFORE
+    recognition — the same structural order as `mrc`'s, seen from the other
+    end (`_enhance_step`). It stages into its own temp beside the output, so
+    the source is never modified, and like MRC it never fails a file."""
     source_path = Path(source).resolve()
     if not source_path.is_dir():
         raise ValueError(f"Source folder not found: {source}")
@@ -477,6 +547,12 @@ def batch_ocr(
         )
         result: dict | None = None
         scratch: Path | None = None
+        # Enhancement's OWN staging, deliberately not `scratch`: the tail reads
+        # `scratch is not None` as "this file was repaired" and may replace the
+        # original from it, which an enhanced copy must never trigger.
+        enhanced: Path | None = None
+        enhance_note = ""
+        enhance_applied = False
         expected_pages = 0
         pdf = None
         try:
@@ -503,6 +579,23 @@ def batch_ocr(
                     scratch = None
                     result = {"rel": rel, "status": "skipped",
                               "reason": f"unreadable image: {exc}"}
+            if enhance and result is None:
+                # BEFORE the page is opened for recognition, because that is
+                # the whole order (`_enhance_step`), and into a staging copy,
+                # because a batch source is never modified.
+                enhanced = out_path.parent / f".{out_path.stem}.enhanced.tmp"
+                try:
+                    enhanced.parent.mkdir(parents=True, exist_ok=True)
+                    _copy_file(source_for_open, enhanced)
+                    enhance_applied, enhance_note = _enhance_step(
+                        enhanced, gs_path, tesseract_path, enhance_orientation
+                    )
+                    source_for_open = enhanced
+                except Exception as exc:  # noqa: BLE001 - never fails the file
+                    if enhanced is not None:
+                        enhanced.unlink(missing_ok=True)
+                        enhanced = None
+                    enhance_note = f"Scan enhancement did not apply: {exc}"
             password = pw_map.get(os.path.normcase(rel)) or pw_map.get(
                 os.path.normcase(os.path.basename(rel))
             )
@@ -540,7 +633,7 @@ def batch_ocr(
                     result = {"rel": rel, "status": "skipped", "reason": classification}
 
             if pdf is not None:
-                working = scratch if scratch is not None else abs_path
+                working = enhanced or scratch or abs_path
                 expected_pages = len(pdf.pages)
                 needing = _pages_needing_ocr(str(working), pdf)
                 pdf.close()
@@ -584,6 +677,21 @@ def batch_ocr(
                                 "pages had no recognizable text"
                             )
 
+            # ── enhancement's note, and its in-place landing ────────────
+            #
+            # The enhanced bytes reach a mirror output through whichever
+            # branch above wrote it (`working` IS the staging). In place, a
+            # file that needed no OCR wrote nothing at all, so the staging has
+            # to be produced here or the enhancement would be discarded.
+            if enhance and result is not None and result["status"] != "skipped":
+                if enhance_note:
+                    result["enhance"] = enhance_note
+                if enhance_applied:
+                    result["enhanceApplied"] = True
+                    if in_place and result["status"] != "ocr" and enhanced is not None:
+                        out_path.parent.mkdir(parents=True, exist_ok=True)
+                        _copy_file(enhanced, out_path)
+
             # ── MRC, after recognition and before the tail ──────────────
             #
             # After, because the order is structural here: the file this
@@ -592,10 +700,10 @@ def batch_ocr(
             # it — verifying bytes that are about to be replaced would verify
             # the wrong file.
             if mrc and result is not None and result["status"] != "skipped":
-                if in_place and result["status"] != "ocr":
+                if in_place and result["status"] != "ocr" and not result.get("enhanceApplied"):
                     # Nothing was staged (the file needed no OCR), so MRC
                     # produces the staging itself, from the original.
-                    mrc_source = scratch if scratch is not None else abs_path
+                    mrc_source = enhanced or scratch or abs_path
                 else:
                     mrc_source = out_path
                 applied_mrc, note = _mrc_step(
@@ -609,7 +717,14 @@ def batch_ocr(
             # ── tail: verify, heal, move ────────────────────────────────
             if result is not None:
                 if result["status"] != "skipped" and (
-                    (in_place and (result["status"] == "ocr" or result.get("mrcApplied")))
+                    (
+                        in_place
+                        and (
+                            result["status"] == "ocr"
+                            or result.get("mrcApplied")
+                            or result.get("enhanceApplied")
+                        )
+                    )
                     or moved_root
                     or (scratch is not None and replace_repaired_originals)
                 ):
@@ -625,7 +740,11 @@ def batch_ocr(
                 # In place: the verified staging REPLACES the original
                 # atomically (same directory, os.replace). A skipped result
                 # leaves the original untouched; the finally unlinks staging.
-                if in_place and (result["status"] == "ocr" or result.get("mrcApplied")):
+                if in_place and (
+                    result["status"] == "ocr"
+                    or result.get("mrcApplied")
+                    or result.get("enhanceApplied")
+                ):
                     try:
                         os.replace(out_path, abs_path)
                         result["inPlace"] = True
@@ -668,6 +787,8 @@ def batch_ocr(
                 pdf.close()
             if scratch is not None:
                 scratch.unlink(missing_ok=True)
+            if enhanced is not None:
+                enhanced.unlink(missing_ok=True)
             if in_place:
                 # Any staging that did not become the original is litter.
                 out_path.unlink(missing_ok=True)
@@ -777,6 +898,10 @@ def _file_line(r: dict) -> str:
             line += f" ({r['reason']})"
     else:
         line = f"{tag}{r['rel']} — {r['reason']}" if r.get("reason") else f"{tag}{r['rel']}"
+    if r.get("enhance"):
+        # What the enhancement corrected — or why it corrected nothing — on
+        # the same terms as the MRC note below: never left to inference.
+        line += f" [{r['enhance']}]"
     if r.get("mrc"):
         # The size saving — or the reason there was none — is the whole
         # point of having asked for MRC, so it is never left to inference.

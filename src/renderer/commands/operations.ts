@@ -27,7 +27,7 @@ export const OPERATIONS = [
   'extract_text', 'watermark', 'forms', 'compare', 'signatures',
   'document_js', 'convert_cmyk', 'headerfooter', 'pagebox', 'pagelabels', 'attachments', 'portfolio', 'layers', 'accessibility',
   'comments', 'preflight', 'outputpreview', 'inkmanager', 'printermarks', 'hairlines', 'flattener', 'trappresets', 'links', 'tags', 'readingorder', 'actions', 'takeoff',
-  'search_redact', 'prepareform', 'sanitize', 'tablereview',
+  'search_redact', 'prepareform', 'sanitize', 'tablereview', 'scanenhance',
 ] as const;
 
 export type Operation = (typeof OPERATIONS)[number];
@@ -68,5 +68,6 @@ export const OPERATION_TITLES: Record<Operation, string> = {
   prepareform: 'Detect Form Fields',
   sanitize: 'Remove Hidden Information',
   tablereview: 'Review Tables',
+  scanenhance: 'Enhance Scans',
   repair: 'Repair PDF', rebuild: 'Rebuild PDF', recover: 'Recover Pages',
 };
