@@ -2,6 +2,23 @@
 
 ## 1.0.25
 
+### Document Properties: Initial View, Fonts and Advanced
+- Document Properties gains three tabs beside Description and Security.
+- **Initial View** sets how a document opens: the page layout, which navigation pane appears, the opening page and its magnification, the reading direction, and the window options.
+- Page layout offers single page, single page continuous, two-up and two-up with a cover page, continuous or not.
+- The navigation pane can open on bookmarks, page thumbnails, layers or attachments — or the document can open with no pane, or full screen.
+- Magnification takes a percentage or fit page, width, height or visible area, and applies to the opening page.
+- The app honours what it can of a document's own initial view when it opens one: the layout, the navigation pane, full screen, the opening page, a percentage magnification, fit-width, and a right-to-left reading direction, which reverses which side of a spread the leading page takes.
+- The rest — hide the toolbar, the menu bar or the window controls, resize or centre the window, show the document title in the title bar — is written for other readers, and the panel says so rather than implying an effect.
+- A document that opens by running a script keeps that script: setting an opening page is refused by name instead of quietly replacing it.
+- A window option turned off removes the setting rather than writing a negative one, so a document only ever carries what departs from the default.
+- **Fonts** lists every font the document uses, grouped by type, with its encoding, how many pages use it, and whether its program is in the file.
+- Fonts are found wherever they hide: nested artwork, comment appearances, glyph procedures and a form's default appearance, not just the page's own resources.
+- A font that is not in the file names the face this app actually substitutes for it.
+- **Advanced** reports the PDF version, fast web view, whether the document is tagged, its page count, its page sizes with their standard paper names, whether an open action and a search index are recorded, and where the file lives.
+- Advanced also sets the trapped flag and the base URL that relative links in the document resolve against.
+- Changes on both tabs are ordinary undoable edits to the open document, and a document with live signatures warns or refuses first, as every other structural edit does.
+
 ### Watermarking with a page of another PDF
 - A watermark is now text, a picture, or a page of another PDF, and the panel offers all three.
 - A letterhead, a pre-drawn stamp or a vector logo can be stamped straight from the PDF it lives in.
