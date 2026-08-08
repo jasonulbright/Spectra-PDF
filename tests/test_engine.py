@@ -1596,7 +1596,7 @@ class TestRedactSplitsPartiallyCoveredRuns:
 # ── Watermark ─────────────────────────────────────────────────────────────
 
 
-def _make_watermark_fixture(path: str, page_count: int = 2, rotate: int | None = None, rotate_on_tree: bool = False) -> None:
+def _make_watermark_fixture(path: str, page_count: int = 2, rotate: int | None = None, rotate_on_tree: bool = False, page_size=(400, 400)) -> None:
     """Pages with per-page ORIGINAL <n> text. `rotate` lands on each page's
     own dict, or (rotate_on_tree) on the /Pages root so it must be resolved
     via the inheritance walk."""
@@ -1605,7 +1605,7 @@ def _make_watermark_fixture(path: str, page_count: int = 2, rotate: int | None =
         Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica, Encoding=Name.WinAnsiEncoding)
     )
     for i in range(page_count):
-        page = doc.add_blank_page(page_size=(400, 400))
+        page = doc.add_blank_page(page_size=page_size)
         page.Resources = Dictionary(Font=Dictionary(F1=font))
         page.Contents = doc.make_stream(f"BT /F1 12 Tf 50 300 Td (ORIGINAL {i + 1}) Tj ET".encode("ascii"))
         if rotate is not None and not rotate_on_tree:
@@ -1691,9 +1691,12 @@ class TestWatermark:
             assert float(gs.ca) == pytest.approx(0.25)
             assert float(gs.CA) == pytest.approx(0.25)
 
-    def test_watermark_rotated_page_composes_the_display_angle(self, tmp_dir):
-        # angle=0 on a /Rotate 90 page must be DRAWN at 90° in user space so
-        # it reads horizontally in the displayed orientation.
+    def test_watermark_rotated_page_takes_the_angle_as_given(self, tmp_dir):
+        # add_overlay places the form into the DISPLAYED rectangle and writes
+        # the /Rotate part of the turn into its own placement matrix, so
+        # angle=0 is DRAWN at 0 and reads level in the displayed orientation.
+        # Composing angle + /Rotate here turns the stamp twice and lays it on
+        # its side (proved by rendering: `rotprobe3.local.py`).
         src = os.path.join(tmp_dir, "wm_rot.pdf")
         out = os.path.join(tmp_dir, "wm_rot_out.pdf")
         _make_watermark_fixture(src, page_count=1, rotate=90)
@@ -1701,25 +1704,27 @@ class TestWatermark:
         watermark(file=src, output=out, text="SIDEWAYS", angle=0)
         with pikepdf.open(out) as pdf:
             a, b, c, d, _, _ = _tm_operands(_find_watermark_forms(pdf.pages[0])[0])
-        assert a == pytest.approx(0.0, abs=1e-4)  # cos 90
-        assert b == pytest.approx(1.0, abs=1e-4)  # sin 90
-        assert c == pytest.approx(-1.0, abs=1e-4)
-        assert d == pytest.approx(0.0, abs=1e-4)
+        assert a == pytest.approx(1.0, abs=1e-4)  # cos 0
+        assert b == pytest.approx(0.0, abs=1e-4)  # sin 0
+        assert c == pytest.approx(0.0, abs=1e-4)
+        assert d == pytest.approx(1.0, abs=1e-4)
         assert "SIDEWAYS" in extract_text(out)["text"]
 
     def test_watermark_honors_inherited_rotate(self, tmp_dir):
         # /Rotate hoisted onto the /Pages root (inheritable per spec) must be
         # found by the /Parent-chain walk — same generator pattern the redact
-        # inherited-resources regression covered.
+        # inherited-resources regression covered. What /Rotate now decides is
+        # the form's BBox: it is the DISPLAYED box, so 90 swaps the axes. A
+        # walk that missed the inherited value would leave 600x400.
         src = os.path.join(tmp_dir, "wm_rot_inh.pdf")
         out = os.path.join(tmp_dir, "wm_rot_inh_out.pdf")
-        _make_watermark_fixture(src, page_count=1, rotate=90, rotate_on_tree=True)
+        _make_watermark_fixture(src, page_count=1, rotate=90, rotate_on_tree=True,
+                                page_size=(600, 400))
 
         watermark(file=src, output=out, text="SIDEWAYS", angle=0)
         with pikepdf.open(out) as pdf:
-            a, b, _, _, _, _ = _tm_operands(_find_watermark_forms(pdf.pages[0])[0])
-        assert a == pytest.approx(0.0, abs=1e-4)
-        assert b == pytest.approx(1.0, abs=1e-4)
+            box = [float(v) for v in _find_watermark_forms(pdf.pages[0])[0].BBox]
+        assert box == [0, 0, 400, 600]
 
     def test_watermark_helvetica_widths_match_pdfminer(self):
         # The embedded ASCII advance table must agree with pdfminer's own
