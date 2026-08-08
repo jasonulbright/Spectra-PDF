@@ -327,6 +327,19 @@ describe('qps pseudo-locale leak sweep', () => {
       await setReactInputValue('[data-testid="redact-props-overlay"]', '');
       await $('[data-testid="redact-props-reset"]').click();
 
+      // Scan Enhancement: four switches, six numeric labels, and a REPORT
+      // whose lines only exist once the measurement has come back. The
+      // document here is born-digital, so what renders is the "no scans" line
+      // and the per-page refusal — the two the panel shows when it declines,
+      // and the two a sweep taken before the measurement would miss.
+      expect(await invokeAppCommand('tools.panel.scanenhance')).toBe(true);
+      await $('[data-testid="scanenhance-report"]').waitForDisplayed({ timeout: 10_000 });
+      await $('[data-testid="scanenhance-refused"]').waitForDisplayed({
+        timeout: 60_000,
+        timeoutMsg: 'the scan-enhancement measurement never came back',
+      });
+      await sweep('[data-testid="tool-dock"]', leaks);
+
       expect(await invokeAppCommand('tools.panel.rotate')).toBe(true);
       await $('[data-testid="tool-dock"]').waitForDisplayed({ timeout: 10_000 });
 
