@@ -3809,5 +3809,22 @@
   "toolbar.group.zoom": "Ζουμ",
   "tools.heading": "Εργαλεία",
   "tools.openFirst": "Ανοίξτε πρώτα ένα PDF",
-  "tools.sub": "Επιλέξτε τι θέλετε να κάνετε με το έγγραφό σας."
+  "tools.sub": "Επιλέξτε τι θέλετε να κάνετε με το έγγραφό σας.",
+  "imageres.title": "Εικόνες",
+  "imageres.loading": "Μέτρηση των εικόνων αυτού του εγγράφου…",
+  "imageres.failed": "Δεν ήταν δυνατή η μέτρηση των εικόνων αυτού του εγγράφου.",
+  "imageres.none": "Αυτό το έγγραφο δεν σχεδιάζει εικόνες.",
+  "imageres.single": "{{images}} στα {{dpi}} DPI",
+  "imageres.range": "{{images}} από {{min}} έως {{max}} DPI, διάμεσος {{median}}",
+  "imageres.unmeasured": "Μη μετρήσιμες: {{unmeasured}}",
+  "imageres.scanned": "Σαρωμένο έγγραφο — {{scanned}} από {{pages}} σελίδες αναγνωρίζονται ως σαρώσεις.",
+  "imageres.scanPages": "{{scanned}} από {{pages}} σελίδες αναγνωρίζονται ως σαρώσεις.",
+  "panel.compress.thenOptimize": "Στη συνέχεια βελτιστοποίηση του αποτελέσματος",
+  "panel.compress.thenOptimizeHint": "Εκτελεί τη βελτιστοποίηση στο συμπιεσμένο αρχείο: γραμμικοποίηση για το web και συσκευασία των αντικειμένων σε ροές. Εκτελείται ως δεύτερη λειτουργία, με δική της εγγραφή στην ουρά.",
+  "panel.compress.optimizing": "Βελτιστοποίηση...",
+  "panel.compress.optimizeResult": "{{result}} Στη συνέχεια βελτιστοποιήθηκε στα {{to}} KB (συνολική μείωση {{ratio}}%).",
+  "panel.compress.optimizeFailed": "{{result}} Η βελτιστοποίηση του συμπιεσμένου αρχείου απέτυχε: {{message}}",
+  "imageres.count_one": "{{count}} εικόνα",
+  "imageres.count_other": "{{count}} εικόνες",
+  "opqueue.op.optimize": "Βελτιστοποίηση"
 }

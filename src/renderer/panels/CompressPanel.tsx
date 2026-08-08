@@ -20,6 +20,11 @@ import {
 import { TEST_HARNESS_ENABLED, registerCompress } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tOcrLanguage, type UiKey } from '../i18n';
+import {
+  parseImageResolution,
+  type ImageResolutionSummary as ImageResolution,
+} from '../lib/image-resolution';
+import { ImageResolutionSummary } from '../components/ImageResolutionSummary';
 
 const PRESET_DPI: Record<string, number> = { screen: 72, ebook: 150, printer: 300, prepress: 300 };
 
@@ -69,10 +74,44 @@ export function CompressPanel(): React.ReactElement {
   // Every other OCR surface picks its languages the same way, with the same
   // '+'-joined string.
   const [verifyLangs, setVerifyLangs] = useState<string[]>([DEFAULT_OCR_LANGUAGE]);
+  // The second step. It is a separate operation on the compressed OUTPUT, not
+  // a compress parameter — see the "Then optimize" run below.
+  const [thenOptimize, setThenOptimize] = useState(false);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const [imageRes, setImageRes] = useState<ImageResolution | null>(null);
+  const [imageResError, setImageResError] = useState<string | null>(null);
+
   const mrc = isMrcQuality(quality);
+
+  const workingPath = activeFile?.workingPath ?? null;
+  const buffer = activeFile?.buffer ?? null;
+
+  // What resolution the document's images actually are — the context the DPI
+  // slider is chosen against. Re-read on every buffer change: a stale summary
+  // would describe bytes the document no longer has (the space audit's rule).
+  useEffect(() => {
+    if (!workingPath || !buffer) {
+      setImageRes(null);
+      setImageResError(null);
+      return;
+    }
+    let cancelled = false;
+    setImageRes(null);
+    setImageResError(null);
+    void (async () => {
+      try {
+        const raw = (await call('summarize_image_resolution', {
+          file: workingPath,
+        })) as unknown as Record<string, unknown>;
+        if (!cancelled) setImageRes(parseImageResolution(raw));
+      } catch (e: unknown) {
+        if (!cancelled) setImageResError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [workingPath, buffer, call]);
 
   const handlePresetChange = (preset: string): void => {
     setQuality(preset);
@@ -120,8 +159,46 @@ export function CompressPanel(): React.ReactElement {
           to: (r.compressed_size / 1024).toFixed(0),
           ratio: ((1 - r.compressed_size / r.original_size) * 100).toFixed(1),
         });
-        setStatus(mrc ? `${line} ${describeMrc(r as unknown as MrcReport)}` : line);
-        return 'ok';
+        const compressed = mrc ? `${line} ${describeMrc(r as unknown as MrcReport)}` : line;
+        setStatus(compressed);
+        if (!thenOptimize) return 'ok';
+
+        // Step two is a SECOND operation on the file step one just wrote — its
+        // own queue entry, its own status, its own failure. It reads and
+        // rewrites `output` in place; the engine stages that write, so the
+        // input is never the file being replaced. Nothing here is undoable
+        // either way: this panel writes a file the user named and never
+        // replaces the open document's bytes.
+        setStatus(tChrome('panel.compress.optimizing'));
+        try {
+          const o = await call('optimize', {
+            file: output,
+            output,
+            linearize: true,
+            strip_metadata: false,
+            compress_streams: true,
+          });
+          setStatus(
+            tChrome('panel.compress.optimizeResult', {
+              result: compressed,
+              to: (o.output_size / 1024).toFixed(0),
+              // Against the ORIGINAL document, not against step one's output:
+              // what the user wants to know is what the pair achieved.
+              ratio: ((1 - o.output_size / r.original_size) * 100).toFixed(1),
+            }),
+          );
+          return 'ok';
+        } catch (e: unknown) {
+          // Step one's output is a complete compressed PDF and it is still on
+          // disk, so the message says so rather than reporting only a failure.
+          setStatus(
+            tChrome('panel.compress.optimizeFailed', {
+              result: compressed,
+              message: e instanceof Error ? e.message : String(e),
+            }),
+          );
+          return 'error';
+        }
       } catch (e: unknown) {
         setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
         return 'error';
@@ -129,7 +206,7 @@ export function CompressPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, quality, dpi, mrc, mrcPreset, pdfaSafe, verifyText, verifyLangs, call],
+    [activeFile, quality, dpi, mrc, mrcPreset, pdfaSafe, verifyText, verifyLangs, thenOptimize, call],
   );
 
   const handleCompress = useCallback(async () => {
@@ -144,7 +221,8 @@ export function CompressPanel(): React.ReactElement {
     setQuality: handlePresetChange,
     setMrcPreset,
     setVerifyText,
-    snapshot: { quality, mrcPreset, verifyText },
+    setThenOptimize,
+    snapshot: { quality, mrcPreset, verifyText, thenOptimize },
   };
   const harnessRef = useRef(harnessDeps);
   harnessRef.current = harnessDeps;
@@ -155,6 +233,7 @@ export function CompressPanel(): React.ReactElement {
       setQuality: (value) => harnessRef.current.setQuality(value),
       setMrcPreset: (value) => harnessRef.current.setMrcPreset(normalizeMrcPreset(value)),
       setVerifyText: (value) => harnessRef.current.setVerifyText(value),
+      setThenOptimize: (value) => harnessRef.current.setThenOptimize(value),
       snapshot: () => harnessRef.current.snapshot,
     });
     return () => registerCompress(null);
@@ -165,6 +244,17 @@ export function CompressPanel(): React.ReactElement {
   return (
     <div className="flex flex-col gap-4">
       <div className="text-sm text-neutral-400">{tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span> ({tChromeCount('panel.common.pageCount', activeFile.pageCount)})</div>
+      <div className="text-xs" data-testid="compress-image-resolution">
+        <span className="block text-neutral-400">{tChrome('imageres.title')}</span>
+        <span className="block text-neutral-300">
+          <ImageResolutionSummary
+            summary={imageRes}
+            loading={imageRes === null && imageResError === null}
+            error={imageResError}
+            testIdPrefix="compress-images"
+          />
+        </span>
+      </div>
       <div>
         <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.compress.quality')}</label>
         <select aria-label={tChrome('panel.compress.presetAria')} data-testid="compress-quality" value={quality} onChange={(e) => handlePresetChange(e.target.value)} className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm">
@@ -251,6 +341,18 @@ export function CompressPanel(): React.ReactElement {
           </div>
         </div>
       )}
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            data-testid="compress-then-optimize"
+            checked={thenOptimize}
+            onChange={(e) => setThenOptimize(e.target.checked)}
+          />
+          <span className="text-sm text-neutral-300">{tChrome('panel.compress.thenOptimize')}</span>
+        </label>
+        <p className="text-xs text-neutral-500 max-w-md">{tChrome('panel.compress.thenOptimizeHint')}</p>
+      </div>
       <button onClick={handleCompress} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
         {busy ? tChrome('panel.compress.compressing') : tChrome('panel.compress.compress')}
       </button>

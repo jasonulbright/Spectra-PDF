@@ -3809,5 +3809,22 @@
   "toolbar.group.zoom": "Zooma",
   "tools.heading": "Verktyg",
   "tools.openFirst": "Öppna en PDF först",
-  "tools.sub": "Välj vad du vill göra med ditt dokument."
+  "tools.sub": "Välj vad du vill göra med ditt dokument.",
+  "imageres.title": "Bilder",
+  "imageres.loading": "Mäter bilderna i det här dokumentet…",
+  "imageres.failed": "Bilderna i det här dokumentet kunde inte mätas.",
+  "imageres.none": "Det här dokumentet ritar inga bilder.",
+  "imageres.single": "{{images}} vid {{dpi}} DPI",
+  "imageres.range": "{{images}} från {{min}} till {{max}} DPI, median {{median}}",
+  "imageres.unmeasured": "Går inte att mäta: {{unmeasured}}",
+  "imageres.scanned": "Skannat dokument — {{scanned}} av {{pages}} sidor räknas som skanningar.",
+  "imageres.scanPages": "{{scanned}} av {{pages}} sidor räknas som skanningar.",
+  "panel.compress.thenOptimize": "Optimera sedan resultatet",
+  "panel.compress.thenOptimizeHint": "Kör optimeringen på den komprimerade filen: linjäriserad för webben och med objekten packade i strömmar. Den körs som en andra åtgärd med en egen rad i kön.",
+  "panel.compress.optimizing": "Optimerar...",
+  "panel.compress.optimizeResult": "{{result}} Därefter optimerad till {{to}} KB ({{ratio}}% total minskning).",
+  "panel.compress.optimizeFailed": "{{result}} Optimeringen av den komprimerade filen misslyckades: {{message}}",
+  "imageres.count_one": "{{count}} bild",
+  "imageres.count_other": "{{count}} bilder",
+  "opqueue.op.optimize": "Optimera"
 }
