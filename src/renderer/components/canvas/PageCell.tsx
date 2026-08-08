@@ -800,7 +800,12 @@ interface PageCellProps {
   // A crop band. Display-normalised like every other banded gesture,
   // with the rotation AT DRAW — the insets are computed against the page as
   // the user saw it, so a landscape scan trims the edges they pointed at.
-  onSetCropRect?: (
+  //
+  // REQUIRED, like every other band-committing callback. An optional one is
+  // erased by `?.` at the call site: the band still draws, the gesture still
+  // completes, and the release goes nowhere — a render path that forgets to
+  // pass it type-checks and ships a tool that does nothing.
+  onSetCropRect: (
     docId: string,
     pageId: string,
     rect: { x: number; y: number; w: number; h: number },
@@ -809,7 +814,7 @@ interface PageCellProps {
   // An article bead band. Same shape and same contract as the crop band —
   // display-normalised, rotation AT DRAW, and nothing commits: the panel
   // appends the box and Save is what writes.
-  onSetBeadRect?: (
+  onSetBeadRect: (
     docId: string,
     pageId: string,
     rect: { x: number; y: number; w: number; h: number },
@@ -2753,11 +2758,11 @@ function PageCellImpl({
         } else if (tool === 'cropdraw') {
           // The band is the region to KEEP. Nothing commits here —
           // the panel turns it into insets and the user applies.
-          onSetCropRect?.(docId, page.id, latest, page.rotation);
+          onSetCropRect(docId, page.id, latest, page.rotation);
         } else if (tool === 'beaddraw') {
           // The band is one box of an article. Nothing commits here — the
           // Articles panel appends it and the user saves.
-          onSetBeadRect?.(docId, page.id, latest, page.rotation);
+          onSetBeadRect(docId, page.id, latest, page.rotation);
         } else if (tool === 'addtext') {
           // Add-text placement — single, drawing again replaces it.
           onSetAddTextRect(docId, page.id, latest, page.rotation);
