@@ -728,8 +728,19 @@ def watermark(
                         show = b"<" + encode(draw_text).hex().encode("ascii") + b"> Tj"
                     auto_gh = glyph_height
                     uni = (font_obj, auto_em, show)
-                size = float(font_size) if float(font_size) > 0 else _auto_font_size(
-                    text, width, height, rotate, angle, em_width=auto_em, glyph_height_em=auto_gh
+                # `scale` multiplies the AUTO size, so it means the same thing
+                # to a reader for either source. An explicit `font_size` is an
+                # explicit size and is not scaled — two numbers fighting over
+                # one dimension would make neither of them mean anything. The
+                # legibility floor is inside the auto fit and is deliberately
+                # not re-applied: a small scale is a request, not an accident.
+                size = (
+                    float(font_size)
+                    if float(font_size) > 0
+                    else _auto_font_size(
+                        text, width, height, rotate, angle,
+                        em_width=auto_em, glyph_height_em=auto_gh,
+                    ) * scale_value
                 )
                 em = auto_em if auto_em is not None else _text_width_em(text)
                 gh = auto_gh if auto_gh is not None else _GLYPH_HEIGHT_EM
