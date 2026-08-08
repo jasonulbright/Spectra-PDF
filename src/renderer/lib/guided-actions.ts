@@ -103,6 +103,12 @@ export interface StepDef {
   /** Reshape the flat form params into the engine call's shape (e.g. the
    * header/footer position+text pair into its `placements` list). */
   mapParams?: (params: Record<string, string | number>) => Record<string, unknown>;
+  /** Param keys of which EXACTLY ONE carries a value (watermark's text or
+   * image source). A `required` flag cannot express it: neither key is
+   * required on its own, and both together is as wrong as neither.
+   * `engine/guided_actions.py` enforces the same pairs, so an exported
+   * action file cannot run headlessly in a shape the editor refuses. */
+  requireOneOf?: readonly string[];
   params: readonly StepParamDef[];
 }
 
@@ -323,8 +329,16 @@ export const STEP_CATALOG: readonly StepDef[] = [
     op: 'watermark',
     title: 'Watermark',
     needsFontDir: true,
+    requireOneOf: ['text', 'image'],
     params: [
-      { key: 'text', label: 'Text', kind: 'text', defaultValue: '', required: true },
+      { key: 'text', label: 'Text', kind: 'text', defaultValue: '' },
+      {
+        key: 'image',
+        label: 'Image file',
+        kind: 'text',
+        defaultValue: '',
+        hint: 'Full path to a picture. Set this or Text, not both.',
+      },
       {
         key: 'opacity',
         label: 'Opacity',
@@ -335,6 +349,24 @@ export const STEP_CATALOG: readonly StepDef[] = [
         step: 0.05,
       },
       { key: 'angle', label: 'Angle', kind: 'number', defaultValue: 45, min: -180, max: 180, step: 5 },
+      { key: 'scale', label: 'Scale', kind: 'number', defaultValue: 1, min: 0.05, max: 4, step: 0.05 },
+      {
+        key: 'position',
+        label: 'Position',
+        kind: 'select',
+        options: [
+          { value: 'center', label: 'Center' },
+          { value: 'top-left', label: 'Top left' },
+          { value: 'top-center', label: 'Top center' },
+          { value: 'top-right', label: 'Top right' },
+          { value: 'middle-left', label: 'Middle left' },
+          { value: 'middle-right', label: 'Middle right' },
+          { value: 'bottom-left', label: 'Bottom left' },
+          { value: 'bottom-center', label: 'Bottom center' },
+          { value: 'bottom-right', label: 'Bottom right' },
+        ],
+        defaultValue: 'center',
+      },
     ],
   },
   {
@@ -682,6 +714,21 @@ export function validateAction(action: GuidedAction): string | null {
         });
       }
     }
+    if (def.requireOneOf) {
+      // An asked key's value is the PRE-RUN form's problem, so an asked pair
+      // is left to `validateRunValues`.
+      const askedEither = def.requireOneOf.some((k) => asked.has(k));
+      const set = def.requireOneOf.filter((k) => String(step.params[k] ?? '').trim());
+      if (!askedEither && set.length !== 1) {
+        return tChrome('refusal.action.paramOneOf', {
+          index: i + 1,
+          step: tStepTitle(def.op, def.title),
+          params: def.requireOneOf
+            .map((k) => tStepParam(def.op, k, def.params.find((p) => p.key === k)?.label ?? k))
+            .join(' / '),
+        });
+      }
+    }
     // A terminal step never mutates the open doc, so nothing may follow it.
     if (def.terminalOutput && i < action.steps.length - 1) {
       return tChrome('refusal.action.terminalNotLast', {
@@ -774,6 +821,21 @@ export function validateRunValues(
       return tChrome('refusal.action.runParamRequired', {
         step: tStepTitle(def.op, def.title),
         param: tStepParam(def.op, p.key, p.label),
+      });
+    }
+  }
+  if (def.requireOneOf) {
+    // The effective value: an asked key comes from this form, an unasked one
+    // from what the step stored.
+    const asked = new Set(askedParamKeys(step));
+    const effective = (k: string): string =>
+      String((asked.has(k) ? values[k] : step.params[k]) ?? '').trim();
+    if (def.requireOneOf.filter((k) => effective(k)).length !== 1) {
+      return tChrome('refusal.action.runParamOneOf', {
+        step: tStepTitle(def.op, def.title),
+        params: def.requireOneOf
+          .map((k) => tStepParam(def.op, k, def.params.find((p) => p.key === k)?.label ?? k))
+          .join(' / '),
       });
     }
   }

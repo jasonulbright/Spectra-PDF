@@ -79,6 +79,9 @@ export const dialog = {
   pickAnyFiles: () => invoke<string[]>('pick_any_files'),
   /** Pick a folder (Batch OCR source/destination). Returns null if cancelled. */
   pickFolder: (title?: string) => invoke<string | null>('pick_folder_dialog', { title }),
+  /** Pick ONE picture to stamp as a watermark. Filtered to the Create PDF
+   * image set — the same set the engine accepts. Null if cancelled. */
+  pickWatermarkImage: () => invoke<string | null>('pick_watermark_image'),
   /** Pick a replacement image (Edit ▸ Replace Image). Null if cancelled.
    * `includeSvg` widens the filter for Add Image (SVG places as real
    * vector content); Replace stays raster-only. */

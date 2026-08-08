@@ -101,7 +101,7 @@ pub enum CliCommand {
     /// (no review step exists headlessly). Use `--marks-only` to write
     /// reviewable /Redact annotations instead of removing content
     SearchRedact(SearchRedactArgs),
-    /// Stamp a translucent text watermark across pages
+    /// Stamp a translucent text or image watermark across pages
     Watermark(WatermarkArgs),
     /// Add headers, footers, page numbers, and Bates numbering
     HeaderFooter(HeaderFooterArgs),
@@ -739,9 +739,14 @@ pub struct WatermarkArgs {
     /// Output PDF file
     #[arg(short, long)]
     pub output: PathBuf,
-    /// Watermark text (Latin-1 best-effort — non-Latin glyphs render as '?')
+    /// Watermark text (Latin-1 best-effort — non-Latin glyphs render as '?').
+    /// Exactly one of --text and --image is the source
     #[arg(short, long)]
-    pub text: String,
+    pub text: Option<String>,
+    /// Picture to stamp instead of text; it embeds once and every page
+    /// references the same image
+    #[arg(long)]
+    pub image: Option<PathBuf>,
     /// Fill/stroke alpha, 0 < opacity <= 1
     #[arg(long, default_value_t = 0.15)]
     pub opacity: f64,
@@ -760,6 +765,25 @@ pub struct WatermarkArgs {
     /// Comma-separated 1-based page numbers (omit for all pages)
     #[arg(long)]
     pub pages: Option<String>,
+    /// Multiplier on the auto fit (1 = as large as it goes without crowding
+    /// the page); above 1 may bleed off the page
+    #[arg(long, default_value_t = 1.0)]
+    pub scale: f64,
+    /// Where the stamp sits, named in the page's displayed orientation
+    #[arg(long, default_value = "center", value_parser = [
+        "center", "top-left", "top-center", "top-right", "middle-left",
+        "middle-right", "bottom-left", "bottom-center", "bottom-right",
+    ])]
+    pub position: String,
+    /// Points inset from the page edge for the non-centred positions
+    #[arg(long, default_value_t = 36.0)]
+    pub margin: f64,
+    /// Repeat the stamp across the whole page; --position is then ignored
+    #[arg(long)]
+    pub tile: bool,
+    /// Points between tiles
+    #[arg(long, default_value_t = 24.0)]
+    pub tile_gap: f64,
 }
 
 #[derive(Args)]
@@ -2890,15 +2914,32 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::Watermark(args) => {
+            // Exactly one source. Passing both would silently honour one of
+            // them; passing neither has no stamp to draw.
+            match (&args.text, &args.image) {
+                (Some(_), Some(_)) => {
+                    return Err("--text and --image are alternatives, not a pair".to_string())
+                }
+                (None, None) => return Err("--text or --image is required".to_string()),
+                _ => {}
+            }
             let mut params = json!({
                 "file": abs(&args.input).to_string_lossy(),
                 "output": abs(&args.output).to_string_lossy(),
-                "text": args.text,
+                "text": args.text.clone().unwrap_or_default(),
+                "image": args.image.as_ref()
+                    .map(|p| abs(p).to_string_lossy().to_string())
+                    .unwrap_or_default(),
                 "opacity": args.opacity,
                 "angle": args.angle,
                 "color": args.color,
                 "font_size": args.font_size,
                 "layer": args.layer,
+                "scale": args.scale,
+                "position": args.position,
+                "margin": args.margin,
+                "tile": args.tile,
+                "tile_gap": args.tile_gap,
                 // The vendored fonts dir lets the engine embed a Unicode
                 // font for non-Latin-1 stamps (else refused, never "?"-mapped).
                 "font_dir": resolve_fonts().to_string_lossy().to_string(),

@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
-import { file, app } from '../lib/tauri-bridge';
+import { file, app, dialog } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
@@ -11,24 +11,54 @@ import { tChrome, tChromeCount } from '../i18n';
 // ink, not a watermark.
 const WATERMARK_COLORS = ['#808080', '#e0393e', '#2f6fed', '#2fbf71'];
 
+const POSITIONS = [
+  'center',
+  'top-left',
+  'top-center',
+  'top-right',
+  'middle-left',
+  'middle-right',
+  'bottom-left',
+  'bottom-center',
+  'bottom-right',
+] as const;
+
+type WatermarkSource = 'text' | 'image';
+
 export function WatermarkPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();
+  const [source, setSource] = useState<WatermarkSource>('text');
   const [text, setText] = useState('CONFIDENTIAL');
+  const [imagePath, setImagePath] = useState('');
   const [opacity, setOpacity] = useState(0.15);
   const [angle, setAngle] = useState(45);
   const [color, setColor] = useState(WATERMARK_COLORS[0]);
   const [layer, setLayer] = useState<'over' | 'under'>('over');
+  const [scale, setScale] = useState(1);
+  const [position, setPosition] = useState<(typeof POSITIONS)[number]>('center');
+  const [margin, setMargin] = useState(36);
+  const [tile, setTile] = useState(false);
+  const [tileGap, setTileGap] = useState(24);
   const [pageInput, setPageInput] = useState('all');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
 
+  const pickImage = useCallback(async () => {
+    const picked = await dialog.pickWatermarkImage();
+    if (picked) setImagePath(picked);
+  }, []);
+
   const handleApply = useCallback(async () => {
     if (!activeFile) return;
-    if (!text.trim()) {
+    if (source === 'text' && !text.trim()) {
       setStatus(tChrome('panel.watermark.emptyText'));
+      return;
+    }
+    if (source === 'image' && !imagePath.trim()) {
+      setStatus(tChrome('panel.watermark.noImage'));
       return;
     }
     const pages =
@@ -52,11 +82,19 @@ export function WatermarkPanel(): React.ReactElement {
       const result = await call('watermark', {
         file: activeFile.workingPath,
         output: activeFile.workingPath,
-        text: text.trim(),
+        // Exactly one source reaches the engine; the other stays empty, which
+        // is how the engine's own either/or refusal is expressed.
+        text: source === 'text' ? text.trim() : '',
+        image: source === 'image' ? imagePath.trim() : '',
         opacity,
         angle,
         color,
         layer,
+        scale,
+        position,
+        margin,
+        tile,
+        tile_gap: tileGap,
         // The bundled fonts dir lets the engine embed a Unicode font for
         // non-Latin-1 stamps instead of rendering "?" (CJK still refuses — the
         // fallback-face boundary — with a surfaced error).
@@ -67,14 +105,18 @@ export function WatermarkPanel(): React.ReactElement {
       const info = await call('get_page_count', { file: activeFile.workingPath });
       dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer, snapshotPath });
       const count = (result as unknown as { pages_watermarked: number }).pages_watermarked;
-      setStatus(tChromeCount('panel.watermark.done', count));
+      const frames = (result as unknown as { image_frames: number }).image_frames ?? 0;
+      setStatus(
+        tChromeCount('panel.watermark.done', count) +
+          (frames > 1 ? ' ' + tChromeCount('panel.watermark.usedFirstFrame', frames) : ''),
+      );
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e);
       setStatus(tChrome('panel.common.error', { message: msg }));
     } finally {
       setBusy(false);
     }
-  }, [activeFile, text, opacity, angle, color, layer, pageInput, call, dispatch]);
+  }, [activeFile, source, text, imagePath, opacity, angle, color, layer, scale, position, margin, tile, tileGap, pageInput, call, dispatch]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.watermark.open')} />;
 
@@ -84,19 +126,51 @@ export function WatermarkPanel(): React.ReactElement {
         {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span> ({tChromeCount('panel.common.pageCount', activeFile.pageCount)})
       </div>
       <div>
-        <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.text')}</label>
-        <input
-          data-testid="watermark-text"
-          aria-label={tChrome('panel.watermark.textAria')}
-          type="text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          className="w-64 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
-        />
-        <p className="text-xs text-neutral-500 mt-1">
-          {tChrome('panel.watermark.scriptsNote')}
-        </p>
+        <label className="block text-sm text-neutral-400 mb-1" htmlFor="watermark-source">{tChrome('panel.watermark.source')}</label>
+        <select
+          id="watermark-source"
+          data-testid="watermark-source"
+          value={source}
+          onChange={(e) => setSource(e.target.value as WatermarkSource)}
+          className="w-48 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+        >
+          <option value="text">{tChrome('panel.watermark.sourceText')}</option>
+          <option value="image">{tChrome('panel.watermark.sourceImage')}</option>
+        </select>
       </div>
+      {source === 'text' ? (
+        <div>
+          <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.text')}</label>
+          <input
+            data-testid="watermark-text"
+            aria-label={tChrome('panel.watermark.textAria')}
+            type="text"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className="w-64 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+          />
+          <p className="text-xs text-neutral-500 mt-1">
+            {tChrome('panel.watermark.scriptsNote')}
+          </p>
+        </div>
+      ) : (
+        <div>
+          <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.imageLabel')}</label>
+          <div className="flex items-center gap-2">
+            <button
+              data-testid="watermark-pick-image"
+              onClick={pickImage}
+              className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded text-sm"
+            >
+              {tChrome('panel.watermark.chooseImage')}
+            </button>
+            <span data-testid="watermark-image-name" className="text-sm text-neutral-300 truncate max-w-xs">
+              {imagePath ? imagePath.replace(/^.*[\\/]/, '') : tChrome('panel.watermark.noImageChosen')}
+            </span>
+          </div>
+          <p className="text-xs text-neutral-500 mt-1">{tChrome('panel.watermark.imageNote')}</p>
+        </div>
+      )}
       <div className="flex gap-6 items-end flex-wrap">
         <div>
           <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.opacity', { pct: Math.round(opacity * 100) })}</label>
@@ -125,24 +199,26 @@ export function WatermarkPanel(): React.ReactElement {
             className="w-20 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
           />
         </div>
-        <div>
-          <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.color')}</label>
-          <div className="flex items-center gap-1.5 py-1.5">
-            {WATERMARK_COLORS.map((c) => (
-              <button
-                key={c}
-                title={c}
-                onClick={() => setColor(c)}
-                className={'color-swatch w-5 h-5 rounded-full' + (color === c ? ' is-selected' : '')}
-                style={{
-                  backgroundColor: c,
-                  outline: color === c ? '2px solid white' : '1px solid rgba(255,255,255,0.3)',
-                  outlineOffset: 1,
-                }}
-              />
-            ))}
+        {source === 'text' && (
+          <div>
+            <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.color')}</label>
+            <div className="flex items-center gap-1.5 py-1.5">
+              {WATERMARK_COLORS.map((c) => (
+                <button
+                  key={c}
+                  title={c}
+                  onClick={() => setColor(c)}
+                  className={'color-swatch w-5 h-5 rounded-full' + (color === c ? ' is-selected' : '')}
+                  style={{
+                    backgroundColor: c,
+                    outline: color === c ? '2px solid white' : '1px solid rgba(255,255,255,0.3)',
+                    outlineOffset: 1,
+                  }}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+        )}
         <div>
           <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.placement')}</label>
           <select
@@ -165,6 +241,76 @@ export function WatermarkPanel(): React.ReactElement {
             value={pageInput}
             onChange={(e) => setPageInput(e.target.value)}
             className="w-40 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+          />
+        </div>
+      </div>
+      <div className="flex gap-6 items-end flex-wrap">
+        <div>
+          <label className="block text-sm text-neutral-400 mb-1" htmlFor="watermark-scale">{tChrome('panel.watermark.scale')}</label>
+          <input
+            id="watermark-scale"
+            data-testid="watermark-scale"
+            type="number"
+            min={0.05}
+            max={4}
+            step={0.05}
+            value={scale}
+            onChange={(e) => setScale(Number(e.target.value))}
+            className="w-24 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+          />
+        </div>
+        <div>
+          <label className="block text-sm text-neutral-400 mb-1" htmlFor="watermark-position">{tChrome('panel.watermark.position')}</label>
+          <select
+            id="watermark-position"
+            data-testid="watermark-position"
+            value={position}
+            disabled={tile}
+            onChange={(e) => setPosition(e.target.value as (typeof POSITIONS)[number])}
+            className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50"
+          >
+            {POSITIONS.map((p) => (
+              <option key={p} value={p}>{tChrome(`panel.watermark.position.${p}` as 'panel.watermark.position.center')}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm text-neutral-400 mb-1" htmlFor="watermark-margin">{tChrome('panel.watermark.margin')}</label>
+          <input
+            id="watermark-margin"
+            data-testid="watermark-margin"
+            type="number"
+            min={0}
+            step={6}
+            value={margin}
+            disabled={tile || position === 'center'}
+            onChange={(e) => setMargin(Number(e.target.value))}
+            className="w-24 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50 focus:outline-none focus:border-blue-500"
+          />
+        </div>
+        <div>
+          <label className="flex items-center gap-2 text-sm text-neutral-400 py-1.5">
+            <input
+              data-testid="watermark-tile"
+              type="checkbox"
+              checked={tile}
+              onChange={(e) => setTile(e.target.checked)}
+            />
+            {tChrome('panel.watermark.tile')}
+          </label>
+        </div>
+        <div>
+          <label className="block text-sm text-neutral-400 mb-1" htmlFor="watermark-tile-gap">{tChrome('panel.watermark.tileGap')}</label>
+          <input
+            id="watermark-tile-gap"
+            data-testid="watermark-tile-gap"
+            type="number"
+            min={0}
+            step={4}
+            value={tileGap}
+            disabled={!tile}
+            onChange={(e) => setTileGap(Number(e.target.value))}
+            className="w-24 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50 focus:outline-none focus:border-blue-500"
           />
         </div>
       </div>
