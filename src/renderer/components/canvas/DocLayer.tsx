@@ -128,14 +128,14 @@ interface DocLayerProps {
   /** The pending crop rectangle, drawn on the page. */
   cropPlacement: SignaturePlacement | null;
   onClearCropPlacement: () => void;
-  onSetCropRect?: (
+  onSetCropRect: (
     docId: string,
     pageId: string,
     rect: { x: number; y: number; w: number; h: number },
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
   /** An article bead band; the Articles panel appends it. */
-  onSetBeadRect?: (
+  onSetBeadRect: (
     docId: string,
     pageId: string,
     rect: { x: number; y: number; w: number; h: number },

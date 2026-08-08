@@ -5837,6 +5837,8 @@ export function WorkspaceCanvasView({
             addTextPlacement: liveAddTextPlacement,
             cropPlacement: liveCropPlacement,
             onClearCropPlacement,
+            onSetCropRect,
+            onSetBeadRect,
             onSetAddTextRect,
             onAddImageRect,
             onClearAddTextPlacement,
