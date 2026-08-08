@@ -60,6 +60,12 @@ interface IoOpts {
   copyFails?: string[];
   /** Mirror outputs whose MRC pass refuses (e.g. nothing to separate). */
   mrcFails?: string[];
+  /** Source paths whose enhancement produces a staged copy, by source path.
+   * A source with no entry reports "nothing to correct" and a null path — the
+   * engine's `written: false`, which must NOT fail the file. */
+  enhanceProduces?: Record<string, string>;
+  /** Source paths whose enhancement itself throws (no scanned page). */
+  enhanceFails?: string[];
 }
 
 function makeIo(specs: Record<string, FakeSpec>, opts: IoOpts = {}) {
@@ -71,6 +77,7 @@ function makeIo(specs: Record<string, FakeSpec>, opts: IoOpts = {}) {
   const verified: [string, number][] = [];
   const discarded: string[] = [];
   const compressed: [string, string, boolean][] = [];
+  const enhancedFrom: string[] = [];
   const io: BatchIo = {
     load: async (abs) => {
       const spec = specs[abs];
@@ -108,11 +115,21 @@ function makeIo(specs: Record<string, FakeSpec>, opts: IoOpts = {}) {
       if (!scratch) throw new Error('too damaged');
       return scratch;
     },
+    enhanceToScratch: async (src) => {
+      enhancedFrom.push(src);
+      if (opts.enhanceFails?.includes(src)) throw new Error('nothing to enhance');
+      const scratch = opts.enhanceProduces?.[src];
+      if (!scratch) return { path: null, note: 'Scan enhancement found nothing to correct' };
+      return { path: scratch, note: 'Enhanced 1 scanned page(s)' };
+    },
     discardScratch: async (path) => {
       discarded.push(path);
     },
   };
-  return { io, destroyed, copies, applied, ensured, moves, verified, discarded, compressed };
+  return {
+    io, destroyed, copies, applied, ensured, moves, verified, discarded, compressed,
+    enhancedFrom,
+  };
 }
 
 /** The four filing primitives, stubbed to explode. Tests using the inline `io`
@@ -121,7 +138,12 @@ function makeIo(specs: Record<string, FakeSpec>, opts: IoOpts = {}) {
  * would hide a driver that moved files nobody asked it to move. */
 function noFiling(): Pick<
   BatchIo,
-  'moveFile' | 'verifyOutput' | 'repairToScratch' | 'discardScratch' | 'compressMrc'
+  | 'moveFile'
+  | 'verifyOutput'
+  | 'repairToScratch'
+  | 'discardScratch'
+  | 'compressMrc'
+  | 'enhanceToScratch'
 > {
   const nope = (name: string) => () => {
     throw new Error(`${name} must not run without the matching opt-in`);
@@ -132,6 +154,7 @@ function noFiling(): Pick<
     repairToScratch: nope('repairToScratch') as unknown as BatchIo['repairToScratch'],
     discardScratch: nope('discardScratch') as unknown as BatchIo['discardScratch'],
     compressMrc: nope('compressMrc') as unknown as BatchIo['compressMrc'],
+    enhanceToScratch: nope('enhanceToScratch') as unknown as BatchIo['enhanceToScratch'],
   };
 }
 
@@ -717,5 +740,110 @@ describe('runBatchOcr — MRC', () => {
       onProgress: (p) => phases.push(p.phase),
     });
     expect(phases).toContain('compressing');
+  });
+});
+
+describe('runBatchOcr — scan enhancement', () => {
+  it('enhances the SOURCE into a scratch and recognises THAT, only when asked', async () => {
+    const specs = {
+      'C:\\src\\scan.pdf': { pages: [true] },
+      'T:\\enh-0.pdf': { pages: [true] },
+    };
+    const off = makeIo(specs);
+    await runBatchOcr([entry('scan.pdf')], 'C:\\out', [], off.io);
+    expect(off.enhancedFrom).toEqual([]);
+    expect(off.applied[0].source).toBe('C:\\src\\scan.pdf');
+
+    const on = makeIo(specs, { enhanceProduces: { 'C:\\src\\scan.pdf': 'T:\\enh-0.pdf' } });
+    const report = await runBatchOcr([entry('scan.pdf')], 'C:\\out', [], on.io, {
+      enhance: { orientation: true },
+    });
+    expect(on.enhancedFrom).toEqual(['C:\\src\\scan.pdf']);
+    // The order the whole feature rests on: recognition reads the ENHANCED
+    // staging, never the source it was made from.
+    expect(on.applied[0].source).toBe('T:\\enh-0.pdf');
+    expect(report.results[0].enhanceApplied).toBe(true);
+    expect(report.results[0].enhance).toBe('Enhanced 1 scanned page(s)');
+    // And the staging is cleaned up — it is not the deliverable.
+    expect(on.discarded).toEqual(['T:\\enh-0.pdf']);
+  });
+
+  it('a refusal is a NOTE, never a file failure', async () => {
+    // A source with no scanned page is the ordinary case in a mixed folder.
+    const { io, applied } = makeIo(
+      { 'C:\\src\\typed.pdf': { pages: [true] } },
+      { enhanceFails: ['C:\\src\\typed.pdf'] },
+    );
+    const report = await runBatchOcr([entry('typed.pdf')], 'C:\\out', [], io, {
+      enhance: { orientation: false },
+    });
+    expect(report.results[0].status).toBe('ocr');
+    expect(report.results[0].enhanceApplied).toBeUndefined();
+    expect(report.results[0].enhance).toContain('nothing to enhance');
+    // Recognition falls back to the source rather than to a file that is not there.
+    expect(applied[0].source).toBe('C:\\src\\typed.pdf');
+  });
+
+  it('"nothing to correct" reads the ORIGINAL, not an empty staging', async () => {
+    // `written: false` means the engine wrote no scratch at all; handing that
+    // path to the loader would fail the entry over a correct decision.
+    const { io, applied } = makeIo({ 'C:\\src\\clean.pdf': { pages: [true] } });
+    const report = await runBatchOcr([entry('clean.pdf')], 'C:\\out', [], io, {
+      enhance: { orientation: false },
+    });
+    expect(applied[0].source).toBe('C:\\src\\clean.pdf');
+    expect(report.results[0].enhance).toBe('Scan enhancement found nothing to correct');
+    expect(report.results[0].enhanceApplied).toBeUndefined();
+  });
+
+  it('a copied file carries the enhanced bytes, not the original', async () => {
+    // A page that needs no OCR still goes through the mirror copy, and what
+    // gets copied has to be the corrected staging.
+    const { io, copies } = makeIo(
+      { 'C:\\src\\born.pdf': { pages: [false] }, 'T:\\enh-0.pdf': { pages: [false] } },
+      { enhanceProduces: { 'C:\\src\\born.pdf': 'T:\\enh-0.pdf' } },
+    );
+    await runBatchOcr([entry('born.pdf')], 'C:\\out', [], io, {
+      enhance: { orientation: false },
+    });
+    expect(copies).toEqual([['T:\\enh-0.pdf', 'C:\\out\\born.pdf']]);
+  });
+
+  it('enhancement runs BEFORE the load, and MRC after the write', async () => {
+    const order: string[] = [];
+    const { io } = makeIo(
+      { 'C:\\src\\scan.pdf': { pages: [true] }, 'T:\\enh-0.pdf': { pages: [true] } },
+      { enhanceProduces: { 'C:\\src\\scan.pdf': 'T:\\enh-0.pdf' } },
+    );
+    const load = io.load;
+    const enhanceToScratch = io.enhanceToScratch;
+    const compressMrc = io.compressMrc;
+    io.enhanceToScratch = async (...a) => {
+      order.push('enhance');
+      return enhanceToScratch(...a);
+    };
+    io.load = async (...a) => {
+      order.push('load');
+      return load(...a);
+    };
+    io.compressMrc = async (...a) => {
+      order.push('mrc');
+      return compressMrc(...a);
+    };
+    await runBatchOcr([entry('scan.pdf')], 'C:\\out', [], io, {
+      enhance: { orientation: false },
+      mrc: { preset: 'balanced', verifyText: false },
+    });
+    expect(order).toEqual(['enhance', 'load', 'mrc']);
+  });
+
+  it('reports an enhancing phase so a long pass is not silence', async () => {
+    const phases: string[] = [];
+    const { io } = makeIo({ 'C:\\src\\scan.pdf': { pages: [true] } });
+    await runBatchOcr([entry('scan.pdf')], 'C:\\out', [], io, {
+      enhance: { orientation: false },
+      onProgress: (p) => phases.push(p.phase),
+    });
+    expect(phases).toContain('enhancing');
   });
 });

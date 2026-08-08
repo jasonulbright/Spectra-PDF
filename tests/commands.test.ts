@@ -550,13 +550,14 @@ describe('invokeCommand', () => {
 
   it('tools.open.* for a canvas-mode tool is disabled with no document open', () => {
     wire(initialState);
-    // There is nothing to comment on / redact / OCR without a document, and the
+    // There is nothing to comment on or redact without a document, and the
     // tool has no pane of its own to fall back to.
     expect(invokeCommand('tools.open.comment')).toBe(false);
     expect(invokeCommand('tools.open.redact')).toBe(false);
-    expect(invokeCommand('tools.open.ocr')).toBe(false);
     // A tool with its own pane stays reachable — the panels prompt for a file.
     expect(invokeCommand('tools.open.protect')).toBe(true);
+    // Scan & OCR joined that group when it gained the Scan Enhancement pane.
+    expect(invokeCommand('tools.open.ocr')).toBe(true);
   });
 
   it('a tool that WORKS ON THE PAGE is disabled with no document — including the ones that also have a pane', () => {
@@ -567,11 +568,14 @@ describe('invokeCommand', () => {
     // work is on the page, so they need one — and the tile/menu grey out rather
     // than pretending. This assertion is the fact; the test edits elsewhere in
     // this file merely stopped tripping over it.
-    for (const id of ['comment', 'redact', 'ocr', 'fillsign', 'prepareform']) {
+    for (const id of ['comment', 'redact', 'fillsign', 'prepareform']) {
       expect(invokeCommand(`tools.open.${id}` as CommandId), `${id} ran with no document`).toBe(false);
     }
     // A tool whose work is a FORM stays reachable — its panel prompts for a file.
-    for (const id of ['protect', 'optimize', 'organize', 'watermark', 'export', 'repair', 'compare']) {
+    // `ocr` moved into this group when Scan & OCR gained the Scan Enhancement
+    // pane: it owns no canvas mode, so it was only ever in the group above by
+    // virtue of having no ops at all, and its pane now prompts like the rest.
+    for (const id of ['protect', 'optimize', 'organize', 'watermark', 'export', 'repair', 'compare', 'ocr']) {
       expect(invokeCommand(`tools.open.${id}` as CommandId), `${id} was blocked`).toBe(true);
     }
   });
@@ -826,10 +830,13 @@ describe('invokeCommand', () => {
     expect(finalState().ui.tool).toBe('select');
   });
 
-  it('Scan & OCR does NOT disarm the canvas tool — it only opens Find', () => {
-    // It has no mode because it isn't one. A Tools-tab tool replaces what you
-    // were doing; this lands you on the page, so taking away the user's
-    // Highlight to show a search box would be gratuitous.
+  it('Scan & OCR opens Find AND seats its pane, disarming the canvas like any pane tool', () => {
+    // It used to leave `ui.tool` alone, because opening it did nothing but
+    // show a search box and taking away the user's Highlight for that would
+    // have been gratuitous. It now owns the Scan Enhancement pane, so it
+    // replaces what you were doing exactly as Optimize or Watermark does —
+    // and leaving Highlight armed under a Scan & OCR pane is the
+    // mode-left-armed-by-another-tool state `openTool` exists to prevent.
     const { finalState } = wire(
       stateWith({
         files: new Map([['a.pdf', makeFile('a.pdf')]]),
@@ -838,7 +845,9 @@ describe('invokeCommand', () => {
       }),
     );
     expect(invokeCommand('tools.open.ocr')).toBe(true);
-    expect(finalState().ui.tool).toBe('highlight');
+    expect(finalState().ui.activeToolId).toBe('ocr');
+    expect(finalState().ui.activeOp).toBe('scanenhance');
+    expect(finalState().ui.tool).toBe('select');
   });
 
   it('picking an op from the RAIL or the Tools menu re-arms that op’s tool mode', () => {

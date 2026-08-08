@@ -133,6 +133,8 @@ pub enum CliCommand {
     PortfolioUpdate(PortfolioUpdateArgs),
     /// Make ONE file searchable (invisible OCR text layers)
     OcrFile(OcrFileArgs),
+    /// Deskew, despeckle, whiten and re-orient the scanned pages of a document
+    EnhanceScan(EnhanceScanArgs),
     /// Run a guided action (a saved step sequence) over a folder of PDFs
     RunAction(RunActionArgs),
     /// List optional-content layers (JSON)
@@ -838,6 +840,62 @@ pub struct OcrFileArgs {
     /// did not survive
     #[arg(long)]
     pub mrc_verify_text: bool,
+    /// OPT-IN: deskew, despeckle, whiten and re-orient the scanned pages
+    /// BEFORE recognition — enhancement first is what raises OCR accuracy
+    #[arg(long)]
+    pub enhance: bool,
+    /// Skip the orientation pass of --enhance (it needs the OSD model)
+    #[arg(long)]
+    pub no_orientation: bool,
+}
+
+#[derive(Args)]
+pub struct EnhanceScanArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file (may equal the input for in-place)
+    #[arg(short, long, required_unless_present = "analyze", conflicts_with = "analyze")]
+    pub output: Option<PathBuf>,
+    /// Report what every selected page measures and change nothing
+    #[arg(long)]
+    pub analyze: bool,
+    /// Pages to work on as comma-separated numbers, e.g. 1,3,5 (default: all)
+    #[arg(long)]
+    pub pages: Option<String>,
+    /// Skip the deskew pass
+    #[arg(long)]
+    pub no_deskew: bool,
+    /// Skip the despeckle pass
+    #[arg(long)]
+    pub no_despeckle: bool,
+    /// Skip the background-whitening pass
+    #[arg(long)]
+    pub no_background: bool,
+    /// Skip the orientation pass (it needs the OSD model)
+    #[arg(long)]
+    pub no_orientation: bool,
+    /// Largest skew to search for, in degrees (0.1-45)
+    #[arg(long, default_value_t = 10.0)]
+    pub max_skew: f64,
+    /// Smallest skew worth rotating for, in degrees — below it the angle is
+    /// reported and the page is left unresampled
+    #[arg(long, default_value_t = 0.1)]
+    pub min_skew: f64,
+    /// Largest speck to remove, in inches (0.001-0.05)
+    #[arg(long, default_value_t = 0.01)]
+    pub speck_size: f64,
+    /// A speck must have no other ink within this distance, in inches
+    #[arg(long, default_value_t = 0.02)]
+    pub speck_gap: f64,
+    /// Background whitening strength, 0-1
+    #[arg(long, default_value_t = 1.0)]
+    pub background_strength: f64,
+    /// Orientation confidence floor — a weaker reading is reported, not applied
+    #[arg(long, default_value_t = 2.0)]
+    pub osd_confidence: f64,
+    /// JPEG quality for the re-encoded raster (1-100)
+    #[arg(long, default_value_t = 85)]
+    pub jpeg_quality: u32,
 }
 
 #[derive(Args)]
@@ -3293,8 +3351,45 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "mrc": args.mrc,
                     "mrc_preset": args.mrc_preset,
                     "mrc_verify_text": args.mrc_verify_text,
+                    "enhance": args.enhance,
+                    "enhance_orientation": !args.no_orientation,
                 }),
             )
+        }
+
+        CliCommand::EnhanceScan(args) => {
+            // ONE params object for both arms: the analysis and the pass take
+            // the same settings, and the preview is only meaningful if it
+            // measures with exactly what the pass would apply.
+            let mut params = json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "pages": match &args.pages {
+                    Some(p) => Value::from(parse_page_numbers(p)?),
+                    None => json!("all"),
+                },
+                "deskew": !args.no_deskew,
+                "despeckle": !args.no_despeckle,
+                "background": !args.no_background,
+                "orientation": !args.no_orientation,
+                "max_skew_deg": args.max_skew,
+                "min_skew_deg": args.min_skew,
+                "speck_size_in": args.speck_size,
+                "speck_gap_in": args.speck_gap,
+                "background_strength": args.background_strength,
+                "osd_confidence": args.osd_confidence,
+                "jpeg_quality": args.jpeg_quality,
+                "gs_path": resolve_gs().to_string_lossy(),
+                "tesseract_path": resolve_tesseract().to_string_lossy(),
+            });
+            if args.analyze {
+                return engine.call("analyze_scan", params);
+            }
+            let output = args
+                .output
+                .as_ref()
+                .ok_or_else(|| "enhance-scan needs an --output".to_string())?;
+            params["output"] = json!(abs(output).to_string_lossy());
+            engine.call("enhance_scan", params)
         }
 
         CliCommand::RunAction(args) => {

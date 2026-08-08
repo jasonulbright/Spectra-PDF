@@ -48,6 +48,14 @@ export interface BatchFileResult {
    * only when the run asked for MRC. Never a failure of its own — the
    * searchable copy is the deliverable and it already exists. */
   mrc?: string;
+  /** What scan enhancement corrected on this file, or why it corrected
+   * nothing. Present only when the run asked for it, and — like `mrc` — never
+   * a failure of its own: enhancement is an improvement to what is recognised,
+   * not the deliverable. */
+  enhance?: string;
+  /** Enhancement actually rewrote pages, so the recognised copy was made from
+   * corrected bytes. */
+  enhanceApplied?: boolean;
   /** The source failed to load and tier-1 repair made it readable. */
   repaired?: boolean;
   /** The repaired bytes were written back over the damaged original. */
@@ -74,6 +82,7 @@ export interface BatchProgress {
     | 'copying'
     | 'repairing'
     | 'moving'
+    | 'enhancing'
     | 'compressing';
   /** 1-based page being recognized and the count of pages to recognize —
    * only meaningful in the 'recognizing' phase. */
@@ -117,7 +126,18 @@ export interface BatchIo {
   /** Tier-1 engine repair of a damaged source into a scratch file; resolves to
    * the scratch path. Called only when `repairDamaged` is on. */
   repairToScratch(src: string): Promise<string>;
-  /** Delete a scratch file from `repairToScratch`. */
+  /** Scan-enhance a source into a scratch file BEFORE it is read for
+   * recognition; resolves to the scratch path and the note that goes on the
+   * result. A NULL path means the enhancement correctly decided to change
+   * nothing, so recognition reads the original — not an error, and the note
+   * says which. A rejection is a note too, never a file failure: a source with
+   * no scanned page is the ordinary case in a mixed folder. Called only when
+   * the run asked for enhancement. */
+  enhanceToScratch(
+    src: string,
+    orientation: boolean,
+  ): Promise<{ path: string | null; note: string }>;
+  /** Delete a scratch file from `repairToScratch` or `enhanceToScratch`. */
   discardScratch(path: string): Promise<void>;
 }
 
@@ -145,6 +165,11 @@ export interface BatchRunOptions {
    * — the order is the and it is structural here, since the file MRC
    * reads is the recognised output. */
   mrc?: { preset: string; verifyText: boolean };
+  /** OPT-IN. Deskew, despeckle, whiten and re-orient each source BEFORE
+   * recognition — the same structural order as `mrc`'s seen from the other
+   * end: the pass that IMPROVES what recognition will read runs first, and
+   * the pass that REPLACES what it read runs last. */
+  enhance?: { orientation: boolean };
 }
 
 // ── Path helpers (vitest-covered) ─────────────────────────────────────────
@@ -200,7 +225,8 @@ export async function runBatchOcr(
 ): Promise<BatchReport> {
   const onProgress = options.onProgress ?? (() => {});
   const isCancelled = options.isCancelled ?? (() => false);
-  const { movedRoot, errorRoot, repairDamaged, replaceRepairedOriginals, mrc } = options;
+  const { movedRoot, errorRoot, repairDamaged, replaceRepairedOriginals, mrc, enhance } =
+    options;
   const results: BatchFileResult[] = [];
   let cancelled = false;
 
@@ -217,6 +243,11 @@ export async function runBatchOcr(
     // Set when tier-1 repair produced a readable copy: the file the run then
     // works FROM, and the bytes "put the repaired original back" writes back.
     let scratch: string | null = null;
+    // Enhancement's OWN staging, deliberately not `scratch`: the tail reads
+    // `scratch` as "this file was repaired" and may write it back over the
+    // original, which an enhanced copy must never trigger.
+    let enhanced: string | null = null;
+    let enhanceNote = '';
     // The single result for this entry. Everything below assigns it rather
     // than pushing, because the tail — verify, heal, move — has to run on
     // every outcome, and the old `continue`-per-branch shape had no tail.
@@ -225,9 +256,23 @@ export async function runBatchOcr(
     let broke = false;
 
     try {
+      // BEFORE the load, because enhancement exists to improve what
+      // recognition reads, and into a staging copy, because a batch source is
+      // never modified.
+      if (enhance) {
+        onProgress({ ...base, phase: 'enhancing' });
+        try {
+          const done = await io.enhanceToScratch(entry.abs, enhance.orientation);
+          enhanced = done.path ?? null;
+          enhanceNote = done.note;
+        } catch (err) {
+          enhanced = null;
+          enhanceNote = `Scan enhancement did not apply: ${messageOf(err)}`;
+        }
+      }
       onProgress({ ...base, phase: 'loading' });
       try {
-        doc = await io.load(entry.abs);
+        doc = await io.load(enhanced ?? entry.abs);
       } catch (err) {
         const classification = classifyLoadError(err);
         // A password failure is NOT a repair candidate: a structural rewrite
@@ -236,7 +281,7 @@ export async function runBatchOcr(
         if (repairDamaged && classification !== 'password-protected') {
           onProgress({ ...base, phase: 'repairing' });
           try {
-            scratch = await io.repairToScratch(entry.abs);
+            scratch = await io.repairToScratch(enhanced ?? entry.abs);
             doc = await io.load(scratch);
           } catch (repairErr) {
             doc = null;
@@ -254,7 +299,7 @@ export async function runBatchOcr(
       // From here on the run works from `working`, which is the repaired copy
       // when there is one — so the mirror gets the readable file, not the
       // damaged bytes that failed to load in the first place.
-      const working = scratch ?? entry.abs;
+      const working = scratch ?? enhanced ?? entry.abs;
 
       if (doc) {
       expectedPages = doc.numPages;
@@ -349,6 +394,10 @@ export async function runBatchOcr(
         // to be replaced would verify the wrong file). A failure here is a
         // note, never a status change: the searchable copy is the deliverable
         // the user asked for and it is already written.
+        if (enhance && result.status !== 'skipped') {
+          if (enhanceNote) result.enhance = enhanceNote;
+          if (enhanced) result.enhanceApplied = true;
+        }
         if (mrc && result.status !== 'skipped') {
           onProgress({ ...base, phase: 'compressing' });
           try {
@@ -426,6 +475,7 @@ export async function runBatchOcr(
       if (doc) await doc.destroy().catch(() => {});
       // After the tail, so "put the repaired original back" still has its bytes.
       if (scratch) await io.discardScratch(scratch).catch(() => {});
+      if (enhanced) await io.discardScratch(enhanced).catch(() => {});
     }
     if (broke) break;
     if (result) results.push(result);

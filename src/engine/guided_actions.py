@@ -44,6 +44,7 @@ from engine.batch_ocr import (
 )
 from engine.compress import compress
 from engine.create_pdf import accepted_suffixes as create_pdf_suffixes
+from engine.enhance_scan import enhance_scan
 from engine.create_pdf import create_pdf
 from engine.encrypt import encrypt
 from engine.image_export import export_images, image_extension
@@ -158,6 +159,28 @@ _STEPS: dict = {
         frozenset({"font_dir"}),
     ),
     "ocr_file": (ocr_file, frozenset({"language"}), frozenset({"gs_path", "tesseract_path"})),
+    # Deskew, despeckle, whiten and re-orient the scanned pages. Its ORDER
+    # against the other two scan steps is enforced in validate_steps.
+    "enhance_scan": (
+        enhance_scan,
+        frozenset(
+            {
+                "pages",
+                "deskew",
+                "despeckle",
+                "background",
+                "orientation",
+                "max_skew_deg",
+                "min_skew_deg",
+                "speck_size_in",
+                "speck_gap_in",
+                "background_strength",
+                "osd_confidence",
+                "jpeg_quality",
+            }
+        ),
+        frozenset({"gs_path", "tesseract_path"}),
+    ),
     # No review step exists in a folder run, so this creates every field the
     # detector offers. `kinds` is the only narrowing available without a
     # reviewer.
@@ -296,6 +319,29 @@ def validate_steps(steps) -> list[dict]:
                     "MRC compression must come after OCR — OCR reads the page image, "
                     "and MRC replaces it"
                 )
+        if op == "enhance_scan":
+            # ORDER, enforced rather than documented (the MRC-after-OCR
+            # precedent, read the other way round): enhancement rewrites the
+            # page IMAGE, so everything that READS that image has to come
+            # after it.
+            for prior in steps[:i]:
+                if not isinstance(prior, dict):
+                    continue
+                if prior.get("op") == "ocr_file":
+                    raise ValueError(
+                        "scan enhancement must come before OCR — enhancement moves the "
+                        "ink, and an OCR layer written first would sit over where it "
+                        "used to be"
+                    )
+                prior_params = prior.get("params") or {}
+                if prior.get("op") == "compress" and str(
+                    prior_params.get("quality", "") if isinstance(prior_params, dict) else ""
+                ).strip().lower() == "mrc":
+                    raise ValueError(
+                        "scan enhancement must come before MRC compression — MRC "
+                        "replaces the page image with reconstructed layers, and "
+                        "enhancing those enhances a reconstruction"
+                    )
         if op in EXPORT_STEPS:
             # The target names the output's extension, so a run cannot be
             # planned without it. Refused at validation rather than per file:
