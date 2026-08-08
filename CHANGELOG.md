@@ -12,7 +12,8 @@
 - Position and tiling apply to text watermarks too, and the old placement is still the default.
 - Opacity, angle, over-or-behind and the page selection work as they did.
 - A picture with several frames stamps the first, and says how many it held.
-- A watermark now reads level on a rotated page instead of lying on its side, and no longer shrinks there.
+- A watermark now reads level on a rotated page instead of lying on its side.
+- A watermark on a rotated page no longer shrinks to fit the page's other dimension.
 - Command line: `watermark --image`, with `--scale`, `--position`, `--margin`, `--tile` and `--tile-gap`.
 - Guided actions can stamp a picture, and refuse a step that names both a text and a picture.
 
@@ -22,7 +23,7 @@
 - Splitting by size measures each file as it is really written, so the limit is the size on disk.
 - A page larger than the limit on its own gets a file of its own, and is reported.
 - Splitting at bookmarks writes one file per top-level bookmark, from that bookmark to the next.
-- Each file is named after the bookmark it starts at, with characters the filesystem refuses replaced.
+- Each file is named after the bookmark it starts at, with a name the filesystem accepts.
 - Pages ahead of the first bookmark are kept, in a file named after the document.
 - A document with no top-level bookmarks says so before you run it, and refuses by name if you do.
 - Form fields survive every mode: each output carries the fields its own pages own, and no others.
@@ -34,7 +35,7 @@
 - Either conversion runs on its own, on a document with no transparency at all.
 - The panel says, before anything is written, how many text runs and stroked paths would convert.
 - It states plainly that converted text can no longer be selected, searched or extracted.
-- Text whose font the document does not embed takes its shapes from a bundled face, and the panel names the face.
+- Text whose font the document does not embed takes its shapes from a bundled face the panel names.
 - A font whose glyphs are program code rather than shapes is refused by name, never skipped in silence.
 - A line with no width is refused by name, and Fix Hairlines is the tool that gives it one.
 - Dashes are preserved by cutting the line into its dashes before each one is outlined.
@@ -55,6 +56,10 @@
 - Lines outside every table and text written down the page are counted before you export.
 - The review writes nothing to the document, whatever you change.
 - Export to Excel offers the review, and exporting without it works exactly as before.
+
+### Fixes
+- Extracting a portfolio member named after a reserved device name now writes a real file.
+- An over-long portfolio member name is shortened to one the filesystem accepts, rather than failing.
 
 ## 1.0.23
 
