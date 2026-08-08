@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.25
+
+### Watermarking with a page of another PDF
+- A watermark is now text, a picture, or a page of another PDF, and the panel offers all three.
+- A letterhead, a pre-drawn stamp or a vector logo can be stamped straight from the PDF it lives in.
+- The page is placed as artwork, not as a picture: its lines and its type stay sharp at any size.
+- Pick which page of the source to use; the first is the default.
+- The source page is stored once in the document, however many pages carry it.
+- The source page's own rotation is honoured, so it lands the way its own reader sees it.
+- Anything the source page shows as a comment or a filled field is stamped along with it.
+- Opacity applies to the whole artwork at once, so overlapping shapes in it do not darken where they cross.
+- Scale, position, margin, tiling, angle, over-or-behind and the page selection all work as they do for the other two sources.
+- Choosing a PDF in the picture picker says so, and points at the PDF source.
+- A document cannot be its own watermark source, and the source cannot be the file being written.
+- A missing, empty, password-protected, page-less or unreadable source is refused by name, as is a page number past the end.
+- Command line: `watermark --pdf-source` with `--pdf-page`.
+- Guided actions can stamp a page of another PDF, and refuse a step that names more than one source.
+
 ## 1.0.24
 
 ### Watermarking with a picture

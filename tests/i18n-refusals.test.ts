@@ -48,12 +48,12 @@ describe('renderer refusal messages', () => {
     action.name = 'Test';
     expect(validateAction(action)).toBe('Add at least one step.');
 
-    // A one-of pair with neither set: the message names BOTH the step and the
-    // params through their own catalog keys, so it cannot disagree with the
+    // A one-of GROUP with none set: the message names the step and every
+    // param through their own catalog keys, so it cannot disagree with the
     // editor rendering the same step above it.
     action.steps = [newStep('watermark')];
     const en = validateAction(action);
-    expect(en).toBe('Step 1 (Watermark): set Text / Image file — one of them, not both.');
+    expect(en).toBe('Step 1 (Watermark): set Text / Image file / PDF file — exactly one of them.');
     const es = await inEs(() => validateAction(action));
     expect(es).toContain('Paso 1');
     expect(es).toContain('Marca de agua');

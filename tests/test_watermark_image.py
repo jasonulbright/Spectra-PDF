@@ -461,15 +461,15 @@ class TestRefusals:
         logo = os.path.join(tmp_dir, "logo.png")
         _pages(src, count=1)
         _logo(logo)
-        with pytest.raises(ValueError, match="either text or an image, not both"):
+        with pytest.raises(ValueError, match="a watermark has one source"):
             watermark(file=src, output=src, text="X", image=logo)
 
     def test_no_source_refuses(self, tmp_dir):
         src = os.path.join(tmp_dir, "in.pdf")
         _pages(src, count=1)
-        with pytest.raises(ValueError, match="needs text or an image"):
+        with pytest.raises(ValueError, match="needs text, an image or a PDF page"):
             watermark(file=src, output=src)
-        with pytest.raises(ValueError, match="needs text or an image"):
+        with pytest.raises(ValueError, match="needs text, an image or a PDF page"):
             watermark(file=src, output=src, text="   ")
 
     def test_a_missing_image_refuses_by_path(self, tmp_dir):
