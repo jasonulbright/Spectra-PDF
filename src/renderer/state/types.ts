@@ -395,6 +395,11 @@ export type DocViewMode = 'document' | 'organize';
 // Reading-view page layout (I.6): one page per row, or two-up facing spreads.
 export type PageLayoutMode = 'single' | 'two';
 
+// Which way a two-up spread reads. Set from the open document's
+// /ViewerPreferences /Direction; only meaningful while pageLayout === 'two',
+// since a single-page column has no facing order to reverse.
+export type SpreadDirection = 'l2r' | 'r2l';
+
 export const NAV_PANE_MIN_WIDTH = 180;
 export const NAV_PANE_MAX_WIDTH = 520;
 export const NAV_PANE_DEFAULT_WIDTH = 240;
@@ -444,6 +449,8 @@ export interface UiState {
   // convention); only meaningful while pageLayout === 'two'.
   pageLayout: PageLayoutMode;
   twoUpCover: boolean;
+  // Facing-page order, from the open document's own reading direction.
+  spreadDirection: SpreadDirection;
   // Reading mode (I.6): collapse the app chrome (toolbar, tab strip, nav pane)
   // around the document. Menu bar stays (the discoverable exit); Esc/Ctrl+H
   // leave; leaving the doc tab clears it (chrome must exist on Home/Tools).
@@ -679,6 +686,9 @@ export type AppAction =
   | { type: 'UI_SET_PAGE_LAYOUT'; layout: PageLayoutMode }
   | { type: 'UI_TOGGLE_TWOUP_COVER' }
   | { type: 'UI_TOGGLE_READING_MODE' }
+  // A document's own initial view, applied as ONE act. Null fields are what
+  // the document did not state; the workbench keeps what the user had.
+  | { type: 'UI_APPLY_INITIAL_VIEW'; plan: import('../lib/initial-view').InitialViewPlan }
   | { type: 'UI_ROTATE_VIEW'; path: string; delta: 90 | 270 }
   | { type: 'UI_FOCUS_DOC'; docId: string | null }
   | { type: 'UI_SET_CURRENT_PAGE'; pageId: string | null }

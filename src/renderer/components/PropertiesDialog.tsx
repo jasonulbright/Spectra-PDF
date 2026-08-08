@@ -1,25 +1,75 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
+import { useOperations } from '../hooks/useOperations';
 import { invokeCommand } from '../commands/context';
 import { useAppModal } from '../hooks/useAppModal';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tNumber } from '../i18n';
+import { tChrome, tChromeCount, tNumber } from '../i18n';
 import { runCommitGate } from '../lib/commit-gate';
 import { formatBytes } from '../lib/format-bytes';
+import { app } from '../lib/tauri-bridge';
+import {
+  DEFAULT_INITIAL_VIEW,
+  HONORED_ZOOMS,
+  PAGE_LAYOUT_VALUES,
+  PAGE_MODE_VALUES,
+  VIEWER_ONLY_OPTIONS,
+  ZOOM_PERCENT_MAX,
+  ZOOM_PERCENT_MIN,
+  ZOOM_PERCENT_STEPS,
+  ZOOM_VALUES,
+  initialViewChanges,
+  parseInitialView,
+  type InitialView,
+  type PageLayoutValue,
+  type PageModeValue,
+  type ViewerOnlyOption,
+  type ZoomValue,
+} from '../lib/initial-view';
+import {
+  DEFAULT_ADVANCED,
+  TRAPPED_VALUES,
+  advancedChanges,
+  pageSizeMeasures,
+  paperNameOf,
+  parseAdvanced,
+  type AdvancedProperties,
+  type TrappedValue,
+} from '../lib/doc-advanced';
+import {
+  fontStatus,
+  fontTestId,
+  groupFonts,
+  parseDocumentFonts,
+  type DocumentFont,
+} from '../lib/font-inventory';
 import type { PdfBuffer } from '../state/types';
 
-// File ▸ Properties combines metadata, PDF version, and encryption status in a
-// single dialog. Metadata changes retain their save-to-a-new-file behavior.
+// File ▸ Properties: metadata, security, the fonts the document uses, its
+// initial view, and the file's own facts. Metadata changes retain their
+// save-to-a-new-file behavior; the initial-view and advanced writes are
+// ordinary undoable in-place edits of THIS document.
 
-const TABS = ['description', 'security', 'advanced'] as const;
+const TABS = ['description', 'security', 'fonts', 'initialView', 'advanced'] as const;
 type PropTab = (typeof TABS)[number];
 
 const TAB_KEYS = {
   description: 'dialog.props.tab.description',
   security: 'dialog.props.tab.security',
+  fonts: 'dialog.props.tab.fonts',
+  initialView: 'dialog.props.tab.initialView',
   advanced: 'dialog.props.tab.advanced',
 } as const;
+
+const VIEWER_ONLY_LABELS = {
+  hide_toolbar: 'dialog.props.iv.hideToolbar',
+  hide_menubar: 'dialog.props.iv.hideMenubar',
+  hide_window_ui: 'dialog.props.iv.hideWindowUi',
+  fit_window: 'dialog.props.iv.fitWindow',
+  center_window: 'dialog.props.iv.centerWindow',
+  display_doc_title: 'dialog.props.iv.displayDocTitle',
+} as const satisfies Record<ViewerOnlyOption, string>;
 
 export interface PropertiesDialogProps {
   onClose: () => void;
@@ -30,6 +80,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
   useTranslation();
   const { activeFile } = useActiveFile();
   const { call, saveFile } = useEngine();
+  const { performOperation, confirmSignedEdit } = useOperations();
   const [tab, setTab] = useState<PropTab>('description');
 
   const [title, setTitle] = useState('');
@@ -41,6 +92,16 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
 
   const [version, setVersion] = useState<string | null>(null);
   const [encrypted, setEncrypted] = useState<boolean | null>(null);
+
+  // Initial view, fonts, advanced. Each keeps a BASELINE beside the edited value so a
+  // save sends only what moved — every engine parameter is
+  // none-means-unchanged, and rewriting an untouched key would churn the file.
+  const [view, setView] = useState<InitialView>(DEFAULT_INITIAL_VIEW);
+  const [viewBase, setViewBase] = useState<InitialView>(DEFAULT_INITIAL_VIEW);
+  const [advanced, setAdvanced] = useState<AdvancedProperties>(DEFAULT_ADVANCED);
+  const [advancedBase, setAdvancedBase] = useState<AdvancedProperties>(DEFAULT_ADVANCED);
+  const [fonts, setFonts] = useState<DocumentFont[] | null>(null);
+  const [fontsError, setFontsError] = useState<string | null>(null);
 
   // Keyed on workingPath (stable per path, unlike the activeFile object, which
   // swaps on every buffer update) — the MetadataPanel's own note.
@@ -58,7 +119,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
       // without this a Properties opened right after deleting a page reports
       // the page as still there, disagreeing with the page counter a few pixels
       // away. This is the commit gate's stated job — "before anything READS or
-      // replaces file bytes, so these three reads are
+      // replaces file bytes, so these reads are
       // INTERNAL_METHODS (individually ungated: a panel reading on mount must
       // not commit) is exactly why the gate has to be asked for here.
       try {
@@ -84,9 +145,61 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
       } catch {
         if (!cancelled) setVersion(null);
       }
+      try {
+        const raw = (await call('get_initial_view', { file: workingPath })) as unknown as Record<string, unknown>;
+        if (cancelled) return;
+        const parsed = parseInitialView(raw);
+        setView(parsed);
+        setViewBase(parsed);
+      } catch {
+        if (!cancelled) {
+          setView(DEFAULT_INITIAL_VIEW);
+          setViewBase(DEFAULT_INITIAL_VIEW);
+        }
+      }
+      try {
+        const raw = (await call('get_advanced_properties', { file: workingPath })) as unknown as Record<string, unknown>;
+        if (cancelled) return;
+        const parsed = parseAdvanced(raw);
+        setAdvanced(parsed);
+        setAdvancedBase(parsed);
+      } catch {
+        if (!cancelled) {
+          setAdvanced(DEFAULT_ADVANCED);
+          setAdvancedBase(DEFAULT_ADVANCED);
+        }
+      }
     })();
     return () => { cancelled = true; };
   }, [workingPath, call]);
+
+  // The font walk visits every page's resources, every nested form and every
+  // appearance stream, so it runs when the tab is first shown rather than on
+  // mount — a dialog opened to read the title must not pay for it.
+  useEffect(() => {
+    if (tab !== 'fonts' || fonts !== null || !workingPath) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        // The vendored fonts directory is what makes the substitution line
+        // real; without it the engine reports the substitution as unknown.
+        let fontDir: string | null = null;
+        try {
+          fontDir = await app.getEditFontPath();
+        } catch {
+          fontDir = null;
+        }
+        const raw = await call('list_document_fonts', { file: workingPath, font_dir: fontDir });
+        if (!cancelled) setFonts(parseDocumentFonts(raw as unknown));
+      } catch (e: unknown) {
+        if (!cancelled) {
+          setFonts([]);
+          setFontsError(e instanceof Error ? e.message : String(e));
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tab, fonts, workingPath, call]);
 
   useEffect(() => {
     if (!originalPath) return;
@@ -135,6 +248,56 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
       setBusy(false);
     }
   }, [activeFile, call, saveFile]);
+
+  /** Both catalog writes share one shape: gate on the document's signatures
+   * (a catalog edit is structural — it coalesces the file and breaks every
+   * byte range), run the op through the undoable in-place flow, then re-read
+   * so the baseline is what the file now says rather than what was typed. */
+  const runCatalogWrite = useCallback(
+    async (
+      method: string,
+      params: Record<string, unknown>,
+      savingKey: 'dialog.props.savingView' | 'dialog.props.savingAdvanced',
+    ): Promise<void> => {
+      if (!activeFile) return;
+      setBusy(true);
+      setStatus(tChrome(savingKey));
+      try {
+        if (!(await confirmSignedEdit(activeFile.path, activeFile.workingPath, 'structural'))) {
+          setStatus('');
+          return;
+        }
+        await performOperation(activeFile.path, method, params);
+        const rawView = (await call('get_initial_view', { file: activeFile.workingPath })) as unknown as Record<string, unknown>;
+        const parsedView = parseInitialView(rawView);
+        setView(parsedView);
+        setViewBase(parsedView);
+        const rawAdvanced = (await call('get_advanced_properties', { file: activeFile.workingPath })) as unknown as Record<string, unknown>;
+        const parsedAdvanced = parseAdvanced(rawAdvanced);
+        setAdvanced(parsedAdvanced);
+        setAdvancedBase(parsedAdvanced);
+        setStatus(tChrome('dialog.props.saved'));
+      } catch (e: unknown) {
+        setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeFile, call, confirmSignedEdit, performOperation],
+  );
+
+  const viewChanges = initialViewChanges(viewBase, view);
+  const advancedDelta = advancedChanges(advancedBase, advanced);
+
+  const handleApplyView = useCallback(() => {
+    if (!viewChanges) return;
+    void runCatalogWrite('set_initial_view', viewChanges, 'dialog.props.savingView');
+  }, [viewChanges, runCatalogWrite]);
+
+  const handleApplyAdvanced = useCallback(() => {
+    if (!advancedDelta) return;
+    void runCatalogWrite('set_advanced_properties', advancedDelta, 'dialog.props.savingAdvanced');
+  }, [advancedDelta, runCatalogWrite]);
 
   // The command's `when` requires a showable document, so this is unreachable —
   // but the dialog reads `activeFile` on every render, and a file can close
@@ -237,6 +400,21 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
           </>
         )}
 
+        {tab === 'fonts' && (
+          <FontsTab fonts={fonts} error={fontsError} />
+        )}
+
+        {tab === 'initialView' && (
+          <InitialViewTab
+            view={view}
+            pages={activeFile.pageCount}
+            busy={busy}
+            dirty={viewChanges !== null}
+            onChange={setView}
+            onApply={handleApplyView}
+          />
+        )}
+
         {tab === 'advanced' && (
           <>
             <Row label={tChrome('dialog.props.pdfVersion')}>
@@ -246,8 +424,29 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
                   : tChrome('dialog.props.unknown')}
               </span>
             </Row>
+            <Row label={tChrome('dialog.props.fastWebView')}>
+              <span data-testid="props-linearized">
+                {tChrome(advanced.linearized ? 'dialog.props.yes' : 'dialog.props.no')}
+              </span>
+            </Row>
+            <Row label={tChrome('dialog.props.tagged')}>
+              <span data-testid="props-tagged">
+                {tChrome(advanced.tagged ? 'dialog.props.yes' : 'dialog.props.no')}
+              </span>
+            </Row>
             <Row label={tChrome('dialog.props.pageCount')}>
               <span data-testid="props-pages">{tNumber(activeFile.pageCount)}</span>
+            </Row>
+            <Row label={tChrome('dialog.props.pageSizes')}>
+              <span data-testid="props-page-sizes" className="block">
+                {advanced.page_sizes.length === 0
+                  ? tChrome('dialog.props.unknown')
+                  : advanced.page_sizes.map((size) => (
+                      <span key={`${size.width}x${size.height}`} className="block">
+                        {describePageSize(size.width, size.height, size.count)}
+                      </span>
+                    ))}
+              </span>
             </Row>
             <Row label={tChrome('dialog.props.size')}>
               {/* The working copy's bytes — the document as it currently stands,
@@ -259,12 +458,353 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
                 {activeFile.path}
               </span>
             </Row>
+            <Row label={tChrome('dialog.props.openAction')}>
+              <span data-testid="props-open-action">
+                {tChrome(advanced.has_open_action ? 'dialog.props.present' : 'dialog.props.absent')}
+              </span>
+            </Row>
+            <Row label={tChrome('dialog.props.searchIndex')}>
+              <span data-testid="props-search-index" className="break-all ltr-notation">
+                {advanced.search_index ?? tChrome('dialog.props.noneRecorded')}
+              </span>
+            </Row>
+
+            <div>
+              <label className="block text-sm text-neutral-400 mb-1" htmlFor="props-trapped">
+                {tChrome('dialog.props.trapped')}
+              </label>
+              <select
+                id="props-trapped"
+                data-testid="props-trapped"
+                disabled={busy}
+                className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+                value={advanced.trapped}
+                onChange={(e) =>
+                  setAdvanced((prev) => ({ ...prev, trapped: e.target.value as TrappedValue }))
+                }
+              >
+                {TRAPPED_VALUES.map((value) => (
+                  <option key={value} value={value}>
+                    {tChrome(`dialog.props.trapped.${value}`)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm text-neutral-400 mb-1" htmlFor="props-base-url">
+                {tChrome('dialog.props.baseUrl')}
+              </label>
+              <input
+                id="props-base-url"
+                data-testid="props-base-url"
+                disabled={busy}
+                className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm ltr-notation"
+                value={advanced.base_url}
+                onChange={(e) => setAdvanced((prev) => ({ ...prev, base_url: e.target.value }))}
+              />
+              <p className="mt-1 text-xs text-neutral-500">{tChrome('dialog.props.baseUrlHint')}</p>
+            </div>
+            <button
+              data-testid="props-advanced-apply"
+              disabled={busy || advancedDelta === null}
+              onClick={handleApplyAdvanced}
+              className="self-start px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+            >
+              {tChrome('dialog.props.apply')}
+            </button>
           </>
         )}
 
-        {status && <p className="text-xs text-neutral-500">{status}</p>}
+        {status && <p className="text-xs text-neutral-500" data-testid="props-status">{status}</p>}
       </div>
     </Shell>
+  );
+}
+
+function describePageSize(width: number, height: number, count: number): string {
+  const measures = pageSizeMeasures(width, height);
+  const paper = paperNameOf(width, height);
+  const size = tChrome('dialog.props.pageSizeValue', {
+    inchesW: tNumber(measures.inches.w),
+    inchesH: tNumber(measures.inches.h),
+    mmW: tNumber(measures.millimetres.w),
+    mmH: tNumber(measures.millimetres.h),
+  });
+  const named = paper ? tChrome('dialog.props.pageSizeNamed', { paper, size }) : size;
+  return tChromeCount('dialog.props.pageSizeRow', count, { size: named });
+}
+
+function FontsTab({
+  fonts,
+  error,
+}: {
+  fonts: DocumentFont[] | null;
+  error: string | null;
+}): React.JSX.Element {
+  if (error) {
+    return (
+      <p className="text-sm text-red-400" data-testid="props-fonts-error">
+        {tChrome('panel.common.error', { message: error })}
+      </p>
+    );
+  }
+  if (fonts === null) {
+    return (
+      <p className="text-sm text-neutral-400" data-testid="props-fonts-loading">
+        {tChrome('dialog.props.fontsLoading')}
+      </p>
+    );
+  }
+  if (fonts.length === 0) {
+    return (
+      <p className="text-sm text-neutral-400" data-testid="props-fonts-empty">
+        {tChrome('dialog.props.fontsEmpty')}
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-4" data-testid="props-fonts">
+      {groupFonts(fonts).map((group) => (
+        <div key={group.type}>
+          <h4 className="text-xs uppercase tracking-wide text-neutral-500 mb-1">{group.type}</h4>
+          <ul className="flex flex-col gap-2">
+            {group.fonts.map((font) => (
+              <li
+                key={`${font.raw_name}|${font.encoding}|${String(font.embedded)}`}
+                data-testid={`props-font-${fontTestId(font)}`}
+                className="rounded border border-neutral-800 bg-neutral-900/50 px-3 py-2"
+              >
+                <div className="text-sm text-neutral-200">
+                  {font.name || tChrome('dialog.props.fontUnnamed')}
+                </div>
+                <div className="text-xs text-neutral-500">
+                  {tChrome('dialog.props.fontDetail', {
+                    type: font.type,
+                    encoding: font.encoding,
+                  })}
+                </div>
+                <div className="text-xs text-neutral-500">
+                  {tChromeCount('dialog.props.fontPages', font.page_count)}
+                </div>
+                <div className="text-xs text-neutral-400">{fontStatusText(font)}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function fontStatusText(font: DocumentFont): string {
+  const state = fontStatus(font);
+  switch (state.kind) {
+    case 'embedded-subset':
+      return tChrome('dialog.props.fontEmbeddedSubset');
+    case 'embedded':
+      return tChrome('dialog.props.fontEmbedded');
+    case 'substituted':
+      return tChrome('dialog.props.fontSubstituted', { face: state.face });
+    default:
+      return tChrome('dialog.props.fontNotEmbedded');
+  }
+}
+
+function InitialViewTab({
+  view,
+  pages,
+  busy,
+  dirty,
+  onChange,
+  onApply,
+}: {
+  view: InitialView;
+  pages: number;
+  busy: boolean;
+  dirty: boolean;
+  onChange: (next: InitialView) => void;
+  onApply: () => void;
+}): React.JSX.Element {
+  const patch = (delta: Partial<InitialView>): void => onChange({ ...view, ...delta });
+  const zoomHonored = HONORED_ZOOMS.includes(view.zoom);
+  return (
+    <>
+      <div>
+        <label className="block text-sm text-neutral-400 mb-1" htmlFor="props-iv-layout">
+          {tChrome('dialog.props.iv.pageLayout')}
+        </label>
+        <select
+          id="props-iv-layout"
+          data-testid="props-iv-layout"
+          disabled={busy}
+          className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+          value={view.page_layout}
+          onChange={(e) => patch({ page_layout: e.target.value as PageLayoutValue })}
+        >
+          {PAGE_LAYOUT_VALUES.map((value) => (
+            <option key={value} value={value}>
+              {tChrome(`dialog.props.iv.layout.${value}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="block text-sm text-neutral-400 mb-1" htmlFor="props-iv-mode">
+          {tChrome('dialog.props.iv.pageMode')}
+        </label>
+        <select
+          id="props-iv-mode"
+          data-testid="props-iv-mode"
+          disabled={busy}
+          className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+          value={view.page_mode}
+          onChange={(e) => patch({ page_mode: e.target.value as PageModeValue })}
+        >
+          {PAGE_MODE_VALUES.map((value) => (
+            <option key={value} value={value}>
+              {tChrome(`dialog.props.iv.mode.${value}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="flex gap-3">
+        <div className="w-32">
+          <label className="block text-sm text-neutral-400 mb-1" htmlFor="props-iv-page">
+            {tChrome('dialog.props.iv.openPage')}
+          </label>
+          <input
+            id="props-iv-page"
+            data-testid="props-iv-page"
+            type="number"
+            min={1}
+            max={Math.max(1, pages)}
+            disabled={busy}
+            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+            value={view.open_page ?? ''}
+            onChange={(e) => {
+              const raw = e.target.value.trim();
+              if (raw === '') {
+                patch({ open_page: null });
+                return;
+              }
+              const parsed = Number.parseInt(raw, 10);
+              if (!Number.isFinite(parsed)) return;
+              patch({ open_page: Math.min(Math.max(1, parsed), Math.max(1, pages)) });
+            }}
+          />
+        </div>
+        <div className="flex-1">
+          <label className="block text-sm text-neutral-400 mb-1" htmlFor="props-iv-zoom">
+            {tChrome('dialog.props.iv.magnification')}
+          </label>
+          <select
+            id="props-iv-zoom"
+            data-testid="props-iv-zoom"
+            disabled={busy || view.open_page === null}
+            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+            value={view.zoom}
+            onChange={(e) => {
+              const zoom = e.target.value as ZoomValue;
+              patch({ zoom, zoom_percent: zoom === 'percent' ? (view.zoom_percent ?? 100) : view.zoom_percent });
+            }}
+          >
+            {ZOOM_VALUES.map((value) => (
+              <option key={value} value={value}>
+                {tChrome(`dialog.props.iv.zoom.${value}`)}
+              </option>
+            ))}
+          </select>
+        </div>
+        {view.zoom === 'percent' && (
+          <div className="w-28">
+            <label className="block text-sm text-neutral-400 mb-1" htmlFor="props-iv-zoom-percent">
+              {tChrome('dialog.props.iv.percent')}
+            </label>
+            <input
+              id="props-iv-zoom-percent"
+              data-testid="props-iv-zoom-percent"
+              type="number"
+              list="props-iv-zoom-steps"
+              min={ZOOM_PERCENT_MIN}
+              max={ZOOM_PERCENT_MAX}
+              disabled={busy}
+              className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+              value={view.zoom_percent ?? 100}
+              onChange={(e) => {
+                const parsed = Number.parseFloat(e.target.value);
+                if (!Number.isFinite(parsed)) return;
+                patch({
+                  zoom_percent: Math.min(Math.max(ZOOM_PERCENT_MIN, parsed), ZOOM_PERCENT_MAX),
+                });
+              }}
+            />
+            <datalist id="props-iv-zoom-steps">
+              {ZOOM_PERCENT_STEPS.map((step) => (
+                <option key={step} value={step} />
+              ))}
+            </datalist>
+          </div>
+        )}
+      </div>
+
+      {view.open_page !== null && !zoomHonored && (
+        <p className="text-xs text-neutral-500" data-testid="props-iv-zoom-note">
+          {tChrome('dialog.props.iv.zoomViewerOnly')}
+        </p>
+      )}
+      {!view.open_action_replaceable && (
+        <p className="text-xs text-amber-400" data-testid="props-iv-open-action-note">
+          {tChrome('dialog.props.iv.openActionScript')}
+        </p>
+      )}
+
+      <div>
+        <label className="block text-sm text-neutral-400 mb-1" htmlFor="props-iv-direction">
+          {tChrome('dialog.props.iv.direction')}
+        </label>
+        <select
+          id="props-iv-direction"
+          data-testid="props-iv-direction"
+          disabled={busy}
+          className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+          value={view.direction}
+          onChange={(e) => patch({ direction: e.target.value === 'R2L' ? 'R2L' : 'L2R' })}
+        >
+          <option value="L2R">{tChrome('dialog.props.iv.directionL2R')}</option>
+          <option value="R2L">{tChrome('dialog.props.iv.directionR2L')}</option>
+        </select>
+      </div>
+
+      <fieldset className="flex flex-col gap-1.5">
+        <legend className="text-sm text-neutral-400 mb-1">
+          {tChrome('dialog.props.iv.windowOptions')}
+        </legend>
+        {VIEWER_ONLY_OPTIONS.map((option) => (
+          <label key={option} className="flex items-center gap-2 text-sm text-neutral-300">
+            <input
+              type="checkbox"
+              data-testid={`props-iv-${option.replace(/_/g, '-')}`}
+              disabled={busy}
+              checked={view[option]}
+              onChange={(e) => patch({ [option]: e.target.checked } as Partial<InitialView>)}
+            />
+            {tChrome(VIEWER_ONLY_LABELS[option])}
+          </label>
+        ))}
+        <p className="text-xs text-neutral-500">{tChrome('dialog.props.iv.windowOptionsNote')}</p>
+      </fieldset>
+
+      <button
+        data-testid="props-iv-apply"
+        disabled={busy || !dirty}
+        onClick={onApply}
+        className="self-start px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+      >
+        {tChrome('dialog.props.apply')}
+      </button>
+    </>
   );
 }
 
@@ -320,4 +860,3 @@ function byteLengthOf(buffer: PdfBuffer | null): number | null {
   if (Array.isArray(buffer)) return buffer.length;
   return buffer.byteLength;
 }
-

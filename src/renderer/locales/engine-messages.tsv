@@ -70,6 +70,15 @@ distill.inputFileFound	pattern	create_pdf,distill,office_export,soffice,trapping
 distill.outputMustDifferentFile	exact	distill	output must be a different file from the input
 distill.postscriptFileMissingHeader	exact	distill	not a PostScript file (missing the '%!' header)
 distill.unknownPresetScreenEbook	pattern	distill	unknown preset {{preset}} (screen, ebook, printer, prepress, default)
+doc_properties.directionMustLR	pattern	doc_properties	direction must be 'L2R' or 'R2L', got {{direction}}
+doc_properties.documentSOpenAction	exact	doc_properties	the document's open action is a script, not a destination; it was left unchanged
+doc_properties.openPageOutRange	pattern	doc_properties	open_page {{page_number}} is out of range (1-{{total}})
+doc_properties.pageLayoutMustDefault	pattern	doc_properties	page_layout must be 'default' or one of {{v0}}, got {{page_layout}}
+doc_properties.pageModeMustDefault	pattern	doc_properties	page_mode must be 'default' or one of {{v0}}, got {{page_mode}}
+doc_properties.trappedMustOneGot	pattern	doc_properties	trapped must be one of {{v0}}, got {{trapped}}
+doc_properties.zoomMustOneGot	pattern	doc_properties	zoom must be one of {{v0}}, got {{zoom}}
+doc_properties.zoomPercentMustBetween	pattern	doc_properties	zoom_percent must be between {{minimum}} and {{maximum}}, got {{zoom_percent}}
+doc_properties.zoomPercentNeedsZoom	exact	doc_properties	zoom 'percent' needs a zoom_percent
 document_js.duplicateDocumentScriptName	pattern	document_js	Duplicate document-script name: {{name}}.
 document_js.eachDocumentScriptMust	exact	document_js	Each document script must be an object with name and js.
 document_js.eachDocumentScriptNeeds	exact	document_js	Each document script needs a non-empty name.
