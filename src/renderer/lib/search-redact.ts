@@ -203,6 +203,7 @@ export const PATTERN_IDS = [
   'iban',
   'nhs_uk',
   'sin_ca',
+  'url',
 ] as const;
 export type PatternId = (typeof PATTERN_IDS)[number];
 

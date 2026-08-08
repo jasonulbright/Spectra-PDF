@@ -111,7 +111,7 @@ describe('tools registry', () => {
     // than claiming a pointer vocabulary — nothing may claim any of the six.
     for (const ownerless of
       ['select', 'hand', 'zoommarquee', 'outputpreview', 'flattenpreview',
-        'tablereview'] as const) {
+        'tablereview', 'beaddraw'] as const) {
       expect(owners.has(ownerless), `'${ownerless}' must belong to no tool`).toBe(false);
       expect(toolForCanvasTool(ownerless)).toBeUndefined();
     }
@@ -120,7 +120,7 @@ describe('tools registry', () => {
     for (const m of CANVAS_MODES) {
       if (m === 'select' || m === 'hand' || m === 'zoommarquee'
         || m === 'outputpreview' || m === 'flattenpreview'
-        || m === 'tablereview') continue;
+        || m === 'tablereview' || m === 'beaddraw') continue;
       expect(toolForCanvasTool(m)?.id, `${m} is owned by no tool`).toBeDefined();
     }
   });

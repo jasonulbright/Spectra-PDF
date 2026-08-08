@@ -134,6 +134,13 @@ interface DocLayerProps {
     rect: { x: number; y: number; w: number; h: number },
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
+  /** An article bead band; the Articles panel appends it. */
+  onSetBeadRect?: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
   onSetAddTextRect: (
     docId: string,
     pageId: string,
@@ -277,6 +284,7 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               onClearCropPlacement={props.onClearCropPlacement}
               onSetAddTextRect={props.onSetAddTextRect}
               onSetCropRect={props.onSetCropRect}
+              onSetBeadRect={props.onSetBeadRect}
               onAddImageRect={props.onAddImageRect}
               onClearAddTextPlacement={props.onClearAddTextPlacement}
               onPageContextMenu={props.onPageContextMenu}

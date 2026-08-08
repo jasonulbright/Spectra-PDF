@@ -806,6 +806,15 @@ interface PageCellProps {
     rect: { x: number; y: number; w: number; h: number },
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
+  // An article bead band. Same shape and same contract as the crop band —
+  // display-normalised, rotation AT DRAW, and nothing commits: the panel
+  // appends the box and Save is what writes.
+  onSetBeadRect?: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
   // Add-Image band release: converts + hands off to App's picker+embed.
   onAddImageRect: (
     docId: string,
@@ -1086,6 +1095,7 @@ function PageCellImpl({
   onClearCropPlacement,
   onSetAddTextRect,
   onSetCropRect,
+  onSetBeadRect,
   onClearAddTextPlacement,
   onAddImageRect,
   onClearNewFieldPlacement,
@@ -2744,6 +2754,10 @@ function PageCellImpl({
           // The band is the region to KEEP. Nothing commits here —
           // the panel turns it into insets and the user applies.
           onSetCropRect?.(docId, page.id, latest, page.rotation);
+        } else if (tool === 'beaddraw') {
+          // The band is one box of an article. Nothing commits here — the
+          // Articles panel appends it and the user saves.
+          onSetBeadRect?.(docId, page.id, latest, page.rotation);
         } else if (tool === 'addtext') {
           // Add-text placement — single, drawing again replaces it.
           onSetAddTextRect(docId, page.id, latest, page.rotation);
@@ -4141,7 +4155,9 @@ function PageCellImpl({
                       ? ' band-addimage'
                       : tool === 'cropdraw'
                         ? ' band-cropdraw'
-                        : '')
+                        : tool === 'beaddraw'
+                          ? ' band-beaddraw'
+                          : '')
           }
           style={{
             left: `${band.x * 100}%`,

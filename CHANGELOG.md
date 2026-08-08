@@ -2,6 +2,22 @@
 
 ## 1.0.25
 
+### Navigation the document already implies
+- Bookmarks can be built from a tagged document's own headings: the Bookmarks pane gains **From structure…**, which counts the headings first and writes the outline on your word.
+- Each bookmark takes the heading's own text and lands on the heading itself, not merely on the page it starts.
+- Headings nest as they are written: a sub-heading becomes a child of the heading above it, and a document that starts at a lower level grows no empty parents.
+- A document with no tags is offered the whole chain — detect its headings, then build — and the result says which of the two it did.
+- A document that already has bookmarks is asked whether to replace them or keep them and add after; nothing is discarded silently.
+- A heading with no readable text is reported rather than written as an untitled bookmark.
+- A bookmark's stored position now survives editing the outline. Renaming one bookmark used to flatten every positioned bookmark in the document to a whole page.
+- **Create links from web addresses** sweeps the text and puts a link over every web and email address it finds, over the whole document or a page range.
+- The link covers the address exactly, and an address that wraps a line gets a link on each line rather than one box across the gap.
+- Text an existing link already covers is left alone and counted, so running it twice changes nothing.
+- Web addresses join the built-in patterns Search & Redact offers.
+- Article threads: a new **Articles** pane defines a run of boxes across pages, walks them forwards and backwards, and saves them into the document as real article threads. The pane says plainly that this viewer follows them and many others ignore them.
+- Command line: `outline-from-structure`, `link-from-urls` (with `--preview` to report and write nothing) and `articles`.
+- Guided actions gain a links-from-addresses step and a bookmarks-from-structure step, so a whole folder can be given its navigation in one run.
+
 ### Straightening, cleaning and righting scanned pages
 - Scan & OCR gains a Scan Enhancement pane: straighten, remove specks, whiten the background and turn sideways pages upright.
 - Every correction is measured on the page and reported before anything is rewritten, so the pane states how far the page leans and how many specks it carries first.
