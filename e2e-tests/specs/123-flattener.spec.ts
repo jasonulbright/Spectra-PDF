@@ -37,6 +37,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 ).href;
 
 const PAGE = resolve(__dirname, '..', 'fixtures', 'transparency-page.pdf');
+const TYPE3 = resolve(__dirname, '..', 'fixtures', 'type3-text.pdf');
 
 /** Every wait here stays under the suite's own per-test budget. A wait AT that
  *  budget loses the race to it, and the failure then reads as a bare timeout
@@ -161,5 +162,66 @@ describe('flattener preview', () => {
   it('a page with nothing left to flatten offers nothing to do', async () => {
     expect(await regionCount()).toBe(0);
     expect(await $('[data-testid="flattener-apply"]').isEnabled()).toBe(false);
+  });
+
+  // ── the outline conversions ──────────────────────────────────────────────
+  //
+  // The state this picks up is exactly the one the flatten left: a document
+  // with no transparency and nothing to rasterize. That is the case a
+  // conversion has to reach on its own, and the case the old enable rule —
+  // regions only — locked the user out of.
+
+  it('arming a conversion reaches Apply on a page with no transparency', async () => {
+    await $('[data-testid="flattener-outline-text"]').click();
+    await $('[data-testid="flattener-outline-text-note"]').waitForDisplayed({
+      timeout: 20_000,
+    });
+    await browser.waitUntil(
+      async () => $('[data-testid="flattener-apply"]').isEnabled(),
+      {
+        timeout: WAIT_MS,
+        timeoutMsg: 'Apply stayed disabled with a conversion armed and no regions',
+      },
+    );
+    // The fixture draws in a standard-14 face it does not embed, so the
+    // panel has to SAY where the glyphs will come from before it converts.
+    await $('[data-testid="flattener-outline-substituted"]').waitForDisplayed({
+      timeout: WAIT_MS,
+    });
+    const report = await $('[data-testid="flattener-outline-report"]').getText();
+    expect(report).toMatch(/\d/);
+  });
+
+  it('converting the text leaves nothing a reader can extract', async () => {
+    const before = await pageOneText(resolve(workDir, 'flattened.pdf'));
+    expect(before).toContain('Line 00');
+
+    await $('[data-testid="flattener-apply"]').click();
+    // The button is disabled while the conversion runs and comes back enabled
+    // (a conversion is armed, so nothing else gates it) once the re-read
+    // lands. Waiting on the re-read is what makes the save below read the
+    // converted bytes rather than the ones already on disk.
+    await browser.waitUntil(
+      async () => (await $('[data-testid="flattener-apply"]').isEnabled())
+        && (await $('[data-testid="flattener-outline-report"]').isDisplayed()),
+      { timeout: WAIT_MS, timeoutMsg: 'the conversion never reported back' },
+    );
+    const outlined = resolve(workDir, 'outlined.pdf');
+    await saveActiveAs(outlined);
+    const text = await pageOneText(outlined);
+    expect(text.replace(/\s+/g, '')).toBe('');
+  });
+
+  it('a font whose glyphs are content streams refuses BY NAME', async () => {
+    await closeAllFiles();
+    await openByPaths([TYPE3]);
+    await openFlattener();
+    await browser.waitUntil(
+      async () => $('[data-testid="flattener-outline-refusals"]').isDisplayed(),
+      { timeout: WAIT_MS, timeoutMsg: 'the Type 3 refusal never surfaced' },
+    );
+    const reason = await $('[data-testid="flattener-outline-refusals"]').getText();
+    expect(reason).toContain('Type 3');
+    expect(reason).toContain('Page 1');
   });
 });
