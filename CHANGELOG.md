@@ -5,6 +5,8 @@
 ### Fixes
 - Cropping by dragging a rectangle on the page works again in the document view. The rectangle now stays on the page as a dashed mark of the region to keep, and the Top/Bottom/Left/Right margins in the Crop & Page Boxes panel fill in from it. Previously the rectangle could be drawn but nothing came of it.
 - Drawing an article box on the page adds it to the selected article, the same way.
+- Large photographic scans now finish compressing. A long document of pages photographed with a phone could run for hours and then end with nothing to show for it, because pages that are more picture than type were being fed to a text-shape compressor that they make grow without limit. Such pages are now recognised and compressed on their own, which is both far faster and, on those pages, smaller.
+- Compression never abandons a run over a slow page. If any part of the stencil compression runs long, that part falls back to a simpler, faster method and the document still finishes; the result says how many pages that happened to.
 
 ## 1.0.25
 
