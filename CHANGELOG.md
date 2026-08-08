@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.26
+
+### Fixes
+- Cropping by dragging a rectangle on the page works again in the document view. The rectangle now stays on the page as a dashed mark of the region to keep, and the Top/Bottom/Left/Right margins in the Crop & Page Boxes panel fill in from it. Previously the rectangle could be drawn but nothing came of it.
+- Drawing an article box on the page adds it to the selected article, the same way.
+
 ## 1.0.25
 
 ### Navigation the document already implies

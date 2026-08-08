@@ -145,4 +145,55 @@ describe('derived navigation', () => {
     const saved = await getArticles();
     expect(saved[0].beads.map((b) => b.page)).toEqual([1, 2]);
   });
+
+  it('appends a bead drawn on the page with the real band gesture', async () => {
+    // The panel append above cannot see the gesture that feeds it: the band's
+    // release hands the box to a callback the page cell receives as a prop, so
+    // a render path that fails to pass it draws the band, finishes the drag,
+    // and appends nothing. Pointer events through the real component tree are
+    // the only thing that reads that.
+    const before = (await getArticles())[0].beads.length;
+
+    await openNav('articles', 'articles-panel');
+    await $('[data-testid="article-row"]').click();
+    const draw = await $('[data-testid="article-draw"]');
+    await draw.click();
+    await browser.waitUntil(async () => (await getState()).tool === 'beaddraw', {
+      timeout: 10_000,
+      timeoutMsg: 'the Draw button never armed the bead mode',
+    });
+
+    const pr = (await browser.execute(function () {
+      const el = document.querySelector('[data-page-id]');
+      if (!el) return null as unknown as { x: number; y: number; w: number; h: number };
+      const r = el.getBoundingClientRect();
+      return { x: r.left, y: r.top, w: r.width, h: r.height };
+    })) as { x: number; y: number; w: number; h: number };
+    expect(pr).not.toBe(null);
+    const at = (fx: number, fy: number): { x: number; y: number } => ({
+      x: Math.round(pr.x + pr.w * fx),
+      y: Math.round(pr.y + pr.h * fy),
+    });
+    await browser
+      .action('pointer', { parameters: { pointerType: 'mouse' } })
+      .move(at(0.35, 0.2))
+      .down()
+      .pause(80)
+      .move(at(0.5, 0.32))
+      .pause(80)
+      .move(at(0.7, 0.45))
+      .pause(80)
+      .up()
+      .perform();
+
+    await browser.waitUntil(async () => (await getArticles())[0].beads.length === before + 1, {
+      timeout: 10_000,
+      timeoutMsg: 'the drawn box never reached the article',
+    });
+    const bead = (await getArticles())[0].beads[before];
+    expect(bead.page).toBe(1);
+    // A box, not a click: the band covers real area in page space.
+    expect(bead.rect[2] - bead.rect[0]).toBeGreaterThan(1);
+    expect(bead.rect[3] - bead.rect[1]).toBeGreaterThan(1);
+  });
 });
