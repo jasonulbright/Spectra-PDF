@@ -21,7 +21,6 @@ outlined is text that would disappear.
 from __future__ import annotations
 
 import math
-from typing import Optional
 
 import pikepdf
 

@@ -32,10 +32,6 @@ Contours = list[list[Segment]]
 # page is rendered or printed at.
 _QU2CU_ERR_EM = 0.001
 
-# Type3 glyph procedures are content streams, not outlines, and a composite
-# glyph can reference another composite; both are bounded here.
-_MAX_COMPONENT_DEPTH = 8
-
 
 class OutlineRefusal(ValueError):
     """A font whose glyphs cannot be taken, or a stroke with no fixed width.
@@ -124,9 +120,6 @@ class _Program:
         return contours
 
     def _draw(self, key):
-        raise NotImplementedError
-
-    def has(self, key) -> bool:
         raise NotImplementedError
 
 
@@ -244,10 +237,6 @@ class _SfntProgram(_Program):
                 continue
         return out
 
-    def has(self, key) -> bool:
-        name = self.name_for_gid(key) if isinstance(key, int) else key
-        return name is not None and name in self.glyph_set
-
     def _draw(self, key):
         name = self.name_for_gid(key) if isinstance(key, int) else key
         if name is None or name not in self.glyph_set:
@@ -309,9 +298,6 @@ class _CffProgram(_Program):
             return None
         return self.by_cid.get(cid)
 
-    def has(self, key) -> bool:
-        return isinstance(key, str) and key in self.charstrings
-
     def _draw(self, key):
         if not isinstance(key, str) or key not in self.charstrings:
             return []
@@ -357,9 +343,6 @@ class _Type1Program(_Program):
             for code, name in enumerate(encoding)
             if isinstance(name, str) and name != ".notdef" and name in self.charstrings
         }
-
-    def has(self, key) -> bool:
-        return isinstance(key, str) and key in self.charstrings
 
     def _draw(self, key):
         if not isinstance(key, str) or key not in self.charstrings:
