@@ -82,6 +82,9 @@ export const dialog = {
   /** Pick ONE picture to stamp as a watermark. Filtered to the Create PDF
    * image set — the same set the engine accepts. Null if cancelled. */
   pickWatermarkImage: () => invoke<string | null>('pick_watermark_image'),
+  /** Pick ONE PDF whose page is stamped as a watermark. The file is never
+   * opened as a document. Null if cancelled. */
+  pickWatermarkPdf: () => invoke<string | null>('pick_watermark_pdf'),
   /** Pick a replacement image (Edit ▸ Replace Image). Null if cancelled.
    * `includeSvg` widens the filter for Add Image (SVG places as real
    * vector content); Replace stays raster-only. */

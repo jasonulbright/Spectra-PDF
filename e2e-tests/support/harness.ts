@@ -162,6 +162,19 @@ export async function saveActiveAs(destPath: string): Promise<void> {
  * destination and the panel's OWN state drives everything else — the quality
  * select's change handler, the MRC branch, the parameter assembly and the real
  * engine call are all the ones a click reaches. */
+/** Watermark panel: select the PDF source and set the file and page a native
+ * picker would have set (panel must be mounted). Apply is still clicked, so
+ * everything from the panel's own state down through the engine is real. */
+export async function watermarkSetPdfSource(path: string, page = 1): Promise<void> {
+  await browser.execute(
+    function (p, n) {
+      (window as any).__SPECTRA_TEST__.watermarkSetPdfSource(p, n);
+    },
+    path,
+    page,
+  );
+}
+
 export async function compressRun(
   out: string,
   opts?: { quality?: string; mrcPreset?: string; verifyText?: boolean },

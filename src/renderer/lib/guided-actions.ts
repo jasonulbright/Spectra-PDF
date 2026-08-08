@@ -329,7 +329,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
     op: 'watermark',
     title: 'Watermark',
     needsFontDir: true,
-    requireOneOf: ['text', 'image'],
+    requireOneOf: ['text', 'image', 'pdf_source'],
     params: [
       { key: 'text', label: 'Text', kind: 'text', defaultValue: '' },
       {
@@ -337,7 +337,22 @@ export const STEP_CATALOG: readonly StepDef[] = [
         label: 'Image file',
         kind: 'text',
         defaultValue: '',
-        hint: 'Full path to a picture. Set this or Text, not both.',
+        hint: 'Full path to a picture. Set exactly one source.',
+      },
+      {
+        key: 'pdf_source',
+        label: 'PDF file',
+        kind: 'text',
+        defaultValue: '',
+        hint: 'Full path to a PDF whose page is stamped as vector artwork. Set exactly one source.',
+      },
+      {
+        key: 'pdf_page',
+        label: 'PDF page',
+        kind: 'number',
+        defaultValue: 1,
+        min: 1,
+        step: 1,
       },
       {
         key: 'opacity',

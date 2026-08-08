@@ -101,7 +101,7 @@ pub enum CliCommand {
     /// (no review step exists headlessly). Use `--marks-only` to write
     /// reviewable /Redact annotations instead of removing content
     SearchRedact(SearchRedactArgs),
-    /// Stamp a translucent text or image watermark across pages
+    /// Stamp a translucent text, image or PDF-page watermark across pages
     Watermark(WatermarkArgs),
     /// Add headers, footers, page numbers, and Bates numbering
     HeaderFooter(HeaderFooterArgs),
@@ -740,13 +740,20 @@ pub struct WatermarkArgs {
     #[arg(short, long)]
     pub output: PathBuf,
     /// Watermark text (Latin-1 best-effort — non-Latin glyphs render as '?').
-    /// Exactly one of --text and --image is the source
+    /// Exactly one of --text, --image and --pdf-source is the source
     #[arg(short, long)]
     pub text: Option<String>,
     /// Picture to stamp instead of text; it embeds once and every page
     /// references the same image
     #[arg(long)]
     pub image: Option<PathBuf>,
+    /// PDF whose page is stamped as VECTOR artwork (a letterhead, a pre-drawn
+    /// stamp); the page embeds once and nothing is rasterized
+    #[arg(long)]
+    pub pdf_source: Option<PathBuf>,
+    /// 1-based page of --pdf-source to stamp
+    #[arg(long, default_value_t = 1)]
+    pub pdf_page: i64,
     /// Fill/stroke alpha, 0 < opacity <= 1
     #[arg(long, default_value_t = 0.15)]
     pub opacity: f64,
@@ -2914,14 +2921,18 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::Watermark(args) => {
-            // Exactly one source. Passing both would silently honour one of
-            // them; passing neither has no stamp to draw.
-            match (&args.text, &args.image) {
-                (Some(_), Some(_)) => {
-                    return Err("--text and --image are alternatives, not a pair".to_string())
-                }
-                (None, None) => return Err("--text or --image is required".to_string()),
-                _ => {}
+            // Exactly one source. Passing two would silently honour one of
+            // them; passing none has no stamp to draw.
+            let sources = usize::from(args.text.is_some())
+                + usize::from(args.image.is_some())
+                + usize::from(args.pdf_source.is_some());
+            if sources > 1 {
+                return Err(
+                    "--text, --image and --pdf-source are alternatives, not a set".to_string()
+                );
+            }
+            if sources == 0 {
+                return Err("--text, --image or --pdf-source is required".to_string());
             }
             let mut params = json!({
                 "file": abs(&args.input).to_string_lossy(),
@@ -2930,6 +2941,10 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "image": args.image.as_ref()
                     .map(|p| abs(p).to_string_lossy().to_string())
                     .unwrap_or_default(),
+                "pdf_source": args.pdf_source.as_ref()
+                    .map(|p| abs(p).to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                "pdf_page": args.pdf_page,
                 "opacity": args.opacity,
                 "angle": args.angle,
                 "color": args.color,

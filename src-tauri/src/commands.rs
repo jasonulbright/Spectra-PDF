@@ -198,6 +198,30 @@ pub async fn pick_watermark_image(
     }
 }
 
+/// Pick ONE PDF whose page is stamped as a watermark. Separate from the
+/// document picker: this file is never opened as a document, and separate from
+/// the image picker because the engine lifts a page as vector artwork rather
+/// than embedding a picture.
+#[tauri::command]
+pub async fn pick_watermark_pdf(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    let result = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("PDF Files", &["pdf", "pdfx"])
+        .blocking_pick_file();
+    match result {
+        Some(p) => match p.into_path() {
+            Ok(pb) => Ok(Some(canonical_path(&pb.to_string_lossy()))),
+            Err(e) => Err(format!("Path error: {}", e)),
+        },
+        None => Ok(None),
+    }
+}
+
 /// Pick one or more Create PDF sources. Separate from the PDF picker
 /// (much wider filter, and MULTI-select); window-parented for modality.
 #[tauri::command]
