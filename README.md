@@ -130,6 +130,7 @@ spectrapdf generate-signer -o me.pfx --cn "My Name" --password pass
 spectrapdf compare a.pdf b.pdf
 spectrapdf redact input.pdf -o redacted.pdf --page 1 --rect 100,100,300,150
 spectrapdf watermark input.pdf -o marked.pdf --text "CONFIDENTIAL"
+spectrapdf watermark input.pdf -o marked.pdf --image logo.png --position bottom-right --scale 0.4
 spectrapdf repair broken.pdf -o repaired.pdf
 spectrapdf rebuild broken.pdf -o rebuilt.pdf
 spectrapdf recover broken.pdf -o recovered.pdf

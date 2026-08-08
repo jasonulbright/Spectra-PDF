@@ -2,11 +2,25 @@
 
 ## 1.0.24
 
+### Watermarking with a picture
+- A watermark is now text or a picture, and the panel offers both.
+- Any picture Create PDF accepts can be stamped, chosen through a file picker.
+- The picture is stored once in the document, however many pages carry it.
+- Scale sets how large it goes; 1 fills the page without crowding it.
+- Position places it in the middle or against any edge or corner, with a margin.
+- Tiling repeats the stamp across the whole page, with a gap you set.
+- Position and tiling apply to text watermarks too, and the old placement is still the default.
+- Opacity, angle, over-or-behind and the page selection work as they did.
+- A picture with several frames stamps the first, and says how many it held.
+- A watermark now reads level on a rotated page instead of lying on its side, and no longer shrinks there.
+- Command line: `watermark --image`, with `--scale`, `--position`, `--margin`, `--tile` and `--tile-gap`.
+- Guided actions can stamp a picture, and refuse a step that names both a text and a picture.
+
 ### Splitting a document four ways
-- Split still takes page ranges, and now also a number of pages, a maximum file size, or the document's top-level bookmarks.
+- Split still takes page ranges, and now also a page count, a maximum file size, or top-level bookmarks.
 - Every N pages writes as many files as it takes, the last one holding the remainder.
-- Splitting by size measures each file as it is really written, so the limit is the size on disk and not an estimate.
-- A single page larger than the limit is written to a file of its own and reported, rather than stopping the whole job.
+- Splitting by size measures each file as it is really written, so the limit is the size on disk.
+- A page larger than the limit on its own gets a file of its own, and is reported.
 - Splitting at bookmarks writes one file per top-level bookmark, from that bookmark to the next.
 - Each file is named after the bookmark it starts at, with characters the filesystem refuses replaced.
 - Pages ahead of the first bookmark are kept, in a file named after the document.

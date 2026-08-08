@@ -175,6 +175,29 @@ fn allow_picked_path(app: &AppHandle, path: &str) {
     }
 }
 
+/// Pick ONE picture to stamp as a watermark. The filter is the Create PDF
+/// image set — the engine accepts exactly that set, so a narrower picker
+/// would hide files the operation would have taken.
+#[tauri::command]
+pub async fn pick_watermark_image(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    let result = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("Images", crate::create_pdf_sources::IMAGES)
+        .blocking_pick_file();
+    match result {
+        Some(p) => match p.into_path() {
+            Ok(pb) => Ok(Some(canonical_path(&pb.to_string_lossy()))),
+            Err(e) => Err(format!("Path error: {}", e)),
+        },
+        None => Ok(None),
+    }
+}
+
 /// Pick one or more Create PDF sources. Separate from the PDF picker
 /// (much wider filter, and MULTI-select); window-parented for modality.
 #[tauri::command]

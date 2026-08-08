@@ -48,7 +48,7 @@ create_pdf.createPdfCannotConvert	pattern	create_pdf	Create PDF cannot convert {
 create_pdf.createPdfNeedsLeast	exact	create_pdf	Create PDF needs at least one source
 create_pdf.everySourceMustObject	exact	create_pdf	every source must be an object with a path or a kind
 create_pdf.everySourceNeedsPath	exact	create_pdf	every source needs a path (or the kind 'blank')
-create_pdf.heicHeifImagesNeed	pattern	create_pdf	HEIC/HEIF images need the pillow-heif plugin, which this runtime does not have: {{src_path}}
+create_pdf.heicHeifImagesNeed	pattern	create_pdf,watermark	HEIC/HEIF images need the pillow-heif plugin, which this runtime does not have: {{src_path}}
 create_pdf.imageContainsFrames	pattern	create_pdf	the image contains no frames: {{src_path}}
 create_pdf.imageDpiDefaultMust	exact	create_pdf	the image DPI default must be a positive number
 create_pdf.imageFileEmpty	pattern	create_pdf	the image file is empty: {{src_path}}
@@ -128,6 +128,7 @@ guided_actions.processedOriginalsFolderMust2	exact	guided_actions	The processed-
 guided_actions.stepNameExportFormat	pattern	guided_actions	step {{v0}} ({{op}}): name the export format
 guided_actions.stepParamsMustObject	pattern	guided_actions	step {{v0}} ({{op}}): params must be an object
 guided_actions.stepPositionTextGo	pattern	guided_actions	step {{v0}} ({{op}}): position and text go together
+guided_actions.stepSetTextImage	pattern	guided_actions	step {{v0}} ({{op}}): set text or image, one of them and not both
 guided_actions.stepStepObject	pattern	guided_actions	step {{v0}} is not a step object
 guided_actions.stepUnknownOperation	pattern	guided_actions	step {{v0}}: unknown operation {{op}}
 guided_actions.stepUnknownParameterS	pattern	guided_actions	step {{v0}} ({{op}}): unknown parameter(s) {{unknown}}
@@ -526,6 +527,19 @@ watermark.colorMustRrggbbGot	pattern	watermark	color must be #rrggbb, got: {{col
 watermark.layerMustOverUnder	pattern	watermark	layer must be "over" or "under", got {{layer}}
 watermark.opacityMustGot	pattern	watermark	opacity must be in (0, 1], got {{opacity}}
 watermark.pageCropboxMediaboxAnywhere	exact	watermark	page has no /CropBox or /MediaBox anywhere in its page tree
+watermark.tilingWatermarkWouldNeed	pattern	watermark	tiling this watermark would need {{v0}} copies per page, more than the {{MAX_TILES}} allowed — increase the scale or the gap
+watermark.unreadableWatermarkImage	pattern	watermark	unreadable watermark image: {{path}} ({{exc}})
+watermark.unreadableWatermarkImageImage	pattern	watermark	unreadable watermark image: {{path}} (no image stream)
+watermark.watermarkImageEmpty	pattern	watermark	watermark image is empty: {{path}}
+watermark.watermarkImageFound	pattern	watermark	watermark image not found: {{path}}
+watermark.watermarkImagePixels	exact	watermark	the watermark image has no pixels
+watermark.watermarkImageTypeSupported	pattern	watermark	watermark image type not supported: {{v0}} (accepted: {{v1}})
+watermark.watermarkMarginMustNegative	pattern	watermark	watermark margin must not be negative, got {{margin}}
+watermark.watermarkNeedsEitherText	exact	watermark	a watermark needs either text or an image, not both
+watermark.watermarkNeedsTextImage	exact	watermark	a watermark needs text or an image
+watermark.watermarkPositionMustOne	pattern	watermark	watermark position must be one of {{v0}}, got {{position}}
+watermark.watermarkScaleMustGreater	pattern	watermark	watermark scale must be greater than 0, got {{scale}}
+watermark.watermarkScaleMustNumber	pattern	watermark	watermark scale must be a number, got {{scale}}
 watermark.watermarkTextContainsCharacters	exact	watermark	watermark text contains characters outside Latin-1 and no fallback font is available
-watermark.watermarkTextMustEmpty	exact	watermark	watermark text must not be empty
+watermark.watermarkTileGapMust	pattern	watermark	watermark tile gap must not be negative, got {{tile_gap}}
 xfdf.xfdfFileAnnotsSection	exact	xfdf	the XFDF file has no <annots> section
