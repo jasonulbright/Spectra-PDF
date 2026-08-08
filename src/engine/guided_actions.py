@@ -54,7 +54,9 @@ from engine.headers import add_header_footer
 from engine.metadata import strip_metadata
 from engine.pdfa import convert_pdfa
 from engine.sanitize import sanitize_pdf
+from engine.derived_nav import outline_from_structure
 from engine.form_prepare import prepare_form_fields
+from engine.links import create_links_from_urls
 from engine.search_redact import search_and_redact
 from engine.watermark import watermark
 
@@ -86,6 +88,19 @@ _STEPS: dict = {
     "grayscale": (grayscale, frozenset(), frozenset({"gs_path"})),
     "convert_pdfa": (convert_pdfa, frozenset({"level"}), frozenset({"gs_path"})),
     "strip_metadata": (strip_metadata, frozenset(), frozenset()),
+    # Authoring navigation over a whole tree is where these two stop being a
+    # nicety: nobody links the addresses in 400 documents by hand, and nobody
+    # transcribes the headings of a folder of tagged reports.
+    "links_from_urls": (
+        create_links_from_urls,
+        frozenset({"pages", "emails", "skip_existing"}),
+        frozenset(),
+    ),
+    "outline_from_structure": (
+        outline_from_structure,
+        frozenset({"mode", "max_level", "tag_if_untagged"}),
+        frozenset(),
+    ),
     # An unattended run is where "clean every document leaving this folder"
     # actually lives. The category list is a run parameter, never a default:
     # the step removes exactly what the action names.

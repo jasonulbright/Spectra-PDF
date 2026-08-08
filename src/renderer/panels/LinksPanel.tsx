@@ -6,6 +6,7 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
+import { pagesParam as pagesArgument } from '../lib/page-scope';
 
 interface Link {
   page: number;
@@ -25,6 +26,9 @@ export function LinksPanel(): React.ReactElement {
   const [draft, setDraft] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [derivePages, setDerivePages] = useState('all');
+  const [deriveEmails, setDeriveEmails] = useState(true);
+  const [found, setFound] = useState<{ count: number; already: number } | null>(null);
 
   const buffer = activeFile?.buffer ?? null;
   const workingPath = activeFile?.workingPath ?? null;
@@ -70,6 +74,42 @@ export function LinksPanel(): React.ReactElement {
     [activeFile, call, dispatch, refresh],
   );
 
+  // ── Links from web addresses ────────────────────────────────────────────
+  // Count first, create second — the hairlines contract. The count comes from
+  // `find_url_links`, which is the collector `create_links_from_urls` runs, so
+  // the number shown and the number created cannot disagree about what the
+  // document contains. The already-linked figure is stated because a run that
+  // finds 40 and creates 12 has to say where the other 28 went.
+  const findAddresses = useCallback(async () => {
+    if (!activeFile) return;
+    setBusy(true);
+    setStatus(tChrome('panel.common.working'));
+    try {
+      const res = await call('find_url_links', {
+        file: activeFile.workingPath,
+        pages: pagesArgument(derivePages),
+        emails: deriveEmails,
+      });
+      const payload = res as unknown as { count: number; already_linked: number };
+      setFound({ count: payload.count ?? 0, already: payload.already_linked ?? 0 });
+      setStatus('');
+    } catch (e: unknown) {
+      setFound(null);
+      setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setBusy(false);
+    }
+  }, [activeFile, call, derivePages, deriveEmails]);
+
+  const createDerivedLinks = useCallback(async () => {
+    await runMutation(
+      'create_links_from_urls',
+      { pages: pagesArgument(derivePages), emails: deriveEmails, skip_existing: true },
+      tChrome('panel.links.derive.created'),
+    );
+    setFound(null);
+  }, [runMutation, derivePages, deriveEmails]);
+
   const saveUrl = useCallback(
     (l: Link) => {
       if (!draft.trim()) {
@@ -88,6 +128,60 @@ export function LinksPanel(): React.ReactElement {
     <div className="flex flex-col gap-4">
       <div className="text-sm text-neutral-400">
         {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span>
+      </div>
+      <div className="flex flex-col gap-2 p-3 bg-neutral-800/40 border border-neutral-800 rounded" data-testid="links-derive">
+        <div className="text-sm text-neutral-200">{tChrome('panel.links.derive.title')}</div>
+        <label className="flex items-center gap-2 text-xs text-neutral-400">
+          {tChrome('panel.links.derive.pages')}
+          <input
+            data-testid="links-derive-pages"
+            type="text"
+            value={derivePages}
+            onChange={(e) => {
+              setDerivePages(e.target.value);
+              setFound(null);
+            }}
+            className="flex-1 px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
+          />
+        </label>
+        <label className="flex items-center gap-2 text-xs text-neutral-400">
+          <input
+            data-testid="links-derive-emails"
+            type="checkbox"
+            checked={deriveEmails}
+            onChange={(e) => {
+              setDeriveEmails(e.target.checked);
+              setFound(null);
+            }}
+          />
+          {tChrome('panel.links.derive.emails')}
+        </label>
+        <div className="flex items-center gap-2">
+          <button
+            data-testid="links-derive-find"
+            onClick={() => void findAddresses()}
+            disabled={busy}
+            className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+          >
+            {tChrome('panel.links.derive.find')}
+          </button>
+          <button
+            data-testid="links-derive-create"
+            onClick={() => void createDerivedLinks()}
+            disabled={busy || found === null || found.count - found.already === 0}
+            className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded"
+          >
+            {tChrome('panel.links.derive.create')}
+          </button>
+        </div>
+        {found && (
+          <div className="text-xs text-neutral-400" data-testid="links-derive-count">
+            {tChrome('panel.links.derive.found', {
+              count: found.count,
+              existing: found.already,
+            })}
+          </div>
+        )}
       </div>
       {links.length === 0 ? (
         <p className="text-sm text-neutral-500" data-testid="links-empty">{tChrome('panel.links.empty')}</p>

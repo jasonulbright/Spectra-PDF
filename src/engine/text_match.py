@@ -373,6 +373,98 @@ def _valid_date(raw: str) -> bool:
     return False
 
 
+# ── web addresses ─────────────────────────────────────────────────────────
+
+# Characters that end a URL because prose put them there, not because the
+# address contains them. Trimmed from the END of a match; a closing bracket is
+# kept when the address opened one (§ _trim_url).
+_URL_TRAILING = "'\"“”‘’.,;:!?…"
+_URL_CLOSERS = {")": "(", "]": "[", "}": "{"}
+
+
+def _trim_url(raw: str) -> int:
+    """The length of `raw` once sentence punctuation is dropped from its end.
+
+    A URL at the end of a sentence is the ordinary case, and swallowing the
+    full stop makes the link fail. The bracket rule is the other half: a
+    trailing `)` belongs to the address only when the address opened one, so
+    a citation-style `(see http://x.example/a)` links `http://x.example/a`
+    while `http://x.example/a_(b)` keeps its bracket.
+    """
+    end = len(raw)
+    while end > 0:
+        ch = raw[end - 1]
+        if ch in _URL_CLOSERS:
+            opener = _URL_CLOSERS[ch]
+            if raw.count(opener, 0, end) >= raw.count(ch, 0, end):
+                break
+            end -= 1
+            continue
+        if ch in _URL_TRAILING:
+            end -= 1
+            continue
+        break
+    return end
+
+
+_URL_SCHEMES = ("http", "https", "ftp", "ftps")
+_LABEL = re.compile(r"[A-Za-z0-9\-]+")
+
+
+def _valid_host(host: str) -> bool:
+    if "@" in host:
+        host = host.rsplit("@", 1)[1]
+    host = host.split(":", 1)[0]
+    if not host or ".." in host or host[0] in ".-" or host[-1] in ".-":
+        return False
+    labels = host.split(".")
+    if len(labels) < 2:
+        return False
+    if any(not _LABEL.fullmatch(label) for label in labels):
+        return False
+    tld = labels[-1]
+    return len(tld) >= 2 and tld.isalpha()
+
+
+def _valid_url(raw: str) -> bool:
+    """A web address, not "anything with a dot in it".
+
+    Bare hostnames are deliberately NOT accepted by the pattern (see the
+    regex), so this validates the two forms that ARE: an absolute URL with a
+    scheme this app would open, and a `www.`-prefixed host. `mailto:` is
+    validated as the email it carries.
+    """
+    text = raw.strip()
+    if not text:
+        return False
+    lower = text.lower()
+    if lower.startswith("mailto:"):
+        return _valid_email(text[7:])
+    if "://" in text:
+        scheme, _, rest = text.partition("://")
+        if scheme.lower() not in _URL_SCHEMES:
+            return False
+        if not rest:
+            return False
+    else:
+        rest = text
+    host = re.split(r"[/?#]", rest, maxsplit=1)[0]
+    return _valid_host(host)
+
+
+def url_target(raw: str) -> str:
+    """The URI a matched address becomes. `www.` gets the scheme every
+    authoring tool supplies for it; everything else is already absolute."""
+    text = raw.strip()
+    if text.lower().startswith("www."):
+        return "https://" + text
+    return text
+
+
+def email_target(raw: str) -> str:
+    return "mailto:" + raw.strip()
+
+
 class PatternDef(NamedTuple):
     """One built-in pattern.
 
@@ -380,12 +472,19 @@ class PatternDef(NamedTuple):
     around it as evidence that nine digits are a social security number, but
     the redaction mark must cover the number and not the label. Matching wide
     and reporting narrow is how both are true at once.
+
+    `trim` shortens the reported span before validation. A URL is the case
+    that needs it: the regex has to run to the end of the token because a
+    path may contain any of the characters prose ends a sentence with, so the
+    span is narrowed afterwards by a rule that can count brackets — which a
+    regex cannot.
     """
 
     id: str
     regex: str
     validate: Optional[Callable[[str], bool]]
     group: int = 0
+    trim: Optional[Callable[[str], int]] = None
 
 
 _DATE_ALT = (
@@ -437,6 +536,20 @@ PATTERNS: dict[str, PatternDef] = {
         r"(?<!\d)\d{3}[ \-]?\d{3}[ \-]?\d{3}(?!\d)",
         _valid_sin,
     ),
+    # A BARE hostname is deliberately absent from this alternation. `web.com`
+    # is a domain and so are `Fig.2`, `v1.0.25`, `report.pdf` and the end of
+    # any sentence whose next word begins with a letter; a rule that linked
+    # them would be `credit_card` without Luhn in another costume. The two
+    # forms below are the two an authoring tool's Create Links from URLs
+    # takes, and they are unambiguous.
+    "url": PatternDef(
+        "url",
+        r"(?<![A-Za-z0-9])(?:https?|ftps?)://[^\s<>\"'“”‘’]+"
+        r"|(?<![A-Za-z0-9])mailto:[^\s<>\"'“”‘’]+"
+        r"|(?<![A-Za-z0-9@.\-/])www\.[^\s<>\"'“”‘’]+",
+        _valid_url,
+        trim=_trim_url,
+    ),
 }
 
 PATTERN_IDS: list[str] = list(PATTERNS.keys())
@@ -485,6 +598,10 @@ def pattern_spans(pattern_id: str, text: str) -> list[tuple[int, int]]:
             start, end = m.span(definition.group)
         else:
             start, end = m.span(0)
+        if definition.trim is not None:
+            end = start + definition.trim(text[start:end])
+            if end <= start:
+                continue
         if definition.validate is not None and not definition.validate(text[start:end]):
             continue
         spans.append((start, end))

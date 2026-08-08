@@ -63,6 +63,10 @@ create_pdf.unknownOrientation	pattern	create_pdf	unknown orientation {{orientati
 create_pdf.unknownPageSize	pattern	create_pdf	unknown page size {{page_size}} ({{v1}})
 create_pdf.unknownUnsupportedRefuseSkip	pattern	create_pdf	unknown on_unsupported {{on_unsupported}} (refuse, skip)
 create_pdf.unreadableImage	pattern	create_pdf	unreadable image: {{src_path}} ({{exc}})
+derived_nav.documentTaggedHeadingsBuild	exact	derived_nav	This document is not tagged, so it has no headings to build bookmarks from. Tag it first — automatically, or in the Tags panel.
+derived_nav.headingDepthMustNumber	pattern	derived_nav	heading depth must be a number from 1 to {{MAX_LEVEL}}
+derived_nav.headingsFoundStructureTree	exact	derived_nav	No headings found in the structure tree — nothing to build bookmarks from.
+derived_nav.modeMustReplaceAppend	exact	derived_nav	mode must be "replace" or "append"
 distill.alreadyPdfDistillingConverts	exact	distill	this is already a PDF — distilling converts PostScript; use Repair (Tier 2 rebuild) to re-render a PDF
 distill.ghostscriptProducedPdfPages	exact	distill	Ghostscript produced a PDF with no pages
 distill.ghostscriptProducedUnreadablePdf	pattern	distill	Ghostscript produced an unreadable PDF: {{exc}}
@@ -188,6 +192,7 @@ links.pageOutRange	pattern	enhance_scan,form_detect,links,page_images,page_vecto
 links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive width and height
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
 links.urlMustEmpty	exact	links	url must not be empty
+links.webAddressesEmailAddresses	exact	links	No web addresses or email addresses were found in the text.
 mrc.everyScannedPageFailed	exact	mrc	every scanned page failed mask verification — no MRC output was written
 mrc.everyScannedPageFailedText	exact	mrc	every scanned page failed text verification — no MRC output was written, because a page whose words did not survive is not an output worth having. Try the archival preset, which keeps thin strokes.
 mrc.ghostscriptAvailableMrcCannot	pattern	mrc	Ghostscript is not available at {{v0}} — MRC cannot verify the stencils it writes, and an unverified stencil is not shippable.
@@ -530,6 +535,16 @@ text_runs.nothingRestyleGiveSize	exact	text_runs	nothing to restyle — give a s
 text_runs.restyleDidApplyRun	exact	text_runs	restyle did not apply (run not found)
 text_runs.sizeMustBetweenPoints	exact	text_runs	size must be between 0.1 and 1000 points
 text_runs.textRunIndexOut	pattern	text_runs	text run index {{index}} is out of range (page has {{count}})
+threads.articleArticleObject	pattern	threads	Article {{number}} is not an article object.
+threads.articleBoxArea	pattern	threads	Article {{number}}, box {{box}} has no area.
+threads.articleBoxBoxObject	pattern	threads	Article {{number}}, box {{box}} is not a box object.
+threads.articleBoxNamesPage	pattern	threads	Article {{number}}, box {{box}} names no page.
+threads.articleBoxRectangle	pattern	threads	Article {{number}}, box {{box}} has no rectangle.
+threads.articleBoxTargetsPage	pattern	threads	Article {{number}}, box {{box}} targets page {{page}} of {{page_count}}.
+threads.articleBoxesArticleNeeds	pattern	threads	Article {{number}} has no boxes — an article needs at least one.
+threads.articleMoreThanBoxes	pattern	threads	Article {{number}} has more than {{MAX_BEADS}} boxes.
+threads.documentMayCarryMost	pattern	threads	a document may carry at most {{MAX_THREADS}} articles
+threads.threadsMustListArticles	exact	threads	threads must be a list of articles
 trapping.colorantzonedetailsMustNameColorant	exact	trapping	ColorantZoneDetails must name a colorant per entry.
 trapping.ghostscriptPostscriptExportFailed	pattern	trapping	Ghostscript PostScript export failed: {{detail}}
 trapping.mustBetween	pattern	trapping	{{field}} must be between {{low}} and {{high}}.

@@ -334,6 +334,12 @@ export type CanvasTool =
   // "click again to un-count" convention). Ctrl-drag bands a marquee that
   // re-files the marks it covers into the armed group. Count & Takeoff's mode.
   | 'count'
+  // Article bead draw: band a box the article visits. Ownerless, like the
+  // three preview modes — it is armed by the Articles nav panel and no tool
+  // claims it, so `openTool` disarms it the moment any tool opens. The band
+  // is a REQUEST: it appends a box to the article being built and nothing
+  // reaches the document until the panel saves.
+  | 'beaddraw'
   // Crop draw: band the region to KEEP; the Page Boxes panel receives
   // it as per-edge insets and commits through the same `set_page_boxes` op a
   // typed crop uses. The band is a REQUEST, not page state — nothing changes
@@ -373,6 +379,7 @@ export function viewOf(tab: FocusedTab): ViewMode {
 export type NavPanelId =
   | 'pages'
   | 'bookmarks'
+  | 'articles'
   | 'attachments'
   | 'layers'
   | 'tags'

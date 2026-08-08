@@ -86,6 +86,11 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   const savesInFlight = useRef<Map<string, number>>(new Map());
   const [revalidate, setRevalidate] = useState(0);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [derive, setDerive] = useState<
+    { tagged: boolean; headings: number; existing: number; skipped: number } | null
+  >(null);
+  const [deriveMode, setDeriveMode] = useState<'replace' | 'append'>('replace');
+  const [deriving, setDeriving] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const session = useRef<DragState | null>(null);
   const nodesRef = useRef(nodes);
@@ -458,6 +463,87 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Bookmarks from structure ─────────────────────────────────────────────
+  // The preview states what the document carries BEFORE anything is written —
+  // the hairlines contract — and the two halves share the engine's own
+  // heading collector, so the count shown is the count built. A document that
+  // already has bookmarks gets the merge-or-replace choice rather than a
+  // silent decision; an UNTAGGED document is offered the chain (detect the
+  // headings, then build) and the status names which path ran, because
+  // "we read your tags" and "we guessed from font sizes" are different claims.
+  const openDerive = useCallback(async () => {
+    const target = mutableTarget();
+    if (!target) return;
+    setDeriving(true);
+    setStatus(tChrome('nav.bookmarks.derive.reading'));
+    try {
+      const res = await call('preview_structure_outline', { file: target.workingPath });
+      const payload = res as unknown as {
+        tagged: boolean;
+        headings: number;
+        existing: number;
+        skipped: unknown[];
+      };
+      setDerive({
+        tagged: !!payload.tagged,
+        headings: payload.headings ?? 0,
+        existing: payload.existing ?? 0,
+        skipped: (payload.skipped ?? []).length,
+      });
+      setStatus('');
+    } catch (e: unknown) {
+      setStatus(
+        tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }),
+      );
+    } finally {
+      setDeriving(false);
+    }
+  }, [call, mutableTarget]);
+
+  const buildFromStructure = useCallback(
+    async (tagFirst: boolean) => {
+      const target = mutableTarget();
+      if (!target) return;
+      setDeriving(true);
+      setStatus(tChrome('nav.bookmarks.derive.building'));
+      try {
+        const snapshotPath = await file.snapshot(target.workingPath);
+        const res = await call('outline_from_structure', {
+          file: target.workingPath,
+          output: target.workingPath,
+          mode: deriveMode,
+          tag_if_untagged: tagFirst,
+        });
+        const payload = res as unknown as { added: number; source: string };
+        const buffer = await file.readBuffer(target.workingPath);
+        dispatch({
+          type: 'UPDATE_FILE',
+          path: target.path,
+          pageCount: target.pageCount,
+          buffer,
+          snapshotPath,
+        });
+        setDerive(null);
+        // The buffer changed, so the reload effect refetches the real tree —
+        // deliberately NOT set here: the engine authored it, and reading it
+        // back is the only way `nodes` and the file agree.
+        setLoadedBuffer(null);
+        setStatus(
+          payload.source === 'autotag'
+            ? tChrome('nav.bookmarks.derive.builtFromDetected', { count: payload.added })
+            : tChrome('nav.bookmarks.derive.builtFromTags', { count: payload.added }),
+        );
+      } catch (e: unknown) {
+        setStatus(
+          tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }),
+        );
+      } finally {
+        setDeriving(false);
+      }
+    },
+    [call, dispatch, deriveMode, mutableTarget],
+  );
+
   const flat = useMemo(() => flattenOutline(nodes), [nodes]);
   const draggedPath = drag?.started ? drag.path : null;
   const rest = draggedPath ? restRows(flat, draggedPath) : [];
@@ -554,7 +640,16 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
                       e.target.value === ''
                         ? null
                         : Math.max(1, Math.min(activeFile.pageCount, Number(e.target.value)));
-                    editNode(f.path, (n) => ({ ...n, page: v }));
+                    // Retargeting drops the view position with it: `top` is a
+                    // coordinate on the OLD page, and carrying it over would
+                    // scroll the new page to wherever the old heading sat.
+                    editNode(f.path, (n) => ({
+                      ...n,
+                      page: v,
+                      left: undefined,
+                      top: undefined,
+                      zoom: undefined,
+                    }));
                   }}
                   onBlur={commitEdit}
                   onKeyDown={(e) => {
@@ -583,6 +678,52 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
         })}
         {loaded && indicatorAtEnd && <div className="outline-drop-indicator" style={{ marginInlineStart: drag!.depth * INDENT_PX }} />}
       </div>
+      {derive && (
+        <div className="bookmarks-derive" data-testid="bookmarks-derive">
+          <div className="bookmarks-derive-state" data-testid="bookmarks-derive-state">
+            {derive.tagged
+              ? tChrome('nav.bookmarks.derive.found', { count: derive.headings })
+              : tChrome('nav.bookmarks.derive.untagged')}
+          </div>
+          {derive.tagged && derive.skipped > 0 && (
+            <div className="bookmarks-derive-state" data-testid="bookmarks-derive-skipped">
+              {tChrome('nav.bookmarks.derive.skipped', { count: derive.skipped })}
+            </div>
+          )}
+          {derive.tagged && derive.existing > 0 && (
+            <label className="bookmarks-derive-mode">
+              {tChrome('nav.bookmarks.derive.existing')}
+              <select
+                data-testid="bookmarks-derive-mode"
+                value={deriveMode}
+                onChange={(e) => setDeriveMode(e.target.value === 'append' ? 'append' : 'replace')}
+              >
+                <option value="replace">{tChrome('nav.bookmarks.derive.replace')}</option>
+                <option value="append">{tChrome('nav.bookmarks.derive.append')}</option>
+              </select>
+            </label>
+          )}
+          <div className="bookmarks-derive-actions">
+            <button
+              data-testid="bookmarks-derive-build"
+              disabled={deriving || (derive.tagged && derive.headings === 0)}
+              onClick={() => void buildFromStructure(!derive.tagged)}
+              className="bookmark-add-btn disabled:opacity-50"
+            >
+              {derive.tagged
+                ? tChrome('nav.bookmarks.derive.build')
+                : tChrome('nav.bookmarks.derive.tagThenBuild')}
+            </button>
+            <button
+              data-testid="bookmarks-derive-cancel"
+              onClick={() => setDerive(null)}
+              className="bookmark-add-btn"
+            >
+              {tChrome('nav.bookmarks.derive.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
       <div className="bookmarks-footer">
         <button
           data-testid="bookmark-add"
@@ -591,6 +732,14 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
           className="bookmark-add-btn disabled:opacity-50"
         >
           {tChrome('nav.bookmarks.add')}
+        </button>
+        <button
+          data-testid="bookmarks-from-structure"
+          onClick={() => void openDerive()}
+          disabled={!loaded || deriving}
+          className="bookmark-add-btn disabled:opacity-50"
+        >
+          {tChrome('nav.bookmarks.derive.open')}
         </button>
         {status && <span className="bookmark-status">{status}</span>}
       </div>

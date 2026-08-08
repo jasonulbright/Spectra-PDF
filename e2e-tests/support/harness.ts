@@ -725,6 +725,41 @@ export async function reorderOutline(
   }
 }
 
+/** The Articles panel's working list (empty when the panel is unmounted). */
+export async function getArticles(): Promise<
+  { title: string; beads: { page: number; rect: number[] }[] }[]
+> {
+  return await browser.execute<
+    { title: string; beads: { page: number; rect: number[] }[] }[],
+    []
+  >(function () {
+    return (window as any).__SPECTRA_TEST__.getArticles();
+  });
+}
+
+/** Append a box to the SELECTED article, exactly as a canvas band does. */
+export async function addArticleBead(page: number, rect: number[]): Promise<void> {
+  await browser.execute<void, [number, number[]]>(
+    function (p, r) {
+      (window as any).__SPECTRA_TEST__.addArticleBead(p, r);
+    },
+    page,
+    rect,
+  );
+}
+
+/** Write the Articles panel's working list through `set_threads`. */
+export async function saveArticles(): Promise<void> {
+  const result = await browser.executeAsync<string | null, []>(function (done) {
+    (window as any).__SPECTRA_TEST__.saveArticles()
+      .then(() => done(null))
+      .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+  });
+  if (typeof result === 'string') {
+    throw new Error(`saveArticles failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
 /** Number of scanned source pages whose OCR words are ready to persist. */
 export async function ocrReadyCount(): Promise<number> {
   return await browser.execute<number, []>(function () {

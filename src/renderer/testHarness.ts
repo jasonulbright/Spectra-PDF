@@ -747,6 +747,24 @@ export function registerCanvasOutline(handlers: CanvasOutlineHandlers | null): v
 }
 
 /**
+ * Article beads are drawn with a pointer band inside transformed canvas
+ * space, which WebDriver cannot land reliably. The Articles panel registers a
+ * reader plus the REAL append and save paths, so a spec authors a thread the
+ * way the user does and verifies the persisted /Threads.
+ */
+export interface CanvasArticleHandlers {
+  list: () => { title: string; beads: { page: number; rect: number[] }[] }[];
+  addBead: (page: number, rect: number[]) => void;
+  save: () => Promise<void>;
+}
+
+let canvasArticles: CanvasArticleHandlers | null = null;
+
+export function registerCanvasArticles(handlers: CanvasArticleHandlers | null): void {
+  canvasArticles = handlers;
+}
+
+/**
  * On-canvas form fill: the overlay inputs live inside transformed
  * canvas space (flaky to drive via WebDriver), so the canvas registers
  * value-setting + apply against the REAL pending-value map and fill path.
@@ -1091,6 +1109,12 @@ export interface TestHarness {
   /** Reorder an outline node via the exact drop path (moveOutlineNode ->
    * set_outline -> UPDATE_FILE); resolves after the save. */
   reorderOutline: (fromPath: number[], overIndex: number, depth: number) => Promise<void>;
+  /** The Articles panel's working list (empty when the panel is unmounted). */
+  getArticles: () => { title: string; beads: { page: number; rect: number[] }[] }[];
+  /** Append a box to the SELECTED article, exactly as a canvas band does. */
+  addArticleBead: (page: number, rect: number[]) => void;
+  /** Write the working list through `set_threads`. */
+  saveArticles: () => Promise<void>;
   /** Set a pending on-canvas form value for a field of an open file
    * — validated against the current field read like the real overlay inputs
    * (must exist + be editable). Returns false when refused. Canvas view must
@@ -1899,6 +1923,15 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     reorderOutline: async (fromPath, overIndex, depth) => {
       if (!canvasOutline) throw new Error('reorderOutline: outline sidebar not mounted');
       await canvasOutline.reorder(fromPath, overIndex, depth);
+    },
+    getArticles: () => canvasArticles?.list() ?? [],
+    addArticleBead: (page, rect) => {
+      if (!canvasArticles) throw new Error('addArticleBead: Articles panel not mounted');
+      canvasArticles.addBead(page, rect);
+    },
+    saveArticles: async () => {
+      if (!canvasArticles) throw new Error('saveArticles: Articles panel not mounted');
+      await canvasArticles.save();
     },
     setCanvasFormValue: async (path, fieldName, value, timeoutMs = 10_000) => {
       // The forms read is async (buffer -> readFormFields -> projection);
