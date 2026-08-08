@@ -3,51 +3,70 @@
 ## 1.0.25
 
 ### Navigation the document already implies
-- Bookmarks can be built from a tagged document's own headings: the Bookmarks pane gains **From structure…**, which counts the headings first and writes the outline on your word.
+- The Bookmarks pane gains **From structure…**, which builds an outline from a tagged document's own headings.
+- It counts the headings first and writes the outline only on your word.
 - Each bookmark takes the heading's own text and lands on the heading itself, not merely on the page it starts.
-- Headings nest as they are written: a sub-heading becomes a child of the heading above it, and a document that starts at a lower level grows no empty parents.
-- A document with no tags is offered the whole chain — detect its headings, then build — and the result says which of the two it did.
-- A document that already has bookmarks is asked whether to replace them or keep them and add after; nothing is discarded silently.
+- Headings nest as written: a sub-heading becomes a child of the heading above it.
+- A document that starts at a lower heading level grows no empty parents.
+- A document with no tags is offered the whole chain: detect its headings, then build.
+- The result says which of the two steps it ran.
+- A document that already has bookmarks is asked whether to replace them or add after; nothing is discarded silently.
 - A heading with no readable text is reported rather than written as an untitled bookmark.
-- A bookmark's stored position now survives editing the outline. Renaming one bookmark used to flatten every positioned bookmark in the document to a whole page.
-- **Create links from web addresses** sweeps the text and puts a link over every web and email address it finds, over the whole document or a page range.
-- The link covers the address exactly, and an address that wraps a line gets a link on each line rather than one box across the gap.
+- **Create links from web addresses** puts a link over every web and email address in the text.
+- Run it over the whole document or a page range.
+- The link covers the address exactly, never a box larger than the text.
+- An address that wraps a line gets a link on each line, not one box across the gap.
 - Text an existing link already covers is left alone and counted, so running it twice changes nothing.
 - Web addresses join the built-in patterns Search & Redact offers.
-- Article threads: a new **Articles** pane defines a run of boxes across pages, walks them forwards and backwards, and saves them into the document as real article threads. The pane says plainly that this viewer follows them and many others ignore them.
+- A new **Articles** pane defines a run of boxes across pages and walks them forwards and backwards.
+- The run is saved into the document as a real article thread.
+- The pane says plainly that this viewer follows threads and many other readers ignore them.
 - Command line: `outline-from-structure`, `link-from-urls` (with `--preview` to report and write nothing) and `articles`.
-- Guided actions gain a links-from-addresses step and a bookmarks-from-structure step, so a whole folder can be given its navigation in one run.
+- Guided actions gain links-from-addresses and bookmarks-from-structure steps, so a whole folder gains its navigation in one run.
 
 ### Straightening, cleaning and righting scanned pages
 - Scan & OCR gains a Scan Enhancement pane: straighten, remove specks, whiten the background and turn sideways pages upright.
-- Every correction is measured on the page and reported before anything is rewritten, so the pane states how far the page leans and how many specks it carries first.
-- Straightening measures the page's own lean to a hundredth of a degree and turns it back, resampling the page once however often the tool runs.
-- Speck removal takes only marks that are small, isolated and not part of a picture, so a full stop, the dot of an i and a halftone survive it.
-- Whitening divides the page by the paper it measured, which lifts a gutter shadow or an uneven lamp instead of merely brightening the whole page — the ink comes out further from the paper, not closer.
-- Orientation is read by the recognition engine and lands as the page's own rotation, so no pixel moves; a reading it is not confident about is reported and not acted on.
-- Only pages that are scans are touched, and a page set from text is refused by name rather than silently skipped.
+- Every correction is measured on the page and reported before anything is rewritten.
+- The pane states how far the page leans and how many specks it carries.
+- Straightening measures the page's own lean to a hundredth of a degree and turns it back.
+- The page is resampled once however often the tool runs.
+- Speck removal takes only marks that are small, isolated and not part of a picture.
+- A full stop, the dot of an i and a halftone all survive it.
+- Whitening divides the page by the paper it measured, lifting a gutter shadow or an uneven lamp.
+- The ink comes out further from the paper, not merely brightened along with it.
+- Orientation is read by the recognition engine and lands as the page's own rotation, so no pixel moves.
+- A reading the engine is not confident about is reported and not acted on.
+- Only scanned pages are touched; a page set from text is refused by name, never silently skipped.
 - Apply to the whole document or just the page you are on, as one undoable change.
 - A page that is already square, clean and upright is left exactly as it is, bytes and all.
-- Batch OCR can straighten and clean each file before reading it, which is what makes a crooked or sideways scan readable at all.
-- Guided actions gain an enhancement step, and refuse an order that would enhance a page after something else has already read or replaced it.
+- Batch OCR can straighten and clean each file before reading it.
+- That is what makes a crooked or sideways scan readable at all.
+- Guided actions gain an enhancement step, so a whole folder can be straightened in one run.
+- An order that enhances a page after something else has read or replaced it is refused.
 - Command line: `enhance-scan`, with `--analyze` to report what a run would do and change nothing, and `ocr-file --enhance`.
 
 ### Document Properties: Initial View, Fonts and Advanced
 - Document Properties gains three tabs beside Description and Security.
-- **Initial View** sets how a document opens: the page layout, which navigation pane appears, the opening page and its magnification, the reading direction, and the window options.
+- **Initial View** sets how a document opens: page layout, navigation pane, opening page, magnification, reading direction and window options.
 - Page layout offers single page, single page continuous, two-up and two-up with a cover page, continuous or not.
-- The navigation pane can open on bookmarks, page thumbnails, layers or attachments — or the document can open with no pane, or full screen.
+- The navigation pane can open on bookmarks, page thumbnails, layers or attachments, or not at all.
+- A document can also open full screen.
 - Magnification takes a percentage or fit page, width, height or visible area, and applies to the opening page.
-- The app honours what it can of a document's own initial view when it opens one: the layout, the navigation pane, full screen, the opening page, a percentage magnification, fit-width, and a right-to-left reading direction, which reverses which side of a spread the leading page takes.
-- The rest — hide the toolbar, the menu bar or the window controls, resize or centre the window, show the document title in the title bar — is written for other readers, and the panel says so rather than implying an effect.
-- A document that opens by running a script keeps that script: setting an opening page is refused by name instead of quietly replacing it.
-- A window option turned off removes the setting rather than writing a negative one, so a document only ever carries what departs from the default.
-- **Fonts** lists every font the document uses, grouped by type, with its encoding, how many pages use it, and whether its program is in the file.
-- Fonts are found wherever they hide: nested artwork, comment appearances, glyph procedures and a form's default appearance, not just the page's own resources.
+- The app honours a document's initial view on open: layout, navigation pane, full screen, opening page, percentage magnification and fit-width.
+- A right-to-left reading direction is honoured too, reversing which side of a spread the leading page takes.
+- The window options are hide the toolbar, menu bar or window controls, resize or centre the window, and title-bar text.
+- They are written for other readers, and the panel says so rather than implying an effect.
+- A document that opens by running a script keeps it: setting an opening page is refused by name.
+- A window option turned off removes the setting rather than writing a negative one.
+- A document only ever carries what departs from the default.
+- **Fonts** lists every font the document uses, grouped by type, with its encoding, page count and whether it is embedded.
+- Fonts are found wherever they hide: nested artwork, comment appearances, glyph procedures and a form's default appearance.
 - A font that is not in the file names the face this app actually substitutes for it.
-- **Advanced** reports the PDF version, fast web view, whether the document is tagged, its page count, its page sizes with their standard paper names, whether an open action and a search index are recorded, and where the file lives.
+- **Advanced** reports PDF version, fast web view, whether the document is tagged, its page count and where the file lives.
+- It also reports page sizes with their standard paper names, and whether an open action and search index are recorded.
 - Advanced also sets the trapped flag and the base URL that relative links in the document resolve against.
-- Changes on both tabs are ordinary undoable edits to the open document, and a document with live signatures warns or refuses first, as every other structural edit does.
+- Changes on both tabs are ordinary undoable edits to the open document.
+- A document with live signatures warns or refuses first, as every other structural edit does.
 
 ### Watermarking with a page of another PDF
 - A watermark is now text, a picture, or a page of another PDF, and the panel offers all three.
@@ -62,8 +81,12 @@
 - Choosing a PDF in the picture picker says so, and points at the PDF source.
 - A document cannot be its own watermark source, and the source cannot be the file being written.
 - A missing, empty, password-protected, page-less or unreadable source is refused by name, as is a page number past the end.
-- Command line: `watermark --pdf-source` with `--pdf-page`.
+- Command line: the `watermark` command takes `--pdf-source` with `--pdf-page`.
 - Guided actions can stamp a page of another PDF, and refuse a step that names more than one source.
+
+### Fixes
+- Editing the outline no longer flattens every positioned bookmark in the document to a whole page.
+- A bookmark's stored position and zoom now survive the edit.
 
 ## 1.0.24
 
