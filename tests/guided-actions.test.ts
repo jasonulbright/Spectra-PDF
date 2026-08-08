@@ -82,8 +82,14 @@ describe('validation', () => {
     expect(validateAction({ ...base(), name: ' ' })).toMatch(/name/);
     expect(validateAction({ ...base(), steps: [] })).toMatch(/at least one/);
     const a = base();
-    a.steps = [newStep('watermark')]; // text required, defaults empty
-    expect(validateAction(a)).toMatch(/Text is required/);
+    // Watermark takes text OR an image; neither set is as wrong as both.
+    a.steps = [newStep('watermark')];
+    expect(validateAction(a)).toMatch(/set Text \/ Image file/);
+    a.steps[0].params.text = 'DRAFT';
+    a.steps[0].params.image = 'logo.png';
+    expect(validateAction(a)).toMatch(/set Text \/ Image file/);
+    a.steps[0].params.image = '';
+    expect(validateAction(a)).toBeNull();
   });
 
   it('encrypt is TERMINAL-output only — never an in-place step (an encrypted working copy is unreadable)', () => {
@@ -99,13 +105,14 @@ describe('validation', () => {
   it('secrets are implicitly asked and required-at-save is skipped for asked params', () => {
     const enc = newStep('encrypt');
     expect(askedParamKeys(enc).sort()).toEqual(['owner_password', 'user_password']);
-    // A required param marked ask-at-run is the PRE-RUN form's problem.
+    // An asked one-of param is the PRE-RUN form's problem.
     const wm = newStep('watermark');
     wm.ask = ['text'];
     const a = base();
     a.steps = [wm];
     expect(validateAction(a)).toBeNull();
-    expect(validateRunValues(wm, {})).toMatch(/Text is required/);
+    expect(validateRunValues(wm, {})).toMatch(/set Text \/ Image file/);
+    expect(validateRunValues(wm, { text: 'DRAFT' })).toBeNull();
     expect(validateRunValues(wm, { text: 'ASKED' })).toBeNull();
   });
 
@@ -211,7 +218,10 @@ describe('action files (export/import)', () => {
     expect(parsed).toEqual({
       name: 'Lock',
       steps: [
-        { op: 'watermark', params: { text: 'DRAFT', opacity: 0.15, angle: 45 } },
+        {
+          op: 'watermark',
+          params: { text: 'DRAFT', image: '', opacity: 0.15, angle: 45, scale: 1, position: 'center' },
+        },
         { op: 'encrypt', params: {} },
       ],
     });
@@ -249,6 +259,11 @@ describe('action files (export/import)', () => {
       parseActionFile(f({ name: 'x', steps: [{ op: 'watermark', params: { text: true } }] })),
     ).toThrow(/parameter 'text' must be text or a number/);
     expect(() =>
+      parseActionFile(
+        f({ name: 'x', steps: [{ op: 'watermark', params: { text: 'A', image: 'b.png' } }] }),
+      ),
+    ).toThrow(/set Text \/ Image file/);
+    expect(() =>
       parseActionFile(f({ name: 'x', steps: [{ op: 'compress', params: 'zip' }] })),
     ).toThrow(/params must be an object/);
     expect(() => parseActionFile(f({ name: '', steps: [{ op: 'strip_metadata', params: {} }] }))).toThrow(
@@ -263,10 +278,10 @@ describe('action files (export/import)', () => {
         }),
       ),
     ).toThrow(/last step/);
-    // Required-and-not-asked params are refused like the editor refuses them.
+    // One-of params with neither set are refused like the editor refuses them.
     expect(() =>
       parseActionFile(f({ name: 'x', steps: [{ op: 'watermark', params: {} }] })),
-    ).toThrow(/Text is required/);
+    ).toThrow(/set Text \/ Image file/);
   });
 
   it('accepts the engine placements shape for ONE placement (CLI-authored files); multi-placement refuses by name', () => {

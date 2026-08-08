@@ -122,6 +122,7 @@ pub fn run() {
             commands::save_file_dialog,
             commands::pick_certificate_file,
             commands::pick_create_pdf_sources,
+            commands::pick_watermark_image,
             commands::pick_pem_file,
             commands::pick_icc_file,
             commands::pick_pkcs11_module,

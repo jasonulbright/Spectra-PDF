@@ -1,9 +1,10 @@
-"""Text watermark: stamp translucent text across pages.
+"""Watermark: stamp translucent text OR an image across pages.
 
-Approach (per page): author a small Form XObject carrying the text ops and
-its OWN private /Resources (standard-14 Helvetica + an /ExtGState with the
-requested alpha), then attach it with pikepdf's ``Page.add_overlay`` /
-``add_underlay``. Using the library's overlay API instead of hand-editing
+Approach (per page): author a small Form XObject carrying the stamp ops and
+its OWN private /Resources (standard-14 Helvetica or the shared image
+XObject, plus an /ExtGState with the requested alpha), then attach it with
+pikepdf's ``Page.add_overlay`` / ``add_underlay``. Using the library's
+overlay API instead of hand-editing
 ``page.Contents`` sidesteps two traps the redaction review taught us:
 
   - **Inherited /Resources** — assigning ``page.Resources`` to register a
@@ -14,24 +15,38 @@ requested alpha), then attach it with pikepdf's ``Page.add_overlay`` /
   - **Unbalanced graphics state** — add_overlay q/Q-shields the stamp from
     whatever state the existing content leaves dangling.
 
-The overlay ``rect`` is passed explicitly as the page's crop box and the
-form's BBox has identical dimensions, so add_overlay's fit-scale is exactly
-1 — no surprise auto-scaling.
+**The form's box is the DISPLAYED page box, and its coordinates are the
+reader's.** ``add_overlay`` places a form into the rectangle *as displayed*:
+on a /Rotate 90 or 270 page it writes a rotation into the placement matrix
+and matches the form's BBox against the SWAPPED dimensions. Two consequences,
+both load-bearing:
 
-Rotation: viewers apply /Rotate clockwise, and a text matrix rotates
-counter-clockwise in user space, so text meant to read at ``angle``° in the
-DISPLAYED orientation is drawn at ``angle + /Rotate`` about the crop-box
-center (the center is rotation-invariant, so centering needs no correction).
+  - The BBox is ``[0 0 disp_w disp_h]``, so the fit-scale is exactly 1 at
+    every /Rotate. A BBox in un-rotated user dimensions makes qpdf scale the
+    stamp by ``min(W/H, H/W)`` on a rotated non-square page.
+  - ``angle`` is drawn as given. It already means degrees in the displayed
+    orientation, and the placement matrix supplies the /Rotate part; adding
+    /Rotate here again turns the stamp a second time and lays it on its side.
+
 /Rotate and the crop/media boxes are inheritable page attributes — resolved
 via pdf_tree.walk_inheritable, the one shared /Parent-chain walk that
 redact's resource lookup also uses (one implementation, so a fix propagates
 to every consumer).
+
+The IMAGE source embeds ONCE per call: the picture is decoded and encoded a
+single time before the page loop and made indirect, and every page's form
+references that one XObject through its own /Resources.
+
+Placement (position, tiling) is shared by both sources — one helper decides
+where the stamp centres go, and each source only knows how to draw itself at
+a centre.
 
 Deliberately NOT Ghostscript: a gs pdfwrite round-trip regenerates the
 whole file to add one stream per page, and GS-backed ops don't run in dev
 until the bundle script has been run.
 """
 
+import io
 import math
 import re
 import shutil
@@ -59,6 +74,24 @@ MAX_AUTO_FONT_SIZE = 144.0
 # Fraction of the box's crossing length (along the text direction) the
 # auto-sized text should span.
 AUTO_FIT_FRACTION = 0.65
+
+# Anchors, named in the page's DISPLAYED orientation.
+POSITIONS = (
+    "center",
+    "top-left",
+    "top-center",
+    "top-right",
+    "middle-left",
+    "middle-right",
+    "bottom-left",
+    "bottom-center",
+    "bottom-right",
+)
+DEFAULT_MARGIN = 36.0
+DEFAULT_TILE_GAP = 24.0
+# A stamp small enough to demand more copies than this is a mistake, not a
+# request: the content stream would grow past what a viewer will finish.
+MAX_TILES = 2000
 
 
 def _parse_color(color: str) -> tuple[float, float, float]:
@@ -165,6 +198,81 @@ def _n(v: float) -> str:
     return f"{v:.4f}".rstrip("0").rstrip(".") or "0"
 
 
+def _displayed_box(width: float, height: float, rotate: int) -> tuple[float, float]:
+    """The page box as the READER sees it. /Rotate 90 and 270 swap the axes."""
+    return (height, width) if rotate in (90, 270) else (width, height)
+
+
+def _rotated_extent(w: float, h: float, angle: float) -> tuple[float, float]:
+    """Half-width and half-height of a w×h stamp's bounding box at `angle`."""
+    theta = math.radians(angle)
+    cos_a, sin_a = abs(math.cos(theta)), abs(math.sin(theta))
+    return ((w * cos_a + h * sin_a) / 2.0, (w * sin_a + h * cos_a) / 2.0)
+
+
+def _anchor(position: str, disp_w: float, disp_h: float, hw: float, hh: float,
+            margin: float) -> tuple[float, float]:
+    """The stamp centre for `position`, in DISPLAYED coordinates."""
+    if position == "center":
+        return (disp_w / 2.0, disp_h / 2.0)
+    vertical, _, horizontal = position.partition("-")
+    x = {
+        "left": margin + hw,
+        "center": disp_w / 2.0,
+        "right": disp_w - margin - hw,
+    }[horizontal]
+    y = {
+        "top": disp_h - margin - hh,
+        "middle": disp_h / 2.0,
+        "bottom": margin + hh,
+    }[vertical]
+    return (x, y)
+
+
+def _centers(
+    disp_w: float,
+    disp_h: float,
+    angle: float,
+    stamp_w: float,
+    stamp_h: float,
+    position: str,
+    margin: float,
+    tile: bool,
+    tile_gap: float,
+) -> list[tuple[float, float]]:
+    """Where the stamp is drawn inside the form's box, one point per copy.
+
+    The form's box IS the displayed page box (see the module docstring), so
+    every coordinate here is a coordinate the reader would point at.
+
+    `center` with no tiling returns the box centre EXACTLY — the shipped
+    single-stamp geometry, unchanged by arithmetic that would only introduce
+    rounding.
+    """
+    if not tile and position == "center":
+        return [(disp_w / 2.0, disp_h / 2.0)]
+    hw, hh = _rotated_extent(stamp_w, stamp_h, angle)
+    if not tile:
+        return [_anchor(position, disp_w, disp_h, hw, hh, margin)]
+
+    cell_w = max(2.0 * hw + tile_gap, 1e-3)
+    cell_h = max(2.0 * hh + tile_gap, 1e-3)
+    cols = max(1, math.ceil(disp_w / cell_w))
+    rows = max(1, math.ceil(disp_h / cell_h))
+    if cols * rows > MAX_TILES:
+        raise ValueError(
+            f"tiling this watermark would need {cols * rows} copies per page, "
+            f"more than the {MAX_TILES} allowed — increase the scale or the gap"
+        )
+    x0 = disp_w / 2.0 - (cols - 1) * cell_w / 2.0
+    y0 = disp_h / 2.0 - (rows - 1) * cell_h / 2.0
+    return [
+        (x0 + c * cell_w, y0 + r * cell_h)
+        for r in range(rows)
+        for c in range(cols)
+    ]
+
+
 def _unicode_watermark_face(font_dir: str, text: str = "") -> str | None:
     """The bundled fallback .ttf to embed for a non-Latin-1 watermark (sans,
     matching the WinAnsi Helvetica shape). None when no fonts DIR is available
@@ -224,25 +332,122 @@ def _face_glyph_height_em(face_path: str) -> float:
         return _GLYPH_HEIGHT_EM
 
 
-def _make_watermark_form(
+def _plain(value):
+    """A PDF value rebuilt out of primitives, owned by no document.
+
+    Image dictionary entries are copied between documents by VALUE here; a
+    direct assignment would carry a reference into a document that is about
+    to close.
+    """
+    if isinstance(value, pikepdf.Array):
+        return pikepdf.Array([_plain(v) for v in value])
+    if isinstance(value, pikepdf.Dictionary):
+        return Dictionary({str(k): _plain(v) for k, v in value.items()})
+    if isinstance(value, pikepdf.Name):
+        return Name(str(value))
+    return value
+
+
+def _embed_image(pdf: pikepdf.Pdf, path: str) -> tuple[pikepdf.Object, int, int, int]:
+    """The picture as ONE Image XObject in `pdf`: (object, px width, px height,
+    frame count).
+
+    The decode and the encode go through Create PDF's own normalisation and
+    Pillow PDF writer (`create_pdf._normalise` / `_frame_pdf`), so the filter
+    choice per image mode is decided in one place for both features. The
+    one-page PDF that comes back holds exactly one Image XObject; its raw
+    (still-encoded) bytes and the handful of image keys are rebuilt here, so
+    nothing depends on a foreign document staying open.
+
+    A multi-frame source (animated GIF, multi-page TIFF) contributes its
+    FIRST frame — a watermark is one picture — and the frame count is
+    reported so the caller can say so.
+    """
+    from engine import create_pdf as create_pdf_mod  # noqa: PLC0415
+
+    src_path = Path(path)
+    if not src_path.is_file():
+        raise ValueError(f"watermark image not found: {path}")
+    if src_path.stat().st_size == 0:
+        raise ValueError(f"watermark image is empty: {path}")
+    suffix = src_path.suffix.lower()
+    if suffix not in create_pdf_mod.IMAGE_SUFFIXES:
+        raise ValueError(
+            f"watermark image type not supported: {suffix or '(none)'} "
+            f"(accepted: {', '.join(create_pdf_mod.accepted_image_suffixes())})"
+        )
+    # The variable name is `src_path` because this sentence is the SAME
+    # refusal Create PDF raises, and the message table keys one row by the
+    # interpolated names — a second spelling would fork the row and orphan
+    # its translations.
+    if suffix in create_pdf_mod.HEIF_SUFFIXES and not create_pdf_mod._register_heif():
+        raise RuntimeError(
+            f"HEIC/HEIF images need the pillow-heif plugin, which this runtime "
+            f"does not have: {src_path}"
+        )
+    create_pdf_mod._register_heif()
+
+    from PIL import Image, ImageSequence, UnidentifiedImageError  # noqa: PLC0415
+
+    try:
+        with Image.open(src_path) as im:
+            frames = 0
+            first = None
+            for raw in ImageSequence.Iterator(im):
+                frames += 1
+                if first is None:
+                    first = create_pdf_mod._normalise(raw.copy())
+            if first is None:
+                raise ValueError(f"the watermark image contains no frames: {path}")
+            px_w, px_h = first.size
+            # 72 dpi: the wrapper page's size is irrelevant here — only the
+            # image XObject is lifted, and a watermark is placed relative to
+            # the page it stamps, never at the picture's own physical size.
+            data = create_pdf_mod._frame_pdf(first, 72.0)
+    except UnidentifiedImageError as exc:
+        raise ValueError(f"unreadable watermark image: {path} ({exc})") from None
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"unreadable watermark image: {path} ({exc})") from None
+
+    with pikepdf.open(io.BytesIO(data)) as wrapper:
+        xobjects = wrapper.pages[0].obj.get("/Resources", {}).get("/XObject", {})
+        source = None
+        for _, candidate in (xobjects.items() if xobjects else []):
+            if candidate.get("/Subtype") == Name.Image:
+                source = candidate
+                break
+        if source is None:
+            raise ValueError(f"unreadable watermark image: {path} (no image stream)")
+        # The stream is copied still ENCODED (read_raw_bytes), so the filter
+        # chain has to travel with it verbatim — decoding and re-encoding
+        # here would throw away the plugin's per-mode filter choice, which is
+        # the whole reason the encode goes through Create PDF.
+        image = pdf.make_stream(source.read_raw_bytes())
+        image.Type = Name.XObject
+        image.Subtype = Name.Image
+        image.Width = int(source.Width)
+        image.Height = int(source.Height)
+        image.BitsPerComponent = int(source.get("/BitsPerComponent", 8))
+        # `_normalise` guarantees a mode the plugin writes with a NAMED device
+        # colour space, so nothing indirect travels with the stream.
+        image.ColorSpace = Name(str(source.ColorSpace))
+        for key in ("/Filter", "/DecodeParms", "/Decode", "/ImageMask"):
+            value = source.get(key)
+            if value is not None:
+                image[key] = _plain(value)
+    return pdf.make_indirect(image), px_w, px_h, frames
+
+
+def _text_draw(
     pdf: pikepdf.Pdf,
     text: str,
     size: float,
     rgb: tuple[float, float, float],
-    opacity: float,
     theta: float,
-    width: float,
-    height: float,
-    uni: tuple | None = None,
-) -> pikepdf.Object:
-    """Form XObject with the stamp drawn about the center of a [0 0 W H] box,
-    baseline direction rotated by theta (radians, user space).
-
-    `uni=(font_obj, em_width, show_bytes)` draws the text with a SHARED
-    embedded Type0/Identity-H font (built once per `watermark` call, since the
-    text is constant for every page); `uni=None` keeps the byte-identical
-    standard-14 Helvetica/WinAnsi path (the `?`-for-non-Latin-1 fallback)."""
-    cx, cy = width / 2.0, height / 2.0
+    centers: list[tuple[float, float]],
+    uni: tuple | None,
+) -> tuple[bytes, pikepdf.Object, float]:
+    """(content ops, font object, em width) for the text source."""
     cos_t, sin_t = math.cos(theta), math.sin(theta)
     if uni is None:
         em_width = _text_width_em(text)
@@ -258,35 +463,101 @@ def _make_watermark_form(
     else:
         font_obj, em_width, show = uni
     est_width = em_width * size
-    # Start of the baseline: back from center by half the text width along
-    # the baseline direction, and down by ~half the cap height along the
-    # rotated up-vector so the text is vertically centered too.
-    tx = cx - (est_width / 2.0) * cos_t + (0.35 * size) * sin_t
-    ty = cy - (est_width / 2.0) * sin_t - (0.35 * size) * cos_t
     r, g, b = rgb
-    content = (
-        f"q /GS0 gs {_n(r)} {_n(g)} {_n(b)} rg "
-        f"BT /F0 {_n(size)} Tf "
-        f"{_n(cos_t)} {_n(sin_t)} {_n(-sin_t)} {_n(cos_t)} {_n(tx)} {_n(ty)} Tm "
-    ).encode("latin-1") + show + b" ET Q"
+    out = b""
+    for cx, cy in centers:
+        # Start of the baseline: back from center by half the text width along
+        # the baseline direction, and down by ~half the cap height along the
+        # rotated up-vector so the text is vertically centered too.
+        tx = cx - (est_width / 2.0) * cos_t + (0.35 * size) * sin_t
+        ty = cy - (est_width / 2.0) * sin_t - (0.35 * size) * cos_t
+        out += (
+            f"{_n(r)} {_n(g)} {_n(b)} rg "
+            f"BT /F0 {_n(size)} Tf "
+            f"{_n(cos_t)} {_n(sin_t)} {_n(-sin_t)} {_n(cos_t)} {_n(tx)} {_n(ty)} Tm "
+        ).encode("latin-1") + show + b" ET"
+    return out, font_obj, em_width
 
+
+def _image_draw_size(
+    px: tuple[int, int],
+    disp_w: float,
+    disp_h: float,
+    angle: float,
+    scale: float,
+) -> tuple[float, float]:
+    """The drawn width and height of the picture, in points.
+
+    Auto fit is the size at which the image's ROTATED bounding box fills
+    AUTO_FIT_FRACTION of the DISPLAYED page box, aspect preserved — the same
+    fraction and the same displayed-orientation reasoning `_auto_font_size`
+    uses, so `scale` 1.0 means the same thing to a reader for either source.
+    `scale` multiplies that; above 1 it may overflow the page, which is what
+    a bleed watermark asks for.
+
+    The image's stored DPI is deliberately not consulted: a watermark is
+    placed relative to the page it stamps, so the same logo at 72 and at 600
+    dpi must land identically.
+    """
+    px_w, px_h = px
+    if px_w <= 0 or px_h <= 0:
+        raise ValueError("the watermark image has no pixels")
+    hw, hh = _rotated_extent(float(px_w), float(px_h), angle)
+    fit = min(
+        AUTO_FIT_FRACTION * disp_w / (2.0 * hw),
+        AUTO_FIT_FRACTION * disp_h / (2.0 * hh),
+    )
+    k = fit * scale
+    return (px_w * k, px_h * k)
+
+
+def _image_draw(
+    draw_w: float, draw_h: float, theta: float, centers: list[tuple[float, float]]
+) -> bytes:
+    """Content ops placing the shared /Im0 at each centre.
+
+    The image XObject's own space is the unit square, so one `cm` carries the
+    size, the rotation and the translation together.
+    """
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
+    a, b = draw_w * cos_t, draw_w * sin_t
+    c, d = -draw_h * sin_t, draw_h * cos_t
+    out = b""
+    for cx, cy in centers:
+        e = cx - (draw_w * cos_t) / 2.0 + (draw_h * sin_t) / 2.0
+        f = cy - (draw_w * sin_t) / 2.0 - (draw_h * cos_t) / 2.0
+        out += (
+            f"q {_n(a)} {_n(b)} {_n(c)} {_n(d)} {_n(e)} {_n(f)} cm /Im0 Do Q"
+        ).encode("latin-1")
+    return out
+
+
+def _make_watermark_form(
+    pdf: pikepdf.Pdf,
+    body: bytes,
+    resources: Dictionary,
+    opacity: float,
+    width: float,
+    height: float,
+) -> pikepdf.Object:
+    """Form XObject wrapping `body` in the shared alpha state, over a
+    [0 0 W H] box. `resources` names the stamp's own font or image."""
     gs = pdf.make_indirect(Dictionary(Type=Name.ExtGState, ca=opacity, CA=opacity))
-    form = pdf.make_stream(content)
+    form = pdf.make_stream(b"q /GS0 gs " + body + b" Q")
     form.Type = Name.XObject
     form.Subtype = Name.Form
     form.FormType = 1
     form.BBox = pikepdf.Array([0, 0, width, height])
-    form.Resources = Dictionary(
-        Font=Dictionary(F0=font_obj),
-        ExtGState=Dictionary(GS0=gs),
-    )
+    resources = Dictionary(resources)
+    resources["/ExtGState"] = Dictionary(GS0=gs)
+    form.Resources = resources
     return form
 
 
 def watermark(
     file: str,
     output: str,
-    text: str,
+    text: str = "",
     opacity: float = 0.15,
     angle: float = 45.0,
     color: str = "#808080",
@@ -294,8 +565,14 @@ def watermark(
     layer: str = "over",
     pages: list | None = None,
     font_dir: str = "",
+    image: str = "",
+    scale: float = 1.0,
+    position: str = "center",
+    margin: float = DEFAULT_MARGIN,
+    tile: bool = False,
+    tile_gap: float = DEFAULT_TILE_GAP,
 ) -> dict:
-    """Stamp translucent text across pages.
+    """Stamp translucent text or an image across pages.
 
     Args:
         file: Input PDF path.
@@ -304,7 +581,7 @@ def watermark(
         opacity: Fill/stroke alpha, 0 < opacity <= 1.
         angle: Degrees counter-clockwise in the page's DISPLAYED orientation
             (45 = classic diagonal).
-        color: ``#rrggbb``.
+        color: ``#rrggbb`` (text source only).
         font_size: Points; 0 auto-fits per page (~65% of the displayed
             extent along the text direction).
         layer: ``"over"`` (default — survives scans/opaque fills) or
@@ -314,13 +591,45 @@ def watermark(
             selection must never silently widen to the whole document; the
             CLI's --pages parse rejects garbage for the same reason).
             Out-of-range entries are ignored (same convention as redact).
+        image: Path to a picture to stamp INSTEAD of text — exactly one of
+            ``text`` and ``image`` is the source. Accepted extensions are
+            Create PDF's own image set. The picture embeds ONCE per call and
+            every page references that one XObject.
+        scale: Multiplier on the auto fit (the size at which the stamp's
+            rotated bounding box fills ~65% of the displayed page box).
+            Values above 1 may overflow the page, which is a real request.
+        position: One of ``POSITIONS``, named in the DISPLAYED orientation.
+        margin: Points inset from the page box for the non-centred anchors.
+        tile: Repeat the stamp across the whole page box on a centred grid;
+            ``position`` is ignored while tiling.
+        tile_gap: Points between tiles in both directions.
     """
-    if not text or not text.strip():
-        raise ValueError("watermark text must not be empty")
+    has_text = bool(text and text.strip())
+    has_image = bool(image and str(image).strip())
+    if has_text and has_image:
+        raise ValueError("a watermark needs either text or an image, not both")
+    if not has_text and not has_image:
+        raise ValueError("a watermark needs text or an image")
     if not 0 < float(opacity) <= 1:
         raise ValueError(f"opacity must be in (0, 1], got {opacity}")
     if layer not in ("over", "under"):
         raise ValueError(f'layer must be "over" or "under", got {layer!r}')
+    if position not in POSITIONS:
+        raise ValueError(
+            f"watermark position must be one of {', '.join(POSITIONS)}, got {position!r}"
+        )
+    try:
+        scale_value = float(scale)
+    except (TypeError, ValueError):
+        raise ValueError(f"watermark scale must be a number, got {scale!r}") from None
+    if not scale_value > 0:
+        raise ValueError(f"watermark scale must be greater than 0, got {scale}")
+    margin_value = float(margin)
+    if margin_value < 0:
+        raise ValueError(f"watermark margin must not be negative, got {margin}")
+    gap_value = float(tile_gap)
+    if gap_value < 0:
+        raise ValueError(f"watermark tile gap must not be negative, got {tile_gap}")
     rgb = _parse_color(color)
 
     input_path = Path(file)
@@ -333,6 +642,8 @@ def watermark(
 
     pages_watermarked = 0
     font_size_applied = 0.0
+    tiles_per_page = 0
+    image_frames = 0
     with pikepdf.open(file) as pdf:
         # A non-Latin-1 stamp is drawn with a subsetted Type0 font SHARED
         # across pages (the text is constant), else the WinAnsi Helvetica path
@@ -346,21 +657,31 @@ def watermark(
         face = ""
         draw_text = ""
         glyph_height: float | None = None
-        try:
-            text.encode("latin-1")
-        except UnicodeEncodeError:
-            needs_unicode = True
-            face = _unicode_watermark_face(font_dir, text) or ""
-            if not face:
-                raise ValueError(
-                    "watermark text contains characters outside Latin-1 and no "
-                    "fallback font is available"
-                )
-            # A stamp is single-line: every layout control or separator,
-            # including \x0b, \x0c, and U+2028,
-            # flattens to space so the drawn glyph set matches the embed.
-            draw_text = _flatten_control_chars(text, keep_newline=False)
-            glyph_height = _face_glyph_height_em(face)
+        if has_text:
+            try:
+                text.encode("latin-1")
+            except UnicodeEncodeError:
+                needs_unicode = True
+                face = _unicode_watermark_face(font_dir, text) or ""
+                if not face:
+                    raise ValueError(
+                        "watermark text contains characters outside Latin-1 and no "
+                        "fallback font is available"
+                    )
+                # A stamp is single-line: every layout control or separator,
+                # including \x0b, \x0c, and U+2028,
+                # flattens to space so the drawn glyph set matches the embed.
+                draw_text = _flatten_control_chars(text, keep_newline=False)
+                glyph_height = _face_glyph_height_em(face)
+
+        # The picture embeds ONCE, before the loop: one XObject in the file
+        # however many pages reference it. Doing it here also means a bad
+        # image refuses before any page is touched.
+        image_obj = None
+        image_px: tuple[int, int] = (0, 0)
+        if has_image:
+            image_obj, px_w, px_h, image_frames = _embed_image(pdf, str(image).strip())
+            image_px = (px_w, px_h)
 
         uni: tuple | None = None
         auto_em: float | None = None
@@ -373,29 +694,52 @@ def watermark(
             width, height = x1 - x0, y1 - y0
             if width <= 0 or height <= 0:
                 continue
-            if needs_unicode and uni is None:
-                # A right-to-left stamp reorders (and shapes, where the
-                # script joins) before it is drawn; everything else keeps the
-                # shipped single-`Tj` emission byte for byte.
-                rtl_built = _rtl_stamp(pdf, face, draw_text)
-                if rtl_built is not None:
-                    font_obj, auto_em, show = rtl_built
-                else:
-                    from engine.font_fallback import build_fallback_font
+            # The form is placed into the page's DISPLAYED rectangle (module
+            # docstring), so the form's own box is the displayed box and its
+            # coordinates are the reader's. `angle` therefore needs no /Rotate
+            # correction: it already means degrees in the displayed
+            # orientation, which is what it is documented to mean.
+            disp_w, disp_h = _displayed_box(width, height, rotate)
+            theta = math.radians(angle)
+            if has_image:
+                draw_w, draw_h = _image_draw_size(
+                    image_px, disp_w, disp_h, float(angle), scale_value
+                )
+                centers = _centers(
+                    disp_w, disp_h, float(angle), draw_w, draw_h,
+                    position, margin_value, bool(tile), gap_value,
+                )
+                body = _image_draw(draw_w, draw_h, theta, centers)
+                resources = Dictionary(XObject=Dictionary(Im0=image_obj))
+                size = 0.0
+            else:
+                if needs_unicode and uni is None:
+                    # A right-to-left stamp reorders (and shapes, where the
+                    # script joins) before it is drawn; everything else keeps
+                    # the shipped single-`Tj` emission byte for byte.
+                    rtl_built = _rtl_stamp(pdf, face, draw_text)
+                    if rtl_built is not None:
+                        font_obj, auto_em, show = rtl_built
+                    else:
+                        from engine.font_fallback import build_fallback_font
 
-                    font_obj, encode, width_1000 = build_fallback_font(pdf, face, draw_text)
-                    auto_em = width_1000(draw_text) / 1000.0
-                    show = b"<" + encode(draw_text).hex().encode("ascii") + b"> Tj"
-                auto_gh = glyph_height
-                uni = (font_obj, auto_em, show)
-            size = float(font_size) if float(font_size) > 0 else _auto_font_size(
-                text, width, height, rotate, angle, em_width=auto_em, glyph_height_em=auto_gh
-            )
-            # Drawn angle composes the requested display angle with /Rotate —
-            # viewers rotate the page clockwise by /Rotate, the text matrix
-            # rotates counter-clockwise, so they add.
-            theta = math.radians(angle + rotate)
-            form = _make_watermark_form(pdf, text, size, rgb, float(opacity), theta, width, height, uni)
+                        font_obj, encode, width_1000 = build_fallback_font(pdf, face, draw_text)
+                        auto_em = width_1000(draw_text) / 1000.0
+                        show = b"<" + encode(draw_text).hex().encode("ascii") + b"> Tj"
+                    auto_gh = glyph_height
+                    uni = (font_obj, auto_em, show)
+                size = float(font_size) if float(font_size) > 0 else _auto_font_size(
+                    text, width, height, rotate, angle, em_width=auto_em, glyph_height_em=auto_gh
+                )
+                em = auto_em if auto_em is not None else _text_width_em(text)
+                gh = auto_gh if auto_gh is not None else _GLYPH_HEIGHT_EM
+                centers = _centers(
+                    disp_w, disp_h, float(angle), em * size, gh * size,
+                    position, margin_value, bool(tile), gap_value,
+                )
+                body, font_used, _ = _text_draw(pdf, text, size, rgb, theta, centers, uni)
+                resources = Dictionary(Font=Dictionary(F0=font_used))
+            form = _make_watermark_form(pdf, body, resources, float(opacity), disp_w, disp_h)
             rect = pikepdf.Rectangle(x0, y0, x1, y1)
             if layer == "over":
                 page.add_overlay(form, rect)
@@ -403,6 +747,7 @@ def watermark(
                 page.add_underlay(form, rect)
             if pages_watermarked == 0:
                 font_size_applied = size
+                tiles_per_page = len(centers)
             pages_watermarked += 1
 
         if same_file:
@@ -422,4 +767,8 @@ def watermark(
         "pages_watermarked": pages_watermarked,
         "font_size_applied": round(font_size_applied, 2),
         "layer": layer,
+        "source": "image" if has_image else "text",
+        "image_frames": image_frames,
+        "scale_applied": round(scale_value, 4),
+        "tiles_per_page": tiles_per_page,
     }

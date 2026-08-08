@@ -118,7 +118,22 @@ _STEPS: dict = {
     ),
     "watermark": (
         watermark,
-        frozenset({"text", "opacity", "angle", "color", "font_size", "layer"}),
+        frozenset(
+            {
+                "text",
+                "image",
+                "opacity",
+                "angle",
+                "color",
+                "font_size",
+                "layer",
+                "scale",
+                "position",
+                "margin",
+                "tile",
+                "tile_gap",
+            }
+        ),
         frozenset({"font_dir"}),
     ),
     "add_header_footer": (
@@ -254,6 +269,16 @@ def validate_steps(steps) -> list[dict]:
             params["placements"] = [
                 {"position": str(params.pop("position")), "text": str(params.pop("text"))}
             ]
+        if op == "watermark":
+            # Exactly one source, checked HERE as well as in the editor: an
+            # action file reaches this validator without passing through the
+            # editor at all, and `watermark` itself would refuse a pair only
+            # after the run had already started.
+            sources = [k for k in ("text", "image") if str(params.get(k, "")).strip()]
+            if len(sources) != 1:
+                raise ValueError(
+                    f"step {i + 1} ({op}): set text or image, one of them and not both"
+                )
         if op == "compress" and str(params.get("quality", "")).strip().lower() == "mrc":
             # ORDER, enforced rather than documented: recognition
             # rasterizes from the page, so OCR after MRC would read the
