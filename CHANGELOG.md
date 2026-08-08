@@ -2,6 +2,20 @@
 
 ## 1.0.25
 
+### Straightening, cleaning and righting scanned pages
+- Scan & OCR gains a Scan Enhancement pane: straighten, remove specks, whiten the background and turn sideways pages upright.
+- Every correction is measured on the page and reported before anything is rewritten, so the pane states how far the page leans and how many specks it carries first.
+- Straightening measures the page's own lean to a hundredth of a degree and turns it back, resampling the page once however often the tool runs.
+- Speck removal takes only marks that are small, isolated and not part of a picture, so a full stop, the dot of an i and a halftone survive it.
+- Whitening divides the page by the paper it measured, which lifts a gutter shadow or an uneven lamp instead of merely brightening the whole page — the ink comes out further from the paper, not closer.
+- Orientation is read by the recognition engine and lands as the page's own rotation, so no pixel moves; a reading it is not confident about is reported and not acted on.
+- Only pages that are scans are touched, and a page set from text is refused by name rather than silently skipped.
+- Apply to the whole document or just the page you are on, as one undoable change.
+- A page that is already square, clean and upright is left exactly as it is, bytes and all.
+- Batch OCR can straighten and clean each file before reading it, which is what makes a crooked or sideways scan readable at all.
+- Guided actions gain an enhancement step, and refuse an order that would enhance a page after something else has already read or replaced it.
+- Command line: `enhance-scan`, with `--analyze` to report what a run would do and change nothing, and `ocr-file --enhance`.
+
 ### Document Properties: Initial View, Fonts and Advanced
 - Document Properties gains three tabs beside Description and Security.
 - **Initial View** sets how a document opens: the page layout, which navigation pane appears, the opening page and its magnification, the reading direction, and the window options.
