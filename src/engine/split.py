@@ -100,13 +100,13 @@ def _bookmark_parts(file: str, page_count: int) -> list[tuple[list[int], str]]:
     non-overlapping parts, and two entries on one page yield ONE part (a
     zero-page output must never be materialized).
     """
-    from engine.outline import _resolve_dest_page  # noqa: PLC0415
+    from engine.outline import _resolve_dest_array, _resolve_dest_page  # noqa: PLC0415
 
     starts: list[tuple[int, str]] = []
     with pikepdf.open(file) as pdf:
         with pdf.open_outline() as outline:
             for item in outline.root:
-                page = _resolve_dest_page(pdf, item)
+                page = _resolve_dest_page(pdf, _resolve_dest_array(pdf, item))
                 if page is None or not 0 <= page < page_count:
                     continue
                 title = str(item.title) if item.title is not None else ""

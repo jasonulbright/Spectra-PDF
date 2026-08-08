@@ -113,6 +113,42 @@ def _plain_segments(operator: str, operands: list) -> list:
     return out
 
 
+def _bdc_mcid(operands: list, resources, fallback):
+    """The /MCID a BDC opens, or None when it opens an unnumbered block.
+
+    The property list is either an inline dictionary or a NAME resolving
+    through the stream's /Properties resource — both spellings are legal and a
+    generator picks whichever it likes, so both are read.
+    """
+    if len(operands) < 2:
+        return None
+    props = operands[1]
+    if isinstance(props, pikepdf.Name):
+        for source in (resources, fallback):
+            if source is None:
+                continue
+            try:
+                table = source.get("/Properties")
+                if table is None:
+                    continue
+                found = table.get(str(props))
+            except (AttributeError, TypeError):
+                continue
+            if found is not None:
+                props = found
+                break
+    try:
+        value = props.get("/MCID")
+    except (AttributeError, TypeError):
+        return None
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nested, fonts, parent_state=None, detail=None, stream_path=(), base_clip=None):
     state = _child_state(base_ctm, parent_state)
     # Clip tracking rides ADDITIVELY beside the state machine so a
@@ -125,12 +161,27 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
     # not a global DFS id — so a rewriter can NAVIGATE to one stream and
     # leave every other form untouched and unvisited.
     local_form_ordinal = 0
+    # Marked-content nesting, one entry per open BDC/BMC. A run reports the
+    # INNERMOST enclosing /MCID, which is the id a structure element's /K
+    # names. Tracked in THIS walk rather than a parallel one so a run and its
+    # mark agree by construction (search_regions' rule about run indexes,
+    # applied to the other axis). MCIDs are scoped to their content stream:
+    # `nested` says whether this run is in the page's own numbering, and a
+    # consumer that needs page scope must test it.
+    marks: list = []
     for instruction in instructions:
         operator = str(instruction.operator)
         operands = list(instruction.operands)
         # Fed with the CURRENT ctm BEFORE state.feed (which consumes-and-
         # continues past q/Q/cm) — path-point ops never move the CTM.
         clips.feed(operator, operands, state.ctm)
+        if operator in ("BDC", "BMC"):
+            marks.append(_bdc_mcid(operands, resources, fallback) if operator == "BDC" else None)
+            continue
+        if operator == "EMC":
+            if marks:
+                marks.pop()
+            continue
         if state.feed(operator, operands):
             continue
         if operator in SHOW_OPS:
@@ -192,6 +243,10 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                     # editable; the index space is UNCHANGED (the mutators'
                     # count agreement is untouched).
                     "clipped": clips.clips_away((x0, y0, x1, y1)),
+                    # Additive: the innermost enclosing marked-content id, or
+                    # None outside any. Scoped to this run's own stream — read
+                    # it together with `nested`.
+                    "mcid": next((m for m in reversed(marks) if m is not None), None),
                 }
             )
             if detail is not None:

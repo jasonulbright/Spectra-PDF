@@ -444,6 +444,13 @@ export const PANEL_STRINGS = {
   'panel.links.save': 'Save',
   'panel.links.setUrl': 'Set URL',
   'panel.links.delete': 'Delete',
+  'panel.links.derive.title': 'Create links from web addresses',
+  'panel.links.derive.pages': 'Pages',
+  'panel.links.derive.emails': 'Link email addresses too',
+  'panel.links.derive.find': 'Find addresses',
+  'panel.links.derive.create': 'Create links',
+  'panel.links.derive.found': '{{count}} found, {{existing}} already linked',
+  'panel.links.derive.created': 'Links created',
 
   'panel.pageLabels.open': 'Open a PDF to set page number labels',
   'panel.pageLabels.blurb':
@@ -1270,6 +1277,7 @@ export const PANEL_STRINGS = {
   'panel.searchRedact.pattern.iban': 'IBAN',
   'panel.searchRedact.pattern.nhs_uk': 'NHS number (UK)',
   'panel.searchRedact.pattern.sin_ca': 'Social insurance number (Canada)',
+  'panel.searchRedact.pattern.url': 'Web address',
   'panel.searchRedact.expand': 'Each mark covers',
   'panel.searchRedact.expand.match': 'What matched',
   'panel.searchRedact.expand.word': 'The whole word',

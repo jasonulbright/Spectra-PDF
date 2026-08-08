@@ -18,6 +18,7 @@ import { tChrome, tStepParam, tStepTitle } from '../i18n';
 // The export targets' table is the one declaration of what each target takes;
 // a second list here would drift from the engine's own refusals.
 import { EXPORT_TARGETS, exportParams, type ExportFormat } from './export-targets';
+import { pagesParam } from './page-scope';
 
 // Slice 2 grew the catalog: OCR (the batch pipeline's single-file arm),
 // header/footer (one positioned text per step — several positions compose as
@@ -35,6 +36,8 @@ export type GuidedStepOp =
   | 'sanitize'
   | 'search_redact'
   | 'prepare_forms'
+  | 'links_from_urls'
+  | 'outline_from_structure'
   | 'watermark'
   | 'ocr_file'
   | 'add_header_footer'
@@ -153,6 +156,89 @@ export const STEP_CATALOG: readonly StepDef[] = [
   },
   { op: 'strip_metadata', title: 'Strip Metadata', params: [] },
   {
+    // Folder scope is where this earns its keep: a tree of documents whose
+    // addresses should be clickable is exactly the job nobody does by hand.
+    op: 'links_from_urls',
+    title: 'Create Links from Web Addresses',
+    params: [
+      {
+        key: 'pages',
+        label: 'Pages',
+        kind: 'text',
+        defaultValue: 'all',
+        hint: 'A list such as 1,3,5 — or all.',
+      },
+      {
+        key: 'emails',
+        label: 'Email addresses',
+        kind: 'select',
+        options: [
+          { value: 'yes', label: 'Link them too' },
+          { value: 'no', label: 'Leave them alone' },
+        ],
+        defaultValue: 'yes',
+      },
+      {
+        key: 'existing',
+        label: 'Text a link already covers',
+        kind: 'select',
+        options: [
+          { value: 'skip', label: 'Leave the existing link' },
+          { value: 'relink', label: 'Add a link anyway' },
+        ],
+        defaultValue: 'skip',
+      },
+    ],
+    mapParams: (params) => ({
+      pages: pagesParam(params.pages),
+      emails: String(params.emails ?? 'yes') === 'yes',
+      skip_existing: String(params.existing ?? 'skip') === 'skip',
+    }),
+  },
+  {
+    // No reviewer in a folder run, so the mode and the depth are the whole
+    // narrowing — and `autotag` is opt-in, because inventing headings from
+    // font sizes is a different claim from reading tagged ones.
+    op: 'outline_from_structure',
+    title: 'Bookmarks from Structure',
+    params: [
+      {
+        key: 'mode',
+        label: 'Existing bookmarks',
+        kind: 'select',
+        options: [
+          { value: 'replace', label: 'Replace them' },
+          { value: 'append', label: 'Keep them and add after' },
+        ],
+        defaultValue: 'replace',
+      },
+      {
+        key: 'levels',
+        label: 'Deepest heading level',
+        kind: 'number',
+        defaultValue: 6,
+        min: 1,
+        max: 6,
+        step: 1,
+      },
+      {
+        key: 'untagged',
+        label: 'A document with no tags',
+        kind: 'select',
+        options: [
+          { value: 'skip', label: 'Leave it alone' },
+          { value: 'autotag', label: 'Detect its headings first' },
+        ],
+        defaultValue: 'skip',
+      },
+    ],
+    mapParams: (params) => ({
+      mode: String(params.mode ?? 'replace'),
+      max_level: Number(params.levels ?? 6),
+      tag_if_untagged: String(params.untagged ?? 'skip') === 'autotag',
+    }),
+  },
+  {
     // The categories are named as a comma-separated list rather than picked
     // from checkboxes: an action runs unattended over a folder, so what it
     // removes has to be written down in the action itself.
@@ -207,7 +293,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
         label: 'Patterns',
         kind: 'text',
         defaultValue: '',
-        hint: 'Comma-separated: phone, email, credit_card, ssn, date, iban, nhs_uk, sin_ca',
+        hint: 'Comma-separated: phone, email, credit_card, ssn, date, iban, nhs_uk, sin_ca, url',
       },
       {
         key: 'expand',

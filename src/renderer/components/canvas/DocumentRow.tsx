@@ -142,6 +142,13 @@ interface DocumentRowProps {
     rect: { x: number; y: number; w: number; h: number },
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
+  /** An article bead band; the Articles panel appends it. */
+  onSetBeadRect?: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
   onSetAddTextRect: (
     docId: string,
     pageId: string,
@@ -263,6 +270,7 @@ function DocumentRowImpl({
   onClearCropPlacement,
   onSetAddTextRect,
   onSetCropRect,
+  onSetBeadRect,
   onClearAddTextPlacement,
   onAddImageRect,
   onPageContextMenu,
@@ -398,6 +406,7 @@ function DocumentRowImpl({
         onClearCropPlacement={onClearCropPlacement}
         onSetAddTextRect={onSetAddTextRect}
         onSetCropRect={onSetCropRect}
+        onSetBeadRect={onSetBeadRect}
         onAddImageRect={onAddImageRect}
         onClearAddTextPlacement={onClearAddTextPlacement}
         onPageContextMenu={onPageContextMenu}

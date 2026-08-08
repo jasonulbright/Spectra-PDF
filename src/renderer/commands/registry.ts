@@ -105,7 +105,7 @@ const CANVAS_TOOLS = [
   'select', 'hand', 'highlight', 'freetext', 'ink', 'stamp', 'redact', 'signature', 'forms',
   'formfields', 'edit', 'addtext', 'addimage', 'measuredist', 'measureperim', 'measurearea',
   'measurecal', 'shape', 'callout', 'note', 'inkerase', 'zoommarquee', 'cropdraw', 'count',
-  'outputpreview', 'flattenpreview', 'tablereview',
+  'outputpreview', 'flattenpreview', 'tablereview', 'beaddraw',
 ] as const;
 
 export const TOOL_TITLES: Record<CanvasTool, string> = {
@@ -119,6 +119,7 @@ export const TOOL_TITLES: Record<CanvasTool, string> = {
   outputpreview: 'Separation Preview',
   flattenpreview: 'Flattener Preview',
   tablereview: 'Table Review',
+  beaddraw: 'Draw Article Box',
 };
 
 // CANVAS_TOOLS must be a literal tuple (COMMAND_IDS builds `tools.${t}` from

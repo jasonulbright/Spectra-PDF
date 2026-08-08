@@ -6,6 +6,7 @@ import type { NavPanelDef } from './types';
 import { NAV_PANEL_TITLES, type AvailableNavPanel } from '../../commands/navpanels';
 import { PagesPanel } from './PagesPanel';
 import { BookmarksPanel } from './BookmarksPanel';
+import { ArticlesPanel } from './ArticlesPanel';
 import { SearchPanel } from './SearchPanel';
 import { SignaturesNavPanel } from './SignaturesNavPanel';
 import { toolPanelNav } from './ToolPanelNav';
@@ -16,6 +17,7 @@ import { TagsPanel } from '../../panels/TagsPanel';
 export const NAV_PANEL_DEFS = [
   { id: 'pages', title: NAV_PANEL_TITLES.pages, icon: 'pages', Component: PagesPanel },
   { id: 'bookmarks', title: NAV_PANEL_TITLES.bookmarks, icon: 'bookmarks', Component: BookmarksPanel },
+  { id: 'articles', title: NAV_PANEL_TITLES.articles, icon: 'articles', Component: ArticlesPanel },
   // Left-dock candidates: the SAME components the tool dock mounts,
   // hosted at nav width — one implementation per capability (ToolPanelNav).
   { id: 'attachments', title: NAV_PANEL_TITLES.attachments, icon: 'attachments', Component: toolPanelNav(AttachmentsPanel) },

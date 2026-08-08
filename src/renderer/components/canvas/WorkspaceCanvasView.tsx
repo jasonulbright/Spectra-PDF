@@ -14,6 +14,7 @@ import { usePageDrag } from '../../canvas/usePageDrag';
 import { uniqueDocName } from '../../lib/doc-names';
 import { primeSystemFonts } from '../../lib/system-fonts';
 import { insetsFromBand, publishDrawnCrop, roundInsets } from '../../lib/crop-draw';
+import { beadRectFromBand, publishDrawnBead } from '../../lib/article-beads';
 import {
   hasCustomLabels,
   labelFor,
@@ -1228,6 +1229,39 @@ export function WorkspaceCanvasView({
     [docs, state.files],
   );
   const onClearCropPlacement = useCallback(() => setCropPlacement(null), []);
+  // --- Article bead draw ----------------------------------------------
+  // The crop draw's contract, one derivation over: the band becomes a rect in
+  // the page's own user space and is PUBLISHED to the Articles panel, which
+  // owns Save. Nothing reaches the document here, so a mis-drag costs a
+  // redraw rather than an undo — and the geometry read is the same one the
+  // crop uses, so a turned page cannot mean two different things.
+  const onSetBeadRect = useCallback(
+    (
+      docId: string,
+      pageId: string,
+      rect: { x: number; y: number; w: number; h: number },
+      rotationAtDraw: 0 | 90 | 180 | 270,
+    ) => {
+      const doc = docs.find((d) => d.id === docId);
+      const page = doc?.pages.find((p) => p.id === pageId);
+      if (!doc || !page) return;
+      if (!placementDocsCurrent(state.files, docs, doc.path)) return;
+      const f = state.files.get(page.sourceDocId);
+      if (!f?.buffer) return;
+      const buffer = f.buffer;
+      void (async () => {
+        const proxy = await getDocumentProxy(page.sourceDocId, buffer);
+        const p = await proxy.getPage(page.sourcePageIndex + 1);
+        const view = p.view as [number, number, number, number];
+        const bead = beadRectFromBand(rect, view, rotationAtDraw);
+        if (!bead) return; // a click, not a box
+        const number = workspacePageNumber(docs, doc, page.id);
+        if (number === null) return;
+        publishDrawnBead({ page: number, rect: bead, path: doc.path });
+      })();
+    },
+    [docs, state.files],
+  );
   // Placement whose page still exists (mirrors liveAddTextPlacement).
   const liveCropPlacement = useMemo(() => {
     if (!cropPlacement) return null;
@@ -4164,6 +4198,7 @@ export function WorkspaceCanvasView({
     tool === 'signature' ||
     tool === 'formfields' ||
     tool === 'cropdraw' ||
+    tool === 'beaddraw' ||
     tool === 'addtext' ||
     tool === 'addimage' ||
     // A count mark is a PLACEMENT, so it snaps like every other
@@ -6055,6 +6090,7 @@ export function WorkspaceCanvasView({
           addTextPlacement={liveAddTextPlacement}
           onSetAddTextRect={onSetAddTextRect}
           onSetCropRect={onSetCropRect}
+          onSetBeadRect={onSetBeadRect}
           cropPlacement={liveCropPlacement}
           onClearCropPlacement={onClearCropPlacement}
           onAddImageRect={onAddImageRect}
