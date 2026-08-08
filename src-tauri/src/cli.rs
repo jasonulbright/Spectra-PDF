@@ -35,7 +35,7 @@ pub enum CliCommand {
     Compress(CompressArgs),
     /// Rotate pages in a PDF
     Rotate(RotateArgs),
-    /// Split a PDF into parts by page ranges
+    /// Split a PDF into parts by page ranges, a page count, a file size, or its top-level bookmarks
     Split(SplitArgs),
     /// Merge multiple files into one PDF (non-PDF inputs are converted first)
     Merge(MergeArgs),
@@ -397,9 +397,19 @@ pub struct SplitArgs {
     /// Output directory
     #[arg(short, long)]
     pub output: PathBuf,
-    /// Page ranges, e.g. "1-3,5-7"
+    /// How to divide the document: ranges, every-n, size, or bookmarks
+    #[arg(long, default_value = "ranges", value_parser = ["ranges", "every-n", "size", "bookmarks"])]
+    pub mode: String,
+    /// Page ranges, e.g. "1-3,5-7" (ranges mode)
     #[arg(short, long)]
-    pub ranges: String,
+    pub ranges: Option<String>,
+    /// Pages per output file (every-n mode)
+    #[arg(long)]
+    pub every_n: Option<u32>,
+    /// Maximum size per output file, in MB (size mode). A page larger than
+    /// the cap on its own is written alone and reported as oversize
+    #[arg(long)]
+    pub max_mb: Option<f64>,
 }
 
 #[derive(Args)]
@@ -2491,12 +2501,72 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             let out_dir = abs(&args.output);
             std::fs::create_dir_all(&out_dir)
                 .map_err(|e| format!("Cannot create output dir: {}", e))?;
+            // The mode names its own required option and refuses the others.
+            // Accepting an ignored --ranges alongside --mode size would let a
+            // caller believe a selection was honoured that never reached the
+            // engine.
+            let mode = args.mode.replace('-', "_");
+            let wrong = |flag: &str| {
+                Err(format!(
+                    "--{flag} does not apply to --mode {}",
+                    args.mode
+                ))
+            };
+            match mode.as_str() {
+                "ranges" => {
+                    if args.every_n.is_some() {
+                        return wrong("every-n");
+                    }
+                    if args.max_mb.is_some() {
+                        return wrong("max-mb");
+                    }
+                    if args.ranges.is_none() {
+                        return Err("--ranges is required with --mode ranges".to_string());
+                    }
+                }
+                "every_n" => {
+                    if args.ranges.is_some() {
+                        return wrong("ranges");
+                    }
+                    if args.max_mb.is_some() {
+                        return wrong("max-mb");
+                    }
+                    if args.every_n.is_none() {
+                        return Err("--every-n is required with --mode every-n".to_string());
+                    }
+                }
+                "size" => {
+                    if args.ranges.is_some() {
+                        return wrong("ranges");
+                    }
+                    if args.every_n.is_some() {
+                        return wrong("every-n");
+                    }
+                    if args.max_mb.is_none() {
+                        return Err("--max-mb is required with --mode size".to_string());
+                    }
+                }
+                _ => {
+                    if args.ranges.is_some() {
+                        return wrong("ranges");
+                    }
+                    if args.every_n.is_some() {
+                        return wrong("every-n");
+                    }
+                    if args.max_mb.is_some() {
+                        return wrong("max-mb");
+                    }
+                }
+            }
             engine.call(
                 "split",
                 json!({
                     "file": abs(&args.input).to_string_lossy(),
-                    "ranges": args.ranges,
                     "output_dir": out_dir.to_string_lossy(),
+                    "mode": mode,
+                    "ranges": args.ranges.clone().unwrap_or_default(),
+                    "every_n": args.every_n.unwrap_or(0),
+                    "max_mb": args.max_mb.unwrap_or(0.0),
                 }),
             )
         }
