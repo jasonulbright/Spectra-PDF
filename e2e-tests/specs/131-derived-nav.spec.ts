@@ -7,6 +7,7 @@ import {
   openByPaths,
   getState,
   closeAllFiles,
+  setView,
   setActiveOp,
   getOutlineOrder,
   getArticles,
@@ -75,6 +76,7 @@ describe('derived navigation', () => {
   });
 
   it('creates links over the web and email addresses in the text', async () => {
+    await setView('operations');
     await setActiveOp('links');
     await $('[data-testid="links-derive"]').waitForDisplayed({
       timeoutMsg: 'the links panel did not open',
