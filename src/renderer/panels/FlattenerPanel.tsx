@@ -6,11 +6,15 @@ import { useFlattenerPreview } from '../hooks/useFlattenerPreview';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { ensureGsPath } from './SettingsPanel';
+import { app } from '../lib/tauri-bridge';
 import { tChrome } from '../i18n';
 import {
   FLATTEN_CATEGORIES,
   FLATTEN_DPI_CHOICES,
+  canApply,
+  outlineRefusals,
   regionCount,
+  substitutedFaces,
   totals,
   unreadablePages,
   type FlattenCategory,
@@ -31,7 +35,8 @@ export function FlattenerPanel(): React.ReactElement {
   const { performOperation } = useOperations();
   const {
     armed, setArmed, report, balance, setBalance, dpi, setDpi,
-    shown, toggleCategory, busy, error, invalidate,
+    shown, toggleCategory, outlines, setOutlines, outlineReport,
+    busy, error, invalidate,
   } = useFlattenerPreview();
 
   const [status, setStatus] = useState('');
@@ -41,6 +46,8 @@ export function FlattenerPanel(): React.ReactElement {
   const counts = totals(report);
   const regions = regionCount(report);
   const unreadable = unreadablePages(report);
+  const refusals = outlineRefusals(outlineReport, outlines);
+  const substituted = substitutedFaces(outlineReport, outlines);
 
   const apply = useCallback(async () => {
     if (!filePath) return;
@@ -51,6 +58,9 @@ export function FlattenerPanel(): React.ReactElement {
         balance,
         dpi,
         gs_path: await ensureGsPath(),
+        outline_text: outlines.text,
+        outline_strokes: outlines.strokes,
+        font_dir: await app.getEditFontPath(),
       });
       invalidate();
       setStatus(tChrome('panel.flattener.flattened', {
@@ -63,7 +73,7 @@ export function FlattenerPanel(): React.ReactElement {
     } finally {
       setApplying(false);
     }
-  }, [filePath, performOperation, balance, dpi, invalidate]);
+  }, [filePath, performOperation, balance, dpi, outlines, invalidate]);
 
   if (!activeFile) {
     return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.flattener.open')} />;
@@ -126,6 +136,61 @@ export function FlattenerPanel(): React.ReactElement {
         </select>
       </label>
 
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-2 text-xs text-neutral-400">
+          <input
+            type="checkbox"
+            data-testid="flattener-outline-text"
+            checked={outlines.text}
+            onChange={(e) => setOutlines({ ...outlines, text: e.target.checked })}
+          />
+          {tChrome('panel.flattener.outlineText')}
+        </label>
+        {outlines.text && (
+          <div className="text-xs text-amber-400" data-testid="flattener-outline-text-note">
+            {tChrome('panel.flattener.outlineTextNote')}
+          </div>
+        )}
+        <label className="flex items-center gap-2 text-xs text-neutral-400">
+          <input
+            type="checkbox"
+            data-testid="flattener-outline-strokes"
+            checked={outlines.strokes}
+            onChange={(e) => setOutlines({ ...outlines, strokes: e.target.checked })}
+          />
+          {tChrome('panel.flattener.outlineStrokes')}
+        </label>
+        {outlineReport !== null && (
+          <div className="text-xs text-neutral-400" data-testid="flattener-outline-report">
+            {tChrome('panel.flattener.outlineReport', {
+              runs: outlineReport.text_runs,
+              strokes: outlineReport.strokes,
+            })}
+          </div>
+        )}
+        {outlineReport !== null && outlineReport.invisible_runs > 0 && outlines.text && (
+          <div className="text-xs text-neutral-500" data-testid="flattener-outline-invisible">
+            {tChrome('panel.flattener.outlineInvisible', {
+              runs: outlineReport.invisible_runs,
+            })}
+          </div>
+        )}
+        {substituted.length > 0 && (
+          <div className="text-xs text-neutral-500" data-testid="flattener-outline-substituted">
+            {tChrome('panel.flattener.outlineSubstituted', {
+              faces: substituted.join(', '),
+            })}
+          </div>
+        )}
+        {refusals.length > 0 && (
+          <div className="text-xs text-amber-400" data-testid="flattener-outline-refusals">
+            {tChrome('panel.flattener.outlineRefusals', {
+              reasons: refusals.join(' '),
+            })}
+          </div>
+        )}
+      </div>
+
       <div className="flex flex-col gap-1" data-testid="flattener-report">
         <div className="text-sm text-neutral-200" data-testid="flattener-regions">
           {tChrome('panel.flattener.regions', { regions })}
@@ -161,7 +226,7 @@ export function FlattenerPanel(): React.ReactElement {
       <div className="flex items-center gap-2">
         <button
           data-testid="flattener-apply"
-          disabled={applying || busy || regions === 0}
+          disabled={applying || busy || !canApply(report, outlines)}
           onClick={() => void apply()}
           className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-50"
         >

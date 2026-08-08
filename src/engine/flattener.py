@@ -870,6 +870,23 @@ def _fmt(value: float) -> str:
     return text if text else "0"
 
 
+def _outline(pdf, page, number: int, outline_text: bool, outline_strokes: bool,
+             font_dir: str) -> dict:
+    """The outline conversion's contribution to one page's report entry.
+
+    Imported at call time: the conversion is an optional half of this door, and
+    a module-level import would make every flatten pay for machinery most
+    flattens never reach.
+    """
+    if not outline_text and not outline_strokes:
+        return {}
+    from .outlines import outline_page
+
+    result = outline_page(pdf, page, number, font_dir, outline_text, outline_strokes)
+    return {key: result[key] for key in
+            ("text_runs", "invisible_runs", "glyphs", "strokes", "substituted")}
+
+
 def flatten_transparency(
     file: str,
     output: str,
@@ -877,6 +894,9 @@ def flatten_transparency(
     balance: float = DEFAULT_BALANCE,
     dpi: int = DEFAULT_DPI,
     gs_path: str = "gs",
+    outline_text: bool = False,
+    outline_strokes: bool = False,
+    font_dir: str = "",
 ) -> dict:
     """Flatten each page's transparency by rasterizing only its regions.
 
@@ -887,10 +907,18 @@ def flatten_transparency(
         balance: Raster/vector balance, 0…1 — the region merge aggressiveness.
         dpi: Resolution the regions rasterize at, and snap against.
         gs_path: Path to the Ghostscript executable.
+        outline_text: Replace every surviving glyph run with its outlines.
+        outline_strokes: Replace every surviving stroke with its filled outline.
+        font_dir: Directory of bundled faces, for text whose font the document
+            does not embed.
 
     Content outside every region is untouched: live text stays live text, and
     a vector stays a vector. A page with no transparency is reported and left
     exactly as it was rather than rewritten to no effect.
+
+    The two outline conversions run AFTER the region rebuild, on what is still
+    live: content a region absorbed is already gone, so nothing is outlined
+    only to be covered by a raster.
     """
     validate_pdf(file)
     dpi = max(1, int(dpi))
@@ -912,8 +940,11 @@ def flatten_transparency(
                 plan = compute_regions(objects, box, balance, dpi)
                 regions = plan["regions"]
                 if not regions:
-                    report.append({"page": number, "regions": 0, "removed": 0,
-                                   "error": None})
+                    entry = {"page": number, "regions": 0, "removed": 0,
+                             "error": None}
+                    entry.update(_outline(pdf, page, number, outline_text,
+                                          outline_strokes, font_dir))
+                    report.append(entry)
                     continue
                 for ordinal, region in enumerate(regions):
                     width, height = _pixel_extent(region, dpi)
@@ -960,13 +991,16 @@ def flatten_transparency(
                 page.Contents = pdf.make_stream(
                     body + b"\n" + "\n".join(placements).encode("ascii")
                 )
-                report.append({
+                entry = {
                     "page": number,
                     "regions": len(regions),
                     "removed": sum(len(group) for group in plan["members"]),
                     "whole_page": plan["whole_page"],
                     "error": None,
-                })
+                }
+                entry.update(_outline(pdf, page, number, outline_text,
+                                      outline_strokes, font_dir))
+                report.append(entry)
             # Same-file output takes temp-and-rename: pikepdf refuses to save
             # over the file it is reading, and the panel's apply routes the
             # working file back onto itself.
@@ -979,4 +1013,11 @@ def flatten_transparency(
         "balance": max(0.0, min(1.0, float(balance))),
         "dpi": dpi,
         "regions": sum(entry["regions"] for entry in report),
+        "outlined_text_runs": sum(entry.get("text_runs", 0) for entry in report),
+        "outlined_strokes": sum(entry.get("strokes", 0) for entry in report),
+        "substituted": sorted({
+            face
+            for entry in report
+            for face in (entry.get("substituted") or {}).values()
+        }),
     }

@@ -70,6 +70,7 @@ PUBLIC_EXCEPTIONS = frozenset(
         # message: the message still reaches the renderer through the bridge,
         # so it still needs a row.
         "FieldSpecError",
+        "OutlineRefusal",
     }
 )
 
