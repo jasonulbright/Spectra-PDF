@@ -2,6 +2,21 @@
 
 ## 1.0.24
 
+### Converting text and strokes to outlines
+- The flattener converts all text to outlines, replacing each glyph with the font's own shape at the same place.
+- It converts all strokes to outlines, replacing each line with the shape the pen covered.
+- Either conversion runs on its own, on a document with no transparency at all.
+- The panel says, before anything is written, how many text runs and stroked paths would convert.
+- It states plainly that converted text can no longer be selected, searched or extracted.
+- Text whose font the document does not embed takes its shapes from a bundled face, and the panel names the face.
+- A font whose glyphs are program code rather than shapes is refused by name, never skipped in silence.
+- A line with no width is refused by name, and Fix Hairlines is the tool that gives it one.
+- Dashes are preserved by cutting the line into its dashes before each one is outlined.
+- Line joins, caps, the miter limit and dotted patterns all come through as drawn.
+- Text used as a clipping shape still clips, and invisible text is removed rather than left behind.
+- Text inside reused page pieces converts without touching the other pages that share them.
+- Command line: `outlines-list` reports what would convert, and `flatten` takes both conversions.
+
 ### Reviewing tables before a spreadsheet
 - Find the tables on a page and see each one drawn on the document itself.
 - Every table is shown with its column boundaries and its rows.
