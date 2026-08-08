@@ -3809,5 +3809,22 @@
   "toolbar.group.zoom": "Zoom",
   "tools.heading": "Værktøjer",
   "tools.openFirst": "Åbn først en PDF",
-  "tools.sub": "Vælg, hvad du vil gøre med dit dokument."
+  "tools.sub": "Vælg, hvad du vil gøre med dit dokument.",
+  "imageres.title": "Billeder",
+  "imageres.loading": "Måler billederne i dette dokument…",
+  "imageres.failed": "Billederne i dette dokument kunne ikke måles.",
+  "imageres.none": "Dette dokument tegner ingen billeder.",
+  "imageres.single": "{{images}} ved {{dpi}} DPI",
+  "imageres.range": "{{images}} fra {{min}} til {{max}} DPI, median {{median}}",
+  "imageres.unmeasured": "Kan ikke måles: {{unmeasured}}",
+  "imageres.scanned": "Scannet dokument — {{scanned}} af {{pages}} sider genkendes som scanninger.",
+  "imageres.scanPages": "{{scanned}} af {{pages}} sider genkendes som scanninger.",
+  "panel.compress.thenOptimize": "Optimér derefter resultatet",
+  "panel.compress.thenOptimizeHint": "Kører optimeringen på den komprimerede fil: lineariseret til web og med objekterne samlet i strømme. Den kører som en anden handling med sin egen linje i køen.",
+  "panel.compress.optimizing": "Optimerer...",
+  "panel.compress.optimizeResult": "{{result}} Derefter optimeret til {{to}} KB ({{ratio}}% samlet reduktion).",
+  "panel.compress.optimizeFailed": "{{result}} Optimeringen af den komprimerede fil mislykkedes: {{message}}",
+  "imageres.count_one": "{{count}} billede",
+  "imageres.count_other": "{{count}} billeder",
+  "opqueue.op.optimize": "Optimér"
 }

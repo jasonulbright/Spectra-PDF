@@ -22,6 +22,9 @@ const ENCRYPTED_PDF = resolve(__dirname, '..', 'fixtures', 'encrypted.pdf');
 const TWO_FONTS_PDF = resolve(__dirname, '..', 'fixtures', 'vertical-orientations.pdf');
 // One font, embedded as a subset — the other half of the Fonts tab's states.
 const EMBEDDED_SUBSET_PDF = resolve(__dirname, '..', 'fixtures', 'mongolian-columns.pdf');
+// One full-page 150 dpi scan: the Images row's discriminating case, because a
+// document with no images cannot tell a working measurement from a stub.
+const SCANNED_PDF = resolve(__dirname, '..', 'fixtures', 'scanned.pdf');
 
 // File ▸ Properties… (Ctrl+D) — the re-homing of the Metadata
 // panel, the PDF-version read and the encryption status into one dialog about
@@ -193,7 +196,35 @@ describe('document properties: fonts, initial view and advanced', () => {
     }
     expect(await $('[data-testid="props-page-sizes"]').getText()).toMatch(/Letter/);
     expect(await $('[data-testid="props-search-index"]').getText()).toBe('None recorded');
+    // A text-only document says so rather than reporting a resolution it has
+    // no images to have.
+    await $('[data-testid="props-images-none"]').waitForDisplayed({
+      timeoutMsg: 'the Images row never resolved',
+    });
+    expect(await $('[data-testid="props-images-none"]').getText()).toBe(
+      'This document draws no images.',
+    );
     await $('[data-testid="props-close"]').click();
+  });
+
+  it('Advanced measures the effective resolution of the images a document draws', async () => {
+    await closeAllFiles();
+    await openByPaths([SCANNED_PDF]);
+    await openProperties('advanced');
+    await $('[data-testid="props-images-dpi"]').waitForDisplayed({
+      timeoutMsg: 'the Images row never measured anything',
+    });
+    // Pixels over placed inches, from the document itself: one full-page image
+    // at 150 dpi. A stub, or a bbox-derived figure, would not land here.
+    expect(await $('[data-testid="props-images-dpi"]').getText()).toBe('1 image at 150 DPI');
+    expect(await $('[data-testid="props-images-dpi"]').getAttribute('data-min-dpi')).toBe('150');
+    expect(await $('[data-testid="props-images-dpi"]').getAttribute('data-max-dpi')).toBe('150');
+    // The scan verdict comes from the MRC classifier, and every page of this
+    // one classifies.
+    expect(await $('[data-testid="props-images-scan"]').getText()).toContain('Scanned document');
+    await $('[data-testid="props-close"]').click();
+    await closeAllFiles();
+    await openByPaths([SAMPLE_PDF]);
   });
 
   it('Advanced writes Trapped and the base URL, and they survive a save and reopen', async () => {

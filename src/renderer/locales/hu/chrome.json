@@ -3809,5 +3809,22 @@
   "toolbar.group.zoom": "Nagyítás",
   "tools.heading": "Eszközök",
   "tools.openFirst": "Előbb nyisson meg egy PDF-et",
-  "tools.sub": "Válassza ki, mit szeretne tenni a dokumentumával."
+  "tools.sub": "Válassza ki, mit szeretne tenni a dokumentumával.",
+  "imageres.title": "Képek",
+  "imageres.loading": "A dokumentum képeinek mérése…",
+  "imageres.failed": "A dokumentum képeit nem sikerült megmérni.",
+  "imageres.none": "Ez a dokumentum nem rajzol képet.",
+  "imageres.single": "{{images}}, mind {{dpi}} DPI",
+  "imageres.range": "{{images}}, {{min}}–{{max}} DPI, medián {{median}}",
+  "imageres.unmeasured": "Nem mérhető: {{unmeasured}}",
+  "imageres.scanned": "Beolvasott dokumentum — {{pages}} oldalból {{scanned}} minősül beolvasottnak.",
+  "imageres.scanPages": "{{pages}} oldalból {{scanned}} minősül beolvasottnak.",
+  "panel.compress.thenOptimize": "Utána optimalizálja az eredményt",
+  "panel.compress.thenOptimizeHint": "Lefuttatja az optimalizálást a tömörített fájlon: linearizálás a webes megjelenítéshez, az objektumok folyamokba csomagolásával. Második műveletként fut, saját sorral a várólistán.",
+  "panel.compress.optimizing": "Optimalizálás...",
+  "panel.compress.optimizeResult": "{{result}} Utána {{to}} KB méretre optimalizálva ({{ratio}}% teljes csökkenés).",
+  "panel.compress.optimizeFailed": "{{result}} A tömörített fájl optimalizálása nem sikerült: {{message}}",
+  "imageres.count_one": "{{count}} kép",
+  "imageres.count_other": "{{count}} kép",
+  "opqueue.op.optimize": "Optimalizálás"
 }

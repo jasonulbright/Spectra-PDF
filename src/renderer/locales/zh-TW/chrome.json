@@ -3700,5 +3700,21 @@
   "toolbar.group.zoom": "縮放",
   "tools.heading": "工具",
   "tools.openFirst": "請先開啟 PDF",
-  "tools.sub": "選擇您想對文件做什麼。"
+  "tools.sub": "選擇您想對文件做什麼。",
+  "imageres.title": "影像",
+  "imageres.loading": "正在測量此文件中的影像…",
+  "imageres.failed": "無法測量此文件中的影像。",
+  "imageres.none": "此文件未繪製任何影像。",
+  "imageres.single": "{{images}}，均為 {{dpi}} DPI",
+  "imageres.range": "{{images}}，{{min}}–{{max}} DPI，中位數 {{median}}",
+  "imageres.unmeasured": "無法測量：{{unmeasured}}",
+  "imageres.scanned": "掃描文件 — {{pages}} 頁中有 {{scanned}} 頁判定為掃描頁。",
+  "imageres.scanPages": "{{pages}} 頁中有 {{scanned}} 頁判定為掃描頁。",
+  "panel.compress.thenOptimize": "接著最佳化結果",
+  "panel.compress.thenOptimizeHint": "對壓縮後的檔案執行最佳化：為網頁瀏覽線性化，並將物件封裝成串流。它會以第二項作業執行，在佇列中占有獨立項目。",
+  "panel.compress.optimizing": "最佳化中...",
+  "panel.compress.optimizeResult": "{{result}} 接著最佳化至 {{to}} KB（總計縮減 {{ratio}}%）。",
+  "panel.compress.optimizeFailed": "{{result}} 最佳化壓縮後的檔案失敗：{{message}}",
+  "imageres.count_other": "{{count}} 張影像",
+  "opqueue.op.optimize": "最佳化"
 }

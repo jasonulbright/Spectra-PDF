@@ -63,6 +63,14 @@ export const PANEL_STRINGS = {
   'panel.compress.result': '{{from}} KB → {{to}} KB ({{ratio}}% reduction)',
   'panel.compress.compressing': 'Compressing...',
   'panel.compress.compress': 'Compress',
+  'panel.compress.thenOptimize': 'Then optimize the result',
+  'panel.compress.thenOptimizeHint':
+    'Runs the Optimize pass over the compressed file — linearized for fast web view, with its objects packed into streams. It runs as a second operation, with its own entry in the queue.',
+  'panel.compress.optimizing': 'Optimizing...',
+  'panel.compress.optimizeResult':
+    '{{result}} Then optimized to {{to}} KB ({{ratio}}% total reduction).',
+  'panel.compress.optimizeFailed':
+    '{{result}} Optimizing the compressed file failed: {{message}}',
 
   'panel.decrypt.open': 'Open an encrypted PDF to decrypt',
   'panel.decrypt.password': 'Password',

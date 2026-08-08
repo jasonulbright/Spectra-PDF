@@ -3700,5 +3700,21 @@
   "toolbar.group.zoom": "확대/축소",
   "tools.heading": "도구",
   "tools.openFirst": "먼저 PDF를 여십시오",
-  "tools.sub": "문서로 무엇을 할지 고르십시오."
+  "tools.sub": "문서로 무엇을 할지 고르십시오.",
+  "imageres.title": "이미지",
+  "imageres.loading": "이 문서의 이미지를 측정하는 중...",
+  "imageres.failed": "이 문서의 이미지를 측정할 수 없습니다.",
+  "imageres.none": "이 문서는 이미지를 그리지 않습니다.",
+  "imageres.single": "{{images}}, 모두 {{dpi}} DPI",
+  "imageres.range": "{{images}}, {{min}}~{{max}} DPI, 중앙값 {{median}}",
+  "imageres.unmeasured": "측정 불가: {{unmeasured}}",
+  "imageres.scanned": "스캔 문서 — {{pages}}쪽 중 {{scanned}}쪽이 스캔으로 판정되었습니다.",
+  "imageres.scanPages": "{{pages}}쪽 중 {{scanned}}쪽이 스캔으로 판정되었습니다.",
+  "panel.compress.thenOptimize": "이어서 결과 최적화",
+  "panel.compress.thenOptimizeHint": "압축된 파일에 최적화를 실행합니다. 웹 보기용으로 선형화하고 개체를 스트림으로 묶습니다. 두 번째 작업으로 실행되며 대기열에 별도 항목이 생깁니다.",
+  "panel.compress.optimizing": "최적화하는 중...",
+  "panel.compress.optimizeResult": "{{result}} 이어서 {{to}} KB로 최적화했습니다(총 {{ratio}}% 감소).",
+  "panel.compress.optimizeFailed": "{{result}} 압축된 파일 최적화에 실패했습니다: {{message}}",
+  "imageres.count_other": "이미지 {{count}}개",
+  "opqueue.op.optimize": "최적화"
 }

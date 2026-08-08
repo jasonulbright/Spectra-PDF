@@ -129,6 +129,7 @@ from engine.recognize import recognize
 from engine.batch_ocr import batch_ocr, ocr_file
 from engine.guided_actions import run_action
 from engine.autotag import autotag
+from engine.image_resolution import summarize_image_resolution
 from engine.page_images import (
     add_page_image,
     add_page_vector_graphic,
@@ -304,6 +305,7 @@ def main() -> None:
     server.register("run_action", run_action)
     server.register("autotag", autotag)
     server.register("list_page_images", list_page_images)
+    server.register("summarize_image_resolution", summarize_image_resolution)
     server.register("delete_page_image", delete_page_image)
     server.register("replace_page_image", replace_page_image)
     server.register("extract_page_image", extract_page_image)

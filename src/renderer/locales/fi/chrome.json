@@ -3809,5 +3809,22 @@
   "toolbar.group.zoom": "Zoomaus",
   "tools.heading": "Työkalut",
   "tools.openFirst": "Avaa ensin PDF",
-  "tools.sub": "Valitse, mitä haluat tehdä asiakirjallesi."
+  "tools.sub": "Valitse, mitä haluat tehdä asiakirjallesi.",
+  "imageres.title": "Kuvat",
+  "imageres.loading": "Mitataan tämän asiakirjan kuvia…",
+  "imageres.failed": "Tämän asiakirjan kuvia ei voitu mitata.",
+  "imageres.none": "Tämä asiakirja ei piirrä yhtään kuvaa.",
+  "imageres.single": "{{images}}, tarkkuus {{dpi}} DPI",
+  "imageres.range": "{{images}}, {{min}}–{{max}} DPI, mediaani {{median}}",
+  "imageres.unmeasured": "Ei mitattavissa: {{unmeasured}}",
+  "imageres.scanned": "Skannattu asiakirja — {{scanned}} / {{pages}} sivua tunnistetaan skannaukseksi.",
+  "imageres.scanPages": "{{scanned}} / {{pages}} sivua tunnistetaan skannaukseksi.",
+  "panel.compress.thenOptimize": "Optimoi tulos tämän jälkeen",
+  "panel.compress.thenOptimizeHint": "Suorittaa optimoinnin pakatulle tiedostolle: linearisoi verkkokäyttöä varten ja pakkaa objektit virtoihin. Se suoritetaan toisena toimintona, jolla on oma rivinsä jonossa.",
+  "panel.compress.optimizing": "Optimoidaan...",
+  "panel.compress.optimizeResult": "{{result}} Tämän jälkeen optimoitu kokoon {{to}} kt (yhteensä {{ratio}} % pienempi).",
+  "panel.compress.optimizeFailed": "{{result}} Pakatun tiedoston optimointi epäonnistui: {{message}}",
+  "imageres.count_one": "{{count}} kuva",
+  "imageres.count_other": "{{count}} kuvaa",
+  "opqueue.op.optimize": "Optimoi"
 }
