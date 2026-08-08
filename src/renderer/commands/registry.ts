@@ -926,6 +926,12 @@ export const COMMANDS: Record<CommandId, Command> = {
         run: (ctx) => {
           const { state, dispatch } = ctx;
           const path = showableDoc(state);
+          // Scan & OCR is two halves — Find's "Make searchable" and the Scan
+          // Enhancement pane — and opening the tool has always meant BOTH, so
+          // this fires whichever destination the rule below picks. Deferred,
+          // not called on ctx.canvas: the focus below has only been SCHEDULED,
+          // so the canvas is still unmounted right now.
+          if (tool.id === 'ocr' && path) openFindWhenCanvasReady(ctx.canvas, path);
           // OPENING A TOOL GOES WHERE ITS WORK IS. One rule, and it is the whole
           // of the destination logic (revision):
           //
@@ -952,11 +958,6 @@ export const COMMANDS: Record<CommandId, Command> = {
             // — their pane is one dock-click away, already seated.
             if (tool.ops.length > 0) dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
             else dispatch({ type: 'UI_OPEN_TOOL', toolId: tool.id });
-            // Scan & OCR's whole surface is Find's "Make searchable", so
-            // the tool opens Find rather than inventing a second entry point.
-            // Deferred, not called on ctx.canvas: the focus above has only been
-            // SCHEDULED, so the canvas is still unmounted right now.
-            if (tool.id === 'ocr') openFindWhenCanvasReady(ctx.canvas, path);
             return;
           }
           // Focus FIRST, then open: leaving doc land resets the mode, so an arm

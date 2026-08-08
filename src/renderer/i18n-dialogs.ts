@@ -543,6 +543,10 @@ export const DIALOG_STRINGS = {
     'Several languages are recognized together, which is slower — and on a page that is only one of them, the single right language is usually more accurate. This is not automatic detection.',
   'dialog.batch.blurb':
     'Every PDF in the source folder is mirrored into the destination: scanned pages gain an invisible searchable text layer; already-searchable files are copied unchanged. Existing destination files with the same names are overwritten.',
+  'dialog.batch.enhance': 'Straighten and clean scans before recognition',
+  'dialog.batch.enhanceOrientation': 'Turn sideways pages upright',
+  'dialog.batch.enhanceNote':
+    'Runs before recognition, because a page two degrees off square reads as ragged lines and a page fed in sideways reads as nothing at all. A file with no scanned page keeps the bytes it already had and says so in the report.',
   'dialog.batch.mrc': 'Compress scans after recognition (MRC)',
   'dialog.batch.mrcPreset': 'Scan preset',
   'dialog.batch.mrcVerify': 'Verify the text after compressing',
@@ -604,6 +608,7 @@ export const DIALOG_STRINGS = {
   'dialog.batch.rowCopied': '{{rel}} — copied ({{reason}})',
   'dialog.batch.rowPartial': '{{rel}} — made searchable, but {{reason}}',
   'dialog.batch.rowMrc': '{{rel}} — {{note}}',
+  'dialog.batch.rowEnhance': '{{rel}} — {{note}}',
   'dialog.batch.unreadableDirs': 'Unreadable subfolders (missing from the mirror): {{dirs}}',
   'dialog.batch.logWritten': 'Log written: {{path}}',
   'dialog.batch.openFolder': 'Open folder',

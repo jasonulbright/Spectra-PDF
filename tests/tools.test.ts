@@ -88,7 +88,7 @@ describe('tools registry', () => {
   // but then it must arm something, or the tile would do nothing at all.
   it('every tool either hosts operations or owns a canvas mode', () => {
     for (const tool of TOOL_DEFS) {
-      const usable = tool.ops.length > 0 || (tool.canvasTools?.length ?? 0) > 0 || tool.id === 'ocr';
+      const usable = tool.ops.length > 0 || (tool.canvasTools?.length ?? 0) > 0;
       expect(usable, `${tool.id} has neither ops nor a canvas mode`).toBe(true);
     }
   });

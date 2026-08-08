@@ -43,6 +43,10 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   compare_text: 'Compare',
   compare_visual: 'Compare (visual)',
   apply_ocr_layer: 'Apply OCR Text',
+  // The document REWRITE. Its read half (`analyze_scan`) is deliberately
+  // absent: it refetches on every setting change while the pane is open, and
+  // a queue entry per keystroke pause is noise, not a record.
+  enhance_scan: 'Enhance Scans',
   delete_page_image: 'Delete Image',
   delete_page_images: 'Delete Images',
   replace_page_image: 'Replace Image',
