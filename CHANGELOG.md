@@ -6,7 +6,7 @@
 - A watermark is now text or a picture, and the panel offers both.
 - Any picture Create PDF accepts can be stamped, chosen through a file picker.
 - The picture is stored once in the document, however many pages carry it.
-- Scale sets how large it goes; 1 fills the page without crowding it.
+- Scale sets how large it goes; 1 fills the page without crowding it, and it sizes a text watermark too.
 - Position places it in the middle or against any edge or corner, with a margin.
 - Tiling repeats the stamp across the whole page, with a gap you set.
 - Position and tiling apply to text watermarks too, and the old placement is still the default.
