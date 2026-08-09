@@ -4,6 +4,7 @@ import { app, batch, dialog, virtualPrinter, type GsInfo, type VirtualPrinterSta
 import { deriveAccentVars, type ThemeName } from '../lib/accent';
 import { StatusBar } from '../components/StatusBar';
 import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
+import { clampSnapshotDpi, MAX_SNAPSHOT_DPI, MIN_SNAPSHOT_DPI } from '../lib/snapshot-image';
 import { useTranslation } from 'react-i18next';
 import { tChrome, setAppLanguage, SHIPPED_LOCALES, LOCALE_NATIVE_NAMES } from '../i18n';
 import type { PanelKey } from '../i18n-panels';
@@ -389,6 +390,24 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         />
         <p className="text-xs text-neutral-500 mt-1">
           {tChrome('panel.settings.identityHint')}
+        </p>
+      </div>
+      <div>
+        <label className="block text-sm text-neutral-400 mb-1" htmlFor="pref-snapshot-dpi">
+          {tChrome('panel.settings.snapshotDpi')}
+        </label>
+        <input
+          id="pref-snapshot-dpi"
+          type="number"
+          data-testid="pref-snapshot-dpi"
+          min={MIN_SNAPSHOT_DPI}
+          max={MAX_SNAPSHOT_DPI}
+          value={settings.snapshotDpi}
+          onChange={(e) => update('snapshotDpi', clampSnapshotDpi(e.target.value))}
+          className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm w-28"
+        />
+        <p className="text-xs text-neutral-500 mt-1">
+          {tChrome('panel.settings.snapshotDpiHint', { min: MIN_SNAPSHOT_DPI, max: MAX_SNAPSHOT_DPI })}
         </p>
       </div>
       <div>

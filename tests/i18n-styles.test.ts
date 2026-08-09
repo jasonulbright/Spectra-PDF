@@ -38,6 +38,9 @@ const PHYSICAL_EXCEPTIONS: Record<string, string> = {
   '.page-edittext-error': 'page-anchored overlay',
   '.page-edittext-convert': 'page-anchored overlay',
   '.page-crop-label': 'page-anchored overlay',
+  // Sits beside .page-annot-x, which is physically anchored for the same
+  // reason; mirroring one and not the other would overlap them.
+  '.page-snapshot-placement .page-snapshot-save': 'page-anchored overlay',
   '.page-editpara-resize-readout': 'page-anchored overlay',
   // Annotation text is DOCUMENT text: its alignment is the document's
   // property and must not follow the UI language.

@@ -55,6 +55,7 @@ import {
   type SpanSize,
 } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
+import type { SnapshotPlacement } from '../../lib/snapshot-capture';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import { PageView } from './PageView';
@@ -790,6 +791,12 @@ interface PageCellProps {
   addTextPlacement?: SignaturePlacement | null;
   cropPlacement?: SignaturePlacement | null;
   onClearCropPlacement?: () => void;
+  // The captured snapshot's card: the same transient, single, page-anchored
+  // lifecycle, carrying what the clipboard now holds so the reader can see
+  // the capture succeeded without leaving the page.
+  snapshotPlacement?: SnapshotPlacement | null;
+  onClearSnapshotPlacement?: () => void;
+  onSaveSnapshot?: () => void;
   onSetAddTextRect: (
     docId: string,
     pageId: string,
@@ -815,6 +822,15 @@ interface PageCellProps {
   // display-normalised, rotation AT DRAW, and nothing commits: the panel
   // appends the box and Save is what writes.
   onSetBeadRect: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  // A snapshot band. Same contract again — display-normalised, rotation AT
+  // DRAW, REQUIRED for the same reason. The capture reaches the clipboard,
+  // never the document.
+  onSetSnapshotRect: (
     docId: string,
     pageId: string,
     rect: { x: number; y: number; w: number; h: number },
@@ -1101,6 +1117,10 @@ function PageCellImpl({
   onSetAddTextRect,
   onSetCropRect,
   onSetBeadRect,
+  onSetSnapshotRect,
+  snapshotPlacement,
+  onClearSnapshotPlacement,
+  onSaveSnapshot,
   onClearAddTextPlacement,
   onAddImageRect,
   onClearNewFieldPlacement,
@@ -2763,6 +2783,10 @@ function PageCellImpl({
           // The band is one box of an article. Nothing commits here — the
           // Articles panel appends it and the user saves.
           onSetBeadRect(docId, page.id, latest, page.rotation);
+        } else if (tool === 'snapshot') {
+          // The band is the region to CAPTURE. The document is not touched:
+          // the region is re-rendered and lands on the clipboard.
+          onSetSnapshotRect(docId, page.id, latest, page.rotation);
         } else if (tool === 'addtext') {
           // Add-text placement — single, drawing again replaces it.
           onSetAddTextRect(docId, page.id, latest, page.rotation);
@@ -4144,6 +4168,54 @@ function PageCellImpl({
           );
         })()
       )}
+      {snapshotPlacement && (
+        (() => {
+          const r = projectMarkRect(snapshotPlacement, page.rotation);
+          return (
+            <div
+              data-testid="snapshot-placement"
+              data-snapshot-size={`${snapshotPlacement.width}x${snapshotPlacement.height}`}
+              data-snapshot-formats={snapshotPlacement.formats.join(',')}
+              className="page-crop-placement page-snapshot-placement"
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.w * 100}%`,
+                height: `${r.h * 100}%`,
+              }}
+            >
+              <span className="page-crop-label">
+                {tChrome('canvas.snapshot.copied', {
+                  width: snapshotPlacement.width,
+                  height: snapshotPlacement.height,
+                })}
+              </span>
+              <button
+                data-testid="snapshot-save"
+                className="page-snapshot-save"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSaveSnapshot?.();
+                }}
+              >
+                {tChrome('canvas.snapshot.save')}
+              </button>
+              <button
+                className="page-annot-x"
+                title={tChrome('canvas.snapshot.dismiss')}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClearSnapshotPlacement?.();
+                }}
+              >
+                ×
+              </button>
+            </div>
+          );
+        })()
+      )}
       {band && (
         <div
           className={
@@ -4162,7 +4234,9 @@ function PageCellImpl({
                         ? ' band-cropdraw'
                         : tool === 'beaddraw'
                           ? ' band-beaddraw'
-                          : '')
+                          : tool === 'snapshot'
+                            ? ' band-snapshot'
+                            : '')
           }
           style={{
             left: `${band.x * 100}%`,

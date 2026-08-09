@@ -134,6 +134,23 @@ export function registerCanvasCrop(handlers: CanvasCropHandlers | null): void {
   canvasCrop = handlers;
 }
 
+/**
+ * Snapshot save. The capture itself is driven as a real pointer gesture and
+ * needs nothing here; the SAVE is behind an OS-modal file dialog, which no
+ * spec can answer. This registers the write half — the same call the button
+ * makes once the dialog has returned a path — so the file the tool produces
+ * is a real assertion rather than an assumption.
+ */
+export interface CanvasSnapshotHandlers {
+  saveTo: (path: string) => Promise<string>;
+}
+
+let canvasSnapshot: CanvasSnapshotHandlers | null = null;
+
+export function registerCanvasSnapshot(handlers: CanvasSnapshotHandlers | null): void {
+  canvasSnapshot = handlers;
+}
+
 let canvasSignature: CanvasSignatureHandlers | null = null;
 
 export function registerCanvasSignature(handlers: CanvasSignatureHandlers | null): void {
@@ -1083,6 +1100,9 @@ export interface TestHarness {
     rect: { x: number; y: number; w: number; h: number },
     timeoutMs?: number,
   ) => Promise<void>;
+  /** Write the captured snapshot to `path` — the save the card's button
+   * makes once its OS-modal dialog has returned a destination. */
+  saveSnapshotTo: (path: string) => Promise<string>;
   placeSignature: (
     rect: { x: number; y: number; w: number; h: number },
     timeoutMs?: number,
@@ -1923,6 +1943,10 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         lastError = msg;
         throw new Error(msg);
       }
+    },
+    saveSnapshotTo: async (path) => {
+      if (!canvasSnapshot) throw new Error('saveSnapshotTo: no capture is on the page');
+      return canvasSnapshot.saveTo(path);
     },
     clearSignaturePlacement: () => canvasSignature?.clear(),
     selectCanvasPages: (pageIds) => canvasSelection?.selectPageIds(pageIds),

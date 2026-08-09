@@ -105,7 +105,7 @@ const CANVAS_TOOLS = [
   'select', 'hand', 'highlight', 'freetext', 'ink', 'stamp', 'redact', 'signature', 'forms',
   'formfields', 'edit', 'addtext', 'addimage', 'measuredist', 'measureperim', 'measurearea',
   'measurecal', 'shape', 'callout', 'note', 'inkerase', 'zoommarquee', 'cropdraw', 'count',
-  'outputpreview', 'flattenpreview', 'tablereview', 'beaddraw',
+  'outputpreview', 'flattenpreview', 'tablereview', 'beaddraw', 'snapshot',
 ] as const;
 
 export const TOOL_TITLES: Record<CanvasTool, string> = {
@@ -120,6 +120,7 @@ export const TOOL_TITLES: Record<CanvasTool, string> = {
   flattenpreview: 'Flattener Preview',
   tablereview: 'Table Review',
   beaddraw: 'Draw Article Box',
+  snapshot: 'Snapshot',
 };
 
 // CANVAS_TOOLS must be a literal tuple (COMMAND_IDS builds `tools.${t}` from
@@ -329,6 +330,8 @@ export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
   headerfooter: [],
   // Pagebox owns the `cropdraw` mode, so its strip needs a way out.
   pagebox: ['tools.close'],
+  // Snapshot's whole surface is the band, so the strip is only the way out.
+  snapshot: ['tools.close'],
   pagelabels: [],
   attachments: [],
   portfolio: [],
