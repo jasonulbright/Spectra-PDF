@@ -4,42 +4,48 @@
 
 ### Spell check
 - The paragraph editor underlines words it does not recognise while you type.
-- A new **Spelling** panel, under the Edit tool, checks the whole document: the text on the pages, the comments, and the values in form fields.
+- Form field values and note text are checked as you type, in the dictionary you chose.
+- A new **Spelling** panel, under the Edit tool, checks page text, comments and form field values.
 - Misspellings are grouped by word, with a count, and selecting one offers suggestions.
 - **Change** corrects one occurrence; **Change all** corrects every occurrence of that word, and says per occurrence what happened.
-- A correction is made the way you would make it by hand: it keeps the styling of the word it replaces, it leaves the rest of the page exactly where it was, and it can be undone.
-- Words can be ignored for the session, or added to your own dictionary, which every later check and the editor's underlining both honour.
+- A correction keeps the styling of the word it replaces and leaves the rest of the page untouched.
+- Every correction is one ordinary undo step.
+- Words can be ignored for the session, or added to your own dictionary, honoured by every later check.
 - **34 dictionaries ship with the app** and work with no connection: Arabic, Catalan (and Valencian), Czech, Danish, German (Germany, Austria, Switzerland), Greek, English (US, UK, Australia, Canada, South Africa), Spanish (Spain, Mexico), French, Hebrew, Hungarian, Italian, Norwegian (Bokmål and Nynorsk), Dutch, Polish, Portuguese (Brazil and Portugal), Romanian, Russian, Slovak, Slovenian, Swedish (Sweden and Finland), Turkish and Ukrainian.
 - Which dictionary is used follows the document's own stated language, then the interface language — or you can pick one.
-- **Add a dictionary…** takes any Hunspell `.aff` and `.dic` pair from disk and copies it in, so a language that is not in the list can still be used.
+- **Add a dictionary…** brings in any Hunspell `.aff` and `.dic` pair from disk, for a language not listed.
 - Words in capitals and words containing numbers are skipped by default, and both are switchable.
 - Web addresses, email addresses, file names and version numbers are never offered as misspellings.
 - A paragraph the editor cannot open is reported as unchecked rather than listed with corrections that could not be applied.
 
 ### Reading a document out loud
-- **View ▸ Read Out Loud** speaks the page you are on, or reads from it to the end of the document.
-- A transport bar appears while it reads: play and pause, stop, and a step back or forward one sentence at a time.
+- **View ▸ Read Out Loud** speaks the current page, or reads from it to the document's end.
+- A transport bar appears while it reads: play, pause, stop, and step back or forward a sentence.
 - The voice and the reading speed are chosen in the bar itself, and both are remembered.
 - Voices are the ones installed on your computer, so a voice you already use elsewhere is available here.
-- The paragraph being read, the sentence being spoken and the word being said are all highlighted on the page, and the view follows along as the reading crosses to the next page.
-- A tagged document is read in the order its author declared, not the order the text happens to sit on the page — and the bar says which order is in use.
+- The paragraph, the sentence and the word being spoken are each highlighted on the page.
+- The view follows the reading, turning to the next page on its own.
+- A tagged document is read in the order its author declared, not the order text sits on the page.
+- The bar says which of the two orders is in use.
 - Page headers, footers and other page furniture marked as such by the document are not read out.
 - Sentences are found using the document's own stated language where it has one.
-- Keyboard shortcuts throughout: Ctrl+Shift+V reads the page, Ctrl+Shift+B reads to the end, Ctrl+Shift+C pauses and resumes, Ctrl+Shift+E stops, and Esc closes the bar.
+- Ctrl+Shift+V reads the page, Ctrl+Shift+B reads to the end of the document.
+- Ctrl+Shift+C pauses and resumes, Ctrl+Shift+E stops, and Esc closes the bar.
 - A page with no readable text says so and points at Scan & OCR instead of reading nothing.
 
 ### Copying a region of a page as a picture
-- A **Snapshot** tool: drag a rectangle over any part of a page and that region goes to the clipboard as an image.
+- A **Snapshot** tool: drag a rectangle over a page and that region goes to the clipboard as an image.
 - Paste it straight into a document, a message or a presentation.
 - The capture is taken at a fixed resolution, not at whatever zoom the page happens to be shown at.
 - That resolution is a preference, under General, and starts at 150 pixels per inch.
-- The captured rectangle stays on the page with its pixel size, and a button to save the same picture as a PNG file.
+- The captured rectangle stays on the page with its pixel size.
+- **Save image…** writes the same picture to a PNG file.
 - The clipboard receives the picture in two forms, so applications that prefer either one can paste it.
 - The document is never changed by a snapshot.
 
 ### Cropping to what a page actually draws
 - The Crop & Page Boxes panel gains **Remove white margins**: the page box is set around the page's own content.
-- **Find content** measures first and reports how many pages would be cropped, how much comes off the widest edge, and how many pages are already tight.
+- **Find content** reports how many pages would crop, the widest edge removed, and how many are already tight.
 - **Crop to content** then applies exactly what was measured.
 - A margin to keep around the content can be set in points.
 - A scanned page is measured from its ink, so a photocopy with wide borders crops like a typeset page.
