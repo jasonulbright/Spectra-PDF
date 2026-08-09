@@ -271,3 +271,83 @@ class TestBatchMrc:
                           out, tesseract_path=TESS, gs_path=GS, mrc=True)
         assert result["mrcApplied"] is True
         assert "MRC compressed" in result["mrc"]
+
+
+class TestBatchEnhance:
+    """Scan enhancement inside a batch run.
+
+    The order is the claim, read the other way round from MRC's: enhancement
+    rewrites the page IMAGE, so it runs BEFORE recognition — a text layer
+    written first would sit over where the ink used to be. These reach the
+    same engine arguments the CLI's `--enhance` / `--no-enhance-orientation`
+    and a scheduled run's expanded command line reach, which is what makes
+    those two surfaces provable without registering a task.
+    """
+
+    def _skewed_scan(self, tmp_dir, dest):
+        """A one-page PDF whose only content is a rotated raster of text."""
+        from pathlib import Path
+
+        from PIL import Image
+
+        png = _scan_png(tmp_dir, os.path.join(tmp_dir, "enh-src.png"))
+        image = Image.open(png).convert("RGB")
+        turned = image.rotate(-2.0, expand=True, fillcolor=(255, 255, 255))
+        leaning = os.path.join(tmp_dir, "enh-leaning.png")
+        turned.save(leaning)
+        image.close()
+        turned.close()
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        image_to_pdf(Path(leaning), Path(dest))
+        return dest
+
+    def test_a_scan_is_enhanced_then_recognised(self, tmp_dir):
+        src = os.path.join(tmp_dir, "in")
+        dst = os.path.join(tmp_dir, "out")
+        os.makedirs(src)
+        self._skewed_scan(tmp_dir, os.path.join(src, "scan.pdf"))
+        report = batch_ocr(source=src, dest=dst, gs_path=GS, tesseract_path=TESS,
+                           enhance=True)
+        entry = report["results"][0]
+        assert entry["status"] == "ocr"
+        assert entry["enhance"]
+        # The searchable layer is written over the CORRECTED page, so the text
+        # is extractable from the output the enhancement produced.
+        assert PHRASE.split()[0].lower() in extract_text(
+            os.path.join(dst, "scan.pdf")
+        )["text"].lower()
+
+    def test_a_file_with_no_scan_says_so_rather_than_failing(self, tmp_dir):
+        src = os.path.join(tmp_dir, "in")
+        dst = os.path.join(tmp_dir, "out")
+        os.makedirs(src)
+        shutil.copy(_typed_pdf(tmp_dir), os.path.join(src, "typed.pdf"))
+        report = batch_ocr(source=src, dest=dst, gs_path=GS, tesseract_path=TESS,
+                           enhance=True)
+        entry = report["results"][0]
+        assert entry["status"] == "copied"
+        assert entry["enhance"]
+        assert os.path.isfile(os.path.join(dst, "typed.pdf"))
+
+    def test_without_the_option_nothing_is_enhanced(self, tmp_dir):
+        src = os.path.join(tmp_dir, "in")
+        dst = os.path.join(tmp_dir, "out")
+        os.makedirs(src)
+        self._skewed_scan(tmp_dir, os.path.join(src, "scan.pdf"))
+        report = batch_ocr(source=src, dest=dst, gs_path=GS, tesseract_path=TESS)
+        assert "enhance" not in report["results"][0]
+
+    def test_the_orientation_half_can_be_turned_off_on_its_own(self, tmp_dir):
+        # The half whose shipped default is ON. It is inert without `enhance`,
+        # so the pin is that turning it off leaves the rest of the run intact
+        # rather than refusing or skipping the file.
+        src = os.path.join(tmp_dir, "in")
+        dst = os.path.join(tmp_dir, "out")
+        os.makedirs(src)
+        self._skewed_scan(tmp_dir, os.path.join(src, "scan.pdf"))
+        report = batch_ocr(source=src, dest=dst, gs_path=GS, tesseract_path=TESS,
+                           enhance=True, enhance_orientation=False)
+        entry = report["results"][0]
+        assert entry["status"] in ("ocr", "copied")
+        assert entry["enhance"]
+        assert os.path.isfile(os.path.join(dst, "scan.pdf"))

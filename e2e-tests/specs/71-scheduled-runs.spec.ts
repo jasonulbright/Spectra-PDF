@@ -60,7 +60,11 @@ describe('scheduled batch runs', () => {
   });
 
   after(() => {
-    forceDelete(TASK_NAME);
+    // Every task this spec can register, whether or not its test reached the
+    // delete — a failed assertion must not leave one on the machine.
+    for (const name of [TASK_NAME, 'E2E Preset Run', 'E2E InPlace Run', 'E2E Contradiction']) {
+      forceDelete(name);
+    }
     if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -102,6 +106,94 @@ describe('scheduled batch runs', () => {
     expect(row!.profile).toBeTruthy();
     expect(row!.profile!.source).toBe(src);
     expect(row!.profile!.dest).toBe(dest);
+  });
+
+  // A named Batch OCR preset is EXPANDED into the task's command line at
+  // scheduling time, because the task fires with the app closed and cannot
+  // read the store a preset lives in. So the proof is that every setting
+  // survives registration and reads back off the registered task — a setting
+  // that did not would make the schedule run a quietly different job.
+  it('carries a preset’s page-image settings into the task and reads them back', async () => {
+    const name = 'E2E Preset Run';
+    forceDelete(name);
+    await scheduleCreate({
+      name,
+      source: src,
+      dest,
+      lang: 'eng+fra',
+      logDir: logs,
+      frequency: 'daily',
+      time: '02:15',
+      enhance: true,
+      enhanceOrientation: false,
+      mrc: true,
+      mrcPreset: 'smallest',
+      mrcVerifyText: true,
+    });
+    expect(taskExists(name)).toBe(true);
+
+    const row = (await scheduleList()).find((r) => r.name === name);
+    expect(row?.profile).toBeTruthy();
+    expect(row!.profile!.lang).toBe('eng+fra');
+    expect(row!.profile!.enhance).toBe(true);
+    // The orientation half defaults ON, so the off case is the one that has to
+    // survive — a round trip that lost it would silently turn it back on.
+    expect(row!.profile!.enhanceOrientation).toBe(false);
+    expect(row!.profile!.mrc).toBe(true);
+    expect(row!.profile!.mrcPreset).toBe('smallest');
+    expect(row!.profile!.mrcVerifyText).toBe(true);
+
+    await scheduleRemove(name);
+    expect(taskExists(name)).toBe(false);
+  });
+
+  // An in-place schedule has no destination by construction. Its own test
+  // because the readback used to require one, so an in-place task would have
+  // listed as unreadable.
+  it('registers an in-place schedule with no destination and lists it', async () => {
+    const name = 'E2E InPlace Run';
+    forceDelete(name);
+    const inPlaceSrc = resolve(tmp, 'inplace');
+    mkdirSync(inPlaceSrc, { recursive: true });
+    copyFileSync(SCANNED, resolve(inPlaceSrc, 'scan.pdf'));
+
+    await scheduleCreate({
+      name,
+      source: inPlaceSrc,
+      dest: '',
+      inPlace: true,
+      logDir: logs,
+      frequency: 'daily',
+      time: '04:00',
+    });
+    expect(taskExists(name)).toBe(true);
+
+    const row = (await scheduleList()).find((r) => r.name === name);
+    expect(row?.profile).toBeTruthy();
+    expect(row!.profile!.inPlace).toBe(true);
+    expect(row!.profile!.dest).toBe('');
+
+    await scheduleRemove(name);
+    expect(taskExists(name)).toBe(false);
+  });
+
+  it('refuses an in-place schedule that also names a destination', async () => {
+    // In place, the processed file IS the original — a destination names a
+    // mirror that is never written, so registering it would describe a run
+    // that cannot happen.
+    let message = '';
+    try {
+      await scheduleCreate({
+        name: 'E2E Contradiction',
+        source: src,
+        dest,
+        inPlace: true,
+      });
+    } catch (e: unknown) {
+      message = e instanceof Error ? e.message : String(e);
+    }
+    expect(message.toLowerCase()).toContain('in-place');
+    expect(taskExists('E2E Contradiction')).toBe(false);
   });
 
   it('refuses a run under another account with no explicit log folder', async () => {

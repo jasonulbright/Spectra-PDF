@@ -2072,6 +2072,14 @@ pub struct BatchOcrArgs {
     /// did not survive
     #[arg(long)]
     pub mrc_verify_text: bool,
+    /// OPT-IN: deskew, despeckle and whiten each scan BEFORE recognition, so
+    /// what is read is the corrected page rather than the crooked one
+    #[arg(long)]
+    pub enhance: bool,
+    /// --enhance only: leave a sideways page as it is. Orientation detection
+    /// runs with --enhance, so this is the flag that turns it off.
+    #[arg(long)]
+    pub no_enhance_orientation: bool,
     /// Print per-file progress
     #[arg(short, long)]
     pub verbose: bool,
@@ -4433,6 +4441,8 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "mrc": args.mrc,
                     "mrc_preset": args.mrc_preset,
                     "mrc_verify_text": args.mrc_verify_text,
+                    "enhance": args.enhance,
+                    "enhance_orientation": !args.no_enhance_orientation,
                     "passwords": args
                         .passwords
                         .iter()
@@ -4842,5 +4852,39 @@ mod tests {
         }
         // Listing a document's fields still takes no lock flags at all.
         assert!(Cli::try_parse_from(["spectrapdf", "forms", "in.pdf"]).is_ok());
+    }
+
+    /// The scan-enhancement pair. It exists on this arm because the GUI's
+    /// Batch OCR dialog offers it and a scheduled run is that dialog with
+    /// nobody watching -- a setting the dialog can express and the command
+    /// line cannot is a schedule that runs a different job.
+    #[test]
+    fn batch_ocr_carries_the_enhancement_pair() {
+        let cli = parse(&["spectrapdf", "batch-ocr", "scans", "--dest", "out", "--enhance"]);
+        match cli.command {
+            Some(CliCommand::BatchOcr(args)) => {
+                assert!(args.enhance);
+                // Orientation detection runs WITH --enhance; only the explicit
+                // flag turns it off, so its absence must read as on.
+                assert!(!args.no_enhance_orientation);
+            }
+            _ => panic!("not the batch-ocr arm"),
+        }
+        let cli = parse(&[
+            "spectrapdf", "batch-ocr", "scans", "--in-place", "--enhance",
+            "--no-enhance-orientation",
+        ]);
+        match cli.command {
+            Some(CliCommand::BatchOcr(args)) => {
+                assert!(args.in_place && args.enhance && args.no_enhance_orientation);
+                assert!(args.dest.is_none());
+            }
+            _ => panic!("not the batch-ocr arm"),
+        }
+        // In-place and a destination are still mutually exclusive.
+        assert!(Cli::try_parse_from([
+            "spectrapdf", "batch-ocr", "scans", "--in-place", "--dest", "out",
+        ])
+        .is_err());
     }
 }
