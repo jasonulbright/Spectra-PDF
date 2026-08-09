@@ -4,6 +4,7 @@
 // commit gate must not run — it would side-effect-commit unrelated pending
 // page edits mid-sweep) and the Rust batch filesystem commands.
 import { batch } from './tauri-bridge';
+import { parseFolderListing } from './folder-create-pdf';
 import type { BuildResult, FolderCreatePdfIo, FolderListing } from './folder-create-pdf';
 
 export interface FolderCreatePdfBuildOptions {
@@ -29,11 +30,16 @@ export async function listSourceFolders(
   source: string,
   options: { sources: string; includeSubfolders: boolean },
 ): Promise<FolderListing> {
-  return (await callRaw('list_source_folders', {
-    source,
-    sources: options.sources,
-    include_subfolders: options.includeSubfolders,
-  })) as unknown as FolderListing;
+  // Through the pure parser, never cast: the engine names its fields in
+  // snake_case, and a cast would hand the UI an `undefined` that only fails
+  // when something reads it.
+  return parseFolderListing(
+    await callRaw('list_source_folders', {
+      source,
+      sources: options.sources,
+      include_subfolders: options.includeSubfolders,
+    }),
+  );
 }
 
 export function createFolderCreatePdfIo(
@@ -56,10 +62,10 @@ export function createFolderCreatePdfIo(
         on_unsupported: 'skip',
         gs_path: tools.ghostscript,
         soffice_path: tools.soffice,
-      })) as { pages: number; warnings?: string[] };
+      })) as { pages?: number; warnings?: string[] };
       return {
-        pages: built.pages,
-        ...(built.warnings ? { warnings: built.warnings } : {}),
+        pages: typeof built.pages === 'number' ? built.pages : 0,
+        ...(Array.isArray(built.warnings) ? { warnings: built.warnings } : {}),
       };
     },
     ensureParentDirs: (path) => batch.ensureParentDirs(path),
