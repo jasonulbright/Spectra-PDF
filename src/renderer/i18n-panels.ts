@@ -886,6 +886,19 @@ export const PANEL_STRINGS = {
   'panel.pageBoxes.edgeInset': '{{edge}} inset',
   'panel.pageBoxes.pagesLabel': 'Pages (e.g. 1,3,5 or all)',
   'panel.pageBoxes.pagesAria': 'Pages to crop',
+  'panel.pageBoxes.autoTitle': 'Remove white margins',
+  'panel.pageBoxes.autoBlurb':
+    'Measures what each page draws and sets the box around it. Nothing is deleted — resetting the box brings the margin back.',
+  'panel.pageBoxes.autoMargin': 'Keep around content (pt)',
+  'panel.pageBoxes.autoPreview': 'Find content',
+  'panel.pageBoxes.autoApply': 'Crop to content',
+  'panel.pageBoxes.autoScanning': 'Measuring each page…',
+  // Labelled numbers rather than a counted sentence: five figures in one
+  // line, and every language reads a label followed by a value.
+  'panel.pageBoxes.autoSummary':
+    'To crop: {{count}} · already tight: {{unchanged}} · skipped: {{skipped}} · from ink: {{scanned}} · largest trim: {{points}}pt',
+  'panel.pageBoxes.autoFound': 'Measured — to crop: {{count}}, skipped: {{skipped}}',
+  'panel.pageBoxes.autoApplied': 'Cropped to content — pages: {{count}}, skipped: {{skipped}}',
 
   'panel.delete.open': 'Open a PDF to delete pages',
   'panel.delete.enterPages': 'Enter page numbers.',
