@@ -49,6 +49,12 @@ export interface Settings {
    * see it. A shared, explicitly chosen folder is the fix — and once
    * scheduling exists, setting one is required for a non-interactive identity. */
   batchLogDir: string;
+  /** Resolution the snapshot tool captures at, in pixels per inch.
+   *
+   * Fixed rather than "whatever the view is at": a region captured from a 40%
+   * zoom would carry 40% of the page's detail into another document, and the
+   * reader has no way to tell from the pasted picture that it happened. */
+  snapshotDpi: number;
   /** The UI language — 'system' resolves against the shipped locales
    * (falling back to en), an explicit code pins one. Stored values are
    * locale-independent keys, never display names. */
@@ -70,6 +76,7 @@ export const DEFAULTS: Settings = {
   batchLogRetentionDays: 30,
   batchLogDir: '',
   identityName: '',
+  snapshotDpi: 150,
   language: 'system',
 };
 

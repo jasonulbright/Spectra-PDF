@@ -344,7 +344,13 @@ export type CanvasTool =
   // it as per-edge insets and commits through the same `set_page_boxes` op a
   // typed crop uses. The band is a REQUEST, not page state — nothing changes
   // until the panel's Apply, so a mis-drag costs a redraw, not an undo.
-  | 'cropdraw';
+  | 'cropdraw'
+  // Snapshot: band a region of the page and put THAT REGION on the clipboard
+  // as an image, re-rendered at the snapshot resolution rather than sampled
+  // from the zoom the reader happens to sit at. The document is never
+  // touched; the band leaves a transient card offering to save the same
+  // raster as a file.
+  | 'snapshot';
 
 // The tab-strip model: Home | Tools | one tab per open
 // document. A doc tab focuses that file and shows the document pane —

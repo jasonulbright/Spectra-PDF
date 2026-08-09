@@ -2372,6 +2372,39 @@
   white-space: nowrap;
 }
 
+/* Snapshot band + its card: cyan, and unfilled for the crop band's reason —
+   the rectangle marks what is TAKEN, and shading it would hide the very
+   content the reader is aiming at. */
+.page-annot-band.band-snapshot {
+  background: transparent;
+  border-color: #22d3ee;
+  border-style: dashed;
+}
+
+.page-snapshot-placement {
+  border-color: #22d3ee;
+}
+
+.page-snapshot-placement .page-crop-label {
+  color: #22d3ee;
+}
+
+.page-snapshot-placement .page-snapshot-save {
+  position: absolute;
+  top: -0.95rem;
+  right: 1.1rem;
+  padding: 0 4px;
+  font-size: 0.55rem;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: #22d3ee;
+  border: 1px solid #22d3ee;
+  border-radius: 2px;
+  background: var(--surface-2);
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
 /* Pending new-field placement: emerald frame, same pointer contract
    as .page-signature — only the × takes events. */
 .page-form-new {

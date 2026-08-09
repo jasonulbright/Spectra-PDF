@@ -1066,6 +1066,9 @@ export const PANEL_STRINGS = {
   'panel.settings.identityName': 'Identity name',
   'panel.settings.identityPlaceholder': 'Used by dynamic stamps’ {name} token',
   'panel.settings.identityHint': 'Shown where a stamp label uses {name} — e.g. “Reviewed by {name} {date}”.',
+  'panel.settings.snapshotDpi': 'Snapshot resolution (pixels per inch)',
+  'panel.settings.snapshotDpiHint':
+    'The Snapshot tool captures at this resolution, not at the current zoom. {{min}}–{{max}}.',
   'panel.settings.compressionQuality': 'Default Compression Quality',
   'panel.settings.mrcPreset': 'Default Scan (MRC) Preset',
   'panel.settings.singleKey': 'Use single-key accelerators to access tools',
