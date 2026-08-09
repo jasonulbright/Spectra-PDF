@@ -616,13 +616,16 @@ export interface CanvasEditImagesHandlers {
     crop: number[] | null;
   }[];
   select: (pageId: string, index: number, additive?: boolean) => void;
-  /** Transform the selected image via the real commit path. */
-  transformImage: (pageId: string, index: number, matrix: number[]) => Promise<void>;
-  /** Multi-select: group transform via the ONE multi engine op. */
+  /** Transform the selected image via the real commit path. FALSE when the
+   * commit refused and the document is unchanged — chiefly a page id whose
+   * generation has retired, which by design can never re-bind. */
+  transformImage: (pageId: string, index: number, matrix: number[]) => Promise<boolean>;
+  /** Multi-select: group transform via the ONE multi engine op. Same
+   * refused-means-false contract as `transformImage`. */
   transformImages: (
     pageId: string,
     targets: { index: number; matrix: number[] }[],
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   /** Delete the whole current selection (routes the group op at N>1). */
   deleteSelected: () => Promise<void>;
   /** Add Image: embed a source at a user-space rect via the real
@@ -1589,6 +1592,10 @@ declare global {
   }
 }
 
+/** Marker a refused image transform carries, so a caller can tell "the page id
+ * retired under me, re-resolve and re-issue" from a genuine failure. */
+const TRANSFORM_REFUSED = 'editImageTransform refused';
+
 export function installTestHarness(deps: TestHarnessDeps): void {
   if (!TEST_HARNESS_ENABLED) return;
 
@@ -2480,7 +2487,9 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         lastError = msg;
         throw new Error(msg);
       }
-      await canvasEditImages.transformImages(pageId, targets);
+      if (!(await canvasEditImages.transformImages(pageId, targets))) {
+        throw new Error(`${TRANSFORM_REFUSED}: ${pageId}`);
+      }
     },
     editImageDeleteSelected: async () => {
       if (!canvasEditImages) {
@@ -2562,7 +2571,11 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       try {
-        await canvasEditImages.transformImage(pageId, index, matrix);
+        // A refusal leaves the document untouched, so a caller that only
+        // watches for the new matrix would burn its whole timeout. Name it.
+        if (!(await canvasEditImages.transformImage(pageId, index, matrix))) {
+          throw new Error(`${TRANSFORM_REFUSED}: ${pageId}`);
+        }
       } catch (err) {
         captureError('editImageTransform', err);
         throw err;

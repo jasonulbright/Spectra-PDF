@@ -4090,15 +4090,21 @@ export function WorkspaceCanvasView({
   // signature placement. The whole-file op rebuilds the page (positional ids
   // regenerate); the reselect stash restores the selection when the fresh
   // listing lands, so chained nudges need no re-click (the shipped C-tail).
+  // Resolves TRUE only when the transform actually ran. Every refusal below
+  // leaves the document untouched while the promise resolves, so a caller that
+  // issues once and then watches for the new matrix would wait out its whole
+  // timeout on a result that was never coming; the outcome is returned so the
+  // refusal is a fact the caller can act on rather than silence. The gesture
+  // path ignores it — the notice line is what the user reads.
   const commitImageTransform = useCallback(
-    async (pageId: string, index: number, matrix: number[]): Promise<void> => {
-      if (!focusedDoc || editBusy) return;
+    async (pageId: string, index: number, matrix: number[]): Promise<boolean> => {
+      if (!focusedDoc || editBusy) return false;
       const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
       // Same refusal as runEditAction: the gesture's page died under it.
       if (pageNumber == null) {
         setEditSel(null);
         setEditNotice({ text: tChrome('canvas.edit.imagePageGone'), error: true });
-        return;
+        return false;
       }
       setEditBusy(true);
       setEditNotice(null);
@@ -4110,12 +4116,16 @@ export function WorkspaceCanvasView({
         if (notice === EDIT_DECLINED) {
           imageReselectRef.current = null;
           setEditNotice({ text: tChrome('canvas.edit.cancelled'), error: false });
-        } else if (typeof notice === 'string') {
+          return false;
+        }
+        if (typeof notice === 'string') {
           setEditNotice({ text: notice, error: false });
         }
+        return true;
       } catch (err) {
         imageReselectRef.current = null;
         setEditNotice({ text: err instanceof Error ? err.message : String(err), error: true });
+        return false;
       } finally {
         setEditBusy(false);
       }
@@ -4131,14 +4141,14 @@ export function WorkspaceCanvasView({
       pageId: string,
       targets: { index: number; matrix: number[] }[],
       reselectIndexes?: number[],
-    ): Promise<void> => {
-      if (!focusedDoc || editBusy || targets.length === 0) return;
+    ): Promise<boolean> => {
+      if (!focusedDoc || editBusy || targets.length === 0) return false;
       const pageNumber = workspacePageNumber(docs, focusedDoc, pageId);
       // Same refusal as runEditAction: the group's page died under it.
       if (pageNumber == null) {
         setEditSel(null);
         setEditNotice({ text: tChrome('canvas.edit.imagePageGone'), error: true });
-        return;
+        return false;
       }
       setEditBusy(true);
       setEditNotice(null);
@@ -4154,12 +4164,16 @@ export function WorkspaceCanvasView({
         if (notice === EDIT_DECLINED) {
           imageReselectRef.current = null;
           setEditNotice({ text: tChrome('canvas.edit.cancelled'), error: false });
-        } else if (typeof notice === 'string') {
+          return false;
+        }
+        if (typeof notice === 'string') {
           setEditNotice({ text: notice, error: false });
         }
+        return true;
       } catch (err) {
         imageReselectRef.current = null;
         setEditNotice({ text: err instanceof Error ? err.message : String(err), error: true });
+        return false;
       } finally {
         setEditBusy(false);
       }
