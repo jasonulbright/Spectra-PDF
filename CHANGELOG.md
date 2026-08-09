@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.0.27
+
+### Copying a region of a page as a picture
+- A **Snapshot** tool: drag a rectangle over any part of a page and that region goes to the clipboard as an image.
+- Paste it straight into a document, a message or a presentation.
+- The capture is taken at a fixed resolution, not at whatever zoom the page happens to be shown at.
+- That resolution is a preference, under General, and starts at 150 pixels per inch.
+- The captured rectangle stays on the page with its pixel size, and a button to save the same picture as a PNG file.
+- The clipboard receives the picture in two forms, so applications that prefer either one can paste it.
+- The document is never changed by a snapshot.
+
+### Cropping to what a page actually draws
+- The Crop & Page Boxes panel gains **Remove white margins**: the page box is set around the page's own content.
+- **Find content** measures first and reports how many pages would be cropped, how much comes off the widest edge, and how many pages are already tight.
+- **Crop to content** then applies exactly what was measured.
+- A margin to keep around the content can be set in points.
+- A scanned page is measured from its ink, so a photocopy with wide borders crops like a typeset page.
+- A speck of dust in a corner of a scan no longer holds the margin open.
+- Text, drawings, images and visible annotations all count as content; an invisible link or a hidden annotation does not.
+- A blank page is reported and left whole rather than cropped to nothing.
+- Content already outside the visible box is not revealed by cropping.
+- Nothing is deleted: resetting the box brings the margin back.
+- The command line gains `page-box --auto`, with `--margin` and `--preview`.
+
 ## 1.0.26
 
 ### Knowing what resolution a document's images are

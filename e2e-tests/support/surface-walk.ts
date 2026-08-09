@@ -34,6 +34,7 @@ export const TOOL_OPS: readonly (readonly [string, readonly string[]])[] = [
   ['watermark', ['watermark']],
   ['headerfooter', ['headerfooter']],
   ['pagebox', ['pagebox']],
+  ['snapshot', []],
   ['pagelabels', ['pagelabels']],
   ['attachments', ['attachments']],
   ['portfolio', ['portfolio']],

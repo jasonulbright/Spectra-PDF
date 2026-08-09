@@ -48,6 +48,8 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   // absent: it refetches on every setting change while the pane is open, and
   // a queue entry per keystroke pause is noise, not a record.
   enhance_scan: 'Enhance Scans',
+  set_page_boxes: 'Crop Pages',
+  content_crop: 'Crop to Content',
   delete_page_image: 'Delete Image',
   delete_page_images: 'Delete Images',
   replace_page_image: 'Replace Image',
