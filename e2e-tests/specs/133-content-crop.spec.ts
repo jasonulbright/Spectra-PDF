@@ -24,6 +24,7 @@ import {
   setActiveOp,
   setReactInputValue,
   saveActiveAs,
+  invokeAppCommand,
   closeAllFiles,
 } from '../support/harness.js';
 
@@ -34,7 +35,8 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 
 // Page 1 draws one rectangle at a known place; page 2 is blank, so the run
 // has both a page to crop and a page to skip.
-const RECT = { x: 200, y: 100, w: 120, h: 60 };
+const RECT = { x: 200, y: 100, width: 120, height: 60 };
+const MARGIN = 10;
 
 async function makeFixture(path: string): Promise<void> {
   const doc = await PDFDocument.create();
@@ -70,8 +72,16 @@ describe('content-aware crop', () => {
   });
 
   it('measures first, then crops to the content', async () => {
+    // Opening the tool arms the crop mode but does NOT open the dock; the
+    // panel is a second step, the way a reader takes it.
+    expect(await invokeAppCommand('tools.open.pagebox')).toBe(true);
+    expect(await invokeAppCommand('tools.panel.pagebox')).toBe(true);
     await setActiveOp('pagebox');
-    await setReactInputValue('[data-testid="pagebox-margin"]', '10');
+    // The auto block sits below the manual fields in a scrolling dock, so it
+    // is clipped until the panel is scrolled to it.
+    await $('[data-testid="pagebox-margin"]').waitForExist({ timeout: 15_000 });
+    await $('[data-testid="pagebox-margin"]').scrollIntoView();
+    await setReactInputValue('[data-testid="pagebox-margin"]', String(MARGIN));
 
     // Committing is refused until the measurement has run: the count shown
     // and the crop applied are the same call, and there is nothing to show
@@ -101,12 +111,15 @@ describe('content-aware crop', () => {
     );
     await saveActiveAs(dest);
 
-    // The rectangle plus the 10pt margin, exactly.
-    const box = await cropBox(dest, 1);
-    expect(box[0]).toBeCloseTo(RECT.x - 10, 0);
-    expect(box[1]).toBeCloseTo(RECT.y - 10, 0);
-    expect(box[2]).toBeCloseTo(RECT.x + RECT.w + 10, 0);
-    expect(box[3]).toBeCloseTo(RECT.y + RECT.h + 10, 0);
+    // The rectangle plus the kept margin, exactly. Compared as one array so a
+    // failure names all four edges rather than the first one that missed.
+    const box = (await cropBox(dest, 1)).map((v) => Math.round(v));
+    expect(box).toEqual([
+      RECT.x - MARGIN,
+      RECT.y - MARGIN,
+      RECT.x + RECT.width + MARGIN,
+      RECT.y + RECT.height + MARGIN,
+    ]);
 
     // The blank page was skipped and keeps its full box.
     const blank = await cropBox(dest, 2);
