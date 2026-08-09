@@ -38,6 +38,50 @@ export interface FolderListing {
   skippedDirs: string[];
 }
 
+/**
+ * Read the engine's listing into the shape this module speaks.
+ *
+ * The engine names its fields in snake_case (`skipped_dirs`); everything above
+ * the seam is camelCase. The translation lives HERE, in the pure module, and
+ * not inline at the IO seam, because it is the breakable part: reading a field
+ * the engine does not send yields `undefined`, and the first `.length` on it
+ * takes the whole React tree down with an uncaught TypeError — which is
+ * exactly how this function came to exist.
+ *
+ * Total by construction: a missing or misshapen field becomes an empty list
+ * rather than `undefined`, and a group that is not an object is dropped rather
+ * than half-read.
+ */
+export function parseFolderListing(raw: unknown): FolderListing {
+  const empty: FolderListing = { source: '', groups: [], skippedDirs: [] };
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return empty;
+  const r = raw as Record<string, unknown>;
+  const strings = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+  const groups: SourceFolder[] = [];
+  if (Array.isArray(r.groups)) {
+    for (const entry of r.groups) {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
+      const g = entry as Record<string, unknown>;
+      const files = strings(g.files);
+      if (typeof g.output !== 'string' || files.length === 0) continue;
+      groups.push({
+        rel: typeof g.rel === 'string' ? g.rel : '',
+        name: typeof g.name === 'string' ? g.name : '',
+        output: g.output,
+        files,
+        // The engine's own count, but never a number the file list contradicts.
+        count: typeof g.count === 'number' ? g.count : files.length,
+      });
+    }
+  }
+  return {
+    source: typeof r.source === 'string' ? r.source : '',
+    groups,
+    skippedDirs: strings(r.skipped_dirs),
+  };
+}
+
 export type FolderStatus = 'built' | 'failed';
 
 export interface FolderResult {
