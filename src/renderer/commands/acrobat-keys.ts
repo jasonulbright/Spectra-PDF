@@ -58,6 +58,15 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { key: 't', ctrl: true, shift: true, command: 'document.insertBlankPage', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
   // Go to page: focus the reading view's page box.
   { key: 'n', ctrl: true, shift: true, command: 'view.goToPage', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
+  // Read Out Loud. The transport's four chords, all guarded against editable
+  // targets — Ctrl+Shift+V is a paste chord inside a field and must stay one
+  // there. 'whenEnabled': with no document open they mean nothing, and a
+  // suppressed press that does nothing is worse than the webview's own
+  // handling of it.
+  { key: 'v', ctrl: true, shift: true, command: 'view.readAloud.page', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
+  { key: 'b', ctrl: true, shift: true, command: 'view.readAloud.document', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
+  { key: 'c', ctrl: true, shift: true, command: 'view.readAloud.pause', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
+  { key: 'e', ctrl: true, shift: true, command: 'view.readAloud.stop', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
   // Reading mode. Ctrl+H is a browser
   // accelerator (history) already in the suppress list; a disabled press must
   // still never reach the webview.

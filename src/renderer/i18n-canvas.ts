@@ -275,6 +275,39 @@ export const CANVAS_STRINGS = {
   'canvas.find.makeSearchable': 'Make searchable',
   'canvas.find.close': 'Close (Esc)',
 
+  // ── Read Out Loud ────────────────────────────────────────────────────
+  // The transport bar. `×` in the speed values is notation — the same
+  // multiplication sign in every locale, the measure-symbol rule — so only
+  // the LABELS below carry keys.
+  'canvas.readAloud.barLabel': 'Read Out Loud',
+  'canvas.readAloud.pause': 'Pause',
+  'canvas.readAloud.resume': 'Resume',
+  'canvas.readAloud.previous': 'Previous sentence',
+  'canvas.readAloud.next': 'Next sentence',
+  'canvas.readAloud.stop': 'Stop reading',
+  'canvas.readAloud.close': 'Close (Esc)',
+  'canvas.readAloud.preparing': 'Preparing…',
+  'canvas.readAloud.onPage': 'Page {{page}}',
+  // Two readings of the same fact, because the reader is owed the
+  // difference: a tagged page is read in the order its author declared, and
+  // an untagged one in the order the text sits on the page.
+  'canvas.readAloud.onPageTagged': 'Page {{page}} · tagged order',
+  'canvas.readAloud.voice': 'Voice',
+  'canvas.readAloud.voiceDefault': 'System default',
+  'canvas.readAloud.rate': 'Speed',
+  'canvas.readAloud.rateValue': '{{rate}}×',
+  'canvas.readAloud.errorUnsupported': 'This window cannot speak text.',
+  'canvas.readAloud.errorUnavailable': 'No speech voices are installed on this computer.',
+  'canvas.readAloud.errorFailed': 'The speech synthesizer stopped unexpectedly.',
+  'canvas.readAloud.errorLanguage': 'No installed voice speaks this document’s language.',
+  'canvas.readAloud.errorVoice': 'The chosen voice is no longer installed.',
+  'canvas.readAloud.errorBusy': 'The audio device is in use by something else.',
+  // The tool arrives as a PLACEHOLDER, resolved through its own command
+  // title, so the sentence names the tool by the name that tool carries in
+  // the reader's language rather than by a second, drifting copy of it.
+  'canvas.readAloud.errorNoText':
+    'There is no readable text here — recognize the page first with {{tool}}.',
+
   // ── The organizer's document header / row chrome ─────────────────────
   'canvas.doc.moveUp': 'Move up',
   'canvas.doc.moveDown': 'Move down',
