@@ -468,14 +468,16 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
           );
         })}
         {dropGap !== null && (
-          // A VERTICAL rule at the gap's own slot: an insertion point in a
-          // grid is between two columns, and a full-width horizontal rule
-          // would claim the gap runs across the whole row.
+          // The indicator draws the gap `thumbDropIndex` named, on the same
+          // axis it was decided: between two columns when there are columns to
+          // be between, and across the row boundary when the panel is one
+          // column — i.e. a list.
           <div
-            className="thumb-drop-indicator"
+            className={'thumb-drop-indicator' + (grid.columns === 1 ? ' is-row' : '')}
             data-testid="thumb-drop-indicator"
             style={(() => {
               const s = thumbSlot(dropGap, grid);
+              if (grid.columns === 1) return { top: s.top };
               // The gap AFTER the last column of a row folds onto the next
               // row's leading edge, which is where `thumbSlot` already puts it.
               return { top: s.top, height: ROW_H, insetInlineStart: s.left };

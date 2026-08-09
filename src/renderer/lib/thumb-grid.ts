@@ -71,6 +71,12 @@ export function thumbWindow(
  * the items themselves. Reading order: a pointer past the last column of a row
  * names the gap before the next row's first item, which is the same position
  * the drop indicator draws.
+ *
+ * ONE COLUMN IS A LIST, and its gaps are the boundaries BETWEEN rows, so the
+ * axis that decides them is y. Deciding by x there would be a defect, not a
+ * simplification: every item spans the full width, so a drag straight down the
+ * middle would sit on the deciding boundary and the target would flip on
+ * horizontal jitter the user is not steering.
  */
 export function thumbDropIndex(
   x: number,
@@ -78,6 +84,9 @@ export function thumbDropIndex(
   grid: ThumbGrid,
   count: number,
 ): number {
+  if (grid.columns === 1) {
+    return Math.max(0, Math.min(count, Math.round(y / ROW_H)));
+  }
   const row = Math.max(0, Math.floor(y / ROW_H));
   const within = (x - SIDE_PAD) / grid.columnWidth;
   const col = Math.max(0, Math.min(grid.columns, Math.round(within)));
