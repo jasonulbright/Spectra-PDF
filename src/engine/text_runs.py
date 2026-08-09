@@ -169,6 +169,12 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
     # `nested` says whether this run is in the page's own numbering, and a
     # consumer that needs page scope must test it.
     marks: list = []
+    # The marked-content TAG of each open section, parallel to `marks` and
+    # pushed/popped with it. `/Artifact` is a positive statement that the
+    # content is page furniture — a running header, a folio, a rule — which a
+    # consumer reading the page aloud must not speak. The tag is scoped to
+    # its own content stream exactly as the /MCID is.
+    mark_tags: list = []
     for instruction in instructions:
         operator = str(instruction.operator)
         operands = list(instruction.operands)
@@ -177,10 +183,13 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
         clips.feed(operator, operands, state.ctm)
         if operator in ("BDC", "BMC"):
             marks.append(_bdc_mcid(operands, resources, fallback) if operator == "BDC" else None)
+            mark_tags.append(str(operands[0]) if operands else "")
             continue
         if operator == "EMC":
             if marks:
                 marks.pop()
+            if mark_tags:
+                mark_tags.pop()
             continue
         if state.feed(operator, operands):
             continue
@@ -247,6 +256,10 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                     # None outside any. Scoped to this run's own stream — read
                     # it together with `nested`.
                     "mcid": next((m for m in reversed(marks) if m is not None), None),
+                    # Additive: this run sits inside a marked-content section
+                    # tagged /Artifact at some depth. Read-aloud excludes it;
+                    # every existing consumer ignores the field.
+                    "artifact": any(t == "/Artifact" for t in mark_tags),
                 }
             )
             if detail is not None:

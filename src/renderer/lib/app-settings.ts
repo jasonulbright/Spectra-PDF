@@ -69,6 +69,16 @@ export interface Settings {
    * webview's, so they agree with the Spelling panel about the dictionary and
    * the custom word list. */
   spellCheckAsYouType: boolean;
+  /** The voice Read Out Loud speaks in, as a `voiceURI`. Empty defers to the
+   * document's language, then to the platform's own default voice.
+   *
+   * A voiceURI rather than a name: two installed voices can share a display
+   * name across languages, and the URI is what the synthesizer matches on. A
+   * pin naming a voice that is no longer installed falls back rather than
+   * leaving the reader silent. */
+  readAloudVoice: string;
+  /** Speaking rate as a multiple of the voice's own (0.5–3). */
+  readAloudRate: number;
   /** The UI language — 'system' resolves against the shipped locales
    * (falling back to en), an explicit code pins one. Stored values are
    * locale-independent keys, never display names. */
@@ -93,6 +103,8 @@ export const DEFAULTS: Settings = {
   snapshotDpi: 150,
   spellLanguage: 'auto',
   spellCheckAsYouType: true,
+  readAloudVoice: '',
+  readAloudRate: 1,
   language: 'system',
 };
 

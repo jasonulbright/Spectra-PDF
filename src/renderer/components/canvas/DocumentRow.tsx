@@ -11,6 +11,7 @@ import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragrap
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { SnapshotPlacement } from '../../lib/snapshot-capture';
 import type { OcrWord } from '../../ocr/types';
+import type { PageReadAloud } from '../../lib/read-aloud';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
@@ -123,6 +124,7 @@ interface DocumentRowProps {
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
+  readAloudByPage: ReadonlyMap<string, PageReadAloud>;
   // Form widgets keyed by pageId + pending values keyed by file path.
   formWidgetsByPage: ReadonlyMap<string, OverlayWidget[]>;
   formValuesByPath: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>;
@@ -279,6 +281,7 @@ function DocumentRowImpl({
   signaturePlacement,
   findMatchPageIds,
   findWordsByPage,
+  readAloudByPage,
   formWidgetsByPage,
   formValuesByPath,
   onSetFormValue,
@@ -421,6 +424,7 @@ function DocumentRowImpl({
         signaturePlacement={signaturePlacement?.pageId === page.id ? signaturePlacement : null}
         findMatch={findMatchPageIds.has(page.id)}
         findWords={findWordsByPage.get(page.id)}
+        readAloud={readAloudByPage.get(page.id)}
         formWidgets={formWidgetsByPage.get(page.id)}
         formValues={formValuesByPath.get(page.sourceDocId)}
         onSetFormValue={onSetFormValue}

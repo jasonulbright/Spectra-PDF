@@ -2151,6 +2151,35 @@
   pointer-events: none;
 }
 
+/* Read Out Loud, three tiers over the page: the block being read, the
+   sentence being spoken, and the word in the air. Deliberately a different
+   hue from the find highlight — a reader can be listening and searching at
+   once, and two overlays that look alike would say nothing. Literal colours
+   like the find box's for the same reason: these paint INTO the document
+   subtree, which is exempt from the shell theme and from forced colours, so a
+   theme token here would be a colour that never resolves. */
+.page-read-block {
+  position: absolute;
+  background: rgba(56, 189, 248, 0.1);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.page-read-sentence {
+  position: absolute;
+  background: rgba(56, 189, 248, 0.26);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.page-read-word {
+  position: absolute;
+  background: rgba(14, 165, 233, 0.42);
+  border: 1px solid rgba(2, 132, 199, 0.85);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
 /* On-canvas form widgets. Interactive only in the Forms tool; a
    widget with a pending value stays visible (inert, emerald) in every other
    tool. Inputs are opaque so the baked — now stale — widget pixels

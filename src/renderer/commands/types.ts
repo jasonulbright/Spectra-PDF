@@ -187,6 +187,24 @@ export interface CanvasServices {
     next(): void;
     prev(): void;
   };
+  /** Read Out Loud's transport. The reader is transient view state owned by
+   * the canvas (the find bar's shape), so the View menu routes here rather
+   * than through the reducer: a highlight is bound to the blocks of a
+   * specific buffer and dies with it. */
+  readAloud: {
+    /** True while a reading run exists — speaking, paused or preparing. */
+    isReading(): boolean;
+    isPaused(): boolean;
+    /** Start at the page on screen, ending with it. */
+    readPage(): void;
+    /** Start at the page on screen and continue to the last page. */
+    readDocument(): void;
+    /** Pause a speaking reader, resume a paused one. Does nothing when
+     * nothing is being read — the command's `when` is what gates it. */
+    togglePause(): void;
+    stop(): void;
+  };
+
   /** Focus the reading view's page box (Ctrl+Shift+N). Returns false
    * when the box isn't on screen (organize view) — the command's `when`
    * gates on the view mode, this is the belt for the render race. */

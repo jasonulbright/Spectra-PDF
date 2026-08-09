@@ -113,6 +113,7 @@ from engine.recover import recover
 from engine.check import check
 from engine.outline import get_outline, set_outline
 from engine.derived_nav import outline_from_structure, preview_structure_outline
+from engine.read_aloud import read_aloud_page
 from engine.document_js import list_document_js, set_document_js
 from engine.redact import redact
 from engine.search_redact import search_and_redact
@@ -285,6 +286,7 @@ def main() -> None:
     server.register("set_outline", set_outline)
     server.register("preview_structure_outline", preview_structure_outline)
     server.register("outline_from_structure", outline_from_structure)
+    server.register("read_aloud_page", read_aloud_page)
     server.register("find_url_links", find_url_links)
     server.register("create_links_from_urls", create_links_from_urls)
     server.register("list_threads", list_threads)

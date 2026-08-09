@@ -236,6 +236,18 @@ export const MENUS: MenuDef[] = [
         ],
       },
       cmd('view.readingMode', 'menuitem-view-reading-mode'),
+      {
+        kind: 'submenu',
+        id: 'view-read-aloud',
+        label: 'Read Out Loud',
+        items: [
+          cmd('view.readAloud.page', 'menuitem-view-read-aloud-page'),
+          cmd('view.readAloud.document', 'menuitem-view-read-aloud-document'),
+          sep,
+          cmd('view.readAloud.pause', 'menuitem-view-read-aloud-pause'),
+          cmd('view.readAloud.stop', 'menuitem-view-read-aloud-stop'),
+        ],
+      },
       cmd('view.propertiesBar', 'menuitem-view-properties-bar'),
       cmd('view.snapping', 'menuitem-view-snapping'),
       {
