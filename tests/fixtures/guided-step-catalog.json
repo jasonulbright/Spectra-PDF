@@ -1,0 +1,171 @@
+{
+  "note": "The guided-step catalog, pinned across the two implementations. engine/guided_actions.py::_STEPS is the authority on op names and the parameter keys each op accepts; src/renderer/lib/guided-actions.ts's STEP_CATALOG is the editor over the same set. Both suites read this file, so a step or a parameter added on one side and not the other goes red on that side. Regenerate with gen-step-fixture.local.py and review the diff.",
+  "steps": {
+    "add_header_footer": {
+      "params": [
+        "bates_digits",
+        "bates_start",
+        "color",
+        "font_size",
+        "margin",
+        "placements",
+        "position",
+        "text"
+      ]
+    },
+    "compress": {
+      "params": [
+        "dpi",
+        "mrc_bg_div",
+        "mrc_fg_div",
+        "mrc_lang",
+        "mrc_mask_codec",
+        "mrc_pdfa_safe",
+        "mrc_preset",
+        "mrc_verify_text",
+        "quality"
+      ]
+    },
+    "convert_pdfa": {
+      "params": [
+        "level"
+      ]
+    },
+    "create_pdf": {
+      "params": [
+        "distill_preset",
+        "image_dpi_default",
+        "margin_pt",
+        "orientation",
+        "page_size"
+      ]
+    },
+    "encrypt": {
+      "params": [
+        "owner_password",
+        "permissions",
+        "user_password"
+      ]
+    },
+    "enhance_scan": {
+      "params": [
+        "background",
+        "background_strength",
+        "deskew",
+        "despeckle",
+        "jpeg_quality",
+        "max_skew_deg",
+        "min_skew_deg",
+        "orientation",
+        "osd_confidence",
+        "pages",
+        "speck_gap_in",
+        "speck_size_in"
+      ]
+    },
+    "export_document": {
+      "params": [
+        "fmt",
+        "include_untabled",
+        "layout",
+        "page_breaks",
+        "pages",
+        "sheet_per",
+        "slide_size"
+      ]
+    },
+    "export_images": {
+      "params": [
+        "dpi",
+        "fmt",
+        "gray",
+        "pages",
+        "quality"
+      ]
+    },
+    "grayscale": {
+      "params": []
+    },
+    "links_from_urls": {
+      "params": [
+        "emails",
+        "pages",
+        "skip_existing"
+      ]
+    },
+    "ocr_file": {
+      "params": [
+        "language"
+      ]
+    },
+    "optimize": {
+      "params": [
+        "compress_streams",
+        "linearize",
+        "strip_metadata"
+      ]
+    },
+    "outline_from_structure": {
+      "params": [
+        "max_level",
+        "mode",
+        "tag_if_untagged"
+      ]
+    },
+    "prepare_forms": {
+      "params": [
+        "allow_signed",
+        "kinds",
+        "lang",
+        "max_candidates",
+        "pages",
+        "scan"
+      ]
+    },
+    "sanitize": {
+      "params": [
+        "all_removable",
+        "categories",
+        "form_fields_mode",
+        "hidden_text_ocr"
+      ]
+    },
+    "search_redact": {
+      "params": [
+        "allow_signed",
+        "case_sensitive",
+        "expand",
+        "marks_only",
+        "max_hits",
+        "pages",
+        "patterns",
+        "properties",
+        "query",
+        "regex",
+        "terms",
+        "whole_word"
+      ]
+    },
+    "strip_metadata": {
+      "params": []
+    },
+    "watermark": {
+      "params": [
+        "angle",
+        "color",
+        "font_size",
+        "image",
+        "layer",
+        "margin",
+        "opacity",
+        "pdf_page",
+        "pdf_source",
+        "position",
+        "scale",
+        "text",
+        "tile",
+        "tile_gap"
+      ]
+    }
+  }
+}
