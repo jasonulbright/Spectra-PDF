@@ -4,6 +4,7 @@ pub mod create_pdf_sources;
 mod print_to_pdf;
 mod scheduler;
 mod send_to;
+mod snapshot;
 mod watchers;
 mod engine;
 mod printers;
@@ -188,6 +189,8 @@ pub fn run() {
             commands::set_start_minimized,
             commands::confirm_close,
             commands::hide_to_tray,
+            snapshot::copy_image_to_clipboard,
+            snapshot::save_snapshot_png,
         ])
         .setup(move |app| {
             // The main window is built here rather than in tauri.conf.json:
