@@ -179,6 +179,8 @@ export interface DocumentViewProps {
   onSelectEditParagraph: (pageId: string, index: number) => void;
   onOpenParagraphEditor: (pageId: string, index: number) => void;
   onCommitParagraphEdit: (pageId: string, index: number, newText: string, opts?: ParagraphEditOpts) => void;
+  onCheckSpelling: (text: string) => Promise<Array<{ start: number; end: number }>>;
+  spellLang: string | undefined;
   onCancelParagraphEdit: () => void;
   onMergeParagraphPrev: (pageId: string, index: number, editedText?: string, restyle?: import('../../lib/edit-paragraphs').MergeRestyle) => void;
   onMergeParagraphNext: (pageId: string, index: number, editedText?: string, restyle?: import('../../lib/edit-paragraphs').MergeRestyle) => void;
@@ -1022,6 +1024,8 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onSelectEditParagraph={props.onSelectEditParagraph}
           onOpenParagraphEditor={props.onOpenParagraphEditor}
           onCommitParagraphEdit={props.onCommitParagraphEdit}
+          onCheckSpelling={props.onCheckSpelling}
+          spellLang={props.spellLang}
           onCancelParagraphEdit={props.onCancelParagraphEdit}
           onMergeParagraphPrev={props.onMergeParagraphPrev}
           onMergeParagraphNext={props.onMergeParagraphNext}

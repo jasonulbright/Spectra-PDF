@@ -31,7 +31,12 @@ from engine.form_authoring import add_form_fields, set_field_lock
 from engine.forms import read_form_fields
 from engine.incremental import signature_policy, transplant_incremental
 from engine.signatures import sign_pdf, verify_signatures
-from tests.test_pades import _build_pki
+# Sibling helper, imported BARE like every other one in this suite
+# (`derived_nav_builders`, `outline_builders`, `hairline_builders`).
+# A `tests.` prefix resolves against whichever regular `tests` package is
+# on sys.path FIRST, and an installed dependency that ships one — spylls
+# 0.1.7 does — shadows this directory outright, which broke collection.
+from test_pades import _build_pki
 
 
 _PKI: dict | None = None

@@ -50,6 +50,7 @@ import { SanitizePanel } from './panels/SanitizePanel';
 import { PrepareFormPanel } from './panels/PrepareFormPanel';
 import { TableReviewPanel } from './panels/TableReviewPanel';
 import { ScanEnhancePanel } from './panels/ScanEnhancePanel';
+import { SpellingPanel } from './panels/SpellingPanel';
 import { LayersPanel } from './panels/LayersPanel';
 import { AccessibilityPanel } from './panels/AccessibilityPanel';
 import { CommentsPanel } from './panels/CommentsPanel';
@@ -199,6 +200,7 @@ const panels: Record<Operation, React.ComponentType> = {
   sanitize: SanitizePanel,
   tablereview: TableReviewPanel,
   scanenhance: ScanEnhancePanel,
+  spelling: SpellingPanel,
 };
 
 function AppContent(): React.ReactElement {

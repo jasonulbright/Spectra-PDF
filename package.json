@@ -9,7 +9,7 @@
     "build:renderer": "node scripts/sync-ocr-assets.mjs && node scripts/sync-pdfjs-assets.mjs && vite build --config vite.config.ts",
     "build": "cargo tauri build",
     "tauri": "tauri",
-    "prepackage": "powershell -ExecutionPolicy Bypass -File scripts/setup-python-embed.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1 && powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-jbig2enc.ps1 && node scripts/sync-ocr-assets.mjs && node scripts/sync-pdfjs-assets.mjs",
+    "prepackage": "powershell -ExecutionPolicy Bypass -File scripts/setup-python-embed.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1 && powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-jbig2enc.ps1 && powershell -ExecutionPolicy Bypass -File scripts/bundle-dictionaries.ps1 && node scripts/sync-ocr-assets.mjs && node scripts/sync-pdfjs-assets.mjs",
     "package": "npm run prepackage && cargo tauri build",
     "package:unsigned": "npm run prepackage && cargo tauri build --config src-tauri/tauri.unsigned.conf.json",
     "lint": "eslint src tests",

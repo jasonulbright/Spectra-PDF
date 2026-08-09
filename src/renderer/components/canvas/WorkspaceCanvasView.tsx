@@ -62,6 +62,11 @@ import { buildSignatureAppearance } from '../../lib/signature-placement';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import { captureSnapshot, type SnapshotPlacement } from '../../lib/snapshot-capture';
 import { getSettings } from '../../lib/app-settings';
+import {
+  loadCustomWords,
+  resolveSpellLanguage,
+  type DictionaryEntry,
+} from '../../lib/spellcheck';
 import { useEngine } from '../../hooks/useEngine';
 import { app, dialog, imageClipboard } from '../../lib/tauri-bridge';
 import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../SignerSourceFields';
@@ -177,7 +182,7 @@ import {
 import { PropertiesBar } from './PropertiesBar';
 import { CanvasStatusBar } from './CanvasStatusBar';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tChromeCount, tNumber } from '../../i18n';
+import { tChrome, tChromeCount, tNumber, currentLanguage } from '../../i18n';
 
 interface WorkspaceCanvasViewProps {
   onOpenFiles: () => void;
@@ -831,6 +836,81 @@ export function WorkspaceCanvasView({
   // dispatch is a denial of service on it.
   const focusedFile = focusedPath ? state.files.get(focusedPath) : undefined;
   const focusedWorkingPath = focusedFile?.workingPath;
+  // ── the editor's own spell check ────────────────────────────────────────
+  //
+  // The paragraph editor renders its own glyph spans, so it draws its own
+  // squiggles from THIS app's checker — the webview's cannot see the chosen
+  // dictionary or the words the user has added, and two checkers over one
+  // document would disagree about individual words.
+  //
+  // Everything the check needs is resolved lazily and cached: the vendored
+  // directory is a Rust-owned constant, and the document's own /Lang costs a
+  // file open, which must not happen until someone actually edits text.
+  const spellDirsRef = useRef<Promise<{ bundled: string; user: string }> | null>(null);
+  const spellLangRef = useRef<Map<string, string>>(new Map());
+  const [spellLang, setSpellLang] = useState<string | undefined>(undefined);
+  const resolveSpellDirs = useCallback((): Promise<{ bundled: string; user: string }> => {
+    if (!spellDirsRef.current) {
+      spellDirsRef.current = Promise.all([app.getDictionaryPath(), app.userDictionaryDir()]).then(
+        ([bundled, user]) => ({ bundled, user }),
+      );
+    }
+    return spellDirsRef.current;
+  }, []);
+  const resolveSpellLang = useCallback(
+    async (workingPath: string, dirs: { bundled: string; user: string }): Promise<string> => {
+      // Keyed on the PREFERENCE as well as the file: changing the dictionary
+      // in the Spelling panel must change what the editor underlines, and a
+      // cache keyed on the path alone would keep marking in the old language
+      // until the document was replaced.
+      const key = `${getSettings().spellLanguage} ${workingPath}`;
+      const cached = spellLangRef.current.get(key);
+      if (cached) return cached;
+      const listing = (await engineCall('list_dictionaries', {
+        dictionary_dir: dirs.bundled,
+        user_dictionary_dir: dirs.user,
+      })) as unknown as { dictionaries: DictionaryEntry[] };
+      // A document that cannot be read for its /Lang is not an error here —
+      // the ladder simply carries on to the interface language.
+      let docLang: string | null;
+      try {
+        const res = (await engineCall('document_language', { file: workingPath })) as unknown as {
+          language: string | null;
+        };
+        docLang = res.language;
+      } catch {
+        docLang = null;
+      }
+      const resolved = resolveSpellLanguage(
+        getSettings().spellLanguage,
+        docLang,
+        currentLanguage(),
+        listing.dictionaries ?? [],
+      );
+      spellLangRef.current.set(key, resolved);
+      setSpellLang(resolved.replace('_', '-'));
+      return resolved;
+    },
+    [engineCall],
+  );
+  const handleCheckSpelling = useCallback(
+    async (text: string): Promise<Array<{ start: number; end: number }>> => {
+      if (!getSettings().spellCheckAsYouType) return [];
+      const workingPath = focusedWorkingPath;
+      if (!workingPath || !text.trim()) return [];
+      const dirs = await resolveSpellDirs();
+      const language = await resolveSpellLang(workingPath, dirs);
+      const res = (await engineCall('check_text', {
+        text,
+        language,
+        dictionary_dir: dirs.bundled,
+        user_dictionary_dir: dirs.user,
+        custom_words: loadCustomWords(),
+      })) as unknown as { misspelled: Array<{ start: number; end: number }> };
+      return res.misspelled ?? [];
+    },
+    [engineCall, resolveSpellDirs, resolveSpellLang, focusedWorkingPath],
+  );
   // BUFFER IDENTITY is the refresh trigger, the workspace's own rule: any
   // edit that could re-number the pages replaces the buffer object, and
   // nothing else does. Page count alone would miss a labels EDIT (the Page
@@ -5914,6 +5994,8 @@ export function WorkspaceCanvasView({
               opts?: ParagraphEditOpts,
             ) => void handleCommitParagraphEdit(pageId, index, text, opts),
             onCancelParagraphEdit: handleCancelTextEdit,
+            onCheckSpelling: handleCheckSpelling,
+            spellLang,
             onMergeParagraphPrev: (
               pageId: string,
               index: number,
@@ -6180,6 +6262,8 @@ export function WorkspaceCanvasView({
             void handleCommitParagraphEdit(pageId, index, text, opts)
           }
           onCancelParagraphEdit={handleCancelTextEdit}
+          onCheckSpelling={handleCheckSpelling}
+          spellLang={spellLang}
           onMergeParagraphPrev={(pageId, index, editedText, restyle) =>
             void handleMergeParagraphPrev(pageId, index, editedText, restyle)
           }

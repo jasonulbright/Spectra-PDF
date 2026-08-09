@@ -1895,6 +1895,19 @@
 .page-editpara-rich.invalid {
   border-color: #dc2626;
 }
+/* A misspelled word inside the rich surface. The editor draws this itself
+   rather than letting the webview mark the box, because the webview's checker
+   cannot see the chosen dictionary or the words the user has added.
+   `text-decoration-line: spelling-error` renders the platform's own squiggle
+   where it is supported; the wavy-red declaration before it is what a browser
+   without it keeps. Under forced colors both collapse to the system's
+   underline, which is the correct behaviour there. */
+.page-editpara-misspelled {
+  text-decoration: underline wavy #dc2626;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 2px;
+  text-decoration-line: spelling-error;
+}
 /* Restyle toolbar: a compact size + colour row above the textarea. */
 .page-editpara-toolbar {
   display: flex;

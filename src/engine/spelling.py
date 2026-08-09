@@ -1,0 +1,583 @@
+"""Spell checking: one checker for every surface the product edits text on.
+
+The dictionaries are real Hunspell `.aff`/`.dic` pairs (vendored — see
+`scripts/bundle-dictionaries.ps1`) read through `spylls`, a pure-Python
+Hunspell implementation. That choice is what makes the affix machinery, the
+compounding rules and the suggestion ladder hunspell's own rather than a
+Levenshtein approximation over a frequency list.
+
+WHY THE ENGINE OWNS THIS AT ALL, when the webview marks editable text by
+itself: the browser's checker cannot see the document's chosen dictionary or
+the user's custom word list, and its coverage is whatever the machine happens
+to carry. This checker is the one the panel, the page editor's squiggles and
+the CLI all read, so they cannot disagree about a word.
+
+COST SHAPE, measured, and designed around rather than discovered later: a
+lookup is microseconds; a suggestion is milliseconds on English and over a
+second on a compounding language. So a document walk does lookups ONLY, and
+suggestions are produced for one word at a time when the user asks. They are
+also taken lazily and capped: `spylls` yields edit-based suggestions before
+the n-gram pass, which walks the whole word list, so stopping at the cap
+short-circuits that pass whenever the edits already sufficed.
+"""
+
+from __future__ import annotations
+
+import re
+import shutil
+import unicodedata
+from pathlib import Path
+from typing import Any, Iterator
+
+from engine import text_match
+
+# ═══════════════════════════ the spylls adapter ═══════════════════════════
+
+
+def _tolerate_rep_patterns() -> None:
+    """Compile an uncompilable REP pattern as a literal instead of raising.
+
+    Hunspell's REP replacement table is not a regular expression — only `^`
+    and `$` are special — but `spylls` compiles each entry with `re.compile`,
+    so a `ph:` morphological field containing `[` raises `re.error` and kills
+    the whole dictionary load. The Hungarian word list contains one. Treating
+    such a pattern as an escaped literal is closer to hunspell's own semantics
+    than refusing to load the language at all, and REP only ever feeds
+    suggestion generation.
+    """
+    from spylls.hunspell.data import aff as aff_data
+
+    if getattr(aff_data.RepPattern, "_spectra_tolerant", False):
+        return
+    original = aff_data.RepPattern.__post_init__
+
+    def tolerant(self: Any) -> None:
+        try:
+            original(self)
+        except re.error:
+            self.regexp = re.compile(re.escape(self.pattern))
+
+    aff_data.RepPattern.__post_init__ = tolerant
+    aff_data.RepPattern._spectra_tolerant = True
+
+
+# ═══════════════════════════ dictionary discovery ══════════════════════════
+
+#: Loaded dictionaries, keyed by the `.aff`/`.dic` base path. A dictionary
+#: costs 0.1-2.7s to parse and is immutable once read, so the engine process
+#: keeps it.
+_LOADED: dict[str, Any] = {}
+
+
+def _search_roots(dictionary_dir: str | None, user_dictionary_dir: str | None) -> list[tuple[Path, str]]:
+    """(directory, origin) pairs, bundled first. A user directory is searched
+    too, but never shadows a bundled tag — `add_user_dictionary` refuses the
+    collision at the door rather than letting the search order decide."""
+    roots: list[tuple[Path, str]] = []
+    if dictionary_dir:
+        roots.append((Path(dictionary_dir), "bundled"))
+    if user_dictionary_dir:
+        roots.append((Path(user_dictionary_dir), "user"))
+    return roots
+
+
+def _tags_in(root: Path) -> Iterator[str]:
+    if not root.is_dir():
+        return
+    for child in sorted(root.iterdir()):
+        if child.is_dir() and (child / f"{child.name}.aff").is_file() and (child / f"{child.name}.dic").is_file():
+            yield child.name
+
+
+def list_dictionaries(
+    dictionary_dir: str | None = None,
+    user_dictionary_dir: str | None = None,
+) -> dict:
+    """Every dictionary on disk, with the BCP-47 tag its name is read from.
+
+    The name itself is deliberately NOT produced here: every UI locale's ICU
+    data already spells all 34 language names, and the renderer reads them
+    through `Intl.DisplayNames` off `bcp47`. Authoring that table per shipped
+    locale would be 34 chances per locale to be wrong.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for root, origin in _search_roots(dictionary_dir, user_dictionary_dir):
+        for tag in _tags_in(root):
+            if tag in seen:
+                continue
+            seen.add(tag)
+            out.append({"tag": tag, "bcp47": tag.replace("_", "-"), "origin": origin})
+    out.sort(key=lambda d: d["tag"])
+    return {"dictionaries": out, "count": len(out)}
+
+
+def _resolve_tag(
+    language: str,
+    dictionary_dir: str | None,
+    user_dictionary_dir: str | None,
+) -> Path:
+    """The `.aff`/`.dic` base path for a language.
+
+    Resolution is exact tag first, then the same base language in any region
+    (`en` finds `en_US`), so a document whose `/Lang` says `en-GB` and a
+    document that says only `en` both reach a dictionary.
+    """
+    wanted = language.replace("-", "_")
+    roots = _search_roots(dictionary_dir, user_dictionary_dir)
+    for root, _ in roots:
+        for tag in _tags_in(root):
+            if tag.lower() == wanted.lower():
+                return root / tag / tag
+    base = wanted.split("_")[0].lower()
+    for root, _ in roots:
+        for tag in _tags_in(root):
+            if tag.split("_")[0].lower() == base:
+                return root / tag / tag
+    raise ValueError(f"No spelling dictionary for {language}.")
+
+
+def load_dictionary(
+    language: str,
+    dictionary_dir: str | None = None,
+    user_dictionary_dir: str | None = None,
+) -> Any:
+    base = _resolve_tag(language, dictionary_dir, user_dictionary_dir)
+    key = str(base)
+    if key in _LOADED:
+        return _LOADED[key]
+    _tolerate_rep_patterns()
+    from spylls.hunspell import Dictionary
+
+    try:
+        dic = Dictionary.from_files(key)
+    except Exception as exc:
+        raise ValueError(f"The {language} dictionary could not be read: {exc}") from exc
+    _LOADED[key] = dic
+    return dic
+
+
+def resolved_tag(
+    language: str,
+    dictionary_dir: str | None = None,
+    user_dictionary_dir: str | None = None,
+) -> str:
+    """Which dictionary a language request actually lands on."""
+    return _resolve_tag(language, dictionary_dir, user_dictionary_dir).name
+
+
+# ═══════════════════════════════ tokenizing ════════════════════════════════
+#
+# ONE implementation for every surface, so page text, a comment and a form
+# value cannot be split differently — a word offered in the panel but not in
+# the editor would be a fix the user cannot apply.
+
+#: Marks that belong INSIDE a word, never at an edge: an English contraction
+#: and a hyphenated compound are one word, a leading or trailing mark is
+#: punctuation.
+_INNER = "'’-‐"
+
+#: A dotted run — `report.pdf`, `v1.0.25`, `e.g.`, `example.com`. A dot with a
+#: word character on each side means the surrounding characters are one
+#: identifier rather than two sentences, and identifiers are not spelling
+#: questions. Requires a letter somewhere so `3.14` is left to the digit rule.
+_DOTTED = re.compile(r"(?<![\w.])[\w\-]*[A-Za-z][\w\-]*(?:\.[\w\-]+)+\.?(?![\w])", re.UNICODE)
+
+
+def _skip_spans(text: str) -> list[tuple[int, int]]:
+    """Code-point ranges no token inside may be offered from."""
+    spans: list[tuple[int, int]] = []
+    for pattern_id in ("url", "email"):
+        for m in text_match.compiled_pattern(pattern_id).finditer(text):
+            spans.append((m.start(), m.end()))
+    for m in _DOTTED.finditer(text):
+        spans.append((m.start(), m.end()))
+    return spans
+
+
+def _is_acronym(word: str) -> bool:
+    return len(word) > 1 and word == word.upper() and word != word.lower()
+
+
+def tokenize(
+    text: str,
+    *,
+    ignore_uppercase: bool = True,
+    ignore_with_digits: bool = True,
+) -> list[dict]:
+    """Words worth checking, as `{word, start, end}` in CODE POINTS.
+
+    Code points, not UTF-16 units, because that is the domain the paragraph
+    editor's style spans and the engine's own string slicing both use — a
+    UTF-16 offset handed back to a fix retargets it after any astral
+    character.
+    """
+    chars = list(text)
+    skips = _skip_spans(text)
+    out: list[dict] = []
+    i = 0
+    n = len(chars)
+    while i < n:
+        if not chars[i].isalpha():
+            i += 1
+            continue
+        start = i
+        while i < n:
+            c = chars[i]
+            if c.isalpha() or c.isdigit():
+                i += 1
+            elif c in _INNER and i + 1 < n and chars[i + 1].isalpha():
+                i += 1
+            else:
+                break
+        end = i
+        word = "".join(chars[start:end])
+        if any(s < end and start < e for s, e in skips):
+            continue
+        if ignore_with_digits and any(c.isdigit() for c in word):
+            continue
+        if ignore_uppercase and _is_acronym(word):
+            continue
+        out.append({"word": word, "start": start, "end": end})
+    return out
+
+
+# ═══════════════════════════════ the lookup ════════════════════════════════
+
+
+def _forms(word: str) -> list[str]:
+    """The word as written, then its NFC and NFD forms.
+
+    A word list may be stored decomposed — the Korean one is — while an
+    ordinary document carries composed characters. A hit on any form is a hit;
+    the alternative is a document written on one platform failing wholesale
+    against a list normalized on another.
+    """
+    forms = [word]
+    for form in ("NFC", "NFD"):
+        normalized = unicodedata.normalize(form, word)
+        if normalized not in forms:
+            forms.append(normalized)
+    return forms
+
+
+def _custom_set(custom_words: list[str] | None) -> set[str]:
+    out: set[str] = set()
+    for word in custom_words or []:
+        for form in _forms(str(word)):
+            out.add(form)
+            out.add(form.lower())
+    return out
+
+
+def check_word(dictionary: Any, word: str, custom: set[str]) -> bool:
+    if word in custom or word.lower() in custom:
+        return True
+    return any(dictionary.lookup(form) for form in _forms(word))
+
+
+def suggest_word(dictionary: Any, word: str, limit: int = 5) -> list[str]:
+    """Up to `limit` suggestions, taken LAZILY — see the module docstring."""
+    out: list[str] = []
+    for candidate in dictionary.suggest(word):
+        if candidate not in out:
+            out.append(candidate)
+        if len(out) >= limit:
+            break
+    return out
+
+
+# ═══════════════════════════════ the doors ═════════════════════════════════
+
+
+def spelling_suggestions(
+    word: str,
+    language: str,
+    dictionary_dir: str | None = None,
+    user_dictionary_dir: str | None = None,
+    custom_words: list[str] | None = None,
+    limit: int = 5,
+) -> dict:
+    """Suggestions for ONE word. See the cost note in the module docstring."""
+    if not str(word).strip():
+        raise ValueError("No word to suggest for.")
+    limit = max(1, min(int(limit), 20))
+    dictionary = load_dictionary(language, dictionary_dir, user_dictionary_dir)
+    custom = _custom_set(custom_words)
+    if check_word(dictionary, word, custom):
+        return {"word": word, "correct": True, "suggestions": []}
+    return {"word": word, "correct": False, "suggestions": suggest_word(dictionary, word, limit)}
+
+
+def check_text(
+    text: str,
+    language: str,
+    dictionary_dir: str | None = None,
+    user_dictionary_dir: str | None = None,
+    custom_words: list[str] | None = None,
+    ignore_uppercase: bool = True,
+    ignore_with_digits: bool = True,
+) -> dict:
+    """Misspelled ranges in ONE string — what the editor underlines.
+
+    Deliberately separate from `check_spelling`: the editor asks about text
+    that is not in any file yet (it is being typed), and the ranges it gets
+    back must come from the SAME tokenizer and the SAME dictionary the panel
+    uses, or the squiggle and the panel would disagree about the same word.
+    """
+    dictionary = load_dictionary(language, dictionary_dir, user_dictionary_dir)
+    custom = _custom_set(custom_words)
+    out = []
+    for token in tokenize(
+        str(text),
+        ignore_uppercase=ignore_uppercase,
+        ignore_with_digits=ignore_with_digits,
+    ):
+        if check_word(dictionary, token["word"], custom):
+            continue
+        out.append({"word": token["word"], "start": token["start"], "end": token["end"]})
+    return {"misspelled": out, "count": len(out)}
+
+
+def document_language(file: str) -> dict:
+    """The document's own `/Lang`, or None. The default language when the file
+    states one — a document says what it is written in more reliably than the
+    interface language of whoever opened it."""
+    import pikepdf
+
+    with pikepdf.open(file) as pdf:
+        try:
+            lang = pdf.Root.get("/Lang")
+        except Exception:
+            return {"language": None}
+        if lang is None:
+            return {"language": None}
+        text = str(lang).strip()
+        return {"language": text or None}
+
+
+def _context(text: str, start: int, end: int, width: int = 40) -> str:
+    chars = list(text)
+    left = max(0, start - width)
+    right = min(len(chars), end + width)
+    return "".join(chars[left:right])
+
+
+def check_spelling(
+    file: str,
+    dictionary_dir: str | None = None,
+    language: str | None = None,
+    user_dictionary_dir: str | None = None,
+    custom_words: list[str] | None = None,
+    pages: list[int] | None = None,
+    sources: list[str] | None = None,
+    ignore_uppercase: bool = True,
+    ignore_with_digits: bool = True,
+    max_issues: int = 5000,
+) -> dict:
+    """Walk a document and report every misspelling with its address.
+
+    Three sources, each addressed the way the surface that fixes it is
+    addressed — a page-text hit carries the paragraph index and the
+    fingerprint the paragraph editor commits with, a comment hit carries its
+    page and annotation index, a field hit carries its field name. The fix
+    then re-reads and re-verifies rather than trusting these offsets, so a
+    document that moved underneath refuses instead of retargeting.
+    """
+    import pikepdf
+
+    from engine.annotations import list_annotations
+    from engine.forms import read_form_fields
+    from engine.text_paragraphs import list_text_paragraphs
+
+    wanted = [s for s in (sources or ["text", "comments", "fields"])]
+    unknown = [s for s in wanted if s not in ("text", "comments", "fields")]
+    if unknown:
+        raise ValueError(f"unknown spell-check source {unknown[0]!r} — use text, comments or fields")
+
+    doc_lang = document_language(file)["language"]
+    chosen = language or doc_lang or "en_US"
+    dictionary = load_dictionary(chosen, dictionary_dir, user_dictionary_dir)
+    tag = resolved_tag(chosen, dictionary_dir, user_dictionary_dir)
+    custom = _custom_set(custom_words)
+
+    issues: list[dict] = []
+    counts = {"text": 0, "comments": 0, "fields": 0}
+    checked = {"paragraphs": 0, "comments": 0, "fields": 0}
+    words_checked = 0
+    skipped_paragraphs = 0
+    truncated = False
+
+    def emit(entry: dict) -> None:
+        nonlocal truncated
+        if len(issues) >= max_issues:
+            truncated = True
+            return
+        issues.append(entry)
+        counts[entry["source"]] += 1
+
+    def scan(text: str, make: Any) -> None:
+        nonlocal words_checked
+        for token in tokenize(
+            text,
+            ignore_uppercase=ignore_uppercase,
+            ignore_with_digits=ignore_with_digits,
+        ):
+            words_checked += 1
+            if check_word(dictionary, token["word"], custom):
+                continue
+            emit(make(token))
+
+    with pikepdf.open(file) as pdf:
+        total_pages = len(pdf.pages)
+    page_list = [p for p in (pages or range(1, total_pages + 1))]
+    for page in page_list:
+        if not 1 <= int(page) <= total_pages:
+            raise ValueError(f"page {page} is out of range (1-{total_pages})")
+
+    if "text" in wanted:
+        for page in page_list:
+            listing = list_text_paragraphs(file, int(page))
+            for para in listing.get("paragraphs", []):
+                text = para.get("text", "")
+                if not text.strip():
+                    continue
+                # A paragraph the editor cannot open cannot be fixed either.
+                # Reporting a misspelling with no way to correct it is worse
+                # than not reporting it, so those are counted apart and
+                # skipped rather than listed as actionable.
+                if not para.get("editable", True) or para.get("clipped"):
+                    skipped_paragraphs += 1
+                    continue
+                checked["paragraphs"] += 1
+                index = para.get("index")
+                runs = para.get("runs", [])
+                scan(
+                    text,
+                    lambda token, page=page, index=index, runs=runs, text=text: {
+                        "source": "text",
+                        "page": int(page),
+                        "paragraph": index,
+                        "runs": runs,
+                        "paragraph_text": text,
+                        "word": token["word"],
+                        "start": token["start"],
+                        "end": token["end"],
+                        "context": _context(text, token["start"], token["end"]),
+                    },
+                )
+
+    if "comments" in wanted:
+        annots = list_annotations(file).get("annotations", [])
+        for index, annot in enumerate(annots):
+            if pages is not None and annot.get("page") not in page_list:
+                continue
+            text = annot.get("contents") or ""
+            if not text.strip():
+                continue
+            checked["comments"] += 1
+            scan(
+                text,
+                lambda token, index=index, annot=annot, text=text: {
+                    "source": "comments",
+                    "page": annot.get("page"),
+                    "annotation": index,
+                    "subtype": annot.get("subtype"),
+                    "annotation_text": text,
+                    "word": token["word"],
+                    "start": token["start"],
+                    "end": token["end"],
+                    "context": _context(text, token["start"], token["end"]),
+                },
+            )
+
+    if "fields" in wanted:
+        for field in read_form_fields(file).get("fields", []):
+            if field.get("type") != "text":
+                continue
+            value = field.get("value")
+            if not isinstance(value, str) or not value.strip():
+                continue
+            checked["fields"] += 1
+            scan(
+                value,
+                lambda token, field=field, value=value: {
+                    "source": "fields",
+                    "field": field.get("name"),
+                    "field_text": value,
+                    "word": token["word"],
+                    "start": token["start"],
+                    "end": token["end"],
+                    "context": _context(value, token["start"], token["end"]),
+                },
+            )
+
+    if not any(checked.values()):
+        raise ValueError("This document has nothing to spell-check.")
+
+    return {
+        "language": chosen,
+        "tag": tag,
+        "bcp47": tag.replace("_", "-"),
+        "document_language": doc_lang,
+        "issues": issues,
+        "counts": counts,
+        "checked": checked,
+        "skipped_paragraphs": skipped_paragraphs,
+        "words": words_checked,
+        "truncated": truncated,
+    }
+
+
+def add_user_dictionary(
+    aff: str,
+    dic: str,
+    user_dictionary_dir: str,
+    dictionary_dir: str | None = None,
+    tag: str | None = None,
+) -> dict:
+    """Copy a user's own `.aff`/`.dic` pair into the searched user directory.
+
+    A copy, not a reference: a dictionary read from wherever the user happened
+    to have it would stop working the moment that folder moved, and the check
+    would then start reporting every word of the language as wrong.
+    """
+    aff_path = Path(aff)
+    dic_path = Path(dic)
+    if aff_path.suffix.lower() != ".aff" or dic_path.suffix.lower() != ".dic":
+        raise ValueError("A dictionary is an .aff file and a .dic file.")
+    if not aff_path.is_file():
+        raise ValueError(f"file not found: {aff}")
+    if not dic_path.is_file():
+        raise ValueError(f"file not found: {dic}")
+    name = (tag or aff_path.stem).replace("-", "_")
+    if not re.fullmatch(r"[A-Za-z0-9_]+", name):
+        raise ValueError(f"{name!r} is not a usable dictionary name — use letters, digits and underscores.")
+    if dictionary_dir and name in set(_tags_in(Path(dictionary_dir))):
+        raise ValueError(f"A {name} dictionary already ships with the app.")
+    dest = Path(user_dictionary_dir) / name
+    if dest.exists():
+        raise ValueError(f"A {name} dictionary has already been added.")
+    # The pair is PROVEN readable in a scratch directory before anything lands
+    # in the searched tree. Validating in place would need the failed copy
+    # deleted again, and the reader may still hold the file open on Windows —
+    # a directory left behind there is a dictionary that resolves and rejects
+    # every word of its language.
+    import tempfile
+
+    staging = Path(tempfile.mkdtemp(prefix="spectra-dict-"))
+    try:
+        shutil.copyfile(aff_path, staging / f"{name}.aff")
+        shutil.copyfile(dic_path, staging / f"{name}.dic")
+        _tolerate_rep_patterns()
+        from spylls.hunspell import Dictionary
+
+        Dictionary.from_files(str(staging / name))
+    except Exception as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise ValueError(f"That dictionary could not be read: {exc}") from exc
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(aff_path, dest / f"{name}.aff")
+    shutil.copyfile(dic_path, dest / f"{name}.dic")
+    shutil.rmtree(staging, ignore_errors=True)
+    return {"tag": name, "bcp47": name.replace("_", "-"), "origin": "user"}

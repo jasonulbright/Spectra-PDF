@@ -90,7 +90,7 @@ LINE = "John Smith lives at 12 Oak Street Portland"
 
 def _cid_font(doc, widths: dict, mapping: dict, encoding: str = "Identity-H",
               vertical_advances: dict | None = None):
-    from tests.test_pdf_fonts import _tounicode_stream
+    from test_pdf_fonts import _tounicode_stream
 
     w_array: list = []
     for cid, width in sorted(widths.items()):
