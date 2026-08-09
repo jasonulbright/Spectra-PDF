@@ -2,7 +2,9 @@
 per-file isolation, logs — plus the encrypt/decrypt in-place pins the runner
 forced (the same latent CLI bug class fixed for five other ops)."""
 
+import json
 import os
+import pathlib
 from pathlib import Path
 
 import pikepdf
@@ -11,6 +13,7 @@ import pytest
 from engine.encrypt import decrypt, encrypt
 from engine.extract_text import extract_text
 from engine.guided_actions import (
+    _STEPS,
     action_log_file_name,
     run_action,
     validate_steps,
@@ -631,3 +634,37 @@ class TestOptimizeStep:
     def test_refuses_a_parameter_optimize_does_not_take(self):
         with pytest.raises(ValueError, match="unknown parameter"):
             validate_steps([{"op": "optimize", "params": {"quality": "screen"}}])
+
+
+class TestCatalogPin:
+    """The engine half of the cross-language catalog pin.
+
+    `tests/fixtures/guided-step-catalog.json` is the one written-down
+    declaration of the step set; the renderer's `STEP_CATALOG` is pinned
+    against the same file in `tests/guided-actions.test.ts`. A step or a
+    parameter added on one side alone therefore goes red on that side rather
+    than surfacing as an unknown-op refusal in front of a user (the
+    `enhance_scan` drift this test exists for).
+    """
+
+    FIXTURE = json.loads(
+        (pathlib.Path(__file__).parent / "fixtures" / "guided-step-catalog.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    def test_the_op_names_match_the_fixture_in_both_directions(self):
+        assert set(_STEPS) == set(self.FIXTURE["steps"])
+
+    def test_every_op_accepts_exactly_the_parameters_the_fixture_names(self):
+        for op, entry in self.FIXTURE["steps"].items():
+            assert sorted(_STEPS[op][1]) == entry["params"], op
+
+    def test_every_op_is_callable_with_its_declared_tool_paths(self):
+        # The third element of a row is the tool-path set `_apply_steps`
+        # injects; a name outside the run's own vocabulary would be passed as
+        # an empty string to a keyword the callable does not take.
+        known = {"gs_path", "tesseract_path", "soffice_path", "font_dir", "jbig2_path"}
+        for op, (fn, _allowed, needed) in _STEPS.items():
+            assert callable(fn), op
+            assert set(needed) <= known, op

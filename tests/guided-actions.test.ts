@@ -449,3 +449,80 @@ describe('the create_pdf source step', () => {
     expect(buildStepParams(action.steps[0]).page_size).toBe('a4');
   });
 });
+
+// The renderer half of the cross-language catalog pin. The fixture is the one
+// written-down declaration of the step set; `tests/test_guided_actions.py`
+// pins engine/guided_actions.py::_STEPS against the same file. A step added to
+// one catalog alone goes red here or there — never in front of a user as
+// "unknown operation" on an action file the other half wrote.
+describe('the two step catalogs are pinned against each other', () => {
+  const fixture = JSON.parse(
+    readFileSync(resolve(__dirname, 'fixtures/guided-step-catalog.json'), 'utf8'),
+  ) as { steps: Record<string, { params: string[] }> };
+
+  it('offers exactly the ops the engine dispatches, in both directions', () => {
+    expect([...STEP_CATALOG].map((d) => d.op).sort()).toEqual(Object.keys(fixture.steps).sort());
+  });
+
+  it('every param a step EMITS is one its engine op accepts', () => {
+    // Emitted, not declared: several steps reshape their form keys through
+    // `mapParams` (`levels` becomes `max_level`), so the form's own key names
+    // are not what the engine is handed and pinning those would pin nothing.
+    for (const def of STEP_CATALOG) {
+      const allowed = new Set(fixture.steps[def.op].params);
+      for (const key of Object.keys(buildStepParams(newStep(def.op)))) {
+        expect(allowed.has(key), `${def.op}.${key}`).toBe(true);
+      }
+    }
+  });
+
+  it('the conditionally-emitted params are accepted too', () => {
+    // Three steps emit a key only when its form value is non-empty, so the
+    // defaults pass above cannot reach them.
+    const redact = newStep('search_redact');
+    redact.params.overlay_text = 'EXEMPT';
+    const forms = newStep('prepare_forms');
+    forms.params.kinds = 'text,checkbox';
+    const header = newStep('add_header_footer');
+    header.params.text = 'Page {page}';
+    for (const step of [redact, forms, header]) {
+      const allowed = new Set(fixture.steps[step.op].params);
+      for (const key of Object.keys(buildStepParams(step))) {
+        expect(allowed.has(key), `${step.op}.${key}`).toBe(true);
+      }
+    }
+    expect(Object.keys(buildStepParams(redact))).toContain('properties');
+    expect(Object.keys(buildStepParams(forms))).toContain('kinds');
+  });
+
+  it('builds the scan-enhancement step the engine already dispatched', () => {
+    // The drift this pin exists for: `enhance_scan` was in the engine's table
+    // and not in this one, so the wizard could not build it and an action file
+    // carrying it was refused by name.
+    const step = newStep('enhance_scan');
+    const params = buildStepParams(step);
+    expect(params.pages).toBe('all');
+    expect(params.deskew).toBe(true);
+    expect(params.jpeg_quality).toBe(85);
+    step.params.pages = '2,4';
+    step.params.orientation = 'no';
+    step.params.jpeg_quality = '400';
+    const narrowed = buildStepParams(step);
+    expect(narrowed.pages).toEqual([2, 4]);
+    expect(narrowed.orientation).toBe(false);
+    expect(narrowed.jpeg_quality).toBe(100);
+  });
+
+  it('imports a CLI-authored action carrying the scan-enhancement step', () => {
+    const file = JSON.stringify({
+      name: 'Clean scans',
+      steps: [
+        { op: 'enhance_scan', params: { deskew: 'yes', despeckle: 'no' } },
+        { op: 'ocr_file', params: { language: 'eng' } },
+      ],
+    });
+    const action = parseActionFile(file);
+    expect(action.steps.map((s) => s.op)).toEqual(['enhance_scan', 'ocr_file']);
+    expect(buildStepParams(action.steps[0]).despeckle).toBe(false);
+  });
+});
