@@ -47,19 +47,60 @@ async function setEditorCaret(offset: number): Promise<void> {
   await setParagraphSelection(offset, offset);
 }
 
+/** Wait for a page to carry a paragraph listing and RETURN its id, captured
+ * inside the predicate. Waiting for a listing and then reading the id back
+ * separately is two reads: an ordinary reindex empties and republishes the
+ * listing, and the second read can land in the gap. */
+async function waitForListedParas(timeoutMsg: string): Promise<string> {
+  let landed = '';
+  await browser.waitUntil(
+    async () => {
+      const cur = await browser.execute<{ pageId: string; count: number } | null, []>(function () {
+        const h = (window as any).__SPECTRA_TEST__;
+        const ids = h.editTextPageIds();
+        if (ids.length === 0) return null;
+        return { pageId: ids[0], count: h.editParagraphs(ids[0]).length };
+      });
+      if (!cur || cur.count === 0) return false;
+      landed = cur.pageId;
+      return true;
+    },
+    { timeout: 30_000, interval: 250, timeoutMsg },
+  );
+  return landed;
+}
+
+/** Wait for the op's reindex to publish a NEW generation whose paragraphs
+ * satisfy `test`, and RETURN the page id that satisfied it. The id is captured
+ * inside the predicate: re-reading it afterwards is a second, independent read
+ * that can land in the next rotation's window, so a wait that proves a value
+ * and then goes and fetches it again proves nothing. The id and the paragraphs
+ * are read together in ONE in-page call for the same reason. */
 async function waitForReindexedParas(
   preOpId: string,
   test: (paras: { index: number; text: string }[]) => boolean,
   timeoutMsg: string,
-): Promise<void> {
+): Promise<string> {
+  let landed = '';
   await browser.waitUntil(
     async () => {
-      const ids = await editTextPageIds();
-      if (ids.length === 0 || ids[0] === preOpId) return false;
-      return test(await editParagraphs(ids[0]));
+      const cur = await browser.execute<
+        { pageId: string; paras: { index: number; text: string }[] } | null,
+        []
+      >(function () {
+        const h = (window as any).__SPECTRA_TEST__;
+        const ids = h.editTextPageIds();
+        if (ids.length === 0) return null;
+        return { pageId: ids[0], paras: h.editParagraphs(ids[0]) };
+      });
+      if (!cur || cur.pageId === preOpId) return false;
+      if (!test(cur.paras)) return false;
+      landed = cur.pageId;
+      return true;
     },
     { timeout: 30_000, timeoutMsg },
   );
+  return landed;
 }
 
 describe('paragraph split + merge', () => {
@@ -92,15 +133,7 @@ describe('paragraph split + merge', () => {
       { timeout: 15_000, timeoutMsg: 'fixture never became active' },
     );
     expect(await invokeAppCommand('tools.open.edit')).toBe(true);
-    await browser.waitUntil(
-      async () => {
-        const ids = await editTextPageIds();
-        if (ids.length === 0) return false;
-        return (await editParagraphs(ids[0])).length > 0;
-      },
-      { timeout: 30_000, timeoutMsg: 'paragraphs never loaded' },
-    );
-    const pageId = (await editTextPageIds())[0];
+    const pageId = await waitForListedParas('paragraphs never loaded');
     const para = (await editParagraphs(pageId))[0];
     const joined = `${LINE1} ${LINE2}`;
     expect(para.text).toBe(joined);
@@ -111,7 +144,7 @@ describe('paragraph split + merge', () => {
     await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
     await setEditorCaret(joined.indexOf('flowing'));
     await browser.keys(['Enter']);
-    await waitForReindexedParas(
+    let nowId = await waitForReindexedParas(
       pageId,
       (paras) =>
         paras.length === 2 && paras[0].text === LINE1 && paras[1].text === LINE2,
@@ -120,28 +153,25 @@ describe('paragraph split + merge', () => {
 
     // MERGE: open the SECOND paragraph, caret at 0, Backspace (unchanged
     // editor — the merge precondition).
-    let nowId = (await editTextPageIds())[0];
     const second = (await editParagraphs(nowId)).find((p) => p.text === LINE2)!;
     await editParagraphOpen(nowId, second.index);
     await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
     await setEditorCaret(0);
     await browser.keys(['Backspace']);
-    await waitForReindexedParas(
+    let preUndoId = await waitForReindexedParas(
       nowId,
       (paras) => paras.length === 1 && paras[0].text === joined,
       'the merge never rejoined the paragraphs',
     );
 
     // UNDO the merge → two paragraphs again.
-    let preUndoId = (await editTextPageIds())[0];
     expect(await invokeAppCommand('edit.undo')).toBe(true);
-    await waitForReindexedParas(
+    preUndoId = await waitForReindexedParas(
       preUndoId,
       (paras) => paras.length === 2,
       'undo did not restore the split state',
     );
     // UNDO the split → the original single paragraph.
-    preUndoId = (await editTextPageIds())[0];
     expect(await invokeAppCommand('edit.undo')).toBe(true);
     await waitForReindexedParas(
       preUndoId,
@@ -157,7 +187,7 @@ describe('paragraph split + merge', () => {
   it('Custom split gap, Delete-merge, edited-merge, grip resize', async function () {
     this.timeout(240_000);
     const joined = `${LINE1} ${LINE2}`;
-    let nowId = (await editTextPageIds())[0];
+    let nowId = await waitForListedParas('paragraphs never re-listed after the undos');
     const para0 = (await editParagraphs(nowId))[0];
     expect(para0.text).toBe(joined);
 
@@ -167,7 +197,7 @@ describe('paragraph split + merge', () => {
     await setReactInputValue('[data-testid="edit-para-splitgap"]', '3');
     await setEditorCaret(joined.indexOf('flowing'));
     await browser.keys(['Enter']);
-    await waitForReindexedParas(
+    nowId = await waitForReindexedParas(
       nowId,
       (paras) =>
         paras.length === 2 && paras[0].text === LINE1 && paras[1].text === LINE2,
@@ -175,13 +205,12 @@ describe('paragraph split + merge', () => {
     );
 
     // DELETE at the END of the FIRST paragraph folds the next back in.
-    nowId = (await editTextPageIds())[0];
     const first = (await editParagraphs(nowId)).find((p) => p.text === LINE1)!;
     await editParagraphOpen(nowId, first.index);
     await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
     await setEditorCaret(Array.from(LINE1).length);
     await browser.keys(['Delete']);
-    await waitForReindexedParas(
+    nowId = await waitForReindexedParas(
       nowId,
       (paras) => paras.length === 1 && paras[0].text === joined,
       'Delete at the end never merged the next paragraph in',
@@ -189,26 +218,31 @@ describe('paragraph split + merge', () => {
 
     // EDITED merge: split again (default gap), append to the SECOND's
     // text, then Backspace at 0 — the edit must survive the merge.
-    nowId = (await editTextPageIds())[0];
     const paraA = (await editParagraphs(nowId))[0];
     await editParagraphOpen(nowId, paraA.index);
     await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
     await setEditorCaret(joined.indexOf('flowing'));
     await browser.keys(['Enter']);
-    await waitForReindexedParas(
+    nowId = await waitForReindexedParas(
       nowId,
       (paras) => paras.length === 2,
       'the re-split never happened',
     );
-    nowId = (await editTextPageIds())[0];
     const second = (await editParagraphs(nowId)).find((p) => p.text === LINE2)!;
     await editParagraphOpen(nowId, second.index);
     await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
     await setEditorCaret(Array.from(LINE2).length);
     await browser.keys([...' extra']);
+    // Typing is asserted BEFORE the merge, on the editor's own text. A render
+    // that replaces the surface's nodes without restoring the caret sends
+    // every character after the first to offset 0, and the merge then fails
+    // for a reason that has nothing to do with merging.
+    expect(
+      await $('[data-testid="edit-para-input"]').getText(),
+    ).toBe(`${LINE2} extra`);
     await setEditorCaret(0);
     await browser.keys(['Backspace']);
-    await waitForReindexedParas(
+    nowId = await waitForReindexedParas(
       nowId,
       (paras) => paras.length === 1 && paras[0].text === `${joined} extra`,
       'the edited merge dropped the edit or never merged',
@@ -216,43 +250,48 @@ describe('paragraph split + merge', () => {
 
     // RESTYLE-ON-MERGE: split once more, set the editor's Size to 20, then
     // Backspace-merge — one op must both join AND resize.
-    nowId = (await editTextPageIds())[0];
     const paraR = (await editParagraphs(nowId))[0];
     await editParagraphOpen(nowId, paraR.index);
     await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
     await setEditorCaret(joined.indexOf('flowing'));
     await browser.keys(['Enter']);
-    await waitForReindexedParas(nowId, (paras) => paras.length === 2, 'restyle re-split failed');
-    nowId = (await editTextPageIds())[0];
+    nowId = await waitForReindexedParas(nowId, (paras) => paras.length === 2, 'restyle re-split failed');
     const secondR = (await editParagraphs(nowId)).find((p) => p.text !== LINE1)!;
     await editParagraphOpen(nowId, secondR.index);
     await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
     await setReactInputValue('[data-testid="edit-para-size"]', '20');
     await setEditorCaret(0);
     await browser.keys(['Backspace']);
+    const preSizeId = nowId;
     await browser.waitUntil(
       async () => {
-        const ids = await editTextPageIds();
-        if (ids.length === 0 || ids[0] === nowId) return false;
-        const paras = (await browser.execute<
-          { index: number; text: string; sizes: number[] }[],
-          [string]
-        >(function (pid) {
-          return (window as any).__SPECTRA_TEST__.editParagraphs(pid);
-        }, ids[0]));
-        return (
-          paras.length === 1 &&
-          paras[0].text === `${joined} extra` &&
-          paras[0].sizes.length === 1 &&
-          Math.round(paras[0].sizes[0]) === 20
-        );
+        const cur = await browser.execute<
+          { pageId: string; paras: { index: number; text: string; sizes: number[] }[] } | null,
+          []
+        >(function () {
+          const h = (window as any).__SPECTRA_TEST__;
+          const ids = h.editTextPageIds();
+          if (ids.length === 0) return null;
+          return { pageId: ids[0], paras: h.editParagraphs(ids[0]) };
+        });
+        if (!cur || cur.pageId === preSizeId) return false;
+        const paras = cur.paras;
+        if (
+          paras.length !== 1 ||
+          paras[0].text !== `${joined} extra` ||
+          paras[0].sizes.length !== 1 ||
+          Math.round(paras[0].sizes[0]) !== 20
+        ) {
+          return false;
+        }
+        nowId = cur.pageId;
+        return true;
       },
-      { timeout: 30_000, timeoutMsg: 'the merge did not carry the size restyle' },
+      { timeout: 30_000, interval: 250, timeoutMsg: 'the merge did not carry the size restyle' },
     );
 
     // RESIZE: drag the END grip inward ~40% of the card — the paragraph
     // must rewrap to more lines.
-    nowId = (await editTextPageIds())[0];
     const paraB = (await editParagraphs(nowId))[0];
     const preLines = paraB.lineCount;
     await editParagraphOpen(nowId, paraB.index);
