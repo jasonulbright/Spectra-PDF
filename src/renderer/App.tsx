@@ -109,6 +109,7 @@ import { BatchOcrDialog } from './components/BatchOcrDialog';
 import { DiskRedactDialog } from './components/DiskRedactDialog';
 import { FolderFormPrepDialog } from './components/FolderFormPrepDialog';
 import { FolderExportDialog } from './components/FolderExportDialog';
+import { FolderCreatePdfDialog } from './components/FolderCreatePdfDialog';
 import { ScheduledRunsDialog } from './components/ScheduledRunsDialog';
 import { WatchedFoldersDialog } from './components/WatchedFoldersDialog';
 import { CreatePdfDialog } from './components/CreatePdfDialog';
@@ -235,6 +236,7 @@ function AppContent(): React.ReactElement {
   const [showDiskRedact, setShowDiskRedact] = useState(false);
   const [showFormPrepFolder, setShowFormPrepFolder] = useState(false);
   const [showFolderExport, setShowFolderExport] = useState(false);
+  const [showFolderCreatePdf, setShowFolderCreatePdf] = useState(false);
   const [showSchedules, setShowSchedules] = useState(false);
   const [showWatchers, setShowWatchers] = useState(false);
   const [showCreatePdf, setShowCreatePdf] = useState(false);
@@ -1952,6 +1954,7 @@ function AppContent(): React.ReactElement {
     openDiskRedact: () => setShowDiskRedact(true),
     openFormPrepFolder: () => setShowFormPrepFolder(true),
     openFolderExport: () => setShowFolderExport(true),
+    openFolderCreatePdf: () => setShowFolderCreatePdf(true),
     openScheduledRuns: () => setShowSchedules(true),
     openWatchedFolders: () => setShowWatchers(true),
     openCreatePdf: () => {
@@ -2006,6 +2009,7 @@ function AppContent(): React.ReactElement {
       openDiskRedact: () => h.current.openDiskRedact(),
       openFormPrepFolder: () => h.current.openFormPrepFolder(),
       openFolderExport: () => h.current.openFolderExport(),
+      openFolderCreatePdf: () => h.current.openFolderCreatePdf(),
       openScheduledRuns: () => h.current.openScheduledRuns(),
       openWatchedFolders: () => h.current.openWatchedFolders(),
       openCreatePdf: () => h.current.openCreatePdf(),
@@ -2444,6 +2448,9 @@ function AppContent(): React.ReactElement {
         />
       )}
       {showFolderExport && <FolderExportDialog onClose={() => setShowFolderExport(false)} />}
+      {showFolderCreatePdf && (
+        <FolderCreatePdfDialog onClose={() => setShowFolderCreatePdf(false)} />
+      )}
       {showSchedules && <ScheduledRunsDialog onClose={() => setShowSchedules(false)} />}
       {showWatchers && <WatchedFoldersDialog onClose={() => setShowWatchers(false)} />}
       {showCreatePdf && (

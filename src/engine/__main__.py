@@ -154,6 +154,7 @@ from engine.page_vectors import (
 )
 from engine.distill import distill
 from engine.create_pdf import create_pdf
+from engine.create_pdf_folders import create_pdf_folders, list_source_folders
 from engine.system_fonts import list_system_fonts
 from engine.text_authoring import add_text_box, measure_text_box
 from engine.text_paragraphs import (
@@ -348,6 +349,8 @@ def main() -> None:
     server.register("add_user_dictionary", add_user_dictionary)
     server.register("distill", distill)
     server.register("create_pdf", create_pdf)
+    server.register("list_source_folders", list_source_folders)
+    server.register("create_pdf_folders", create_pdf_folders)
     server.register("list_system_fonts", list_system_fonts)
     server.register("add_text_box", add_text_box)
     server.register("measure_text_box", measure_text_box)

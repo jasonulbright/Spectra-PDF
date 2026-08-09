@@ -40,6 +40,17 @@
         "page_size"
       ]
     },
+    "create_pdf_folders": {
+      "params": [
+        "distill_preset",
+        "image_dpi_default",
+        "include_subfolders",
+        "margin_pt",
+        "orientation",
+        "page_size",
+        "sources"
+      ]
+    },
     "encrypt": {
       "params": [
         "owner_password",

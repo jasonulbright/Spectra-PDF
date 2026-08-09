@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.0.29
+
+*Unreleased*
+
+### One PDF per folder
+- **Tools ▸ One PDF per Folder** turns a tree of scan folders into one PDF per folder.
+- Pages are assembled in page-number order, so `page2` comes before `page10`.
+- A folder at `a/b` becomes `a/b.pdf` in the destination; the originals are never modified.
+- A folder holding nothing to assemble is skipped rather than reported as a failure.
+- A picture that cannot be read is named in the report, and the rest of the folder is still assembled.
+- The same run is available as a guided-action step, so it can be followed by other steps and scheduled.
+- The command line gains `create-pdf-folders` for the same job.
+
+### Saved Batch OCR settings
+- **Batch OCR Folder** saves every setting in the dialog under a name, folders included.
+- A saved set can be recalled, renamed and deleted from the same place.
+- **Scheduled Batch Runs** can start from a saved set, which fills in the form.
+- A schedule keeps those values as its own; editing the saved set later leaves the schedule alone.
+- A schedule can now replace the originals in place, compress scans, and straighten them before recognition.
+- The command line's `batch-ocr` gains `--enhance` and `--no-enhance-orientation`.
+
+### Guided actions
+- **Enhance Scans** is available as a guided-action step, with all twelve of its settings.
+- An action file naming that step imports instead of being refused as an unknown operation.
+
 ## 1.0.28
 
 *Released 2026-08-09*
