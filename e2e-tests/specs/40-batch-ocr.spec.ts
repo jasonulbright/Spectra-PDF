@@ -312,4 +312,77 @@ describe('batch OCR folder mirror', () => {
     await browser.waitUntil(async () => !(await fra.isSelected()), { timeout: 5_000 });
     await $('[data-testid="batch-ocr-cancel"]').click();
   });
+
+  // Named presets. The assertion that matters is that recalling one restores
+  // the settings ACROSS A CLOSE — the whole complaint was that fourteen
+  // settings had to be retyped every run — and that the source is re-listed
+  // rather than restored from a stored count.
+  it('saves the dialog’s settings under a name and recalls them after a close', async () => {
+    await waitForHarness();
+    await invokeAppCommand('tools.batchOcr');
+    await $('[data-testid="batch-ocr-dialog"]').waitForDisplayed({ timeout: 10_000 });
+
+    await batchOcrSetFolders(src, dest);
+    await browser.waitUntil(async () => (await batchOcrSnapshot())?.fileCount === 3, {
+      timeout: 15_000,
+      timeoutMsg: 'enumeration never found the 3 fixture PDFs',
+    });
+
+    // Two settings that are OFF by default and live in different sections.
+    const enhance = $('[data-testid="batch-enhance"]');
+    await enhance.waitForDisplayed({ timeout: 5_000 });
+    expect(await enhance.isSelected()).toBe(false);
+    await enhance.click();
+    await $('[data-testid="batch-enhance-orientation"]').waitForDisplayed({ timeout: 5_000 });
+    await $('[data-testid="batch-enhance-orientation"]').click(); // orientation OFF
+    await $('[data-testid="batch-ocr-filing"] summary').click();
+    const repair = $('[data-testid="batch-ocr-repair"]');
+    await repair.waitForDisplayed({ timeout: 5_000 });
+    await repair.click();
+
+    const name = $('[data-testid="batch-ocr-preset-name"]');
+    await name.setValue('E2E nightly');
+    await $('[data-testid="batch-ocr-preset-save"]').click();
+    // The saved preset is selected, which is what makes Rename and Delete
+    // reachable — a save that left nothing selected would strand it.
+    await $('[data-testid="batch-ocr-preset-rename"]').waitForDisplayed({ timeout: 5_000 });
+
+    await $('[data-testid="batch-ocr-cancel"]').click();
+    await $('[data-testid="batch-ocr-dialog"]').waitForExist({ reverse: true, timeout: 10_000 });
+
+    // Reopened: every control is back at its default until the preset is
+    // recalled, which is the state the complaint was about.
+    await invokeAppCommand('tools.batchOcr');
+    await $('[data-testid="batch-ocr-dialog"]').waitForDisplayed({ timeout: 10_000 });
+    expect(await $('[data-testid="batch-enhance"]').isSelected()).toBe(false);
+
+    await $('[data-testid="batch-ocr-preset-select"]').selectByVisibleText('E2E nightly');
+    await browser.waitUntil(async () => await $('[data-testid="batch-enhance"]').isSelected(), {
+      timeout: 10_000,
+      timeoutMsg: 'recalling the preset did not restore the enhancement switch',
+    });
+    expect(await $('[data-testid="batch-enhance-orientation"]').isSelected()).toBe(false);
+    await $('[data-testid="batch-ocr-filing"] summary').click();
+    expect(await $('[data-testid="batch-ocr-repair"]').isSelected()).toBe(true);
+    // The folders came back AND the tree was walked again, so Start is armed
+    // against a listing rather than against a remembered number.
+    expect(await $('[data-testid="batch-ocr-source"]').getText()).toBe(src);
+    expect(await $('[data-testid="batch-ocr-dest"]').getText()).toBe(dest);
+    await browser.waitUntil(async () => (await batchOcrSnapshot())?.fileCount === 3, {
+      timeout: 15_000,
+      timeoutMsg: 'recalling the preset did not re-list the source folder',
+    });
+
+    // Delete takes a confirm, then the preset is gone from the list — leaving
+    // the shared workspace as this test found it.
+    await $('[data-testid="batch-ocr-preset-delete"]').click();
+    await $('[data-testid="batch-ocr-preset-delete-confirm"]').click();
+    await browser.waitUntil(
+      async () =>
+        !(await $('[data-testid="batch-ocr-preset-select"]').getText()).includes('E2E nightly'),
+      { timeout: 5_000, timeoutMsg: 'the deleted preset is still listed' },
+    );
+
+    await $('[data-testid="batch-ocr-cancel"]').click();
+  });
 });

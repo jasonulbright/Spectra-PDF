@@ -220,6 +220,15 @@ export interface ScheduleProfile {
   days: string;
   /** Empty = the current user. Otherwise DOMAIN\\user, or DOMAIN\\gmsa$. */
   account: string;
+  /** DESTRUCTIVE: replace each original with its searchable version. Retires
+   * `dest` and `movedRoot`, which the Rust validator refuses alongside it. */
+  inPlace: boolean;
+  mrc: boolean;
+  mrcPreset: string;
+  mrcVerifyText: boolean;
+  enhance: boolean;
+  /** Shipped default ON; only read when `enhance` is set. */
+  enhanceOrientation: boolean;
   /** Which CLI arm the task invokes: 'batch-ocr' (default; also for '') or
    * 'action' — a guided-action run over the source tree. */
   runType: string;

@@ -488,6 +488,11 @@ export const DIALOG_STRINGS = {
   'dialog.schedule.keepAction': '(keep the current action)',
   'dialog.schedule.actionNote':
     'The schedule keeps its own copy of the action; edit the schedule to pick up later changes. Actions that ask for values when they run can’t be scheduled.',
+  'dialog.schedule.presetLabel': 'Start from settings saved in {{batch}}',
+  'dialog.schedule.presetNone': 'Fill the form in below',
+  'dialog.schedule.presetNote':
+    'Choosing one fills in the form. The schedule then keeps those values as its own; editing the saved settings later does not change a schedule already created.',
+  'dialog.schedule.routeInPlace': '{{source}} — the originals are replaced',
   'dialog.schedule.sourceLabel': 'Source folder',
   'dialog.schedule.destLabel': 'Destination folder',
   'dialog.schedule.pickSource': 'Choose the folder to process',
@@ -522,6 +527,20 @@ export const DIALOG_STRINGS = {
   // tests — so it passes through verbatim inside a localized frame, exactly
   // as the Preflight panel leaves engine findings alone.
   'dialog.batch.title': 'Batch OCR Folder',
+  'dialog.batch.presetLabel': 'Saved settings',
+  'dialog.batch.presetNone': 'Not using saved settings',
+  'dialog.batch.presetNameLabel': 'Name for these settings',
+  'dialog.batch.presetNamePlaceholder': 'Name these settings',
+  'dialog.batch.presetSave': 'Save settings',
+  'dialog.batch.presetRename': 'Rename',
+  // The scheduling surface is named through a placeholder resolved from its
+  // own title, so this sentence never carries a second, drifting copy of it.
+  'dialog.batch.presetNote':
+    'Saves every setting in this dialog under a name, including the folders. {{schedule}} can start from one of these.',
+  'dialog.batch.presetProblem.empty': 'Give these settings a name before saving them.',
+  'dialog.batch.presetProblem.tooLong': 'That name is too long — 80 characters at most.',
+  'dialog.batch.presetProblem.duplicate': 'Another set of settings already has that name.',
+  'dialog.batch.presetProblem.full': 'There is no room for another set of settings — delete one first.',
   'dialog.batch.sourceLabel': 'Source folder',
   'dialog.batch.destLabel': 'Destination folder',
   'dialog.batch.pickSource': 'Choose the folder to make searchable',

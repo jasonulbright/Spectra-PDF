@@ -21,6 +21,16 @@ import {
   type MrcPreset,
   type MrcReport,
 } from '../lib/mrc-presets';
+import {
+  loadBatchOcrPresets,
+  presetNameProblem,
+  removePreset,
+  renamePreset,
+  saveBatchOcrPresets,
+  upsertPreset,
+  type BatchOcrPreset,
+  type BatchOcrSettings,
+} from '../lib/batch-ocr-presets';
 import type { ScanEnhanceReport } from '../lib/scan-enhance';
 import { TEST_HARNESS_ENABLED, registerBatchOcr } from '../testHarness';
 import { useTranslation } from 'react-i18next';
@@ -89,6 +99,103 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   // so a ref-driven button label was a button that ignored the click
   // (regression).
   const [stopping, setStopping] = useState(false);
+
+  // Named presets. The library is read once at mount and every mutation goes
+  // through `persist`, so the store and what is on screen cannot disagree.
+  const [presets, setPresets] = useState<BatchOcrPreset[]>(() => loadBatchOcrPresets());
+  const [presetId, setPresetId] = useState('');
+  const [presetName, setPresetName] = useState('');
+  const [presetProblem, setPresetProblem] = useState<string | null>(null);
+  const [confirmDeletePreset, setConfirmDeletePreset] = useState(false);
+
+  const persist = (next: BatchOcrPreset[]): void => {
+    setPresets(next);
+    saveBatchOcrPresets(next);
+  };
+
+  /** Everything the dialog is set to, as the stored shape. */
+  const currentSettings = (): BatchOcrSettings => ({
+    source: source ?? '',
+    dest: dest ?? '',
+    langs,
+    inPlace,
+    movedRoot: movedRoot ?? '',
+    errorRoot: errorRoot ?? '',
+    repairDamaged,
+    replaceRepairedOriginals: repairDamaged && replaceRepaired,
+    mrc,
+    mrcPreset,
+    mrcVerifyText: mrcVerify,
+    enhance,
+    enhanceOrientation,
+  });
+
+  // Applying a preset re-enumerates the source rather than trusting a stored
+  // count: the tree the preset names may have changed since it was saved, and
+  // Start reads the enumeration, not the path.
+  const applyPreset = async (id: string): Promise<void> => {
+    setPresetId(id);
+    setConfirmDeletePreset(false);
+    setPresetProblem(null);
+    const preset = presets.find((p) => p.id === id);
+    if (!preset) return;
+    const s = preset.settings;
+    setPresetName(preset.name);
+    setInPlace(s.inPlace);
+    setConfirmInPlace(false);
+    setDest(s.dest === '' ? null : s.dest);
+    setLangs(s.langs);
+    setMovedRoot(s.movedRoot === '' ? null : s.movedRoot);
+    setErrorRoot(s.errorRoot === '' ? null : s.errorRoot);
+    setRepairDamaged(s.repairDamaged);
+    setReplaceRepaired(s.replaceRepairedOriginals);
+    setMrc(s.mrc);
+    setMrcPreset(s.mrcPreset);
+    setMrcVerify(s.mrcVerifyText);
+    setEnhance(s.enhance);
+    setEnhanceOrientation(s.enhanceOrientation);
+    if (s.source === '') {
+      setSource(null);
+      setEntries(null);
+      setSkippedDirs([]);
+    } else {
+      await selectSource(s.source);
+    }
+  };
+
+  const savePreset = (): void => {
+    const problem = presetNameProblem(presetName, presets, presetId || undefined);
+    if (problem) {
+      setPresetProblem(tChrome(`dialog.batch.presetProblem.${problem}` as never));
+      return;
+    }
+    const next = upsertPreset(presets, presetName, currentSettings(), presetId || undefined);
+    persist(next);
+    const saved = next.find((p) => p.name === presetName.trim());
+    setPresetId(saved?.id ?? '');
+    setPresetProblem(null);
+  };
+
+  // Rename is NOT "save under a new name": it leaves the stored settings
+  // exactly as they are, so correcting a typo cannot silently capture whatever
+  // the dialog happens to be set to at that moment.
+  const renameSelectedPreset = (): void => {
+    const problem = presetNameProblem(presetName, presets, presetId);
+    if (problem) {
+      setPresetProblem(tChrome(`dialog.batch.presetProblem.${problem}` as never));
+      return;
+    }
+    persist(renamePreset(presets, presetId, presetName));
+    setPresetProblem(null);
+  };
+
+  const deletePreset = (): void => {
+    persist(removePreset(presets, presetId));
+    setPresetId('');
+    setPresetName('');
+    setConfirmDeletePreset(false);
+    setPresetProblem(null);
+  };
 
   const cancelledRef = useRef(false);
   const cancelOcrRef = useRef<(() => void) | null>(null);
@@ -485,6 +592,100 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
     <Shell onClose={guardedClose}>
       {phase === 'setup' && (
         <div className="flex flex-col gap-4">
+          {/* Named presets. This dialog holds fourteen independent settings
+              and none of them used to survive closing it, so a folder someone
+              processes every week was retyped every week. Deliberately at the
+              TOP: recalling one rewrites every control below. */}
+          <div
+            className="rounded border border-neutral-800 bg-neutral-950/40 px-3 py-2 flex flex-col gap-2"
+            data-testid="batch-ocr-presets"
+          >
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-neutral-400 shrink-0">
+                {tChrome('dialog.batch.presetLabel')}
+              </span>
+              <select
+                data-testid="batch-ocr-preset-select"
+                aria-label={tChrome('dialog.batch.presetLabel')}
+                value={presetId}
+                onChange={(e) => void applyPreset(e.target.value)}
+                className="flex-1 px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
+              >
+                <option value="">{tChrome('dialog.batch.presetNone')}</option>
+                {presets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                data-testid="batch-ocr-preset-name"
+                aria-label={tChrome('dialog.batch.presetNameLabel')}
+                value={presetName}
+                placeholder={tChrome('dialog.batch.presetNamePlaceholder')}
+                onChange={(e) => {
+                  setPresetName(e.target.value);
+                  setPresetProblem(null);
+                }}
+                className="flex-1 min-w-0 px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
+              />
+              <button
+                data-testid="batch-ocr-preset-save"
+                onClick={savePreset}
+                className="px-2.5 py-1 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium shrink-0"
+              >
+                {tChrome('dialog.batch.presetSave')}
+              </button>
+              {presetId !== '' && (
+                <button
+                  data-testid="batch-ocr-preset-rename"
+                  onClick={renameSelectedPreset}
+                  className="px-2.5 py-1 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium shrink-0"
+                >
+                  {tChrome('dialog.batch.presetRename')}
+                </button>
+              )}
+              {presetId !== '' &&
+                (confirmDeletePreset ? (
+                  <>
+                    <button
+                      data-testid="batch-ocr-preset-delete-confirm"
+                      onClick={deletePreset}
+                      className="px-2.5 py-1 text-xs bg-red-700/80 hover:bg-red-600 text-white rounded font-medium shrink-0"
+                    >
+                      {tChrome('dialog.common.delete')}
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeletePreset(false)}
+                      className="px-2 py-1 text-xs text-neutral-400 hover:text-neutral-200 shrink-0"
+                    >
+                      {tChrome('dialog.common.keep')}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    data-testid="batch-ocr-preset-delete"
+                    onClick={() => setConfirmDeletePreset(true)}
+                    className="px-2 py-1 text-xs text-neutral-400 hover:text-red-400 shrink-0"
+                  >
+                    {tChrome('dialog.common.delete')}
+                  </button>
+                ))}
+            </div>
+            {presetProblem !== null ? (
+              <p className="text-xs text-red-400" data-testid="batch-ocr-preset-problem">
+                {presetProblem}
+              </p>
+            ) : (
+              <p className="text-xs text-neutral-500">
+                {tChrome('dialog.batch.presetNote', {
+                  schedule: tChrome('dialog.schedule.title'),
+                })}
+              </p>
+            )}
+          </div>
           <FolderRow
             label={tChrome('dialog.batch.sourceLabel')}
             testid="batch-ocr-source"

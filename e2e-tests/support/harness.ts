@@ -2021,13 +2021,32 @@ export interface ScheduleProfileInput {
   time?: string;
   days?: string;
   account?: string;
+  /** The Batch OCR settings a named preset expands into. */
+  inPlace?: boolean;
+  mrc?: boolean;
+  mrcPreset?: string;
+  mrcVerifyText?: boolean;
+  enhance?: boolean;
+  enhanceOrientation?: boolean;
   /** 'batch-ocr' (default) or 'action' (guided actions). */
   runType?: string;
 }
 
 export interface ScheduledRunRow {
   name: string;
-  profile: { source: string; dest: string; lang: string; runType?: string; actionFile?: string } | null;
+  profile: {
+    source: string;
+    dest: string;
+    lang: string;
+    runType?: string;
+    actionFile?: string;
+    inPlace?: boolean;
+    mrc?: boolean;
+    mrcPreset?: string;
+    mrcVerifyText?: boolean;
+    enhance?: boolean;
+    enhanceOrientation?: boolean;
+  } | null;
   status: string;
   nextRun: string;
   actionName?: string;
