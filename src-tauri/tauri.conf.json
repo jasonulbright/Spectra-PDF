@@ -30,6 +30,7 @@
       "../resources/fonts": "fonts",
       "../resources/tesseract": "tesseract",
       "../resources/jbig2enc": "jbig2enc",
+      "../resources/dictionaries": "dictionaries",
       "../src/engine": "engine",
       "../THIRD-PARTY-LICENSES.md": "THIRD-PARTY-LICENSES.md",
       "THIRD-PARTY-LICENSES-RUST.html": "THIRD-PARTY-LICENSES-RUST.html"

@@ -372,12 +372,20 @@ function FormWidgetView({
   onSetFormValue,
   onSignFieldRequest,
   onFormButton,
+  spellLang,
 }: {
   widget: OverlayWidget;
   rotation: 0 | 90 | 180 | 270;
   formsMode: boolean;
   pending: FormFieldValue | undefined;
   fontPx: number;
+  /** BCP-47 tag of the chosen spelling dictionary. A form value is a real
+   * `<input>`/`<textarea>`, so the WEBVIEW marks it — nothing can draw inside
+   * a native text control without the mirror overlay the paragraph editor
+   * already measured as unworkable. Naming the language at least keeps the
+   * two checkers agreeing about which one to use; the Spelling panel stays
+   * the authority for the document-wide pass. */
+  spellLang?: string;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
   onSignFieldRequest: (path: string, fieldName: string) => void;
   onFormButton: (path: string, fieldName: string, action: import('../../lib/forms').ButtonAction | null) => void;
@@ -500,7 +508,8 @@ function FormWidgetView({
         style={{ ...style, fontSize: fontPx }}
         value={str}
         onChange={(e) => set(e.target.value)}
-        spellCheck={false}
+        spellCheck
+        lang={spellLang}
       />
     ) : (
       <input
@@ -510,7 +519,8 @@ function FormWidgetView({
         type="text"
         value={str}
         onChange={(e) => set(e.target.value)}
-        spellCheck={false}
+        spellCheck
+        lang={spellLang}
       />
     );
   }
@@ -750,6 +760,15 @@ interface PageCellProps {
     opts?: ParagraphEditOpts,
   ) => void;
   onCancelParagraphEdit?: () => void;
+  /** Misspelled code-point ranges in the text being typed, from THIS app's
+   * checker rather than the webview's — so the squiggles agree with the
+   * Spelling panel about the dictionary and the user's added words. Absent
+   * (or resolving empty) simply draws nothing, which is what the preference
+   * being off looks like. */
+  onCheckSpelling?: (text: string) => Promise<Array<{ start: number; end: number }>>;
+  /** BCP-47 tag of the chosen spelling dictionary, for the native text
+   * controls this app cannot draw inside (form values, comment text). */
+  spellLang?: string;
   /** Merge the paragraph being edited into the one above it (fires
    * only from an unchanged editor with the caret at position 0). */
   onMergeParagraphPrev?: (pageId: string, index: number, editedText?: string, restyle?: import('../../lib/edit-paragraphs').MergeRestyle) => void;
@@ -1097,6 +1116,8 @@ function PageCellImpl({
   editingParaIndex,
   onSelectEditParagraph,
   onOpenParagraphEditor,
+  onCheckSpelling,
+  spellLang,
   onCommitParagraphEdit,
   onCancelParagraphEdit,
   onMergeParagraphPrev,
@@ -3507,6 +3528,8 @@ function PageCellImpl({
                 }}
                 autoFocus
                 defaultValue={a.note ?? ''}
+                spellCheck
+                lang={spellLang}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
                 onDoubleClick={(e) => e.stopPropagation()}
@@ -3854,6 +3877,7 @@ function PageCellImpl({
                     : undefined
                 }
                 rotation={page.rotation}
+                checkSpelling={onCheckSpelling}
               />
             );
           }
@@ -4022,6 +4046,7 @@ function PageCellImpl({
           onSetFormValue={onSetFormValue}
           onSignFieldRequest={onSignFieldRequest}
           onFormButton={onFormButton}
+          spellLang={spellLang}
         />
       ))}
       {signaturePlacement && (
@@ -4484,6 +4509,11 @@ function setEditorSelection(root: HTMLElement, start: number, end: number): void
  * become spaces); Escape cancels; blur commits-if-valid-and-changed, else
  * cancels. The DOM is rendered FROM state every keystroke and is never the
  * source of truth, so the value is always a plain string. */
+/** A spell check is an engine round trip; the editor's value changes on every
+ * keystroke. Long enough that typing a word does not check its prefixes,
+ * short enough that a pause shows the mark. */
+const SPELL_DEBOUNCE_MS = 400;
+
 function ParagraphEditor({
   para,
   rect,
@@ -4493,6 +4523,7 @@ function ParagraphEditor({
   onMergePrev,
   onMergeNext,
   rotation = 0,
+  checkSpelling,
 }: {
   para: EditParagraph;
   rect: { x: number; y: number; w: number; h: number };
@@ -4508,6 +4539,9 @@ function ParagraphEditor({
   /** The page's view rotation — the resize grips map their screen
    * drag back onto the paragraph's inline axis through it. */
   rotation?: number;
+  /** Misspelled code-point ranges in the current text (see the prop of the
+   * same purpose on PageCell). */
+  checkSpelling?: (text: string) => Promise<Array<{ start: number; end: number }>>;
 }): React.JSX.Element {
   useTranslation();
   const [value, setValue] = useState(para.text);
@@ -4607,11 +4641,43 @@ function ParagraphEditor({
   // The rich surface's content, computed once: the JSX assigns it and the
   // layout effect compares against the last committed copy to know when the
   // DOM was rebuilt (and the selection therefore needs restoring).
-  const html = segmentsToHtml(styledSegments(value, spanColors, shownFaces, shownSizes), {
-    basePx: fontPx,
-    baseSize: Math.max(1, size),
-    rev,
-  });
+  // Misspelled ranges for the text as it stands. Debounced because a check
+  // is an engine round trip and the value changes on every keystroke; the
+  // ranges are DROPPED the moment the text changes so a squiggle can never
+  // sit under a word the user has already corrected (a stale range would
+  // underline whatever now occupies those offsets).
+  const [misspelled, setMisspelled] = useState<Array<{ start: number; end: number }>>([]);
+  useEffect(() => {
+    if (!checkSpelling) {
+      setMisspelled([]);
+      return;
+    }
+    setMisspelled([]);
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void checkSpelling(value)
+        .then((ranges) => {
+          if (!cancelled) setMisspelled(ranges);
+        })
+        .catch(() => {
+          // A dictionary that will not load is reported where the user asked
+          // for a check — the Spelling panel. The editor simply draws nothing.
+          if (!cancelled) setMisspelled([]);
+        });
+    }, SPELL_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [value, checkSpelling]);
+  const html = segmentsToHtml(
+    styledSegments(value, spanColors, shownFaces, shownSizes, misspelled),
+    {
+      basePx: fontPx,
+      baseSize: Math.max(1, size),
+      rev,
+    },
+  );
   // The face covering a code-point position (for a per-span toggle to flip
   // one axis while keeping the others), or the plain default.
   const faceAt = (

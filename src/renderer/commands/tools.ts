@@ -106,7 +106,11 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     title: 'Edit',
     // Name text, paragraph, image, and text-authoring capabilities explicitly.
     description: 'Edit text, whole paragraphs, and images — or add new text — right on the page.',
-    ops: [],
+    // The document-wide spelling check belongs to the tool that edits text,
+    // and hosting a pane here does NOT move the tool off the page: the
+    // reducer arms a tool's canvas mode before it considers ops, exactly as
+    // Comment hosts its review list while still landing you on the document.
+    ops: ['spelling'],
     // Three modes: 'edit' (click existing content to edit), 'addtext' (drag a
     // box to author new text), 'addimage' (drag a box, pick a raster). Opening
     // the tool arms the first; the secondary toolbar switches between them.

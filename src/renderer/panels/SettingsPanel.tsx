@@ -411,6 +411,20 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         </p>
       </div>
       <div>
+        <label className="flex items-center gap-2 text-sm text-neutral-400">
+          <input
+            type="checkbox"
+            data-testid="pref-spellcheck-as-you-type"
+            checked={settings.spellCheckAsYouType}
+            onChange={(e) => update('spellCheckAsYouType', e.target.checked)}
+          />
+          {tChrome('panel.settings.spellCheckAsYouType')}
+        </label>
+        <p className="text-xs text-neutral-500 mt-1">
+          {tChrome('panel.settings.spellCheckAsYouTypeHint')}
+        </p>
+      </div>
+      <div>
         <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.settings.compressionQuality')}</label>
         <select
           aria-label={tChrome('panel.settings.compressionQuality')}

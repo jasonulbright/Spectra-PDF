@@ -1,0 +1,165 @@
+# Pinned manifest for the bundled spelling dictionaries.
+#
+# bundle-dictionaries.ps1 fetches every row below from ONE upstream tree --
+# the LibreOffice `dictionaries` repository -- at the commit pinned in the
+# script, and writes resources/dictionaries/<tag>/. Raw URLs at a commit SHA
+# are immutable, so the pin plus the per-file sha256 in this file is the
+# integrity record; nothing is re-fetched at build time from a moving ref.
+#
+# ROLES
+#  aff     the Hunspell affix table, written as <tag>.aff
+#  dic     the Hunspell word list, written as <tag>.dic
+#  notice  an upstream licence or readme file, copied verbatim into
+#          <tag>/notices/ under its own name
+#
+# RULES
+#  - A dictionary is never dropped to simplify this file. Copyleft rows are
+#    ordinary rows: this project is MIT open source with a public repository,
+#    so the source column answers "where is the source".
+#  - Every tag carrying an aff+dic pair must carry at least one notice row.
+#    bundle-dictionaries.ps1 refuses to write the tree otherwise.
+#  - A tag ships only once its smoke set passes (tests/test_spelling.py):
+#    ordinary words of the language must be accepted and planted misspellings
+#    rejected. A dictionary that rejects its own vocabulary is worse than no
+#    dictionary, so it does not get a row here.
+#  - Keep sorted by tag, then role, so a diff reads cleanly.
+#
+tag	role	upstream	sha256	spdx	source
+ar	aff	ar/ar.aff	cec30b8621001e49618feb05aec1984c5fcfbf7d2ec309901d5cbf66585217a3	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ar
+ar	dic	ar/ar.dic	2a3e5367f61c1583734db9d66734f5603e6be5c2d227cf5c5cd7e4ca586e34fe	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ar
+ar	notice	ar/COPYING.txt	73480d918cd78d655508e80aa88c022cbd53634524a0f714b5f2519f2cf19124	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ar
+ar	notice	ar/README_ar.txt	5ead684ae5211ccf615686959e24bd21ef6eebbb6195997529fda08b993f615e	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ar
+ca	aff	ca/dictionaries/ca.aff	abcca353b16af2d91be51d68899f47e5076a47489d08f696717fbac44074ddb8	GPL-2.0-or-later OR LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ca
+ca	dic	ca/dictionaries/ca.dic	4838bb46776f5d82a3823aa7abb17cd00b9dc0c301d1b6d002e1ab6558fa07ca	GPL-2.0-or-later OR LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ca
+ca	notice	ca/LICENSES-en.txt	e1931218994ce97e1d92fe57173838cd8a2c4de78fc4687f7e58bd2b3218272d	GPL-2.0-or-later OR LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ca
+ca	notice	ca/README_ca.txt	ebdec61a0083bf2435879e236d6de44bab2959ad03bcce2a0d8ad4190097810c	GPL-2.0-or-later OR LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ca
+ca_valencia	aff	ca/dictionaries/ca-valencia.aff	2e0b44b5dffd1b9b2f1af432f7db43f847f32e0103a91ba961e8652128dc9fad	GPL-2.0-or-later OR LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ca
+ca_valencia	dic	ca/dictionaries/ca-valencia.dic	8f65e295eac2ae5ef8ed6b4d584b1acde0d1d353cadde67aefe8dadd1632b47b	GPL-2.0-or-later OR LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ca
+ca_valencia	notice	ca/LICENSES-en.txt	e1931218994ce97e1d92fe57173838cd8a2c4de78fc4687f7e58bd2b3218272d	GPL-2.0-or-later OR LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ca
+ca_valencia	notice	ca/README_ca.txt	ebdec61a0083bf2435879e236d6de44bab2959ad03bcce2a0d8ad4190097810c	GPL-2.0-or-later OR LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ca
+cs_CZ	aff	cs_CZ/cs_CZ.aff	7ecb20620ecd46ebd9c36f3f33e69dd4eda385cba5b2bb4e6bc396d910e297f7	GPL-2.0-only	https://github.com/LibreOffice/dictionaries/tree/master/cs_CZ
+cs_CZ	dic	cs_CZ/cs_CZ.dic	d8e8c88c006fdae72dac8c85df11b0c99a773e05a4ab0fcbe92244876668ca74	GPL-2.0-only	https://github.com/LibreOffice/dictionaries/tree/master/cs_CZ
+cs_CZ	notice	cs_CZ/README_en.txt	0fe6d017aa91ffb58146d19160f8207900cc0c49d5fffef0b1a7d3a364cb29bd	GPL-2.0-only	https://github.com/LibreOffice/dictionaries/tree/master/cs_CZ
+cs_CZ	notice	cs_CZ/README_cs.txt	24d1d07409b62e8e6f0ee114991d4749d3e97b05ea19feca835916af67312720	GPL-2.0-only	https://github.com/LibreOffice/dictionaries/tree/master/cs_CZ
+da_DK	aff	da_DK/da_DK.aff	ee4fe193d19b72aa64bc0d2b9bcdf44ee44f11d9b4e7dcf6da36fd0e91528561	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/da_DK
+da_DK	dic	da_DK/da_DK.dic	298aabeca362ee2c71836c5c7748d22080a460bd7193e6fbd2471f27a70d0fd3	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/da_DK
+da_DK	notice	da_DK/README_da_DK.txt	9508f4ec9e14a3d2a3360dd694881440d0d73fe1fe076e547639e5fe33c7b42d	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/da_DK
+de_AT	aff	de/de_AT_frami.aff	8b428f6215e36e145626e3d150cd0ffe273e1ad9a9ec0a1bbd31ee468ee39edc	GPL-2.0-or-later OR GPL-3.0-or-later OR LGPL-2.1-or-later OR OASIS-Open-Public-Use-1.0	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_AT	dic	de/de_AT_frami.dic	d821e0a5a029b66df696c982a4cd55eb792139c33716ccbde364941db2448cbb	GPL-2.0-or-later OR GPL-3.0-or-later OR LGPL-2.1-or-later OR OASIS-Open-Public-Use-1.0	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_AT	notice	de/README_de_DE_frami.txt	c141f4f79c428b7348b5012836f4ad3db4d124f288f15effc22696dc876512ae	GPL-2.0-or-later OR GPL-3.0-or-later OR LGPL-2.1-or-later OR OASIS-Open-Public-Use-1.0	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_AT	notice	de/COPYING_GPLv2	e7431ac20e815b6797369e802f9e4bb1b0082485060d8b096235f035d741bd89	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_AT	notice	de/COPYING_GPLv3	8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_AT	notice	de/COPYING_LGPL_v2.1.txt	dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_AT	notice	de/COPYING_OASIS.txt	2d9d81e88ecd0e837122f4688ca7a6a5bd7bb41bff6e21ff5d4663eb43372db3	OASIS-Open-Public-Use-1.0	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_CH	aff	de/de_CH_frami.aff	d86884be4c3f07e5e08057884856feabf2872b4e2f90a587a11376082bc4126b	GPL-2.0-or-later OR GPL-3.0-or-later OR LGPL-2.1-or-later OR OASIS-Open-Public-Use-1.0	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_CH	dic	de/de_CH_frami.dic	80a4df38cdc3e16d2f042f8eba4a99668ab9c075662e4262c62f8bba46c7bd16	GPL-2.0-or-later OR GPL-3.0-or-later OR LGPL-2.1-or-later OR OASIS-Open-Public-Use-1.0	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_CH	notice	de/README_de_DE_frami.txt	c141f4f79c428b7348b5012836f4ad3db4d124f288f15effc22696dc876512ae	GPL-2.0-or-later OR GPL-3.0-or-later OR LGPL-2.1-or-later OR OASIS-Open-Public-Use-1.0	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_CH	notice	de/COPYING_GPLv2	e7431ac20e815b6797369e802f9e4bb1b0082485060d8b096235f035d741bd89	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_CH	notice	de/COPYING_GPLv3	8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_CH	notice	de/COPYING_LGPL_v2.1.txt	dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_CH	notice	de/COPYING_OASIS.txt	2d9d81e88ecd0e837122f4688ca7a6a5bd7bb41bff6e21ff5d4663eb43372db3	OASIS-Open-Public-Use-1.0	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_DE	aff	de/de_DE_frami.aff	646bf3333ac69c23e9d794533ee5241d6f755c359e8fe10a648f87613743d594	GPL-2.0-or-later OR GPL-3.0-or-later OR LGPL-2.1-or-later OR OASIS-Open-Public-Use-1.0	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_DE	dic	de/de_DE_frami.dic	4ca3c958b0e5545910999bc246f668840bf8ede3df8e5e6790d05edd5a586c38	GPL-2.0-or-later OR GPL-3.0-or-later OR LGPL-2.1-or-later OR OASIS-Open-Public-Use-1.0	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_DE	notice	de/README_de_DE_frami.txt	c141f4f79c428b7348b5012836f4ad3db4d124f288f15effc22696dc876512ae	GPL-2.0-or-later OR GPL-3.0-or-later OR LGPL-2.1-or-later OR OASIS-Open-Public-Use-1.0	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_DE	notice	de/COPYING_GPLv2	e7431ac20e815b6797369e802f9e4bb1b0082485060d8b096235f035d741bd89	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_DE	notice	de/COPYING_GPLv3	8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_DE	notice	de/COPYING_LGPL_v2.1.txt	dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/de
+de_DE	notice	de/COPYING_OASIS.txt	2d9d81e88ecd0e837122f4688ca7a6a5bd7bb41bff6e21ff5d4663eb43372db3	OASIS-Open-Public-Use-1.0	https://github.com/LibreOffice/dictionaries/tree/master/de
+el_GR	aff	el_GR/el_GR.aff	868dfe13ad7d34251915a745e44d38542831463d56e60732ba3a5bc1dcca582a	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/el_GR
+el_GR	dic	el_GR/el_GR.dic	e5b9b9c2cf05bbc59e03fe302b462dae85968f822f4fc219a8ed2879d6943720	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/el_GR
+el_GR	notice	el_GR/README_el_GR.txt	8b942846bba64ac1b28c38aee294f1667d0063e2162d59030d0da09332e8c342	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/el_GR
+en_AU	aff	en/en_AU.aff	e746c882dd6f303c2c46e7452804b9201115a6942cfeb15f18f8edf774d2e24e	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_AU	dic	en/en_AU.dic	aa07c46571f306b79fc1bc534357ed357af15687381b26f891ba66e8a2caed89	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_AU	notice	en/README_en_AU.txt	f0897dcfdf058bcfc93fbc8e7e1b5da4c27ae9e175ee3a9242e887f02eb84a8b	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_AU	notice	en/license.txt	df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_CA	aff	en/en_CA.aff	e746c882dd6f303c2c46e7452804b9201115a6942cfeb15f18f8edf774d2e24e	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_CA	dic	en/en_CA.dic	53096689870246a78fa408b1e7a8c49bc140bd466a84a384cfb509445fff7173	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_CA	notice	en/README_en_CA.txt	86700e39b2307dda4c087ad3505a1e634a5b4d518ab808c398a16d21ebe957e2	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_CA	notice	en/license.txt	df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_GB	aff	en/en_GB.aff	0fd6ed120ef28957847d98ba5149b117e27116cf81b5aa36208453f6755a36fd	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_GB	dic	en/en_GB.dic	04e90f34f5263bf26780e9c4a442e9ad16584e227af49ddd1b3b21b01df5b29c	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_GB	notice	en/README_en_GB.txt	18b5833de60a52ffcb6e5b6b5048bb5a5d910acfecd5b096985b77058223880c	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_GB	notice	en/license.txt	df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_US	aff	en/en_US.aff	e746c882dd6f303c2c46e7452804b9201115a6942cfeb15f18f8edf774d2e24e	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_US	dic	en/en_US.dic	f0b1a234bd178bdd01875b2a392a9647f888b8fe879f79c52aae62c2759b3647	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_US	notice	en/README_en_US.txt	168b4c01cb841f766a72f310b065c04d09cff46376c37a81d799593ce751c371	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_US	notice	en/license.txt	df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_ZA	aff	en/en_ZA.aff	5ddaf2bd123df16cbb887adf7dd835593200d0454703c461714886833c9ddec9	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_ZA	dic	en/en_ZA.dic	a438af6c6bfa9b25208d72c6ebf53507e178d6e6d285895e97870c36193433b1	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_ZA	notice	en/README_en_ZA.txt	116ade99dd4a92715b21ae5b358a1a8cc814c76c0d6e582fdba4870835d1a6e2	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+en_ZA	notice	en/license.txt	df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/en
+es_ES	aff	es/es_ES.aff	e73a9bf8e1383f4986a5dc9e2fbed49371c0c61f511c626d15586bd433c1cad9	GPL-3.0-only OR LGPL-3.0-only OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/es
+es_ES	dic	es/es_ES.dic	6975dddec3d5d2c676069537bc67b4b5f786c65c5d4cf6703a82acf779ac9ec1	GPL-3.0-only OR LGPL-3.0-only OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/es
+es_ES	notice	es/LICENSE.md	2b70fd5cb8d3b34cc6ae322c969557a2270b99017594addb2531ef5ffd9e1b17	GPL-3.0-only OR LGPL-3.0-only OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/es
+es_ES	notice	es/GPLv3.txt	8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903	GPL-3.0-only	https://github.com/LibreOffice/dictionaries/tree/master/es
+es_ES	notice	es/LGPLv3.txt	a853c2ffec17057872340eee242ae4d96cbf2b520ae27d903e1b2fef1a5f9d1c	LGPL-3.0-only	https://github.com/LibreOffice/dictionaries/tree/master/es
+es_ES	notice	es/MPL-1.1.txt	53692a2ed6c6a2c6ec9b32dd0b820dfae91e0a1fcdf625ca9ed0bdf8705fcc4f	MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/es
+es_MX	aff	es/es_MX.aff	d966cb748e4a688ed75ec84b50c0835ac438e5325ee4fce703a093794f9cba7e	GPL-3.0-only OR LGPL-3.0-only OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/es
+es_MX	dic	es/es_MX.dic	44ce35af220962c68f97962776639bef271f7d90a85ba924b539a36e33315f82	GPL-3.0-only OR LGPL-3.0-only OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/es
+es_MX	notice	es/LICENSE.md	2b70fd5cb8d3b34cc6ae322c969557a2270b99017594addb2531ef5ffd9e1b17	GPL-3.0-only OR LGPL-3.0-only OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/es
+es_MX	notice	es/GPLv3.txt	8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903	GPL-3.0-only	https://github.com/LibreOffice/dictionaries/tree/master/es
+es_MX	notice	es/LGPLv3.txt	a853c2ffec17057872340eee242ae4d96cbf2b520ae27d903e1b2fef1a5f9d1c	LGPL-3.0-only	https://github.com/LibreOffice/dictionaries/tree/master/es
+es_MX	notice	es/MPL-1.1.txt	53692a2ed6c6a2c6ec9b32dd0b820dfae91e0a1fcdf625ca9ed0bdf8705fcc4f	MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/es
+fr_FR	aff	fr_FR/dictionaries/fr.aff	c176610cd5dc4846806a65ddd029f422d87978bf58f224aa44222662a16a2de5	MPL-2.0	https://github.com/LibreOffice/dictionaries/tree/master/fr_FR
+fr_FR	dic	fr_FR/dictionaries/fr.dic	b78a868e31dd6e373b6c3217969afb898a9acde828a5e7ef97308da42218c88c	MPL-2.0	https://github.com/LibreOffice/dictionaries/tree/master/fr_FR
+fr_FR	notice	fr_FR/dictionaries/README_dict_fr.txt	4a25abf740ad6ba5e8d0cfc0d2ffadc3c13c303f8fe389f323b061a389350f83	MPL-2.0	https://github.com/LibreOffice/dictionaries/tree/master/fr_FR
+he_IL	aff	he_IL/he_IL.aff	6caf86b3a545be5614f135d33a48baa244a59aca43f051dda6173d5d9cbc7700	AGPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/he_IL
+he_IL	dic	he_IL/he_IL.dic	5f5331f90ed775bd527f6fb7ad1ead9a1b7d8ce46ad640c2387d9d1dc91d3058	AGPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/he_IL
+he_IL	notice	he_IL/README_he_IL.txt	3212469adc6113e77939c20de2c29b9cec6c917d0cae80f2554cac092198e682	AGPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/he_IL
+hu_HU	aff	hu_HU/hu_HU.aff	f3a2748dd535cfde2142ab17d0f7f8e4787b03fb25a60829c69ac8d493db4802	LGPL-2.1-or-later OR GPL-2.0-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/hu_HU
+hu_HU	dic	hu_HU/hu_HU.dic	97293d670ad4a3b8e7eebef7e25c6e8e939b914c64b6b4672b2bf416b768f990	LGPL-2.1-or-later OR GPL-2.0-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/hu_HU
+hu_HU	notice	hu_HU/README_hu_HU.txt	52b17fc3d53b6935eab747a71894507d702f7f0fde379c819c16cc803005fc84	LGPL-2.1-or-later OR GPL-2.0-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/hu_HU
+it_IT	aff	it_IT/it_IT.aff	951afaa19272f13555b8823e8bcf9ccf78f8fe1a07835bdfb912ab3e4d537c2b	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/it_IT
+it_IT	dic	it_IT/it_IT.dic	bae1e3501dcd2a923669592493b3fde6c02aae7c7aab83bf5e5b49077e73dd64	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/it_IT
+it_IT	notice	it_IT/README_it_IT.txt	34c3e93595cf3cf5f3afc9bc0d98eea12593750383f1e82ed1d3ca29f9681283	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/it_IT
+nb_NO	aff	no/nb_NO.aff	68265c84eebd06d77031947c6c3e49de4c1e211cfcfed675f8d8dc63517df096	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/no
+nb_NO	dic	no/nb_NO.dic	b06ec5e56356d97165109abe914f162f1350ebebadfc5f89c2207b6e676c2316	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/no
+nb_NO	notice	no/COPYING	e7431ac20e815b6797369e802f9e4bb1b0082485060d8b096235f035d741bd89	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/no
+nl_NL	aff	nl_NL/nl_NL.aff	f0233d4f721f4661cf5f4d05ed2739549322bf3b6b66764b55a38257e1e16e6f	BSD-3-Clause OR CC-BY-3.0	https://github.com/LibreOffice/dictionaries/tree/master/nl_NL
+nl_NL	dic	nl_NL/nl_NL.dic	bc28af45307700a9927ad5719184da44dfd7eed4f707b8c1477f6d8a21b586a6	BSD-3-Clause OR CC-BY-3.0	https://github.com/LibreOffice/dictionaries/tree/master/nl_NL
+nl_NL	notice	nl_NL/LICENSE.txt	2189c248cbc054445aeac6cd65b87eebd0a115efeb55ed498b0f2a73441805dd	BSD-3-Clause OR CC-BY-3.0	https://github.com/LibreOffice/dictionaries/tree/master/nl_NL
+nl_NL	notice	nl_NL/README.md	aa4685a78f32d0d24a67dd5043ef4e39acc8720c3e416fe5d201985980dbc004	BSD-3-Clause OR CC-BY-3.0	https://github.com/LibreOffice/dictionaries/tree/master/nl_NL
+nn_NO	aff	no/nn_NO.aff	462705808519ff8f16a91ad8b21001b3e8a5c1cb21747777a91a9877fc2dfdae	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/no
+nn_NO	dic	no/nn_NO.dic	a2853488ad8696c817a642dafe666d8d7286e8b7bfcbae606d126b61311236ee	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/no
+nn_NO	notice	no/COPYING	e7431ac20e815b6797369e802f9e4bb1b0082485060d8b096235f035d741bd89	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/no
+pl_PL	aff	pl_PL/pl_PL.aff	82973651651aa930335c865b339b98db376ca3dbf3a661b70b9eeb71fdf41dca	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1 OR CC-BY-SA-4.0	https://github.com/LibreOffice/dictionaries/tree/master/pl_PL
+pl_PL	dic	pl_PL/pl_PL.dic	c0848440599eb88e5aca500418d5f389e562ec2c157b63dbe39d354658ffba49	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1 OR CC-BY-SA-4.0	https://github.com/LibreOffice/dictionaries/tree/master/pl_PL
+pl_PL	notice	pl_PL/README_en.txt	fb5f9b4a0643821cf88775c0932810c1cd05f236136c913e3eaf1e24806f3f44	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1 OR CC-BY-SA-4.0	https://github.com/LibreOffice/dictionaries/tree/master/pl_PL
+pl_PL	notice	pl_PL/README_pl.txt	ce3ad7ab1d3a8b767b8f7dcc870796fbda76bc7ad8cde22f6312b0cf86a5bd11	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1 OR CC-BY-SA-4.0	https://github.com/LibreOffice/dictionaries/tree/master/pl_PL
+pt_BR	aff	pt_BR/pt_BR.aff	21d8ad2a769a60e17e2b5ea4ef11d4d593a58b9e2a82d642ef82d6a4c5523865	LGPL-3.0-only	https://github.com/LibreOffice/dictionaries/tree/master/pt_BR
+pt_BR	dic	pt_BR/pt_BR.dic	a38bfb26b68ece2834e79fe83e48d5792652970ace12db89d1b9674bf9933183	LGPL-3.0-only	https://github.com/LibreOffice/dictionaries/tree/master/pt_BR
+pt_BR	notice	pt_BR/README_en.txt	bb064f3db7ba5f5536da7d079773f692c5f928822e8aebc3d78259ff6cceb9e5	LGPL-3.0-only	https://github.com/LibreOffice/dictionaries/tree/master/pt_BR
+pt_BR	notice	pt_BR/README_pt_BR.txt	9974ce691fdc1fe731717d7a2dc668244405fdc2bf9bf3367eb9b29e85177c88	LGPL-3.0-only	https://github.com/LibreOffice/dictionaries/tree/master/pt_BR
+pt_PT	aff	pt_PT/pt_PT.aff	975a209fcc892cb382fa5f34a28c391a39668661ce373ae071287809c5fcae24	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/pt_PT
+pt_PT	dic	pt_PT/pt_PT.dic	e29ba2d7aa8a2ad43e9cb46ac6473064b661545c87002aea90e18899d98d3cc9	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/pt_PT
+pt_PT	notice	pt_PT/LICENSES.txt	d2c1cfe2e2dd81c651aec3fda5d1b4b4e7679b9e04f8cdc37586e521837384d1	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/pt_PT
+pt_PT	notice	pt_PT/README_pt_PT.txt	36de7d88a406a4947bf646a64145f00827566808988632e3df969aa95776060c	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/pt_PT
+ro_RO	aff	ro/ro_RO.aff	0c83a02f0ac5202c068e60e1aef5ce99e13d7f6c92ae8e68ca8b9e06829edfd1	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/ro
+ro_RO	dic	ro/ro_RO.dic	c26a9356f598a0ae89e7be650f6bdd9ba70acce66b41d7ab14c0c68639b6ed33	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/ro
+ro_RO	notice	ro/README_EN.txt	854c3b7e6575da37d066d5a09945af336a8ecc62c5e3c1049e97504dc67cbd81	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/ro
+ro_RO	notice	ro/COPYING.GPL	2233a3eecf299bc271f1a9f57f0b3198343ad4ab16571d70320133002c51496b	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ro
+ro_RO	notice	ro/COPYING.LGPL	5bbcbb737e60fe9deba08ecbd00920cfcc3403ba2e534c64fdeea49d6bb87509	LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ro
+ro_RO	notice	ro/COPYING.MPL	53692a2ed6c6a2c6ec9b32dd0b820dfae91e0a1fcdf625ca9ed0bdf8705fcc4f	MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/ro
+ru_RU	aff	ru_RU/ru_RU.aff	38ce7d4af78e211e9bafe4bf7e3d6a2c420591136cb738ec6648f8fdf6524cd7	LGPL-2.1-or-later OR BSD-3-Clause	https://github.com/LibreOffice/dictionaries/tree/master/ru_RU
+ru_RU	dic	ru_RU/ru_RU.dic	f6047416a0204adbecf3a451b874ec8a97ee37e2cbc714466ef04d8dbcc0d6fc	LGPL-2.1-or-later OR BSD-3-Clause	https://github.com/LibreOffice/dictionaries/tree/master/ru_RU
+ru_RU	notice	ru_RU/README_ru_RU.txt	262af2f6ad70a61e5ee1332ff44fa8ee50edca819cf33207d8ad6ba6a0c9be52	LGPL-2.1-or-later OR BSD-3-Clause	https://github.com/LibreOffice/dictionaries/tree/master/ru_RU
+sk_SK	aff	sk_SK/sk_SK.aff	af67bbe8ea9dea74968ec01acd266b3f74177ca087ee6eb7898c576e0aef7a3d	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/sk_SK
+sk_SK	dic	sk_SK/sk_SK.dic	3e3dbd5c6af8431a3a47652c69692f3f86d0cd82deb4418e49a057a33ef56063	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/sk_SK
+sk_SK	notice	sk_SK/LICENSE.txt	dc06f891b13dcb6fe1ede36c0c9020f0e57e6777aca951ecaceefa95a19d7cfc	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/sk_SK
+sk_SK	notice	sk_SK/README_en.txt	a36af75654ae6e65614f7821b2c401ea1f3b4adfdcba9b59efcb1a06c96df14d	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/sk_SK
+sl_SI	aff	sl_SI/sl_SI.aff	3cb3e84824959928c8004e07b37b9d2bcb84176095f514e134f006dbb14a0beb	GPL-2.0-or-later OR LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/sl_SI
+sl_SI	dic	sl_SI/sl_SI.dic	e157aabf1a20d21f639d04cf79f019ff1a3eb623c6780a726ffa4293787fa0ab	GPL-2.0-or-later OR LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/sl_SI
+sl_SI	notice	sl_SI/README_sl_SI.txt	80e3fb8a78bf7c3cf1c76679ff1f11d4cb100440c9362553636b02edca005eb8	GPL-2.0-or-later OR LGPL-2.1-or-later	https://github.com/LibreOffice/dictionaries/tree/master/sl_SI
+sv_FI	aff	sv_SE/dictionaries/sv_FI.aff	cf50fb4860a4b839011e08c580459bb45fe018ca5a4e1c3b80ac69d9e47d31a8	LGPL-3.0-only	https://github.com/LibreOffice/dictionaries/tree/master/sv_SE
+sv_FI	dic	sv_SE/dictionaries/sv_FI.dic	3a2ee52ff2d9cbac633cf2400b3a0afef1804d0c75894b273ee18a8fd397b9d3	LGPL-3.0-only	https://github.com/LibreOffice/dictionaries/tree/master/sv_SE
+sv_FI	notice	sv_SE/LICENSE_en_US.txt	1314b6004bff32053ca25aca5fc419e905d75a6d49f9f9825baf4f02298af6d9	LGPL-3.0-only	https://github.com/LibreOffice/dictionaries/tree/master/sv_SE
+sv_SE	aff	sv_SE/dictionaries/sv_SE.aff	b721c9d44bee912feb182b601a1bc2ae3e7dffef660f4130cf2751867488a9dd	LGPL-3.0-only	https://github.com/LibreOffice/dictionaries/tree/master/sv_SE
+sv_SE	dic	sv_SE/dictionaries/sv_SE.dic	384a2126eff333f5f6f9790ae892554546f53948d2988c600397cb5ad6ce66e8	LGPL-3.0-only	https://github.com/LibreOffice/dictionaries/tree/master/sv_SE
+sv_SE	notice	sv_SE/LICENSE_en_US.txt	1314b6004bff32053ca25aca5fc419e905d75a6d49f9f9825baf4f02298af6d9	LGPL-3.0-only	https://github.com/LibreOffice/dictionaries/tree/master/sv_SE
+tr_TR	aff	tr_TR/tr_TR.aff	a04a227b2ee45574000b876a1afa982e3436d49ebb97a7a796ddc5ec0cc8191b	MPL-2.0	https://github.com/LibreOffice/dictionaries/tree/master/tr_TR
+tr_TR	dic	tr_TR/tr_TR.dic	48e5352c5770956b24f355265aef7649b25bcb4d933c0b254ea8b419c241f4bd	MPL-2.0	https://github.com/LibreOffice/dictionaries/tree/master/tr_TR
+tr_TR	notice	tr_TR/LICENSE	3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04	MPL-2.0	https://github.com/LibreOffice/dictionaries/tree/master/tr_TR
+tr_TR	notice	tr_TR/README.txt	18750c09a1e666a6d34854b92dfdc0353c3bfe39008b412d539f52821ecdbdec	MPL-2.0	https://github.com/LibreOffice/dictionaries/tree/master/tr_TR
+uk_UA	aff	uk_UA/uk_UA.aff	2219dd15e9802adebc45722c60943b1472640260491af38dd3e43b07e75585e6	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/uk_UA
+uk_UA	dic	uk_UA/uk_UA.dic	2e5a9e67be63bdb089b3459addb5d71113319d13768e277bcae20f3cc1ad5a93	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/uk_UA
+uk_UA	notice	uk_UA/README_uk_UA.txt	664436fee625b4a3e712483947d1711a2f467670f4c389bcf10abca2a564e1dc	GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1	https://github.com/LibreOffice/dictionaries/tree/master/uk_UA

@@ -79,6 +79,9 @@ export const dialog = {
   pickAnyFiles: () => invoke<string[]>('pick_any_files'),
   /** Pick a folder (Batch OCR source/destination). Returns null if cancelled. */
   pickFolder: (title?: string) => invoke<string | null>('pick_folder_dialog', { title }),
+  /** A user's own Hunspell pair (.aff + .dic) in ONE dialog — picking them
+   *  separately invites a pair from two different languages. */
+  pickDictionaryFiles: () => invoke<string[] | null>('pick_dictionary_files'),
   /** Pick ONE picture to stamp as a watermark. Filtered to the Create PDF
    * image set — the same set the engine accepts. Null if cancelled. */
   pickWatermarkImage: () => invoke<string | null>('pick_watermark_image'),
@@ -389,6 +392,12 @@ export const app = {
   getSofficePath: () => invoke<string>('get_soffice_path'),
   /** The bundled Edit-tool fallback font (resources/fonts). */
   getEditFontPath: () => invoke<string>('get_edit_font_path'),
+  /** The bundled spelling dictionaries DIRECTORY (resources/dictionaries) —
+   *  the engine resolves a language tag against what is on disk. */
+  getDictionaryPath: () => invoke<string>('get_dictionary_path'),
+  /** The managed folder a user's own dictionaries are copied into (Rust owns
+   *  the path, so an added dictionary outlives the folder it came from). */
+  userDictionaryDir: () => invoke<string>('user_dictionary_dir'),
   /** Installed Windows printers + the default (the Print dialog's picker). */
   listPrinters: () => invoke<PrinterList>('list_printers'),
   /** One printer's papers/duplex/color — gates the Print dialog's option

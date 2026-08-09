@@ -120,6 +120,7 @@ below were read from those wheels' METADATA):
 | python-pkcs11 | MIT | <https://github.com/pyauth/python-pkcs11> |
 | python-pptx | MIT | <https://github.com/scanny/python-pptx> |
 | requests | Apache-2.0 (its NOTICE file ships in its dist-info) | <https://github.com/psf/requests> |
+| spylls | MIT | <https://github.com/zverok/spylls> |
 | typing_extensions | PSF-2.0 | <https://github.com/python/typing_extensions> |
 | tzdata | Apache-2.0 | <https://github.com/python/tzdata> |
 | uharfbuzz | Apache-2.0 (embeds HarfBuzz, MIT-0) | <https://github.com/harfbuzz/uharfbuzz> |
@@ -327,6 +328,57 @@ Recognition runs in the engine rather than the UI, which is what lets the CLI
 open. There is exactly one recognizer; the previous in-browser WASM path
 (**tesseract.js** / **tesseract.js-core**, Apache-2.0) was retired in v2.8.5 and
 is no longer distributed.
+
+## Spelling dictionaries
+
+34 Hunspell `.aff`/`.dic` pairs, vendored by
+`scripts/bundle-dictionaries.ps1` into the app's `dictionaries` resources from
+the **LibreOffice `dictionaries`** collection at a pinned commit. Every shipped
+file's SHA-256, SPDX expression and upstream URL is in
+`scripts/dictionaries.tsv`, and each language's own upstream licence and readme
+files ship verbatim beside its word list in `dictionaries/<tag>/notices/`.
+
+Several of these are copyleft. This project is MIT-licensed with a public
+repository, so the obligation those licences carry — say where the source is —
+is met by naming the upstreams below, exactly as the bundled OCR runtime's
+`libjbig-0.dll` (GPL-2.0) and pillow-heif's x265 are handled.
+
+| Tag | Language | License | Source |
+|---|---|---|---|
+| ar | ar | GPL-2.0-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/ar> |
+| ca | ca | GPL-2.0-or-later OR LGPL-2.1-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/ca> |
+| ca_valencia | ca-valencia | GPL-2.0-or-later OR LGPL-2.1-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/ca> |
+| cs_CZ | cs-CZ | GPL-2.0-only | <https://github.com/LibreOffice/dictionaries/tree/master/cs_CZ> |
+| da_DK | da-DK | GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1 | <https://github.com/LibreOffice/dictionaries/tree/master/da_DK> |
+| de_AT | de-AT | GPL-2.0-or-later OR GPL-3.0-or-later OR LGPL-2.1-or-later OR OASIS-Open-Public-Use-1.0 | <https://github.com/LibreOffice/dictionaries/tree/master/de> |
+| de_CH | de-CH | GPL-2.0-or-later OR GPL-3.0-or-later OR LGPL-2.1-or-later OR OASIS-Open-Public-Use-1.0 | <https://github.com/LibreOffice/dictionaries/tree/master/de> |
+| de_DE | de-DE | GPL-2.0-or-later OR GPL-3.0-or-later OR LGPL-2.1-or-later OR OASIS-Open-Public-Use-1.0 | <https://github.com/LibreOffice/dictionaries/tree/master/de> |
+| el_GR | el-GR | GPL-3.0-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/el_GR> |
+| en_AU | en-AU | LGPL-2.1-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/en> |
+| en_CA | en-CA | LGPL-2.1-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/en> |
+| en_GB | en-GB | LGPL-2.1-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/en> |
+| en_US | en-US | LGPL-2.1-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/en> |
+| en_ZA | en-ZA | LGPL-2.1-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/en> |
+| es_ES | es-ES | GPL-3.0-only OR LGPL-3.0-only OR MPL-1.1 | <https://github.com/LibreOffice/dictionaries/tree/master/es> |
+| es_MX | es-MX | GPL-3.0-only OR LGPL-3.0-only OR MPL-1.1 | <https://github.com/LibreOffice/dictionaries/tree/master/es> |
+| fr_FR | fr-FR | MPL-2.0 | <https://github.com/LibreOffice/dictionaries/tree/master/fr_FR> |
+| he_IL | he-IL | AGPL-3.0-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/he_IL> |
+| hu_HU | hu-HU | LGPL-2.1-or-later OR GPL-2.0-or-later OR MPL-1.1 | <https://github.com/LibreOffice/dictionaries/tree/master/hu_HU> |
+| it_IT | it-IT | GPL-3.0-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/it_IT> |
+| nb_NO | nb-NO | GPL-2.0-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/no> |
+| nl_NL | nl-NL | BSD-3-Clause OR CC-BY-3.0 | <https://github.com/LibreOffice/dictionaries/tree/master/nl_NL> |
+| nn_NO | nn-NO | GPL-2.0-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/no> |
+| pl_PL | pl-PL | GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1 OR CC-BY-SA-4.0 | <https://github.com/LibreOffice/dictionaries/tree/master/pl_PL> |
+| pt_BR | pt-BR | LGPL-3.0-only | <https://github.com/LibreOffice/dictionaries/tree/master/pt_BR> |
+| pt_PT | pt-PT | GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1 | <https://github.com/LibreOffice/dictionaries/tree/master/pt_PT> |
+| ro_RO | ro-RO | GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1 | <https://github.com/LibreOffice/dictionaries/tree/master/ro> |
+| ru_RU | ru-RU | LGPL-2.1-or-later OR BSD-3-Clause | <https://github.com/LibreOffice/dictionaries/tree/master/ru_RU> |
+| sk_SK | sk-SK | GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1 | <https://github.com/LibreOffice/dictionaries/tree/master/sk_SK> |
+| sl_SI | sl-SI | GPL-2.0-or-later OR LGPL-2.1-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/sl_SI> |
+| sv_FI | sv-FI | LGPL-3.0-only | <https://github.com/LibreOffice/dictionaries/tree/master/sv_SE> |
+| sv_SE | sv-SE | LGPL-3.0-only | <https://github.com/LibreOffice/dictionaries/tree/master/sv_SE> |
+| tr_TR | tr-TR | MPL-2.0 | <https://github.com/LibreOffice/dictionaries/tree/master/tr_TR> |
+| uk_UA | uk-UA | GPL-2.0-or-later OR LGPL-2.1-or-later OR MPL-1.1 | <https://github.com/LibreOffice/dictionaries/tree/master/uk_UA> |
 
 ## Frontend / runtime libraries
 

@@ -399,7 +399,7 @@ class TestReplaceTextRun:
         """The same char reachable via the baseline encoding AND a ToUnicode
         entry at a higher code: encode uses the LOWEST (deterministic)."""
         from engine.pdf_fonts import font_capability
-        from tests.test_pdf_fonts import _tounicode_stream
+        from test_pdf_fonts import _tounicode_stream
 
         pdf = pikepdf.new()
         font = pdf.make_indirect(
@@ -428,7 +428,7 @@ class TestPredefinedCjkEditing:
     """End-to-end edit of CJK text under a named Unicode CMap."""
 
     def _cjk_page(self, pdf, chars, content):
-        from tests.test_pdf_fonts import _tounicode_stream
+        from test_pdf_fonts import _tounicode_stream
 
         desc = pdf.make_indirect(
             Dictionary(
@@ -493,7 +493,7 @@ class TestLigatureSequencesListing:
     replacement path encoding through a ligature code end to end."""
 
     def _lig_font(self, pdf, mapping, w_array=None):
-        from tests.test_pdf_fonts import _tounicode_stream
+        from test_pdf_fonts import _tounicode_stream
 
         desc = Dictionary(
             Type=Name("/Font"),
@@ -582,7 +582,7 @@ class TestVerticalRunEditing:
     W2 = [3, [-900, 500, 880, -800, 450, 880], 5, 5, -750, 500, 880]
 
     def _vertical_page(self, pdf, content: bytes):
-        from tests.test_pdf_fonts import _tounicode_stream
+        from test_pdf_fonts import _tounicode_stream
 
         def _arr(items):
             return Array([Array(el) if isinstance(el, list) else el for el in items])
