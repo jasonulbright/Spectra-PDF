@@ -88,12 +88,31 @@ describe('spell check', () => {
 
   it('underlines a misspelling in the paragraph editor', async () => {
     expect(await invokeAppCommand('tools.open.edit')).toBe(true);
-    const pageIds = (await browser.execute(function () {
-      return (window as unknown as { __SPECTRA_TEST__: { editTextPageIds(): string[] } })
-        .__SPECTRA_TEST__.editTextPageIds();
-    })) as string[];
-    expect(pageIds.length).toBeGreaterThan(0);
-    await openParagraphEditor(pageIds[0], 0);
+    // The listing is produced asynchronously after the tool arms, and the
+    // page id and its paragraphs are read in ONE window — re-reading after a
+    // wait proved the listing non-empty is a check-then-read race the edit
+    // specs already document.
+    let seen: { pageId: string; count: number } | null = null;
+    await browser.waitUntil(
+      async () => {
+        const ids = (await browser.execute(function () {
+          return (window as unknown as { __SPECTRA_TEST__: { editTextPageIds(): string[] } })
+            .__SPECTRA_TEST__.editTextPageIds();
+        })) as string[];
+        if (ids.length === 0) return false;
+        const count = (await browser.execute(function (p: string) {
+          return (
+            window as unknown as { __SPECTRA_TEST__: { editParagraphs(id: string): unknown[] } }
+          ).__SPECTRA_TEST__.editParagraphs(p).length;
+        }, ids[0])) as number;
+        if (count === 0) return false;
+        seen = { pageId: ids[0], count };
+        return true;
+      },
+      { timeout: 30_000, timeoutMsg: 'no non-empty paragraph listing became available' },
+    );
+    const listing = seen as unknown as { pageId: string; count: number };
+    await openParagraphEditor(listing.pageId, 0);
 
     // The check is debounced and is an engine round trip, so the mark arrives
     // a beat after the editor does. The CLASS is what is asserted, not a
