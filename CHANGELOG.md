@@ -2,7 +2,7 @@
 
 ## 1.0.28
 
-*Unreleased*
+*Released 2026-08-09*
 
 ### Pages panel
 - The pages panel lays its thumbnails out in a grid: widening the panel adds columns instead of one larger thumbnail.
@@ -10,26 +10,33 @@
 - Dragging a page to reorder shows the insertion point between the two thumbnails it falls between.
 
 ### Page ranges
-- **Crop**, **Rotate** and **Delete Pages** read a page range written with a hyphen: `1,3,5-9`. `5-9` previously meant page 5 alone, silently.
+- **Crop**, **Rotate** and **Delete Pages** read a page range written with a hyphen: `1,3,5-9`.
 - Each of those fields has a **Use selection** button that fills it from the pages selected in the page list.
 - A range that names no page is refused with a message instead of acting on nothing and reporting success.
 
 ### Saving a result
-- Compress, Optimize, Grayscale, PDF/A, Encrypt, Decrypt, Repair, Rebuild, Recover, prepress conversion and the metadata tools suggest a file name built from the document's own: `report_compressed.pdf`, not `compressed.pdf`. It is a suggestion; the dialog still accepts any name.
+- Compressing, optimizing, converting or repairing a document suggests a name built from its own: `report_compressed.pdf`, not `compressed.pdf`.
+- **Compress**, **Optimize**, **Grayscale**, **PDF/A**, **Encrypt**, **Decrypt**, **Repair**, **Rebuild**, **Recover**, prepress conversion and the metadata tools all do this.
+- It is only a suggestion — the save dialog still accepts any name you type.
 
 ### Elsewhere
 - Right-clicking a file under **Recent files** offers Open, **Show in folder**, and Copy full path.
 - The Compress panel says when a document reads as a scan, and offers the scanned-document setting in one click.
-- **Optimize** is available as a guided-action step, so compress-then-optimize runs over a whole folder, on a watched folder, or on a schedule.
+- **Optimize** is available as a guided-action step, so compress-then-optimize runs over a whole folder, a watched folder, or a schedule.
 - The Compress and Optimize panels point at guided actions for running the same steps over a folder.
 - Each release heading in this file carries the date it was published.
 
 ### Fixes
-- Choosing a different shape while one is half-drawn now abandons the half-drawn one. Picking **Cloud** part-way through a polygon drew a polygon; the figure you pick is the figure you get.
-- A half-drawn shape is also dropped when you leave the tool, so a stray click can no longer add its point to the next shape you draw.
-- The snap options popover, the stamp symbol palette and the document view's rulers follow the interface theme. Under the light theme they kept a dark fill behind dark text and read as solid black.
+- **Crop**, **Rotate** and **Delete Pages** read `5-9` as page 5 alone, then reported success over pages they never touched.
+- Every operation used to propose one fixed file name, so a second run offered to overwrite the first result.
+- Choosing a different shape part-way through drawing one now abandons the half-drawn shape.
+- Choosing **Cloud** part-way through a polygon used to commit a polygon; you now get the figure you picked.
+- A half-drawn shape is also dropped when you leave the tool, so a stray click cannot join the next shape.
+- The snap options popover, the stamp symbol palette and the document view's rulers follow the interface theme.
+- Under the light theme each kept a dark fill behind dark text and read as solid black.
 - Ruler numbers and the symbol palette's buttons meet the AA contrast minimum in every theme.
-- A stamp preset's name is drawn in the interface text colour, with the stamp's own colour on its outline, so a pale stamp's name is readable.
+- A stamp preset's name is drawn in the interface text colour, with the stamp's own colour on its outline.
+- A pale stamp's name was previously unreadable against the panel behind it.
 
 ## 1.0.27
 
