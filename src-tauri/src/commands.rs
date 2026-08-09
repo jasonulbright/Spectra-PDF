@@ -1269,7 +1269,8 @@ fn is_batch_log_name(name: &str) -> bool {
         || name.starts_with("action-run-")
         || name.starts_with("search-redact-")
         || name.starts_with("form-prep-")
-        || name.starts_with("folder-export-"))
+        || name.starts_with("folder-export-")
+        || name.starts_with("create-pdf-folders-"))
         && name.ends_with(".log")
         && !name.contains('/')
         && !name.contains('\\')
@@ -1545,8 +1546,13 @@ mod tests {
             "search-redact-2026-01-02_030405.log",
             "form-prep-2026-01-02_030405.log",
             "folder-export-2026-01-02_030405.log",
+            "create-pdf-folders-2026-01-02_030405.log",
         ] {
             assert!(is_batch_log_name(name), "{name} should be swept");
+            // The predicate also gates the WRITE, so a name it rejects is a
+            // run that produces no record at all — which is how the
+            // one-PDF-per-folder prefix came to be missing here.
+            assert!(name.len() <= 64, "{name} is longer than the write allows");
         }
         // The predicate scopes a DELETE, so anything it does not itself write
         // stays out — including a traversal wearing a known prefix.
