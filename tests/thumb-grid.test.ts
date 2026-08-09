@@ -70,6 +70,29 @@ describe('thumbWindow', () => {
   });
 });
 
+describe('thumbDropIndex with one column', () => {
+  // One column is a LIST: y decides, and x must not, because a drag straight
+  // down the middle would otherwise flip its target on horizontal jitter.
+  const g = thumbGrid(240, 6);
+
+  it('reads the gap from y alone', () => {
+    expect(g.columns).toBe(1);
+    expect(thumbDropIndex(0, 4, g, 6)).toBe(0);
+    expect(thumbDropIndex(0, ROW_H - 6, g, 6)).toBe(1);
+    expect(thumbDropIndex(0, ROW_H * 2 - 6, g, 6)).toBe(2);
+  });
+
+  it('ignores x entirely', () => {
+    const y = ROW_H * 2 - 6;
+    expect(thumbDropIndex(0, y, g, 6)).toBe(thumbDropIndex(999, y, g, 6));
+  });
+
+  it('clamps to the ends', () => {
+    expect(thumbDropIndex(0, -500, g, 6)).toBe(0);
+    expect(thumbDropIndex(0, 99999, g, 6)).toBe(6);
+  });
+});
+
 describe('thumbDropIndex', () => {
   const g = thumbGrid(300 + SIDE_PAD * 2, 6); // 2 columns of 150
 
