@@ -32,6 +32,7 @@ import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
 from engine.inplace import finish_staged, is_same_file, staging_target
+from engine.pdf_save import save_pdf
 
 MAX_THREADS = 512
 MAX_BEADS = 4096
@@ -237,9 +238,9 @@ def set_threads(file: str, output: str, threads) -> dict:
 
         if same_file:
             staged = staging_target(output_path)
-            pdf.save(staged)
+            save_pdf(pdf, staged)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     if same_file:
         finish_staged(staged, output_path)

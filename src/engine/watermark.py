@@ -60,6 +60,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Dictionary, Name
 
+from engine.pdf_save import save_pdf
 from engine.pdf_tree import walk_inheritable
 
 
@@ -1050,9 +1051,9 @@ def watermark(
                 suffix=".pdf", delete=False, dir=str(input_path.parent)
             ) as tmp:
                 tmp_path = tmp.name
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     if same_file:
         shutil.move(tmp_path, str(output_path))

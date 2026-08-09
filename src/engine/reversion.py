@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pikepdf
+from engine.pdf_save import save_pdf
 
 
 def get_pdf_version(file: str) -> dict:
@@ -46,7 +47,7 @@ def set_pdf_version(
         # "PDF 1.. → PDF 1.7" and in the CLI's JSON. The conversion itself was
         # always correct; only the number it told you about was wrong.
         original_version = pdf.pdf_version
-        pdf.save(output_path, min_version=version)
+        save_pdf(pdf, output_path, min_version=version)
 
     return {
         "output": str(output_path),

@@ -59,6 +59,7 @@ import pikepdf
 from pikepdf import Dictionary, Name
 
 from engine.content_walk import ClipTracker, GraphicsTextState
+from engine.pdf_save import save_pdf
 from engine.redact import (
     IDENTITY,
     MAX_FORM_DEPTH,
@@ -1224,13 +1225,13 @@ def _save(pdf, input_path: Path, output_path: Path) -> None:
             suffix=".pdf", delete=False, dir=str(input_path.parent)
         ) as tmp:
             tmp_path = tmp.name
-        pdf.save(tmp_path)
+        save_pdf(pdf, tmp_path)
         pdf.close()
         shutil.move(tmp_path, str(output_path))
     else:
         if output_path.exists() and not os.access(output_path, os.W_OK):
             os.chmod(output_path, stat.S_IWRITE)
-        pdf.save(output_path)
+        save_pdf(pdf, output_path)
 
 
 def delete_page_images(file: str, output: str, page: int, indexes: list) -> dict:

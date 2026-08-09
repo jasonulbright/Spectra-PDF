@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Name
+from engine.pdf_save import save_pdf
 
 # Subtypes that count as a "comment"/markup annotation (everything except the
 # structural Widget/Link/Popup — Popup rides its parent and is swept with it).
@@ -106,9 +107,9 @@ def delete_all_annotations(file: str, output: str) -> dict:
         if same_file:
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, dir=str(input_path.parent)) as tmp:
                 tmp_path = tmp.name
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     # On a signed input the landed bytes become an incremental append
     # (original verbatim + one revision), so sweeping comments never breaks

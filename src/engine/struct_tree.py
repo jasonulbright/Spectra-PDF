@@ -44,6 +44,7 @@ from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
+from engine.pdf_save import save_pdf
 
 # Deep enough for any real document's nesting; combined with the visited-set
 # cycle guard it bounds walks over malformed self-referential trees.
@@ -441,7 +442,7 @@ def _save(pdf, input_path: Path, output_path: Path, same_file: bool) -> None:
     if same_file:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, dir=str(input_path.parent)) as tmp:
             tmp_path = tmp.name
-        pdf.save(tmp_path)
+        save_pdf(pdf, tmp_path)
         shutil.move(tmp_path, str(output_path))
     else:
-        pdf.save(output_path)
+        save_pdf(pdf, output_path)

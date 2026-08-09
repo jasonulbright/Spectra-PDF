@@ -53,6 +53,7 @@ from .redact import (
 )
 from .text_metrics import _FontCache, _run_metrics
 from .validate import validate_pdf
+from engine.pdf_save import save_pdf
 
 # Path grammar, the same one the vector listing uses: a maximal run of
 # construction operators terminated by an operator that DRAWS it.
@@ -750,7 +751,7 @@ def _region_source(pdf, number: int, region, work: Path, ordinal: int) -> Path:
     page.obj["/CropBox"] = pikepdf.Array([region[0], region[1], region[2], region[3]])
     if "/Annots" in page.obj:
         del page.obj["/Annots"]
-    single.save(out)
+    save_pdf(single, out)
     single.close()
     return out
 

@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pikepdf
 from pikepdf import Dictionary, Name, String
+from engine.pdf_save import save_pdf
 
 
 def _page_index_of(pdf, ref) -> int | None:
@@ -378,10 +379,10 @@ def _save(pdf, input_path: Path, output_path: Path, same_file: bool) -> bool:
     if same_file:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, dir=str(input_path.parent)) as tmp:
             tmp_path = tmp.name
-        pdf.save(tmp_path)
+        save_pdf(pdf, tmp_path)
         preserved = finalize_preserving_signatures(str(input_path), tmp_path)
         shutil.move(tmp_path, str(output_path))
     else:
-        pdf.save(output_path)
+        save_pdf(pdf, output_path)
         preserved = finalize_preserving_signatures(str(input_path), str(output_path))
     return bool(preserved.get("preserved"))

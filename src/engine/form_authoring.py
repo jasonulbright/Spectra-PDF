@@ -45,6 +45,7 @@ from engine.forms import (
     _all_fields,
 )
 from engine.incremental import signature_policy, signed_edit_decision
+from engine.pdf_save import save_pdf
 from engine.validate import validate_pdf
 
 FF_NO_TOGGLE_TO_OFF = 1 << 14
@@ -562,10 +563,10 @@ def add_form_fields(
                 suffix=".pdf", delete=False, dir=str(input_path.parent)
             ) as tmp:
                 staged = tmp.name
-            pdf.save(staged)
+            save_pdf(pdf, staged)
         else:
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
     if same_file:
         shutil.move(staged, str(output_path))
     return {"output": str(output_path), "created": len(specs), "names": names}
@@ -649,10 +650,10 @@ def set_field_lock(
                 suffix=".pdf", delete=False, dir=str(input_path.parent)
             ) as tmp:
                 staged = tmp.name
-            pdf.save(staged)
+            save_pdf(pdf, staged)
         else:
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
     if same_file:
         shutil.move(staged, str(output_path))
     return {"output": str(output_path), "field": name, "lock": seed}

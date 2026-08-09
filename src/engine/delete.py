@@ -7,6 +7,7 @@ from pathlib import Path
 import pikepdf
 
 from engine.acroform import prune_form_to_pages, refuse_if_xfa
+from engine.pdf_save import save_pdf
 
 
 def delete(file: str, pages: list[int], output: str) -> dict:
@@ -37,9 +38,9 @@ def delete(file: str, pages: list[int], output: str) -> dict:
         if same_file:
             with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False, dir=str(input_path.parent)) as tmp:
                 tmp_path = tmp.name
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     if same_file:
         shutil.move(tmp_path, str(output_path))

@@ -39,6 +39,7 @@ from pikepdf import Dictionary, Name
 from engine.attachments import _save, list_attachments
 from engine.fs_names import safe_file_name, unique_name, unique_path
 from engine.pdf_metrics import text_width_em
+from engine.pdf_save import save_pdf
 from engine.watermark import _escape_pdf_text, _n
 
 _PAGE_W = 612.0  # US Letter; the cover sheet is generated boilerplate
@@ -101,7 +102,7 @@ def create_portfolio(output: str, sources: list, title: str = "") -> dict:
             )
             members.append({"name": name, "size": len(data), "mime": mime})
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        pdf.save(str(out_path))
+        save_pdf(pdf, str(out_path))
     finally:
         pdf.close()
     return {"output": str(out_path), "members": members, "count": len(members)}

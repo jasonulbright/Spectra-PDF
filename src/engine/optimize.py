@@ -5,6 +5,7 @@ from pathlib import Path
 import pikepdf
 
 from engine.inplace import finish_staged, is_same_file, staging_target
+from engine.pdf_save import save_pdf
 
 
 def _rebrand_xmptk(path: Path) -> None:
@@ -57,10 +58,10 @@ def optimize(
         # just wrote.
         if is_same_file(file, output):
             staged = staging_target(output_path)
-            pdf.save(staged, linearize=linearize, object_stream_mode=stream_mode)
+            save_pdf(pdf, staged, linearize=linearize, object_stream_mode=stream_mode)
             finish_staged(staged, output_path)
         else:
-            pdf.save(output_path, linearize=linearize, object_stream_mode=stream_mode)
+            save_pdf(pdf, output_path, linearize=linearize, object_stream_mode=stream_mode)
 
     if strip_metadata:
         _rebrand_xmptk(output_path)

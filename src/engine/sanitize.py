@@ -32,6 +32,7 @@ from pikepdf import Name
 
 from engine.docmdp import certification_of_pdf
 from engine.inplace import finish_staged, is_same_file, staging_target
+from engine.pdf_save import save_pdf
 from engine.sanitize_content import analyze_page, off_ocg_set
 
 # Every category, in report order. `signatures` is reported and never removed.
@@ -1238,9 +1239,9 @@ def sanitize_pdf(
 
         if same_file:
             staged = staging_target(output_path)
-            pdf.save(staged)
+            save_pdf(pdf, staged)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
     if same_file:
         finish_staged(staged, output_path)
 

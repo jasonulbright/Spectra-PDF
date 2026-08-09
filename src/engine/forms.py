@@ -41,6 +41,7 @@ from engine.pdf_metrics import (
     flatten_control_chars,
     text_width_em,
 )
+from engine.pdf_save import save_pdf
 
 # Field flags (1-based bit positions per the PDF spec, expressed as masks).
 FF_READ_ONLY = 1 << 0
@@ -1196,9 +1197,9 @@ def fill_form_fields(
                 suffix=".pdf", delete=False, dir=str(input_path.parent)
             ) as tmp:
                 tmp_path = tmp.name
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     # Filling a SIGNED document lands as an incremental append —
     # original bytes verbatim + one revision carrying the value/appearance

@@ -21,6 +21,7 @@ from engine.acroform import (
     refuse_if_xfa,
 )
 from engine.fs_names import safe_file_name, unique_name
+from engine.pdf_save import save_pdf
 
 MODES = ("ranges", "every_n", "size", "bookmarks")
 
@@ -72,7 +73,7 @@ def _render_part(file: str, page_indices: list[int]) -> bytes:
         renames.update({r["from"]: r["to"] for r in pure_renames})
         carry_doc_form_extras(result, pdf, renames)
         buf = io.BytesIO()
-        result.save(buf)
+        save_pdf(result, buf)
         return buf.getvalue()
 
 

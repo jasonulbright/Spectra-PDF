@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pikepdf
 from pikepdf import OutlineItem
+from engine.pdf_save import save_pdf
 
 MAX_DEPTH = 32
 MAX_NODES = 10_000
@@ -293,9 +294,9 @@ def set_outline(file: str, outline: list[dict], output: str) -> dict:
                 suffix=".pdf", delete=False, dir=str(input_path.parent)
             ) as tmp:
                 tmp_path = tmp.name
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     if same_file:
         shutil.move(tmp_path, str(output_path))

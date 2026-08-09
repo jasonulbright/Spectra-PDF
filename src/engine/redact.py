@@ -65,6 +65,7 @@ from typing import NamedTuple
 import pikepdf
 from pikepdf import Name
 
+from engine.pdf_save import save_pdf
 from engine.pdf_tree import walk_inheritable
 from engine.content_walk import (
     IDENTITY,
@@ -1161,9 +1162,9 @@ def redact(file: str, output: str, regions: list[dict], font_dir: str = "") -> d
         if same_file:
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, dir=str(input_path.parent)) as tmp:
                 tmp_path = tmp.name
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     if same_file:
         shutil.move(tmp_path, str(output_path))
