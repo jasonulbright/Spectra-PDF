@@ -8,10 +8,10 @@ import {
   openByPaths,
   getState,
   invokeAppCommand,
-  editImagePageIds,
-  editImagePlacements,
   editImageSelect,
-  editImageTransform,
+  editImageTransformSettled,
+  settledPlacement,
+  waitForSettledMatrix,
 } from '../support/harness.js';
 
 // Image move/resize/rotate against the built binary. Arm Edit,
@@ -31,25 +31,19 @@ const RED_DOT_PNG = Buffer.from(
   'base64',
 );
 
-function matrixClose(a: number[] | undefined, b: number[], eps = 0.5): boolean {
-  return !!a && a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) <= eps);
-}
-
-/** The current (post-rebuild) first page's sole placement matrix, or []. */
-async function currentMatrix(): Promise<number[]> {
-  const ids = await editImagePageIds();
-  if (ids.length === 0) return [];
-  return (await editImagePlacements(ids[0]))[0]?.matrix ?? [];
-}
-
-/** Wait until the first page has exactly one placement at `target`, then return
- * its (fresh) page id — the anchor for the next select+transform. */
-async function waitForMatrix(target: number[], msg: string): Promise<string> {
-  await browser.waitUntil(async () => matrixClose(await currentMatrix(), target), {
-    timeout: 30_000,
-    timeoutMsg: msg,
-  });
-  return (await editImagePageIds())[0];
+/** Wait for a SETTLED listing that has a placement, and return its page id. */
+async function waitForSettledPageId(msg: string): Promise<string> {
+  let id = '';
+  await browser.waitUntil(
+    async () => {
+      const cur = await settledPlacement(0);
+      if (!cur) return false;
+      id = cur.pageId;
+      return true;
+    },
+    { timeout: 30_000, interval: 250, timeoutMsg: msg },
+  );
+  return id;
 }
 
 describe('edit image transform', () => {
@@ -81,45 +75,44 @@ describe('edit image transform', () => {
     );
 
     expect(await invokeAppCommand('tools.open.edit')).toBe(true);
-    await browser.waitUntil(async () => (await editImagePageIds()).length > 0, {
-      timeout: 30_000,
-      timeoutMsg: 'edit placements never loaded',
-    });
-    let pageId = (await editImagePageIds())[0];
-    expect(matrixClose(await currentMatrix(), [120, 0, 0, 90, 100, 100])).toBe(true);
+    let pageId = await waitForSettledPageId('edit placements never loaded');
+    await waitForSettledMatrix([120, 0, 0, 90, 100, 100], 'the fixture CTM never listed');
 
     // MOVE: shift +100 x, +50 y (same size).
     await editImageSelect(pageId, 0);
-    await editImageTransform(pageId, 0, [120, 0, 0, 90, 200, 150]);
-    pageId = await waitForMatrix([120, 0, 0, 90, 200, 150], 'the move never applied');
+    pageId = await editImageTransformSettled(
+      0,
+      [120, 0, 0, 90, 200, 150],
+      'the move never applied',
+    );
 
     // RESIZE (from the moved state): double the footprint about its origin.
     await editImageSelect(pageId, 0);
-    await editImageTransform(pageId, 0, [240, 0, 0, 180, 200, 150]);
-    await waitForMatrix([240, 0, 0, 180, 200, 150], 'the resize never applied');
+    await editImageTransformSettled(0, [240, 0, 0, 180, 200, 150], 'the resize never applied');
 
     // Undo the resize, then the move — back to the original CTM.
     expect(await invokeAppCommand('edit.undo')).toBe(true);
-    await waitForMatrix([120, 0, 0, 90, 200, 150], 'undo did not restore the pre-resize matrix');
+    await waitForSettledMatrix(
+      [120, 0, 0, 90, 200, 150],
+      'undo did not restore the pre-resize matrix',
+    );
     expect(await invokeAppCommand('edit.undo')).toBe(true);
-    await waitForMatrix([120, 0, 0, 90, 100, 100], 'undo did not restore the original matrix');
+    await waitForSettledMatrix(
+      [120, 0, 0, 90, 100, 100],
+      'undo did not restore the original matrix',
+    );
   });
 
   it('rotates a placement (off-diagonal terms round-trip)', async function () {
     this.timeout(120_000);
     await waitForHarness();
     await invokeAppCommand('tools.open.edit');
-    await browser.waitUntil(async () => (await editImagePageIds()).length > 0, {
-      timeout: 30_000,
-      timeoutMsg: 'edit placements never loaded',
-    });
-    const pageId = (await editImagePageIds())[0];
+    const pageId = await waitForSettledPageId('edit placements never loaded');
     await editImageSelect(pageId, 0);
 
     // A rotated/scaled target with non-zero b, c.
     const rotated = [0, 90, -120, 0, 220, 100];
-    await editImageTransform(pageId, 0, rotated);
-    await waitForMatrix(rotated, 'the rotate never applied');
+    await editImageTransformSettled(0, rotated, 'the rotate never applied');
     expect(await invokeAppCommand('edit.undo')).toBe(true);
   });
 });

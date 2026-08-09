@@ -4650,6 +4650,10 @@ function ParagraphEditor({
   // The html last committed to the DOM — lets the layout effect tell a
   // DOM-rebuilding render (a text edit or a restyle) from an ordinary one.
   const lastHtmlRef = useRef<string>('');
+  // The node the rich surface's content hung off at the last commit. Node
+  // identity, not the html string, is what says the browser selection's
+  // anchors were replaced.
+  const lastRootChildRef = useRef<Node | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   // Per-span colour: the ranges (code points) painted a colour other
   // than the paragraph default, seeded from the listing's per-span colours.
@@ -4891,6 +4895,19 @@ function ParagraphEditor({
   useLayoutEffect(() => {
     const el = areaRef.current;
     if (!el) return;
+    // The html STRING is not a reliable rebuild signal for this element.
+    // React re-applies `dangerouslySetInnerHTML` on renders where the string
+    // did not change at all — a contentEditable's DOM is mutated by the
+    // browser between commits, so the committed tree and what React last
+    // wrote diverge — and that write replaces the text nodes the browser
+    // selection points into. Any render that does not itself change the text
+    // therefore destroys the caret: the extra render a keystroke now
+    // schedules lands one tick after the caret was restored, and every
+    // following keystroke inserts at offset 0. Compare the NODE, so a rebuild
+    // is detected by what actually happened to the DOM.
+    const firstCommit = lastHtmlRef.current === '';
+    const domReplaced = lastRootChildRef.current !== el.firstChild;
+    lastRootChildRef.current = el.firstChild;
     const pending = pendingCaretRef.current;
     if (pending !== null) {
       pendingCaretRef.current = null;
@@ -4904,14 +4921,17 @@ function ParagraphEditor({
     // stays selected so a second control acts on the same range — and without
     // this, the transient collapse gets cached and the NEXT control falls
     // through to the whole-paragraph branch, silently restyling everything.
-    const rebuilt = lastHtmlRef.current !== html;
+    const rebuilt = !firstCommit && (lastHtmlRef.current !== html || domReplaced);
     lastHtmlRef.current = html;
     const s = lastSelRef.current;
-    if (s.end <= s.start) return; // nothing meaningful to put back
+    // A COLLAPSED caret is restored too. The nodes it pointed into are gone,
+    // so leaving it alone does not preserve it — it drops to the start of the
+    // element.
     if (rebuilt) {
       setEditorSelection(el, s.start, s.end);
       return;
     }
+    if (s.end <= s.start) return; // nothing meaningful to put back
     // SELF-HEAL. A re-render can drop the selection even when the html is
     // unchanged (observed: the first `captureSelection` after selecting a word
     // left the caret collapsed on the editor element). The signature is
