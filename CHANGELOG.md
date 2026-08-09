@@ -16,6 +16,18 @@
 - Web addresses, email addresses, file names and version numbers are never offered as misspellings.
 - A paragraph the editor cannot open is reported as unchecked rather than listed with corrections that could not be applied.
 
+### Reading a document out loud
+- **View ▸ Read Out Loud** speaks the page you are on, or reads from it to the end of the document.
+- A transport bar appears while it reads: play and pause, stop, and a step back or forward one sentence at a time.
+- The voice and the reading speed are chosen in the bar itself, and both are remembered.
+- Voices are the ones installed on your computer, so a voice you already use elsewhere is available here.
+- The paragraph being read, the sentence being spoken and the word being said are all highlighted on the page, and the view follows along as the reading crosses to the next page.
+- A tagged document is read in the order its author declared, not the order the text happens to sit on the page — and the bar says which order is in use.
+- Page headers, footers and other page furniture marked as such by the document are not read out.
+- Sentences are found using the document's own stated language where it has one.
+- Keyboard shortcuts throughout: Ctrl+Shift+V reads the page, Ctrl+Shift+B reads to the end, Ctrl+Shift+C pauses and resumes, Ctrl+Shift+E stops, and Esc closes the bar.
+- A page with no readable text says so and points at Scan & OCR instead of reading nothing.
+
 ### Copying a region of a page as a picture
 - A **Snapshot** tool: drag a rectangle over any part of a page and that region goes to the clipboard as an image.
 - Paste it straight into a document, a message or a presentation.

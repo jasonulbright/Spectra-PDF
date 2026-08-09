@@ -1021,6 +1021,7 @@ export function WorkspaceCanvasView({
     targets: readAloudTargets,
     geometryOf: readAloudGeometry,
     currentIndex: currentPage - 1,
+    resetKey: readAloudKey,
     resolveLocale: resolveReadingLocale,
     onShowPage: (pageId) => activeCanvasHandle()?.centerOn(pageId),
     onPersist: ({ voice, rate }) => {

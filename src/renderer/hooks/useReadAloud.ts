@@ -17,6 +17,7 @@
 //   3. A 500-character utterance spoke for 29 seconds without truncation, so
 //      nothing here chunks a long sentence.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { runCommitGate } from '../lib/commit-gate';
 import type { PageGeometry } from '../lib/redaction';
 import {
   fetchReadAloudPage,
@@ -85,6 +86,9 @@ interface Options {
   geometryOf: (target: ReadAloudTarget) => Promise<PageGeometry>;
   /** 0-based index into `targets` of the page on screen. */
   currentIndex: number;
+  /** A string that changes exactly when the pages under the reader change
+   * identity. A live run stops when it moves — see the reset effect. */
+  resetKey: string;
   /** The tag sentence segmentation and voice matching run under, resolved
    * when a run STARTS rather than held as a value: it depends on the
    * document's own `/Lang`, which costs a file read, and a reader nobody
@@ -117,6 +121,11 @@ interface Session {
   from: number;
   /** Pages already listed, by index into `targets`. */
   pages: Map<number, ReadPage>;
+  /** The page ID each listed index was read FROM. Ids are opaque and
+   * generation-tagged, so an index whose id no longer matches is naming a
+   * different page than the one these blocks were measured on — a stale-id
+   * guard, and it stops the run rather than drawing over the wrong page. */
+  pageIds: Map<number, string>;
   /** The flat utterance list, grown a page at a time. */
   queue: Utterance[];
   /** How far into `targets` the queue has been built. */
@@ -132,6 +141,7 @@ export function useReadAloud(options: Options): ReadAloudApi {
     targets,
     geometryOf,
     currentIndex,
+    resetKey,
     resolveLocale,
     onShowPage,
     onPersist,
@@ -156,15 +166,27 @@ export function useReadAloud(options: Options): ReadAloudApi {
   const [highlight, setHighlight] = useState<ReadAloudHighlight | null>(null);
 
   const sessionRef = useRef<Session | null>(null);
+  // A run asked for before the workspace index has produced this document's
+  // pages, held until they arrive. A menu command that silently does nothing
+  // is not an answer, and indexing is asynchronous.
+  const pendingScopeRef = useRef<ReadAloudScope | null>(null);
+  // The page-identity key the LIVE run started on. Null when nothing is
+  // running, which is what keeps the reset effect from firing on a key change
+  // that happened before anyone asked to read.
+  const startedKeyRef = useRef<string | null>(null);
   // Live copies for the speak loop, which runs from synthesizer callbacks and
   // would otherwise close over the values of the render that started it.
   const rateRef = useRef(rate);
   const voiceRef = useRef(voice);
   const localeRef = useRef('');
   const targetsRef = useRef(targets);
+  const currentIndexRef = useRef(currentIndex);
+  const resetKeyRef = useRef(resetKey);
   rateRef.current = rate;
   voiceRef.current = voice;
   targetsRef.current = targets;
+  currentIndexRef.current = currentIndex;
+  resetKeyRef.current = resetKey;
 
   // Rule 1: re-read on EVERY notification, never latch the first.
   useEffect(() => {
@@ -198,6 +220,8 @@ export function useReadAloud(options: Options): ReadAloudApi {
   const stop = useCallback(() => {
     clearSpeech();
     sessionRef.current = null;
+    pendingScopeRef.current = null;
+    startedKeyRef.current = null;
     setStatus('idle');
     setHighlight(null);
     setOpen(false);
@@ -206,23 +230,35 @@ export function useReadAloud(options: Options): ReadAloudApi {
     setPageNumber(null);
   }, [clearSpeech]);
 
-  // The reader is transient view state bound to bytes: it stops when the set
-  // of pages under it changes identity, which is what a commit, an undo or an
-  // operation does. A highlight over blocks that no longer exist must never
-  // be drawn.
+  // The reader is transient view state bound to bytes: it stops when the pages
+  // under it change identity, which is what a commit, an undo or an operation
+  // does — a highlight over blocks that no longer exist must never be drawn.
+  //
+  // The trigger is the KEY, not the target array's identity. Page ids are
+  // generation-tagged, so the key changes exactly when the pages do; the array
+  // is rebuilt for reasons of its own, and stopping on that would have killed
+  // every run the moment the workspace index next produced a list.
   useEffect(() => {
-    stop();
-    // `targets` is rebuilt whenever the focused document's page list changes.
-  }, [targets, stop]);
+    if (startedKeyRef.current !== null && startedKeyRef.current !== resetKey) stop();
+  }, [resetKey, stop]);
 
   useEffect(() => () => clearSpeech(), [clearSpeech]);
+
+  /** The target an utterance's page index names, or null when that index no
+   * longer names the page these blocks were read from. */
+  const targetFor = useCallback((session: Session, pageIndex: number) => {
+    const target = targetsRef.current[pageIndex];
+    if (!target) return null;
+    const read = session.pageIds.get(pageIndex);
+    return read !== undefined && read !== target.pageId ? null : target;
+  }, []);
 
   const paint = useCallback((session: Session, charIndex: number, charLength: number) => {
     const utterance = session.queue[session.cursor];
     if (!utterance) return;
     const page = session.pages.get(utterance.pageIndex);
     const block = page?.blocks[utterance.blockIndex];
-    const target = targetsRef.current[utterance.pageIndex];
+    const target = targetFor(session, utterance.pageIndex);
     if (!page || !block || !target) return;
     const word =
       charLength > 0
@@ -238,7 +274,7 @@ export function useReadAloud(options: Options): ReadAloudApi {
       sentence: rectsForRange(block, utterance.start, utterance.end),
       word,
     });
-  }, []);
+  }, [targetFor]);
 
   // The loop is mutually recursive — a sentence ending advances, advancing
   // speaks — so the two halves reach each other through refs rather than
@@ -252,15 +288,29 @@ export function useReadAloud(options: Options): ReadAloudApi {
         stop();
         return;
       }
-      const target = targetsRef.current[utterance.pageIndex];
-      if (target && onShowPage) onShowPage(target.pageId);
+      const target = targetFor(session, utterance.pageIndex);
+      if (!target) {
+        // The page these blocks were read from is gone from under them. The
+        // stale-id rule: stop and say so by stopping, never draw over whatever
+        // now sits at that index.
+        stop();
+        return;
+      }
+      // The key is adopted HERE rather than when the run was requested: the
+      // first listing runs the commit gate, which can renumber every page id,
+      // and a key captured before that would look like the pages had moved.
+      if (startedKeyRef.current === null) startedKeyRef.current = resetKeyRef.current;
+      if (onShowPage) onShowPage(target.pageId);
       const page = session.pages.get(utterance.pageIndex);
       if (page) {
         setOrder(page.order);
-        setPageNumber(target ? target.pageNumber : null);
+        setPageNumber(target.pageNumber);
       }
       paint(session, 0, 0);
       const token = session.token;
+      // A boundary that arrives after this utterance ended must not paint
+      // against the NEXT one's cursor — the token only changes on a cancel.
+      const at = session.cursor;
       const spoken = new SpeechSynthesisUtterance(utterance.text);
       spoken.rate = rateRef.current;
       const chosen = pickVoice(voices, localeRef.current, voiceRef.current);
@@ -274,7 +324,7 @@ export function useReadAloud(options: Options): ReadAloudApi {
       // own default is the honest answer there.
       if (localeRef.current) spoken.lang = localeRef.current;
       spoken.onboundary = (event) => {
-        if (session.token !== token) return;
+        if (session.token !== token || session.cursor !== at) return;
         const length =
           typeof event.charLength === 'number' && event.charLength > 0
             ? event.charLength
@@ -297,7 +347,7 @@ export function useReadAloud(options: Options): ReadAloudApi {
       setStatus('speaking');
       window.speechSynthesis.speak(spoken);
     },
-    [paint, stop, voices, onShowPage],
+    [paint, stop, voices, onShowPage, targetFor],
   );
 
   const speakRef = useRef(speak);
@@ -321,6 +371,7 @@ export function useReadAloud(options: Options): ReadAloudApi {
             geometry,
           );
           session.pages.set(at, page);
+          session.pageIds.set(at, target.pageId);
           session.queue.push(...utterancesForPage(page, at, localeRef.current));
         } catch {
           // A page that cannot be listed is a page with nothing to say. The
@@ -333,6 +384,7 @@ export function useReadAloud(options: Options): ReadAloudApi {
             artifacts: 0,
             blocks: [],
           });
+          session.pageIds.set(at, target.pageId);
         }
         session.built = at + 1;
       }
@@ -361,24 +413,22 @@ export function useReadAloud(options: Options): ReadAloudApi {
 
   advanceRef.current = advance;
 
-  const start = useCallback(
+  /** Begin a run over the pages that exist RIGHT NOW. */
+  const begin = useCallback(
     (nextScope: ReadAloudScope) => {
-      if (!supported) {
-        setOpen(true);
-        setStatus('error');
-        setErrorKey('canvas.readAloud.errorUnsupported');
-        return;
-      }
-      if (targetsRef.current.length === 0) return;
       clearSpeech();
+      // The key is NOT adopted here — see `speak`. It is adopted once the run
+      // is actually speaking, because the flush below renumbers page ids.
+      startedKeyRef.current = null;
       const from = Math.min(
-        Math.max(currentIndex, 0),
+        Math.max(currentIndexRef.current, 0),
         targetsRef.current.length - 1,
       );
       const session: Session = {
         scope: nextScope,
         from,
         pages: new Map(),
+        pageIds: new Map(),
         queue: [],
         built: from,
         cursor: 0,
@@ -390,6 +440,18 @@ export function useReadAloud(options: Options): ReadAloudApi {
       setErrorKey(null);
       setStatus('loading');
       void (async () => {
+        // Pending page edits are flushed BEFORE anything is listed. The first
+        // engine call would run the gate anyway; running it up front means the
+        // page ids have settled before the run binds to them, instead of
+        // moving underneath a run already in progress.
+        try {
+          await runCommitGate();
+        } catch {
+          // A commit that refuses leaves the file as it was. The listing below
+          // then reads the working bytes as they stand, which is what the
+          // reader would have read anyway.
+        }
+        if (sessionRef.current !== session) return;
         const last = nextScope === 'page' ? from : targetsRef.current.length - 1;
         try {
           localeRef.current = await resolveLocale();
@@ -411,8 +473,44 @@ export function useReadAloud(options: Options): ReadAloudApi {
         speakRef.current(session);
       })();
     },
-    [supported, clearSpeech, currentIndex, build, resolveLocale],
+    [clearSpeech, build, resolveLocale],
   );
+
+  const beginRef = useRef(begin);
+  beginRef.current = begin;
+
+  const start = useCallback(
+    (nextScope: ReadAloudScope) => {
+      if (!supported) {
+        setOpen(true);
+        setStatus('error');
+        setErrorKey('canvas.readAloud.errorUnsupported');
+        return;
+      }
+      setScope(nextScope);
+      setOpen(true);
+      setErrorKey(null);
+      setStatus('loading');
+      if (targetsRef.current.length === 0) {
+        // Workspace indexing is asynchronous: a document can be on screen
+        // before its page list exists. The bar opens in its preparing state
+        // and the run begins the moment the pages arrive — returning silently
+        // here would make the menu command a dead click on a large file.
+        pendingScopeRef.current = nextScope;
+        return;
+      }
+      beginRef.current(nextScope);
+    },
+    [supported],
+  );
+
+  // The other half of that: the pages arrived.
+  useEffect(() => {
+    const pending = pendingScopeRef.current;
+    if (pending === null || targets.length === 0) return;
+    pendingScopeRef.current = null;
+    beginRef.current(pending);
+  }, [targets]);
 
   const pause = useCallback(() => {
     if (!supported) return;
@@ -433,8 +531,9 @@ export function useReadAloud(options: Options): ReadAloudApi {
     (delta: number) => {
       const session = sessionRef.current;
       if (!session) return;
-      const at = session.cursor + delta;
-      if (at < 0) return;
+      // Stepping back from the first sentence restarts it, the transport
+      // convention — a control that does nothing when pressed says nothing.
+      const at = Math.max(session.cursor + delta, 0);
       clearSpeech();
       session.cursor = at;
       void advanceRef.current(session);

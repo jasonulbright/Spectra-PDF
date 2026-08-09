@@ -68,8 +68,8 @@ export type SurfaceVisitor = (theme: WalkTheme, surface: string) => Promise<void
 
 /** Walk every surface under one theme, calling the visitor at each stop:
  * home, the open document, every tool and op panel, every nav panel, the
- * find bar, an open menu, the Properties dialog, and every Preferences
- * category. */
+ * find bar, the Read Out Loud transport, an open menu, the Properties dialog,
+ * and every Preferences category. */
 export async function walkSurfaces(theme: WalkTheme, visit: SurfaceVisitor): Promise<void> {
   await stampTheme(theme);
 
@@ -113,6 +113,32 @@ export async function walkSurfaces(theme: WalkTheme, visit: SurfaceVisitor): Pro
   await browser.pause(250);
   await visit(theme, 'findbar');
   await browser.keys(['Escape']);
+
+  // Read Out Loud's transport bar. It only exists while a run is open, so the
+  // walk opens one — a floating surface with its own buttons and selects
+  // belongs in the audit for the same reason the find bar does. Muted first:
+  // an audit sweep that reads three themes of a document aloud is an audit
+  // nobody runs twice.
+  await browser.execute(function () {
+    if ((window as any).__READ_ALOUD_MUTED__) return;
+    (window as any).__READ_ALOUD_MUTED__ = true;
+    const Original = (window as any).SpeechSynthesisUtterance;
+    function Muted(this: unknown, text: string) {
+      const u = new Original(text);
+      u.volume = 0;
+      return u;
+    }
+    Muted.prototype = Original.prototype;
+    (window as any).SpeechSynthesisUtterance = Muted;
+  });
+  expect(await invokeAppCommand('view.readAloud.page')).toBe(true);
+  await $('[data-testid="read-aloud-bar"]').waitForExist({
+    timeout: 15_000,
+    timeoutMsg: `the read-aloud bar did not open (${theme})`,
+  });
+  await visit(theme, 'readaloudbar');
+  expect(await invokeAppCommand('view.readAloud.stop')).toBe(true);
+  await browser.pause(200);
 
   // An OPEN menu — the menubar's popups never render otherwise.
   await $('[data-testid="menu-file"]').click();
