@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.28
+
+### Fixes
+- Choosing a different shape while one is half-drawn now abandons the half-drawn one. Picking **Cloud** part-way through a polygon drew a polygon; the figure you pick is the figure you get.
+- A half-drawn shape is also dropped when you leave the tool, so a stray click can no longer add its point to the next shape you draw.
+- The snap options popover, the stamp symbol palette and the document view's rulers follow the interface theme. Under the light theme they kept a dark fill behind dark text and read as solid black.
+- Ruler numbers and the symbol palette's buttons meet the AA contrast minimum in every theme.
+- A stamp preset's name is drawn in the interface text colour, with the stamp's own colour on its outline, so a pale stamp's name is readable.
+
 ## 1.0.27
 
 ### Spell check

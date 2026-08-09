@@ -4,7 +4,14 @@
 // measures.
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
-import { openByPaths, setView, getState, closeAllFiles, invokeAppCommand } from './harness.js';
+import {
+  openByPaths,
+  setView,
+  setDocViewMode,
+  getState,
+  closeAllFiles,
+  invokeAppCommand,
+} from './harness.js';
 
 export const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 
@@ -87,6 +94,60 @@ export async function walkSurfaces(theme: WalkTheme, visit: SurfaceVisitor): Pro
   });
   await browser.pause(250);
   await visit(theme, 'document');
+
+  // Surfaces that exist only while something is HELD OPEN over the document:
+  // the two canvas popovers and the document view's rulers. A walk that stops
+  // at panels never opens them, and a surface outside the walk is a surface
+  // outside both gates — a popover carries its own opaque fill, so what it
+  // does under a theme is not implied by the panel beside it.
+  const snapCaret = await $('[data-testid="snap-options-toggle"]');
+  await snapCaret.waitForExist({
+    timeout: 10_000,
+    timeoutMsg: `the snap options caret is not on the status bar (${theme})`,
+  });
+  await snapCaret.click();
+  await $('[data-testid="snap-options-popover"]').waitForDisplayed({
+    timeout: 10_000,
+    timeoutMsg: `the snap options popover did not open (${theme})`,
+  });
+  await visit(theme, 'popover:snap-options');
+  await snapCaret.click();
+  await browser.pause(200);
+
+  expect(await invokeAppCommand('tools.open.comment')).toBe(true);
+  await browser.pause(250);
+  expect(await invokeAppCommand('tools.stamp')).toBe(true);
+  await browser.pause(250);
+  const symbolsToggle = await $('[data-testid="stamp-symbols-toggle"]');
+  await symbolsToggle.waitForExist({
+    timeout: 10_000,
+    timeoutMsg: `the stamp tool's symbols toggle is missing (${theme})`,
+  });
+  await symbolsToggle.click();
+  await $('.symbol-palette-popover').waitForDisplayed({
+    timeout: 10_000,
+    timeoutMsg: `the symbol palette popover did not open (${theme})`,
+  });
+  await visit(theme, 'popover:symbol-palette');
+  await symbolsToggle.click();
+  await browser.pause(200);
+  expect(await invokeAppCommand('tools.close')).toBe(true);
+  await browser.pause(200);
+
+  // Rulers live on the document view, not the board. The mode is restored
+  // afterwards — the next stop's audit depends on which one is up.
+  const docViewMode = (await getState()).docViewMode;
+  await setDocViewMode('document');
+  await browser.pause(300);
+  expect(await invokeAppCommand('view.rulers')).toBe(true);
+  await $('.docview-ruler').waitForDisplayed({
+    timeout: 10_000,
+    timeoutMsg: `the rulers did not appear (${theme})`,
+  });
+  await visit(theme, 'docview:rulers');
+  expect(await invokeAppCommand('view.rulers')).toBe(true);
+  await setDocViewMode(docViewMode);
+  await browser.pause(250);
 
   // Every tool, and every op panel inside it. `tools.open` seats the FIRST
   // op's panel; the rest are reached the way the dock's own op strip does.
