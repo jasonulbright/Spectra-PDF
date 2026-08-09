@@ -43,6 +43,12 @@ pillow-heif==1.5.0
 # engine's own table detection and this package writes them. MIT; a
 # `none-any` wheel, so nothing compiles at packaging time.
 openpyxl==3.1.5
+# Spell check: a pure-Python Hunspell implementation, so the bundled
+# dictionaries' affix tables, compounding rules and suggestion ladder are
+# hunspell's own rather than a Levenshtein approximation over a frequency
+# list. MIT; a `py2.py3-none-any` wheel, so nothing compiles at packaging
+# time and it has no dependencies of its own.
+spylls==0.1.7
 # Presentation export: the deck writer for the pptx target. MIT, `none-any`.
 # Its binary transitive dependencies (lxml, Pillow) already resolve here at the
 # same versions, so nothing is duplicated or upgraded.

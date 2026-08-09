@@ -191,7 +191,7 @@ inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 links.linkIndexOutRange	pattern	links	link index {{index}} is out of range (page has {{v1}})
 links.linksAdd	exact	links	no links to add
-links.pageOutRange	pattern	enhance_scan,form_detect,links,page_images,page_vectors,redact_marks,search_regions,slide_export,table_export,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
+links.pageOutRange	pattern	enhance_scan,form_detect,links,page_images,page_vectors,redact_marks,search_regions,slide_export,spelling,table_export,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
 links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive width and height
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
 links.urlMustEmpty	exact	links	url must not be empty
@@ -443,6 +443,17 @@ soffice.libreofficeAvailable	pattern	soffice	LibreOffice is not available at {{s
 soffice.libreofficeCannotConvertAccepted	pattern	soffice	LibreOffice cannot convert {{v0}} (accepted: {{v1}})
 soffice.libreofficeProducedPdfCannot	pattern	soffice	LibreOffice produced a PDF that cannot be read: {{exc}}
 soffice.libreofficeReportedSuccessPdf	exact	soffice	LibreOffice reported success but the PDF it wrote has no pages
+spelling.dictionaryAffFileDic	exact	spelling	A dictionary is an .aff file and a .dic file.
+spelling.dictionaryAlreadyBeenAdded	pattern	spelling	A {{name}} dictionary has already been added.
+spelling.dictionaryAlreadyShipsApp	pattern	spelling	A {{name}} dictionary already ships with the app.
+spelling.dictionaryCouldRead	pattern	spelling	That dictionary could not be read: {{exc}}
+spelling.dictionaryCouldRead2	pattern	spelling	The {{language}} dictionary could not be read: {{exc}}
+spelling.documentNothingSpellCheck	exact	spelling	This document has nothing to spell-check.
+spelling.fileFound	pattern	spelling	file not found: {{aff}}
+spelling.spellingDictionary	pattern	spelling	No spelling dictionary for {{language}}.
+spelling.unknownSpellCheckSource	pattern	spelling	unknown spell-check source {{v0}} — use text, comments or fields
+spelling.usableDictionaryNameUse	pattern	spelling	{{name}} is not a usable dictionary name — use letters, digits and underscores.
+spelling.wordSuggest	exact	spelling	No word to suggest for.
 split.documentTopLevelBookmarks	exact	split	this document has no top-level bookmarks to split at
 split.maximumFileSizeMust	pattern	split	maximum file size must be a number, got {{max_mb}}
 split.maximumFileSizeMust2	pattern	split	maximum file size must be greater than 0, got {{max_mb}}

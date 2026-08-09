@@ -55,6 +55,20 @@ export interface Settings {
    * zoom would carry 40% of the page's detail into another document, and the
    * reader has no way to tell from the pasted picture that it happened. */
   snapshotDpi: number;
+  /** The dictionary the spell checker uses, as a bundled tag ('en_GB').
+   *
+   * 'auto' is the default and is NOT a language: it defers to the document's
+   * own /Lang, then the interface language. Document language is not
+   * interface language — a Spanish speaker proofreading an English contract
+   * wants the English dictionary — so this pins one when the user knows
+   * better than the file does. */
+  spellLanguage: string;
+  /** Underline misspellings in the paragraph editor as it is typed in.
+   *
+   * Default ON. The marks are drawn by this app's own checker rather than the
+   * webview's, so they agree with the Spelling panel about the dictionary and
+   * the custom word list. */
+  spellCheckAsYouType: boolean;
   /** The UI language — 'system' resolves against the shipped locales
    * (falling back to en), an explicit code pins one. Stored values are
    * locale-independent keys, never display names. */
@@ -77,6 +91,8 @@ export const DEFAULTS: Settings = {
   batchLogDir: '',
   identityName: '',
   snapshotDpi: 150,
+  spellLanguage: 'auto',
+  spellCheckAsYouType: true,
   language: 'system',
 };
 

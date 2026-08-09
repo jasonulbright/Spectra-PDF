@@ -924,7 +924,7 @@ def _text_page(doc, content: bytes, fonts: dict, size=(612, 792)) -> None:
 def _identity_h_font(doc, widths: dict[int, int], default: int = 1000):
     """An Identity-H CID font whose /W declares `widths` (CID → 1000/em) and
     whose /ToUnicode names every one of them, so the run MEASURES."""
-    from tests.test_pdf_fonts import _tounicode_stream
+    from test_pdf_fonts import _tounicode_stream
 
     w_array = []
     for cid, width in sorted(widths.items()):
@@ -1251,7 +1251,7 @@ def _worst_drift(before: list, after: list) -> float:
 
 def _cid_font(doc, widths: dict[int, int], mapping: dict[int, str],
               encoding: str = "Identity-H", vertical_advances: dict | None = None):
-    from tests.test_pdf_fonts import _tounicode_stream
+    from test_pdf_fonts import _tounicode_stream
 
     w_array: list = []
     for cid, width in sorted(widths.items()):

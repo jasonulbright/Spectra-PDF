@@ -324,6 +324,16 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <path d="M6 6.5h.01M18.5 15h.01M17 5.5h.01" strokeWidth="1.5" />
     </>
   ),
+  // A tick over the wavy underline a misspelling carries — the mark the
+  // feature draws, and the verdict it gives.
+  spelling: (
+    <>
+      <path d="M4 15l3.5-9 3.5 9" />
+      <path d="M5.4 12h4.2" />
+      <path d="M14 15l2.5 3 4.5-6" />
+      <path d="M3 20q1.5-1.5 3 0t3 0t3 0" strokeWidth="1.2" />
+    </>
+  ),
   sanitize: (
     <>
       <path d="M7 3h7l4 4v6" />

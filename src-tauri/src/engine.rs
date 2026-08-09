@@ -97,6 +97,22 @@ pub fn get_edit_font_path(app: &AppHandle) -> String {
         .to_string()
 }
 
+/// The bundled spelling-dictionary DIRECTORY (resources/dictionaries).
+///
+/// Returns the DIR, not one dictionary: the engine resolves a language tag
+/// against what is on disk, so a request for `en-GB` and a request for `en`
+/// both land somewhere real without the renderer knowing the file layout.
+/// Same class as the fonts directory, and `dunce::simplified` for the same
+/// reason — a verbatim `\\?\` prefix travels into a path the engine opens.
+pub fn get_dictionary_path(app: &AppHandle) -> String {
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .expect("failed to resolve resource dir");
+    let dir = resource_dir.join("dictionaries");
+    dunce::simplified(&dir).to_string_lossy().to_string()
+}
+
 /// Resolves LibreOffice's `soffice` for Office export. Prefers the vendored copy
 /// (resources/libreoffice, assembled by a setup script and gitignored like the
 /// gs / python runtimes) and falls back to a standard system install, so a dev

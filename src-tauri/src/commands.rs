@@ -175,6 +175,36 @@ fn allow_picked_path(app: &AppHandle, path: &str) {
     }
 }
 
+/// Pick a user's own Hunspell dictionary — the `.aff` and the `.dic`.
+#[tauri::command]
+pub async fn pick_dictionary_files(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<Vec<String>>, String> {
+    // BOTH halves in one dialog: a Hunspell dictionary is an .aff and a .dic
+    // that belong together, and picking them in two dialogs invites a pair
+    // from two different languages. The engine still refuses a mismatch.
+    let result = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("Hunspell dictionary", &["aff", "dic"])
+        .blocking_pick_files();
+    match result {
+        Some(paths) => {
+            let mut out = Vec::new();
+            for p in paths {
+                match p.into_path() {
+                    Ok(pb) => out.push(canonical_path(&pb.to_string_lossy())),
+                    Err(e) => return Err(format!("Path error: {}", e)),
+                }
+            }
+            Ok(Some(out))
+        }
+        None => Ok(None),
+    }
+}
+
 /// Pick ONE picture to stamp as a watermark. The filter is the Create PDF
 /// image set — the engine accepts exactly that set, so a narrower picker
 /// would hide files the operation would have taken.
@@ -880,6 +910,29 @@ pub async fn get_soffice_path(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 pub async fn get_edit_font_path(app: AppHandle) -> Result<String, String> {
     Ok(engine::get_edit_font_path(&app))
+}
+
+#[tauri::command]
+pub async fn get_dictionary_path(app: AppHandle) -> Result<String, String> {
+    Ok(engine::get_dictionary_path(&app))
+}
+
+/// The managed folder a user's own spelling dictionaries are copied into.
+///
+/// Rust owns the path so a dictionary added from the panel outlives whatever
+/// folder the user picked it from — a dictionary read in place would stop
+/// resolving the moment that folder moved, and the check would then report
+/// every word of the language as wrong.
+#[tauri::command]
+pub async fn user_dictionary_dir(app: AppHandle) -> Result<String, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("{}", e))?
+        .join("dictionaries");
+    fs::create_dir_all(&dir)
+        .map_err(|e| format!("Cannot create the dictionaries folder {}: {}", dir.display(), e))?;
+    Ok(dunce::simplified(&dir).to_string_lossy().into_owned())
 }
 
 #[tauri::command]

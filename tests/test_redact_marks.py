@@ -132,8 +132,8 @@ class TestSaveAndList:
         assert remaining == [(1, [200, 300, 250, 350])]
 
     def test_signed_document_marks_preserve_signature(self, tmp_dir):
-        from tests.test_incremental import _base_pdf, _assert_sig_still_valid, _PKI
-        from tests.test_pades import _build_pki
+        from test_incremental import _base_pdf, _assert_sig_still_valid, _PKI
+        from test_pades import _build_pki
         from engine.signatures import sign_pdf
 
         pki = _PKI or _build_pki(tmp_dir)
