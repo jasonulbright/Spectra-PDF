@@ -12,6 +12,7 @@ import { file } from '../lib/tauri-bridge';
 import { ensureGsPath } from './SettingsPanel';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
+import { PageRangeField } from '../components/PageRangeField';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import type { PanelKey } from '../i18n-panels';
@@ -219,17 +220,14 @@ export function PageBoxesPanel(): React.ReactElement {
         {edge(tChrome('panel.pageBoxes.bottom'), bottom, setBottom, 'pagebox-bottom')}
         {edge(tChrome('panel.pageBoxes.left'), left, setLeft, 'pagebox-left')}
         {edge(tChrome('panel.pageBoxes.right'), right, setRight, 'pagebox-right')}
-        <div>
-          <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.pageBoxes.pagesLabel')}</label>
-          <input
-            data-testid="pagebox-pages"
-            aria-label={tChrome('panel.pageBoxes.pagesAria')}
-            type="text"
-            value={pageInput}
-            onChange={(e) => setPageInput(e.target.value)}
-            className="w-32 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
-          />
-        </div>
+        <PageRangeField
+          value={pageInput}
+          onChange={setPageInput}
+          label="panel.pageBoxes.pagesLabel"
+          ariaLabel="panel.pageBoxes.pagesAria"
+          testIdPrefix="pagebox"
+          className="w-32 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+        />
       </div>
       <button
         data-testid="pagebox-apply"

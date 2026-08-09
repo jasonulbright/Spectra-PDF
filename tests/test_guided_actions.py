@@ -579,3 +579,55 @@ class TestExportSteps:
         assert by_rel["broken.pdf"]["status"] == "error"
         assert by_rel["a.pdf"]["status"] == "ok"
         assert report["ok"] == 2
+
+
+class TestOptimizeStep:
+    """The Compress panel's "then optimize" second pass, as a folder step.
+
+    It is lossless and needs no tool path, which is what lets it compose after
+    any other step; the pins here are that it runs in place on the mirrored
+    copy and that its three switches reach `optimize` rather than being
+    silently dropped.
+    """
+
+    def test_runs_over_the_tree_and_leaves_readable_pdfs(self, tree, tmp_path):
+        dest = tmp_path / "out"
+        report = run_action(
+            source=str(tree),
+            dest=str(dest),
+            steps=[{"op": "optimize", "params": {"linearize": True}}],
+            action_name="Optimize",
+        )
+        assert report["total"] == 2 and report["ok"] == 2 and report["failed"] == 0
+        for rel in ("a.pdf", os.path.join("sub", "b.pdf")):
+            with pikepdf.open(dest / rel) as pdf:
+                assert len(pdf.pages) == 1
+
+    def test_composes_after_another_step(self, tree, tmp_path):
+        # The pair the single-document panel offers together. Optimize last is
+        # the point: it packs what the earlier step rewrote.
+        dest = tmp_path / "out"
+        report = run_action(
+            source=str(tree),
+            dest=str(dest),
+            steps=[
+                {"op": "watermark", "params": {"text": "PAIRED"}},
+                {"op": "optimize", "params": {"compress_streams": True}},
+            ],
+        )
+        assert report["ok"] == 2 and report["failed"] == 0
+        assert "PAIRED" in extract_text(file=str(dest / "a.pdf"))["text"]
+
+    def test_strip_metadata_switch_reaches_the_call(self, tree, tmp_path):
+        dest = tmp_path / "out"
+        run_action(
+            source=str(tree),
+            dest=str(dest),
+            steps=[{"op": "optimize", "params": {"strip_metadata": True}}],
+        )
+        with pikepdf.open(dest / "a.pdf") as pdf:
+            assert pikepdf.Name.Info not in pdf.trailer
+
+    def test_refuses_a_parameter_optimize_does_not_take(self):
+        with pytest.raises(ValueError, match="unknown parameter"):
+            validate_steps([{"op": "optimize", "params": {"quality": "screen"}}])

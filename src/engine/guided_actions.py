@@ -52,6 +52,7 @@ from engine.office_export import export_document, target_extension
 from engine.grayscale import grayscale
 from engine.headers import add_header_footer
 from engine.metadata import strip_metadata
+from engine.optimize import optimize
 from engine.pdfa import convert_pdfa
 from engine.sanitize import sanitize_pdf
 from engine.derived_nav import outline_from_structure
@@ -84,6 +85,15 @@ _STEPS: dict = {
             }
         ),
         frozenset({"gs_path", "jbig2_path", "tesseract_path"}),
+    ),
+    # The pair the single-document panel already offers as one flow ("then
+    # optimize"). Lossless and Ghostscript-free, so it composes after any
+    # step; running it LAST is what leaves the object streams the earlier
+    # steps rewrote in their smallest form.
+    "optimize": (
+        optimize,
+        frozenset({"linearize", "strip_metadata", "compress_streams"}),
+        frozenset(),
     ),
     "grayscale": (grayscale, frozenset(), frozenset({"gs_path"})),
     "convert_pdfa": (convert_pdfa, frozenset({"level"}), frozenset({"gs_path"})),

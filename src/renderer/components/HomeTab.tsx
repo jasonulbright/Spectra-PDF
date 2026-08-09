@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ChromeIcon } from './chrome-icons';
 import { formatOpenedAt, type RecentEntry } from '../lib/recent-files';
+import { ContextMenu } from './ContextMenu';
 import { ToolsCenter } from './ToolsCenter';
 import { invokeCommand, isCommandEnabled } from '../commands/context';
 import type { CommandId } from '../commands/registry';
@@ -17,6 +18,10 @@ interface HomeTabProps {
   onOpen: () => void;
   onOpenRecent: (path: string) => void;
   onClearRecent: () => void;
+  /** Show one recent file in the file manager. App owns it because the
+   * failure — the file has been moved or deleted since it was listed — is
+   * reported through the shared notice dialog, which Home does not own. */
+  onRevealRecent: (path: string) => void;
   /** Home hosts the tile grid (the docless tools surface —
    * the Tools tab is gone; ops tiles run the picker-first flow). */
   onOpenTool: (id: ToolId) => void;
@@ -36,9 +41,13 @@ const QUICK_ACTIONS: ReadonlyArray<{ command: CommandId; label: ChromeKey; icon:
   { command: 'tools.batchOcr', label: 'chrome.home.batchOcr', icon: 'find' },
 ];
 
-export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onOpenTool }: HomeTabProps): React.ReactElement {
+export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onRevealRecent, onOpenTool }: HomeTabProps): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
+  // The menu carries the path it was opened on rather than an index: the list
+  // can be rewritten (a file opened in another window) between the right-click
+  // and the choice, and an index would then name a different document.
+  const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
   return (
     <div data-testid="home-tab" className="flex-1 overflow-y-auto">
       <div className="home-shell">
@@ -98,6 +107,10 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onOp
                 key={path}
                 data-testid="home-recent-item"
                 onClick={() => onOpenRecent(path)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenu({ x: e.clientX, y: e.clientY, path });
+                }}
                 title={path}
                 className="home-recent"
               >
@@ -120,6 +133,21 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onOp
         </div>
         <ToolsCenter onOpenTool={onOpenTool} embedded />
       </div>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            { label: tChrome('chrome.recent.open'), onClick: () => onOpenRecent(menu.path) },
+            { label: tChrome('chrome.recent.reveal'), onClick: () => onRevealRecent(menu.path) },
+            {
+              label: tChrome('chrome.recent.copyPath'),
+              onClick: () => void navigator.clipboard.writeText(menu.path),
+            },
+          ]}
+        />
+      )}
     </div>
   );
 }

@@ -7,6 +7,8 @@
  * a preview into the counts the reader is shown before committing.
  */
 
+import { parsePageRangeField, type PageRangeResult } from './page-range';
+
 export interface ContentCropTrim {
   left: number;
   bottom: number;
@@ -75,24 +77,8 @@ export function summarizeContentCrop(result: ContentCropResult): ContentCropSumm
   };
 }
 
-export type PageScope = { pages: number[] | undefined } | { error: 'badPages' };
+export type PageScope = PageRangeResult;
 
-/**
- * The page-scope field, read the one way.
- *
- * `all` (in any case, with surrounding space) means the whole document, which
- * the engine spells as an absent list. Anything else is a comma-separated set
- * of 1-based numbers; a field that names no valid page is an ERROR rather
- * than an empty list, because an empty list means "no pages" to the engine
- * and would apply the crop to nothing while reporting success.
- */
-export function parsePageScope(input: string): PageScope {
-  const trimmed = input.trim().toLowerCase();
-  if (trimmed === 'all') return { pages: undefined };
-  const pages = trimmed
-    .split(',')
-    .map((s) => parseInt(s.trim(), 10))
-    .filter((n) => Number.isFinite(n) && n >= 1);
-  if (pages.length === 0) return { error: 'badPages' };
-  return { pages: [...new Set(pages)].sort((a, b) => a - b) };
-}
+/** The page-scope field, read the one way — see `lib/page-range.ts` for the
+ * syntax every such field shares. */
+export const parsePageScope = parsePageRangeField;

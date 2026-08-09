@@ -6,6 +6,7 @@ import { StatusBar } from '../components/StatusBar';
 import { ensureGsPath } from './SettingsPanel';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
+import { suffixedOutputName } from '../lib/output-names';
 
 export function PdfaPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -18,7 +19,7 @@ export function PdfaPanel(): React.ReactElement {
 
   const handleConvert = useCallback(async () => {
     if (!activeFile) return;
-    const output = await saveFile('output-pdfa.pdf');
+    const output = await saveFile(suffixedOutputName(activeFile.name, "pdfa"));
     if (!output) return;
     setBusy(true); setStatus(tChrome('panel.pdfa.converting'));
     try {

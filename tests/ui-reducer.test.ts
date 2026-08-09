@@ -4,6 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import { appReducer, initialState } from '../src/renderer/state/reducer';
 import type { AppAction, AppState, OpenDocument, OpenFile, PageRef } from '../src/renderer/state/types';
+import { NAV_PANE_MAX_WIDTH, NAV_PANE_MIN_WIDTH } from '../src/renderer/state/types';
+import { selectedPageNumbers } from '../src/renderer/state/selectors';
 
 function makeFile(path: string, pageCount: number): OpenFile {
   return {
@@ -507,9 +509,11 @@ describe('nav pane', () => {
 
   it('clamps the width to both ends and no-ops when unchanged', () => {
     const s = appReducer(initialState, { type: 'UI_SET_NAV_PANE_WIDTH', width: 50 });
-    expect(s.ui.navPane.width).toBe(180); // NAV_PANE_MIN_WIDTH
-    const huge = appReducer(initialState, { type: 'UI_SET_NAV_PANE_WIDTH', width: 9999 });
-    expect(huge.ui.navPane.width).toBe(520); // NAV_PANE_MAX_WIDTH — never buries the board
+    expect(s.ui.navPane.width).toBe(NAV_PANE_MIN_WIDTH);
+    const huge = appReducer(initialState, { type: 'UI_SET_NAV_PANE_WIDTH', width: 99999 });
+    // The reducer's clamp is the ABSOLUTE bound and nothing more; the room the
+    // document keeps is a viewport question, applied at the drag (NavPane).
+    expect(huge.ui.navPane.width).toBe(NAV_PANE_MAX_WIDTH);
     const wide = appReducer(initialState, { type: 'UI_SET_NAV_PANE_WIDTH', width: 300 });
     expect(wide.ui.navPane.width).toBe(300);
     expect(appReducer(wide, { type: 'UI_SET_NAV_PANE_WIDTH', width: 300 })).toBe(wide);
@@ -760,5 +764,47 @@ describe('split view modes (two-pane + spreadsheet quad)', () => {
     s = appReducer(s, { type: 'UI_TOGGLE_SPREADSHEET_SPLIT' });
     s = appReducer(s, { type: 'UI_TOGGLE_SPREADSHEET_SPLIT' });
     expect(s.ui.splitView).toBe('off');
+  });
+});
+
+// The affordance that fills a panel's page-range field from what is selected.
+// The selection is a set of opaque ids that can span files; the field
+// addresses ONE file by position, so the mapping is the whole risk.
+describe('selectedPageNumbers (state/selectors)', () => {
+  const active = (s: AppState, path: string): AppState => ({ ...s, activeFileId: path });
+
+  it('numbers the active file’s selected pages 1-based, in order', () => {
+    let s = active(twoDocState(), 'a.pdf');
+    s = select(s, ['a.pdf#p2', 'a.pdf#p0'], 'a.pdf#p0');
+    expect(selectedPageNumbers(s)).toEqual([1, 3]);
+  });
+
+  // Renumbering another file's pages into this field would scope an operation
+  // to positions nobody picked.
+  it('leaves out pages of any other file', () => {
+    let s = active(twoDocState(), 'a.pdf');
+    s = select(s, ['a.pdf#p1', 'b.pdf#p0'], 'b.pdf#p0');
+    expect(selectedPageNumbers(s)).toEqual([2]);
+  });
+
+  it('numbers across a file’s partitions in workspace order', () => {
+    const f = makeFile('book.pdfx', 5);
+    const s = active(
+      stateWith(
+        [f],
+        [
+          makeDoc(f, 'book.pdfx#0', makePages('book.pdfx', 3)),
+          makeDoc(f, 'book.pdfx#1', makePages('book.pdfx', 2, 3)),
+        ],
+      ),
+      'book.pdfx',
+    );
+    expect(selectedPageNumbers(select(s, ['book.pdfx#p0', 'book.pdfx#p4'], null))).toEqual([1, 5]);
+  });
+
+  it('is empty with nothing selected, and with no showable document', () => {
+    expect(selectedPageNumbers(active(twoDocState(), 'a.pdf'))).toEqual([]);
+    const s = select(twoDocState(), ['a.pdf#p0'], 'a.pdf#p0');
+    expect(selectedPageNumbers(s)).toEqual([]); // activeFileId is null
   });
 });
