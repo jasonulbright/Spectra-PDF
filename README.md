@@ -144,6 +144,7 @@ spectrapdf export-images input.pdf -o page.png --format png --dpi 300 --pages 1-
 spectrapdf header-footer input.pdf -o numbered.pdf --bc "Page {page} of {pages}"
 spectrapdf header-footer input.pdf -o stamped.pdf --br "BATES-{bates}" --bates-start 1000
 spectrapdf page-box input.pdf -o cropped.pdf --box crop --top 36 --bottom 36 --left 36 --right 36
+spectrapdf page-box input.pdf -o trimmed.pdf --auto --margin 9   # crop to each page's content
 spectrapdf page-labels input.pdf -o labeled.pdf --range "1:r" --range "5:D"
 
 # Attachments, layers, links

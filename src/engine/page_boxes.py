@@ -22,16 +22,29 @@ from pikepdf import Array
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import walk_inheritable
 
-_BOXES = {
+#: The four boundary boxes, by the name every surface spells them with. Shared
+#: so the content-aware crop cannot grow a second spelling of the same choice.
+BOXES = {
     "crop": "/CropBox",
     "bleed": "/BleedBox",
     "trim": "/TrimBox",
     "art": "/ArtBox",
 }
-_MIN_EXTENT = 1.0  # points — a box thinner than this is degenerate
+MIN_EXTENT = 1.0  # points — a box thinner than this is degenerate
 
 
-def _box(page, key: str):
+def box_key(box: str) -> str:
+    """The dictionary key for a box name, raising the one refusal both crops
+    share for an unknown one."""
+    key = BOXES.get(str(box).lower())
+    if key is None:
+        raise ValueError(f"box must be one of {sorted(BOXES)}, got {box!r}")
+    return key
+
+
+def effective_box(page, key: str):
+    """A page's box as `(x0, y0, x1, y1)`, inheritance-aware and normalized,
+    or None when the page does not have one."""
     v = walk_inheritable(page, key)
     if v is None:
         return None
@@ -62,9 +75,7 @@ def set_page_boxes(
             convention — an empty selection never widens to all). Out-of-range
             entries are ignored.
     """
-    key = _BOXES.get(str(box).lower())
-    if key is None:
-        raise ValueError(f"box must be one of {sorted(_BOXES)}, got {box!r}")
+    key = box_key(box)
     t, b, l, r = float(top), float(bottom), float(left), float(right)
 
     input_path = Path(file)
@@ -79,13 +90,13 @@ def set_page_boxes(
         for index, page in enumerate(pdf.pages, start=1):
             if wanted is not None and index not in wanted:
                 continue
-            media = _box(page, "/MediaBox")
+            media = effective_box(page, "/MediaBox")
             if media is None:
                 skipped.append({"page": index, "reason": "no media box"})
                 continue
             # Inset the box we're editing from its current value, else the media
             # box (a page with no explicit crop crops from its media bounds).
-            base = _box(page, key) or media
+            base = effective_box(page, key) or media
             nx0, ny0 = base[0] + l, base[1] + b
             nx1, ny1 = base[2] - r, base[3] - t
             # Clamp inside the media box.
@@ -93,7 +104,7 @@ def set_page_boxes(
             ny0 = max(ny0, media[1])
             nx1 = min(nx1, media[2])
             ny1 = min(ny1, media[3])
-            if nx1 - nx0 < _MIN_EXTENT or ny1 - ny0 < _MIN_EXTENT:
+            if nx1 - nx0 < MIN_EXTENT or ny1 - ny0 < MIN_EXTENT:
                 skipped.append({"page": index, "reason": "resulting box is degenerate"})
                 continue
             page.obj[key] = Array([nx0, ny0, nx1, ny1])

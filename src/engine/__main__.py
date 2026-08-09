@@ -36,6 +36,7 @@ from engine.extract_text import extract_text
 from engine.search_in_files import search_in_files
 from engine.search_regions import search_text_regions
 from engine.headers import add_header_footer
+from engine.content_crop import content_crop
 from engine.page_boxes import set_page_boxes
 from engine.page_labels import get_page_labels, set_page_labels
 from engine.layers import list_layers, set_layer_visibility
@@ -199,6 +200,7 @@ def main() -> None:
     server.register("search_text_regions", search_text_regions)
     server.register("add_header_footer", add_header_footer)
     server.register("set_page_boxes", set_page_boxes)
+    server.register("content_crop", content_crop)
     server.register("get_page_labels", get_page_labels)
     server.register("set_page_labels", set_page_labels)
     server.register("export_xfdf", export_xfdf)

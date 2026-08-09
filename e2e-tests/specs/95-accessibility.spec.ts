@@ -1,6 +1,6 @@
 // WCAG 2.1 A/AA evidence, run against the LIVE app: an axe-core sweep
 // of every major surface (the shared walk in support/surface-walk.ts: home,
-// the open document, all 24 tools and every op panel inside them, every nav
+// the open document, every tool and every op panel inside them, every nav
 // panel, the find bar, an open menu, the Properties dialog, every
 // Preferences category), in all three shipped themes. The gate is DEFINITE
 // violations at zero; axe's "incomplete" results (checks it could not
