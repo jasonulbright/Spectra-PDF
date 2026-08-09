@@ -32,6 +32,7 @@
 - A part of the stencil compression that runs long falls back to a simpler, faster method.
 - The result says how many pages that happened to.
 - The Optimize operation now reads as **Optimize** in the operation queue rather than a raw internal name.
+- Running the same operation on the same document twice now writes the same file, byte for byte.
 
 ## 1.0.25
 

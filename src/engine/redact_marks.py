@@ -31,6 +31,7 @@ import pikepdf
 from .incremental import finalize_preserving_signatures
 from .redact import properties_of
 from .validate import validate_pdf
+from engine.pdf_save import save_pdf
 
 
 def _page_annots(page) -> tuple[list, bool]:
@@ -302,9 +303,9 @@ def save_redaction_marks(file: str, output: str, regions: list) -> dict:
                 suffix=".pdf", delete=False, dir=str(input_path.parent)
             ) as tmp:
                 tmp_path = tmp.name
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     landed = tmp_path if same_file else str(output_path)
     preserved = finalize_preserving_signatures(str(input_path), landed)

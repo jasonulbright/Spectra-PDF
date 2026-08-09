@@ -35,6 +35,7 @@ import pikepdf
 from pikepdf import Dictionary, Name
 
 from engine.pdf_metrics import text_width_em
+from engine.pdf_save import save_pdf
 
 OCR_XOBJECT_NAME = "/SpectraPDFOCR"
 MIN_WORD_FONT = 1.0
@@ -197,7 +198,7 @@ def apply_ocr_layer(file: str, output: str, pages: list[dict]) -> dict:
                 suffix=".pdf", delete=False, dir=str(input_path.parent)
             ) as tmp:
                 tmp_path = tmp.name
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         else:
             # Overwriting an existing mirror output: clear a read-only
             # attribute first — fs-level copies propagate attributes, so a
@@ -206,7 +207,7 @@ def apply_ocr_layer(file: str, output: str, pages: list[dict]) -> dict:
             # bare access-denied (batch-mirror review finding).
             if output_path.exists() and not os.access(output_path, os.W_OK):
                 os.chmod(output_path, stat.S_IWRITE)
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     if same_file:
         shutil.move(tmp_path, str(output_path))

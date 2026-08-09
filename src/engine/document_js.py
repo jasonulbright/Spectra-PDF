@@ -19,6 +19,7 @@ import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.pdf_save import save_pdf
 
 # The PDF text-string UTF-16BE byte-order mark. `/JS` is a "text string or
 # stream" (PDF 32000 §12.6.4.16): PDFDocEncoding, or UTF-16 with a BOM. We WRITE
@@ -151,9 +152,9 @@ def set_document_js(file: str, output: str, scripts: list | None = None) -> dict
         if same_file:
             fd, tmp_path = tempfile.mkstemp(suffix=".pdf", dir=str(Path(output).parent))
             os.close(fd)
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         else:
-            pdf.save(output)
+            save_pdf(pdf, output)
     if same_file and tmp_path is not None:
         try:
             os.replace(tmp_path, output)

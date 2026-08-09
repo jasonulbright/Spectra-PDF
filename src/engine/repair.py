@@ -7,6 +7,7 @@ preserves annotations, bookmarks, metadata.
 
 import pikepdf
 from pathlib import Path
+from engine.pdf_save import save_pdf
 
 
 def repair(file: str, output: str) -> dict:
@@ -67,7 +68,8 @@ def repair(file: str, output: str) -> dict:
 
         # Save with full rewrite -- this is the actual repair step.
         # QPDF rewrites all objects, fixing xref, stream lengths, etc.
-        pdf.save(
+        save_pdf(
+            pdf,
             str(output_path),
             linearize=False,  # Clean output, no web-optimization artifacts
             object_stream_mode=pikepdf.ObjectStreamMode.generate,

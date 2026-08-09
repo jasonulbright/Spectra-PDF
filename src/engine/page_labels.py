@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
+from engine.pdf_save import save_pdf
 
 _STYLES = {"D", "r", "R", "a", "A"}
 
@@ -158,9 +159,9 @@ def set_page_labels(file: str, output: str, ranges: list[dict]) -> dict:
                 suffix=".pdf", delete=False, dir=str(input_path.parent)
             ) as tmp:
                 tmp_path = tmp.name
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     if same_file:
         shutil.move(tmp_path, str(output_path))

@@ -34,6 +34,7 @@ import subprocess
 from pathlib import Path
 
 import pikepdf
+from engine.pdf_save import save_pdf
 
 # Render stages inherit printer.py's posture: bounded, stdin-isolated.
 RENDER_TIMEOUT_S = 600
@@ -277,7 +278,7 @@ def strip_annotations(src: str, dst: str, mode: str) -> int:
                     removed += 1
             if removed:
                 page.obj["/Annots"] = pikepdf.Array(kept)
-        pdf.save(dst)
+        save_pdf(pdf, dst)
     return removed
 
 
@@ -320,7 +321,7 @@ def build_sequence(
                 dw, dh = (h, w) if rot % 180 == 90 else (w, h)
                 if dw > dh:
                     page.obj["/Rotate"] = (rot + 90) % 360
-        pdf.save(dst)
+        save_pdf(pdf, dst)
 
 
 def _xobject_for(dst_pdf, src_pdf, index: int, cache: dict):
@@ -417,7 +418,7 @@ def impose_sheets(
             page.Contents = out.make_stream(" ".join(content).encode("ascii"))
             page.obj["/Resources"] = resources
         n = len(sheets)
-        out.save(dst)
+        save_pdf(out, dst)
     return n
 
 
@@ -513,7 +514,7 @@ def impose_poster(
                     page.Contents = out.make_stream(" ".join(content).encode("ascii"))
                     page.obj["/Resources"] = resources
                     sheets += 1
-        out.save(dst)
+        save_pdf(out, dst)
     return {"sheets": sheets, "grid": grids}
 
 
