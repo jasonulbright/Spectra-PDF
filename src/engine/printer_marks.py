@@ -40,6 +40,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Dictionary, Name
 
+from engine.pdf_save import save_pdf
 from engine.pdf_tree import walk_inheritable
 from engine.preflight import walk_page_resources
 from engine.separations import ink_kind
@@ -726,9 +727,9 @@ def add_printer_marks(
                 suffix=".pdf", delete=False, dir=str(input_path.parent)
             ) as tmp:
                 tmp_path = tmp.name
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     if same_file:
         shutil.move(tmp_path, str(output_path))
@@ -773,9 +774,9 @@ def remove_printer_marks(file: str, output: str, pages: list | None = None) -> d
                 suffix=".pdf", delete=False, dir=str(input_path.parent)
             ) as tmp:
                 tmp_path = tmp.name
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     if same_file:
         shutil.move(tmp_path, str(output_path))

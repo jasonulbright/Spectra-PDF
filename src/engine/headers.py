@@ -42,6 +42,7 @@ from engine.pdf_metrics import (
     flatten_control_chars as _flatten_control_chars,
     text_width_em as _text_width_em,
 )
+from engine.pdf_save import save_pdf
 from engine.watermark import (
     _escape_pdf_text,
     _face_glyph_height_em,
@@ -257,9 +258,9 @@ def add_header_footer(
                 suffix=".pdf", delete=False, dir=str(input_path.parent)
             ) as tmp:
                 tmp_path = tmp.name
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     if same_file:
         shutil.move(tmp_path, str(output_path))

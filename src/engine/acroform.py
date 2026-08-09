@@ -63,6 +63,7 @@ from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name
+from engine.pdf_save import save_pdf
 
 MAX_FIELD_DEPTH = 32
 
@@ -619,5 +620,5 @@ def reattach_forms_file(original_path, regenerated_path) -> bool:
         with pikepdf.open(regenerated_path, allow_overwriting_input=True) as regen:
             if not reattach_acroform(orig, regen):
                 return False
-            regen.save(regenerated_path)
+            save_pdf(regen, regenerated_path)
             return True

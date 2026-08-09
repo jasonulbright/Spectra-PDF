@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.pdf_save import save_pdf
 
 
 def check_encrypted(file: str) -> dict:
@@ -30,7 +31,7 @@ def unlock(file: str, password: str) -> dict:
     os.close(fd)
     try:
         with pikepdf.open(file, password=password) as pdf:
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         os.replace(tmp_path, file)
     except Exception:
         if os.path.exists(tmp_path):

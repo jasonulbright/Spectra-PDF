@@ -11,6 +11,7 @@ from engine.acroform import (
     refresh_sig_flags,
     refuse_if_xfa,
 )
+from engine.pdf_save import save_pdf
 
 
 def merge(files: list[str], output: str) -> dict:
@@ -49,7 +50,7 @@ def merge(files: list[str], output: str) -> dict:
         # Sources stay open through the save — qpdf resolves foreign copies
         # lazily, so a source closed before the destination is saved risks
         # reading freed data (the old per-file `with` closed each one early).
-        merged.save(output_path)
+        save_pdf(merged, output_path)
 
     result_dict = {
         "output": str(output_path),

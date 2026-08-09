@@ -39,6 +39,7 @@ from pikepdf import Array, Dictionary, Name
 from .color_spaces import build_function
 from .separations import PROCESS_INKS, ink_kind, list_inks
 from .validate import validate_pdf
+from engine.pdf_save import save_pdf
 
 _MAX_DEPTH = 12
 # Tints the two transforms are compared at, endpoints included.
@@ -373,7 +374,7 @@ def alias_ink(
                             del colorants[Name("/" + source)]
         if renamed == 0:
             raise ValueError(f'Ink "{source}" is not used in this document.')
-        pdf.save(output)
+        save_pdf(pdf, output)
     return {
         "source": source,
         "target": target,
@@ -746,7 +747,7 @@ def spot_to_process(
 
         changed_images = _convert_images(pdf, wanted)
         changed_shadings = _convert_shadings(pdf, wanted)
-        pdf.save(output)
+        save_pdf(pdf, output)
 
     return {
         "inks": sorted(wanted),

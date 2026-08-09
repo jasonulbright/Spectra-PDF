@@ -7,6 +7,7 @@ which were lost.
 
 import pikepdf
 from pathlib import Path
+from engine.pdf_save import save_pdf
 
 
 def recover(file: str, output: str) -> dict:
@@ -93,7 +94,8 @@ def recover(file: str, output: str) -> dict:
                 "No pages could be recovered. File is completely unreadable."
             )
 
-        dest.save(
+        save_pdf(
+            dest,
             str(output_path),
             compress_streams=True,
             object_stream_mode=pikepdf.ObjectStreamMode.generate,
