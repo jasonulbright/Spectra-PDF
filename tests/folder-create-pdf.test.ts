@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   folderLabel,
+  parseFolderListing,
   runFolderCreatePdf,
   summarize,
   type FolderCreatePdfIo,
@@ -51,6 +52,69 @@ function io(overrides: Partial<FolderCreatePdfIo> = {}): FolderCreatePdfIo {
     ...overrides,
   };
 }
+
+describe('reading the engine’s listing', () => {
+  // This parser exists because of a live defect the e2e caught: the engine
+  // names its fields in snake_case, the seam CAST the reply instead of
+  // reading it, and the first `listing.skippedDirs.length` was
+  // `undefined.length` — an uncaught TypeError that took the whole React tree
+  // down, so the dialog vanished and every later open failed.
+  it('reads the engine’s snake_case field, which a cast silently missed', () => {
+    const parsed = parseFolderListing({
+      source: 'C:\\scans',
+      groups: [],
+      skipped_dirs: ['[WinError 5] Access is denied'],
+    });
+    expect(parsed.skippedDirs).toEqual(['[WinError 5] Access is denied']);
+  });
+
+  it('carries a whole group through', () => {
+    const parsed = parseFolderListing({
+      source: 'C:\\scans',
+      groups: [
+        {
+          rel: 'invoice',
+          name: 'invoice',
+          output: 'invoice.pdf',
+          files: ['C:\\scans\\invoice\\page1.png'],
+          count: 1,
+        },
+      ],
+      skipped_dirs: [],
+    });
+    expect(parsed.groups).toHaveLength(1);
+    expect(parsed.groups[0]).toEqual({
+      rel: 'invoice',
+      name: 'invoice',
+      output: 'invoice.pdf',
+      files: ['C:\\scans\\invoice\\page1.png'],
+      count: 1,
+    });
+  });
+
+  it('never yields undefined for a field the engine did not send', () => {
+    for (const raw of [null, undefined, 7, 'listing', [], {}, { groups: 'no' }]) {
+      const parsed = parseFolderListing(raw);
+      expect(Array.isArray(parsed.groups)).toBe(true);
+      expect(Array.isArray(parsed.skippedDirs)).toBe(true);
+      expect(typeof parsed.source).toBe('string');
+    }
+  });
+
+  it('drops a group it cannot read rather than half-reading it', () => {
+    const parsed = parseFolderListing({
+      groups: [
+        'not an object',
+        { output: 'no-files.pdf', files: [] },
+        { rel: 'a', output: 'a.pdf', files: ['x.png', 3] },
+      ],
+    });
+    expect(parsed.groups.map((g) => g.output)).toEqual(['a.pdf']);
+    // A count the file list contradicts is not trusted.
+    expect(parsed.groups[0].files).toEqual(['x.png']);
+    expect(parsed.groups[0].count).toBe(1);
+  });
+});
 
 describe('the run', () => {
   it('builds one document per folder, at the folder’s own place in the mirror', async () => {
