@@ -41,6 +41,7 @@ export type GuidedStepOp =
   | 'outline_from_structure'
   | 'watermark'
   | 'ocr_file'
+  | 'enhance_scan'
   | 'add_header_footer'
   | 'encrypt'
   | 'export_document'
@@ -530,6 +531,143 @@ export const STEP_CATALOG: readonly StepDef[] = [
         defaultValue: 'eng',
       },
     ],
+  },
+  {
+    // Deskew, despeckle, whiten and re-orient the scanned pages. The engine
+    // enforces the ORDER against the other two scan steps (before OCR, before
+    // MRC compression); the numbers below are the same thresholds the Scan &
+    // OCR panel exposes, spelled out because an unattended run has no reviewer
+    // to look at a measurement first.
+    op: 'enhance_scan',
+    title: 'Enhance Scans',
+    needsGs: true,
+    needsTesseract: true,
+    params: [
+      {
+        key: 'pages',
+        label: 'Pages',
+        kind: 'text',
+        defaultValue: 'all',
+        hint: 'A list such as 1,3,5 — or all.',
+      },
+      {
+        key: 'deskew',
+        label: 'Straighten (deskew)',
+        kind: 'select',
+        options: [
+          { value: 'yes', label: 'Straighten a leaning page' },
+          { value: 'no', label: 'Leave the angle alone' },
+        ],
+        defaultValue: 'yes',
+      },
+      {
+        key: 'despeckle',
+        label: 'Remove specks',
+        kind: 'select',
+        options: [
+          { value: 'yes', label: 'Remove scanning specks' },
+          { value: 'no', label: 'Leave the specks' },
+        ],
+        defaultValue: 'yes',
+      },
+      {
+        key: 'background',
+        label: 'Whiten the background',
+        kind: 'select',
+        options: [
+          { value: 'yes', label: 'Whiten a greyed background' },
+          { value: 'no', label: 'Leave the background' },
+        ],
+        defaultValue: 'yes',
+      },
+      {
+        key: 'orientation',
+        label: 'Detect the orientation',
+        kind: 'select',
+        options: [
+          { value: 'yes', label: 'Turn a sideways page upright' },
+          { value: 'no', label: 'Leave the page as it is' },
+        ],
+        defaultValue: 'yes',
+      },
+      {
+        key: 'max_skew_deg',
+        label: 'Search up to (°)',
+        kind: 'number',
+        defaultValue: 10,
+        min: 0.1,
+        max: 45,
+        step: 0.1,
+      },
+      {
+        key: 'min_skew_deg',
+        label: 'Smallest skew worth fixing (°)',
+        kind: 'number',
+        defaultValue: 0.1,
+        min: 0,
+        max: 45,
+        step: 0.1,
+      },
+      {
+        key: 'speck_size_in',
+        label: 'Largest speck (in)',
+        kind: 'number',
+        defaultValue: 0.01,
+        min: 0.001,
+        max: 0.05,
+        step: 0.001,
+      },
+      {
+        key: 'speck_gap_in',
+        label: 'Keep a speck this close to ink (in)',
+        kind: 'number',
+        defaultValue: 0.02,
+        min: 0.001,
+        max: 0.2,
+        step: 0.001,
+      },
+      {
+        key: 'background_strength',
+        label: 'Whitening strength',
+        kind: 'number',
+        defaultValue: 1,
+        min: 0,
+        max: 1,
+        step: 0.05,
+      },
+      {
+        key: 'osd_confidence',
+        label: 'Turn the page when at least',
+        kind: 'number',
+        defaultValue: 2,
+        min: 0,
+        max: 10,
+        step: 0.1,
+      },
+      {
+        key: 'jpeg_quality',
+        label: 'Re-encode quality',
+        kind: 'number',
+        defaultValue: 85,
+        min: 1,
+        max: 100,
+        step: 1,
+      },
+    ],
+    mapParams: (params) => ({
+      pages: pagesParam(params.pages),
+      deskew: String(params.deskew ?? 'yes') === 'yes',
+      despeckle: String(params.despeckle ?? 'yes') === 'yes',
+      background: String(params.background ?? 'yes') === 'yes',
+      orientation: String(params.orientation ?? 'yes') === 'yes',
+      max_skew_deg: Number(params.max_skew_deg ?? 10),
+      min_skew_deg: Number(params.min_skew_deg ?? 0.1),
+      speck_size_in: Number(params.speck_size_in ?? 0.01),
+      speck_gap_in: Number(params.speck_gap_in ?? 0.02),
+      background_strength: Number(params.background_strength ?? 1),
+      osd_confidence: Number(params.osd_confidence ?? 2),
+      jpeg_quality: Number(params.jpeg_quality ?? 85),
+    }),
   },
   {
     op: 'add_header_footer',
