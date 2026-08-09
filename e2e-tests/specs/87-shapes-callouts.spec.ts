@@ -119,6 +119,50 @@ describe('drawing shapes and callouts', () => {
     );
   });
 
+  it('draws a cloud with vertex clicks', async () => {
+    await browser.$('[data-testid="shape-type-cloud"]').click();
+    await clickOnPage(pr, [0.58, 0.45]);
+    await clickOnPage(pr, [0.8, 0.45]);
+    await clickOnPage(pr, [0.8, 0.56]);
+    await clickOnPage(pr, [0.58, 0.56]);
+    await clickOnPage(pr, [0.58, 0.56], true);
+    await browser.waitUntil(
+      async () => (await getPageAnnotations(doc.docId, doc.pageId)).some((a) => a.shapeType === 'cloud'),
+      { timeout: 5_000, timeoutMsg: 'the vertex sequence never committed a cloud' },
+    );
+    const cloud = (await getPageAnnotations(doc.docId, doc.pageId)).find((a) => a.shapeType === 'cloud')!;
+    expect(cloud.points!.length).toBe(8);
+  });
+
+  // A vertex sequence belongs to the figure that started it. The figure
+  // changes without the TOOL changing, so nothing that watches the tool sees
+  // it: a sequence left live goes on collecting clicks under a figure nobody
+  // armed and commits the one it started with — pick Cloud part-way through a
+  // polygon and what lands is another polygon.
+  it('ends a live vertex sequence when the figure changes', async () => {
+    const before = (await getPageAnnotations(doc.docId, doc.pageId)).length;
+    await browser.$('[data-testid="shape-type-polygon"]').click();
+    await clickOnPage(pr, [0.36, 0.44]);
+    await clickOnPage(pr, [0.48, 0.44]);
+    // Switch mid-sequence. The half-drawn polygon is abandoned, not banked.
+    await browser.$('[data-testid="shape-type-cloud"]').click();
+    await browser.pause(300);
+    await clickOnPage(pr, [0.36, 0.5]);
+    await clickOnPage(pr, [0.48, 0.5]);
+    await clickOnPage(pr, [0.48, 0.57]);
+    await clickOnPage(pr, [0.48, 0.57], true);
+    await browser.waitUntil(
+      async () => (await getPageAnnotations(doc.docId, doc.pageId)).length > before,
+      { timeout: 5_000, timeoutMsg: 'nothing committed after the figure switch' },
+    );
+    const added = (await getPageAnnotations(doc.docId, doc.pageId)).slice(before);
+    expect(added).toHaveLength(1);
+    expect(added[0].shapeType).toBe('cloud');
+    // Three clicks after the switch, so the abandoned polygon's two vertices
+    // cannot have joined this one.
+    expect(added[0].points!.length).toBe(6);
+  });
+
   it('draws a callout whose editor opens for the text', async () => {
     await invokeAppCommand('tools.callout');
     await dragOnPage(pr, [0.55, 0.32], [0.85, 0.4]);
