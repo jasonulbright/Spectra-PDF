@@ -6,6 +6,7 @@ import type { NavPanelComponentProps } from './types';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tNavPanelTitle } from '../../i18n';
 import { inlineExtent } from '../../lib/inline-direction';
+import { NAV_PANE_BOARD_RESERVE, NAV_PANE_MIN_WIDTH } from '../../state/types';
 
 // The navigation pane on the inline-start side: a thin, always-docked icon strip
 // (one button per AVAILABLE panel) + the active panel body at the persisted
@@ -42,9 +43,13 @@ export function NavPane(props: NavPaneProps): React.ReactElement {
       e.preventDefault();
       const bounds = bodyRef.current?.getBoundingClientRect() ?? { left: 0, right: 0 };
       const onMove = (ev: PointerEvent) => {
+        // The reducer's clamp is absolute and pure. The document's own
+        // reserve depends on the window, which a reducer may not read — so it
+        // is applied here, where the viewport is.
+        const ceiling = Math.max(NAV_PANE_MIN_WIDTH, window.innerWidth - NAV_PANE_BOARD_RESERVE);
         dispatch({
           type: 'UI_SET_NAV_PANE_WIDTH',
-          width: inlineExtent(bounds, ev.clientX, 'start'),
+          width: Math.min(ceiling, inlineExtent(bounds, ev.clientX, 'start')),
         });
       };
       const detach = () => {

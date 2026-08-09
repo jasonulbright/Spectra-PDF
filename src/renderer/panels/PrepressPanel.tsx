@@ -8,6 +8,7 @@ import { dialog } from '../lib/tauri-bridge';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import type { PanelKey } from '../i18n-panels';
+import { suffixedOutputName } from '../lib/output-names';
 
 // ICC-managed CMYK conversion for prepress (Ghostscript). Like
 // grayscale/pdfa it writes a new file (the "Optimize" tool group's pattern);
@@ -60,7 +61,7 @@ export function PrepressPanel(): React.ReactElement {
 
   const handleConvert = useCallback(async () => {
     if (!activeFile) return;
-    const output = await saveFile('cmyk.pdf');
+    const output = await saveFile(suffixedOutputName(activeFile.name, "cmyk"));
     if (!output) return;
     setBusy(true);
     setStatus(tChrome('panel.prepress.convertingCmyk'));
@@ -84,7 +85,7 @@ export function PrepressPanel(): React.ReactElement {
 
   const handlePdfx = useCallback(async () => {
     if (!activeFile) return;
-    const output = await saveFile('pdfx.pdf');
+    const output = await saveFile(suffixedOutputName(activeFile.name, "pdfx"));
     if (!output) return;
     setBusy(true);
     setStatus(tChrome('panel.prepress.creatingPdfx'));

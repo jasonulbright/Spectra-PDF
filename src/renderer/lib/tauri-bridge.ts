@@ -342,6 +342,10 @@ export const file = {
     invoke('restore_snapshot', { workingPath, snapshotPath }),
   saveAs: (workingPath: string, destPath: string) =>
     invoke('save_as', { workingPath, destPath }),
+  /** Show a file in the file manager, SELECTED. Rust refuses anything that is
+   * not an existing file, and browses rather than shell-opens — see
+   * `commands::reveal_in_file_manager`. */
+  reveal: (filePath: string) => invoke<void>('reveal_in_file_manager', { path: filePath }),
 };
 
 // ── App ───────────────────────────────────────────────────────────────────

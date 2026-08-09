@@ -6,6 +6,7 @@ import { StatusBar } from '../components/StatusBar';
 import { ensureGsPath } from './SettingsPanel';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
+import { suffixedOutputName } from '../lib/output-names';
 
 export function RebuildPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -17,7 +18,7 @@ export function RebuildPanel(): React.ReactElement {
 
   const handleRebuild = useCallback(async () => {
     if (!activeFile) return;
-    const output = await saveFile('rebuilt.pdf');
+    const output = await saveFile(suffixedOutputName(activeFile.name, "rebuilt"));
     if (!output) return;
     setBusy(true); setStatus(tChrome('panel.rebuild.rebuilding'));
     try {

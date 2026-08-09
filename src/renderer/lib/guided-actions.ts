@@ -30,6 +30,7 @@ import { pagesParam } from './page-scope';
 export type GuidedStepOp =
   | 'create_pdf'
   | 'compress'
+  | 'optimize'
   | 'grayscale'
   | 'convert_pdfa'
   | 'strip_metadata'
@@ -134,6 +135,51 @@ export const STEP_CATALOG: readonly StepDef[] = [
         defaultValue: 'ebook',
       },
     ],
+  },
+  {
+    // The Compress panel's "then optimize" checkbox, as a step — so the pair
+    // the single-document flow already offers together is reachable over a
+    // folder. Lossless and Ghostscript-free, which is why it needs no tool
+    // path and composes after any other step.
+    op: 'optimize',
+    title: 'Optimize (lossless)',
+    params: [
+      {
+        key: 'linearize',
+        label: 'Web view',
+        kind: 'select',
+        options: [
+          { value: 'yes', label: 'Arrange for fast web viewing' },
+          { value: 'no', label: 'Leave the arrangement alone' },
+        ],
+        defaultValue: 'yes',
+      },
+      {
+        key: 'compress_streams',
+        label: 'Object streams',
+        kind: 'select',
+        options: [
+          { value: 'yes', label: 'Pack the objects together' },
+          { value: 'no', label: 'Keep them as they are' },
+        ],
+        defaultValue: 'yes',
+      },
+      {
+        key: 'strip_metadata',
+        label: 'Metadata',
+        kind: 'select',
+        options: [
+          { value: 'no', label: 'Keep it' },
+          { value: 'yes', label: 'Remove the document’s metadata' },
+        ],
+        defaultValue: 'no',
+      },
+    ],
+    mapParams: (params) => ({
+      linearize: String(params.linearize ?? 'yes') === 'yes',
+      compress_streams: String(params.compress_streams ?? 'yes') === 'yes',
+      strip_metadata: String(params.strip_metadata ?? 'no') === 'yes',
+    }),
   },
   { op: 'grayscale', title: 'Convert to Grayscale', needsGs: true, params: [] },
   {

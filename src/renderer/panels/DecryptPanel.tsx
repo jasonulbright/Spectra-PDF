@@ -5,6 +5,7 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
+import { suffixedOutputName } from '../lib/output-names';
 
 export function DecryptPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -17,7 +18,7 @@ export function DecryptPanel(): React.ReactElement {
 
   const handleDecrypt = useCallback(async () => {
     if (!activeFile) return;
-    const output = await saveFile('decrypted.pdf');
+    const output = await saveFile(suffixedOutputName(activeFile.name, "decrypted"));
     if (!output) return;
     setBusy(true); setStatus(tChrome('panel.decrypt.decrypting'));
     try {

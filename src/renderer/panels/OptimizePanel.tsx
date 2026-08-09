@@ -16,6 +16,8 @@ import {
   type SpaceDetail,
   type SpaceReport,
 } from '../lib/space-audit';
+import { suffixedOutputName } from '../lib/output-names';
+import { FolderRouteHint } from '../components/FolderRouteHint';
 
 // The panel opens on the AUDIT, not on the knobs: which setting is worth
 // changing is a property of the document, and a checkbox list with nothing
@@ -144,7 +146,7 @@ export function OptimizePanel(): React.ReactElement {
 
   const handleOptimize = useCallback(async () => {
     if (!activeFile) return;
-    const output = await saveFile('optimized.pdf');
+    const output = await saveFile(suffixedOutputName(activeFile.name, "optimized"));
     if (!output) return;
     setBusy(true); setStatus(tChrome('panel.optimize.optimizing'));
     try {
@@ -313,6 +315,7 @@ export function OptimizePanel(): React.ReactElement {
         {busy ? tChrome('panel.optimize.optimizing') : tChrome('panel.optimize.optimize')}
       </button>
       <StatusBar message={status} busy={busy} />
+      <FolderRouteHint />
     </div>
   );
 }

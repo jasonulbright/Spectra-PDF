@@ -11,6 +11,11 @@ export const PANEL_STRINGS = {
   'panel.common.pageCount_other': '{{count}} pages',
   'panel.common.error': 'Error: {{message}}',
   'panel.common.working': 'Working…',
+  'panel.common.folderRouteHint':
+    'This works on the open document. To run the same steps over every document in a folder, build an action.',
+  'panel.common.folderRouteOpen': 'Open Guided Actions',
+  'panel.common.useSelection': 'Use selection',
+  'panel.common.useSelectionTitle': 'Fill this field with the pages selected in the page list',
 
   'panel.rotate.open': 'Open a PDF to rotate pages',
   'panel.rotate.angle': 'Angle',
@@ -18,8 +23,9 @@ export const PANEL_STRINGS = {
   'panel.rotate.cw90': '90 CW',
   'panel.rotate.flip180': '180',
   'panel.rotate.ccw90': '90 CCW',
-  'panel.rotate.pagesLabel': 'Pages (e.g. 1,3,5 or all)',
+  'panel.rotate.pagesLabel': 'Pages (e.g. 1,3,5-9 or all)',
   'panel.rotate.pagesAria': 'Pages to rotate',
+  'panel.rotate.badPages': 'Error: pages must be e.g. 1,3,5-9 or all',
   'panel.rotate.rotate': 'Rotate',
   'panel.rotate.rotating': 'Rotating...',
   'panel.rotate.done': 'Rotated {{pages}} pages by {{angle}} degrees',
@@ -34,6 +40,9 @@ export const PANEL_STRINGS = {
   'panel.compress.mrc': 'Scanned document (MRC)',
   'panel.compress.mrcHint':
     'Separates a scan into a text stencil, an ink colour and a paper background. The text stays at the scan’s own resolution while the background compresses hard.',
+  'panel.compress.mrcSuggest':
+    'Most of this document’s pages read as scans. The scanned-document setting usually makes those far smaller than a resolution change does.',
+  'panel.compress.mrcSuggestApply': 'Use it',
   'panel.compress.mrcPreset': 'Scan preset',
   'panel.compress.mrcPresetArchival': 'Archival',
   'panel.compress.mrcPresetBalanced': 'Balanced',
@@ -904,7 +913,7 @@ export const PANEL_STRINGS = {
     'Drag a rectangle on the page to set the area to keep, or trim points from each edge of the chosen box below. Cropping only hides content — nothing is deleted, and the crop can never fall outside the media box.',
   'panel.pageBoxes.cropDrawn': 'Crop drawn on page {{page}} — review the margins, then Apply',
   'panel.pageBoxes.enterMargin': 'Enter a margin to trim on at least one edge',
-  'panel.pageBoxes.badPages': 'Error: pages must be e.g. 1,3,5 or all',
+  'panel.pageBoxes.badPages': 'Error: pages must be e.g. 1,3,5-9 or all',
   'panel.pageBoxes.applying': 'Applying…',
   'panel.pageBoxes.apply': 'Apply',
   'panel.pageBoxes.updated_one': 'Updated {{count}} page{{skipped}}',
@@ -921,7 +930,7 @@ export const PANEL_STRINGS = {
   'panel.pageBoxes.left': 'Left',
   'panel.pageBoxes.right': 'Right',
   'panel.pageBoxes.edgeInset': '{{edge}} inset',
-  'panel.pageBoxes.pagesLabel': 'Pages (e.g. 1,3,5 or all)',
+  'panel.pageBoxes.pagesLabel': 'Pages (e.g. 1,3,5-9 or all)',
   'panel.pageBoxes.pagesAria': 'Pages to crop',
   'panel.pageBoxes.autoTitle': 'Remove white margins',
   'panel.pageBoxes.autoBlurb':
@@ -943,7 +952,9 @@ export const PANEL_STRINGS = {
   'panel.delete.deletingBtn': 'Deleting...',
   'panel.delete.delete': 'Delete Pages',
   'panel.delete.done': 'Deleted {{count}} pages, {{remaining}} remaining',
-  'panel.delete.pagesLabel': 'Pages to delete (e.g. 2,4,6)',
+  'panel.delete.pagesLabel': 'Pages to delete (e.g. 2,4,6-8)',
+  'panel.delete.pagesAria': 'Pages to delete',
+  'panel.delete.badPages': 'Error: pages must be e.g. 2,4,6-8',
 
   'panel.portfolio.openAlt': 'Or open an existing portfolio to manage its files',
   'panel.portfolio.creating': 'Creating portfolio…',

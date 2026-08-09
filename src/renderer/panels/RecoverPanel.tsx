@@ -5,6 +5,7 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
+import { suffixedOutputName } from '../lib/output-names';
 
 export function RecoverPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -17,7 +18,7 @@ export function RecoverPanel(): React.ReactElement {
 
   const handleRecover = useCallback(async () => {
     if (!activeFile) return;
-    const output = await saveFile('recovered.pdf');
+    const output = await saveFile(suffixedOutputName(activeFile.name, "recovered"));
     if (!output) return;
     setBusy(true); setStatus(tChrome('panel.recover.recovering'));
     setReport(null);

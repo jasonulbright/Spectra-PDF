@@ -21,10 +21,13 @@ import { TEST_HARNESS_ENABLED, registerCompress } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tOcrLanguage, type UiKey } from '../i18n';
 import {
+  isScanClassified,
   parseImageResolution,
   type ImageResolutionSummary as ImageResolution,
 } from '../lib/image-resolution';
 import { ImageResolutionSummary } from '../components/ImageResolutionSummary';
+import { suffixedOutputName } from '../lib/output-names';
+import { FolderRouteHint } from '../components/FolderRouteHint';
 
 const PRESET_DPI: Record<string, number> = { screen: 72, ebook: 150, printer: 300, prepress: 300 };
 
@@ -211,7 +214,7 @@ export function CompressPanel(): React.ReactElement {
 
   const handleCompress = useCallback(async () => {
     if (!activeFile) return;
-    const output = await saveFile('compressed.pdf');
+    const output = await saveFile(suffixedOutputName(activeFile.name, "compressed"));
     if (!output) return;
     await performCompress(output);
   }, [activeFile, saveFile, performCompress]);
@@ -265,6 +268,24 @@ export function CompressPanel(): React.ReactElement {
           <option value="mrc">{tChrome('panel.compress.mrc')}</option>
           <option value="custom">{tChrome('panel.compress.custom')}</option>
         </select>
+        {/* The classifier that decides this already runs for the Images
+            summary above, and it is the same one the MRC pass itself uses to
+            decide which pages it will touch — so the suggestion and the
+            outcome cannot disagree. Offered, never applied: the DPI presets
+            stay reachable for a scan the reader wants resampled instead. */}
+        {imageRes !== null && isScanClassified(imageRes) && !mrc && (
+          <p className="mt-1 text-xs text-neutral-400 max-w-md" data-testid="compress-mrc-suggestion">
+            {tChrome('panel.compress.mrcSuggest')}{' '}
+            <button
+              type="button"
+              data-testid="compress-mrc-suggestion-apply"
+              onClick={() => handlePresetChange('mrc')}
+              className="underline text-blue-400 hover:text-blue-300"
+            >
+              {tChrome('panel.compress.mrcSuggestApply')}
+            </button>
+          </p>
+        )}
       </div>
       {mrc ? (
         <div className="flex flex-col gap-3" data-testid="compress-mrc-options">
@@ -357,6 +378,7 @@ export function CompressPanel(): React.ReactElement {
         {busy ? tChrome('panel.compress.compressing') : tChrome('panel.compress.compress')}
       </button>
       <StatusBar message={status} busy={busy} />
+      <FolderRouteHint />
     </div>
   );
 }

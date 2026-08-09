@@ -6,6 +6,7 @@ import { StatusBar } from '../components/StatusBar';
 import { dialog } from '../lib/tauri-bridge';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
+import { suffixedOutputName } from '../lib/output-names';
 
 export function EncryptPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -35,7 +36,7 @@ export function EncryptPanel(): React.ReactElement {
       setStatus(tChrome('panel.encrypt.ownerNeeded'));
       return;
     }
-    const output = await saveFile('encrypted.pdf');
+    const output = await saveFile(suffixedOutputName(activeFile.name, "encrypted"));
     if (!output) return;
     setBusy(true); setStatus(tChrome('panel.encrypt.encrypting'));
     try {
@@ -62,7 +63,7 @@ export function EncryptPanel(): React.ReactElement {
   const handleEncryptCerts = useCallback(async () => {
     if (!activeFile) return;
     if (recipients.length === 0) { setStatus(tChrome('panel.encrypt.addRecipientFirst')); return; }
-    const output = await saveFile('encrypted.pdf');
+    const output = await saveFile(suffixedOutputName(activeFile.name, "encrypted"));
     if (!output) return;
     setBusy(true); setStatus(tChrome('panel.encrypt.encrypting'));
     try {
