@@ -5,6 +5,7 @@ from pathlib import Path
 import pikepdf
 
 from .inplace import finish_staged, is_same_file, staging_target
+from engine.pdf_save import save_pdf
 
 
 def _rebrand_xmptk(path: Path) -> None:
@@ -68,10 +69,10 @@ def set_metadata(
         # pikepdf cannot save over its own open input (engine/inplace.py).
         if is_same_file(file, output):
             staged = staging_target(output_path)
-            pdf.save(staged)
+            save_pdf(pdf, staged)
             finish_staged(staged, output_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     return {
         "output": str(output_path),
@@ -102,9 +103,9 @@ def strip_metadata(file: str, output: str) -> dict:
             del pdf.trailer[pikepdf.Name.Info]
         if same_file:
             staged = staging_target(output_path)
-            pdf.save(staged)
+            save_pdf(pdf, staged)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     if same_file:
         _rebrand_xmptk(staged)

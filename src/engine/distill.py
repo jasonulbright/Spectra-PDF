@@ -19,6 +19,7 @@ import pikepdf
 
 from engine import budget
 from engine.acroform import adopt_orphan_widget_fields
+from engine.pdf_save import save_pdf
 
 # Reuses compress.py's preset vocabulary; 'default' emits no
 # -dPDFSETTINGS (Ghostscript's own defaults — Distiller's "Standard").
@@ -122,7 +123,7 @@ def distill(file: str, output: str, preset: str = "printer", gs_path: str = "gs"
                         suffix=".pdf", dir=str(output_path.parent)
                     )
                     os.close(fd)
-                    pdf.save(adopted_tmp)
+                    save_pdf(pdf, adopted_tmp)
         # The replace happens after the reading handle closes — Windows
         # refuses to replace a file the process still holds open.
         if adopted_tmp is not None:

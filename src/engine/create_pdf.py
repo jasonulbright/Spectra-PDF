@@ -33,6 +33,7 @@ from engine.acroform import (
     prune_form_to_pages,
     refresh_sig_flags,
 )
+from engine.pdf_save import save_pdf
 from engine.split import parse_ranges
 
 # Accepted raster formats. Bundled Pillow decodes WEBP, JPEG 2000, AVIF, GIF,
@@ -226,7 +227,7 @@ def image_to_pdf(src: str | Path, dest: str | Path, *, dpi_default: float = 200.
                 # invariant holds even where no source can carry a form, because
                 # the exception is what erodes.
                 merged.add_pages_from(page_pdf)
-            merged.save(str(dest_path))
+            save_pdf(merged, str(dest_path))
 
     return {
         "output": str(dest_path),
@@ -305,7 +306,7 @@ def _blank_pdf(dest: Path, width, height) -> int:
         raise ValueError("a blank page needs a positive width and height")
     pdf = pikepdf.Pdf.new()
     pdf.add_blank_page(page_size=(w, h))
-    pdf.save(str(dest))
+    save_pdf(pdf, str(dest))
     return 1
 
 
@@ -441,7 +442,7 @@ def _apply_page_size(path: Path, page_size: str, orientation: str, margin: float
                 # Already the right size: never rewrite a page for nothing.
                 continue
             _place_page(pdf, page, target, margin)
-        pdf.save(str(path))
+        save_pdf(pdf, str(path))
 
 
 # A member's page range, as the Combine dialog and the CLI spell it: "1-3,5".
@@ -482,7 +483,7 @@ def _subset(src: Path, dest: Path, spec: str, label: str) -> int:
         renames = dict(copied.renamed_fields)
         renames.update({r["from"]: r["to"] for r in pure})
         carry_doc_form_extras(out, pdf, renames)
-        out.save(str(dest))
+        save_pdf(out, str(dest))
     return len(indices)
 
 

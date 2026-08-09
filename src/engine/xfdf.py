@@ -21,6 +21,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 import pikepdf
+from engine.pdf_save import save_pdf
 
 XFDF_NS = "http://ns.adobe.com/xfdf/"
 
@@ -472,11 +473,11 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
                 suffix=".pdf", delete=False, dir=str(in_path.parent)
             ) as tmp:
                 tmp_path = tmp.name
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
             preserved = finalize_preserving_signatures(str(in_path), tmp_path)
             shutil.move(tmp_path, str(out_path))
         else:
-            pdf.save(output)
+            save_pdf(pdf, output)
             preserved = finalize_preserving_signatures(str(in_path), str(out_path))
     out: dict = {"output": output, "added": added, "skipped": skipped}
     if unresolved:

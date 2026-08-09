@@ -67,6 +67,7 @@ from PIL import Image
 from PIL.TiffImagePlugin import ROWSPERSTRIP
 
 from . import budget
+from engine.pdf_save import save_pdf
 
 # The mask codecs, in the order the presets prefer them.
 JBIG2_SYMBOL = "jbig2_symbol"
@@ -613,7 +614,7 @@ def build_stencil_pdf(stream: MaskStream, dest: str | Path) -> None:
         Contents=pdf.make_stream(content),
     )
     pdf.pages.append(pikepdf.Page(pdf.make_indirect(page)))
-    pdf.save(str(dest))
+    save_pdf(pdf, str(dest))
 
 
 def verify_mask_stream(

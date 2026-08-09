@@ -22,6 +22,7 @@ import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
 from .inplace import finish_staged, is_same_file, staging_target
+from engine.pdf_save import save_pdf
 
 # panel value → /PageLayout name. "default" is the absent key.
 _PAGE_LAYOUTS = {
@@ -405,10 +406,10 @@ def set_initial_view(
         # pikepdf cannot save over its own open input (engine/inplace.py).
         if is_same_file(file, output):
             staged = staging_target(output_path)
-            pdf.save(staged)
+            save_pdf(pdf, staged)
             finish_staged(staged, output_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     return {"output": str(output_path)}
 
@@ -552,9 +553,9 @@ def set_advanced_properties(
         # pikepdf cannot save over its own open input (engine/inplace.py).
         if is_same_file(file, output):
             staged = staging_target(output_path)
-            pdf.save(staged)
+            save_pdf(pdf, staged)
             finish_staged(staged, output_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     return {"output": str(output_path)}

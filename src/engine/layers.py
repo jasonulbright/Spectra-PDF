@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Name
+from engine.pdf_save import save_pdf
 
 
 def _ocgs(pdf) -> list:
@@ -109,9 +110,9 @@ def set_layer_visibility(file: str, output: str, index: int, visible: bool) -> d
         if same_file:
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, dir=str(input_path.parent)) as tmp:
                 tmp_path = tmp.name
-            pdf.save(tmp_path)
+            save_pdf(pdf, tmp_path)
         else:
-            pdf.save(output_path)
+            save_pdf(pdf, output_path)
 
     if same_file:
         shutil.move(tmp_path, str(output_path))
