@@ -79,6 +79,15 @@
    DEFINED — every consumer (the measure scale controls among them) was
    theme-frozen at its dark fallback. Same disease as --text-dim above. */
 
+/* Floating chrome over the document: popovers (snap options, the stamp
+   palette) and the document view's rulers. Same disease as the row above.
+   These surfaces carry their own opaque background while their text colour
+   follows the theme, so a fill frozen at a dark literal puts light-theme ink
+   on a near-black panel — black on black. */
+:root { --panel-bg: #1f1f1f; --panel-border: rgba(255, 255, 255, 0.16); --surface-1: #232327; }
+[data-theme="light"] { --panel-bg: #f9fafb; --panel-border: #d1d5db; --surface-1: #ffffff; }
+[data-theme="high-contrast"] { --panel-bg: #0d0d0d; --panel-border: #2e2e2e; --surface-1: #0d0d0d; }
+
 /* Tailwind's neutral-500 (#737373) is 3.8:1 on the dark shell and 2.7:1 on
    bg-neutral-800 cards — sub-AA for exactly the hint text it is used on.
    #a0a0a8 clears 4.5:1 on both. The :root prefix lifts specificity over the
@@ -1637,8 +1646,8 @@
   max-width: calc(100% - 20px);
   padding: 8px;
   border-radius: 6px;
-  background: var(--panel-bg, rgba(23, 23, 23, 0.98));
-  border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.16));
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 .symbol-palette-head {
@@ -1652,20 +1661,22 @@
   padding: 3px 6px;
   font-size: 12px;
   color: var(--text, #e6e6ea);
-  background: var(--surface-1, #232327);
+  background: var(--surface-1);
   border: 1px solid var(--border, #45454c);
   border-radius: 4px;
 }
 .symbol-palette-action {
   padding: 2px 6px;
   font-size: 11px;
-  color: var(--text-dim, #8a8a92);
-  background: var(--surface-2, #303034);
-  border: 1px solid var(--border, #45454c);
+  /* A button label, not hint text: --text-dim is authored against the shell
+     and misses AA on the lighter --surface-2 these sit on. */
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 4px;
 }
 .symbol-palette-action:hover {
-  color: var(--text, #e6e6ea);
+  border-color: var(--text);
 }
 .symbol-palette-sets {
   display: flex;
@@ -1918,7 +1929,9 @@
   background: rgba(59, 130, 246, 0.1);
   border-radius: 2px;
   font-size: 11px;
-  color: var(--fg, #111);
+  /* Drawn on the page, which is white in every theme — a shell token here
+     would re-tint a control that sits on document paper. */
+  color: #111;
 }
 .page-editpara-ctl {
   display: inline-flex;
@@ -3479,6 +3492,7 @@
   font-weight: 700;
   border-radius: 999px;
   border: 1px solid currentColor;
+  color: var(--text);
   cursor: default;
 }
 .annot-swatch {
@@ -3903,8 +3917,11 @@
   align-items: center;
   justify-content: center;
   font-size: 8px;
-  color: var(--ink-soft, #a3a3a3);
-  background: var(--panel-bg, #1f1f1f);
+  /* Chrome beside the page, not ink on it: --ink-soft is authored for the
+     white paper the canvas draws on and is near-black under the contrast
+     theme, where this sits on a near-black panel. */
+  color: var(--text-dim);
+  background: var(--panel-bg);
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
@@ -3912,8 +3929,8 @@
 .docview-ruler {
   position: relative;
   overflow: hidden;
-  background: var(--panel-bg, #1f1f1f);
-  color: var(--ink-soft, #a3a3a3);
+  background: var(--panel-bg);
+  color: var(--text-dim);
   font-size: 9px;
   user-select: none;
   touch-action: none;
@@ -3931,24 +3948,31 @@
   cursor: col-resize;
 }
 .docview-frame.with-rulers .docview-scroll { grid-column: 2; grid-row: 2; }
+/* A tick's weight is on its own border, never on the element: a major tick
+   CARRIES its label, and element opacity composites the text along with the
+   rule, dropping the numbers below AA. */
 .docview-ruler-h .ruler-tick {
   position: absolute;
   bottom: 0;
   width: 0;
   height: 4px;
-  border-left: 1px solid currentColor;
-  opacity: 0.55;
+  border-left: 1px solid color-mix(in srgb, currentColor 55%, transparent);
 }
-.docview-ruler-h .ruler-tick.major { height: 9px; opacity: 0.9; }
+.docview-ruler-h .ruler-tick.major {
+  height: 9px;
+  border-left-color: color-mix(in srgb, currentColor 90%, transparent);
+}
 .docview-ruler-v .ruler-tick {
   position: absolute;
   right: 0;
   height: 0;
   width: 4px;
-  border-top: 1px solid currentColor;
-  opacity: 0.55;
+  border-top: 1px solid color-mix(in srgb, currentColor 55%, transparent);
 }
-.docview-ruler-v .ruler-tick.major { width: 9px; opacity: 0.9; }
+.docview-ruler-v .ruler-tick.major {
+  width: 9px;
+  border-top-color: color-mix(in srgb, currentColor 90%, transparent);
+}
 .docview-ruler-h .ruler-label {
   position: absolute;
   left: 2px;
@@ -4040,8 +4064,8 @@
   min-width: 168px;
   padding: 8px;
   border-radius: 6px;
-  background: var(--panel-bg, rgba(23, 23, 23, 0.98));
-  border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.16));
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   z-index: 40;
 }
@@ -4063,7 +4087,7 @@
   margin-inline-start: auto;
   padding: 1px 4px;
   background: transparent;
-  border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.16));
+  border: 1px solid var(--panel-border);
   border-radius: 4px;
   color: inherit;
   font-variant-numeric: tabular-nums;
@@ -4072,7 +4096,7 @@
   margin-inline-start: auto;
   padding: 1px 4px;
   background: transparent;
-  border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.16));
+  border: 1px solid var(--panel-border);
   border-radius: 4px;
   color: inherit;
 }
