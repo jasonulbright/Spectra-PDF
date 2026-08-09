@@ -21,13 +21,16 @@ const BUTTON =
 
 export function ReadAloudBar({ reader }: { reader: ReadAloudApi }): React.ReactElement {
   useTranslation();
-  const firstRef = useRef<HTMLButtonElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
 
-  // The bar takes focus when it opens, so the transport is operable by keys
-  // from the moment it exists (spec 96's contract) without the reader having
-  // to hunt for it in the tab ring.
+  // The BAR takes focus when it opens, not its first button: the transport
+  // controls are disabled while the pages are being listed, and a disabled
+  // button cannot take focus — Escape would then go to the document and the
+  // bar would be unclosable by keyboard for exactly as long as it was busy.
+  // Focusing the container keeps the key handler below live in every state,
+  // and the buttons keep their own places in the tab ring.
   useEffect(() => {
-    firstRef.current?.focus();
+    barRef.current?.focus();
   }, []);
 
   const speaking = reader.status === 'speaking';
@@ -36,8 +39,10 @@ export function ReadAloudBar({ reader }: { reader: ReadAloudApi }): React.ReactE
 
   return (
     <div
+      ref={barRef}
       data-testid="read-aloud-bar"
       role="group"
+      tabIndex={-1}
       aria-label={tChrome('canvas.readAloud.barLabel')}
       className="absolute bottom-6 start-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-2 bg-neutral-800/95 border border-neutral-700 rounded-lg shadow-xl"
       onKeyDown={(e) => {
@@ -49,10 +54,12 @@ export function ReadAloudBar({ reader }: { reader: ReadAloudApi }): React.ReactE
       }}
     >
       <button
-        ref={firstRef}
         data-testid="read-aloud-playpause"
         className={BUTTON}
-        disabled={failed}
+        // Nothing to pause or resume until a run is actually speaking:
+        // enabling it while the pages are still being listed would let a press
+        // claim a state the synthesizer is not in.
+        disabled={failed || busy}
         aria-label={tChrome(speaking ? 'canvas.readAloud.pause' : 'canvas.readAloud.resume')}
         title={tChrome(speaking ? 'canvas.readAloud.pause' : 'canvas.readAloud.resume')}
         onClick={() => (speaking ? reader.pause() : reader.resume())}
@@ -62,7 +69,7 @@ export function ReadAloudBar({ reader }: { reader: ReadAloudApi }): React.ReactE
       <button
         data-testid="read-aloud-prev"
         className={BUTTON}
-        disabled={failed}
+        disabled={failed || busy}
         aria-label={tChrome('canvas.readAloud.previous')}
         title={tChrome('canvas.readAloud.previous')}
         onClick={reader.previous}
@@ -72,7 +79,7 @@ export function ReadAloudBar({ reader }: { reader: ReadAloudApi }): React.ReactE
       <button
         data-testid="read-aloud-next"
         className={BUTTON}
-        disabled={failed}
+        disabled={failed || busy}
         aria-label={tChrome('canvas.readAloud.next')}
         title={tChrome('canvas.readAloud.next')}
         onClick={reader.next}
