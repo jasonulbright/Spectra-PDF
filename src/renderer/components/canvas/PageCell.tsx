@@ -2130,6 +2130,10 @@ function PageCellImpl({
   const [shapeCursor, setShapeCursor] = useState<{ x: number; y: number } | null>(null);
   const shapeSeqActive = useRef(false);
   const appendShapeVertexRef = useRef<((p: { x: number; y: number }, done: boolean) => void) | null>(null);
+  // The sequence's own cancel, held apart from the shared `cancelBand` slot: a
+  // band gesture started while a sequence is live overwrites that slot, and the
+  // cleanup it displaces would then never run.
+  const cancelShapeSeq = useRef<(() => void) | null>(null);
 
   const commitShape = (type: ShapeType, viewPts: number[]): void => {
     const stored = toStoredPoints(viewPts);
@@ -2189,6 +2193,10 @@ function PageCellImpl({
       shapeSeqActive.current = true;
       gestureLive.current = true;
       constrainAnchor.current = p;
+      // The figure is read ONCE, here. A sequence commits the figure it was
+      // started with; the effect below ends it the moment the armed figure
+      // changes, so the two can never name different things.
+      const seqType = shapeType;
       let pts = [p.x, p.y];
       setShapeDraft(pts);
       setShapeCursor(p);
@@ -2197,7 +2205,8 @@ function PageCellImpl({
       const cleanup = (): void => {
         window.removeEventListener('pointermove', onMove);
         shapeSeqActive.current = false;
-        cancelBand.current = null;
+        if (cancelBand.current === cleanup) cancelBand.current = null;
+        cancelShapeSeq.current = null;
         endSnapGesture();
         appendShapeVertexRef.current = null;
         setShapeDraft(null);
@@ -2209,11 +2218,10 @@ function PageCellImpl({
           Math.abs(q.x - pts[pts.length - 2]) < 0.008 &&
           Math.abs(q.y - pts[pts.length - 1]) < 0.008;
         if (dblclick || nearLast) {
-          const minVerts = shapeType === 'polyline' ? 2 : 3;
+          const minVerts = seqType === 'polyline' ? 2 : 3;
           const finished = pts.length / 2 >= minVerts ? [...pts] : null;
-          const type = shapeType;
           cleanup();
-          if (finished) commitShape(type, finished);
+          if (finished) commitShape(seqType, finished);
           return;
         }
         pts = [...pts, q.x, q.y];
@@ -2221,11 +2229,25 @@ function PageCellImpl({
         setShapeDraft(pts);
       };
       cancelBand.current = cleanup;
+      cancelShapeSeq.current = cleanup;
       window.addEventListener('pointermove', onMove);
       return;
     }
     appendShapeVertexRef.current?.(p, e.detail >= 2);
   };
+
+  // A shape sequence outlives neither the figure that started it nor the mode
+  // it was started in. The figure changes without `tool` changing at all (the
+  // secondary toolbar's figure buttons), and every annotate mode keeps
+  // `annotateMode` true, so without this a live sequence goes on collecting
+  // clicks under a figure nobody armed and commits the one it started with.
+  useEffect(() => {
+    cancelShapeSeq.current?.();
+  }, [tool, shapeType]);
+  useEffect(() => {
+    if (!annotateMode) cancelShapeSeq.current?.();
+  }, [annotateMode]);
+  useEffect(() => () => cancelShapeSeq.current?.(), []);
 
   // Stroke merging: the last ink annotation this cell created/extended.
   const lastInkRef = useRef<{ id: string; pageId: string; color: string; time: number } | null>(null);
