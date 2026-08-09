@@ -443,7 +443,7 @@ class TestCreatePdfStep:
         # Replacing `notes.txt` with a PDF that is still called `notes.txt` is
         # not an in-place edit — it is a destroyed source with a misleading
         # name.
-        with pytest.raises(ValueError, match="cannot start with create_pdf"):
+        with pytest.raises(ValueError, match="cannot start with a step that creates"):
             run_action(
                 source=str(tree),
                 dest="",
@@ -668,3 +668,112 @@ class TestCatalogPin:
         for op, (fn, _allowed, needed) in _STEPS.items():
             assert callable(fn), op
             assert set(needed) <= known, op
+
+
+class TestFolderGroupingSource:
+    """The second source step: a run whose UNIT is a directory.
+
+    A folder of page images is one document, so `create_pdf_folders` changes
+    what the walk enumerates. Everything after it runs on the assembled PDF,
+    which is what makes "one PDF per scan folder, then clean it up" a single
+    unattended job rather than two runs with a manual step between them.
+    """
+
+    @pytest.fixture
+    def scans(self, tmp_path):
+        from PIL import Image
+
+        root = tmp_path / "scans"
+        for folder, count in (("invoice", 3), ("letter", 2)):
+            (root / folder).mkdir(parents=True)
+            for n in range(1, count + 1):
+                Image.new("RGB", (120, 160), (255, 255, 255)).save(
+                    root / folder / f"page{n}.png"
+                )
+        return root
+
+    def test_each_folder_becomes_one_document(self, scans, tmp_path):
+        dest = tmp_path / "out"
+        report = run_action(
+            source=str(scans),
+            dest=str(dest),
+            steps=[{"op": "create_pdf_folders", "params": {}}],
+            write_log=False,
+        )
+        assert report["total"] == 2 and report["ok"] == 2
+        with pikepdf.open(dest / "invoice.pdf") as pdf:
+            assert len(pdf.pages) == 3
+        with pikepdf.open(dest / "letter.pdf") as pdf:
+            assert len(pdf.pages) == 2
+
+    def test_later_steps_run_on_the_assembled_document(self, scans, tmp_path):
+        dest = tmp_path / "out"
+        report = run_action(
+            source=str(scans),
+            dest=str(dest),
+            steps=[
+                {"op": "create_pdf_folders", "params": {}},
+                {"op": "strip_metadata", "params": {}},
+            ],
+            write_log=False,
+        )
+        assert report["ok"] == 2
+        assert all(r["steps_applied"] == 2 for r in report["results"])
+        with pikepdf.open(dest / "invoice.pdf") as pdf:
+            assert pikepdf.Name.Info not in pdf.trailer
+
+    def test_the_walk_parameters_never_reach_the_builder(self, scans, tmp_path):
+        # `sources` and `include_subfolders` describe the WALK; create_pdf
+        # takes neither, so passing them through would refuse every folder.
+        report = run_action(
+            source=str(scans),
+            dest=str(tmp_path / "out"),
+            steps=[
+                {
+                    "op": "create_pdf_folders",
+                    "params": {"sources": "images", "include_subfolders": True},
+                }
+            ],
+            write_log=False,
+        )
+        assert report["failed"] == 0
+
+    def test_it_must_be_the_first_step(self):
+        with pytest.raises(ValueError, match="first step"):
+            validate_steps(
+                [
+                    {"op": "strip_metadata", "params": {}},
+                    {"op": "create_pdf_folders", "params": {}},
+                ]
+            )
+
+    def test_an_action_produces_its_document_once(self):
+        with pytest.raises(ValueError, match="not both"):
+            validate_steps(
+                [
+                    {"op": "create_pdf_folders", "params": {}},
+                    {"op": "create_pdf", "params": {}},
+                ]
+            )
+
+    def test_in_place_is_refused(self, scans):
+        with pytest.raises(ValueError, match="In-place mode cannot start"):
+            run_action(
+                source=str(scans),
+                dest="",
+                steps=[{"op": "create_pdf_folders", "params": {}}],
+                in_place=True,
+                write_log=False,
+            )
+
+    def test_moving_processed_originals_is_refused(self, scans, tmp_path):
+        # Its sources are whole FOLDERS; the per-file move would take part of
+        # what a row consumed and leave the rest.
+        with pytest.raises(ValueError, match="whole folders"):
+            run_action(
+                source=str(scans),
+                dest=str(tmp_path / "out"),
+                steps=[{"op": "create_pdf_folders", "params": {}}],
+                move_processed_root=str(tmp_path / "done"),
+                write_log=False,
+            )

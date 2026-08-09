@@ -10,7 +10,6 @@
 # and `key` names the catalog entry (engine.<key>) that renders it in the UI
 # language. A message NOT in this table passes through verbatim — nothing is
 # ever swallowed. Keys are STABLE: rewording a message keeps its key.
-key	kind	modules	message
 acroform.containsXmlFormXfa	pattern	acroform	{{v0}} contains an XML form (XFA). Page operations would detach the form from its pages, so {{operation}} is not available for this document. Fill the form, or flatten it with another tool first.
 acroform.regeneratedFileSPage	exact	acroform	The regenerated file's page count differs from the original; cannot reattach its form fields.
 attachments.attachmentNamed	pattern	attachments	no attachment named {{name}}
@@ -28,7 +27,7 @@ batch_ocr.moveAbortedShortCopy	pattern	batch_ocr	move aborted: short copy to {{t
 batch_ocr.placeModeCannotAlso	exact	batch_ocr,guided_actions	In-place mode cannot also move processed originals -- the processed file IS the original.
 batch_ocr.placeModeTakesDestination	exact	batch_ocr,guided_actions	In-place mode takes no destination -- the originals are replaced.
 batch_ocr.sourceDestinationSameFile	exact	batch_ocr	source and destination are the same file
-batch_ocr.sourceFolderFound	pattern	batch_ocr,guided_actions	Source folder not found: {{source}}
+batch_ocr.sourceFolderFound	pattern	batch_ocr,create_pdf_folders,guided_actions	Source folder not found: {{source}}
 budget.timeBudgetNeedsPositive	exact	budget	a time budget needs a positive floor
 check.fileFound	pattern	check,rebuild,recognize,recover,repair	File not found: {{file}}
 color_spaces.expectedNumberGotProcedure	exact	color_spaces	expected number, got procedure
@@ -66,6 +65,9 @@ create_pdf.unknownOrientation	pattern	create_pdf	unknown orientation {{orientati
 create_pdf.unknownPageSize	pattern	create_pdf	unknown page size {{page_size}} ({{v1}})
 create_pdf.unknownUnsupportedRefuseSkip	pattern	create_pdf	unknown on_unsupported {{on_unsupported}} (refuse, skip)
 create_pdf.unreadableImage	pattern	create_pdf	unreadable image: {{src_path}} ({{exc}})
+create_pdf_folders.destinationFolderRequired	exact	create_pdf_folders	A destination folder is required.
+create_pdf_folders.destinationMustOutsideSource	exact	create_pdf_folders	The destination must be outside the source folder -- choose a separate folder for the assembled documents.
+create_pdf_folders.unknownSourceSet	pattern	create_pdf_folders	unknown source set {{sources}} ({{v1}})
 derived_nav.documentTaggedHeadingsBuild	exact	derived_nav	This document is not tagged, so it has no headings to build bookmarks from. Tag it first — automatically, or in the Tags panel.
 derived_nav.headingDepthMustNumber	pattern	derived_nav	heading depth must be a number from 1 to {{MAX_LEVEL}}
 derived_nav.headingsFoundStructureTree	exact	derived_nav	No headings found in the structure tree — nothing to build bookmarks from.
@@ -141,15 +143,17 @@ glyph_outlines.pageDrawsTextType	pattern	glyph_outlines	Page {{page}} draws text
 glyph_outlines.pageDrawsTextWhich	pattern	glyph_outlines	Page {{page}} draws text in {{name}}, which is not embedded in this document and no bundled face could stand in for it.
 glyph_outlines.pageDrawsTextWhose	pattern	glyph_outlines	Page {{page}} draws text in {{name}}, whose embedded font program could not be read.
 grayscale.ghostscriptGrayscaleConversionFailed	pattern	grayscale	Ghostscript grayscale conversion failed: {{v0}}
+guided_actions.actionProducesDocumentOnce	exact	guided_actions	an action produces its document once — use create_pdf or create_pdf_folders, not both
 guided_actions.actionSteps	exact	guided_actions	the action has no steps
-guided_actions.createPdfMustFirst	exact	guided_actions	create_pdf must be the first step — it produces the document the rest of the action works on
+guided_actions.createPdfMustFirst	pattern	guided_actions	{{op}} must be the first step — it produces the document the rest of the action works on
 guided_actions.destinationMustOutsideSource	exact	guided_actions	The destination must be outside the source folder -- choose a separate folder for the processed copies.
 guided_actions.encryptMustLastStep	exact	guided_actions	encrypt must be the last step
 guided_actions.encryptSetOpenOwner	exact	guided_actions	encrypt: set an open or an owner password
 guided_actions.mrcCompressionMustCome	exact	guided_actions	MRC compression must come after OCR — OCR reads the page image, and MRC replaces it
 guided_actions.mustLastStepWrites	pattern	guided_actions	{{op}} must be the last step -- it writes a different kind of file, and nothing can run on that
+guided_actions.onePdfPerFolder	exact	guided_actions	A one-PDF-per-folder run cannot move processed originals -- its sources are whole folders, not single files.
 guided_actions.placeModeCannotEnd	exact	guided_actions	In-place mode cannot end with an export -- the exported document is a new file, not a replacement for its source.
-guided_actions.placeModeCannotStart	exact	guided_actions	In-place mode cannot start with create_pdf -- the converted document is a new file, not a replacement for its source.
+guided_actions.placeModeCannotStart	exact	guided_actions	In-place mode cannot start with a step that creates the document -- the converted document is a new file, not a replacement for its source.
 guided_actions.processedOriginalsFolderMust	exact	guided_actions	The processed-originals folder must be outside the destination folder.
 guided_actions.processedOriginalsFolderMust2	exact	guided_actions	The processed-originals folder must be outside the source folder.
 guided_actions.scanEnhancementMustCome	exact	guided_actions	scan enhancement must come before MRC compression — MRC replaces the page image with reconstructed layers, and enhancing those enhances a reconstruction
@@ -188,6 +192,7 @@ ink_manager.inkUsedPatternTool	pattern	ink_manager	Ink "{{name}}" is used by a p
 ink_manager.nameLeastOneInk	exact	ink_manager	Name at least one ink to convert.
 ink_manager.processInksCannotAliased	exact	ink_manager	Process inks cannot be aliased to a spot colour.
 inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
+key	kind	modules	message
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 links.linkIndexOutRange	pattern	links	link index {{index}} is out of range (page has {{v1}})
 links.linksAdd	exact	links	no links to add

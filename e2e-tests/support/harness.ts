@@ -1528,6 +1528,59 @@ export async function folderExportSnapshot(): Promise<FolderExportSnapshot | nul
   });
 }
 
+// --- Tools ▸ One PDF per Folder -------------------------------------------
+
+export interface FolderCreatePdfSnapshot {
+  phase: 'setup' | 'running' | 'done';
+  /** The run's unit is a FOLDER, so this counts folders, not files. */
+  folderCount: number | null;
+  report: {
+    cancelled: boolean;
+    results: {
+      rel: string;
+      output: string;
+      status: string;
+      files: number;
+      pages?: number;
+      reason?: string;
+      warnings?: string[];
+    }[];
+    skippedDirs: string[];
+  } | null;
+  logPath: string | null;
+}
+
+/** Inject source+destination into the open one-PDF-per-folder dialog — runs
+ * the dialog's REAL selection flow, the engine's folder walk included. */
+export async function folderCreatePdfSetFolders(source: string, dest: string): Promise<void> {
+  const result = await browser.executeAsync<string | null, [string, string]>(
+    function (s, d, done) {
+      (window as any).__SPECTRA_TEST__.folderCreatePdfSetFolders(s, d)
+        .then(() => done(null))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    source,
+    dest,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`folderCreatePdfSetFolders failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+}
+
+/** Run the sweep WITHOUT awaiting it — a folder run can outlive the WebDriver
+ * script timeout. Poll `folderCreatePdfSnapshot()` for the phase. */
+export async function folderCreatePdfRun(): Promise<void> {
+  await browser.execute(function () {
+    void (window as any).__SPECTRA_TEST__.folderCreatePdfRun();
+  });
+}
+
+export async function folderCreatePdfSnapshot(): Promise<FolderCreatePdfSnapshot | null> {
+  return await browser.execute<FolderCreatePdfSnapshot | null, []>(function () {
+    return (window as any).__SPECTRA_TEST__.folderCreatePdfSnapshot();
+  });
+}
+
 // --- Edit ▸ Images ---------------------------------------------------------
 
 export async function editImagePageIds(): Promise<string[]> {
