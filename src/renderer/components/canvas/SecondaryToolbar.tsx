@@ -909,8 +909,11 @@ export function SecondaryToolbar({
                 title={p.label}
                 className="stamp-preset"
                 onClick={() => onSetStampPreset(armed ? null : p)}
+                // The stamp's colour is the border and the armed fill, never
+                // the label: a preset's colour is arbitrary (a custom stamp
+                // carries its own), so a label drawn in it has no contrast
+                // floor against any theme's panel.
                 style={{
-                  color: p.color,
                   borderColor: p.color,
                   backgroundColor: armed ? `${p.color}33` : 'transparent',
                 }}
