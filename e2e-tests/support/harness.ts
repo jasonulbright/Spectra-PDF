@@ -1617,6 +1617,135 @@ export async function editImageTransform(
   }
 }
 
+/** The SETTLED first page's id and one placement's matrix, captured in ONE
+ * in-page call. Reading the ids and then the placements is two round trips
+ * that can straddle a listing rotation, so the pair that has to agree is taken
+ * together — a matrix is only ever returned with the id it was read from.
+ *
+ * Null while a listing pass is in flight. An unsettled listing is both "this
+ * page has no images" and "the fresh listing has not landed", and its
+ * published ids can already name a retired generation, which is what makes an
+ * id taken from it unusable as a transform target.
+ *
+ * The settle flag covers the whole listing pass — images, vectors and text
+ * are refetched together — so it is the honest gate for any of them. */
+export async function settledPlacement(
+  index = 0,
+): Promise<{ pageId: string; matrix: number[] } | null> {
+  return await browser.execute<{ pageId: string; matrix: number[] } | null, [number]>(
+    function (i) {
+      const h = (window as any).__SPECTRA_TEST__;
+      if (!h.editImageListingSettled()) return null;
+      const ids = h.editImagePageIds();
+      if (ids.length === 0) return null;
+      const hit = h.editImagePlacements(ids[0]).find((p: { index: number }) => p.index === i);
+      if (!hit) return null;
+      return { pageId: ids[0], matrix: hit.matrix.slice() };
+    },
+    index,
+  );
+}
+
+function matrixWithin(a: number[], b: number[], eps: number): boolean {
+  return a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) <= eps);
+}
+
+/** Wait for a placement to READ BACK at `matrix`, and return the page id it
+ * was observed on — captured inside the predicate. A second, independent read
+ * of the ids can land in the next rotation's empty window, so a wait that
+ * proves a value and then goes and fetches it again proves nothing. */
+export async function waitForSettledMatrix(
+  matrix: number[],
+  timeoutMsg: string,
+  opts: { index?: number; eps?: number; timeoutMs?: number } = {},
+): Promise<string> {
+  const index = opts.index ?? 0;
+  const eps = opts.eps ?? 0.5;
+  let landed = '';
+  let seen: { pageId: string; matrix: number[] } | null = null;
+  try {
+    await browser.waitUntil(
+      async () => {
+        const cur = await settledPlacement(index);
+        if (!cur) return false;
+        seen = cur;
+        if (!matrixWithin(cur.matrix, matrix, eps)) return false;
+        landed = cur.pageId;
+        return true;
+      },
+      { timeout: opts.timeoutMs ?? 30_000, interval: 250, timeoutMsg },
+    );
+  } catch {
+    throw new Error(`${timeoutMsg} (last settled read: ${JSON.stringify(seen)})`);
+  }
+  return landed;
+}
+
+/**
+ * Apply an absolute matrix through the REAL commit and wait for the listing
+ * that carries it to land, re-resolving the page id from a SETTLED listing on
+ * every attempt. Returns the fresh page id the matrix was observed on — the
+ * anchor for the next select and transform.
+ *
+ * Issue-once-then-watch is not a wait, it is a guess. A transform is aimed at
+ * a generation-tagged page id and a commit REBUILDS the file, so an id read
+ * even one render before the aim can already name a retired generation: the
+ * commit then refuses, the document is untouched, and the watch burns its
+ * whole timeout on a matrix that was never going to arrive. That is the
+ * failure this exists to remove, and it appears only when the machine is slow
+ * enough for the id to rotate inside the gap.
+ *
+ * Re-issuing is safe because the target is ABSOLUTE — applying it twice is the
+ * same document — but it is still issued at most once per generation, so a
+ * commit that is merely in flight is never duplicated into a second undo
+ * entry: re-issue only after a refusal, or once the settled listing has
+ * rotated to an id the last issue was not aimed at.
+ */
+export async function editImageTransformSettled(
+  index: number,
+  matrix: number[],
+  timeoutMsg: string,
+  opts: { eps?: number; timeoutMs?: number } = {},
+): Promise<string> {
+  const eps = opts.eps ?? 0.5;
+  let landed = '';
+  let issuedFor: string | null = null;
+  let refused = false;
+  let lastRefusal = '';
+  let seen: { pageId: string; matrix: number[] } | null = null;
+  try {
+    await browser.waitUntil(
+      async () => {
+        const cur = await settledPlacement(index);
+        if (!cur) return false;
+        seen = cur;
+        if (matrixWithin(cur.matrix, matrix, eps)) {
+          landed = cur.pageId;
+          return true;
+        }
+        if (issuedFor === null || refused || issuedFor !== cur.pageId) {
+          issuedFor = cur.pageId;
+          refused = false;
+          try {
+            await editImageTransform(cur.pageId, index, matrix);
+          } catch (err) {
+            refused = true;
+            lastRefusal = err instanceof Error ? err.message : String(err);
+          }
+        }
+        return false;
+      },
+      { timeout: opts.timeoutMs ?? 30_000, interval: 250, timeoutMsg },
+    );
+  } catch {
+    throw new Error(
+      `${timeoutMsg} (last settled read: ${JSON.stringify(seen)}; ` +
+        `last issue aimed at ${issuedFor}${lastRefusal ? `, refused: ${lastRefusal}` : ''})`,
+    );
+  }
+  return landed;
+}
+
 /** Add Image: embed a source at a user-space rect through the REAL
  * commit path (the native picker is undrivable — inject the source).
  * rect=null with `at` = the natural-size click-place. */
