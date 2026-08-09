@@ -89,6 +89,7 @@ jobs:
           mkdir -p resources/libreoffice
           mkdir -p resources/tesseract
           mkdir -p resources/jbig2enc
+          mkdir -p resources/dictionaries
         shell: bash
 
       # `cargo check` never RUNS anything. The Rust tests cover the virtual
@@ -191,6 +192,14 @@ jobs:
         # if any statically-linked component named in upstream's depmf.json
         # lacks a row in scripts/jbig2enc-licenses.tsv.
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-jbig2enc.ps1
+
+      - name: Vendor spelling dictionaries
+        # P32: 34 Hunspell .aff/.dic pairs from LibreOffice/dictionaries at the
+        # commit pinned in the script, each file SHA-256 verified against
+        # scripts/dictionaries.tsv. The script REFUSES to write the tree if any
+        # tag ships a dictionary with no notice row (the jbig2enc precedent).
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-dictionaries.ps1
+        shell: pwsh
 
       - name: Stage OCR language models
         # Decompresses the 47 pinned Apache-2.0 models into

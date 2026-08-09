@@ -2,6 +2,20 @@
 
 ## 1.0.27
 
+### Spell check
+- The paragraph editor underlines words it does not recognise while you type.
+- A new **Spelling** panel, under the Edit tool, checks the whole document: the text on the pages, the comments, and the values in form fields.
+- Misspellings are grouped by word, with a count, and selecting one offers suggestions.
+- **Change** corrects one occurrence; **Change all** corrects every occurrence of that word, and says per occurrence what happened.
+- A correction is made the way you would make it by hand: it keeps the styling of the word it replaces, it leaves the rest of the page exactly where it was, and it can be undone.
+- Words can be ignored for the session, or added to your own dictionary, which every later check and the editor's underlining both honour.
+- **34 dictionaries ship with the app** and work with no connection: Arabic, Catalan (and Valencian), Czech, Danish, German (Germany, Austria, Switzerland), Greek, English (US, UK, Australia, Canada, South Africa), Spanish (Spain, Mexico), French, Hebrew, Hungarian, Italian, Norwegian (Bokmål and Nynorsk), Dutch, Polish, Portuguese (Brazil and Portugal), Romanian, Russian, Slovak, Slovenian, Swedish (Sweden and Finland), Turkish and Ukrainian.
+- Which dictionary is used follows the document's own stated language, then the interface language — or you can pick one.
+- **Add a dictionary…** takes any Hunspell `.aff` and `.dic` pair from disk and copies it in, so a language that is not in the list can still be used.
+- Words in capitals and words containing numbers are skipped by default, and both are switchable.
+- Web addresses, email addresses, file names and version numbers are never offered as misspellings.
+- A paragraph the editor cannot open is reported as unchecked rather than listed with corrections that could not be applied.
+
 ### Copying a region of a page as a picture
 - A **Snapshot** tool: drag a rectangle over any part of a page and that region goes to the clipboard as an image.
 - Paste it straight into a document, a message or a presentation.

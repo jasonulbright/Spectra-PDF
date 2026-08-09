@@ -183,7 +183,7 @@ def _hebrew3(pdf) -> pikepdf.Object:
 
 def _identity_v(pdf, mapping: dict[int, str], w2: list) -> pikepdf.Object:
     """Identity-V + ToUnicode + /W2 — the vertical-run producer."""
-    from tests.test_pdf_fonts import _tounicode_stream
+    from test_pdf_fonts import _tounicode_stream
 
     desc = pdf.make_indirect(
         Dictionary(

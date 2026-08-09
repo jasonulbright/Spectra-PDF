@@ -415,6 +415,34 @@ export function tOcrLanguage(code: string): string {
   }
 }
 
+/**
+ * Any BCP-47 tag's language name in the current UI language.
+ *
+ * The `tOcrLanguage` rule, generalized: the 34 bundled spelling dictionaries
+ * name themselves with a BCP-47 tag, and every locale's ICU data already
+ * spells all of them. Authoring that table into 28 catalogs would be 34
+ * chances per locale to be wrong, and it would go stale the moment a
+ * dictionary is added — including one the USER adds, whose tag no catalog
+ * could ever have carried. The tag itself is the fallback.
+ *
+ * Same consequence to know as `tOcrLanguage`: these names never pass through
+ * the catalog, so they are not pseudo-localized under `qps` and the leak
+ * sweep must not read one as an untranslated string.
+ */
+export function tLanguageName(bcp47: string): string {
+  try {
+    return new Intl.DisplayNames([formattingLocale()], { type: 'language' }).of(bcp47) ?? bcp47;
+  } catch {
+    return bcp47;
+  }
+}
+
+/** The resolved UI language tag — what a language ladder consults when a
+ * document states nothing about its own. */
+export function currentLanguage(): string {
+  return formattingLocale();
+}
+
 /** Locale-aware number formatting (`Intl.NumberFormat`, never a
  * hand-rolled decimal — the separator and grouping are locale properties). */
 export function tNumber(value: number, opts?: Intl.NumberFormatOptions): string {

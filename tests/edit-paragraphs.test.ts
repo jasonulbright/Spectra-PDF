@@ -506,9 +506,9 @@ describe('seedSpanColors / styledSegments / spanColorsToStyles', () => {
 
   it('splits text into base + coloured backdrop segments (with face flags)', () => {
     expect(styledSegments('Hello colored world', [{ start: 6, end: 13, color: '#ff0000' }])).toEqual([
-      { text: 'Hello ', color: null, bold: false, italic: false, size: null, smallCaps: false },
-      { text: 'colored', color: '#ff0000', bold: false, italic: false, size: null, smallCaps: false },
-      { text: ' world', color: null, bold: false, italic: false, size: null, smallCaps: false },
+      { text: 'Hello ', color: null, bold: false, italic: false, size: null, smallCaps: false, misspelled: false },
+      { text: 'colored', color: '#ff0000', bold: false, italic: false, size: null, smallCaps: false, misspelled: false },
+      { text: ' world', color: null, bold: false, italic: false, size: null, smallCaps: false, misspelled: false },
     ]);
   });
 
@@ -521,10 +521,10 @@ describe('seedSpanColors / styledSegments / spanColorsToStyles', () => {
         [{ start: 0, end: 5, bold: true, italic: false }],
       ),
     ).toEqual([
-      { text: 'Hel', color: null, bold: true, italic: false, size: null, smallCaps: false },
-      { text: 'lo', color: '#ff0000', bold: true, italic: false, size: null, smallCaps: false },
-      { text: ' wo', color: '#ff0000', bold: false, italic: false, size: null, smallCaps: false },
-      { text: 'rld', color: null, bold: false, italic: false, size: null, smallCaps: false },
+      { text: 'Hel', color: null, bold: true, italic: false, size: null, smallCaps: false, misspelled: false },
+      { text: 'lo', color: '#ff0000', bold: true, italic: false, size: null, smallCaps: false, misspelled: false },
+      { text: ' wo', color: '#ff0000', bold: false, italic: false, size: null, smallCaps: false, misspelled: false },
+      { text: 'rld', color: null, bold: false, italic: false, size: null, smallCaps: false, misspelled: false },
     ]);
   });
 
@@ -552,7 +552,7 @@ describe('mergeSpanColors overlap flattening', () => {
     // describe the SAME per-position colours (no silent mismatch).
     const segs = styledSegments('Hi folks everyone', overlapping);
     expect(segs).toEqual([
-      { text: 'H', color: '#ff0000', bold: false, italic: false, size: null, smallCaps: false },
+      { text: 'H', color: '#ff0000', bold: false, italic: false, size: null, smallCaps: false, misspelled: false },
       {
         text: 'i folks everyone',
         color: '#0000ff',
@@ -560,6 +560,7 @@ describe('mergeSpanColors overlap flattening', () => {
         italic: false,
         size: null,
         smallCaps: false,
+        misspelled: false,
       },
     ]);
     expect(spanColorsToStyles(overlapping)).toEqual([
@@ -656,9 +657,9 @@ describe('per-span SIZE helpers', () => {
     // textarea's caret. The contentEditable surface renders the size itself.
     const segs = styledSegments('Big word here', [], [], [{ start: 4, end: 8, size: 24 }]);
     expect(segs).toEqual([
-      { text: 'Big ', color: null, bold: false, italic: false, size: null, smallCaps: false },
-      { text: 'word', color: null, bold: false, italic: false, size: 24, smallCaps: false },
-      { text: ' here', color: null, bold: false, italic: false, size: null, smallCaps: false },
+      { text: 'Big ', color: null, bold: false, italic: false, size: null, smallCaps: false, misspelled: false },
+      { text: 'word', color: null, bold: false, italic: false, size: 24, smallCaps: false, misspelled: false },
+      { text: ' here', color: null, bold: false, italic: false, size: null, smallCaps: false, misspelled: false },
     ]);
   });
 
@@ -670,7 +671,7 @@ describe('per-span SIZE helpers', () => {
       [],
     );
     expect(segs).toEqual([
-      { text: 'plain ', color: null, bold: false, italic: false, size: null, smallCaps: false },
+      { text: 'plain ', color: null, bold: false, italic: false, size: null, smallCaps: false, misspelled: false },
       {
         text: 'serif',
         color: null,
@@ -679,8 +680,9 @@ describe('per-span SIZE helpers', () => {
         family: 'serif',
         size: null,
         smallCaps: false,
+        misspelled: false,
       },
-      { text: ' plain', color: null, bold: false, italic: false, size: null, smallCaps: false },
+      { text: ' plain', color: null, bold: false, italic: false, size: null, smallCaps: false, misspelled: false },
     ]);
   });
 });
@@ -1046,14 +1048,14 @@ describe('OpenType features (small caps / alternates)', () => {
       [],
     );
     expect(segs).toEqual([
-      { text: 'abc', color: null, bold: false, italic: false, size: null, smallCaps: true },
-      { text: 'def', color: null, bold: false, italic: false, size: null, smallCaps: false },
+      { text: 'abc', color: null, bold: false, italic: false, size: null, smallCaps: true, misspelled: false },
+      { text: 'def', color: null, bold: false, italic: false, size: null, smallCaps: false, misspelled: false },
     ]);
   });
 
   it('segmentsToHtml sets font-variant-caps for a small-caps segment', () => {
     const html = segmentsToHtml(
-      [{ text: 'abc', color: null, bold: false, italic: false, size: null, smallCaps: true }],
+      [{ text: 'abc', color: null, bold: false, italic: false, size: null, smallCaps: true, misspelled: false }],
       { basePx: 14, baseSize: 12, rev: 0 },
     );
     expect(html).toContain('font-variant-caps:all-small-caps');

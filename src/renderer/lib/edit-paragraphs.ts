@@ -782,6 +782,11 @@ export function styledSegments(
   colors: SpanColor[],
   faces: SpanFace[] = [],
   sizes: SpanSize[] = [],
+  /** Ranges the spell checker flagged. A sixth axis, folded exactly like the
+   * others so a squiggle can start and stop mid-style-run — the editor draws
+   * its OWN marks (the browser's cannot see the chosen dictionary or the
+   * user's custom words), and drawing them means segmenting on them. */
+  misspelled: Array<{ start: number; end: number }> = [],
 ): Array<{
   text: string;
   color: string | null;
@@ -790,6 +795,7 @@ export function styledSegments(
   family?: FaceSelector;
   size: number | null;
   smallCaps: boolean;
+  misspelled: boolean;
 }> {
   const chars = Array.from(text);
   const n = chars.length;
@@ -817,6 +823,10 @@ export function styledSegments(
   for (const r of mergeSpanSizes(sizes)) {
     for (let k = Math.max(0, r.start); k < Math.min(r.end, n); k++) sizeAt[k] = r.size;
   }
+  const badAt: boolean[] = new Array(n).fill(false);
+  for (const r of misspelled) {
+    for (let k = Math.max(0, r.start); k < Math.min(r.end, n); k++) badAt[k] = true;
+  }
   const segs: Array<{
     text: string;
     color: string | null;
@@ -825,6 +835,7 @@ export function styledSegments(
     family?: FaceSelector;
     size: number | null;
     smallCaps: boolean;
+    misspelled: boolean;
   }> = [];
   for (let k = 0; k < n; k++) {
     const last = segs[segs.length - 1];
@@ -835,7 +846,8 @@ export function styledSegments(
       last.italic === italicAt[k] &&
       last.family === familyAt[k] &&
       last.size === sizeAt[k] &&
-      last.smallCaps === smcpAt[k]
+      last.smallCaps === smcpAt[k] &&
+      last.misspelled === badAt[k]
     ) {
       last.text += chars[k];
     } else {
@@ -847,6 +859,7 @@ export function styledSegments(
         ...(familyAt[k] ? { family: familyAt[k] } : {}),
         size: sizeAt[k],
         smallCaps: smcpAt[k],
+        misspelled: badAt[k],
       });
     }
   }
@@ -905,6 +918,7 @@ export function segmentsToHtml(
     family?: FaceSelector;
     size: number | null;
     smallCaps?: boolean;
+    misspelled?: boolean;
   }>,
   opts: { basePx: number; baseSize: number; rev: number },
 ): string {
@@ -925,8 +939,13 @@ export function segmentsToHtml(
     // Liberation stand-in (a close approximation — the committed Libertinus
     // page is the fidelity authority, like the family/size preview).
     if (seg.smallCaps) style.push('font-variant-caps:all-small-caps');
+    // The squiggle is a CLASS, not an inline decoration: `text-decoration`
+    // would collide with the underline a styled run may already carry, and
+    // the class paints it with `text-decoration-line: spelling-error` where
+    // the engine supports it and a wavy underline where it does not.
+    const cls = seg.misspelled ? ' class="page-editpara-misspelled"' : '';
     parts.push(
-      `<span data-seg="${i}" data-r="${rev}"${
+      `<span data-seg="${i}" data-r="${rev}"${cls}${
         style.length ? ` style="${style.join(';')}"` : ''
       }>${escapeHtml(seg.text)}</span>`,
     );

@@ -130,6 +130,22 @@ const INTERNAL_METHODS = new Set([
   // nothing to gate, and running it through them would put a font-picker
   // open in front of the user's actual work in the serial engine queue.
   'list_system_fonts',
+  // The spell checker's reads. Three of them name no file at all — the
+  // dictionary listing, the editor's per-keystroke text check and a single
+  // word's suggestions — so there is nothing for the gate or the per-file
+  // lock to act on, and routing the editor's debounced check through the
+  // serial queue would put a squiggle in front of the user's actual work.
+  // Adding a user dictionary copies the user's own files and never touches a
+  // document (the extract_attachment case). Reading /Lang seeds the panel's
+  // default language on open, where gating would flush pending page edits
+  // merely for looking (the get_pdf_version hazard). check_spelling itself
+  // stays GATED: it must see the edits the user can see, and it is a
+  // deliberate action, not a background read.
+  'list_dictionaries',
+  'check_text',
+  'spelling_suggestions',
+  'add_user_dictionary',
+  'document_language',
   // Listing embedded attachments to seed the panel — a read; add/remove
   // (mutations) stay gated.
   'list_attachments',

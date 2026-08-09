@@ -111,6 +111,12 @@ interface DocumentRowProps {
   onSelectEditParagraph: (pageId: string, index: number) => void;
   onOpenParagraphEditor: (pageId: string, index: number) => void;
   onCommitParagraphEdit: (pageId: string, index: number, newText: string, opts?: ParagraphEditOpts) => void;
+  /** Misspelled ranges for the paragraph editor's own squiggles, and the
+   * BCP-47 tag the native controls mark in. REQUIRED in the prop type so a
+   * second render path cannot silently ship without them: an optional
+   * callback erased by `?.` is indistinguishable from a wired one. */
+  onCheckSpelling: (text: string) => Promise<Array<{ start: number; end: number }>>;
+  spellLang: string | undefined;
   onCancelParagraphEdit: () => void;
   onMergeParagraphPrev: (pageId: string, index: number, editedText?: string, restyle?: import('../../lib/edit-paragraphs').MergeRestyle) => void;
   onMergeParagraphNext: (pageId: string, index: number, editedText?: string, restyle?: import('../../lib/edit-paragraphs').MergeRestyle) => void;
@@ -265,6 +271,8 @@ function DocumentRowImpl({
   onSelectEditParagraph,
   onOpenParagraphEditor,
   onCommitParagraphEdit,
+  onCheckSpelling,
+  spellLang,
   onCancelParagraphEdit,
   onMergeParagraphPrev,
   onMergeParagraphNext,
@@ -405,6 +413,8 @@ function DocumentRowImpl({
         onSelectEditParagraph={onSelectEditParagraph}
         onOpenParagraphEditor={onOpenParagraphEditor}
         onCommitParagraphEdit={onCommitParagraphEdit}
+        onCheckSpelling={onCheckSpelling}
+        spellLang={spellLang}
         onCancelParagraphEdit={onCancelParagraphEdit}
         onMergeParagraphPrev={onMergeParagraphPrev}
         onMergeParagraphNext={onMergeParagraphNext}

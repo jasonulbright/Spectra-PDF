@@ -47,6 +47,10 @@ resources/tesseract/
 # provision script, the SHA-256 pin and the checked-in notice texts are what
 # lives in git; the binary does not).
 resources/jbig2enc/
+# Hunspell spelling dictionaries (vendored by scripts/bundle-dictionaries.ps1;
+# ~147MB of word lists across 34 languages, same repo-hygiene class as the
+# above. The pinned manifest with every file's sha256 is what lives in git).
+resources/dictionaries/
 
 # Test
 coverage/

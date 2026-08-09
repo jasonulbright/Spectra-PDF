@@ -161,6 +161,14 @@ from engine.text_paragraphs import (
     replace_paragraph_text,
 )
 from engine.text_runs import convert_text_run, list_text_runs, replace_text_run, restyle_text_run
+from engine.spelling import (
+    add_user_dictionary,
+    check_spelling,
+    check_text,
+    document_language,
+    list_dictionaries,
+    spelling_suggestions,
+)
 from engine.printer import print_pdf, print_preview, print_preview_cleanup
 from engine.incremental import signature_policy, transplant_incremental
 from engine.redact_marks import list_redact_annotations, save_redaction_marks
@@ -330,6 +338,12 @@ def main() -> None:
     server.register("list_text_paragraphs", list_text_paragraphs)
     server.register("replace_paragraph_text", replace_paragraph_text)
     server.register("merge_paragraph_with_previous", merge_paragraph_with_previous)
+    server.register("list_dictionaries", list_dictionaries)
+    server.register("check_spelling", check_spelling)
+    server.register("check_text", check_text)
+    server.register("document_language", document_language)
+    server.register("spelling_suggestions", spelling_suggestions)
+    server.register("add_user_dictionary", add_user_dictionary)
     server.register("distill", distill)
     server.register("create_pdf", create_pdf)
     server.register("list_system_fonts", list_system_fonts)
