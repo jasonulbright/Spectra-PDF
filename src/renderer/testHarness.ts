@@ -358,6 +358,41 @@ export function registerFolderExport(handlers: FolderExportHandlers | null): voi
   folderExport = handlers;
 }
 
+/**
+ * One PDF per folder: the folder pickers are native dialogs, so e2e injects
+ * both paths into the SAME selection flow the buttons run and then drives the
+ * real run. The snapshot counts FOLDERS, not files — the run's unit.
+ */
+export interface FolderCreatePdfHandlers {
+  setSource: (path: string) => Promise<void>;
+  setDest: (path: string) => void;
+  run: () => Promise<void>;
+  snapshot: () => {
+    phase: 'setup' | 'running' | 'done';
+    folderCount: number | null;
+    report: {
+      cancelled: boolean;
+      results: {
+        rel: string;
+        output: string;
+        status: string;
+        files: number;
+        pages?: number;
+        reason?: string;
+        warnings?: string[];
+      }[];
+      skippedDirs: string[];
+    } | null;
+    logPath: string | null;
+  };
+}
+
+let folderCreatePdf: FolderCreatePdfHandlers | null = null;
+
+export function registerFolderCreatePdf(handlers: FolderCreatePdfHandlers | null): void {
+  folderCreatePdf = handlers;
+}
+
 import type { Orientation as CreatePdfOrientation, PageSize as CreatePdfPageSize } from './lib/create-pdf';
 
 /**
@@ -1285,6 +1320,11 @@ export interface TestHarness {
   folderExportSetFormat: (format: string) => void;
   folderExportRun: () => Promise<void>;
   folderExportSnapshot: () => ReturnType<FolderExportHandlers['snapshot']> | null;
+  /** One-PDF-per-folder injectors (dialog must be open —
+   * `tools.folderCreatePdf`). */
+  folderCreatePdfSetFolders: (source: string, dest: string) => Promise<void>;
+  folderCreatePdfRun: () => Promise<void>;
+  folderCreatePdfSnapshot: () => ReturnType<FolderCreatePdfHandlers['snapshot']> | null;
   scheduleCreate: (profile: Record<string, unknown>, actionJson?: string) => Promise<string>;
   scheduleList: () => Promise<unknown[]>;
   scheduleRemove: (name: string) => Promise<void>;
@@ -2304,6 +2344,34 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     folderExportSnapshot: () => folderExport?.snapshot() ?? null,
+    folderCreatePdfSetFolders: async (source, dest) => {
+      if (!folderCreatePdf) {
+        const msg = 'folderCreatePdfSetFolders: one-PDF-per-folder dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await folderCreatePdf.setSource(source);
+        folderCreatePdf.setDest(dest);
+      } catch (err) {
+        captureError('folderCreatePdfSetFolders', err);
+        throw err;
+      }
+    },
+    folderCreatePdfRun: async () => {
+      if (!folderCreatePdf) {
+        const msg = 'folderCreatePdfRun: one-PDF-per-folder dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await folderCreatePdf.run();
+      } catch (err) {
+        captureError('folderCreatePdfRun', err);
+        throw err;
+      }
+    },
+    folderCreatePdfSnapshot: () => folderCreatePdf?.snapshot() ?? null,
     scheduleCreate: async (profile, actionJson) => {
       if (!scheduledRuns) throw new Error('scheduleCreate: Scheduled Runs dialog not mounted');
       return scheduledRuns.create(profile, actionJson);

@@ -87,6 +87,7 @@ export interface AppCommandHandlers {
    * path, entirely outside the workspace. */
   openFormPrepFolder(): void;
   openFolderExport(): void;
+  openFolderCreatePdf(): void;
   openScheduledRuns(): void;
   /** Open the Watched Folders dialog (Tools ▸ Watched Folders…). */
   openWatchedFolders(): void;

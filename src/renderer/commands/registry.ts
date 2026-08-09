@@ -217,6 +217,7 @@ export const COMMAND_IDS = [
   'tools.diskRedact',
   'tools.formPrepFolder',
   'tools.folderExport',
+  'tools.folderCreatePdf',
   'tools.scheduledRuns',
   'tools.watchedFolders',
   'file.createPdf',
@@ -581,6 +582,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Export a Folder…',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openFolderExport(),
+  },
+  // Same no-document shape again: it walks a picked tree and assembles each
+  // folder's files into one document in a mirror, opening nothing.
+  'tools.folderCreatePdf': {
+    title: 'One PDF per Folder…',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openFolderCreatePdf(),
   },
   // Request 5 — same no-document shape as Batch OCR: it manages schedules over
   // picked folder trees, nothing to do with what is open.
