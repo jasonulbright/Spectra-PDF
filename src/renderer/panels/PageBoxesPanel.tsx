@@ -1,8 +1,15 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { consumeDrawnCrop, subscribeDrawnCrop, type DrawnCrop } from '../lib/crop-draw';
+import {
+  parsePageScope,
+  summarizeContentCrop,
+  type ContentCropResult,
+  type ContentCropSummary,
+} from '../lib/content-crop';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { file } from '../lib/tauri-bridge';
+import { ensureGsPath } from './SettingsPanel';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
@@ -29,6 +36,8 @@ export function PageBoxesPanel(): React.ReactElement {
   const [pageInput, setPageInput] = useState('all');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [margin, setMargin] = useState(0);
+  const [autoPreview, setAutoPreview] = useState<ContentCropSummary | null>(null);
 
   // A crop dragged on the page lands in these fields. The panel still
   // owns the commit — drawing fills the form, Apply is what changes the file,
@@ -64,15 +73,12 @@ export function PageBoxesPanel(): React.ReactElement {
       setStatus(tChrome('panel.pageBoxes.enterMargin'));
       return;
     }
-    const trimmed = pageInput.trim().toLowerCase();
-    let pages: number[] | undefined;
-    if (trimmed !== 'all') {
-      pages = trimmed.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n));
-      if (pages.length === 0) {
-        setStatus(tChrome('panel.pageBoxes.badPages'));
-        return;
-      }
+    const scope = parsePageScope(pageInput);
+    if ('error' in scope) {
+      setStatus(tChrome('panel.pageBoxes.badPages'));
+      return;
     }
+    const pages = scope.pages;
     setBusy(true);
     setStatus(tChrome('panel.pageBoxes.applying'));
     try {
@@ -105,6 +111,66 @@ export function PageBoxesPanel(): React.ReactElement {
       setBusy(false);
     }
   }, [activeFile, box, top, bottom, left, right, pageInput, call, dispatch]);
+
+  // Auto crop: measure first, commit second — the same call with `preview`
+  // flipped, so the number the reader is shown is the number that lands.
+  const runAuto = useCallback(
+    async (preview: boolean) => {
+      if (!activeFile) return;
+      const scope = parsePageScope(pageInput);
+      if ('error' in scope) {
+        setStatus(tChrome('panel.pageBoxes.badPages'));
+        return;
+      }
+      setBusy(true);
+      setStatus(tChrome(preview ? 'panel.pageBoxes.autoScanning' : 'panel.pageBoxes.applying'));
+      try {
+        const snapshotPath = preview ? null : await file.snapshot(activeFile.workingPath);
+        const result = (await call('content_crop', {
+          file: activeFile.workingPath,
+          output: activeFile.workingPath,
+          box,
+          margin,
+          preview,
+          // Only reached for a scan whose codestream this runtime cannot
+          // decode, but the crop must not silently measure that page as blank
+          // for want of a renderer.
+          gs_path: await ensureGsPath(),
+          ...(scope.pages ? { pages: scope.pages } : {}),
+        })) as unknown as ContentCropResult;
+        const summary = summarizeContentCrop(result);
+        if (preview) {
+          setAutoPreview(summary);
+        } else {
+          setAutoPreview(null);
+          const buffer = await file.readBuffer(activeFile.workingPath);
+          const info = await call('get_page_count', { file: activeFile.workingPath });
+          dispatch({
+            type: 'UPDATE_FILE',
+            path: activeFile.path,
+            pageCount: info.pages,
+            buffer,
+            snapshotPath: snapshotPath as string,
+          });
+        }
+        setStatus(
+          tChrome(preview ? 'panel.pageBoxes.autoFound' : 'panel.pageBoxes.autoApplied', {
+            count: summary.cropped,
+            unchanged: summary.unchanged,
+            skipped: summary.skipped,
+            points: summary.largestTrim,
+          }),
+        );
+      } catch (e: unknown) {
+        setAutoPreview(null);
+        const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e);
+        setStatus(tChrome('panel.common.error', { message: msg }));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeFile, box, margin, pageInput, call, dispatch],
+  );
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.pageBoxes.open')} />;
 
@@ -173,6 +239,54 @@ export function PageBoxesPanel(): React.ReactElement {
       >
         {busy ? tChrome('panel.pageBoxes.applying') : tChrome('panel.pageBoxes.apply')}
       </button>
+
+      <div className="flex flex-col gap-2 pt-3 border-t border-neutral-800">
+        <div className="text-sm text-neutral-200">{tChrome('panel.pageBoxes.autoTitle')}</div>
+        <p className="text-xs text-neutral-500">{tChrome('panel.pageBoxes.autoBlurb')}</p>
+        <div className="flex gap-4 flex-wrap items-end">
+          <div>
+            <label className="block text-sm text-neutral-400 mb-1" htmlFor="pagebox-margin">
+              {tChrome('panel.pageBoxes.autoMargin')}
+            </label>
+            <input
+              id="pagebox-margin"
+              data-testid="pagebox-margin"
+              type="number"
+              min={0}
+              value={margin}
+              onChange={(e) => setMargin(Math.max(0, Number(e.target.value)))}
+              className="w-24 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <button
+            data-testid="pagebox-auto-preview"
+            onClick={() => void runAuto(true)}
+            disabled={busy}
+            className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm font-medium"
+          >
+            {tChrome('panel.pageBoxes.autoPreview')}
+          </button>
+          <button
+            data-testid="pagebox-auto-apply"
+            onClick={() => void runAuto(false)}
+            disabled={busy || autoPreview === null || autoPreview.cropped === 0}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+          >
+            {tChrome('panel.pageBoxes.autoApply')}
+          </button>
+        </div>
+        {autoPreview && (
+          <div className="text-xs text-neutral-400" data-testid="pagebox-auto-summary">
+            {tChrome('panel.pageBoxes.autoSummary', {
+              count: autoPreview.cropped,
+              unchanged: autoPreview.unchanged,
+              skipped: autoPreview.skipped,
+              scanned: autoPreview.scanned,
+              points: autoPreview.largestTrim,
+            })}
+          </div>
+        )}
+      </div>
       <StatusBar message={status} busy={busy} />
     </div>
   );

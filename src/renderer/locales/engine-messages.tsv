@@ -42,6 +42,9 @@ compare.toleranceMustBetween	exact	compare	tolerance must be between 0 and 255.
 compare.unsupportedPpmMaxvalExpected	pattern	compare	Unsupported PPM maxval {{maxval}} (expected 255)
 compress.ghostscriptFailed	pattern	compress,distill,image_export	Ghostscript failed: {{v0}}
 compress.mrcCompressionDpiSetting	exact	compress	MRC compression has no DPI setting — the text stays at the scan's own resolution, which is the point of it. Choose a preset instead.
+content_crop.marginMustNumberGot	pattern	content_crop	margin must be a number, got {{margin}}
+content_crop.marginMustZeroMore	exact	content_crop	margin must be zero or more points
+content_crop.pageSelectionContentCrop	exact	content_crop	no page in the selection has content to crop to
 create_pdf.blankPageNeedsPositive	exact	create_pdf	a blank page needs a positive width and height
 create_pdf.blankPagePagesSelect	exact	create_pdf	a blank page has no pages to select a range from
 create_pdf.createPdfCannotConvert	pattern	create_pdf	Create PDF cannot convert {{v0}} (accepted: {{v1}})

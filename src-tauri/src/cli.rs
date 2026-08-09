@@ -1634,6 +1634,15 @@ pub struct PageBoxArgs {
     /// Comma-separated 1-based page numbers (omit for all pages)
     #[arg(long)]
     pub pages: Option<String>,
+    /// Crop to each page's own content instead of by per-edge insets
+    #[arg(long)]
+    pub auto: bool,
+    /// Points of paper to keep around the content (--auto only)
+    #[arg(long, default_value_t = 0.0)]
+    pub margin: f64,
+    /// Report what --auto would write, without writing it
+    #[arg(long)]
+    pub preview: bool,
 }
 
 #[derive(Args)]
@@ -3290,15 +3299,39 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::PageBox(args) => {
-            let mut params = json!({
-                "file": abs(&args.input).to_string_lossy(),
-                "output": abs(&args.output).to_string_lossy(),
-                "box": args.box_,
-                "top": args.top,
-                "bottom": args.bottom,
-                "left": args.left,
-                "right": args.right,
-            });
+            // An automatic crop and a typed inset are two different requests;
+            // accepting both in one call would silently apply one of them.
+            let typed = args.top != 0.0 || args.bottom != 0.0 || args.left != 0.0 || args.right != 0.0;
+            if args.auto && typed {
+                return Err(
+                    "--auto crops to the page's content; it cannot be combined with \
+                     --top/--bottom/--left/--right"
+                        .to_string(),
+                );
+            }
+            if !args.auto && (args.margin != 0.0 || args.preview) {
+                return Err("--margin and --preview apply to --auto only".to_string());
+            }
+            let mut params = if args.auto {
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "box": args.box_,
+                    "margin": args.margin,
+                    "preview": args.preview,
+                    "gs_path": resolve_gs().to_string_lossy(),
+                })
+            } else {
+                json!({
+                    "file": abs(&args.input).to_string_lossy(),
+                    "output": abs(&args.output).to_string_lossy(),
+                    "box": args.box_,
+                    "top": args.top,
+                    "bottom": args.bottom,
+                    "left": args.left,
+                    "right": args.right,
+                })
+            };
             if let Some(pages) = &args.pages {
                 let parsed: Vec<i64> = pages
                     .split(',')
@@ -3310,7 +3343,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 }
                 params["pages"] = json!(parsed);
             }
-            engine.call("set_page_boxes", params)
+            engine.call(if args.auto { "content_crop" } else { "set_page_boxes" }, params)
         }
 
         CliCommand::PageLabels(args) => {
