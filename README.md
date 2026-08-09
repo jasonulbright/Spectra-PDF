@@ -20,18 +20,20 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 - **Organize view** — every open file as a strip of live page thumbnails; drag pages within and across documents, multi-select, whole-document merge, drop files to import their pages at that spot. All of it staged in memory, committed atomically, undoable
 - **Navigation pane** (`F4`) — Pages (thumbnails with drag-reorder), Bookmarks (with editing), Search, Signatures
 - **Find & Search** — a universal search box in the toolbar that answers with both **tools and document text** in one list (type a tool's name to launch it, or a phrase to jump to the page), plus floating find (`Ctrl+F`, `F3`/`Ctrl+G` stepping) and a workspace-wide Search panel (`Ctrl+Shift+F`) with regex, case and whole-word modes and an on-disk scope. Scanned pages become searchable (and selectable) via OCR
+- **Read Out Loud** (View ▸ Read Out Loud, `Ctrl+Shift+V`) — speaks the page or reads to the end of the document with the voices installed on your computer, highlighting the paragraph, sentence and word as it goes; a tagged document is read in the order its author declared, and page furniture is skipped
 - **Batch OCR** (Tools ▸ Batch OCR Folder…) — point it at a folder and get a mirrored copy of the whole tree with every scanned PDF made searchable; already-searchable files copy through unchanged and problem files are reported. Your originals stay untouched unless you pick the explicit replace-in-place mode, which stages each result beside the original, verifies it reads back, and only then swaps it over. Fully offline, like all OCR here
 
 ![Organize view](docs/images/screenshot_organize.png)
 
-### The twenty-four tools
+### The twenty-six tools
 - **Organize Pages** — reorder, rotate, delete, split, extract — and merge pages between open files by dragging
 - **Comment** — highlights, text boxes, ink, and stamps, with notes and recoloring on each; existing PDF annotations import as editable; one list of every comment in the document — jump to it, edit its note, recolour or delete it, or clear them all
-- **Edit** — select an image, a paragraph, or a line of text on the page: move, resize, rotate, crop, dim, replace, extract or delete images and place new ones; rewrite text in place in the document's own font with live validation, kerned like a typesetter; edit whole paragraphs with true rewrap, split and merge, restyle size, colour, family, bold and italic — plus real OpenType small caps and stylistic alternates — for a whole paragraph or a selected range; move, resize, recolour, re-width or delete drawn vector shapes, even inside groups; add brand-new text boxes. Right-to-left scripts — Arabic, Hebrew, Persian, Urdu — reflow and author like any other, with cursive letters joined correctly; Chinese, Japanese and Korean too
+- **Edit** — select an image, a paragraph, or a line of text on the page: move, resize, rotate, crop, dim, replace, extract or delete images and place new ones; rewrite text in place in the document's own font with live validation, kerned like a typesetter; edit whole paragraphs with true rewrap, split and merge, restyle size, colour, family, bold and italic — plus real OpenType small caps and stylistic alternates — for a whole paragraph or a selected range; move, resize, recolour, re-width or delete drawn vector shapes, even inside groups; add brand-new text boxes. Right-to-left scripts — Arabic, Hebrew, Persian, Urdu — reflow and author like any other, with cursive letters joined correctly; Chinese, Japanese and Korean too. **Spell check** underlines unrecognised words as you type and checks the whole document — page text, comments and form field values — against 34 bundled dictionaries that work with no connection, with your own added words honoured everywhere
 - **Fill & Sign** — AcroForm fill on the page; digital signatures: verify with your own trust anchors, sign with PFX/PEM including PAdES baseline-through-LTA profiles with timestamping, visible stamps, sign-into-field, counter-signing
 - **Prepare Form** — draw new fields on the page; view and edit the document's JavaScript
 - **Redact** — true content removal
 - **Measure** — distance, perimeter, and area on the page, with a real-world scale ratio ("1 in = 2 ft"); finished measurements stay on the page as markups you can delete like any comment
+- **Count & Takeoff** — count items on a drawing by group, read the tallies, place a legend on the page, or export the takeoff as CSV
 - **Guided Actions** — save sequences of steps (compress, watermark, page numbers, OCR, strip metadata, encrypt to a new file…) and run them on a document with one click; any setting can be asked for at run time — passwords always are, and are never stored
 - **Scan & OCR** — make scanned pages searchable, in 47 languages, fully offline
 - **Compare** — text and visual diff
@@ -40,13 +42,14 @@ A full-featured PDF workbench with a familiar user interface: a menu bar, custom
 - **Repair** — three tiers, up to per-page salvage
 - **Watermark**
 - **Header & Footer** — six positions, page-number and auto-incrementing Bates tokens
-- **Crop & Page Boxes** — crop/bleed/trim/art
+- **Crop & Page Boxes** — crop/bleed/trim/art, and **Remove white margins** crops each page to its own content (a scan is measured from its ink), measured first and applied second
+- **Snapshot** — drag a rectangle over any part of a page and that region goes to the clipboard as a picture, at a fixed resolution, or saves as a PNG
 - **Page Labels** — front matter as i, ii, iii; prefixed appendices, and the page box navigates by them
 - **Attachments** — embed, extract, remove
 - **Portfolio** — open a portfolio and work its files; create one from any files on disk, or convert the open document; add, open, save out, update, and remove member files
 - **Layers** — show/hide optional content
 - **Accessibility** — checker, structure-tag editor, reading-order panel
-- **Preflight** — fonts, colour, and transparency checks for print
+- **Print Production** — preflight for fonts, colour and transparency; separations and ink-coverage preview, ink manager, printer marks, hairline fixing, flattener preview, trap presets, and colour conversion
 - **Links** — list, retarget, or remove link regions — and create them from selected text
 - **Export** — text extraction, Word/RTF/ODT/HTML via a bundled converter, page images as PNG/JPEG/TIFF
 
@@ -312,6 +315,7 @@ versions: [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
 | Compatible-font fallback and OpenType features for text editing | Liberation + Libertinus faces, fontTools | SIL OFL 1.1 / MIT |
 | Chinese, Japanese and Korean text editing and authoring | Noto Sans CJK SC | SIL OFL 1.1 |
 | Right-to-left text — Arabic, Hebrew, Persian, Urdu | IBM Plex Sans Arabic + Noto Sans Hebrew | SIL OFL 1.1 |
+| Spell check — 34 bundled dictionaries | spylls (pure-Python Hunspell) + LibreOffice dictionaries | MIT / see notices |
 | Cursive letter joining (shaping) for right-to-left scripts | HarfBuzz via uharfbuzz | Apache-2.0 (HarfBuzz: MIT-0) |
 | Window shell, native dialogs, IPC, updater | Tauri v2 + Rust crates | MIT / Apache-2.0 |
 
