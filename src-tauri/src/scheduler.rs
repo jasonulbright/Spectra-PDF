@@ -63,6 +63,27 @@ pub struct ScheduleProfile {
     /// (`DOMAIN\user`, or `DOMAIN\gmsa$` for a group Managed Service Account).
     #[serde(default)]
     pub account: String,
+    /// DESTRUCTIVE: replace each original with its searchable version instead
+    /// of mirroring into `dest`. Mutually exclusive with a destination and
+    /// with `moved_root` — the processed file IS the original.
+    #[serde(default)]
+    pub in_place: bool,
+    /// MRC-compress each processed file after recognition.
+    #[serde(default)]
+    pub mrc: bool,
+    /// MRC preset; read only when `mrc` is set.
+    #[serde(default)]
+    pub mrc_preset: String,
+    #[serde(default)]
+    pub mrc_verify_text: bool,
+    /// Deskew/despeckle/whiten each scan BEFORE recognition.
+    #[serde(default)]
+    pub enhance: bool,
+    /// The orientation half of enhancement. Its shipped default is ON, so the
+    /// command line spells the OFF case (`--no-enhance-orientation`) and
+    /// `profile_from_command` starts from true.
+    #[serde(default)]
+    pub enhance_orientation: bool,
     /// Which CLI arm the task invokes: "batch-ocr" (the default, also for
     /// empty) or "action" — a guided-action run over the source tree.
     #[serde(default)]
@@ -303,7 +324,25 @@ pub fn validate_profile(p: &ScheduleProfile) -> Result<(), String> {
                 .into(),
         );
     }
-    if p.source.trim().is_empty() || p.dest.trim().is_empty() {
+    if p.source.trim().is_empty() {
+        return Err("A scheduled run needs a source folder.".into());
+    }
+    // In-place replaces each original, so a destination would name a mirror
+    // that is never written; a guided action still needs one.
+    if p.in_place && p.run_type == "action" {
+        return Err("A guided action cannot be scheduled in place from here.".into());
+    }
+    if p.in_place && !p.dest.trim().is_empty() {
+        return Err("An in-place run takes no destination -- the originals are replaced.".into());
+    }
+    if p.in_place && !p.moved_root.trim().is_empty() {
+        return Err(
+            "An in-place run cannot also move processed originals -- the processed file IS \
+             the original."
+                .into(),
+        );
+    }
+    if !p.in_place && p.dest.trim().is_empty() {
         return Err("A scheduled run needs both a source and a destination folder.".into());
     }
     if !PathBuf::from(&p.source).is_dir() {
@@ -340,12 +379,39 @@ fn build_arguments(exe: &str, p: &ScheduleProfile) -> String {
         }
         return args;
     }
-    let mut args = format!(
-        "batch-ocr \"{}\" --dest \"{}\" --lang {}",
-        p.source,
-        p.dest,
-        if p.lang.is_empty() { "eng" } else { &p.lang }
-    );
+    // The whole run is expanded HERE, into the task's own command line: the
+    // registered task is the store, so a schedule carries its settings rather
+    // than a reference to a preset the run could not read anyway (it fires
+    // with the app closed, and possibly under another account).
+    let mut args = if p.in_place {
+        format!(
+            "batch-ocr \"{}\" --in-place --lang {}",
+            p.source,
+            if p.lang.is_empty() { "eng" } else { &p.lang }
+        )
+    } else {
+        format!(
+            "batch-ocr \"{}\" --dest \"{}\" --lang {}",
+            p.source,
+            p.dest,
+            if p.lang.is_empty() { "eng" } else { &p.lang }
+        )
+    };
+    if p.mrc {
+        args.push_str(" --mrc");
+        if !p.mrc_preset.is_empty() {
+            args.push_str(&format!(" --mrc-preset {}", p.mrc_preset));
+        }
+        if p.mrc_verify_text {
+            args.push_str(" --mrc-verify-text");
+        }
+    }
+    if p.enhance {
+        args.push_str(" --enhance");
+        if !p.enhance_orientation {
+            args.push_str(" --no-enhance-orientation");
+        }
+    }
     if !p.moved_root.is_empty() {
         args.push_str(&format!(" --moved \"{}\"", p.moved_root));
     }
@@ -625,6 +691,13 @@ fn profile_from_command(name: &str, command: &str) -> Option<ScheduleProfile> {
         time: String::new(),
         days: String::new(),
         account: String::new(),
+        in_place: false,
+        mrc: false,
+        mrc_preset: String::new(),
+        mrc_verify_text: false,
+        enhance: false,
+        // Its shipped default is ON; only the explicit off-flag lowers it.
+        enhance_orientation: true,
         run_type: run_type.to_string(),
         action_file: String::new(),
     };
@@ -644,8 +717,14 @@ fn profile_from_command(name: &str, command: &str) -> Option<ScheduleProfile> {
             "--errors" => take_value(&mut p.error_root),
             "--log-dir" => take_value(&mut p.log_dir),
             "--action" => take_value(&mut p.action_file),
+            "--mrc-preset" => take_value(&mut p.mrc_preset),
             "--repair" => p.repair_damaged = true,
             "--replace-repaired" => p.replace_repaired_originals = true,
+            "--in-place" => p.in_place = true,
+            "--mrc" => p.mrc = true,
+            "--mrc-verify-text" => p.mrc_verify_text = true,
+            "--enhance" => p.enhance = true,
+            "--no-enhance-orientation" => p.enhance_orientation = false,
             other if !other.starts_with("--") && p.source.is_empty() => {
                 p.source = other.to_string();
             }
@@ -653,7 +732,9 @@ fn profile_from_command(name: &str, command: &str) -> Option<ScheduleProfile> {
         }
         i += 1;
     }
-    if p.source.is_empty() || p.dest.is_empty() {
+    // An in-place run has no destination by construction, so requiring one
+    // would report every in-place schedule as unreadable.
+    if p.source.is_empty() || (p.dest.is_empty() && !p.in_place) {
         return None;
     }
     if p.run_type == "action" && p.action_file.is_empty() {
@@ -897,6 +978,12 @@ mod tests {
             time: "03:00".into(),
             days: String::new(),
             account: String::new(),
+            in_place: false,
+            mrc: false,
+            mrc_preset: String::new(),
+            mrc_verify_text: false,
+            enhance: false,
+            enhance_orientation: true,
             run_type: "action".into(),
             action_file: r"C:\ProgramData\Spectra PDF\scheduled-actions\Nightly Strip.json"
                 .into(),
@@ -1098,5 +1185,114 @@ mod tests {
         assert_eq!(parsed.source, r"C:\scans");
         assert!(parsed.repair_damaged);
         assert!(parsed.action_file.is_empty());
+        // A command line written before these flags existed reads back with
+        // enhancement off and its orientation half at the shipped default.
+        assert!(!parsed.enhance && parsed.enhance_orientation);
+        assert!(!parsed.in_place && !parsed.mrc);
+    }
+
+    fn ocr_profile() -> ScheduleProfile {
+        ScheduleProfile {
+            name: "Nightly Scans".into(),
+            source: r"C:\intake".into(),
+            dest: r"C:\searchable".into(),
+            lang: "eng+fra".into(),
+            moved_root: r"C:\done".into(),
+            error_root: r"C:\failed".into(),
+            repair_damaged: true,
+            replace_repaired_originals: true,
+            log_dir: r"C:\logs".into(),
+            frequency: "daily".into(),
+            time: "03:00".into(),
+            days: String::new(),
+            account: String::new(),
+            in_place: false,
+            mrc: true,
+            mrc_preset: "smallest".into(),
+            mrc_verify_text: true,
+            enhance: true,
+            enhance_orientation: false,
+            run_type: "batch-ocr".into(),
+            action_file: String::new(),
+        }
+    }
+
+    /// A named preset is EXPANDED into the command line at scheduling time —
+    /// there is no preset reference to resolve later, because the task fires
+    /// with the app closed and cannot read the app's own store. So every
+    /// setting has to survive the round trip through the argument string, or
+    /// the schedule silently runs a different job from the one that was saved.
+    #[test]
+    fn every_preset_setting_survives_the_command_line_round_trip() {
+        let p = ocr_profile();
+        let command = format!("\"C:\\Program Files\\app.exe\" {}", build_arguments("exe", &p));
+        let parsed = profile_from_command(&p.name, &command).expect("parses");
+        assert_eq!(parsed.source, p.source);
+        assert_eq!(parsed.dest, p.dest);
+        assert_eq!(parsed.lang, p.lang);
+        assert_eq!(parsed.moved_root, p.moved_root);
+        assert_eq!(parsed.error_root, p.error_root);
+        assert_eq!(parsed.log_dir, p.log_dir);
+        assert!(parsed.repair_damaged && parsed.replace_repaired_originals);
+        assert!(parsed.mrc && parsed.mrc_verify_text);
+        assert_eq!(parsed.mrc_preset, "smallest");
+        assert!(parsed.enhance);
+        assert!(!parsed.enhance_orientation);
+        assert!(!parsed.in_place);
+    }
+
+    #[test]
+    fn an_in_place_schedule_carries_no_destination() {
+        let mut p = ocr_profile();
+        p.in_place = true;
+        p.dest = String::new();
+        p.moved_root = String::new();
+        let args = build_arguments("exe", &p);
+        assert!(args.contains("--in-place"), "{args}");
+        assert!(!args.contains("--dest"), "{args}");
+        let parsed = profile_from_command(&p.name, &format!("app.exe {args}")).expect("parses");
+        assert!(parsed.in_place);
+        assert!(parsed.dest.is_empty());
+    }
+
+    /// The three refusals that would otherwise register a task describing a
+    /// run the engine refuses on its first firing.
+    #[test]
+    fn in_place_refuses_the_settings_it_retires() {
+        let mut p = ocr_profile();
+        // The source must EXIST for validation to reach the in-place rules —
+        // the missing-folder refusal fires first and would pass this test for
+        // the wrong reason.
+        p.source = std::env::temp_dir().to_string_lossy().to_string();
+        p.in_place = true;
+        p.moved_root = String::new();
+        assert!(validate_profile(&p).is_err(), "a destination alongside in-place");
+        p.dest = String::new();
+        p.moved_root = r"C:\done".into();
+        assert!(validate_profile(&p).is_err(), "a moved root alongside in-place");
+        p.moved_root = String::new();
+        assert!(validate_profile(&p).is_ok());
+        p.run_type = "action".into();
+        assert!(validate_profile(&p).is_err(), "an in-place guided action");
+    }
+
+    /// The orientation half defaults ON, so the OFF case is the one the
+    /// command line spells. An enhancement schedule that left orientation
+    /// alone must not emit the flag at all.
+    #[test]
+    fn the_orientation_flag_is_written_only_when_it_is_off() {
+        let mut p = ocr_profile();
+        p.enhance_orientation = true;
+        let args = build_arguments("exe", &p);
+        assert!(args.contains("--enhance"), "{args}");
+        assert!(!args.contains("--no-enhance-orientation"), "{args}");
+        assert!(
+            profile_from_command(&p.name, &format!("app.exe {args}"))
+                .expect("parses")
+                .enhance_orientation
+        );
+        p.enhance = false;
+        let args = build_arguments("exe", &p);
+        assert!(!args.contains("--enhance"), "{args}");
     }
 }

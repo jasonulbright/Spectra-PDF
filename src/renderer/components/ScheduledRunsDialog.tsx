@@ -11,6 +11,11 @@ import {
   stepDefFor,
   unattendedBlocker,
 } from '../lib/guided-actions';
+import {
+  loadBatchOcrPresets,
+  presetScheduleFields,
+} from '../lib/batch-ocr-presets';
+import { normalizeMrcPreset } from '../lib/mrc-presets';
 import { TEST_HARNESS_ENABLED, registerScheduledRuns } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tOcrLanguage, tStepTitle } from '../i18n';
@@ -49,6 +54,12 @@ const EMPTY: ScheduleProfile = {
   time: '09:30',
   days: 'MON,TUE,WED,THU,FRI',
   account: '',
+  inPlace: false,
+  mrc: false,
+  mrcPreset: 'balanced',
+  mrcVerifyText: false,
+  enhance: false,
+  enhanceOrientation: true,
   runType: 'batch-ocr',
   actionFile: '',
 };
@@ -68,6 +79,14 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
   // "keep the frozen copy already on disk".
   const [libraryActions] = useState(() => loadGuidedActions());
   const [actionId, setActionId] = useState('');
+  // The Batch OCR dialog's named presets. A preset is EXPANDED into the form
+  // here and frozen into the task's command line on save — a scheduled task
+  // fires with the app closed, possibly under a service account, so it can
+  // never read the store a preset lives in. Editing the preset afterwards
+  // therefore changes nothing about a task already registered, and what the
+  // form shows after the expansion is exactly what will run.
+  const [libraryPresets] = useState(() => loadBatchOcrPresets());
+  const [presetId, setPresetId] = useState('');
 
   const refresh = useCallback(async () => {
     try {
@@ -205,10 +224,15 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                   {r.profile ? (
                     <>
                       <div className="text-xs text-neutral-400 mt-0.5 truncate" title={r.profile.source}>
-                        {tChrome('dialog.common.route', {
-                          source: r.profile.source,
-                          dest: r.profile.dest,
-                        })}
+                        {/* An in-place run has no destination, so the route
+                            line says what it does instead of naming an empty
+                            folder as the second half of an arrow. */}
+                        {r.profile.inPlace
+                          ? tChrome('dialog.schedule.routeInPlace', { source: r.profile.source })
+                          : tChrome('dialog.common.route', {
+                              source: r.profile.source,
+                              dest: r.profile.dest,
+                            })}
                       </div>
                       {r.profile.runType === 'action' && (
                         <div
@@ -269,6 +293,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                         disabled={busy}
                         onClick={() => {
                           setActionId('');
+                          setPresetId('');
                           setEditing({ ...EMPTY, ...r.profile! });
                         }}
                         className="px-2 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
@@ -331,6 +356,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
               data-testid="schedule-new"
               onClick={() => {
                 setActionId('');
+                setPresetId('');
                 setEditing({ ...EMPTY, logDir: getSettings().batchLogDir });
                 setError(null);
               }}
@@ -395,18 +421,72 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
             </Field>
           )}
 
+          {editing.runType !== 'action' && libraryPresets.length > 0 && (
+            <Field
+              label={tChrome('dialog.schedule.presetLabel', {
+                batch: tChrome('dialog.batch.title'),
+              })}
+            >
+              <select
+                data-testid="schedule-preset"
+                value={presetId}
+                onChange={(e) => {
+                  const chosen = libraryPresets.find((p) => p.id === e.target.value);
+                  setPresetId(e.target.value);
+                  if (chosen) setEditing({ ...editing, ...presetScheduleFields(chosen.settings) });
+                }}
+                className="w-full px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
+              >
+                <option value="">{tChrome('dialog.schedule.presetNone')}</option>
+                {libraryPresets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-neutral-500 mt-1">
+                {tChrome('dialog.schedule.presetNote')}
+              </p>
+            </Field>
+          )}
+
           <FolderField
             label={tChrome('dialog.schedule.sourceLabel')}
             testid="schedule-source"
             value={editing.source}
             onPick={() => void pick(tChrome('dialog.schedule.pickSource'), (p) => setEditing({ ...editing, source: p }))}
           />
-          <FolderField
-            label={tChrome('dialog.schedule.destLabel')}
-            testid="schedule-dest"
-            value={editing.dest}
-            onPick={() => void pick(tChrome('dialog.common.pickDest'), (p) => setEditing({ ...editing, dest: p }))}
-          />
+          {editing.runType !== 'action' && (
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                data-testid="schedule-inplace"
+                checked={editing.inPlace}
+                onChange={() => {
+                  const next = !editing.inPlace;
+                  // In place, the processed file IS the original, so a
+                  // destination and a processed-originals root both name a
+                  // copy that is never written. Rust refuses either alongside
+                  // it; clearing them here is what keeps the form honest.
+                  setEditing(
+                    next
+                      ? { ...editing, inPlace: true, dest: '', movedRoot: '' }
+                      : { ...editing, inPlace: false },
+                  );
+                }}
+                className="rounded bg-neutral-900 border-neutral-600"
+              />
+              <span className="text-sm text-neutral-300">{tChrome('dialog.batch.inPlace')}</span>
+            </label>
+          )}
+          {!editing.inPlace && (
+            <FolderField
+              label={tChrome('dialog.schedule.destLabel')}
+              testid="schedule-dest"
+              value={editing.dest}
+              onPick={() => void pick(tChrome('dialog.common.pickDest'), (p) => setEditing({ ...editing, dest: p }))}
+            />
+          )}
 
           {editing.runType !== 'action' && (
             <Field label={tChrome('dialog.schedule.languages', { summary: describeLanguages(langs) })}>
@@ -429,6 +509,83 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                 ))}
               </div>
             </Field>
+          )}
+
+          {/* The two page-image options, in run order: enhancement corrects
+              what will be read, MRC replaces what was read. Both belong on
+              this form as well as in the dialog — a schedule read back from a
+              task that carries them must be re-savable without dropping them. */}
+          {editing.runType !== 'action' && (
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  data-testid="schedule-enhance"
+                  checked={editing.enhance}
+                  onChange={() => setEditing({ ...editing, enhance: !editing.enhance })}
+                  className="rounded bg-neutral-900 border-neutral-600"
+                />
+                <span className="text-sm text-neutral-300">{tChrome('dialog.batch.enhance')}</span>
+              </label>
+              {editing.enhance && (
+                <label className="flex items-center gap-2 cursor-pointer ps-6">
+                  <input
+                    type="checkbox"
+                    data-testid="schedule-enhance-orientation"
+                    checked={editing.enhanceOrientation}
+                    onChange={() =>
+                      setEditing({ ...editing, enhanceOrientation: !editing.enhanceOrientation })
+                    }
+                    className="rounded bg-neutral-900 border-neutral-600"
+                  />
+                  <span className="text-sm text-neutral-300">
+                    {tChrome('dialog.batch.enhanceOrientation')}
+                  </span>
+                </label>
+              )}
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  data-testid="schedule-mrc"
+                  checked={editing.mrc}
+                  onChange={() => setEditing({ ...editing, mrc: !editing.mrc })}
+                  className="rounded bg-neutral-900 border-neutral-600"
+                />
+                <span className="text-sm text-neutral-300">{tChrome('dialog.batch.mrc')}</span>
+              </label>
+              {editing.mrc && (
+                <div className="flex flex-col gap-2 ps-6">
+                  <label className="flex items-center gap-2 text-sm">
+                    <span className="text-neutral-400">{tChrome('dialog.batch.mrcPreset')}</span>
+                    <select
+                      data-testid="schedule-mrc-preset"
+                      aria-label={tChrome('dialog.batch.mrcPreset')}
+                      value={normalizeMrcPreset(editing.mrcPreset)}
+                      onChange={(e) =>
+                        setEditing({ ...editing, mrcPreset: normalizeMrcPreset(e.target.value) })
+                      }
+                      className="px-2 py-1 bg-neutral-900 border border-neutral-700 rounded text-sm"
+                    >
+                      <option value="archival">{tChrome('panel.compress.mrcPresetArchival')}</option>
+                      <option value="balanced">{tChrome('panel.compress.mrcPresetBalanced')}</option>
+                      <option value="smallest">{tChrome('panel.compress.mrcPresetSmallest')}</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      data-testid="schedule-mrc-verify"
+                      checked={editing.mrcVerifyText}
+                      onChange={() =>
+                        setEditing({ ...editing, mrcVerifyText: !editing.mrcVerifyText })
+                      }
+                      className="rounded bg-neutral-900 border-neutral-600"
+                    />
+                    <span className="text-sm text-neutral-300">{tChrome('dialog.batch.mrcVerify')}</span>
+                  </label>
+                </div>
+              )}
+            </div>
           )}
 
           <div className="flex gap-3">
@@ -475,7 +632,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
               )}
             </summary>
             <div className="px-3 pb-3 pt-1 flex flex-col gap-3">
-              {editing.runType !== 'action' && (
+              {editing.runType !== 'action' && !editing.inPlace && (
                 <>
                   <FolderField
                     label={tChrome('dialog.schedule.movedLabel')}
