@@ -46,6 +46,7 @@ from engine.compress import compress
 from engine.create_pdf import accepted_suffixes as create_pdf_suffixes
 from engine.enhance_scan import enhance_scan
 from engine.create_pdf import create_pdf
+from engine.create_pdf_folders import create_pdf_folders, list_source_folders
 from engine.encrypt import encrypt
 from engine.image_export import export_images, image_extension
 from engine.office_export import export_document, target_extension
@@ -234,6 +235,26 @@ _STEPS: dict = {
         ),
         frozenset({"gs_path", "soffice_path"}),
     ),
+    # The second source step, and the one that changes the run's UNIT: a
+    # folder of pages is one document, so the run walks DIRECTORIES rather
+    # than files. Everything after it runs on the assembled PDF, which is what
+    # makes "one PDF per scan folder, then straighten it, then make it
+    # searchable" a single unattended job.
+    "create_pdf_folders": (
+        create_pdf_folders,
+        frozenset(
+            {
+                "sources",
+                "include_subfolders",
+                "page_size",
+                "orientation",
+                "margin_pt",
+                "image_dpi_default",
+                "distill_preset",
+            }
+        ),
+        frozenset({"gs_path", "soffice_path"}),
+    ),
     # The two steps that CONSUME the document instead of transforming it. They
     # write a different kind of file at a different extension, so nothing can
     # follow them and `run_action` handles them directly rather than through
@@ -271,9 +292,24 @@ EXPORT_STEPS = ("export_document", "export_images")
 CREATE_PDF_EXTRA_SUFFIXES = tuple(s for s in create_pdf_suffixes() if s != ".pdf")
 
 
+# The steps that PRODUCE the document the rest of the action works on. Named
+# once: the ordering rule, the in-place refusal, the open-document refusal and
+# what the run walks all ask the same question.
+SOURCE_STEPS = ("create_pdf", "create_pdf_folders")
+
+
 def creates_its_own_source(steps) -> bool:
     """Does this (validated) step list START by creating the document?"""
-    return bool(steps) and steps[0]["op"] == "create_pdf"
+    return bool(steps) and steps[0]["op"] in SOURCE_STEPS
+
+
+def groups_by_folder(steps) -> bool:
+    """Is this run's unit a DIRECTORY rather than a file?
+
+    True only when the folder-grouping source step leads, which is the one
+    shape where a run's rows are folders and its outputs are named after them.
+    """
+    return bool(steps) and steps[0]["op"] == "create_pdf_folders"
 
 
 def exports_its_result(steps) -> bool:
@@ -388,14 +424,23 @@ def validate_steps(steps) -> list[dict]:
                 f"{op} must be the last step -- it writes a different kind of "
                 "file, and nothing can run on that"
             )
-        if op == "create_pdf" and i != 0:
+        if op in SOURCE_STEPS and i != 0:
             # ORDER, enforced rather than documented (the MRC-after-OCR
-            # precedent): create_pdf PRODUCES the document the rest of the
+            # precedent): a source step PRODUCES the document the rest of the
             # action operates on, so anywhere but first it would convert a
             # file the earlier steps had already rewritten.
             raise ValueError(
-                "create_pdf must be the first step — it produces the document "
+                f"{op} must be the first step — it produces the document "
                 "the rest of the action works on"
+            )
+        if op == "create_pdf_folders" and any(
+            isinstance(s2, dict) and s2.get("op") == "create_pdf" for s2 in steps
+        ):
+            # Two source steps would each claim to produce the document, and
+            # only one of them can name what the run walks.
+            raise ValueError(
+                "an action produces its document once — use create_pdf or "
+                "create_pdf_folders, not both"
             )
         if op == "encrypt":
             if i != len(steps) - 1:
@@ -510,8 +555,18 @@ def run_action(
         # a PDF that is still called `report.docx` is not an in-place edit,
         # it is a destroyed source with a misleading name.
         raise ValueError(
-            "In-place mode cannot start with create_pdf -- the converted document is a "
-            "new file, not a replacement for its source."
+            "In-place mode cannot start with a step that creates the document -- the "
+            "converted document is a new file, not a replacement for its source."
+        )
+    grouping = groups_by_folder(clean_steps)
+    if grouping and move_processed_root:
+        # A folder run's unit is a DIRECTORY of pages, and moving processed
+        # originals means moving that whole directory -- a different operation
+        # from the per-file move this option performs. Refused rather than
+        # silently moving only part of what was consumed.
+        raise ValueError(
+            "A one-PDF-per-folder run cannot move processed originals -- its "
+            "sources are whole folders, not single files."
         )
     tool_paths = {
         "gs_path": gs_path,
@@ -521,13 +576,30 @@ def run_action(
     }
 
     started_at = datetime.now()
-    # Guided actions run PDF steps; image sources are the batch-OCR
-    # sweep's own option and would have nothing to run against here —
-    # UNLESS the action starts by CREATING the document, which is exactly the
-    # "convert every Office file that lands in this folder" run.
-    entries, skipped_dirs = _list_sources(
-        source_path, False, CREATE_PDF_EXTRA_SUFFIXES if creates else ()
-    )
+    # What one ROW of this run is. Ordinarily a file; with the folder-grouping
+    # source step, a directory of pages that becomes one document — so the
+    # listing, the row key and the output name all change together rather than
+    # a file walk being reinterpreted downstream.
+    group_members: dict[str, list[str]] = {}
+    if grouping:
+        listing = list_source_folders(
+            str(source_path),
+            sources=str(clean_steps[0]["params"].get("sources", "images")),
+            include_subfolders=bool(clean_steps[0]["params"].get("include_subfolders", True)),
+        )
+        skipped_dirs = listing["skipped_dirs"]
+        entries = []
+        for group in listing["groups"]:
+            entries.append((Path(group["files"][0]).parent, group["output"]))
+            group_members[group["output"]] = group["files"]
+    else:
+        # Guided actions run PDF steps; image sources are the batch-OCR
+        # sweep's own option and would have nothing to run against here —
+        # UNLESS the action starts by CREATING the document, which is exactly
+        # the "convert every Office file that lands in this folder" run.
+        entries, skipped_dirs = _list_sources(
+            source_path, False, CREATE_PDF_EXTRA_SUFFIXES if creates else ()
+        )
     results: list[dict] = []
     # A terminal export CONSUMES the document; everything before it transforms
     # a copy of it, which is the shape `_apply_steps` speaks.
@@ -554,12 +626,25 @@ def run_action(
         try:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             if creates:
+                if grouping:
+                    # The grouping parameters describe the WALK, which already
+                    # happened; `create_pdf` takes neither, and passing them
+                    # would refuse the whole run on an unexpected keyword.
+                    build_params = {
+                        k: v
+                        for k, v in clean_steps[0]["params"].items()
+                        if k not in ("sources", "include_subfolders")
+                    }
+                    members = [{"path": p} for p in group_members[rel]]
+                else:
+                    build_params = dict(clean_steps[0]["params"])
+                    members = [{"path": str(abs_path)}]
                 create_pdf(
-                    [{"path": str(abs_path)}],
+                    members,
                     str(out_path),
                     gs_path=gs_path or "gs",
                     soffice_path=soffice_path,
-                    **clean_steps[0]["params"],
+                    **build_params,
                 )
                 applied = 1 + _apply_steps(str(out_path), transform_steps[1:], tool_paths)
             elif stages:

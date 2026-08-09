@@ -301,6 +301,37 @@ export const DIALOG_STRINGS = {
   'dialog.createPdf.preset.printer': 'Print Quality (300 dpi)',
   'dialog.createPdf.preset.prepress': 'Press Quality',
   'dialog.createPdf.preset.default': 'Standard (Ghostscript defaults)',
+  // One PDF per folder — the folder scope of Create PDF. It reuses that
+  // dialog's page-size, orientation and quality vocabularies verbatim; only
+  // what is new to a WALK is authored here.
+  'dialog.folderCreatePdf.title': 'One PDF per Folder',
+  'dialog.folderCreatePdf.blurb':
+    'Every folder holding files becomes one PDF, assembled in page-number order, at that folder’s own place in the destination — a folder at a/b becomes a/b.pdf. Sources are never modified.',
+  'dialog.folderCreatePdf.pickSource': 'Choose the folder tree to assemble',
+  // The counted nouns come from the plural bases the catalogs already carry
+  // (`dialog.exportImages.fileCount`, `panel.common.pageCount`), interpolated
+  // as whole phrases. A folder COUNT sits after a colon, where no language
+  // inflects, so this row needs no plural of its own.
+  'dialog.folderCreatePdf.found': 'Folders to assemble: {{folders}} ({{files}})',
+  'dialog.folderCreatePdf.sources': 'Files a folder contributes',
+  'dialog.folderCreatePdf.sourcesImages': 'Pictures only',
+  'dialog.folderCreatePdf.sourcesAll': 'Every kind Create PDF accepts',
+  'dialog.folderCreatePdf.subfolders': 'Walk the whole tree, not just the folder chosen',
+  'dialog.folderCreatePdf.imageDpi': 'Resolution assumed for a picture storing none (dpi)',
+  'dialog.folderCreatePdf.previewRow': '{{folder}} → {{output}} ({{files}})',
+  'dialog.folderCreatePdf.empty':
+    'No folder under here holds anything to assemble. Pictures only is the default — switch it to every accepted kind if this tree holds documents.',
+  'dialog.folderCreatePdf.run': 'Assemble',
+  'dialog.folderCreatePdf.progress': '[{{index}}/{{count}}] {{output}}',
+  'dialog.folderCreatePdf.stoppedPrefix': 'Stopped — {{summary}}',
+  'dialog.folderCreatePdf.cancelledNote':
+    'Documents finished before the stop are written and stay where they are.',
+  'dialog.folderCreatePdf.rowFailed': '{{folder}} — {{reason}}',
+  'dialog.folderCreatePdf.rowBuilt': '{{output}} — {{files}}, {{pages}}',
+  'dialog.folderCreatePdf.sumBuilt': '{{count}} built',
+  'dialog.folderCreatePdf.sumFailed': '{{count}} failed',
+  'dialog.folderCreatePdf.sumPages': '{{pages}} in all',
+  'dialog.folderCreatePdf.again': 'Assemble another folder',
   'dialog.createPdf.done_one': 'Created {{count}} page → {{path}}',
   'dialog.createPdf.done_other': 'Created {{count}} pages → {{path}}',
   'dialog.createPdf.converting': 'Converting…',

@@ -87,6 +87,7 @@ const toolsItems: MenuNode[] = [
   cmd('tools.diskRedact', 'menuitem-tools-disk-redact'),
   cmd('tools.formPrepFolder', 'menuitem-tools-form-prep-folder'),
   cmd('tools.folderExport', 'menuitem-tools-folder-export'),
+  cmd('tools.folderCreatePdf', 'menuitem-tools-folder-create-pdf'),
   cmd('tools.scheduledRuns', 'menuitem-tools-scheduled-runs'),
   cmd('tools.watchedFolders', 'menuitem-tools-watched-folders'),
 ];

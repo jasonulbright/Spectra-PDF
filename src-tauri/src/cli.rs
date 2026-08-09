@@ -42,6 +42,9 @@ pub enum CliCommand {
     /// Create a PDF from any accepted source: images, Office/text/HTML
     /// documents, PostScript, PDFs and blank pages
     CreatePdf(CreatePdfArgs),
+    /// Walk a tree and build ONE PDF from each folder of files, in page-number
+    /// order, mirrored into a destination folder
+    CreatePdfFolders(CreatePdfFoldersArgs),
     /// Encrypt a PDF with AES-256
     Encrypt(EncryptArgs),
     /// Decrypt a password-protected PDF
@@ -461,6 +464,46 @@ pub struct CreatePdfArgs {
     /// Report and skip a source nothing can convert instead of failing the run
     #[arg(long)]
     pub skip_unsupported: bool,
+}
+
+#[derive(Args)]
+pub struct CreatePdfFoldersArgs {
+    /// Folder tree to walk. Each directory holding accepted files becomes one
+    /// PDF; a directory with none produces nothing and is not an error
+    pub source: PathBuf,
+    /// Folder the assembled PDFs are written to (must be outside SOURCE). A
+    /// folder at `a/b` becomes `a/b.pdf`
+    #[arg(short, long)]
+    pub dest: PathBuf,
+    /// Which files a folder contributes: images (default) | all
+    #[arg(long, default_value = "images")]
+    pub sources: String,
+    /// Only the named folder itself, not the tree below it
+    #[arg(long)]
+    pub no_subfolders: bool,
+    /// Page size: auto (keep each source's own) | first | letter | legal |
+    /// tabloid | a3 | a4 | a5
+    #[arg(long, default_value = "auto")]
+    pub page_size: String,
+    /// Orientation: auto (follow the content) | portrait | landscape
+    #[arg(long, default_value = "auto")]
+    pub orientation: String,
+    /// Margin in points kept around placed content when a page size is named
+    #[arg(long, default_value_t = 0.0)]
+    pub margin: f64,
+    /// Resolution assumed for an image that stores none
+    #[arg(long, default_value_t = 200.0)]
+    pub image_dpi: f64,
+    /// Ghostscript quality preset for PostScript sources:
+    /// screen | ebook | printer | prepress | default
+    #[arg(long, default_value = "printer")]
+    pub quality: String,
+    /// Folder for the run log
+    #[arg(long)]
+    pub log_dir: Option<PathBuf>,
+    /// Print per-folder progress
+    #[arg(short, long)]
+    pub verbose: bool,
 }
 
 #[derive(Args)]
@@ -2816,6 +2859,30 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "image_dpi_default": args.image_dpi,
                     "distill_preset": args.quality,
                     "on_unsupported": if args.skip_unsupported { "skip" } else { "refuse" },
+                    "gs_path": resolve_gs().to_string_lossy(),
+                    "soffice_path": resolve_soffice(),
+                }),
+            )
+        }
+
+        CliCommand::CreatePdfFolders(args) => {
+            // The whole tree in ONE engine call: the walk, the grouping, the
+            // ordering and the log all live engine-side, so this arm, a guided
+            // action and a scheduled run assemble folders identically.
+            engine.call(
+                "create_pdf_folders",
+                json!({
+                    "source": abs(&args.source).to_string_lossy(),
+                    "dest": abs(&args.dest).to_string_lossy(),
+                    "sources": args.sources,
+                    "include_subfolders": !args.no_subfolders,
+                    "page_size": args.page_size,
+                    "orientation": args.orientation,
+                    "margin_pt": args.margin,
+                    "image_dpi_default": args.image_dpi,
+                    "distill_preset": args.quality,
+                    "log_dir": args.log_dir.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
+                    "progress": args.verbose,
                     "gs_path": resolve_gs().to_string_lossy(),
                     "soffice_path": resolve_soffice(),
                 }),

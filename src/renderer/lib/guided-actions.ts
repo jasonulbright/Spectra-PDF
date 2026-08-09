@@ -44,6 +44,7 @@ export type GuidedStepOp =
   | 'enhance_scan'
   | 'add_header_footer'
   | 'encrypt'
+  | 'create_pdf_folders'
   | 'export_document'
   | 'export_images';
 
@@ -920,6 +921,101 @@ export const STEP_CATALOG: readonly StepDef[] = [
         defaultValue: 'printer',
       },
     ],
+  },
+  {
+    // The second source step. It changes the run's UNIT from a file to a
+    // DIRECTORY: a folder of page images is one document, which is the shape a
+    // flatbed produces. Everything after it runs on the assembled PDF, so
+    // "one PDF per scan folder, then straighten, then make searchable" is one
+    // unattended job. `needsSoffice` is declared for accuracy and is inert
+    // here — a source step never runs against an open document, and the
+    // folder runner passes every tool path unconditionally.
+    op: 'create_pdf_folders',
+    title: 'Create one PDF per folder',
+    sourceStep: true,
+    needsGs: true,
+    needsSoffice: true,
+    params: [
+      {
+        key: 'sources',
+        label: 'Files to assemble',
+        kind: 'select',
+        options: [
+          { value: 'images', label: 'Pictures only' },
+          { value: 'all', label: 'Every kind Create PDF accepts' },
+        ],
+        defaultValue: 'images',
+      },
+      {
+        key: 'include_subfolders',
+        label: 'Subfolders',
+        kind: 'select',
+        options: [
+          { value: 'yes', label: 'Walk the whole tree' },
+          { value: 'no', label: 'Only the folder itself' },
+        ],
+        defaultValue: 'yes',
+      },
+      {
+        key: 'page_size',
+        label: 'Page size',
+        kind: 'select',
+        options: [
+          { value: 'auto', label: 'Keep each source’s own size' },
+          { value: 'first', label: 'Match the first source' },
+          { value: 'letter', label: 'Letter' },
+          { value: 'legal', label: 'Legal' },
+          { value: 'tabloid', label: 'Tabloid' },
+          { value: 'a3', label: 'A3' },
+          { value: 'a4', label: 'A4' },
+          { value: 'a5', label: 'A5' },
+        ],
+        defaultValue: 'auto',
+      },
+      {
+        key: 'orientation',
+        label: 'Orientation',
+        kind: 'select',
+        options: [
+          { value: 'auto', label: 'Follow the content' },
+          { value: 'portrait', label: 'Portrait' },
+          { value: 'landscape', label: 'Landscape' },
+        ],
+        defaultValue: 'auto',
+      },
+      { key: 'margin_pt', label: 'Margin (pt)', kind: 'number', defaultValue: 0, min: 0, max: 288, step: 1 },
+      {
+        key: 'image_dpi_default',
+        label: 'Image resolution (dpi)',
+        kind: 'number',
+        defaultValue: 200,
+        min: 1,
+        max: 2400,
+        step: 1,
+      },
+      {
+        key: 'distill_preset',
+        label: 'PostScript quality',
+        kind: 'select',
+        options: [
+          { value: 'screen', label: 'Smallest Size (72 dpi)' },
+          { value: 'ebook', label: 'eBook (150 dpi)' },
+          { value: 'printer', label: 'Print Quality (300 dpi)' },
+          { value: 'prepress', label: 'Press Quality' },
+          { value: 'default', label: 'Standard (Ghostscript defaults)' },
+        ],
+        defaultValue: 'printer',
+      },
+    ],
+    mapParams: (params) => ({
+      sources: String(params.sources ?? 'images'),
+      include_subfolders: String(params.include_subfolders ?? 'yes') === 'yes',
+      page_size: String(params.page_size ?? 'auto'),
+      orientation: String(params.orientation ?? 'auto'),
+      margin_pt: Number(params.margin_pt ?? 0),
+      image_dpi_default: Number(params.image_dpi_default ?? 200),
+      distill_preset: String(params.distill_preset ?? 'printer'),
+    }),
   },
 ];
 
