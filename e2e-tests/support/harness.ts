@@ -958,6 +958,20 @@ export async function drawCropRect(rect: { x: number; y: number; w: number; h: n
   }
 }
 
+/** Write the captured snapshot to `path` — the save the card's button makes
+ * once its OS-modal dialog has returned a destination. */
+export async function saveSnapshotTo(path: string): Promise<string> {
+  const result = await browser.executeAsync<string, [string]>(function (p, done) {
+    (window as any).__SPECTRA_TEST__.saveSnapshotTo(p)
+      .then((written: string) => done(written))
+      .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+  }, path);
+  if (result.startsWith(ERROR_TAG)) {
+    throw new Error(`saveSnapshotTo failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}
+
 /** The engine appearance payload the canvas Sign button would send for the
  * pending placement — produced by the REAL display→PDF conversion path. */
 export async function buildSignatureAppearance(): Promise<{

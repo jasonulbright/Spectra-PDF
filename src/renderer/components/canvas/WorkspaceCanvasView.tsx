@@ -60,8 +60,10 @@ import type { ExportDocumentResult } from '../../lib/export-targets';
 import type { PageRef } from '../../state/types';
 import { buildSignatureAppearance } from '../../lib/signature-placement';
 import type { SignaturePlacement } from '../../lib/signature-placement';
+import { captureSnapshot, type SnapshotPlacement } from '../../lib/snapshot-capture';
+import { getSettings } from '../../lib/app-settings';
 import { useEngine } from '../../hooks/useEngine';
-import { app, dialog } from '../../lib/tauri-bridge';
+import { app, dialog, imageClipboard } from '../../lib/tauri-bridge';
 import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../SignerSourceFields';
 import type { SignerSource } from '../SignerSourceFields';
 import {
@@ -133,7 +135,7 @@ import { placementDocsCurrent, pruneFormValues, valueShapeMatches } from '../../
 import type { OverlayWidget } from '../../lib/form-overlay';
 import { readFormFields, type FormFieldValue } from '../../lib/forms';
 import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
-import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasCrop, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge, registerCanvasEditImages } from '../../testHarness';
+import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasCrop, registerCanvasSnapshot, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge, registerCanvasEditImages } from '../../testHarness';
 import { invokeCommand, registerCanvasServices, pushEscapeInterceptor } from '../../commands/context';
 import { buildPageContextMenu } from '../../lib/page-context-menu';
 import { ContextMenu } from '../ContextMenu';
@@ -1262,6 +1264,102 @@ export function WorkspaceCanvasView({
     },
     [docs, state.files],
   );
+  // --- Snapshot -------------------------------------------------------
+  // The band's contract again, with one difference that matters: the capture
+  // runs on release rather than waiting for an Apply. There is nothing to
+  // confirm — the document is not touched, and a clipboard write the reader
+  // did not want costs them one more copy. What is left behind is the card,
+  // carrying the raster so *Save image…* writes the SAME pixels the
+  // clipboard holds rather than re-rendering a second, possibly different,
+  // one.
+  const [snapshotPlacement, setSnapshotPlacement] = useState<SnapshotPlacement | null>(null);
+  const snapshotPlacementRef = useRef<SnapshotPlacement | null>(null);
+  snapshotPlacementRef.current = snapshotPlacement;
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
+  const capturingRef = useRef(false);
+  const onSetSnapshotRect = useCallback(
+    (
+      docId: string,
+      pageId: string,
+      rect: { x: number; y: number; w: number; h: number },
+      rotationAtDraw: 0 | 90 | 180 | 270,
+    ) => {
+      const doc = docs.find((d) => d.id === docId);
+      const page = doc?.pages.find((p) => p.id === pageId);
+      if (!doc || !page) return;
+      if (!placementDocsCurrent(state.files, docs, doc.path)) return;
+      const f = state.files.get(page.sourceDocId);
+      if (!f?.buffer) return;
+      const buffer = f.buffer;
+      // One capture at a time: a second band while the first is still
+      // rendering would race two writers for one clipboard.
+      if (capturingRef.current) return;
+      capturingRef.current = true;
+      void (async () => {
+        try {
+          const proxy = await getDocumentProxy(page.sourceDocId, buffer);
+          const p = await proxy.getPage(page.sourcePageIndex + 1);
+          const shot = await captureSnapshot(p, rect, rotationAtDraw, getSettings().snapshotDpi);
+          if (!shot) return; // a click, not a capture
+          setSnapshotError(null);
+          setSnapshotPlacement({
+            id: crypto.randomUUID(),
+            path: doc.path,
+            pageId,
+            rect,
+            rotationAtDraw,
+            width: shot.clipboard.width,
+            // A positive DIB height means bottom-up rows, which is what is
+            // written; the card reports the extent either way.
+            height: Math.abs(shot.clipboard.height),
+            formats: shot.clipboard.formats,
+            png: shot.png,
+          });
+        } catch (e: unknown) {
+          setSnapshotPlacement(null);
+          setSnapshotError(e instanceof Error ? e.message : String(e));
+        } finally {
+          capturingRef.current = false;
+        }
+      })();
+    },
+    [docs, state.files],
+  );
+  const onClearSnapshotPlacement = useCallback(() => {
+    setSnapshotPlacement(null);
+    setSnapshotError(null);
+  }, []);
+  // The write, separate from the dialog that chooses where: the dialog is
+  // OS-modal and unreachable from a spec, and this is what the button does
+  // once it has an answer.
+  const writeSnapshotTo = useCallback(
+    async (dest: string): Promise<string> => {
+      const shot = snapshotPlacementRef.current;
+      if (!shot) throw new Error('no capture is on the page');
+      const path = /\.png$/i.test(dest) ? dest : `${dest}.png`;
+      return imageClipboard.savePng(shot.png, path);
+    },
+    [],
+  );
+  const onSaveSnapshot = useCallback(() => {
+    if (!snapshotPlacement) return;
+    void (async () => {
+      try {
+        const dest = await dialog.saveImageFile('snapshot.png');
+        if (!dest) return;
+        await writeSnapshotTo(dest);
+      } catch (e: unknown) {
+        setSnapshotError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+  }, [snapshotPlacement, writeSnapshotTo]);
+  // The card dies with its page, like every other placement.
+  const liveSnapshotPlacement = useMemo(() => {
+    if (!snapshotPlacement) return null;
+    return docs.some((d) => d.pages.some((p) => p.id === snapshotPlacement.pageId))
+      ? snapshotPlacement
+      : null;
+  }, [snapshotPlacement, docs]);
   // Placement whose page still exists (mirrors liveAddTextPlacement).
   const liveCropPlacement = useMemo(() => {
     if (!cropPlacement) return null;
@@ -5334,6 +5432,11 @@ export function WorkspaceCanvasView({
     registerCanvasCrop({ drawOnFirstPage: (rect) => harnessDrawCropRef.current(rect) });
     return () => registerCanvasCrop(null);
   }, []);
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerCanvasSnapshot({ saveTo: (path) => writeSnapshotTo(path) });
+    return () => registerCanvasSnapshot(null);
+  }, [writeSnapshotTo]);
 
   // Which pages travel with a drag that grabs `grabbedPageId`: the whole
   // selection (in workspace order) when the grabbed page is part of a
@@ -5839,6 +5942,10 @@ export function WorkspaceCanvasView({
             onClearCropPlacement,
             onSetCropRect,
             onSetBeadRect,
+            onSetSnapshotRect,
+            snapshotPlacement: liveSnapshotPlacement,
+            onClearSnapshotPlacement,
+            onSaveSnapshot,
             onSetAddTextRect,
             onAddImageRect,
             onClearAddTextPlacement,
@@ -5869,6 +5976,7 @@ export function WorkspaceCanvasView({
             addTextPlacement: null,
             cropPlacement: null,
             onClearCropPlacement,
+            snapshotPlacement: null,
           };
           if (!splitView) {
             return (
@@ -6095,6 +6203,10 @@ export function WorkspaceCanvasView({
           onSetBeadRect={onSetBeadRect}
           cropPlacement={liveCropPlacement}
           onClearCropPlacement={onClearCropPlacement}
+          onSetSnapshotRect={onSetSnapshotRect}
+          snapshotPlacement={liveSnapshotPlacement}
+          onClearSnapshotPlacement={onClearSnapshotPlacement}
+          onSaveSnapshot={onSaveSnapshot}
           onAddImageRect={onAddImageRect}
           onClearAddTextPlacement={onClearAddTextPlacement}
           onPageContextMenu={onPageContextMenu}
@@ -6871,6 +6983,23 @@ export function WorkspaceCanvasView({
           <span className="flex-1">{redactError}</span>
           <button
             onClick={() => setRedactError(null)}
+            className="text-red-300 hover:text-red-100"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {snapshotError && (
+        <div
+          data-testid="snapshot-error"
+          className="absolute bottom-16 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
+        >
+          <span className="flex-1">
+            {tChrome('canvas.snapshot.failed', { message: snapshotError })}
+          </span>
+          <button
+            onClick={() => setSnapshotError(null)}
             className="text-red-300 hover:text-red-100"
           >
             ×

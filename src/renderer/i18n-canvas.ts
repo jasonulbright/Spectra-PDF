@@ -362,6 +362,12 @@ export const CANVAS_STRINGS = {
   'canvas.mark.keep': 'KEEP',
   'canvas.mark.cropRemove': 'Remove crop rectangle',
 
+  // ── Snapshot ─────────────────────────────────────────────────────────
+  'canvas.snapshot.copied': 'COPIED {{width}} × {{height}}',
+  'canvas.snapshot.save': 'Save image…',
+  'canvas.snapshot.dismiss': 'Dismiss the snapshot',
+  'canvas.snapshot.failed': 'The snapshot could not be copied: {{message}}',
+
   // ── Edit-tool object hit targets ─────────────────────────────────────
   'canvas.editimg.vector': 'Vector graphic',
   'canvas.editimg.nested': 'Image (inside a form)',

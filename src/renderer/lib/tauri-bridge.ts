@@ -96,6 +96,38 @@ export const dialog = {
     invoke<string | null>('save_image_file_dialog', { defaultName }),
 };
 
+// ── Image clipboard ───────────────────────────────────────────────────────
+
+/** What the clipboard HOLDS afterwards — read back out of its own DIB header
+ * by the Rust command, not reported by the call that wrote it. */
+export interface ClipboardImage {
+  width: number;
+  height: number;
+  formats: string[];
+}
+
+export const imageClipboard = {
+  /**
+   * Publish one raster to the clipboard as both a DIB and a PNG.
+   *
+   * The two blobs cross as ONE raw body (`png || dib`) rather than a JSON
+   * argument: a megabyte of pixels serialized as an array of numbers is an
+   * order of magnitude larger and slower, and both formats must land in the
+   * same clipboard session.
+   */
+  copyImage: (bytes: Uint8Array, pngLength: number) =>
+    invoke<ClipboardImage>('copy_image_to_clipboard', bytes, {
+      headers: { 'snapshot-png-length': String(pngLength) },
+    }),
+  /** Write the captured PNG to a path the save dialog returned. The
+   * capability-scoped filesystem plugin reaches only the app's own temp
+   * tree, so a user-chosen destination goes through the command instead. */
+  savePng: (png: Uint8Array, path: string) =>
+    invoke<string>('save_snapshot_png', png, {
+      headers: { 'snapshot-path': encodeURIComponent(path) },
+    }),
+};
+
 // ── Batch OCR ─────────────────────────────────────────────────────────────
 //
 // Batch operates on paths OUTSIDE the workspace (never OPEN_FILE'd, never in

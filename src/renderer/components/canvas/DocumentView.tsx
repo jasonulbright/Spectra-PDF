@@ -18,6 +18,7 @@ import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-i
 import type { EditVectorObject } from '../../lib/edit-vectors';
 import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
+import type { SnapshotPlacement } from '../../lib/snapshot-capture';
 import type { OcrWord } from '../../ocr/types';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
@@ -215,6 +216,19 @@ export interface DocumentViewProps {
     rect: { x: number; y: number; w: number; h: number },
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
+  /** A snapshot band; the region is captured to the clipboard. REQUIRED for
+   * the crop band's reason — an optional callback silently unwires a tool
+   * in whichever render path forgets to pass it. */
+  onSetSnapshotRect: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  /** The captured snapshot's card, and its two actions. */
+  snapshotPlacement: SnapshotPlacement | null;
+  onClearSnapshotPlacement: () => void;
+  onSaveSnapshot: () => void;
   onSetAddTextRect: (
     docId: string,
     pageId: string,
@@ -1028,6 +1042,10 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onSetAddTextRect={props.onSetAddTextRect}
           onSetCropRect={props.onSetCropRect}
           onSetBeadRect={props.onSetBeadRect}
+          onSetSnapshotRect={props.onSetSnapshotRect}
+          snapshotPlacement={props.snapshotPlacement?.pageId === page.id ? props.snapshotPlacement : null}
+          onClearSnapshotPlacement={props.onClearSnapshotPlacement}
+          onSaveSnapshot={props.onSaveSnapshot}
           onAddImageRect={props.onAddImageRect}
           onClearAddTextPlacement={props.onClearAddTextPlacement}
           onPageContextMenu={props.onPageContextMenu}

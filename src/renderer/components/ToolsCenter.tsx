@@ -91,6 +91,9 @@ export const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = 
   watermark: 'watermark',
   headerfooter: 'headerfooter',
   pagebox: 'pagebox',
+  // The capture is of a page region, so the tile borrows the crop glyph —
+  // the one op whose picture is a rectangle drawn on a page.
+  snapshot: 'pagebox',
   pagelabels: 'pagelabels',
   attachments: 'attachments',
   portfolio: 'portfolio',

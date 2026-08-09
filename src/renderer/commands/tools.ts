@@ -33,6 +33,7 @@ export type ToolId =
   | 'watermark'
   | 'headerfooter'
   | 'pagebox'
+  | 'snapshot'
   | 'pagelabels'
   | 'attachments'
   | 'portfolio'
@@ -217,6 +218,15 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     // the page the moment you pick Crop — the numeric fields in the dock are
     // where the drag LANDS, not a second way to do the same job.
     canvasTools: ['cropdraw'],
+  },
+  {
+    id: 'snapshot',
+    title: 'Snapshot',
+    description: 'Copy a region of the page to the clipboard as a picture.',
+    // No operation: the whole surface is the band. Opening the tool arms the
+    // mode, so the capture cursor is live the moment it is picked.
+    ops: [],
+    canvasTools: ['snapshot'],
   },
   {
     id: 'pagelabels',
