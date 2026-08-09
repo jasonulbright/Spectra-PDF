@@ -177,6 +177,10 @@ export const COMMAND_IDS = [
   'view.documentView',
   'view.presentation',
   'view.readingMode',
+  'view.readAloud.page',
+  'view.readAloud.document',
+  'view.readAloud.pause',
+  'view.readAloud.stop',
   'view.propertiesBar',
   'view.snapping',
   'view.rulers',
@@ -671,6 +675,32 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Reading Mode',
     when: inCanvas,
     run: ({ dispatch }) => dispatch({ type: 'UI_TOGGLE_READING_MODE' }),
+  },
+  // Read Out Loud. Under View, where a reader looks for it, and gated on the
+  // reading view: the organizer shows page thumbnails, and a highlight drawn
+  // over one names nothing legible.
+  'view.readAloud.page': {
+    title: 'Read This Page',
+    when: (ctx) => inCanvas(ctx) && ctx.canvas !== null,
+    run: (ctx) => ctx.canvas!.readAloud.readPage(),
+  },
+  'view.readAloud.document': {
+    title: 'Read to End of Document',
+    when: (ctx) => inCanvas(ctx) && ctx.canvas !== null,
+    run: (ctx) => ctx.canvas!.readAloud.readDocument(),
+  },
+  // One row for both halves of the toggle, the way a transport works: the
+  // label follows the state, so the menu never offers "Pause" to a reader
+  // that is already paused.
+  'view.readAloud.pause': {
+    title: 'Pause Reading',
+    when: (ctx) => ctx.canvas !== null && ctx.canvas.readAloud.isReading(),
+    run: (ctx) => ctx.canvas!.readAloud.togglePause(),
+  },
+  'view.readAloud.stop': {
+    title: 'Stop Reading',
+    when: (ctx) => ctx.canvas !== null && ctx.canvas.readAloud.isReading(),
+    run: (ctx) => ctx.canvas!.readAloud.stop(),
   },
   // Properties bar: the selected annotation's
   // properties, under the secondary toolbar. Doc tabs only, like the strip.

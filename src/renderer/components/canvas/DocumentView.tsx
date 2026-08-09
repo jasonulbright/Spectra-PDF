@@ -20,6 +20,7 @@ import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragrap
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { SnapshotPlacement } from '../../lib/snapshot-capture';
 import type { OcrWord } from '../../ocr/types';
+import type { PageReadAloud } from '../../lib/read-aloud';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
@@ -187,6 +188,7 @@ export interface DocumentViewProps {
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
+  readAloudByPage: ReadonlyMap<string, PageReadAloud>;
   formWidgetsByPage: ReadonlyMap<string, OverlayWidget[]>;
   formValuesByPath: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
@@ -1032,6 +1034,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           signaturePlacement={props.signaturePlacement?.pageId === page.id ? props.signaturePlacement : null}
           findMatch={props.findMatchPageIds.has(page.id)}
           findWords={props.findWordsByPage.get(page.id)}
+          readAloud={props.readAloudByPage.get(page.id)}
           formWidgets={props.formWidgetsByPage.get(page.id)}
           formValues={props.formValuesByPath.get(page.sourceDocId)}
           onSetFormValue={props.onSetFormValue}
