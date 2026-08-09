@@ -61,7 +61,10 @@ import type { PageRef } from '../../state/types';
 import { buildSignatureAppearance } from '../../lib/signature-placement';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import { captureSnapshot, type SnapshotPlacement } from '../../lib/snapshot-capture';
-import { getSettings } from '../../lib/app-settings';
+import { getSettings, saveSettings } from '../../lib/app-settings';
+import { readingLocale, type PageReadAloud } from '../../lib/read-aloud';
+import { useReadAloud, type ReadAloudTarget } from '../../hooks/useReadAloud';
+import { ReadAloudBar } from './ReadAloudBar';
 import {
   loadCustomWords,
   resolveSpellLanguage,
@@ -481,6 +484,7 @@ const NO_GUIDES_BY_PAGE: ReadonlyMap<string, PageGuide[]> = new Map();
 const NO_EDIT_TEXT: ReadonlyMap<string, EditTextListing> = new Map();
 const NO_PAGE_IDS: ReadonlySet<string> = new Set();
 const NO_WORDS_BY_PAGE: ReadonlyMap<string, OcrWord[]> = new Map();
+const NO_READ_ALOUD: ReadonlyMap<string, PageReadAloud> = new Map();
 const NO_WIDGETS_BY_PAGE: ReadonlyMap<string, OverlayWidget[]> = new Map();
 const NO_LOCK_NAMES: readonly string[] = [];
 const NO_FORM_VALUES: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>> = new Map();
@@ -942,6 +946,110 @@ export function WorkspaceCanvasView({
     // the wrong sheet (`resolvePageEntry` refuses an out-of-range one, but
     // an in-range wrong one it cannot see).
   }, [focusedWorkingPath, focusedBuffer, engineCall]);
+
+  // ── Read Out Loud ───────────────────────────────────────────────────────
+  //
+  // The reader is transient view state bound to BYTES: its blocks and their
+  // rectangles were listed from one buffer, so the target list is keyed on the
+  // page ids AND the buffer identity, and the hook stops the moment either
+  // moves. `state.files` is deliberately absent from the deps — the Map is
+  // rebuilt on every dispatch, and depending on it would stop the reader on
+  // every keystroke elsewhere in the app (the page-labels lesson).
+  const readAloudFilesRef = useRef(state.files);
+  readAloudFilesRef.current = state.files;
+  const focusedWorkingPathRef = useRef(focusedWorkingPath);
+  focusedWorkingPathRef.current = focusedWorkingPath;
+  const readAloudKey =
+    docViewMode === 'document' && focusedDoc
+      ? `${focusedDoc.id}|${focusedDoc.pages.map((p) => p.id).join(',')}`
+      : '';
+  const readAloudTargets = useMemo<ReadAloudTarget[]>(() => {
+    const doc = focusedDocRef.current;
+    if (!readAloudKey || !doc) return [];
+    const out: ReadAloudTarget[] = [];
+    for (const page of doc.pages) {
+      const file = readAloudFilesRef.current.get(page.sourceDocId);
+      if (!file?.workingPath) continue;
+      out.push({
+        pageId: page.id,
+        workingPath: file.workingPath,
+        pageNumber: page.sourcePageIndex + 1,
+      });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readAloudKey, focusedBuffer]);
+  const readAloudGeometry = useCallback(async (target: ReadAloudTarget) => {
+    const doc = focusedDocRef.current;
+    const page = doc?.pages.find((p) => p.id === target.pageId);
+    if (!page) throw new Error('page gone');
+    const file = readAloudFilesRef.current.get(page.sourceDocId);
+    if (!file?.buffer) throw new Error(`no buffer loaded for ${page.sourceDocId}`);
+    const proxy = await getDocumentProxy(page.sourceDocId, file.buffer);
+    const p = await proxy.getPage(page.sourcePageIndex + 1);
+    const [vx0, vy0, vx1, vy1] = p.view;
+    return {
+      box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
+      bakedRotate: p.rotate,
+    };
+  }, []);
+  // The document's own /Lang, read ONCE per document and only when a reading
+  // run actually starts. Cached on the working path, so a second run on the
+  // same document costs nothing.
+  const readAloudLangRef = useRef<Map<string, string>>(new Map());
+  const resolveReadingLocale = useCallback(async (): Promise<string> => {
+    const workingPath = focusedWorkingPathRef.current;
+    if (!workingPath) return readingLocale(null, currentLanguage());
+    const cached = readAloudLangRef.current.get(workingPath);
+    if (cached !== undefined) return cached;
+    let docLang: string | null = null;
+    try {
+      const res = (await engineCall('document_language', { file: workingPath })) as unknown as {
+        language: string | null;
+      };
+      docLang = res.language;
+    } catch {
+      // A document that cannot be read for its /Lang is not an error here —
+      // the ladder simply carries on to the interface language.
+    }
+    const resolved = readingLocale(docLang, currentLanguage());
+    readAloudLangRef.current.set(workingPath, resolved);
+    return resolved;
+  }, [engineCall]);
+  const reader = useReadAloud({
+    engineCall,
+    targets: readAloudTargets,
+    geometryOf: readAloudGeometry,
+    currentIndex: currentPage - 1,
+    resolveLocale: resolveReadingLocale,
+    onShowPage: (pageId) => activeCanvasHandle()?.centerOn(pageId),
+    onPersist: ({ voice, rate }) => {
+      const settings = getSettings();
+      saveSettings({
+        ...settings,
+        ...(voice !== undefined ? { readAloudVoice: voice } : {}),
+        ...(rate !== undefined ? { readAloudRate: rate } : {}),
+      });
+    },
+    initialVoice: getSettings().readAloudVoice,
+    initialRate: getSettings().readAloudRate,
+  });
+  const readerRef = useRef(reader);
+  readerRef.current = reader;
+  // One entry, always — the reader speaks one block at a time. Shaped as a
+  // per-page map so it rides the SAME plumbing the find-word boxes do rather
+  // than threading a second kind of overlay through four components.
+  const readAloudByPage = useMemo(() => {
+    const highlight = reader.highlight;
+    if (!highlight) return NO_READ_ALOUD;
+    return new Map([
+      [
+        highlight.pageId,
+        { block: highlight.block, sentence: highlight.sentence, word: highlight.word },
+      ],
+    ]);
+  }, [reader.highlight]);
+
   // Find/OCR: the ONE workspace search index, lifted to a provider so the
   // Search nav panel shares it (double-instantiating would
   // double the OCR work and desync results). Ctrl+F opens the bar.
@@ -1786,6 +1894,18 @@ export function WorkspaceCanvasView({
         close: () => findRef.current.closeFind(),
         next: () => findRef.current.next(),
         prev: () => findRef.current.prev(),
+      },
+      readAloud: {
+        isReading: () => readerRef.current.open,
+        isPaused: () => readerRef.current.status === 'paused',
+        readPage: () => readerRef.current.start('page'),
+        readDocument: () => readerRef.current.start('document'),
+        togglePause: () => {
+          const active = readerRef.current;
+          if (active.status === 'paused') active.resume();
+          else if (active.status === 'speaking') active.pause();
+        },
+        stop: () => readerRef.current.stop(),
       },
       goToPage: () => {
         const el = pageBoxRef.current;
@@ -6011,6 +6131,7 @@ export function WorkspaceCanvasView({
             signaturePlacement: liveSigPlacement,
             findMatchPageIds,
             findWordsByPage,
+            readAloudByPage,
             formWidgetsByPage,
             formValuesByPath: pendingFormValues,
             onSetFormValue,
@@ -6273,6 +6394,7 @@ export function WorkspaceCanvasView({
           signaturePlacement={liveSigPlacement}
           findMatchPageIds={findMatchPageIds}
           findWordsByPage={findWordsByPage}
+          readAloudByPage={readAloudByPage}
           formWidgetsByPage={formWidgetsByPage}
           formValuesByPath={pendingFormValues}
           onSetFormValue={onSetFormValue}
@@ -6442,6 +6564,7 @@ export function WorkspaceCanvasView({
           onClose={find.closeFind}
         />
       )}
+      {reader.open && <ReadAloudBar reader={reader} />}
       {ocrApplyError && (
         <div
           data-testid="ocr-apply-error"

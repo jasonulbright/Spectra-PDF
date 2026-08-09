@@ -14,6 +14,7 @@ import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragrap
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { SnapshotPlacement } from '../../lib/snapshot-capture';
 import type { OcrWord } from '../../ocr/types';
+import type { PageReadAloud } from '../../lib/read-aloud';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
@@ -111,6 +112,7 @@ interface DocLayerProps {
   signaturePlacement: SignaturePlacement | null;
   findMatchPageIds: ReadonlySet<string>;
   findWordsByPage: ReadonlyMap<string, OcrWord[]>;
+  readAloudByPage: ReadonlyMap<string, PageReadAloud>;
   // Form widgets keyed by pageId + pending values keyed by file path.
   formWidgetsByPage: ReadonlyMap<string, OverlayWidget[]>;
   formValuesByPath: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>;
@@ -289,6 +291,7 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               signaturePlacement={props.signaturePlacement}
               findMatchPageIds={props.findMatchPageIds}
               findWordsByPage={props.findWordsByPage}
+              readAloudByPage={props.readAloudByPage}
               formWidgetsByPage={props.formWidgetsByPage}
               formValuesByPath={props.formValuesByPath}
               onSetFormValue={props.onSetFormValue}

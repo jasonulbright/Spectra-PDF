@@ -243,6 +243,14 @@ describe('dispatchKeyEvent', () => {
       jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
       clearGuides: vi.fn(),
+      readAloud: {
+        isReading: () => false,
+        isPaused: () => false,
+        readPage: vi.fn(),
+        readDocument: vi.fn(),
+        togglePause: vi.fn(),
+        stop: vi.fn(),
+      },
       redaction: {
         addMarks: async () => ({ added: 0, duplicates: 0, skipped: 0 }),
         markedRects: async () => [],
@@ -287,6 +295,14 @@ describe('dispatchKeyEvent', () => {
       jumpToFilePage: vi.fn(),
       openPageForReading: vi.fn(),
       clearGuides: vi.fn(),
+      readAloud: {
+        isReading: () => false,
+        isPaused: () => false,
+        readPage: vi.fn(),
+        readDocument: vi.fn(),
+        togglePause: vi.fn(),
+        stop: vi.fn(),
+      },
       redaction: {
         addMarks: async () => ({ added: 0, duplicates: 0, skipped: 0 }),
         markedRects: async () => [],

@@ -11,6 +11,7 @@ import type { TableRegion, TableReviewHandlers } from '../../lib/table-review';
 import { currentRotation } from '../../lib/table-review';
 import TableRegionOverlay from './TableRegionOverlay';
 import type { OcrWord } from '../../ocr/types';
+import type { PageReadAloud } from '../../lib/read-aloud';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import { rgb01ToHex, hex01ToRgb, type EditVectorObject } from '../../lib/edit-vectors';
 import ImageTransformOverlay from './ImageTransformOverlay';
@@ -781,6 +782,10 @@ interface PageCellProps {
   // orientation — projected by the current in-memory rotation like marks).
   findMatch?: boolean;
   findWords?: OcrWord[];
+  // Read Out Loud: the block being read, the sentence being spoken and the
+  // word in the air, on THIS page. Display-normalized at the baked
+  // orientation like findWords, so the in-memory rotation re-projects them.
+  readAloud?: PageReadAloud;
   // Form widgets on this page — display-normalized at the BAKED
   // orientation like findWords; interactive only in the 'forms' tool, but a
   // widget with a pending value stays visible in every tool (marks
@@ -1125,6 +1130,7 @@ function PageCellImpl({
   signaturePlacement,
   findMatch,
   findWords,
+  readAloud,
   formWidgets,
   formValues,
   onSetFormValue,
@@ -4033,6 +4039,42 @@ function PageCellImpl({
           />
         );
       })}
+      {readAloud &&
+        (() => {
+          // Three tiers, drawn back to front so the word sits over the
+          // sentence and the sentence over the block. Every rect re-projects
+          // through the page's in-memory rotation, the findWords recipe.
+          const project = (r: { x: number; y: number; w: number; h: number }) =>
+            rotateNormalizedRect(r, page.rotation);
+          const box = (
+            r: { x: number; y: number; w: number; h: number },
+            key: string,
+            className: string,
+          ) => {
+            const p = project(r);
+            return (
+              <div
+                key={key}
+                className={className}
+                style={{
+                  left: `${p.x * 100}%`,
+                  top: `${p.y * 100}%`,
+                  width: `${p.w * 100}%`,
+                  height: `${p.h * 100}%`,
+                }}
+              />
+            );
+          };
+          return (
+            <>
+              {readAloud.block && box(readAloud.block, 'ra-block', 'page-read-block')}
+              {readAloud.sentence.map((r, i) =>
+                box(r, `ra-sentence-${i}`, 'page-read-sentence'),
+              )}
+              {readAloud.word.map((r, i) => box(r, `ra-word-${i}`, 'page-read-word'))}
+            </>
+          );
+        })()}
       {(formWidgets ?? []).map((w, i) => (
         <FormWidgetView
           key={`fwid-${w.fieldName}-${i}`}

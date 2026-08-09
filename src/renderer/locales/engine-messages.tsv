@@ -191,7 +191,7 @@ inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 links.linkIndexOutRange	pattern	links	link index {{index}} is out of range (page has {{v1}})
 links.linksAdd	exact	links	no links to add
-links.pageOutRange	pattern	enhance_scan,form_detect,links,page_images,page_vectors,redact_marks,search_regions,slide_export,spelling,table_export,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
+links.pageOutRange	pattern	enhance_scan,form_detect,links,page_images,page_vectors,read_aloud,redact_marks,search_regions,slide_export,spelling,table_export,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
 links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive width and height
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
 links.urlMustEmpty	exact	links	url must not be empty
