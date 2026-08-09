@@ -50,6 +50,7 @@ import {
 } from '../lib/image-resolution';
 import { ImageResolutionSummary } from './ImageResolutionSummary';
 import type { PdfBuffer } from '../state/types';
+import { suffixedOutputName } from '../lib/output-names';
 
 // File ▸ Properties: metadata, security, the fonts the document uses, its
 // initial view, and the file's own facts. Metadata changes retain their
@@ -242,7 +243,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
 
   const handleSave = useCallback(async () => {
     if (!activeFile) return;
-    const output = await saveFile('metadata-updated.pdf');
+    const output = await saveFile(suffixedOutputName(activeFile.name, "metadata"));
     if (!output) return;
     setBusy(true);
     setStatus(tChrome('dialog.props.savingMetadata'));
@@ -260,7 +261,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
 
   const handleStrip = useCallback(async () => {
     if (!activeFile) return;
-    const output = await saveFile('stripped.pdf');
+    const output = await saveFile(suffixedOutputName(activeFile.name, "stripped"));
     if (!output) return;
     setBusy(true);
     setStatus(tChrome('dialog.props.strippingMetadata'));

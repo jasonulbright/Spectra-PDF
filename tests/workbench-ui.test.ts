@@ -5,7 +5,7 @@
 // stub since vitest runs in node.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readWorkbenchUi, writeWorkbenchUi } from '../src/renderer/lib/workbench-ui';
-import { NAV_PANE_DEFAULT_WIDTH, TOOL_DOCK_DEFAULT_WIDTH } from '../src/renderer/state/types';
+import { NAV_PANE_DEFAULT_WIDTH, NAV_PANE_MAX_WIDTH, TOOL_DOCK_DEFAULT_WIDTH } from '../src/renderer/state/types';
 
 const DEFAULTS = {
   navPane: { open: false, panel: 'pages' as const, width: NAV_PANE_DEFAULT_WIDTH },
@@ -64,7 +64,7 @@ describe('readWorkbenchUi', () => {
     });
     // An already-persisted oversized width self-heals on next boot.
     store.set('workbench-ui', JSON.stringify({ navPane: { open: true, panel: 'pages', width: 5000 } }));
-    expect(readWorkbenchUi(DEFAULTS).navPane.width).toBe(520);
+    expect(readWorkbenchUi(DEFAULTS).navPane.width).toBe(NAV_PANE_MAX_WIDTH);
   });
 
   it('coerces the tool dock the same way (and tolerates its absence — older entries)', () => {

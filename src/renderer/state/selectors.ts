@@ -60,6 +60,32 @@ export function showableDocuments(state: AppState): OpenDocument[] {
 }
 
 /**
+ * The selected pages as 1-based numbers within the ACTIVE FILE, ordered.
+ *
+ * The selection is a set of opaque page ids that can span files; a page-range
+ * field addresses one file by position. Pages of any other file are left out
+ * rather than renumbered — a field that silently named positions in the wrong
+ * document would scope an operation to pages nobody picked. Empty when nothing
+ * of the active file is selected, which is what disables the affordance.
+ */
+export function selectedPageNumbers(state: AppState): number[] {
+  const path = showableDoc(state);
+  if (!path) return [];
+  const selected = state.ui.selectedPageIds;
+  if (selected.size === 0) return [];
+  const out: number[] = [];
+  let n = 0;
+  for (const doc of state.workspace.documents) {
+    if (doc.path !== path) continue;
+    for (const page of doc.pages) {
+      n += 1;
+      if (selected.has(page.id)) out.push(n);
+    }
+  }
+  return out;
+}
+
+/**
  * Where "Insert Pages" (from file / blank) puts new pages:
  * AFTER the page currently being read, when that page belongs to the active
  * document; else at the END of the active file's last workspace document.
