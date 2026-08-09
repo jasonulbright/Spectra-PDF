@@ -2,6 +2,28 @@
 
 ## 1.0.28
 
+*Unreleased*
+
+### Pages panel
+- The pages panel lays its thumbnails out in a grid: widening the panel adds columns instead of one larger thumbnail.
+- The panel can be dragged much wider than before, and always leaves room for the document beside it.
+- Dragging a page to reorder shows the insertion point between the two thumbnails it falls between.
+
+### Page ranges
+- **Crop**, **Rotate** and **Delete Pages** read a page range written with a hyphen: `1,3,5-9`. `5-9` previously meant page 5 alone, silently.
+- Each of those fields has a **Use selection** button that fills it from the pages selected in the page list.
+- A range that names no page is refused with a message instead of acting on nothing and reporting success.
+
+### Saving a result
+- Compress, Optimize, Grayscale, PDF/A, Encrypt, Decrypt, Repair, Rebuild, Recover, prepress conversion and the metadata tools suggest a file name built from the document's own: `report_compressed.pdf`, not `compressed.pdf`. It is a suggestion; the dialog still accepts any name.
+
+### Elsewhere
+- Right-clicking a file under **Recent files** offers Open, **Show in folder**, and Copy full path.
+- The Compress panel says when a document reads as a scan, and offers the scanned-document setting in one click.
+- **Optimize** is available as a guided-action step, so compress-then-optimize runs over a whole folder, on a watched folder, or on a schedule.
+- The Compress and Optimize panels point at guided actions for running the same steps over a folder.
+- Each release heading in this file carries the date it was published.
+
 ### Fixes
 - Choosing a different shape while one is half-drawn now abandons the half-drawn one. Picking **Cloud** part-way through a polygon drew a polygon; the figure you pick is the figure you get.
 - A half-drawn shape is also dropped when you leave the tool, so a stray click can no longer add its point to the next shape you draw.
@@ -10,6 +32,8 @@
 - A stamp preset's name is drawn in the interface text colour, with the stamp's own colour on its outline, so a pale stamp's name is readable.
 
 ## 1.0.27
+
+*Released 2026-08-09*
 
 ### Spell check
 - The paragraph editor underlines words it does not recognise while you type.
@@ -67,6 +91,8 @@
 
 ## 1.0.26
 
+*Released 2026-08-08*
+
 ### Knowing what resolution a document's images are
 - Document Properties ▸ Advanced gains an **Images** row: how many images the document draws, and at what effective resolution.
 - The figure is measured: an image's resolution is its pixels over the space it is placed in.
@@ -100,6 +126,8 @@
 - Running the same operation on the same document twice now writes the same file, byte for byte.
 
 ## 1.0.25
+
+*Released 2026-08-08*
 
 ### Navigation the document already implies
 - The Bookmarks pane gains **From structure…**, which builds an outline from a tagged document's own headings.
@@ -189,6 +217,8 @@
 
 ## 1.0.24
 
+*Released 2026-08-07*
+
 ### Watermarking with a picture
 - A watermark is now text or a picture, and the panel offers both.
 - Any picture Create PDF accepts can be stamped, chosen through a file picker.
@@ -249,6 +279,8 @@
 - An over-long portfolio member name is shortened to one the filesystem accepts, rather than failing.
 
 ## 1.0.23
+
+*Released 2026-08-07*
 
 ### Print production
 - A new Print Production tool holds preflight, colour conversion, and the two new ink tools.
@@ -353,6 +385,8 @@
 
 ## 1.0.22
 
+*Released 2026-08-06*
+
 ### Signing
 - Lock form fields when you sign: every field, only the ones you choose, or everything except them.
 - Fields are picked from the document's own list, beside the certification options and as `--lock` with `--lock-field`.
@@ -387,6 +421,8 @@
 - Updated bundled and build-time dependencies, fixing GHSA-52cp-r559-cp3m, GHSA-h67p-54hq-rp68 and GHSA-mh29-5h37-fv8m in js-yaml and GHSA-67mh-4wv8-2f99 in esbuild.
 
 ## 1.0.21
+
+*Released 2026-08-06*
 
 ### Certifying a document
 - A signature can certify, stating what may change afterwards: nothing, form filling, or form filling and commenting.
@@ -444,6 +480,8 @@
 
 ## 1.0.20
 
+*Released 2026-08-05*
+
 ### Redaction
 - Search & Redact marks every occurrence of a term, an imported word list or a built-in pattern in one pass.
 - Built-in patterns cover phone numbers, emails, card numbers, social security numbers, dates, IBANs, NHS and social insurance numbers.
@@ -497,6 +535,8 @@
 
 ## 1.0.19
 
+*Released 2026-08-04*
+
 ### Vertical text
 - Mongolian columns advance left to right, and now list, read and reflow in that order.
 - The direction is read from the text itself, so documents in other vertical scripts are untouched.
@@ -526,6 +566,8 @@
 - A PC set to Portuguese or Chinese in any regional spelling opens in that language.
 
 ## 1.0.17
+
+*Released 2026-08-04*
 
 ### Drafting aids
 - The pointer snaps to endpoints, midpoints, centres, intersections and edges, and to markup already placed.
@@ -577,6 +619,8 @@
 
 ## 1.0.16 — Deeper image, vector, and paragraph editing
 
+*Released 2026-08-03*
+
 ### Images
 - Edge handles shear a placed image, and rotation and resize compose with it naturally.
 - Shift/Ctrl-click builds a group on a page — move, scale, rotate, align, distribute or delete as one step.
@@ -597,6 +641,8 @@
 - A paragraph split between the page and an embedded drawing groups and edits as a single paragraph.
 
 ## 1.0.15
+
+*Released 2026-08-03*
 
 ### Editing
 - Drag either edge of the paragraph editor and the text rewraps; a width no word fits is refused.
@@ -622,6 +668,8 @@
 - Documentation was corrected where it described retired components or overstated what publishing runs.
 
 ## 1.0.14
+
+*Released 2026-08-02*
 
 ### Printing
 - Two documents printed in the same second no longer overwrite one another's work in progress.
@@ -651,6 +699,8 @@
 
 ## 1.0.12
 
+*Released 2026-08-02*
+
 ### Text
 - Combining accent marks compose properly when editing, adding text, stamping a watermark or filling a field.
 - Ligatures form where the typeface has them, and the words still copy, search and extract as ordinary letters.
@@ -662,6 +712,8 @@
 
 ## 1.0.11 — Every font, every encoding
 
+*Released 2026-08-02*
+
 ### Text
 - The Add Text card and the paragraph editor list every font installed on this machine.
 - Fonts whose licence forbids embedding are not offered, and the picker says how many were left out.
@@ -672,6 +724,8 @@
 - Supply a password with the run and an encrypted file is processed like any other.
 
 ## 1.0.10 — Write it in any direction
+
+*Released 2026-08-01*
 
 ### Text
 - Arabic or Hebrew typed into a new text box lays out in reading order, wraps, and joins cursively.
@@ -690,6 +744,8 @@
 - Fully vocalised Arabic round-trips: text carrying harakat is written, read back and re-edited exactly as typed.
 
 ## 1.0.9
+
+*Released 2026-08-01*
 
 ### Text
 - Arabic, Hebrew, Persian, Urdu and the other right-to-left scripts reflow: type and the paragraph re-wraps.
@@ -710,6 +766,8 @@
 
 ## 1.0.8
 
+*Released 2026-08-01*
+
 ### Text
 - Style any part of the text in the Add Text card with its own size, colour, bold or italic.
 - Mixed sizes lay out with correct line heights, and the fit indicator measures exactly what will be drawn.
@@ -720,6 +778,8 @@
 - A high-contrast theme: black backgrounds, white text, bright accents and gold focus outlines, applied from the first frame.
 
 ## 1.0.7
+
+*Released 2026-08-01*
 
 ### Text
 - Documents using Type 3 glyph-procedure fonts, common in TeX output, now edit like any other text.
@@ -733,6 +793,8 @@
 
 ## 1.0.6
 
+*Released 2026-08-01*
+
 - Sign with a PKCS#11 smart card, USB token or HSM: choose the module, name the token and certificate, enter the PIN.
 - Every signing feature works as with a file-based identity, including visible stamps, in-place signing and the PAdES range.
 - PostScript files carrying form annotations now produce PDFs whose fields are readable, fillable and keep their values.
@@ -740,6 +802,8 @@
 - Text set in bare CFF or original Type 1 fonts is now editable, using the font's own encoding and widths.
 
 ## 1.0.5
+
+*Released 2026-08-01*
 
 ### Certificate encryption
 - Lock a document to one or more recipient certificates; anyone holding a matching private key opens it.
@@ -762,6 +826,8 @@
 
 ## 1.0.4
 
+*Released 2026-08-01*
+
 ### Redaction
 - "Save marks" stores redaction marks in the document as standard redaction annotations, so they survive closing it.
 - Other PDF tools read them, marks never print, and saving them keeps existing signatures valid.
@@ -781,6 +847,8 @@
 
 ## 1.0.3 — Signed documents stay signed
 
+*Released 2026-08-01*
+
 ### Signatures
 - Comments, form filling, XFDF import, added links and added pages append to the file, so existing signatures keep verifying.
 - Edits a signed file cannot carry — removing or reordering pages, editing page content, flattening — behave as before.
@@ -797,6 +865,8 @@
 - With single-key accelerators on: S places a sticky note, Z is marquee zoom, and E opens the content editor.
 
 ## 1.0.2
+
+*Released 2026-07-31*
 
 ### Print options
 - Two-sided printing: one side only, flip on the long edge, or flip on the short edge, where the printer has a duplexer.
@@ -817,6 +887,8 @@
 - `print` gained the same option set, and `printers --capabilities` reports a printer's papers, duplexer and colour support.
 
 ## 1.0.1
+
+*Released 2026-07-31*
 
 ### Arrange your comments
 - Drag a comment to move it and grab a corner to resize, with the opposite corner anchored and Shift locking the aspect.
@@ -840,6 +912,8 @@
 - In the Comments panel, and on the command line as `xfdf-export` and `xfdf-import`.
 
 ## 1.0.0 — A new name: Spectra PDF
+
+*Released 2026-07-31*
 
 The product formerly released as "Open PDF Studio" continues here as Spectra PDF and restarts its numbering at 1.0.0 — same application, same code line.
 
@@ -865,6 +939,8 @@ The product formerly released as "Open PDF Studio" continues here as Spectra PDF
 
 ## 2.8.7
 
+*Released 2026-07-31*
+
 ### Guided actions
 - Run an action over a folder of PDFs, subfolders included, into a mirror of the tree with originals untouched.
 - One file's failure never stops the rest, and a run log lands beside the batch OCR logs.
@@ -880,6 +956,8 @@ The product formerly released as "Open PDF Studio" continues here as Spectra PDF
 - In-place `encrypt` and `decrypt` now stage safely and replace the file atomically instead of silently failing.
 
 ## 2.8.6
+
+*Released 2026-07-30*
 
 ### PDF portfolios
 - A portfolio opens on its cover sheet with the file list alongside; open, save out, replace, add and remove files.
@@ -911,6 +989,8 @@ The product formerly released as "Open PDF Studio" continues here as Spectra PDF
 
 ## 2.8.5 — Batch OCR grows up
 
+*Released 2026-07-29*
+
 - 47 recognition languages in the app and in batch runs, including Japanese, Chinese, Korean, Arabic, Hebrew and Russian.
 - A log for every batch run, with a retention you control, in a folder you can choose.
 - Processed originals can file themselves into moved and error folders, with verify-before-move.
@@ -920,6 +1000,8 @@ The product formerly released as "Open PDF Studio" continues here as Spectra PDF
 - Recognition runs natively for speed and works under service accounts; the in-browser recognizer is gone.
 
 ## 2.8.4 — Tools you can find
+
+*Released 2026-07-25*
 
 ### The tool pane
 - A tool's name is now the biggest thing on its button, icons are smaller, and descriptions moved into tooltips.
@@ -938,6 +1020,8 @@ The product formerly released as "Open PDF Studio" continues here as Spectra PDF
 
 ## 2.8.3 — License notices in the box
 
+*Released 2026-07-25*
+
 ### The tool pane
 - A Tools button in the toolbar shows and hides the right-hand tool pane from the top row.
 
@@ -949,6 +1033,8 @@ The product formerly released as "Open PDF Studio" continues here as Spectra PDF
 - The notices were audited and corrected against what actually ships.
 
 ## 2.8.2 — The workbench
+
+*Released 2026-07-25*
 
 ### The new layout
 - Every tool panel lives in a resizable pane on the right, with the document still in front of you.
@@ -978,6 +1064,8 @@ The product formerly released as "Open PDF Studio" continues here as Spectra PDF
 
 ## 2.8.1
 
+*Released 2026-07-23*
+
 ### Search
 - The Find bar and Search panel gain match case, whole word and regular expression modes.
 - Search every PDF in a folder without opening them; results list each file and page, and a click opens the match.
@@ -996,6 +1084,8 @@ The product formerly released as "Open PDF Studio" continues here as Spectra PDF
 - Form fields read through the same engine as filling, so nested fields that were invisible now appear.
 
 ## 2.8.0
+
+*Released 2026-07-22*
 
 ### Typography
 - Text you add or edit is properly kerned, from the document's own font metrics or a metric-compatible stand-in.
@@ -1019,6 +1109,8 @@ The product formerly released as "Open PDF Studio" continues here as Spectra PDF
 
 ## 2.7.1 — Redaction fix (recommended update)
 
+*Released 2026-07-21*
+
 Three kinds of content could survive underneath a redaction mark and remain extractable from the saved file.
 
 - Inline images stored directly in the page's content stream were left in place with the black box drawn over them.
@@ -1028,6 +1120,8 @@ Three kinds of content could survive underneath a redaction mark and remain extr
 
 ## 2.7.0
 
+*Released 2026-07-20*
+
 - Colour, bold, italic, font family and size apply to a selected range inside a paragraph.
 - The whole-paragraph controls remain when nothing is selected.
 - Select a drawn line, rectangle or shape in the Edit tool and move, resize or rotate it with handles.
@@ -1035,6 +1129,8 @@ Three kinds of content could survive underneath a redaction mark and remain extr
 - Shapes inside a form or group are selectable and editable too, leaving the group's other uses untouched.
 
 ## 2.6.0
+
+*Released 2026-07-19*
 
 ### Authoring
 - Add Text: draw a box, type, pick size, colour and font family, and the text lands as real searchable text.
@@ -1058,6 +1154,8 @@ Three kinds of content could survive underneath a redaction mark and remain extr
 
 ## 2.5.0
 
+*Released 2026-07-18*
+
 ### More documents
 - Chinese, Japanese and Korean documents using the standard Unicode CJK encodings open for editing.
 - A substitute font matches the original's style — serif for serif, monospaced for monospaced.
@@ -1068,6 +1166,8 @@ Three kinds of content could survive underneath a redaction mark and remain extr
 
 ## 2.4.0 — Create PDF from PostScript
 
+*Released 2026-07-18*
+
 - File ▸ Create PDF from PostScript… converts `.ps` and `.eps` files with the classic quality presets.
 - The result opens in one click, powered by the Ghostscript already bundled for compression and PDF/A.
 - EPS files convert with their bounding box as the page, so figures stay figures.
@@ -1076,6 +1176,8 @@ Three kinds of content could survive underneath a redaction mark and remain extr
 - The README carries a feature sourcing table mapping every capability to the component that powers it.
 
 ## 2.3.0
+
+*Released 2026-07-18*
 
 ### Find the features
 - Document ▸ Combine Files… gives merging a named menu path; pages append to the current document, undoably.
@@ -1089,6 +1191,8 @@ Three kinds of content could survive underneath a redaction mark and remain extr
 - Positions still reset when a file's content is rebuilt outside the editor, where holding a position would be a guess.
 
 ## 2.2.0 — Edit Text & Paragraph Reflow
+
+*Released 2026-07-18*
 
 ### Edit Paragraphs
 - Text that reads as a paragraph selects as one box and edits in a multi-line editor.
@@ -1109,6 +1213,8 @@ Three kinds of content could survive underneath a redaction mark and remain extr
 
 ## 2.1.0 — Edit Images & Batch OCR
 
+*Released 2026-07-17*
+
 ### Edit Images
 - Click any image on the page to replace, extract or delete it, undoably.
 - An image used in several places changes only where you clicked, including inside reused form graphics.
@@ -1124,6 +1230,8 @@ Three kinds of content could survive underneath a redaction mark and remain extr
 - A destination inside the source is refused, including when reached by two different path spellings.
 
 ## 2.0.0 — The Workbench
+
+*Released 2026-07-16*
 
 ### The frame
 - A menu bar, main toolbar and tab strip: Home, Tools, and one tab per open document.
@@ -1194,6 +1302,8 @@ Three kinds of content could survive underneath a redaction mark and remain extr
 - Reopening an already-open file can no longer briefly serve its previous in-memory state.
 
 ## 0.9.0 — Initial Release
+
+*Released 2026-06-09*
 
 First public release of Open PDF Studio.
 

@@ -80,6 +80,9 @@ const PHYSICAL_EXCEPTIONS: Record<string, string> = {
   '.docview-ruler-corner': 'ruler geometry',
   '.docview-ruler-v': 'ruler geometry',
   '.docview-ruler-h .ruler-tick': 'ruler geometry',
+  // The tick's own rule is the exception above; the major variant only
+  // restates that same border's colour and shares its geometry.
+  '.docview-ruler-h .ruler-tick.major': 'ruler geometry',
   '.docview-ruler-v .ruler-tick': 'ruler geometry',
   '.docview-ruler-h .ruler-label': 'ruler geometry',
   '.docview-ruler-v .ruler-label': 'ruler geometry',

@@ -487,10 +487,12 @@
 .thumb-frame canvas { transition: opacity 0.15s ease; }
 .thumb-label { font-size: 11px; color: #a3a3a3; }
 .thumb-row.selected .thumb-label { color: #ffffff; }
+/* A vertical insertion rule: the panel lays pages out in a grid, so a gap is
+   between two columns. Top/height/offset come from the grid math inline. */
 .thumb-drop-indicator {
   position: absolute;
-  inset-inline: 8px;
-  height: 2px;
+  width: 2px;
+  margin-inline-start: -1px;
   background: var(--accent, #0078d4);
   border-radius: 1px;
   z-index: 6;

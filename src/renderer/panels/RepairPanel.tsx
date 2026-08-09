@@ -5,6 +5,7 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
+import { suffixedOutputName } from '../lib/output-names';
 
 export function RepairPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -37,7 +38,7 @@ export function RepairPanel(): React.ReactElement {
 
   const handleRepair = useCallback(async () => {
     if (!activeFile) return;
-    const output = await saveFile('repaired.pdf');
+    const output = await saveFile(suffixedOutputName(activeFile.name, "repaired"));
     if (!output) return;
     setBusy(true); setBusyOp('repair'); setStatus(tChrome('panel.repair.repairing'));
     try {

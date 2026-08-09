@@ -958,6 +958,35 @@ pub async fn open_releases_page(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Shows a file in the file manager with the file SELECTED.
+///
+/// Not a shell-open, which is the whole point: `shell().open` on a file RUNS
+/// whatever the OS associates with it, so a path arriving from the webview
+/// could execute. `explorer /select,<path>` browses to the file and
+/// highlights it — the argument is a navigation target, never a program. The
+/// path is canonicalized and required to be an existing FILE before it is
+/// passed, so a directory, a missing entry, or a crafted argument string
+/// cannot reach the command line.
+#[tauri::command]
+pub async fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    let canonical = canonical_path(&path);
+    let p = std::path::Path::new(&canonical);
+    if !p.is_file() {
+        return Err(format!("not a file: {canonical}"));
+    }
+    // `/select,<path>` is ONE argument to explorer; passing it as two would
+    // make the comma-prefixed path a separate argument explorer ignores, and
+    // it would then open the user's Documents folder instead.
+    let arg = format!("/select,{canonical}");
+    std::process::Command::new("explorer.exe")
+        .arg(arg)
+        .spawn()
+        // explorer.exe exits non-zero even when it succeeds, so the spawn is
+        // the only thing worth checking; the process is not awaited.
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// Opens one of the SHIPPED third-party license notice files with the OS
 /// default handler. Allowlisted names only — this is a licenses opener, not
 /// a general path opener, and the webview has no shell-open capability.

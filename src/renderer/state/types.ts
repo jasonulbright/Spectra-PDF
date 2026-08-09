@@ -414,8 +414,15 @@ export type PageLayoutMode = 'single' | 'two';
 export type SpreadDirection = 'l2r' | 'r2l';
 
 export const NAV_PANE_MIN_WIDTH = 180;
-export const NAV_PANE_MAX_WIDTH = 520;
+// The Pages panel adds a thumbnail column roughly every 124px, so the cap is
+// what decides how many columns are reachable at all. 520 allowed four and
+// read as "the pane will not widen" against a long document. This is the
+// ABSOLUTE bound; the drag additionally reserves room for the document
+// itself, which is a viewport question and so lives at the drag site.
+export const NAV_PANE_MAX_WIDTH = 1200;
 export const NAV_PANE_DEFAULT_WIDTH = 240;
+/** Document width the nav-pane drag will not eat into. */
+export const NAV_PANE_BOARD_RESERVE = 420;
 
 // The right-hand tool dock. Panels were authored around
 // ~380px of comfortable form width; the clamp keeps a drag from crushing them

@@ -5,6 +5,7 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
+import { suffixedOutputName } from '../lib/output-names';
 
 const VERSIONS = ['1.4', '1.5', '1.6', '1.7', '2.0'];
 
@@ -36,7 +37,7 @@ export function PdfVersionPanel(): React.ReactElement {
 
   const handleSetVersion = useCallback(async () => {
     if (!activeFile) return;
-    const output = await saveFile('reversion.pdf');
+    const output = await saveFile(suffixedOutputName(activeFile.name, "version"));
     if (!output) return;
     setBusy(true); setStatus(tChrome('panel.pdfVersion.setting'));
     try {

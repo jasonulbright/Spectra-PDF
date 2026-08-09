@@ -6,6 +6,14 @@ import { logRenderError, scheduleReblit } from '../canvas/raster';
 import { getCanvasServices, pushEscapeInterceptor } from '../../commands/context';
 import { buildPageContextMenu } from '../../lib/page-context-menu';
 import { computeReorderTarget } from '../../lib/page-reorder';
+import {
+  ROW_H,
+  thumbDropIndex,
+  thumbGrid,
+  thumbSlot,
+  thumbWindow,
+} from '../../lib/thumb-grid';
+import { inlineExtent } from '../../lib/inline-direction';
 import { ContextMenu } from '../ContextMenu';
 import type { NavPanelComponentProps } from './types';
 import type { PageRef } from '../../state/types';
@@ -16,12 +24,13 @@ import { tChrome } from '../../i18n';
 // file's pages through the same pdf.js proxy the board uses (one per file via
 // pdfDocCache); virtualized to a window around the scroll viewport. Click →
 // select (the SHARED ui.selectedPageIds) + centerOn the board; the context
-// menu is the shared page menu. Drag-reorder is not implemented here;
-// the board's reorder remains available.
+// menu is the shared page menu.
+//
+// The layout is a GRID whose column count follows the pane's width
+// (lib/thumb-grid.ts) — widening the pane adds columns rather than one larger
+// thumbnail with empty band beside it.
 
-const ROW_H = 172; // fixed slot: thumbnail area + page-number label
 const THUMB_MAX_H = 136;
-const SIDE_PAD = 16; // horizontal padding inside the scroller
 const OVERSCAN = 3; // rows rendered beyond the viewport each side
 // Rotation-invariant raster budget (longest side, CSS px before dpr). Fixed so
 // a pending rotation never re-renders the raster (only the CSS transform/size
@@ -198,9 +207,9 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
     return v;
   }, [activeFile]);
 
-  const maxThumbW = Math.max(40, viewport.w - SIDE_PAD * 2);
-  const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN);
-  const end = Math.min(items.length, Math.ceil((scrollTop + viewport.h) / ROW_H) + OVERSCAN);
+  const grid = useMemo(() => thumbGrid(viewport.w, items.length), [viewport.w, items.length]);
+  const maxThumbW = Math.max(40, grid.columnWidth - 12);
+  const { start, end } = thumbWindow(scrollTop, viewport.h, grid, items.length, OVERSCAN);
   const windowItems = items.slice(start, end);
 
   const [menu, setMenu] = useState<{ x: number; y: number; docId: string; pageId: string } | null>(null);
@@ -223,11 +232,24 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
   const activeFilePathRef = useRef(activeFile?.path);
   activeFilePathRef.current = activeFile?.path;
 
-  const flatIndexAt = useCallback((clientY: number): number => {
+  // The grid the window handlers read. A ref because those handlers are
+  // installed once per drag and must see the CURRENT column count — the pane
+  // can be resized (or the file switched) while a drag is in flight.
+  const gridRef = useRef(grid);
+  gridRef.current = grid;
+
+  const flatIndexAt = useCallback((clientX: number, clientY: number): number => {
     const el = scrollerRef.current;
     if (!el) return 0;
-    const y = clientY - el.getBoundingClientRect().top + el.scrollTop;
-    return Math.max(0, Math.min(itemsRef.current.length, Math.round(y / ROW_H)));
+    const box = el.getBoundingClientRect();
+    // Distance from the scroller's INLINE-START edge — the grid lays its
+    // columns out from there, so under `dir=rtl` that edge is the right one.
+    return thumbDropIndex(
+      inlineExtent(box, clientX, 'start'),
+      clientY - box.top + el.scrollTop,
+      gridRef.current,
+      itemsRef.current.length,
+    );
   }, []);
 
   const dragMove = useCallback(
@@ -245,14 +267,14 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
             ? itemsRef.current.filter((it) => sel.has(it.page.id)).map((it) => it.page.id)
             : [s.grabbedId];
       }
-      setDropGap(flatIndexAt(e.clientY));
+      setDropGap(flatIndexAt(e.clientX, e.clientY));
     },
     [flatIndexAt],
   );
 
   // Finish a drag. `drop` = pointerup (apply the move); false = cancel/unmount.
   const finishDrag = useCallback(
-    (clientY: number, drop: boolean): void => {
+    (clientX: number, clientY: number, drop: boolean): void => {
       const s = dragRef.current;
       dragRef.current = null;
       detachRef.current();
@@ -278,7 +300,7 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
       const target = computeReorderTarget(
         itemsRef.current.map((it) => ({ docId: it.docId, pageId: it.page.id })),
         s.movingIds,
-        flatIndexAt(clientY),
+        flatIndexAt(clientX, clientY),
       );
       if (!target) return;
       if (s.movingIds.length === 1) {
@@ -304,8 +326,8 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
         movingIds: [item.page.id],
         filePath: activeFilePathRef.current,
       };
-      const onUp = (ev: PointerEvent) => finishDrag(ev.clientY, true);
-      const cancel = () => finishDrag(0, false); // pointercancel / blur / Escape
+      const onUp = (ev: PointerEvent) => finishDrag(ev.clientX, ev.clientY, true);
+      const cancel = () => finishDrag(0, 0, false); // pointercancel / blur / Escape
       window.addEventListener('pointermove', dragMove);
       window.addEventListener('pointerup', onUp);
       window.addEventListener('pointercancel', cancel);
@@ -356,7 +378,9 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
     if (!el) return;
     const index = itemsRef.current.findIndex((it) => it.page.id === currentPageId);
     if (index < 0) return; // not this file's page (or a stale id) — leave the panel be
-    const top = index * ROW_H;
+    // The ROW the page sits in, not its index — in a multi-column grid the
+    // two stop agreeing and scrolling by index overshoots the document.
+    const top = Math.floor(index / gridRef.current.columns) * ROW_H;
     const bottom = top + ROW_H;
     if (top < el.scrollTop) el.scrollTo({ top, behavior: 'auto' });
     else if (bottom > el.scrollTop + el.clientHeight)
@@ -407,9 +431,10 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
       aria-label={tChrome('nav.pages.aria')}
       onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
     >
-      <div style={{ height: items.length * ROW_H, position: 'relative' }}>
+      <div style={{ height: grid.rows * ROW_H, position: 'relative' }}>
         {windowItems.map((item, i) => {
           const index = start + i;
+          const slot = thumbSlot(index, grid);
           const isSelected = selected.has(item.page.id);
           // The page being READ is a different thing from the selection — you
           // can read page 40 with nothing selected, or select a page and scroll
@@ -424,7 +449,7 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
               data-page-id={item.page.id}
               data-current={isCurrent ? 'true' : undefined}
               className={'thumb-row' + (isSelected ? ' selected' : '') + (isCurrent ? ' current' : '')}
-              style={{ position: 'absolute', top: index * ROW_H, height: ROW_H, left: 0, right: 0 }}
+              style={{ position: 'absolute', top: slot.top, height: ROW_H, insetInlineStart: slot.left, width: slot.width }}
               onPointerDown={(e) => onRowPointerDown(item, e)}
               onClick={(e) => onThumbClick(item, e)}
               onContextMenu={(e) => onThumbContextMenu(item, e)}
@@ -443,7 +468,19 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
           );
         })}
         {dropGap !== null && (
-          <div className="thumb-drop-indicator" data-testid="thumb-drop-indicator" style={{ top: dropGap * ROW_H }} />
+          // A VERTICAL rule at the gap's own slot: an insertion point in a
+          // grid is between two columns, and a full-width horizontal rule
+          // would claim the gap runs across the whole row.
+          <div
+            className="thumb-drop-indicator"
+            data-testid="thumb-drop-indicator"
+            style={(() => {
+              const s = thumbSlot(dropGap, grid);
+              // The gap AFTER the last column of a row folds onto the next
+              // row's leading edge, which is where `thumbSlot` already puts it.
+              return { top: s.top, height: ROW_H, insetInlineStart: s.left };
+            })()}
+          />
         )}
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}

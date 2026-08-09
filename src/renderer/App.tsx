@@ -2349,6 +2349,11 @@ function AppContent(): React.ReactElement {
               onOpen={() => invokeCommand('file.open')}
               onOpenRecent={(path) => void openByPaths([path])}
               onClearRecent={() => invokeCommand('file.clearRecent')}
+              onRevealRecent={(path) => {
+                void file.reveal(path).catch(() =>
+                  showNotice(tChrome('chrome.home.recentFiles'), tChrome('chrome.recent.revealFailed')),
+                );
+              }}
               onOpenTool={(id) => invokeCommand(`tools.open.${id}`)}
             />
           ) : (
