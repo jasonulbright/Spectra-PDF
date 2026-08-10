@@ -1,0 +1,17 @@
+[
+  "scan.busy",
+  "scan.cancelledAtDevice",
+  "scan.coverOpen",
+  "scan.deviceBusy",
+  "scan.deviceGone",
+  "scan.deviceLocked",
+  "scan.deviceOffline",
+  "scan.driverError",
+  "scan.failed",
+  "scan.feederEmpty",
+  "scan.needsAttention",
+  "scan.notResponding",
+  "scan.paperJam",
+  "scan.paperProblem",
+  "scan.settingRejected"
+]
