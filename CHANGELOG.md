@@ -25,6 +25,21 @@
 - **Enhance Scans** is available as a guided-action step, with all twelve of its settings.
 - An action file naming that step imports instead of being refused as an unknown operation.
 
+<!-- SCAN BLOCK — remove this whole section if scanning does not make the cut -->
+### Scanning
+- **File ▸ Create PDF from Scanner…** scans pages from a connected scanner into a new document.
+- **Document ▸ Insert Pages ▸ From Scanner…** scans straight into the document you have open, as ordinary undoable page work.
+- The **Scan & OCR** tool starts at the scanner: it opens the scan dialog when nothing is open, and offers scanning from its own pane when something is.
+- Every control comes from what the scanner reports it can do: resolutions are the ones it offers, colour modes are the ones it lists, and a control it has no setting for is simply not shown.
+- Feeder, flatbed and both-sides scanning are offered only where the device has them, with a page count or "every page in the feeder".
+- Scanning shows progress per page and can be stopped part way; the pages that finished are kept and offered.
+- Scanned pages can be reviewed and removed one at a time before the document is built.
+- Straightening, clean-up and searchable text can be applied to the scan as it is saved.
+- A setting the scanner did not take is reported rather than silently ignored.
+- Network scanners reachable from this computer appear alongside connected ones, and a device the list misses can be picked from the system chooser.
+- The command line gains `scan`, alongside `scanners`.
+<!-- END SCAN BLOCK -->
+
 ## 1.0.28
 
 *Released 2026-08-09*
