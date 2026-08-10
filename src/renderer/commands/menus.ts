@@ -119,6 +119,7 @@ export const MENUS: MenuDef[] = [
       recentSubmenu,
       sep,
       cmd('file.createPdf', 'menuitem-file-create-pdf'),
+      cmd('file.createFromScanner', 'menuitem-file-create-from-scanner'),
       sep,
       cmd('file.save', 'menuitem-file-save'),
       cmd('file.saveAs', 'menuitem-file-save-as'),
@@ -279,6 +280,7 @@ export const MENUS: MenuDef[] = [
         label: 'Insert Pages',
         items: [
           cmd('document.insertFromFile', 'menuitem-document-insert-file'),
+          cmd('document.insertFromScanner', 'menuitem-document-insert-scanner'),
           cmd('document.insertBlankPage', 'menuitem-document-insert-blank'),
         ],
       },

@@ -4,6 +4,7 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
 import { NoFileOpen } from '../components/NoFileOpen';
+import { invokeCommand } from '../commands/context';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
@@ -185,6 +186,22 @@ export function ScanEnhancePanel(): React.ReactElement {
         <span className="text-neutral-200">{activeFile.name}</span>
       </div>
       <p className="text-xs text-neutral-500">{tChrome('panel.scanEnhance.blurb')}</p>
+
+      {/* Acquisition, on the Scan & OCR tool's own landing pane — the tool's
+          name is only true where scanning starts here. The pages land in THIS
+          document at the insertion anchor; with nothing to append to the
+          dialog opens for a new document instead. */}
+      <div className="flex flex-col gap-1 border-b border-neutral-800 pb-3">
+        <p className="text-xs text-neutral-500">{tChrome('dialog.scan.panelBlurb')}</p>
+        <button
+          type="button"
+          data-testid="scanenhance-acquire"
+          className="self-start px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
+          onClick={() => invokeCommand('document.insertFromScanner')}
+        >
+          {tChrome('dialog.scan.panelStart')}
+        </button>
+      </div>
 
       <label className="flex items-center gap-2 text-xs text-neutral-500">
         {tChrome('panel.scanEnhance.scopeLabel')}

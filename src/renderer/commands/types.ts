@@ -103,6 +103,11 @@ export interface AppCommandHandlers {
   combineFiles(): Promise<void>;
   /** Create PDF from PostScript: open the distill dialog. */
   openCreatePdf(): void;
+  /** Open the scan dialog. `append` lands the pages in the open document at
+   * the insertion anchor; with nothing to append to it opens for a new
+   * document instead, because the destination is the part that has no answer,
+   * not the scanning. */
+  openScan(mode: 'new' | 'append'): void;
   /** Open the Settings modal at its third-party-licenses section (Help ▸
    * Third-party Licenses). Same surface as preferences. */
   openLicenses(): void;

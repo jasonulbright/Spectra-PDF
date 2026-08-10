@@ -125,6 +125,27 @@ export const REFUSAL_STRINGS = {
   'refusal.symbolSet.idInUse': 'The id "{{id}}" is already used by the set {{set}}.',
   'refusal.symbolSet.parts':
     'Symbol "{{id}}": every part must be a poly or circle drawn inside the unit square.',
+
+  // ── Scanner ──────────────────────────────────────────────────────────
+  // The device layer refuses with a stable KEY beside its English sentence,
+  // so these resolve from the catalog and nothing matches a message. The key
+  // set is pinned across the two languages by
+  // `tests/fixtures/scan-refusal-keys.json`, which both suites read.
+  'refusal.scan.busy': 'A scan is already running on this scanner.',
+  'refusal.scan.cancelledAtDevice': 'The scan was cancelled at the scanner.',
+  'refusal.scan.coverOpen': 'Close the scanner cover.',
+  'refusal.scan.deviceBusy': 'The scanner is busy. Try again in a moment.',
+  'refusal.scan.deviceGone': 'The scanner is no longer connected.',
+  'refusal.scan.deviceLocked': 'Another program is using the scanner.',
+  'refusal.scan.deviceOffline': 'The scanner is turned off or cannot be reached.',
+  'refusal.scan.driverError': 'The scanner driver reported a problem.',
+  'refusal.scan.failed': 'The scanner reported an error.',
+  'refusal.scan.feederEmpty': 'Put paper in the feeder.',
+  'refusal.scan.needsAttention': 'The scanner needs attention at the device.',
+  'refusal.scan.notResponding': 'The scanner stopped responding.',
+  'refusal.scan.paperJam': 'Clear the paper jam, then scan again.',
+  'refusal.scan.paperProblem': 'Check the paper in the feeder.',
+  'refusal.scan.settingRejected': 'The scanner rejected one of the requested settings.',
 } as const;
 
 export type RefusalKey = keyof typeof REFUSAL_STRINGS;
