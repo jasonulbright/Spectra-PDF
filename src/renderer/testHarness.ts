@@ -411,7 +411,7 @@ export interface ScanHandlers {
   setPostOptions: (opts: { enhance?: boolean; ocr?: boolean }) => void;
   removePage: (id: string) => void;
   saveAs: (output: string) => Promise<string | null>;
-  append: (output: string) => Promise<string | null>;
+  append: () => Promise<string | null>;
   snapshot: () => {
     phase: string;
     deviceName: string | null;
@@ -1384,7 +1384,7 @@ export interface TestHarness {
   scanSaveAs: (output: string) => Promise<string | null>;
   /** Assemble and append into the open document through the REAL byte-only
    * import machinery. */
-  scanAppend: (output: string) => Promise<string | null>;
+  scanAppend: () => Promise<string | null>;
   scanSnapshot: () => ReturnType<ScanHandlers['snapshot']> | null;
   /** The device-layer command contract, reachable with no dialog open: an
    * empty enumeration is a RESULT, and an unknown id refuses by name. */
@@ -2508,14 +2508,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw err;
       }
     },
-    scanAppend: async (output) => {
+    scanAppend: async () => {
       if (!scan) {
         const msg = 'scanAppend: scan dialog not mounted';
         lastError = msg;
         throw new Error(msg);
       }
       try {
-        return await scan.append(output);
+        return await scan.append();
       } catch (err) {
         captureError('scanAppend', err);
         throw err;

@@ -73,6 +73,7 @@ export function ScanDialog({
   onClose,
   onCreated,
   onAppend,
+  appendDir,
 }: {
   /** `append` lands the pages in the open document at the insertion anchor;
    * `new` writes a file and opens it through the ordinary funnel. */
@@ -82,6 +83,10 @@ export function ScanDialog({
   /** Absent when nothing can be appended to, which is what makes the append
    * button's absence a fact rather than a disabled control. */
   onAppend: ((path: string) => Promise<void>) | null;
+  /** The destination's working-copy directory — where an append assembles.
+   * Inside the filesystem capability's scope by construction, which is what
+   * lets the import read the bytes back. */
+  appendDir: string | null;
 }): React.JSX.Element {
   useTranslation();
   const { callRaw } = useEngine();
@@ -396,21 +401,22 @@ export function ScanDialog({
     onClose();
   }, [pages, assemble, discardScratches, onCreated, onClose]);
 
-  const appendToDocument = useCallback(async () => {
-    if (pages.length === 0 || !onAppend) return;
-    // Assembled into the scan's own scratch folder, which is swept with the
-    // rest of the run: the import machinery reads the bytes and the file has
-    // no life after that.
-    const scratch = pages[pages.length - 1].scratch;
-    const sep = scratch.includes('\\') ? '\\' : '/';
-    const built = await assemble(`${scratch}${sep}scan.pdf`);
-    if (!built) return;
+  const appendToDocument = useCallback(async (): Promise<string | null> => {
+    if (pages.length === 0 || !onAppend || !appendDir) return null;
+    // Assembled BESIDE the destination's working copy: that directory exists
+    // by construction and is inside the filesystem capability's own scope, so
+    // the import can read the bytes back with no new grant (the
+    // insert-blank-page precedent). The file has no life after the import.
+    const sep = appendDir.includes('\\') ? '\\' : '/';
+    const built = await assemble(`${appendDir}${sep}scan-${crypto.randomUUID()}.pdf`);
+    if (!built) return null;
     const staged = pages;
     setPages([]);
     await onAppend(built);
     await discardScratches(staged);
     onClose();
-  }, [pages, onAppend, assemble, discardScratches, onClose]);
+    return built;
+  }, [pages, onAppend, appendDir, assemble, discardScratches, onClose]);
 
   const chooseDifferent = useCallback(async () => {
     try {
@@ -469,8 +475,10 @@ export function ScanDialog({
     if (!TEST_HARNESS_ENABLED) return;
     registerScan({
       injectDevice: (caps, staged) => {
+        // The device id is deliberately NOT set: assigning it would fire the
+        // real capability fetch, which on a scannerless machine refuses and
+        // clears the report that was just injected.
         harnessRef.current.setCapabilities(caps as ScannerCapabilities);
-        harnessRef.current.setDeviceId((caps as ScannerCapabilities).device_id);
         harnessRef.current.setPhase('setup');
         if (staged) {
           harnessRef.current.setPages(
@@ -497,16 +505,9 @@ export function ScanDialog({
         onClose();
         return built;
       },
-      append: async (output) => {
-        const built = await harnessRef.current.assemble(output);
-        if (!built || !onAppend) return null;
-        const staged = stateRef.current.pages;
-        harnessRef.current.setPages([]);
-        await onAppend(built);
-        await discardScratches(staged);
-        onClose();
-        return built;
-      },
+      // The REAL append flow, output path included: it assembles inside the
+      // filesystem capability's scope, which a spec-chosen path would not.
+      append: () => harnessRef.current.appendToDocument(),
       snapshot: () => {
         const s = stateRef.current;
         return {
