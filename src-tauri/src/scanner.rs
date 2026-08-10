@@ -525,16 +525,120 @@ pub struct ScanSourceReport {
     pub document_handling_select: ControlModel,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceOptionId {
+    Flatbed,
+    Feeder,
+    Duplex,
+}
+
+/// One row of the source picker: which item a run transfers from and what it
+/// writes to select it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ScanSourceOption {
+    pub id: SourceOptionId,
+    pub item_name: String,
+    /// The `WIA_IPS_DOCUMENT_HANDLING_SELECT` value this row writes, absent
+    /// where the device reports no such property to write.
+    pub document_handling: Option<i32>,
+    /// Can this row produce more than one page in one run? Only a feeder can,
+    /// which is what makes a page count meaningful.
+    pub feeds: bool,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ScannerCapabilities {
     pub device_id: String,
     pub device_name: String,
     pub document_handling: DocumentHandling,
+    /// The sources this device offers, in picker order.
+    ///
+    /// Derived HERE and reported, never re-derived by a caller: the dialog
+    /// and the CLI arm would otherwise be two answers to "which sources does
+    /// this device have", and the one that is wrong scans the wrong side of a
+    /// sheet or offers duplex on a flatbed.
+    pub source_options: Vec<ScanSourceOption>,
     /// `WIA_DPS_MAX_SCAN_TIME` in milliseconds — the device's own answer to
     /// how long its slowest page takes, and the only honest basis for a
     /// watchdog.
     pub max_scan_time_ms: Option<i32>,
     pub sources: Vec<ScanSourceReport>,
+}
+
+/// The sources a device offers, in picker order.
+///
+/// A row appears only where the device reported BOTH the capability and an
+/// item to transfer from: a duplex row on a flatbed and a feeder row on a
+/// device with no feeder are exactly what deriving from the report prevents.
+pub fn source_options(
+    handling: &DocumentHandling,
+    sources: &[ScanSourceReport],
+) -> Vec<ScanSourceOption> {
+    let item = |wanted: &[SourceCategory]| -> Option<&ScanSourceReport> {
+        wanted
+            .iter()
+            .find_map(|c| sources.iter().find(|s| s.category == *c))
+    };
+    // A device with one scan source and no handling word still scans; the
+    // item it reported is the source, and nothing is written to select it.
+    let only = if sources.len() == 1 {
+        sources.first()
+    } else {
+        None
+    };
+    let writes = |value: i32| -> Option<i32> {
+        sources
+            .iter()
+            .any(|s| !matches!(s.document_handling_select, ControlModel::Absent))
+            .then_some(value)
+    };
+    let flatbed = item(&[SourceCategory::Flatbed]).or(only);
+    let feeder = item(&[SourceCategory::Feeder, SourceCategory::FeederFront]).or(only);
+
+    let mut options: Vec<ScanSourceOption> = Vec::new();
+    if let Some(source) = flatbed.filter(|_| handling.flatbed) {
+        options.push(ScanSourceOption {
+            id: SourceOptionId::Flatbed,
+            item_name: source.item_name.clone(),
+            document_handling: writes(handling.flatbed_select),
+            feeds: false,
+        });
+    }
+    if let Some(source) = feeder.filter(|_| handling.feeder) {
+        options.push(ScanSourceOption {
+            id: SourceOptionId::Feeder,
+            item_name: source.item_name.clone(),
+            document_handling: writes(handling.feeder_select),
+            feeds: true,
+        });
+    }
+    if let Some(source) = feeder.filter(|_| handling.duplex_mode != DuplexMode::None) {
+        options.push(ScanSourceOption {
+            id: SourceOptionId::Duplex,
+            item_name: source.item_name.clone(),
+            document_handling: writes(handling.duplex_select),
+            feeds: true,
+        });
+    }
+    // A device that reported neither capability still has items; offering the
+    // first of them beats an empty picker on a working scanner.
+    if options.is_empty() {
+        if let Some(first) = sources.first() {
+            let feeds = !matches!(first.category, SourceCategory::Flatbed);
+            options.push(ScanSourceOption {
+                id: if feeds {
+                    SourceOptionId::Feeder
+                } else {
+                    SourceOptionId::Flatbed
+                },
+                item_name: first.item_name.clone(),
+                document_handling: None,
+                feeds,
+            });
+        }
+    }
+    options
 }
 
 /// The properties the report reads per scan source, in report order.
@@ -1199,10 +1303,12 @@ unsafe fn capability_report(
         }
 
         let categories: Vec<SourceCategory> = sources.iter().map(|s| s.category).collect();
+        let handling = document_handling(capabilities, &categories);
         Ok(ScannerCapabilities {
             device_id: device_id.to_string(),
             device_name,
-            document_handling: document_handling(capabilities, &categories),
+            source_options: source_options(&handling, &sources),
+            document_handling: handling,
             max_scan_time_ms,
             sources,
         })
@@ -2586,6 +2692,120 @@ mod tests {
             SourceCategory::FeederBack
         );
         assert_eq!(category_of(&GUID::zeroed()), SourceCategory::Other);
+    }
+
+    fn reported(category: SourceCategory, selectable: bool) -> ScanSourceReport {
+        ScanSourceReport {
+            item_name: format!("Root\\{category:?}"),
+            category,
+            properties: Vec::new(),
+            resolution: ControlModel::Absent,
+            optical_resolution: None,
+            color_modes: Vec::new(),
+            brightness: ControlModel::Absent,
+            contrast: ControlModel::Absent,
+            pages: ControlModel::Absent,
+            document_handling_select: if selectable {
+                ControlModel::Flags {
+                    valid: 7,
+                    current: Some(2),
+                }
+            } else {
+                ControlModel::Absent
+            },
+        }
+    }
+
+    #[test]
+    fn a_flatbed_only_device_offers_no_feeder_and_no_duplex() {
+        let sources = vec![reported(SourceCategory::Flatbed, true)];
+        let handling = document_handling(FLATBED as i32, &[SourceCategory::Flatbed]);
+        let options = source_options(&handling, &sources);
+        assert_eq!(
+            options.iter().map(|o| o.id).collect::<Vec<_>>(),
+            vec![SourceOptionId::Flatbed]
+        );
+        assert!(!options[0].feeds);
+    }
+
+    #[test]
+    fn a_feeder_with_duplex_offers_three_rows_and_writes_the_reported_values() {
+        let sources = vec![
+            reported(SourceCategory::Flatbed, true),
+            reported(SourceCategory::Feeder, true),
+        ];
+        let handling = document_handling(
+            (FLATBED | FEEDER | DUPLEX) as i32,
+            &[SourceCategory::Flatbed, SourceCategory::Feeder],
+        );
+        let options = source_options(&handling, &sources);
+        assert_eq!(
+            options.iter().map(|o| o.id).collect::<Vec<_>>(),
+            vec![
+                SourceOptionId::Flatbed,
+                SourceOptionId::Feeder,
+                SourceOptionId::Duplex
+            ]
+        );
+        assert_eq!(
+            options
+                .iter()
+                .map(|o| o.document_handling)
+                .collect::<Vec<_>>(),
+            vec![
+                Some(FLATBED as i32),
+                Some(FEEDER as i32),
+                Some((FEEDER | DUPLEX) as i32)
+            ]
+        );
+        // Only a feeder can produce more than one page in one run.
+        assert_eq!(
+            options.iter().map(|o| o.feeds).collect::<Vec<_>>(),
+            vec![false, true, true]
+        );
+        // The duplex row transfers from the FEEDER item; the duplex bit names
+        // no source to take the sheet from.
+        assert_eq!(options[2].item_name, options[1].item_name);
+    }
+
+    #[test]
+    fn front_and_back_child_items_still_transfer_from_the_feeder() {
+        let sources = vec![
+            reported(SourceCategory::Feeder, true),
+            reported(SourceCategory::FeederFront, true),
+            reported(SourceCategory::FeederBack, true),
+        ];
+        let handling = document_handling(
+            (FEEDER | DUPLEX | ADVANCED_DUPLEX) as i32,
+            &[
+                SourceCategory::Feeder,
+                SourceCategory::FeederFront,
+                SourceCategory::FeederBack,
+            ],
+        );
+        let options = source_options(&handling, &sources);
+        let duplex = options
+            .iter()
+            .find(|o| o.id == SourceOptionId::Duplex)
+            .expect("a duplex row");
+        assert_eq!(duplex.item_name, "Root\\Feeder");
+    }
+
+    #[test]
+    fn a_device_that_reports_no_handling_still_offers_the_item_it_has() {
+        let sources = vec![reported(SourceCategory::Flatbed, false)];
+        let handling = document_handling(0, &[SourceCategory::Flatbed]);
+        let options = source_options(&handling, &sources);
+        assert_eq!(options.len(), 1);
+        // Nothing is written to select a source the device never said it had
+        // a property for.
+        assert_eq!(options[0].document_handling, None);
+    }
+
+    #[test]
+    fn a_device_with_no_scan_source_offers_nothing() {
+        let handling = document_handling(0, &[]);
+        assert!(source_options(&handling, &[]).is_empty());
     }
 
     #[test]

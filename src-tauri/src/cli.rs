@@ -242,6 +242,8 @@ pub enum CliCommand {
     Printers(PrintersArgs),
     /// List connected scanners (JSON: ids + names)
     Scanners(ScannersArgs),
+    /// Acquire pages from a scanner straight into a PDF
+    Scan(ScanArgs),
     /// Apply an edited copy's annotate/fill/add-page changes onto a SIGNED
     /// original as one incremental append (signatures keep verifying)
     IncrementalSave(IncrementalSaveArgs),
@@ -270,6 +272,36 @@ pub struct ScannersArgs {
     /// Also report one scanner's sources and settable properties as JSON
     #[arg(long, value_name = "DEVICE_ID")]
     pub capabilities: Option<String>,
+}
+
+#[derive(Args)]
+pub struct ScanArgs {
+    /// Device id from `spectrapdf scanners`. With exactly one scanner
+    /// attached it may be omitted; with none or several the run refuses by
+    /// name rather than guessing which machine has paper in it.
+    #[arg(long, value_name = "DEVICE_ID")]
+    pub device: Option<String>,
+    /// Resolution in dpi. Omitted leaves the device's own current setting.
+    #[arg(long)]
+    pub dpi: Option<i32>,
+    /// bw | gray | color | auto — offered only where the device lists it
+    #[arg(long)]
+    pub color: Option<String>,
+    /// flatbed | feeder | duplex
+    #[arg(long)]
+    pub source: Option<String>,
+    /// Sheets to take from the feeder; 0 means until it empties
+    #[arg(long)]
+    pub pages: Option<i32>,
+    /// auto | letter | legal | tabloid | a3 | a4 | a5
+    #[arg(long, default_value = "auto")]
+    pub paper: String,
+    /// Output PDF
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Resolution assumed for a page whose image stores none (dpi)
+    #[arg(long, default_value_t = 300.0)]
+    pub image_dpi: f64,
 }
 
 #[derive(Args)]
@@ -2454,6 +2486,118 @@ impl CliEngine {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Resolve a path to absolute (relative to cwd).
+/// The device a headless run scans from.
+///
+/// There is no device-selection dialog headlessly: with exactly one scanner
+/// attached it is the one, and with none or several the run refuses by name.
+/// Guessing which of two machines has paper in its feeder is not a decision
+/// software gets to make.
+fn resolve_scan_device(requested: Option<&str>) -> Result<String, String> {
+    if let Some(id) = requested {
+        return Ok(id.to_string());
+    }
+    let list = crate::scanner::enumerate(None).map_err(|e| e.to_string())?;
+    match list.scanners.len() {
+        0 => Err("No scanners found.".to_string()),
+        1 => Ok(list.scanners[0].id.clone()),
+        _ => {
+            let names: Vec<String> = list
+                .scanners
+                .iter()
+                .map(|d| format!("{} ({})", d.name, d.id))
+                .collect();
+            Err(format!(
+                "Several scanners are attached; name one with --device: {}",
+                names.join(", ")
+            ))
+        }
+    }
+}
+
+/// Turn the command line into the settings the device is written with.
+///
+/// The source rows come from the capability report, the same list the dialog
+/// picks from — a second derivation here would be a run whose CLI and whose
+/// dialog disagree about which side of a sheet "duplex" means.
+fn scan_settings(
+    capabilities: &crate::scanner::ScannerCapabilities,
+    args: &ScanArgs,
+) -> Result<crate::scanner::ScanSettings, String> {
+    use crate::scanner::{ColorMode, PaperSize, SourceOptionId};
+    let mut settings = crate::scanner::ScanSettings {
+        dpi: args.dpi,
+        ..Default::default()
+    };
+    let wanted = match args.source.as_deref() {
+        None => None,
+        Some("flatbed") => Some(SourceOptionId::Flatbed),
+        Some("feeder") => Some(SourceOptionId::Feeder),
+        Some("duplex") => Some(SourceOptionId::Duplex),
+        Some(other) => {
+            return Err(format!(
+                "--source must be flatbed, feeder or duplex, not '{other}'"
+            ))
+        }
+    };
+    let option = match wanted {
+        Some(id) => Some(
+            capabilities
+                .source_options
+                .iter()
+                .find(|o| o.id == id)
+                .ok_or_else(|| {
+                    let offered: Vec<String> = capabilities
+                        .source_options
+                        .iter()
+                        .map(|o| format!("{:?}", o.id).to_lowercase())
+                        .collect();
+                    format!(
+                        "This scanner does not offer that source; it offers: {}",
+                        offered.join(", ")
+                    )
+                })?,
+        ),
+        None => capabilities.source_options.first(),
+    };
+    if let Some(option) = option {
+        settings.item_name = Some(option.item_name.clone());
+        settings.document_handling = option.document_handling;
+        // A page count means nothing on a source that cannot feed sheets.
+        if option.feeds {
+            settings.pages = args.pages;
+        }
+    }
+    if let Some(color) = args.color.as_deref() {
+        let mode = match color {
+            "bw" => ColorMode::BlackAndWhite,
+            "gray" | "grey" => ColorMode::Grayscale,
+            "color" | "colour" => ColorMode::Color,
+            "auto" => ColorMode::Auto,
+            other => {
+                return Err(format!(
+                    "--color must be bw, gray, color or auto, not '{other}'"
+                ))
+            }
+        };
+        // Offered only where the device lists it: writing a mode the driver
+        // never reported is how a run comes back in the wrong colour.
+        let offered = capabilities
+            .sources
+            .iter()
+            .any(|s| s.color_modes.contains(&mode));
+        if !offered {
+            return Err(format!("This scanner does not offer the '{color}' colour mode."));
+        }
+        settings.color_mode = Some(mode);
+    }
+    let paper = PaperSize::parse(&args.paper)
+        .ok_or_else(|| format!("--paper does not name a paper size: '{}'", args.paper))?;
+    if paper != PaperSize::Auto {
+        settings.paper = Some(paper);
+    }
+    Ok(settings)
+}
+
 fn abs(p: &Path) -> PathBuf {
     if p.is_absolute() {
         p.to_path_buf()
@@ -2895,6 +3039,52 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "soffice_path": resolve_soffice(),
                 }),
             )
+        }
+
+        CliCommand::Scan(args) => {
+            let sessions = crate::scanner::ScannerSessions::new();
+            let device = resolve_scan_device(args.device.as_deref())?;
+            let capabilities = sessions.capabilities(&device).map_err(|e| e.to_string())?;
+            let settings = scan_settings(&capabilities, args)?;
+            // A line per page on stderr, so stdout stays the JSON result.
+            let sink: crate::scanner::EventSink = Box::new(|event| {
+                if let crate::scanner::ScanEvent::PageFinished { index, .. } = event {
+                    eprintln!("page {}", index + 1);
+                }
+            });
+            let scratch = crate::scanner::new_scan_scratch().map_err(|e| e.to_string())?;
+            let result = sessions
+                .acquire(&device, settings, scratch.clone(), sink)
+                .map_err(|e| {
+                    let _ = crate::scanner::discard_scan_scratch(&scratch);
+                    e.to_string()
+                })?;
+            if result.pages.is_empty() {
+                let _ = crate::scanner::discard_scan_scratch(&scratch);
+                return Err("The scan produced no pages.".to_string());
+            }
+            let sources: Vec<Value> = result
+                .pages
+                .iter()
+                .map(|path| json!({ "path": path }))
+                .collect();
+            let built = engine.call(
+                "create_pdf",
+                json!({
+                    "sources": sources,
+                    "output": abs(&args.output).to_string_lossy(),
+                    "page_size": "auto",
+                    "orientation": "auto",
+                    "margin_pt": 0,
+                    // The resolution the device REPORTED BACK, so a driver
+                    // that clamped the request still sizes its pages right.
+                    "image_dpi_default": if result.dpi > 0 { result.dpi as f64 } else { args.image_dpi },
+                    "gs_path": resolve_gs().to_string_lossy(),
+                    "soffice_path": resolve_soffice(),
+                }),
+            );
+            let _ = crate::scanner::discard_scan_scratch(&scratch);
+            built
         }
 
         CliCommand::CreatePdfFolders(args) => {
@@ -4780,6 +4970,145 @@ mod tests {
 
     fn parse(args: &[&str]) -> Cli {
         Cli::try_parse_from(args).expect("should parse")
+    }
+
+    fn scan_capabilities() -> crate::scanner::ScannerCapabilities {
+        use crate::scanner::*;
+        let feeder = ScanSourceReport {
+            item_name: "Root\\feeder".into(),
+            category: SourceCategory::Feeder,
+            properties: Vec::new(),
+            resolution: ControlModel::Absent,
+            optical_resolution: None,
+            color_modes: vec![ColorMode::Grayscale, ColorMode::Color],
+            brightness: ControlModel::Absent,
+            contrast: ControlModel::Absent,
+            pages: ControlModel::Span {
+                min: 0,
+                max: 99,
+                step: 1,
+                current: Some(0),
+            },
+            document_handling_select: ControlModel::Flags {
+                valid: 7,
+                current: Some(1),
+            },
+        };
+        ScannerCapabilities {
+            device_id: "dev".into(),
+            device_name: "A Scanner".into(),
+            document_handling: DocumentHandling {
+                capabilities: 5,
+                flatbed: false,
+                feeder: true,
+                duplex: true,
+                advanced_duplex: false,
+                duplex_mode: DuplexMode::DuplexBit,
+                flatbed_select: 2,
+                feeder_select: 1,
+                duplex_select: 5,
+            },
+            source_options: vec![
+                ScanSourceOption {
+                    id: SourceOptionId::Feeder,
+                    item_name: "Root\\feeder".into(),
+                    document_handling: Some(1),
+                    feeds: true,
+                },
+                ScanSourceOption {
+                    id: SourceOptionId::Duplex,
+                    item_name: "Root\\feeder".into(),
+                    document_handling: Some(5),
+                    feeds: true,
+                },
+            ],
+            max_scan_time_ms: Some(60_000),
+            sources: vec![feeder],
+        }
+    }
+
+    fn scan_args(extra: &[&str]) -> ScanArgs {
+        let mut argv: Vec<&str> = vec!["spectrapdf", "scan", "-o", "out.pdf"];
+        argv.extend_from_slice(extra);
+        match parse(&argv).command {
+            Some(CliCommand::Scan(args)) => args,
+            _ => panic!("scan should parse"),
+        }
+    }
+
+    #[test]
+    fn scan_takes_the_documented_flags() {
+        let args = scan_args(&[
+            "--device", "dev", "--dpi", "600", "--color", "gray", "--source", "duplex", "--pages",
+            "0", "--paper", "a4",
+        ]);
+        assert_eq!(args.device.as_deref(), Some("dev"));
+        assert_eq!(args.dpi, Some(600));
+        assert_eq!(args.color.as_deref(), Some("gray"));
+        assert_eq!(args.source.as_deref(), Some("duplex"));
+        assert_eq!(args.pages, Some(0));
+        assert_eq!(args.paper, "a4");
+        // Omitted settings stay absent: they leave the device's own value
+        // alone, which is not the same as writing a default over it.
+        let bare = scan_args(&[]);
+        assert_eq!(bare.dpi, None);
+        assert_eq!(bare.color, None);
+        assert_eq!(bare.paper, "auto");
+    }
+
+    #[test]
+    fn scan_settings_come_from_the_reported_source_rows() {
+        let caps = scan_capabilities();
+        let settings = scan_settings(&caps, &scan_args(&["--source", "duplex", "--pages", "3"]))
+            .expect("duplex is offered");
+        assert_eq!(settings.item_name.as_deref(), Some("Root\\feeder"));
+        assert_eq!(settings.document_handling, Some(5));
+        assert_eq!(settings.pages, Some(3));
+        // No --source takes the first row the device reported, never a guess.
+        let settings = scan_settings(&caps, &scan_args(&[])).expect("a first row exists");
+        assert_eq!(settings.document_handling, Some(1));
+    }
+
+    #[test]
+    fn scan_refuses_a_source_or_a_colour_the_device_does_not_offer() {
+        let caps = scan_capabilities();
+        // This device reports no flatbed row, so asking for one is refused
+        // rather than silently scanned from the feeder.
+        let refusal = scan_settings(&caps, &scan_args(&["--source", "flatbed"]))
+            .expect_err("a flatbed row is not offered");
+        assert!(refusal.contains("does not offer that source"), "{refusal}");
+        // A colour mode the device never listed would come back in the wrong
+        // colour, so it is refused too.
+        let refusal = scan_settings(&caps, &scan_args(&["--color", "bw"]))
+            .expect_err("black and white is not listed");
+        assert!(refusal.contains("colour mode"), "{refusal}");
+        // And the vocabularies themselves are checked by name.
+        assert!(scan_settings(&caps, &scan_args(&["--source", "film"])).is_err());
+        assert!(scan_settings(&caps, &scan_args(&["--color", "sepia"])).is_err());
+        assert!(scan_settings(&caps, &scan_args(&["--paper", "foolscap"])).is_err());
+    }
+
+    #[test]
+    fn a_page_count_is_dropped_on_a_source_that_cannot_feed_sheets() {
+        use crate::scanner::{ScanSourceOption, SourceOptionId};
+        let mut caps = scan_capabilities();
+        caps.source_options = vec![ScanSourceOption {
+            id: SourceOptionId::Flatbed,
+            item_name: "Root\\flatbed".into(),
+            document_handling: Some(2),
+            feeds: false,
+        }];
+        let settings = scan_settings(&caps, &scan_args(&["--pages", "5"])).expect("flatbed row");
+        assert_eq!(settings.pages, None);
+    }
+
+    #[test]
+    fn a_headless_run_refuses_to_pick_between_scanners() {
+        // A named device is taken as given; the enumeration only decides when
+        // none was named, and this box has no scanner.
+        assert_eq!(resolve_scan_device(Some("dev")).as_deref(), Ok("dev"));
+        let refusal = resolve_scan_device(None).expect_err("no scanner is attached here");
+        assert!(refusal.contains("No scanners found"), "{refusal}");
     }
 
     #[test]
