@@ -2,7 +2,7 @@
 
 ## 1.0.29
 
-*Unreleased*
+*Released 2026-08-10*
 
 ### One PDF per folder
 - **Tools ▸ One PDF per Folder** turns a tree of scan folders into one PDF per folder.
@@ -25,7 +25,6 @@
 - **Enhance Scans** is available as a guided-action step, with all twelve of its settings.
 - An action file naming that step imports instead of being refused as an unknown operation.
 
-<!-- SCAN BLOCK — remove this whole section if scanning does not make the cut -->
 ### Scanning
 - **File ▸ Create PDF from Scanner…** scans pages from a connected scanner into a new document.
 - **Document ▸ Insert Pages ▸ From Scanner…** scans straight into the document you have open, as ordinary undoable page work.
@@ -38,7 +37,6 @@
 - A setting the scanner did not take is reported rather than silently ignored.
 - Network scanners reachable from this computer appear alongside connected ones, and a device the list misses can be picked from the system chooser.
 - The command line gains `scan`, alongside `scanners`.
-<!-- END SCAN BLOCK -->
 
 ## 1.0.28
 
