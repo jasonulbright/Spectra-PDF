@@ -240,6 +240,8 @@ pub enum CliCommand {
     Print(PrintArgs),
     /// List installed Windows printers (JSON: names + default)
     Printers(PrintersArgs),
+    /// List connected scanners (JSON: ids + names)
+    Scanners(ScannersArgs),
     /// Apply an edited copy's annotate/fill/add-page changes onto a SIGNED
     /// original as one incremental append (signatures keep verifying)
     IncrementalSave(IncrementalSaveArgs),
@@ -260,6 +262,13 @@ pub struct IncrementalSaveArgs {
 pub struct PrintersArgs {
     /// Also report one printer's capabilities (papers/duplex/color) as JSON
     #[arg(long, value_name = "PRINTER")]
+    pub capabilities: Option<String>,
+}
+
+#[derive(Args)]
+pub struct ScannersArgs {
+    /// Also report one scanner's sources and settable properties as JSON
+    #[arg(long, value_name = "DEVICE_ID")]
     pub capabilities: Option<String>,
 }
 
@@ -2589,6 +2598,28 @@ pub fn run(command: CliCommand) -> i32 {
         };
     }
 
+    // Scanner enumeration/capabilities are pure WIA — no Python engine to
+    // spawn, and the session store closes its devices when it drops here.
+    if let CliCommand::Scanners(args) = &command {
+        let result = match &args.capabilities {
+            Some(device_id) => crate::scanner::ScannerSessions::new()
+                .capabilities(device_id)
+                .map(|caps| serde_json::to_string_pretty(&caps).unwrap()),
+            None => crate::scanner::enumerate(None)
+                .map(|list| serde_json::to_string_pretty(&list.scanners).unwrap()),
+        };
+        return match result {
+            Ok(json) => {
+                println!("{}", json);
+                0
+            }
+            Err(refusal) => {
+                eprintln!("error: {}", refusal);
+                1
+            }
+        };
+    }
+
     let mut engine = match CliEngine::start() {
         Ok(e) => e,
         Err(msg) => {
@@ -2706,6 +2737,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
 
         // Handled in run() before the engine spawns.
         CliCommand::Printers(_) => unreachable!("printers is dispatched before engine start"),
+        CliCommand::Scanners(_) => unreachable!("scanners is dispatched before engine start"),
 
         CliCommand::Rotate(args) => {
             engine.call(
