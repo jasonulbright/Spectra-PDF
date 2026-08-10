@@ -170,7 +170,8 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'ocr',
     title: 'Scan & OCR',
-    description: 'Straighten, clean and turn scanned pages upright, then make them searchable.',
+    description:
+      'Scan pages from a scanner, straighten and clean them, then make them searchable.',
     // Its FIRST op. Opening the tool still lands the reader on the document
     // with Find's "Make searchable" open (`registry.ts` keeps that); seating
     // the pane on `scanenhance` is what puts the enhancement one dock click

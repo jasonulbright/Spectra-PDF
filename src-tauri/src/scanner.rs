@@ -459,6 +459,13 @@ pub struct DocumentHandling {
     pub duplex: bool,
     pub advanced_duplex: bool,
     pub duplex_mode: DuplexMode,
+    /// The exact `WIA_IPS_DOCUMENT_HANDLING_SELECT` value each offered source
+    /// writes. Reported rather than reconstructed by the caller: a second
+    /// declaration of these bit values somewhere else is a second thing to
+    /// keep right, and the one that is wrong scans the wrong side of a sheet.
+    pub flatbed_select: i32,
+    pub feeder_select: i32,
+    pub duplex_select: i32,
 }
 
 /// Read the capabilities word, masked against the child items the device
@@ -490,6 +497,13 @@ pub fn document_handling(capabilities: i32, categories: &[SourceCategory]) -> Do
         duplex,
         advanced_duplex,
         duplex_mode,
+        flatbed_select: FLATBED as i32,
+        feeder_select: FEEDER as i32,
+        // A duplex run selects the feeder AND the duplex bit. On a device
+        // whose front and back arrive as separate child items the driver
+        // still honours this pair; the separate items exist so per-side
+        // settings are possible, not because the bit stops working.
+        duplex_select: (FEEDER | DUPLEX) as i32,
     }
 }
 
@@ -2546,6 +2560,20 @@ mod tests {
     }
 
     #[test]
+    fn each_offered_source_reports_the_value_it_writes() {
+        let handling = document_handling(
+            (FLATBED | FEEDER | DUPLEX) as i32,
+            &[SourceCategory::Flatbed, SourceCategory::Feeder],
+        );
+        assert_eq!(handling.flatbed_select, FLATBED as i32);
+        assert_eq!(handling.feeder_select, FEEDER as i32);
+        // A duplex run selects the feeder as well as the duplex bit; the bit
+        // alone names no source to take the sheet from.
+        assert_eq!(handling.duplex_select, (FEEDER | DUPLEX) as i32);
+        assert_ne!(handling.duplex_select & FEEDER as i32, 0);
+    }
+
+    #[test]
     fn a_scan_category_is_recognised_by_its_own_guid() {
         assert_eq!(category_of(&WIA_CATEGORY_FLATBED), SourceCategory::Flatbed);
         assert_eq!(category_of(&WIA_CATEGORY_FEEDER), SourceCategory::Feeder);
@@ -2722,6 +2750,36 @@ mod tests {
             domain: PropertyDomain::None,
         };
         assert_eq!(domain_max(none), None);
+    }
+
+    #[test]
+    fn every_refusal_key_is_one_the_catalog_carries() {
+        // The cross-language pin. A key this module can refuse with and the
+        // renderer's catalog has no row for renders as its own name, and
+        // nothing on either side would notice on its own.
+        let fixture = include_str!("../../tests/fixtures/scan-refusal-keys.json");
+        let carried: Vec<String> = serde_json::from_str(fixture).expect("the fixture is JSON");
+        let mut produced: Vec<&str> = HRESULT_REFUSALS.iter().map(|(_, key, _)| *key).collect();
+        produced.extend([
+            "scan.failed",
+            "scan.busy",
+            "scan.cancelledAtDevice",
+            "scan.notResponding",
+        ]);
+        for key in &produced {
+            assert!(
+                carried.iter().any(|c| c == key),
+                "{key} is refusable here and absent from the catalog fixture"
+            );
+        }
+        // And the other way: a fixture row nothing produces is a catalog
+        // entry with no refusal behind it.
+        for key in &carried {
+            assert!(
+                produced.contains(&key.as_str()),
+                "{key} is in the catalog fixture and nothing here produces it"
+            );
+        }
     }
 
     #[test]
