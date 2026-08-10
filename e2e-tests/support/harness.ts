@@ -1655,15 +1655,12 @@ export async function scanSaveAs(output: string): Promise<string | null> {
 
 /** Assemble and append into the open document through the REAL byte-only
  * import machinery. */
-export async function scanAppend(output: string): Promise<string | null> {
-  const result = await browser.executeAsync<string | null, [string]>(
-    function (out, done) {
-      (window as any).__SPECTRA_TEST__.scanAppend(out)
-        .then((path: string | null) => done(path))
-        .catch((err: unknown) => done((ERROR_TAG + String(err)) as any));
-    },
-    output,
-  );
+export async function scanAppend(): Promise<string | null> {
+  const result = await browser.executeAsync<string | null, []>(function (done) {
+    (window as any).__SPECTRA_TEST__.scanAppend()
+      .then((path: string | null) => done(path))
+      .catch((err: unknown) => done((ERROR_TAG + String(err)) as any));
+  });
   if (typeof result === 'string' && result.startsWith(ERROR_TAG)) {
     throw new Error(`scanAppend failed: ${result.replace(ERROR_TAG, '')}`);
   }

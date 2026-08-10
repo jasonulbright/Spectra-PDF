@@ -5,7 +5,9 @@ import { deflateSync } from 'node:zlib';
 import { expect } from '@wdio/globals';
 import { PDFDocument } from 'pdf-lib';
 import {
+  commitPendingEdits,
   waitForHarness,
+  getState,
   invokeAppCommand,
   openByPaths,
   scanAppend,
@@ -328,15 +330,35 @@ describe('scan', () => {
   it('appends into the open document through the real import machinery', async function () {
     this.timeout(180_000);
     await waitForHarness();
-    // A two-page document to append into, built by the same real path.
+    // A two-page document to append into.
     const base = await PDFDocument.create();
     base.addPage([300, 400]);
     base.addPage([300, 400]);
     const basePath = resolve(tmp, 'base.pdf');
     writeFileSync(basePath, await base.save());
+    // The document built by the previous case is still open and also has two
+    // pages, so the wait below names the FILE, not just a page count.
     await openByPaths([basePath]);
-
-    expect(await invokeAppCommand('document.insertFromScanner')).toBe(true);
+    await browser.waitUntil(
+      async () => {
+        const state = await getState();
+        // By NAME, not by the string this spec wrote: paths are canonicalised
+        // at the Rust boundary, so the open file's spelling is the canonical
+        // one and need not equal the one handed to the open funnel.
+        return (
+          state.activeFile?.path.toLowerCase().endsWith('base.pdf') === true &&
+          state.activeFile?.pageCount === 2
+        );
+      },
+      { timeout: 15_000, timeoutMsg: 'the base document never opened' },
+    );
+    // The menu item is gated on an insertion ANCHOR, which needs the async
+    // workspace indexing to have produced a document for the file — an open
+    // file with a page count is not yet a document to insert into.
+    await browser.waitUntil(async () => invokeAppCommand('document.insertFromScanner'), {
+      timeout: 15_000,
+      timeoutMsg: 'Insert ▸ From Scanner never became available',
+    });
     await $('[data-testid="scan-dialog"]').waitForExist({ timeout: 15_000 });
     await $('[data-testid="scan-empty"]').waitForExist({ timeout: 20_000 });
 
@@ -344,22 +366,37 @@ describe('scan', () => {
     await browser.waitUntil(async () => ((await scanSnapshot())?.pageIds.length ?? 0) === 3, {
       timeout: 10_000,
     });
-    const appended = resolve(tmp, 'appended.pdf');
-    expect(await scanAppend(appended)).toBe(appended);
+    // The append assembles beside the destination's working copy — the
+    // dialog chooses that path, not the spec.
+    expect(await scanAppend()).not.toBe(null);
     await $('[data-testid="scan-dialog"]').waitForExist({ reverse: true, timeout: 30_000 });
 
-    // The pages land in the OPEN document as page-tier work: the workspace
-    // now shows five pages, and nothing was written over the base file.
+    // The pages land as PAGE-TIER work, which is the point of routing an
+    // append through the byte-only import machinery: they live in the
+    // workspace until committed, and committing writes the WORKING COPY —
+    // the user's own file is untouched until they save.
+    //
+    // The commit is retried because the import dispatch settles a beat after
+    // the append resolves, and a commit that ran before it had nothing
+    // pending to write.
+    let workingPath = '';
     await browser.waitUntil(
       async () => {
-        const snap = await browser.execute(function () {
-          return (window as any).__SPECTRA_TEST__.snapshot();
-        });
-        return (snap as { pageCount: number }).pageCount === 5;
+        await commitPendingEdits();
+        const state = await getState();
+        workingPath = state.activeFile?.workingPath ?? '';
+        if (!workingPath || !existsSync(workingPath)) return false;
+        return (await PDFDocument.load(readFileSync(workingPath))).getPageCount() === 5;
       },
-      { timeout: 60_000, timeoutMsg: 'the scanned pages never reached the open document' },
+      { timeout: 40_000, timeoutMsg: 'the scanned pages never reached the open document' },
     );
-    const onDisk = await PDFDocument.load(readFileSync(basePath));
-    expect(onDisk.getPageCount()).toBe(2);
+    // The three that arrived are the scanned ones — each a different height,
+    // ascending in scan order.
+    const committed = await PDFDocument.load(readFileSync(workingPath));
+    const heights = committed.getPages().map((page) => page.getHeight());
+    expect(heights[3]).toBeGreaterThan(heights[2]);
+    expect(heights[4]).toBeGreaterThan(heights[3]);
+    // Nothing was written over the file the user opened.
+    expect((await PDFDocument.load(readFileSync(basePath))).getPageCount()).toBe(2);
   });
 });

@@ -897,6 +897,14 @@ function AppContent(): React.ReactElement {
     await importFilesIntoDoc([tempPath], anchor.docId, anchor.index);
   }, [importFilesIntoDoc]);
 
+  /** Where an appended scan assembles: beside the destination's working copy,
+   * which exists by construction and is inside the filesystem capability's own
+   * scope, so the import reads it back with no new grant. */
+  const scanAppendDir = useMemo(() => {
+    const anchor = insertAnchor(state);
+    return anchor ? combineWorkingDirFor(anchor.docId) : null;
+  }, [state, combineWorkingDirFor]);
+
   /** A scan's assembled PDF into the open document at the insertion anchor —
    * the byte-only import machinery, so the added pages are undoable page-tier
    * work and no new commit path exists. */
@@ -2481,6 +2489,7 @@ function AppContent(): React.ReactElement {
           onClose={() => setScanMode(null)}
           onCreated={(path) => openByPaths([path])}
           onAppend={insertAnchor(state) ? (path) => insertPagesFromScan(path) : null}
+          appendDir={scanAppendDir}
         />
       )}
       {showCreatePdf && (
