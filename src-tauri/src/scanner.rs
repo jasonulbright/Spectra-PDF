@@ -1,10 +1,20 @@
-//! Windows scanner acquisition — WIA 2.0 device enumeration and the
-//! capability report.
+//! Windows scanner acquisition — WIA 2.0 device enumeration, the capability
+//! report, and the page transfer.
 //!
 //! One implementation shared by the GUI (`list_scanners` /
-//! `scanner_capabilities` / `scanner_select_dialog`) and the CLI (`scanners`
-//! subcommand and its `--capabilities` arm) — the `printers.rs` shape, so
-//! neither surface can hold a different idea of what a device is.
+//! `scanner_capabilities` / `scan_acquire` / `scan_cancel` /
+//! `scanner_select_dialog`) and the CLI (`scanners` and `scan`) — the
+//! `printers.rs` shape, so neither surface can hold a different idea of what a
+//! device is.
+//!
+//! # Cancel is a flag, and a cancelled run is a result
+//!
+//! The scan thread is inside the driver for the whole transfer, so a cancel
+//! cannot be a call into the transfer object. `scan_cancel` sets an
+//! `AtomicBool` the callback reads, and the next callback tick returns
+//! `S_FALSE`. What comes back is a [`ScanResult`] carrying the pages that
+//! completed: a user who cancels a fifty-page feeder run at page thirty wants
+//! the thirty.
 //!
 //! # The apartment rule is this module's boundary
 //!
@@ -39,15 +49,20 @@
 #![cfg(windows)]
 
 use std::collections::HashMap;
+use std::os::windows::ffi::OsStrExt;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use windows::core::{Interface, BSTR, GUID, HRESULT, PWSTR};
+use windows::core::{implement, Interface, BSTR, GUID, HRESULT, PCWSTR, PWSTR};
 use windows::Win32::Devices::ImageAcquisition::{
-    IEnumWiaItem2, IWiaDevMgr2, IWiaItem2, IWiaPropertyStorage, WiaDevMgr2, ADVANCED_DUPLEX,
+    IEnumWiaItem2, IWiaDevMgr2, IWiaItem2, IWiaPropertyStorage, IWiaTransfer,
+    IWiaTransferCallback, IWiaTransferCallback_Impl, WiaDevMgr2, WiaImgFmt_BMP, WiaImgFmt_PNG,
+    WiaImgFmt_TIFF, WiaTransferParams, ADVANCED_DUPLEX,
     DUPLEX, FEEDER, FLATBED, WIA_CATEGORY_AUTO, WIA_CATEGORY_FEEDER, WIA_CATEGORY_FEEDER_BACK,
     WIA_CATEGORY_FEEDER_FRONT, WIA_CATEGORY_FLATBED, WIA_CATEGORY_FILM, WIA_DATA_AUTO,
     WIA_DATA_COLOR, WIA_DATA_GRAYSCALE, WIA_DATA_THRESHOLD, WIA_DEVINFO_ENUM_LOCAL,
@@ -56,24 +71,29 @@ use windows::Win32::Devices::ImageAcquisition::{
     WIA_ERROR_COVER_OPEN, WIA_ERROR_DEVICE_LOCKED, WIA_ERROR_EXCEPTION_IN_DRIVER,
     WIA_ERROR_INVALID_COMMAND, WIA_ERROR_OFFLINE, WIA_ERROR_PAPER_EMPTY, WIA_ERROR_PAPER_JAM,
     WIA_ERROR_PAPER_PROBLEM, WIA_ERROR_USER_INTERVENTION, WIA_FLAG_NOM, WIA_FLAG_VALUES,
-    WIA_IPA_DATATYPE,
-    WIA_IPA_FULL_ITEM_NAME, WIA_IPA_ITEM_CATEGORY, WIA_IPS_BRIGHTNESS, WIA_IPS_CONTRAST,
+    WIA_IPA_DATATYPE, WIA_IPA_FORMAT,
+    WIA_IPA_FULL_ITEM_NAME, WIA_IPA_ITEM_CATEGORY, WIA_IPA_TYMED, WIA_IPS_BRIGHTNESS,
+    WIA_IPS_CONTRAST,
     WIA_IPS_DOCUMENT_HANDLING_SELECT, WIA_IPS_OPTICAL_XRES, WIA_IPS_PAGES, WIA_IPS_XEXTENT,
-    WIA_IPS_XRES, WIA_IPS_YEXTENT, WIA_IPS_YRES, WIA_LIST_COUNT, WIA_LIST_NOM, WIA_LIST_VALUES,
+    WIA_IPS_XPOS, WIA_IPS_XRES, WIA_IPS_YEXTENT, WIA_IPS_YPOS, WIA_IPS_YRES, WIA_LIST_COUNT,
+    WIA_LIST_NOM, WIA_LIST_VALUES,
     WIA_PROP_FLAG, WIA_PROP_LIST, WIA_PROP_RANGE, WIA_PROP_READ, WIA_PROP_WRITE, WIA_RANGE_MAX,
     WIA_RANGE_MIN, WIA_RANGE_NOM, WIA_RANGE_STEP, WIA_S_NO_DEVICE_AVAILABLE,
+    WIA_STATUS_WARMING_UP, WIA_TRANSFER_MSG_DEVICE_STATUS, WIA_TRANSFER_MSG_END_OF_STREAM,
+    WIA_TRANSFER_MSG_END_OF_TRANSFER, WIA_TRANSFER_MSG_NEW_PAGE, WIA_TRANSFER_MSG_STATUS,
 };
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::StructuredStorage::{
     PropVariantClear, PROPSPEC, PROPSPEC_0, PROPSPEC_KIND, PROPVARIANT,
 };
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_LOCAL_SERVER,
-    COINIT_APARTMENTTHREADED,
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, IStream, CLSCTX_LOCAL_SERVER,
+    COINIT_APARTMENTTHREADED, STGM_CREATE, STGM_SHARE_EXCLUSIVE, STGM_WRITE, TYMED_FILE,
 };
 use windows::Win32::System::Variant::{
     VT_BSTR, VT_CLSID, VT_I2, VT_I4, VT_LPWSTR, VT_UI2, VT_UI4, VT_VECTOR,
 };
+use windows::Win32::UI::Shell::SHCreateStreamOnFileEx;
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
 };
@@ -339,13 +359,25 @@ pub fn control_model(report: Option<&PropertyReport>) -> ControlModel {
 }
 
 /// The colour modes offered, in the order a dialog shows them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ColorMode {
     BlackAndWhite,
     Grayscale,
     Color,
     Auto,
+}
+
+impl ColorMode {
+    /// The `WIA_IPA_DATATYPE` value this mode writes.
+    pub fn data_type(self) -> i32 {
+        match self {
+            ColorMode::BlackAndWhite => WIA_DATA_THRESHOLD as i32,
+            ColorMode::Grayscale => WIA_DATA_GRAYSCALE as i32,
+            ColorMode::Color => WIA_DATA_COLOR as i32,
+            ColorMode::Auto => WIA_DATA_AUTO as i32,
+        }
+    }
 }
 
 /// The colour modes a device actually lists, never a fixed menu. A device
@@ -518,6 +550,11 @@ const PRSPEC_PROPID: PROPSPEC_KIND = PROPSPEC_KIND(1);
 /// only behind an unrelated feature.
 const STI_DEVICE_TYPE_SCANNER: i32 = 1;
 
+/// `FILE_ATTRIBUTE_NORMAL`, for the staged page files. Named here rather than
+/// pulled in behind another crate feature, the `STI_DEVICE_TYPE_SCANNER`
+/// precedent — one frozen constant.
+const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
+
 fn propspec(id: u32) -> PROPSPEC {
     PROPSPEC {
         ulKind: PRSPEC_PROPID,
@@ -605,6 +642,50 @@ unsafe fn variant_vector_i32(var: &PROPVARIANT) -> Vec<i32> {
 }
 
 /// # Safety
+/// `var` must be an initialised PROPVARIANT.
+unsafe fn variant_vector_guid(var: &PROPVARIANT) -> Vec<GUID> {
+    let inner = unsafe { &*var.Anonymous.Anonymous };
+    unsafe {
+        if inner.vt.0 != VT_VECTOR.0 | VT_CLSID.0 {
+            return variant_guid(var).into_iter().collect();
+        }
+        let ca = &inner.Anonymous.cauuid;
+        if ca.pElems.is_null() || ca.cElems == 0 {
+            return Vec::new();
+        }
+        std::slice::from_raw_parts(ca.pElems, ca.cElems as usize).to_vec()
+    }
+}
+
+/// A `VT_I4` PROPVARIANT. Owns nothing, so it is never cleared.
+fn propvariant_i32(value: i32) -> PROPVARIANT {
+    let mut var = PROPVARIANT::default();
+    unsafe {
+        let inner = &mut *var.Anonymous.Anonymous;
+        inner.vt = VT_I4;
+        inner.Anonymous.lVal = value;
+    }
+    var
+}
+
+/// A `VT_CLSID` PROPVARIANT BORROWING `guid`.
+///
+/// The variant points at the caller's GUID rather than owning a task-allocated
+/// copy, which is why it must never reach `PropVariantClear`: that would hand
+/// `CoTaskMemFree` a pointer it did not allocate. `WriteMultiple` only reads
+/// the value, so borrowing is enough and the caller keeps `guid` alive across
+/// the call.
+fn propvariant_guid(guid: &mut GUID) -> PROPVARIANT {
+    let mut var = PROPVARIANT::default();
+    unsafe {
+        let inner = &mut *var.Anonymous.Anonymous;
+        inner.vt = VT_CLSID;
+        inner.Anonymous.puuid = guid as *mut GUID;
+    }
+    var
+}
+
+/// # Safety
 /// `store` must be a live property storage on the calling apartment.
 unsafe fn read_i32(store: &IWiaPropertyStorage, id: u32) -> Option<i32> {
     let spec = propspec(id);
@@ -661,6 +742,49 @@ unsafe fn read_property_name(store: &IWiaPropertyStorage, id: u32) -> String {
         // ReadPropertyNames allocates with the task allocator.
         CoTaskMemFree(Some(name.as_ptr() as *const _));
         text
+    }
+}
+
+/// # Safety
+/// `store` must be a live property storage on the calling apartment.
+unsafe fn write_i32(store: &IWiaPropertyStorage, id: u32, value: i32) -> bool {
+    let spec = propspec(id);
+    let var = propvariant_i32(value);
+    unsafe { store.WriteMultiple(1, &spec, &var, 2).is_ok() }
+}
+
+/// # Safety
+/// `store` must be a live property storage on the calling apartment.
+unsafe fn write_guid(store: &IWiaPropertyStorage, id: u32, mut value: GUID) -> bool {
+    let spec = propspec(id);
+    let var = propvariant_guid(&mut value);
+    unsafe { store.WriteMultiple(1, &spec, &var, 2).is_ok() }
+}
+
+/// Every GUID `GetPropertyAttributes` returned for `WIA_IPA_FORMAT`, header
+/// slots included.
+///
+/// The list's leading slots encode the element count and the nominal value
+/// rather than naming formats, and their encoding differs between drivers. The
+/// vector is therefore never indexed: `chosen_format` only tests MEMBERSHIP,
+/// and no count-or-nominal slot can collide with a `WiaImgFmt_*` GUID.
+///
+/// # Safety
+/// `store` must be a live property storage on the calling apartment.
+unsafe fn listed_formats(store: &IWiaPropertyStorage) -> Vec<GUID> {
+    let spec = propspec(WIA_IPA_FORMAT);
+    let mut flags = 0u32;
+    let mut attr = PROPVARIANT::default();
+    unsafe {
+        if store
+            .GetPropertyAttributes(1, &spec, &mut flags, &mut attr)
+            .is_err()
+        {
+            return Vec::new();
+        }
+        let all = variant_vector_guid(&attr);
+        let _ = PropVariantClear(&mut attr);
+        all
     }
 }
 
@@ -824,6 +948,7 @@ const PUMP_INTERVAL: Duration = Duration::from_millis(50);
 
 enum Request {
     Capabilities(Sender<Result<ScannerCapabilities, ScanRefusal>>),
+    Acquire(AcquireRequest),
     Shutdown,
 }
 
@@ -831,6 +956,13 @@ struct Session {
     requests: Sender<Request>,
     thread: Option<JoinHandle<()>>,
     last_used: Instant,
+    /// Read by the transfer callback on every tick. Cancel is a flag rather
+    /// than a call because the scan thread is inside the driver for the whole
+    /// run, and `scan_cancel` arrives on another thread entirely.
+    cancel: Arc<AtomicBool>,
+    /// A device is held by at most one run: a queued scan would start minutes
+    /// later against paper that is no longer in the tray.
+    busy: Arc<AtomicBool>,
 }
 
 impl Session {
@@ -852,6 +984,8 @@ impl Session {
                 requests,
                 thread: Some(thread),
                 last_used: Instant::now(),
+                cancel: Arc::new(AtomicBool::new(false)),
+                busy: Arc::new(AtomicBool::new(false)),
             }),
             Ok(Err(refusal)) => {
                 let _ = thread.join();
@@ -943,6 +1077,25 @@ unsafe fn session_thread(
                     ))
                 });
                 let _ = reply.send(report);
+            }
+            Ok(Request::Acquire(request)) => {
+                let AcquireRequest {
+                    settings,
+                    dir,
+                    sink,
+                    cancel,
+                    reply,
+                } = request;
+                let outcome = catch_unwind(AssertUnwindSafe(|| unsafe {
+                    acquire(&root, settings, dir, sink, cancel)
+                }))
+                .unwrap_or_else(|_| {
+                    Err(ScanRefusal::named(
+                        "scan.failed",
+                        "The scanner driver failed during the scan.",
+                    ))
+                });
+                let _ = reply.send(outcome);
             }
             Ok(Request::Shutdown) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -1042,6 +1195,734 @@ unsafe fn capability_report(
     }
 }
 
+// ── Acquisition ─────────────────────────────────────────────────────────────
+
+/// The paper sizes the scan area dropdown offers. `Auto` writes no area at
+/// all, which leaves the device's own full bed — the only honest reading of
+/// "whatever is on the glass".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaperSize {
+    Auto,
+    Letter,
+    Legal,
+    Tabloid,
+    A3,
+    A4,
+    A5,
+}
+
+/// Every paper size this build offers, in dropdown order.
+pub const PAPER_SIZES: &[PaperSize] = &[
+    PaperSize::Auto,
+    PaperSize::Letter,
+    PaperSize::Legal,
+    PaperSize::Tabloid,
+    PaperSize::A3,
+    PaperSize::A4,
+    PaperSize::A5,
+];
+
+impl PaperSize {
+    /// Width × height in inches, portrait. The metric sizes are their exact
+    /// millimetre definitions converted at 25.4 mm to the inch, not rounded
+    /// inch approximations — a 0.5 mm error is 12 pixels at 600 dpi.
+    pub fn dimensions_in(self) -> Option<(f64, f64)> {
+        let mm = |w: f64, h: f64| Some((w / 25.4, h / 25.4));
+        match self {
+            PaperSize::Auto => None,
+            PaperSize::Letter => Some((8.5, 11.0)),
+            PaperSize::Legal => Some((8.5, 14.0)),
+            PaperSize::Tabloid => Some((11.0, 17.0)),
+            PaperSize::A3 => mm(297.0, 420.0),
+            PaperSize::A4 => mm(210.0, 297.0),
+            PaperSize::A5 => mm(148.0, 210.0),
+        }
+    }
+
+    /// The wire spelling, so the CLI can accept the same vocabulary the
+    /// dialog sends.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.to_ascii_lowercase().as_str() {
+            "auto" => Some(PaperSize::Auto),
+            "letter" => Some(PaperSize::Letter),
+            "legal" => Some(PaperSize::Legal),
+            "tabloid" => Some(PaperSize::Tabloid),
+            "a3" => Some(PaperSize::A3),
+            "a4" => Some(PaperSize::A4),
+            "a5" => Some(PaperSize::A5),
+            _ => None,
+        }
+    }
+}
+
+/// `WIA_IPS_XPOS` / `YPOS` / `XEXTENT` / `YEXTENT`, in PIXELS at the
+/// resolution that will be in force for the transfer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct ScanArea {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// The scan area for a paper size at a resolution, clamped to the bed.
+///
+/// Extents are pixels, so they depend on the resolution and must be computed
+/// AFTER the resolution is written — a Letter area computed at 300 dpi and
+/// applied at 600 would scan the top-left quarter of the sheet.
+///
+/// `max_width` / `max_height` are the device's own reported extent maxima at
+/// that resolution, i.e. its bed. A sheet longer than the bed is clamped
+/// rather than refused: a legal-size request on a letter-size flatbed scans
+/// the letter-size area it has, which is what the glass can see.
+///
+/// `Auto` returns nothing at all, and nothing is then written.
+pub fn scan_area(
+    paper: PaperSize,
+    dpi: i32,
+    max_width: Option<i32>,
+    max_height: Option<i32>,
+) -> Option<ScanArea> {
+    let (width_in, height_in) = paper.dimensions_in()?;
+    if dpi <= 0 {
+        return None;
+    }
+    // Round to the nearest pixel, never truncate: truncation loses up to a
+    // pixel per axis on every page, and a page one pixel short of the sheet
+    // is a page with a white line where the sheet's edge was.
+    let pixels = |inches: f64| ((inches * dpi as f64).round() as i64).clamp(1, i32::MAX as i64) as i32;
+    let mut width = pixels(width_in);
+    let mut height = pixels(height_in);
+    if let Some(max) = max_width.filter(|m| *m > 0) {
+        width = width.min(max);
+    }
+    if let Some(max) = max_height.filter(|m| *m > 0) {
+        height = height.min(max);
+    }
+    Some(ScanArea {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    })
+}
+
+/// The transfer format, chosen from what the source lists.
+///
+/// BMP first because every WIA driver supports it, it is lossless, and its
+/// header carries pixels-per-metre — which is what makes the requested
+/// resolution survive into `create_pdf`'s DPI-honest page sizing. PNG and
+/// TIFF are the fallbacks for a source that lists neither.
+pub fn chosen_format(listed: &[GUID]) -> (GUID, &'static str) {
+    for (guid, extension) in [
+        (WiaImgFmt_BMP, "bmp"),
+        (WiaImgFmt_PNG, "png"),
+        (WiaImgFmt_TIFF, "tif"),
+    ] {
+        if listed.contains(&guid) {
+            return (guid, extension);
+        }
+    }
+    // A source that lists nothing still transfers; BMP is the format every
+    // WIA driver is required to support.
+    (WiaImgFmt_BMP, "bmp")
+}
+
+/// What the dialog (or the CLI) asked for. Every field is optional: a control
+/// the device did not report is a control the dialog did not render, so its
+/// setting is absent rather than guessed.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct ScanSettings {
+    /// `WIA_IPA_FULL_ITEM_NAME` of the chosen scan source; the first reported
+    /// source when absent.
+    pub item_name: Option<String>,
+    pub dpi: Option<i32>,
+    pub color_mode: Option<ColorMode>,
+    pub paper: Option<PaperSize>,
+    /// `WIA_IPS_PAGES`; `0` is "until the feeder empties".
+    pub pages: Option<i32>,
+    /// The `WIA_IPS_DOCUMENT_HANDLING_SELECT` bits to write.
+    pub document_handling: Option<i32>,
+    pub brightness: Option<i32>,
+    pub contrast: Option<i32>,
+}
+
+/// A setting the device did not take.
+///
+/// Both halves of the driver-quality defence land here: a write the driver
+/// REFUSED (`actual` absent) and a write it accepted and then reported back
+/// differently (`actual` present and unequal). Neither fails the scan — a
+/// device that silently clamps 1200 dpi to 600 still produced pages, and
+/// hiding that would be worse than a refusal.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PropertyAdjustment {
+    /// The property's own name as the driver spells it, never translated.
+    pub property: String,
+    pub requested: i32,
+    pub actual: Option<i32>,
+}
+
+/// One acquisition's outcome. A cancelled run is a RESULT: the pages that
+/// completed are here and the dialog offers them.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ScanResult {
+    pub pages: Vec<String>,
+    pub cancelled: bool,
+    /// The scratch folder holding `pages`, handed back to `scan_discard`.
+    pub scratch: String,
+    /// The resolution actually in force, read back after the write. This is
+    /// what `create_pdf`'s `image_dpi_default` is set from, so a driver that
+    /// clamped the request still produces correctly sized pages.
+    pub dpi: i32,
+    pub adjusted: Vec<PropertyAdjustment>,
+    pub bytes: u64,
+}
+
+/// Progress for one acquisition, over that invocation's own channel.
+///
+/// A per-invocation channel rather than a named global event: two dialogs, or
+/// a dialog and a CLI-driven run, sharing one event name would cross their
+/// progress.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ScanEvent {
+    Warming,
+    PageStarted { index: u32 },
+    Progress { index: u32, percent: u32 },
+    PageFinished { index: u32, path: String },
+    DeviceStatus { code: String },
+    /// The scratch has passed [`SCAN_SIZE_WARN_BYTES`]. Emitted once per run:
+    /// an uncompressed 600-dpi colour A3 page is roughly 400 MB, and a long
+    /// ADF stack can fill a volume silently.
+    SizeWarning { bytes: u64 },
+}
+
+/// Where a run's staged pages start being worth mentioning. Two 600-dpi
+/// colour A4 pages, near enough — big enough that a normal letter-size run
+/// never trips it, small enough to arrive before a volume is in trouble.
+pub const SCAN_SIZE_WARN_BYTES: u64 = 512 * 1024 * 1024;
+
+/// How long a run may go with no callback at all before the watchdog gives
+/// up, when the device reports no `WIA_DPS_MAX_SCAN_TIME`.
+const DEFAULT_WATCHDOG: Duration = Duration::from_secs(120);
+/// The floor under a device-reported watchdog. A driver reporting a
+/// two-second maximum scan time would otherwise cut off its own first page.
+const MIN_WATCHDOG: Duration = Duration::from_secs(60);
+/// How often the watchdog looks at the last callback's timestamp.
+const WATCHDOG_INTERVAL: Duration = Duration::from_secs(1);
+
+/// A boxed event sink, so the transfer path has no idea whether it is feeding
+/// a Tauri channel, a CLI's stderr, or nothing.
+pub type EventSink = Box<dyn Fn(ScanEvent) + Send + Sync>;
+
+/// Everything the callback object and the watchdog share.
+struct TransferState {
+    cancel: Arc<AtomicBool>,
+    dir: PathBuf,
+    extension: &'static str,
+    sink: EventSink,
+    /// Pages whose stream reached end-of-stream, in transfer order.
+    pages: Mutex<Vec<PathBuf>>,
+    /// The page currently being written; taken at end-of-stream. A page still
+    /// open when the run ends was cut mid-transfer and is deleted with the
+    /// scratch rather than offered.
+    open: Mutex<Option<(u32, PathBuf)>>,
+    next: AtomicU32,
+    bytes: AtomicU64,
+    warned: AtomicBool,
+    /// When the driver last said anything. The watchdog measures from here,
+    /// not from the start, so a legitimately slow 1200-dpi A3 page is not cut
+    /// off while it is still reporting.
+    activity: Mutex<Instant>,
+    /// Set by the watchdog, so a cancel it caused reads as
+    /// `scan.notResponding` rather than as the user's own cancel.
+    timed_out: AtomicBool,
+    /// The last error the driver reported through the callback.
+    failure: Mutex<Option<HRESULT>>,
+}
+
+impl TransferState {
+    fn touch(&self) {
+        if let Ok(mut at) = self.activity.lock() {
+            *at = Instant::now();
+        }
+    }
+
+    fn emit(&self, event: ScanEvent) {
+        (self.sink)(event);
+    }
+}
+
+/// The transfer callback: one file per page, progress as it arrives, and a
+/// cancel the driver sees on its next tick.
+#[implement(IWiaTransferCallback)]
+struct TransferSink {
+    state: Arc<TransferState>,
+}
+
+/// `S_FALSE` — what a callback returns to abort a transfer. Never
+/// `IWiaTransfer::Cancel()`: that would be a call into an interface the scan
+/// thread is currently inside.
+fn abort() -> windows::core::Error {
+    windows::core::Error::from(HRESULT(1))
+}
+
+impl IWiaTransferCallback_Impl for TransferSink_Impl {
+    fn TransferCallback(
+        &self,
+        _flags: i32,
+        params: *const WiaTransferParams,
+    ) -> windows::core::Result<()> {
+        let state = &self.state;
+        state.touch();
+        if state.cancel.load(Ordering::SeqCst) {
+            return Err(abort());
+        }
+        if params.is_null() {
+            return Ok(());
+        }
+        let params = unsafe { &*params };
+        let status = params.hrErrorStatus;
+        if status.0 < 0 {
+            if let Ok(mut failure) = state.failure.lock() {
+                *failure = Some(status);
+            }
+        }
+        let index = state
+            .open
+            .lock()
+            .ok()
+            .and_then(|open| open.as_ref().map(|(index, _)| *index))
+            .unwrap_or_else(|| state.next.load(Ordering::SeqCst).saturating_sub(1));
+        match params.lMessage as u32 {
+            WIA_TRANSFER_MSG_STATUS => {
+                let percent = params.lPercentComplete.clamp(0, 100) as u32;
+                state.emit(ScanEvent::Progress { index, percent });
+            }
+            // The page's own start is reported from `GetNextStream`, which is
+            // the hook that runs exactly once per page and is the one that
+            // knows the page's file. This message only proves the device is
+            // alive, which `touch` above already recorded.
+            WIA_TRANSFER_MSG_NEW_PAGE => {}
+            WIA_TRANSFER_MSG_END_OF_STREAM => {
+                let finished = state.open.lock().ok().and_then(|mut open| open.take());
+                if let Some((index, path)) = finished {
+                    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    let total = state.bytes.fetch_add(size, Ordering::SeqCst) + size;
+                    if let Ok(mut pages) = state.pages.lock() {
+                        pages.push(path.clone());
+                    }
+                    state.emit(ScanEvent::PageFinished {
+                        index,
+                        path: path.to_string_lossy().to_string(),
+                    });
+                    if total >= SCAN_SIZE_WARN_BYTES && !state.warned.swap(true, Ordering::SeqCst) {
+                        state.emit(ScanEvent::SizeWarning { bytes: total });
+                    }
+                }
+            }
+            WIA_TRANSFER_MSG_DEVICE_STATUS => {
+                if status == WIA_STATUS_WARMING_UP {
+                    state.emit(ScanEvent::Warming);
+                } else {
+                    state.emit(ScanEvent::DeviceStatus {
+                        code: format!("0x{:08X}", status.0 as u32),
+                    });
+                }
+            }
+            WIA_TRANSFER_MSG_END_OF_TRANSFER => {}
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn GetNextStream(
+        &self,
+        _flags: i32,
+        _item_name: &BSTR,
+        _full_item_name: &BSTR,
+    ) -> windows::core::Result<IStream> {
+        let state = &self.state;
+        state.touch();
+        if state.cancel.load(Ordering::SeqCst) {
+            return Err(abort());
+        }
+        let index = state.next.fetch_add(1, Ordering::SeqCst);
+        // Zero-padded so the staged pages sort in transfer order in any
+        // listing, which is the order `create_pdf` is handed them in.
+        let path = state
+            .dir
+            .join(format!("page-{index:04}.{}", state.extension));
+        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        wide.push(0);
+        let stream = unsafe {
+            SHCreateStreamOnFileEx(
+                PCWSTR(wide.as_ptr()),
+                STGM_CREATE.0 | STGM_WRITE.0 | STGM_SHARE_EXCLUSIVE.0,
+                FILE_ATTRIBUTE_NORMAL,
+                true,
+                None,
+            )
+        }?;
+        if let Ok(mut open) = state.open.lock() {
+            *open = Some((index, path));
+        }
+        state.emit(ScanEvent::PageStarted { index });
+        Ok(stream)
+    }
+}
+
+/// Write one property and read it back, recording a disagreement rather than
+/// assuming the device agreed.
+///
+/// # Safety
+/// `store` must be a live property storage on the calling apartment.
+unsafe fn apply_setting(
+    store: &IWiaPropertyStorage,
+    id: u32,
+    value: i32,
+    adjusted: &mut Vec<PropertyAdjustment>,
+) -> Option<i32> {
+    unsafe {
+        let wrote = write_i32(store, id, value);
+        let actual = read_i32(store, id);
+        let name = read_property_name(store, id);
+        let property = if name.is_empty() {
+            format!("{id}")
+        } else {
+            name
+        };
+        if !wrote {
+            adjusted.push(PropertyAdjustment {
+                property,
+                requested: value,
+                actual: None,
+            });
+            return actual;
+        }
+        match actual {
+            Some(got) if got != value => adjusted.push(PropertyAdjustment {
+                property,
+                requested: value,
+                actual: Some(got),
+            }),
+            // A property the device will not read back says nothing either
+            // way; the write reported success and that is all there is.
+            _ => {}
+        }
+        actual
+    }
+}
+
+/// Everything one acquire request carries onto the session thread.
+struct AcquireRequest {
+    settings: ScanSettings,
+    dir: PathBuf,
+    sink: EventSink,
+    cancel: Arc<AtomicBool>,
+    reply: Sender<Result<ScanResult, ScanRefusal>>,
+}
+
+/// Run one acquisition on the session thread.
+///
+/// # Safety
+/// `root` must belong to the calling thread's apartment.
+unsafe fn acquire(
+    root: &IWiaItem2,
+    settings: ScanSettings,
+    dir: PathBuf,
+    sink: EventSink,
+    cancel: Arc<AtomicBool>,
+) -> Result<ScanResult, ScanRefusal> {
+    unsafe {
+        let root_store: IWiaPropertyStorage = root.cast().map_err(refusal_from)?;
+        let max_scan_time = read_i32(&root_store, WIA_DPS_MAX_SCAN_TIME)
+            .filter(|ms| *ms > 0)
+            .map(|ms| Duration::from_millis(ms as u64))
+            .unwrap_or(DEFAULT_WATCHDOG)
+            .max(MIN_WATCHDOG);
+
+        let item = select_source(root, settings.item_name.as_deref())?;
+        let store: IWiaPropertyStorage = item.cast().map_err(refusal_from)?;
+        let mut adjusted: Vec<PropertyAdjustment> = Vec::new();
+
+        // Document handling first: it decides which source is being read, and
+        // a device can report different extents for its feeder and its glass.
+        if let Some(bits) = settings.document_handling {
+            apply_setting(&store, WIA_IPS_DOCUMENT_HANDLING_SELECT, bits, &mut adjusted);
+        }
+        if let Some(mode) = settings.color_mode {
+            apply_setting(&store, WIA_IPA_DATATYPE, mode.data_type(), &mut adjusted);
+        }
+        // Resolution before the area: the area is in pixels at the resolution
+        // in force, so writing it first would size it against the old one.
+        let mut dpi = read_i32(&store, WIA_IPS_XRES).unwrap_or(0);
+        if let Some(requested) = settings.dpi.filter(|d| *d > 0) {
+            let x = apply_setting(&store, WIA_IPS_XRES, requested, &mut adjusted);
+            apply_setting(&store, WIA_IPS_YRES, requested, &mut adjusted);
+            dpi = x.unwrap_or(requested);
+        }
+        if dpi <= 0 {
+            dpi = settings.dpi.unwrap_or(300).max(1);
+        }
+        if let Some(paper) = settings.paper {
+            // The bed is read AFTER the resolution write, because the extent
+            // maxima are pixels at whatever resolution is now in force.
+            let max_x = read_property(&store, WIA_IPS_XEXTENT).and_then(domain_max);
+            let max_y = read_property(&store, WIA_IPS_YEXTENT).and_then(domain_max);
+            if let Some(area) = scan_area(paper, dpi, max_x, max_y) {
+                apply_setting(&store, WIA_IPS_XPOS, area.x, &mut adjusted);
+                apply_setting(&store, WIA_IPS_YPOS, area.y, &mut adjusted);
+                apply_setting(&store, WIA_IPS_XEXTENT, area.width, &mut adjusted);
+                apply_setting(&store, WIA_IPS_YEXTENT, area.height, &mut adjusted);
+            }
+        }
+        if let Some(pages) = settings.pages.filter(|p| *p >= 0) {
+            apply_setting(&store, WIA_IPS_PAGES, pages, &mut adjusted);
+        }
+        if let Some(brightness) = settings.brightness {
+            apply_setting(&store, WIA_IPS_BRIGHTNESS, brightness, &mut adjusted);
+        }
+        if let Some(contrast) = settings.contrast {
+            apply_setting(&store, WIA_IPS_CONTRAST, contrast, &mut adjusted);
+        }
+
+        // The transfer format is OURS, not the user's: per-page files
+        // so a cancel still yields the pages that completed.
+        let (format, extension) = chosen_format(&listed_formats(&store));
+        write_i32(&store, WIA_IPA_TYMED, TYMED_FILE.0);
+        write_guid(&store, WIA_IPA_FORMAT, format);
+
+        std::fs::create_dir_all(&dir).map_err(|e| ScanRefusal {
+            key: "scan.failed",
+            message: format!("Could not create the scan scratch folder: {e}"),
+            code: None,
+        })?;
+
+        let state = Arc::new(TransferState {
+            cancel: cancel.clone(),
+            dir: dir.clone(),
+            extension,
+            sink,
+            pages: Mutex::new(Vec::new()),
+            open: Mutex::new(None),
+            next: AtomicU32::new(0),
+            bytes: AtomicU64::new(0),
+            warned: AtomicBool::new(false),
+            activity: Mutex::new(Instant::now()),
+            timed_out: AtomicBool::new(false),
+            failure: Mutex::new(None),
+        });
+
+        let transfer: IWiaTransfer = item.cast().map_err(refusal_from)?;
+        let callback: IWiaTransferCallback = TransferSink {
+            state: state.clone(),
+        }
+        .into();
+
+        // The watchdog is a separate thread because `Download` blocks this
+        // one for the whole run. It cancels the same way the user does, so
+        // the driver is never called into from outside its apartment.
+        let watched = state.clone();
+        let running = Arc::new(AtomicBool::new(true));
+        let watching = running.clone();
+        let watchdog = std::thread::spawn(move || {
+            while watching.load(Ordering::SeqCst) {
+                std::thread::sleep(WATCHDOG_INTERVAL);
+                let idle = watched
+                    .activity
+                    .lock()
+                    .map(|at| at.elapsed())
+                    .unwrap_or_default();
+                if idle > max_scan_time {
+                    watched.timed_out.store(true, Ordering::SeqCst);
+                    watched.cancel.store(true, Ordering::SeqCst);
+                    return;
+                }
+            }
+        });
+
+        let outcome = transfer.Download(0, &callback);
+        running.store(false, Ordering::SeqCst);
+        let _ = watchdog.join();
+        // Drop the callback before anything else runs: it holds the state the
+        // page list is read out of, and an open page's stream with it.
+        drop(callback);
+        drop(transfer);
+
+        let timed_out = state.timed_out.load(Ordering::SeqCst);
+        let cancelled = cancel.load(Ordering::SeqCst);
+        // A page still open was cut mid-transfer; it is a partial file and is
+        // swept with the scratch rather than offered as a page.
+        if let Ok(mut open) = state.open.lock() {
+            if let Some((_, path)) = open.take() {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+        let pages: Vec<String> = state
+            .pages
+            .lock()
+            .map(|pages| {
+                pages
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let bytes = state.bytes.load(Ordering::SeqCst);
+
+        if timed_out {
+            return Err(ScanRefusal::named(
+                "scan.notResponding",
+                "The scanner stopped responding.",
+            ));
+        }
+        if let Err(e) = outcome {
+            // A cancel we asked for surfaces as S_FALSE or as a cancelled
+            // HRESULT; that is a result with pages, not a failure.
+            if !cancelled {
+                let reported = state.failure.lock().ok().and_then(|f| *f);
+                return Err(refusal_for(reported.unwrap_or_else(|| e.code())));
+            }
+        }
+        // A transfer that ended cleanly with no pages at all is the device's
+        // own Cancel button: indistinguishable from success at the HRESULT
+        // level, wrong as an error and baffling as an empty success.
+        if pages.is_empty() && !cancelled {
+            return Err(ScanRefusal::named(
+                "scan.cancelledAtDevice",
+                "The scan was cancelled at the scanner.",
+            ));
+        }
+        Ok(ScanResult {
+            pages,
+            cancelled,
+            scratch: dir.to_string_lossy().to_string(),
+            dpi,
+            adjusted,
+            bytes,
+        })
+    }
+}
+
+/// The largest value a property's own domain allows, which is what an extent
+/// maximum means: the bed.
+fn domain_max(report: PropertyReport) -> Option<i32> {
+    match report.domain {
+        PropertyDomain::Range { max, .. } => Some(max),
+        PropertyDomain::List { values, .. } => values.into_iter().max(),
+        _ => None,
+    }
+}
+
+/// The child item a run transfers from: the one whose full item name matches,
+/// else the first item that produces a scanned page.
+///
+/// # Safety
+/// `root` must belong to the calling thread's apartment.
+unsafe fn select_source(root: &IWiaItem2, item_name: Option<&str>) -> Result<IWiaItem2, ScanRefusal> {
+    unsafe {
+        let children: IEnumWiaItem2 = root.EnumChildItems(None).map_err(refusal_from)?;
+        let mut first: Option<IWiaItem2> = None;
+        loop {
+            let mut slot: [Option<IWiaItem2>; 1] = [None];
+            let mut fetched = 0u32;
+            if children.Next(1, slot.as_mut_ptr(), &mut fetched).is_err() || fetched == 0 {
+                break;
+            }
+            let Some(child) = slot[0].take() else { break };
+            let Ok(store) = child.cast::<IWiaPropertyStorage>() else {
+                continue;
+            };
+            let category = child
+                .GetItemCategory()
+                .ok()
+                .or_else(|| read_guid(&store, WIA_IPA_ITEM_CATEGORY))
+                .map(|guid| category_of(&guid))
+                .unwrap_or(SourceCategory::Other);
+            if matches!(category, SourceCategory::Other) {
+                continue;
+            }
+            let name = read_string(&store, WIA_IPA_FULL_ITEM_NAME).unwrap_or_default();
+            match item_name {
+                Some(wanted) if name == wanted => return Ok(child),
+                Some(_) => {
+                    if first.is_none() {
+                        first = Some(child);
+                    }
+                }
+                None => return Ok(child),
+            }
+        }
+        // A named item that is no longer there falls back to the first scan
+        // source rather than refusing: the name came from a capability report
+        // the device itself may have re-issued between the report and the run.
+        first.ok_or_else(|| {
+            ScanRefusal::named(
+                "scan.failed",
+                "The scanner reported no source that can produce a page.",
+            )
+        })
+    }
+}
+
+// ── Scan scratch ────────────────────────────────────────────────────────────
+
+/// The one folder every run's staged pages live under. Same discipline as the
+/// batch scratch: a delete names exactly what it may take, so a caller cannot
+/// turn `scan_discard` into a general remove by passing a source path.
+fn scan_scratch_root() -> PathBuf {
+    std::env::temp_dir().join("spectrapdf").join("scan-scratch")
+}
+
+/// A fresh, empty scratch folder for one run.
+pub fn new_scan_scratch() -> Result<PathBuf, ScanRefusal> {
+    let root = scan_scratch_root();
+    for n in 0..10_000u32 {
+        let candidate = root.join(format!("scan-{n}"));
+        if !candidate.exists() {
+            std::fs::create_dir_all(&candidate).map_err(|e| ScanRefusal {
+                key: "scan.failed",
+                message: format!("Could not create the scan scratch folder: {e}"),
+                code: None,
+            })?;
+            return Ok(candidate);
+        }
+    }
+    Err(ScanRefusal::named(
+        "scan.failed",
+        "Could not allocate a scan scratch folder.",
+    ))
+}
+
+/// Is this path a scan scratch folder this process may delete?
+///
+/// String containment is not the test: `..` and a symlink both defeat it. The
+/// comparison is between canonicalised paths, and a path that cannot be
+/// canonicalised is not inside anything.
+pub fn inside_scan_scratch(path: &Path) -> bool {
+    match (path.canonicalize(), scan_scratch_root().canonicalize()) {
+        (Ok(target), Ok(root)) => target.starts_with(&root) && target != root,
+        _ => false,
+    }
+}
+
+/// Delete one run's scratch folder and everything staged in it.
+pub fn discard_scan_scratch(path: &Path) -> Result<(), ScanRefusal> {
+    if !inside_scan_scratch(path) {
+        return Err(ScanRefusal::named(
+            "scan.failed",
+            "That folder is not a scan scratch folder.",
+        ));
+    }
+    std::fs::remove_dir_all(path).map_err(|e| ScanRefusal {
+        key: "scan.failed",
+        message: format!("Could not remove the scan scratch folder: {e}"),
+        code: None,
+    })
+}
+
 // ── Session store ───────────────────────────────────────────────────────────
 
 /// The live sessions, one per device id.
@@ -1116,6 +1997,84 @@ impl ScannerSessions {
             open.remove(device_id);
         }
     }
+
+    /// Run one acquisition, opening a session for the device if none is live.
+    ///
+    /// The store's lock is released before the run starts. Holding it for the
+    /// whole transfer would make `cancel` and `close` wait for the very run
+    /// they are trying to stop.
+    pub fn acquire(
+        &self,
+        device_id: &str,
+        settings: ScanSettings,
+        dir: PathBuf,
+        sink: EventSink,
+    ) -> Result<ScanResult, ScanRefusal> {
+        let (requests, cancel, busy) = {
+            let mut open = self.sessions.lock().map_err(|_| {
+                ScanRefusal::named("scan.failed", "The scanner session store is unusable.")
+            })?;
+            if !open.contains_key(device_id) {
+                let session = Session::open(device_id.to_string())?;
+                self.start_reaper();
+                open.insert(device_id.to_string(), session);
+            }
+            let session = open.get_mut(device_id).expect("session was just inserted");
+            session.last_used = Instant::now();
+            (
+                session.requests.clone(),
+                session.cancel.clone(),
+                session.busy.clone(),
+            )
+        };
+        if busy.swap(true, Ordering::SeqCst) {
+            return Err(ScanRefusal::named(
+                "scan.busy",
+                "A scan is already running on this scanner.",
+            ));
+        }
+        cancel.store(false, Ordering::SeqCst);
+        let (reply, answer) = mpsc::channel();
+        let sent = requests.send(Request::Acquire(AcquireRequest {
+            settings,
+            dir,
+            sink,
+            cancel,
+            reply,
+        }));
+        let outcome = if sent.is_err() {
+            Err(ScanRefusal::named(
+                "scan.failed",
+                "The scanner session is no longer running.",
+            ))
+        } else {
+            answer.recv().unwrap_or_else(|_| {
+                Err(ScanRefusal::named(
+                    "scan.failed",
+                    "The scanner session stopped during the scan.",
+                ))
+            })
+        };
+        busy.store(false, Ordering::SeqCst);
+        if let Ok(mut open) = self.sessions.lock() {
+            if let Some(session) = open.get_mut(device_id) {
+                session.last_used = Instant::now();
+            }
+        }
+        outcome
+    }
+
+    /// Ask the run in flight to stop at the driver's next callback tick.
+    ///
+    /// A device with nothing running is not an error: a cancel that arrives
+    /// after the last page is a cancel of nothing.
+    pub fn cancel(&self, device_id: &str) {
+        if let Ok(open) = self.sessions.lock() {
+            if let Some(session) = open.get(device_id) {
+                session.cancel.store(true, Ordering::SeqCst);
+            }
+        }
+    }
 }
 
 // ── The system device picker ────────────────────────────────────────────────
@@ -1177,6 +2136,50 @@ pub async fn scanner_close(
 ) -> Result<(), ScanRefusal> {
     sessions.close(&device_id);
     Ok(())
+}
+
+/// Acquire pages from one device, streaming progress over `on_event`.
+///
+/// A cancelled run returns `Ok` with the pages that completed — the caller
+/// offers them. Only a device or driver fault is an error.
+#[tauri::command]
+pub async fn scan_acquire(
+    sessions: tauri::State<'_, ScannerSessions>,
+    device_id: String,
+    settings: ScanSettings,
+    on_event: tauri::ipc::Channel<ScanEvent>,
+) -> Result<ScanResult, ScanRefusal> {
+    let dir = new_scan_scratch()?;
+    let outcome = sessions.acquire(
+        &device_id,
+        settings,
+        dir.clone(),
+        Box::new(move |event| {
+            let _ = on_event.send(event);
+        }),
+    );
+    if outcome.is_err() {
+        // A failed run leaves nothing worth keeping, and the folder it would
+        // otherwise leave behind is one nothing will ever come back for.
+        let _ = discard_scan_scratch(&dir);
+    }
+    outcome
+}
+
+/// Stop the run in flight on one device.
+#[tauri::command]
+pub async fn scan_cancel(
+    sessions: tauri::State<'_, ScannerSessions>,
+    device_id: String,
+) -> Result<(), ScanRefusal> {
+    sessions.cancel(&device_id);
+    Ok(())
+}
+
+/// Delete one run's staged pages.
+#[tauri::command]
+pub async fn scan_discard(scratch: String) -> Result<(), ScanRefusal> {
+    discard_scan_scratch(Path::new(&scratch))
 }
 
 /// The system device picker.
@@ -1555,6 +2558,221 @@ mod tests {
             SourceCategory::FeederBack
         );
         assert_eq!(category_of(&GUID::zeroed()), SourceCategory::Other);
+    }
+
+    #[test]
+    fn a_paper_size_becomes_pixels_at_the_requested_resolution() {
+        // Letter at 300 dpi is exactly 2550 × 3300 pixels; the assertion is
+        // the whole point of computing the area after the resolution write.
+        assert_eq!(
+            scan_area(PaperSize::Letter, 300, None, None),
+            Some(ScanArea {
+                x: 0,
+                y: 0,
+                width: 2550,
+                height: 3300,
+            })
+        );
+        assert_eq!(
+            scan_area(PaperSize::Letter, 600, None, None),
+            Some(ScanArea {
+                x: 0,
+                y: 0,
+                width: 5100,
+                height: 6600,
+            })
+        );
+    }
+
+    #[test]
+    fn a_metric_paper_size_rounds_to_the_nearest_pixel() {
+        // A4 is 210 × 297 mm = 8.2677… × 11.6929… in, which at 300 dpi is
+        // 2480.31 × 3507.87 — the rounding rule, not truncation: a truncated
+        // height would be 3507 and leave a white line where the sheet ended.
+        assert_eq!(
+            scan_area(PaperSize::A4, 300, None, None),
+            Some(ScanArea {
+                x: 0,
+                y: 0,
+                width: 2480,
+                height: 3508,
+            })
+        );
+    }
+
+    #[test]
+    fn an_area_beyond_the_bed_clamps_to_it() {
+        // Legal on a letter-size bed: the height the glass has, not the
+        // height the sheet has.
+        let area = scan_area(PaperSize::Legal, 300, Some(2550), Some(3300))
+            .expect("legal has dimensions");
+        assert_eq!(area.width, 2550);
+        assert_eq!(area.height, 3300);
+        // A bed the device reports as zero or negative is no bed at all and
+        // must not clamp everything to one pixel.
+        let area = scan_area(PaperSize::Letter, 300, Some(0), Some(-1))
+            .expect("letter has dimensions");
+        assert_eq!((area.width, area.height), (2550, 3300));
+    }
+
+    #[test]
+    fn auto_paper_writes_no_area_at_all() {
+        assert_eq!(scan_area(PaperSize::Auto, 300, None, None), None);
+        // A resolution that is not a resolution cannot produce an area.
+        assert_eq!(scan_area(PaperSize::Letter, 0, None, None), None);
+    }
+
+    #[test]
+    fn every_paper_size_round_trips_its_own_spelling() {
+        for paper in PAPER_SIZES {
+            let text = serde_json::to_string(paper).expect("a paper size serialises");
+            let wire = text.trim_matches('"');
+            assert_eq!(PaperSize::parse(wire), Some(*paper), "{wire}");
+            assert_eq!(PaperSize::parse(&wire.to_uppercase()), Some(*paper));
+        }
+        assert_eq!(PaperSize::parse("foolscap"), None);
+        // Auto is the only size with no dimensions; every other one has them.
+        for paper in PAPER_SIZES {
+            assert_eq!(
+                paper.dimensions_in().is_none(),
+                *paper == PaperSize::Auto,
+                "{paper:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_transfer_format_prefers_bmp_and_falls_back_in_order() {
+        assert_eq!(chosen_format(&[WiaImgFmt_BMP, WiaImgFmt_PNG]).1, "bmp");
+        assert_eq!(chosen_format(&[WiaImgFmt_PNG, WiaImgFmt_TIFF]).1, "png");
+        assert_eq!(chosen_format(&[WiaImgFmt_TIFF]).1, "tif");
+        // A source that lists nothing still transfers: BMP is the format
+        // every WIA driver is required to support.
+        assert_eq!(chosen_format(&[]).0, WiaImgFmt_BMP);
+        // A list's leading slots encode a count and a nominal rather than a
+        // format, and membership testing is what makes them harmless.
+        let count_slot = GUID::from_u128(3);
+        assert_eq!(chosen_format(&[count_slot, WiaImgFmt_PNG]).1, "png");
+    }
+
+    #[test]
+    fn each_colour_mode_writes_its_own_data_type() {
+        let modes = [
+            ColorMode::BlackAndWhite,
+            ColorMode::Grayscale,
+            ColorMode::Color,
+            ColorMode::Auto,
+        ];
+        let mut values: Vec<i32> = modes.iter().map(|m| m.data_type()).collect();
+        let distinct = values.len();
+        values.sort_unstable();
+        values.dedup();
+        assert_eq!(values.len(), distinct, "two modes write the same data type");
+        // The mapping is the inverse of the one the capability report reads.
+        for mode in modes {
+            let report = PropertyReport {
+                id: WIA_IPA_DATATYPE,
+                name: "Data Type".into(),
+                readable: true,
+                writable: true,
+                current: Some(mode.data_type()),
+                domain: PropertyDomain::List {
+                    values: vec![mode.data_type()],
+                    nominal: None,
+                },
+            };
+            assert_eq!(color_modes(Some(&report)), vec![mode]);
+        }
+    }
+
+    #[test]
+    fn an_extent_maximum_comes_from_the_property_domain() {
+        let range = PropertyReport {
+            id: WIA_IPS_XEXTENT,
+            name: "Horizontal Extent".into(),
+            readable: true,
+            writable: true,
+            current: Some(2550),
+            domain: PropertyDomain::Range {
+                min: 1,
+                max: 5100,
+                step: 1,
+                nominal: None,
+            },
+        };
+        assert_eq!(domain_max(range), Some(5100));
+        let listed = PropertyReport {
+            id: WIA_IPS_XEXTENT,
+            name: "Horizontal Extent".into(),
+            readable: true,
+            writable: true,
+            current: Some(1275),
+            domain: PropertyDomain::List {
+                values: vec![1275, 2550, 1700],
+                nominal: None,
+            },
+        };
+        assert_eq!(domain_max(listed), Some(2550));
+        let none = PropertyReport {
+            id: WIA_IPS_XEXTENT,
+            name: "Horizontal Extent".into(),
+            readable: true,
+            writable: true,
+            current: Some(2550),
+            domain: PropertyDomain::None,
+        };
+        assert_eq!(domain_max(none), None);
+    }
+
+    #[test]
+    fn the_transfer_path_refusals_are_named_and_distinct() {
+        // The three rows the transfer produces have no HRESULT behind them,
+        // so nothing else pins their spelling.
+        let rows = [
+            ("scan.busy", "A scan is already running on this scanner."),
+            ("scan.cancelledAtDevice", "The scan was cancelled at the scanner."),
+            ("scan.notResponding", "The scanner stopped responding."),
+        ];
+        let mut keys: Vec<&str> = rows.iter().map(|(key, _)| *key).collect();
+        let named = keys.len();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), named);
+        for (key, message) in rows {
+            let refusal = ScanRefusal::named(key, message);
+            assert!(refusal.code.is_none());
+            assert!(!refusal.message.is_empty());
+            // No transfer row may collide with an HRESULT row.
+            for (_, hresult_key, _) in HRESULT_REFUSALS {
+                assert_ne!(*hresult_key, key);
+            }
+        }
+    }
+
+    #[test]
+    fn only_a_folder_under_the_scan_scratch_root_can_be_discarded() {
+        let scratch = new_scan_scratch().expect("a scratch folder is allocatable");
+        assert!(inside_scan_scratch(&scratch));
+        // The root itself is not a run's folder, and neither is anything
+        // outside it — a caller must not be able to turn discard into a
+        // general remove by passing a source path.
+        assert!(!inside_scan_scratch(&scan_scratch_root()));
+        assert!(!inside_scan_scratch(&std::env::temp_dir()));
+        assert!(!inside_scan_scratch(Path::new("C:\\Windows")));
+        // A path that leaves the root by traversal is outside it, which
+        // string containment would not have caught.
+        assert!(!inside_scan_scratch(&scratch.join("..").join("..")));
+
+        std::fs::write(scratch.join("page-0000.bmp"), b"staged").expect("stage a page");
+        discard_scan_scratch(&scratch).expect("its own scratch is discardable");
+        assert!(!scratch.exists());
+        // A folder that is already gone cannot be canonicalised, so it is
+        // inside nothing and the second discard refuses rather than ranging
+        // over the filesystem.
+        assert_eq!(
+            discard_scan_scratch(&scratch).expect_err("a gone folder refuses").key,
+            "scan.failed"
+        );
     }
 
     #[test]
