@@ -88,6 +88,9 @@ export interface ScannerCapabilities {
   device_name: string;
   document_handling: DocumentHandling;
   max_scan_time_ms: number | null;
+  /** The sources this device offers, in picker order — derived by the device
+   * layer so nothing downstream re-derives it. */
+  source_options: ScanSourceOption[];
   sources: ScanSourceReport[];
 }
 
@@ -323,86 +326,29 @@ export function initialDpi(control: NumericControl): number | null {
   return initialValue(control);
 }
 
-/** One row of the source picker. */
+/** One row of the source picker, exactly as the device layer reported it. */
 export interface ScanSourceOption {
   id: 'flatbed' | 'feeder' | 'duplex';
   /** The item the transfer runs against. */
-  itemName: string;
+  item_name: string;
   /** The `WIA_IPS_DOCUMENT_HANDLING_SELECT` value this row writes, or `null`
    * where the device reports no such property to write. */
-  documentHandling: number | null;
+  document_handling: number | null;
   /** Does this row feed sheets, i.e. can it produce more than one page in one
    * run? Only a feeder makes a page count meaningful. */
   feeds: boolean;
 }
 
-/** The scan-source item a category is transferred from, if the device
- * reported one. */
-function itemFor(
-  capabilities: ScannerCapabilities,
-  ...categories: SourceCategory[]
-): ScanSourceReport | null {
-  for (const category of categories) {
-    const found = capabilities.sources.find((s) => s.category === category);
-    if (found) return found;
-  }
-  return null;
-}
-
 /**
  * The sources this device offers, in picker order.
  *
- * A row appears only where the device reported both the capability and an
- * item to transfer from: a duplex checkbox on a flatbed and a feeder row on a
- * device with no feeder are exactly what deriving from the report prevents.
+ * Read from the report, never re-derived: the dialog and the CLI arm would
+ * otherwise be two answers to "which sources does this device have", and the
+ * one that is wrong offers duplex on a flatbed or scans the wrong side of a
+ * sheet. The device layer owns the rule; this is the accessor.
  */
 export function sourceOptions(capabilities: ScannerCapabilities): ScanSourceOption[] {
-  const handling = capabilities.document_handling;
-  const options: ScanSourceOption[] = [];
-  const flatbed = itemFor(capabilities, 'flatbed');
-  const feeder = itemFor(capabilities, 'feeder', 'feeder_front');
-  // A device with one scan source and no handling property still scans; the
-  // item it reported is the source, and nothing is written to select it.
-  const only = capabilities.sources.length === 1 ? capabilities.sources[0] : null;
-  const writes = (value: number): number | null =>
-    capabilities.sources.some((s) => s.document_handling_select.kind !== 'absent') ? value : null;
-
-  if (handling.flatbed && (flatbed ?? only)) {
-    options.push({
-      id: 'flatbed',
-      itemName: (flatbed ?? only)!.item_name,
-      documentHandling: writes(handling.flatbed_select),
-      feeds: false,
-    });
-  }
-  if (handling.feeder && (feeder ?? only)) {
-    options.push({
-      id: 'feeder',
-      itemName: (feeder ?? only)!.item_name,
-      documentHandling: writes(handling.feeder_select),
-      feeds: true,
-    });
-  }
-  if (handling.duplex_mode !== 'none' && (feeder ?? only)) {
-    options.push({
-      id: 'duplex',
-      itemName: (feeder ?? only)!.item_name,
-      documentHandling: writes(handling.duplex_select),
-      feeds: true,
-    });
-  }
-  // A device that reported neither capability still has items; offering the
-  // first of them is better than an empty picker on a working scanner.
-  if (options.length === 0 && capabilities.sources.length > 0) {
-    const first = capabilities.sources[0];
-    options.push({
-      id: first.category === 'feeder' || first.category === 'feeder_front' ? 'feeder' : 'flatbed',
-      itemName: first.item_name,
-      documentHandling: null,
-      feeds: first.category !== 'flatbed',
-    });
-  }
-  return options;
+  return capabilities.source_options;
 }
 
 /** The report for one picker row, which is where its own resolution, colour
@@ -413,7 +359,7 @@ export function reportFor(
 ): ScanSourceReport | null {
   if (!option) return capabilities.sources[0] ?? null;
   return (
-    capabilities.sources.find((s) => s.item_name === option.itemName) ??
+    capabilities.sources.find((s) => s.item_name === option.item_name) ??
     capabilities.sources[0] ??
     null
   );
@@ -484,9 +430,9 @@ export interface ScanFormState {
 export function toScanSettings(form: ScanFormState): ScanSettings {
   const settings: ScanSettings = {};
   if (form.option) {
-    settings.item_name = form.option.itemName;
-    if (form.option.documentHandling !== null) {
-      settings.document_handling = form.option.documentHandling;
+    settings.item_name = form.option.item_name;
+    if (form.option.document_handling !== null) {
+      settings.document_handling = form.option.document_handling;
     }
     settings.pages = form.allPages ? 0 : Math.max(1, Math.trunc(form.pageCount));
   }

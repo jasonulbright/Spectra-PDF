@@ -139,6 +139,7 @@ fn show_help_dialog() {
          spectrapdf print input.pdf --printer \"Printer Name\" --pages 1-3\r\n\
          spectrapdf printers\r\n\
          spectrapdf scanners\r\n\
+         spectrapdf scan --device \"Device Id\" --dpi 300 -o scan.pdf\r\n\
          spectrapdf batch input_dir/ -o out_dir/ compress --quality ebook\r\n\
          \r\n\
          FLAGS:\r\n\
