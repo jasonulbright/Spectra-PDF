@@ -8,6 +8,7 @@ mod snapshot;
 mod watchers;
 mod engine;
 mod printers;
+pub mod scanner;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
@@ -75,6 +76,7 @@ pub fn run() {
 
     let mut builder = tauri::Builder::default()
         .manage(engine::EngineState::new())
+        .manage(scanner::ScannerSessions::new())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
@@ -153,6 +155,10 @@ pub fn run() {
             commands::user_dictionary_dir,
             commands::list_printers,
             commands::printer_capabilities,
+            scanner::list_scanners,
+            scanner::scanner_capabilities,
+            scanner::scanner_close,
+            scanner::scanner_select_dialog,
             commands::canonicalize_paths,
             commands::portfolio_member_dir,
             commands::open_portfolio_member_file,
