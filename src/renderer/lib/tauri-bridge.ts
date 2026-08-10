@@ -2,8 +2,15 @@
  * Tauri IPC bridge — typed wrappers around invoke() and listen().
  * All renderer code imports from here for backend communication.
  */
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import type {
+  ScanEvent,
+  ScanResult,
+  ScanSettings,
+  ScannerCapabilities,
+  ScannerList,
+} from './scan';
 import {
   readFile as fsReadFile,
   writeFile as fsWriteFile,
@@ -482,6 +489,44 @@ export const app = {
   onTrayAction: (callback: (action: string) => void) => {
     return listen<string>('app:trayAction', (event) => callback(event.payload));
   },
+};
+
+// ── Scanner (WIA) ─────────────────────────────────────────────────────────
+//
+// Its own namespace rather than more of `app`: a scan session holds a DEVICE
+// LOCK, so which calls open one and which release one has to be readable in
+// one place.
+
+export const scanner = {
+  /** Attached scanners plus `lastUsed` when it is still one of them (the
+   * phantom-default rule). An empty list is the ANSWER, never an error. */
+  listScanners: (lastUsed: string | null) =>
+    invoke<ScannerList>('list_scanners', { lastUsed }),
+  /** One device's scan sources and what each reports it can do — the only
+   * thing the dialog's controls are derived from. Opens a session. */
+  scannerCapabilities: (deviceId: string) =>
+    invoke<ScannerCapabilities>('scanner_capabilities', { deviceId }),
+  /** Release a device now rather than at the session's idle timeout. WIA
+   * locks a device while an item on it lives, so a dialog that closes without
+   * this makes every other imaging application wait the timeout out. */
+  scannerClose: (deviceId: string) => invoke<void>('scanner_close', { deviceId }),
+  /** The system device picker — the door for a device the enumeration filter
+   * drops. Returns an id, which then flows through the ordinary capability
+   * path; `null` when the user cancels. */
+  scannerSelectDialog: () => invoke<string | null>('scanner_select_dialog'),
+  /** Acquire pages. Progress rides a per-invocation channel rather than a
+   * named event: two runs sharing one event name would cross their progress.
+   * A cancelled run RESOLVES, carrying the pages that completed. */
+  scanAcquire: (deviceId: string, settings: ScanSettings, onEvent: (event: ScanEvent) => void) => {
+    const channel = new Channel<ScanEvent>();
+    channel.onmessage = onEvent;
+    return invoke<ScanResult>('scan_acquire', { deviceId, settings, onEvent: channel });
+  },
+  /** Ask the run in flight to stop at the driver's next callback tick. */
+  scanCancel: (deviceId: string) => invoke<void>('scan_cancel', { deviceId }),
+  /** Delete one run's staged pages — refused Rust-side for anything outside
+   * the scan scratch root, so this can never become a general remove. */
+  scanDiscard: (scratch: string) => invoke<void>('scan_discard', { scratch }),
 };
 
 // ── Auto-updater ──────────────────────────────────────────────────────────

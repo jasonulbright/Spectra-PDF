@@ -198,6 +198,7 @@ export const COMMAND_IDS = [
   'view.toolsPane',
   'document.insertBlankPage',
   'document.insertFromFile',
+  'document.insertFromScanner',
   'document.combineFiles',
   'document.deleteSelection',
   'document.rotateSelectionCW',
@@ -221,6 +222,7 @@ export const COMMAND_IDS = [
   'tools.scheduledRuns',
   'tools.watchedFolders',
   'file.createPdf',
+  'file.createFromScanner',
   ...CANVAS_TOOLS.map((t) => `tools.${t}` as const),
   ...OPERATIONS.map((op) => `tools.panel.${op}` as const),
   ...TOOL_IDS.map((id) => `tools.open.${id}` as const),
@@ -613,6 +615,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openCreatePdf(),
   },
+  // The Create PDF sibling: scanning needs no open document either, and the
+  // pages it acquires go through the same DPI-honest image door.
+  'file.createFromScanner': {
+    title: 'Create PDF from Scanner…',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openScan('new'),
+  },
   'view.home': {
     title: 'Home',
     run: ({ dispatch }) => dispatch({ type: 'UI_FOCUS_TAB', tab: 'home' }),
@@ -831,6 +840,11 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.app !== null && insertAnchor(ctx.state) !== null,
     run: (ctx) => void ctx.app!.insertPagesFromFile(),
   },
+  'document.insertFromScanner': {
+    title: 'From Scanner…',
+    when: (ctx) => ctx.app !== null && insertAnchor(ctx.state) !== null,
+    run: (ctx) => ctx.app!.openScan('append'),
+  },
   // Combine Files: opens the Combine dialog — a source list
   // that accepts everything Create PDF accepts, converts the non-PDF members
   // through the one `create_pdf` door, and lands the result either in a NEW
@@ -1009,6 +1023,12 @@ export const COMMANDS: Record<CommandId, Command> = {
             dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: path } });
             dispatch({ type: 'UI_SET_ACTIVE_OP', op: tool.ops[0] });
             dispatch({ type: 'UI_SET_TOOL_DOCK_OPEN', open: true });
+          } else if (tool.id === 'ocr' && ctx.app) {
+            // Scan & OCR with nothing open is somebody about to scan
+            // something, and its panes all need a document. The file picker
+            // every other docless tool runs would be the wrong question; the
+            // scanner produces the document instead.
+            ctx.app.openScan('new');
           } else {
             void openThenSeat(ctx, tool.ops[0]);
           }

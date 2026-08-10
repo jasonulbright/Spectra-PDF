@@ -9,7 +9,7 @@
  * grant any capability the renderer doesn't already have. Treat it as a
  * scriptable remote control over the public IPC surface.
  */
-import { app, file, engine } from './lib/tauri-bridge';
+import { app, file, engine, scanner as scannerBridge } from './lib/tauri-bridge';
 import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
 import { invokeCommand as invokeRegisteredCommand, getCanvasServices } from './commands/context';
 import { COMMANDS, type CommandId } from './commands/registry';
@@ -391,6 +391,49 @@ let folderCreatePdf: FolderCreatePdfHandlers | null = null;
 
 export function registerFolderCreatePdf(handlers: FolderCreatePdfHandlers | null): void {
   folderCreatePdf = handlers;
+}
+
+/**
+ * Scan. The acquisition itself needs a physical device and a driver — a mock
+ * WIA driver would be a second product to maintain and would prove the mock's
+ * behaviour, not a scanner's. So a spec injects the CAPABILITY REPORT (which
+ * is the only thing every control is derived from) and the staged page files
+ * it wrote itself, and everything downstream of the transfer — the control
+ * derivation, the scan-more list, the per-page remove, `create_pdf` and the
+ * import into an open document — runs for real.
+ */
+export interface ScanHandlers {
+  injectDevice: (capabilities: unknown, pages?: string[]) => void;
+  setSource: (id: string) => void;
+  setDpi: (dpi: number) => void;
+  setColorMode: (mode: string) => void;
+  setPaper: (paper: string) => void;
+  setPostOptions: (opts: { enhance?: boolean; ocr?: boolean }) => void;
+  removePage: (id: string) => void;
+  saveAs: (output: string) => Promise<string | null>;
+  append: (output: string) => Promise<string | null>;
+  snapshot: () => {
+    phase: string;
+    deviceName: string | null;
+    /** The source rows the report DERIVED, which is the assertion that a
+     * flatbed offers no duplex. */
+    sources: string[];
+    source: string | null;
+    /** The resolution control as derived: a listed property is a choice of
+     * exactly its values, a wide range is a bounded number field. */
+    dpiControl: unknown;
+    colorModes: string[];
+    brightness: string;
+    pageIds: string[];
+    pagePaths: string[];
+    error: string | null;
+  };
+}
+
+let scan: ScanHandlers | null = null;
+
+export function registerScan(handlers: ScanHandlers | null): void {
+  scan = handlers;
 }
 
 import type { Orientation as CreatePdfOrientation, PageSize as CreatePdfPageSize } from './lib/create-pdf';
@@ -1325,6 +1368,30 @@ export interface TestHarness {
   folderCreatePdfSetFolders: (source: string, dest: string) => Promise<void>;
   folderCreatePdfRun: () => Promise<void>;
   folderCreatePdfSnapshot: () => ReturnType<FolderCreatePdfHandlers['snapshot']> | null;
+  /** Scan injectors (dialog must be open — `file.createFromScanner` or
+   * `document.insertFromScanner`). Acquisition needs a physical device, so a
+   * spec supplies the capability report and the page files and everything
+   * downstream of the transfer runs for real. */
+  scanInjectDevice: (capabilities: unknown, pages?: string[]) => void;
+  scanSetSource: (id: string) => void;
+  scanSetDpi: (dpi: number) => void;
+  scanSetColorMode: (mode: string) => void;
+  scanSetPaper: (paper: string) => void;
+  scanSetPostOptions: (opts: { enhance?: boolean; ocr?: boolean }) => void;
+  scanRemovePage: (id: string) => void;
+  /** Assemble the staged pages into `output` and open the result — the REAL
+   * create_pdf and the REAL open funnel. */
+  scanSaveAs: (output: string) => Promise<string | null>;
+  /** Assemble and append into the open document through the REAL byte-only
+   * import machinery. */
+  scanAppend: (output: string) => Promise<string | null>;
+  scanSnapshot: () => ReturnType<ScanHandlers['snapshot']> | null;
+  /** The device-layer command contract, reachable with no dialog open: an
+   * empty enumeration is a RESULT, and an unknown id refuses by name. */
+  scanListDevices: () => Promise<unknown>;
+  scanCapabilitiesRefusal: (
+    deviceId: string,
+  ) => Promise<{ key: string; message: string; code: string | null } | null>;
   scheduleCreate: (profile: Record<string, unknown>, actionJson?: string) => Promise<string>;
   scheduleList: () => Promise<unknown[]>;
   scheduleRemove: (name: string) => Promise<void>;
@@ -2372,6 +2439,100 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     folderCreatePdfSnapshot: () => folderCreatePdf?.snapshot() ?? null,
+    scanInjectDevice: (capabilities, pages) => {
+      if (!scan) {
+        const msg = 'scanInjectDevice: scan dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      scan.injectDevice(capabilities, pages);
+    },
+    scanSetSource: (id) => {
+      if (!scan) {
+        const msg = 'scanSetSource: scan dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      scan.setSource(id);
+    },
+    scanSetDpi: (dpi) => {
+      if (!scan) {
+        const msg = 'scanSetDpi: scan dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      scan.setDpi(dpi);
+    },
+    scanSetColorMode: (mode) => {
+      if (!scan) {
+        const msg = 'scanSetColorMode: scan dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      scan.setColorMode(mode);
+    },
+    scanSetPaper: (paper) => {
+      if (!scan) {
+        const msg = 'scanSetPaper: scan dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      scan.setPaper(paper);
+    },
+    scanSetPostOptions: (opts) => {
+      if (!scan) {
+        const msg = 'scanSetPostOptions: scan dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      scan.setPostOptions(opts);
+    },
+    scanRemovePage: (id) => {
+      if (!scan) {
+        const msg = 'scanRemovePage: scan dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      scan.removePage(id);
+    },
+    scanSaveAs: async (output) => {
+      if (!scan) {
+        const msg = 'scanSaveAs: scan dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        return await scan.saveAs(output);
+      } catch (err) {
+        captureError('scanSaveAs', err);
+        throw err;
+      }
+    },
+    scanAppend: async (output) => {
+      if (!scan) {
+        const msg = 'scanAppend: scan dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        return await scan.append(output);
+      } catch (err) {
+        captureError('scanAppend', err);
+        throw err;
+      }
+    },
+    scanSnapshot: () => scan?.snapshot() ?? null,
+    scanListDevices: () => scannerBridge.listScanners(null),
+    scanCapabilitiesRefusal: async (deviceId) => {
+      try {
+        await scannerBridge.scannerCapabilities(deviceId);
+        return null;
+      } catch (err) {
+        // Returned rather than thrown: the point of the assertion is the
+        // refusal's own SHAPE, and a rejection would arrive as a string.
+        return err as { key: string; message: string; code: string | null };
+      }
+    },
     scheduleCreate: async (profile, actionJson) => {
       if (!scheduledRuns) throw new Error('scheduleCreate: Scheduled Runs dialog not mounted');
       return scheduledRuns.create(profile, actionJson);

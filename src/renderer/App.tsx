@@ -110,6 +110,7 @@ import { DiskRedactDialog } from './components/DiskRedactDialog';
 import { FolderFormPrepDialog } from './components/FolderFormPrepDialog';
 import { FolderExportDialog } from './components/FolderExportDialog';
 import { FolderCreatePdfDialog } from './components/FolderCreatePdfDialog';
+import { ScanDialog } from './components/ScanDialog';
 import { ScheduledRunsDialog } from './components/ScheduledRunsDialog';
 import { WatchedFoldersDialog } from './components/WatchedFoldersDialog';
 import { CreatePdfDialog } from './components/CreatePdfDialog';
@@ -240,6 +241,10 @@ function AppContent(): React.ReactElement {
   const [showSchedules, setShowSchedules] = useState(false);
   const [showWatchers, setShowWatchers] = useState(false);
   const [showCreatePdf, setShowCreatePdf] = useState(false);
+  // Which destination the scan dialog was opened for. `null` = closed; the
+  // mode is settled at the entry point rather than inside the dialog, because
+  // "append" is only meaningful where there is a document to append to.
+  const [scanMode, setScanMode] = useState<'new' | 'append' | null>(null);
   // Sources a drop pre-populates Create PDF with. Cleared on close so
   // the next menu-opened dialog starts empty rather than replaying a drop.
   const [createPdfSeed, setCreatePdfSeed] = useState<string[]>([]);
@@ -891,6 +896,18 @@ function AppContent(): React.ReactElement {
     await file.writeBuffer(tempPath, bytes);
     await importFilesIntoDoc([tempPath], anchor.docId, anchor.index);
   }, [importFilesIntoDoc]);
+
+  /** A scan's assembled PDF into the open document at the insertion anchor —
+   * the byte-only import machinery, so the added pages are undoable page-tier
+   * work and no new commit path exists. */
+  const insertPagesFromScan = useCallback(
+    async (path: string) => {
+      const anchor = insertAnchor(stateRef.current);
+      if (!anchor) return;
+      await importFilesIntoDoc([path], anchor.docId, anchor.index);
+    },
+    [importFilesIntoDoc],
+  );
 
   // Snapshot + perform operation + reload
   const performOperation = useCallback(async (
@@ -1961,6 +1978,10 @@ function AppContent(): React.ReactElement {
       setCreatePdfSeed([]);
       setShowCreatePdf(true);
     },
+    // An append with nowhere to append to is a new document, not a disabled
+    // menu item: the user asked to scan, and the destination is the part that
+    // has no answer.
+    openScan: (wanted) => setScanMode(wanted === 'append' && !insertAnchor(stateRef.current) ? 'new' : wanted),
     openExportImages: () => setShowExportImages(true),
     openExportDocument: (format) => setExportDocFormat(format),
     openPresentation: () => {
@@ -2013,6 +2034,7 @@ function AppContent(): React.ReactElement {
       openScheduledRuns: () => h.current.openScheduledRuns(),
       openWatchedFolders: () => h.current.openWatchedFolders(),
       openCreatePdf: () => h.current.openCreatePdf(),
+      openScan: (wanted) => h.current.openScan(wanted),
       openExportImages: () => h.current.openExportImages(),
       openExportDocument: (format) => h.current.openExportDocument(format),
       openPresentation: () => h.current.openPresentation(),
@@ -2453,6 +2475,14 @@ function AppContent(): React.ReactElement {
       )}
       {showSchedules && <ScheduledRunsDialog onClose={() => setShowSchedules(false)} />}
       {showWatchers && <WatchedFoldersDialog onClose={() => setShowWatchers(false)} />}
+      {scanMode && (
+        <ScanDialog
+          mode={scanMode}
+          onClose={() => setScanMode(null)}
+          onCreated={(path) => openByPaths([path])}
+          onAppend={insertAnchor(state) ? (path) => insertPagesFromScan(path) : null}
+        />
+      )}
       {showCreatePdf && (
         <CreatePdfDialog
           initialPaths={createPdfSeed}

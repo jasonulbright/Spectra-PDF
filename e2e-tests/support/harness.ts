@@ -1581,6 +1581,132 @@ export async function folderCreatePdfSnapshot(): Promise<FolderCreatePdfSnapshot
   });
 }
 
+// --- Scan ------------------------------------------------------------------
+
+export interface ScanSnapshot {
+  phase: string;
+  deviceName: string | null;
+  sources: string[];
+  source: string | null;
+  dpiControl: unknown;
+  colorModes: string[];
+  brightness: string;
+  pageIds: string[];
+  pagePaths: string[];
+  error: string | null;
+}
+
+/** Supply a capability report and, optionally, the staged page files.
+ *
+ * Acquisition needs a physical device and a driver, so the transfer is the
+ * one thing a spec cannot drive. Everything downstream of it — the control
+ * derivation, the scan-more list, the per-page remove, `create_pdf` and the
+ * import into an open document — runs for real against these. */
+export async function scanInjectDevice(
+  capabilities: unknown,
+  pages?: string[],
+): Promise<void> {
+  await browser.execute<void, [unknown, string[] | null]>(
+    function (caps, staged) {
+      (window as any).__SPECTRA_TEST__.scanInjectDevice(caps, staged ?? undefined);
+    },
+    capabilities,
+    pages ?? null,
+  );
+}
+
+export async function scanSetSource(id: string): Promise<void> {
+  await browser.execute<void, [string]>(function (i) {
+    (window as any).__SPECTRA_TEST__.scanSetSource(i);
+  }, id);
+}
+
+export async function scanSetPostOptions(opts: {
+  enhance?: boolean;
+  ocr?: boolean;
+}): Promise<void> {
+  await browser.execute<void, [{ enhance?: boolean; ocr?: boolean }]>(function (o) {
+    (window as any).__SPECTRA_TEST__.scanSetPostOptions(o);
+  }, opts);
+}
+
+export async function scanRemovePage(id: string): Promise<void> {
+  await browser.execute<void, [string]>(function (i) {
+    (window as any).__SPECTRA_TEST__.scanRemovePage(i);
+  }, id);
+}
+
+/** Assemble the staged pages into `output` and open the result — the REAL
+ * `create_pdf` and the REAL open funnel. */
+export async function scanSaveAs(output: string): Promise<string | null> {
+  const result = await browser.executeAsync<string | null, [string]>(
+    function (out, done) {
+      (window as any).__SPECTRA_TEST__.scanSaveAs(out)
+        .then((path: string | null) => done(path))
+        .catch((err: unknown) => done((ERROR_TAG + String(err)) as any));
+    },
+    output,
+  );
+  if (typeof result === 'string' && result.startsWith(ERROR_TAG)) {
+    throw new Error(`scanSaveAs failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}
+
+/** Assemble and append into the open document through the REAL byte-only
+ * import machinery. */
+export async function scanAppend(output: string): Promise<string | null> {
+  const result = await browser.executeAsync<string | null, [string]>(
+    function (out, done) {
+      (window as any).__SPECTRA_TEST__.scanAppend(out)
+        .then((path: string | null) => done(path))
+        .catch((err: unknown) => done((ERROR_TAG + String(err)) as any));
+    },
+    output,
+  );
+  if (typeof result === 'string' && result.startsWith(ERROR_TAG)) {
+    throw new Error(`scanAppend failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}
+
+export async function scanSnapshot(): Promise<ScanSnapshot | null> {
+  return await browser.execute<ScanSnapshot | null, []>(function () {
+    return (window as any).__SPECTRA_TEST__.scanSnapshot();
+  });
+}
+
+/** `list_scanners` straight through the bridge — the empty-list contract the
+ * empty state rests on. */
+export async function scanListDevices(): Promise<{
+  scanners: { id: string; name: string }[];
+  default: string | null;
+}> {
+  const result = await browser.executeAsync<unknown, []>(function (done) {
+    (window as any).__SPECTRA_TEST__.scanListDevices()
+      .then((list: unknown) => done(list))
+      .catch((err: unknown) => done(ERROR_TAG + String(err)));
+  });
+  if (typeof result === 'string' && result.startsWith(ERROR_TAG)) {
+    throw new Error(`scanListDevices failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result as { scanners: { id: string; name: string }[]; default: string | null };
+}
+
+/** `scanner_capabilities` on an id that names no device. Resolves to the
+ * structured refusal it threw, so a spec reads the KEY rather than parsing a
+ * sentence. */
+export async function scanCapabilitiesRefusal(
+  deviceId: string,
+): Promise<{ key: string; message: string; code: string | null } | null> {
+  return await browser.executeAsync<
+    { key: string; message: string; code: string | null } | null,
+    [string]
+  >(function (id, done) {
+    (window as any).__SPECTRA_TEST__.scanCapabilitiesRefusal(id).then((r: unknown) => done(r as any));
+  }, deviceId);
+}
+
 // --- Edit ▸ Images ---------------------------------------------------------
 
 export async function editImagePageIds(): Promise<string[]> {
