@@ -95,6 +95,11 @@ const FLATBED_ONLY = {
   device_name: 'E2E Flatbed 100',
   max_scan_time_ms: 60_000,
   sources: [reportedSource('flatbed', { pages: { kind: 'absent' } })],
+  // The picker rows are reported, not re-derived: a flatbed device offers one
+  // row and no duplex anywhere.
+  source_options: [
+    { id: 'flatbed', item_name: 'Root\\flatbed', document_handling: 2, feeds: false },
+  ],
   document_handling: {
     capabilities: 2,
     flatbed: true,
@@ -120,6 +125,13 @@ const FEEDER_DUPLEX = {
       color_modes: ['grayscale', 'color', 'auto'],
       resolution: { kind: 'span', min: 75, max: 4800, step: 1, current: 200 },
     }),
+  ],
+  source_options: [
+    { id: 'flatbed', item_name: 'Root\\flatbed', document_handling: 2, feeds: false },
+    { id: 'feeder', item_name: 'Root\\feeder', document_handling: 1, feeds: true },
+    // The duplex row transfers from the FEEDER item; the duplex bit names no
+    // source to take the sheet from.
+    { id: 'duplex', item_name: 'Root\\feeder', document_handling: 5, feeds: true },
   ],
   document_handling: {
     capabilities: 7,

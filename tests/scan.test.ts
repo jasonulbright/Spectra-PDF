@@ -30,6 +30,7 @@ import {
   sourceOptions,
   toScanSettings,
   type ControlModel,
+  type ScanSourceOption,
   type ScanSourceReport,
   type ScannerCapabilities,
   type SourceCategory,
@@ -56,12 +57,14 @@ function source(
 
 function device(
   sources: ScanSourceReport[],
+  options: ScanSourceOption[] = [],
   handling: Partial<ScannerCapabilities['document_handling']> = {},
 ): ScannerCapabilities {
   return {
     device_id: 'dev',
     device_name: 'A Scanner',
     max_scan_time_ms: 60000,
+    source_options: options,
     sources,
     document_handling: {
       capabilities: 0,
@@ -169,63 +172,54 @@ describe('the value a control opens on', () => {
   });
 });
 
-describe('the source picker is derived, never listed', () => {
-  it('a flatbed-only device offers no feeder and no duplex', () => {
-    const caps = device([source('flatbed')], { flatbed: true });
-    expect(sourceOptions(caps).map((o) => o.id)).toEqual(['flatbed']);
+describe('the source picker is read from the report, not re-derived', () => {
+  const flatbedRow: ScanSourceOption = {
+    id: 'flatbed',
+    item_name: 'Root\\flatbed',
+    document_handling: 2,
+    feeds: false,
+  };
+  const feederRow: ScanSourceOption = {
+    id: 'feeder',
+    item_name: 'Root\\feeder',
+    document_handling: 1,
+    feeds: true,
+  };
+  const duplexRow: ScanSourceOption = {
+    id: 'duplex',
+    item_name: 'Root\\feeder',
+    document_handling: 5,
+    feeds: true,
+  };
+
+  it('offers exactly the rows the device layer reported', () => {
+    // Which sources a device has is answered ONCE, in the device layer, so
+    // the dialog and the CLI arm cannot disagree about what "duplex" means.
+    const caps = device([source('flatbed'), source('feeder')], [flatbedRow, feederRow, duplexRow]);
+    expect(sourceOptions(caps)).toEqual([flatbedRow, feederRow, duplexRow]);
+    // A device with no reported row offers none, rather than a guess.
+    expect(sourceOptions(device([source('flatbed')], []))).toEqual([]);
   });
 
-  it('a feeder device with the duplex bit offers all three rows', () => {
-    const caps = device([source('flatbed'), source('feeder')], {
-      flatbed: true,
-      feeder: true,
-      duplex: true,
-      duplex_mode: 'duplex_bit',
-    });
-    const options = sourceOptions(caps);
-    expect(options.map((o) => o.id)).toEqual(['flatbed', 'feeder', 'duplex']);
-    // Each row writes the value the device layer reported for it — the bit
-    // values are never rebuilt here.
-    expect(options.map((o) => o.documentHandling)).toEqual([2, 1, 5]);
-    // Only a feeder can produce more than one page in one run, which is what
-    // makes a page count meaningful.
-    expect(options.map((o) => o.feeds)).toEqual([false, true, true]);
-  });
-
-  it('the duplex row transfers from the FEEDER item, not a duplex item', () => {
-    const caps = device([source('feeder'), source('feeder_front'), source('feeder_back')], {
-      feeder: true,
-      duplex: true,
-      advanced_duplex: true,
-      duplex_mode: 'front_back_items',
-    });
-    const duplex = sourceOptions(caps).find((o) => o.id === 'duplex');
-    expect(duplex?.itemName).toBe('Root\\feeder');
-  });
-
-  it('a device that reported no handling word still offers its one item', () => {
-    const caps = device([source('flatbed')]);
-    const options = sourceOptions(caps);
-    expect(options.map((o) => o.id)).toEqual(['flatbed']);
-    // Nothing is written to select a source the device never said it had a
-    // property for.
-    expect(options[0].documentHandling).toBeNull();
-  });
-
-  it('a row resolves back to its own report', () => {
+  it('resolves a row back to its own per-source report', () => {
     const flatbed = source('flatbed', { color_modes: ['color'] });
     const feeder = source('feeder', { color_modes: ['grayscale'] });
-    const caps = device([flatbed, feeder], { flatbed: true, feeder: true });
-    const options = sourceOptions(caps);
-    expect(reportFor(caps, options[1])?.color_modes).toEqual(['grayscale']);
+    const caps = device([flatbed, feeder], [flatbedRow, feederRow]);
+    expect(reportFor(caps, feederRow)?.color_modes).toEqual(['grayscale']);
+    expect(reportFor(caps, flatbedRow)?.color_modes).toEqual(['color']);
     // No row at all still answers with something transferable.
     expect(reportFor(caps, null)?.item_name).toBe(flatbed.item_name);
+    // A row naming an item the report no longer carries falls back rather
+    // than leaving the dialog with no controls at all.
+    expect(reportFor(caps, { ...feederRow, item_name: 'Root\\gone' })?.item_name).toBe(
+      flatbed.item_name,
+    );
   });
 });
 
 describe('the page count', () => {
-  const feederRow = { id: 'feeder' as const, itemName: 'f', documentHandling: 1, feeds: true };
-  const flatbedRow = { id: 'flatbed' as const, itemName: 'g', documentHandling: 2, feeds: false };
+  const feederRow = { id: 'feeder' as const, item_name: 'f', document_handling: 1, feeds: true };
+  const flatbedRow = { id: 'flatbed' as const, item_name: 'g', document_handling: 2, feeds: false };
 
   it('offers "all pages" only where the device takes zero for it', () => {
     expect(offersAllPages(feederRow, { kind: 'span', min: 0, max: 99, step: 1, current: 0 })).toBe(
@@ -256,7 +250,7 @@ describe('the page count', () => {
 
 describe('the settings sent to the device', () => {
   const form = {
-    option: { id: 'feeder' as const, itemName: 'Root\\feeder', documentHandling: 1, feeds: true },
+    option: { id: 'feeder' as const, item_name: 'Root\\feeder', document_handling: 1, feeds: true },
     dpi: 300,
     colorMode: 'color' as const,
     paper: 'letter' as const,
