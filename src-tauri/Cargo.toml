@@ -38,7 +38,12 @@ serde_json = "1"
 winreg = "0.56"
 window-vibrancy = "0.8"
 windows-version = "0.1"
-windows = { version = "0.62", features = ["UI_ViewManagement", "Win32_Graphics_Printing", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Variant", "Win32_System_TaskScheduler", "Win32_Devices_ImageAcquisition"] }
+windows = { version = "0.62", features = ["UI_ViewManagement", "Win32_Graphics_Printing", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Variant", "Win32_System_TaskScheduler", "Win32_Devices_ImageAcquisition", "Win32_UI_Shell"] }
+# Named directly, at the version `windows` itself uses: `#[implement]` expands
+# to `windows_core::` paths, and without a direct dependency that name resolves
+# to the older windows-core another crate in the graph pulls in, so the
+# generated COM vtable fails to typecheck against the interface it implements.
+windows-core = "0.62"
 tokio = { version = "1", features = ["sync", "io-util"] }
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"

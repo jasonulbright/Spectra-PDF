@@ -3823,6 +3823,7 @@ dependencies = [
  "uuid",
  "window-vibrancy 0.8.0",
  "windows 0.62.2",
+ "windows-core 0.62.2",
  "windows-version",
  "winreg 0.56.0",
 ]
