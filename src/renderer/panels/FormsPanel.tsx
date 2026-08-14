@@ -7,8 +7,26 @@ import { StatusBar } from '../components/StatusBar';
 import { readFormFields } from '../lib/forms';
 import { mergeUntouched } from '../lib/late-read';
 import type { FormField, FormFieldValue } from '../lib/forms';
+import {
+  ACTION_KIND_LABEL,
+  ACTION_TRIGGERS,
+  ACTION_TRIGGER_LABEL,
+  isRunnable,
+} from '../lib/field-actions';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
+
+/** The four value triggers, in the order a commit runs them — the same order
+ * `engine/forms.py` declares, so a refusal list reads the way the document
+ * would have executed. */
+const SCRIPT_TRIGGERS = ['K', 'V', 'C', 'F'] as const;
+
+const SCRIPT_TRIGGER_LABEL = {
+  K: 'panel.forms.scriptTrigger.K',
+  V: 'panel.forms.scriptTrigger.V',
+  C: 'panel.forms.scriptTrigger.C',
+  F: 'panel.forms.scriptTrigger.F',
+} as const satisfies Record<(typeof SCRIPT_TRIGGERS)[number], string>;
 
 /** Value equality across the FormFieldValue union (arrays compared element-wise). */
 function valueEquals(a: FormFieldValue | undefined, b: FormFieldValue | undefined): boolean {
@@ -116,6 +134,17 @@ export function FormsPanel(): React.ReactElement {
   const scriptsNotRunCount = fields.filter((f) => f.scriptsNotRun?.length).length;
   const unorderedCalcCount =
     calculationOrder.length === 0 ? fields.filter((f) => f.actions?.C).length : 0;
+  // The refused scripts THEMSELVES, per field and per trigger, with the body
+  // readable. A count alone states a position without evidencing it; a reader
+  // who wants to know what this app declined to run can see it, and the bytes
+  // are still in the document either way.
+  const refusedScripts = fields.flatMap((f) =>
+    (f.scriptsNotRun ?? [])
+      .filter((t): t is (typeof SCRIPT_TRIGGERS)[number] =>
+        (SCRIPT_TRIGGERS as readonly string[]).includes(t),
+      )
+      .map((trigger) => ({ field: f.name, trigger, js: f.actions?.[trigger] ?? '' })),
+  );
 
   const handleApply = useCallback(async () => {
     if (!activeFile) return;
@@ -202,9 +231,18 @@ export function FormsPanel(): React.ReactElement {
       {scriptsNotRunCount > 0 && (
         <div
           data-testid="forms-scripts-not-run"
-          className="shrink-0 px-3 py-2 bg-neutral-800/60 border border-neutral-700 rounded text-xs text-neutral-300"
+          className="shrink-0 px-3 py-2 bg-neutral-800/60 border border-neutral-700 rounded text-xs text-neutral-300 flex flex-col gap-2"
         >
-          {tChromeCount('panel.forms.scriptsNotRun', scriptsNotRunCount)}
+          <div>{tChromeCount('panel.forms.scriptsNotRun', scriptsNotRunCount)}</div>
+          <div className="text-neutral-200">{tChrome('panel.forms.scriptsTitle')}</div>
+          <p className="text-[11px] text-neutral-400">
+            {tChrome('panel.forms.scriptsPosition')}
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {refusedScripts.map((row) => (
+              <RefusedScript key={`${row.field}:${row.trigger}`} {...row} />
+            ))}
+          </div>
         </div>
       )}
 
@@ -251,6 +289,83 @@ export function FormsPanel(): React.ReactElement {
   );
 }
 
+/** One script this app declined to run: which field, which trigger, and the
+ * body on request. The body is the document's own bytes and is shown verbatim
+ * — never localized, never summarized, because a paraphrase of a script is not
+ * the script. */
+function RefusedScript({
+  field,
+  trigger,
+  js,
+}: {
+  field: string;
+  trigger: (typeof SCRIPT_TRIGGERS)[number];
+  js: string;
+}): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded border border-neutral-700 bg-neutral-900/60 p-1.5">
+      <div className="flex items-center gap-2">
+        <span className="text-neutral-200 truncate">{field}</span>
+        <span className="text-[11px] text-neutral-500 truncate">
+          {tChrome(SCRIPT_TRIGGER_LABEL[trigger])}
+        </span>
+        {js !== '' && (
+          <button
+            type="button"
+            data-testid={`forms-script-toggle-${field}-${trigger}`}
+            className="ms-auto text-[11px] text-neutral-400 hover:text-neutral-200 underline shrink-0"
+            onClick={() => setOpen((v) => !v)}
+          >
+            {tChrome(open ? 'panel.forms.scriptHide' : 'panel.forms.scriptShow')}
+          </button>
+        )}
+      </div>
+      {open && (
+        <pre
+          data-testid={`forms-script-body-${field}-${trigger}`}
+          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-neutral-950 p-1.5 text-[11px] text-neutral-300"
+        >
+          {js}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+/** The data actions a field carries, named from the one kind table the canvas
+ * and the properties editor also name them from. */
+function DataActions({ field }: { field: FormField }): React.ReactElement | null {
+  const rows = ACTION_TRIGGERS.flatMap((trigger) => {
+    const action = field.fieldActions?.[trigger];
+    return action ? [{ trigger, action }] : [];
+  });
+  if (rows.length === 0) return null;
+  return (
+    <div
+      className="mt-1 flex flex-col gap-0.5"
+      data-testid={`form-field-actions-${field.name}`}
+    >
+      {rows.map(({ trigger, action }) => (
+        <span key={trigger} className="text-[11px] text-neutral-500">
+          {/* An action this app reports rather than performs says so where it
+              is listed, not only when it is used — as a whole sentence, so a
+              translation can order the clause its own way. */}
+          {tChrome(
+            isRunnable(action)
+              ? 'panel.forms.dataActionRow'
+              : 'panel.forms.dataActionRowReported',
+            {
+              trigger: tChrome(ACTION_TRIGGER_LABEL[trigger]),
+              action: tChrome(ACTION_KIND_LABEL[action.kind]),
+            },
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function FieldRow({
   field,
   value,
@@ -278,17 +393,21 @@ function FieldRow({
   );
 
   // Non-fillable kinds render a disabled placeholder so the field is still
-  // visible in the list.
+  // visible in the list. A pushbutton holds no value at all, so what it DOES
+  // is the only thing there is to report about it.
   if (!field.editable) {
     return (
       <div>
         {label}
-        <input
-          type="text"
-          disabled
-          value={typeof value === 'string' ? value : Array.isArray(value) ? value.join(', ') : ''}
-          className="w-full px-3 py-1.5 bg-neutral-800/50 border border-neutral-800 rounded text-sm text-neutral-500"
-        />
+        {field.type !== 'button' && (
+          <input
+            type="text"
+            disabled
+            value={typeof value === 'string' ? value : Array.isArray(value) ? value.join(', ') : ''}
+            className="w-full px-3 py-1.5 bg-neutral-800/50 border border-neutral-800 rounded text-sm text-neutral-500"
+          />
+        )}
+        <DataActions field={field} />
       </div>
     );
   }
