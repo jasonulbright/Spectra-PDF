@@ -6,10 +6,16 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { FieldLockControl } from '../components/FieldLockControl';
 import {
   FieldActionsControl,
+  FieldDataActionsControl,
   actionsToDraft,
   draftToActions,
   type FieldActionsDraft,
 } from '../components/FieldActionsControl';
+import {
+  authoredActions,
+  unauthorableTriggers,
+  type AuthoredAction,
+} from '../lib/field-actions';
 import { DATE_FORMATS, TIME_FORMATS } from '../lib/af-calc';
 import { actionsFromScripts } from '../lib/af-emit';
 import { getCanvasServices, getCommandContext, invokeCommand } from '../commands/context';
@@ -111,6 +117,9 @@ export function PrepareFormPanel(): React.ReactElement {
   // drafts, an edit is applied deliberately — writing a property rewrites the
   // file, so it is not a per-keystroke act.
   const [actionDrafts, setActionDrafts] = useState<Record<string, FieldActionsDraft>>({});
+  // The DATA actions, drafted separately: a field can carry both, and the two
+  // answer different questions ("what does it hold" against "what does it do").
+  const [dataDrafts, setDataDrafts] = useState<Record<string, AuthoredAction[]>>({});
   const [applyingActions, setApplyingActions] = useState<string | null>(null);
 
   const path = activeFile?.path ?? null;
@@ -159,6 +168,7 @@ export function PrepareFormPanel(): React.ReactElement {
         // the document as carrying something it does not.
         setLockDrafts({});
         setActionDrafts({});
+        setDataDrafts({});
       })
       .catch(() => {
         if (!cancelled) setFields([]);
@@ -262,16 +272,31 @@ export function PrepareFormPanel(): React.ReactElement {
   /** The fields whose Format / Accepted range / Calculate can be edited. A
    * calculation writes a value, which only a text field holds; a format shows
    * one, which a dropdown does too. */
-  const propertyFields = useMemo(
+  const valueFields = useMemo(
     () => fields.filter((f) => f.type === 'text' || f.type === 'dropdown'),
     [fields],
+  );
+
+  /** Every field whose properties this panel edits. A button holds no value,
+   * so it gets the data-action editor alone — which is the whole of what a
+   * pushbutton is for. */
+  const propertyFields = useMemo(
+    () => fields.filter((f) => f.type === 'text' || f.type === 'dropdown' || f.type === 'button'),
+    [fields],
+  );
+
+  /** What an action may scope itself to: every field of the document, its own
+   * included — hiding the button that hides things is a real design. */
+  const actionContext = useMemo(
+    () => ({ fieldNames: fields.map((f) => f.name), pageCount: activeFile?.pageCount ?? 1 }),
+    [fields, activeFile?.pageCount],
   );
 
   /** What a calculation on `field` may read: every other field of the
    * document. A field cannot read itself, and the write refuses if it tries. */
   const calculableNames = useCallback(
-    (field: string) => propertyFields.filter((f) => f.name !== field).map((f) => f.name),
-    [propertyFields],
+    (field: string) => valueFields.filter((f) => f.name !== field).map((f) => f.name),
+    [valueFields],
   );
 
   /** The draft for a field: the pending edit when there is one, and otherwise
@@ -287,10 +312,26 @@ export function PrepareFormPanel(): React.ReactElement {
     [actionDrafts],
   );
 
+  /** The data actions for a field: the pending edit when there is one, else
+   * what the document itself carries, narrowed to the kinds this app writes.
+   * A kind it does not write is reported by `unauthorableOf` rather than
+   * silently dropped on apply. */
+  const dataOf = useCallback(
+    (field: FormField): AuthoredAction[] =>
+      dataDrafts[field.name] ?? authoredActions(field.fieldActions ?? {}),
+    [dataDrafts],
+  );
+
+  const unauthorableOf = useCallback(
+    (field: FormField) => unauthorableTriggers(field.fieldActions ?? {}),
+    [],
+  );
+
   const applyActions = useCallback(
     async (field: FormField) => {
       const draft = actionDrafts[field.name];
-      if (!path || !draft) return;
+      const data = dataDrafts[field.name];
+      if (!path || (!draft && !data)) return;
       setApplyingActions(field.name);
       setError(null);
       try {
@@ -299,10 +340,14 @@ export function PrepareFormPanel(): React.ReactElement {
         // one place every other edit takes it.
         const handlers = getCommandContext()?.app;
         if (!handlers) return;
+        // Each half is total over itself, so a half this field does not have
+        // an editor for is passed as null and left exactly as the document
+        // carries it — a button edit must not reach the value triggers.
         const written = await handlers.setFieldActions(
           path,
           field.name,
-          draftToActions(draft),
+          field.type === 'button' ? null : draftToActions(draft ?? actionsOf(field)),
+          data ?? authoredActions(field.fieldActions ?? {}),
         );
         setStatus(
           written
@@ -315,7 +360,7 @@ export function PrepareFormPanel(): React.ReactElement {
         setApplyingActions(null);
       }
     },
-    [actionDrafts, path],
+    [actionDrafts, dataDrafts, actionsOf, path],
   );
 
   const lockOf = useCallback(
@@ -697,17 +742,28 @@ export function PrepareFormPanel(): React.ReactElement {
             data-testid={`prepare-form-fieldprop-${field.name}`}
           >
             <div className="text-xs text-neutral-200 truncate">{field.name}</div>
-            <FieldActionsControl
-              value={actionsOf(field)}
-              onChange={(next) => setActionDrafts((prev) => ({ ...prev, [field.name]: next }))}
-              fieldNames={calculableNames(field.name)}
+            {field.type !== 'button' && (
+              <FieldActionsControl
+                value={actionsOf(field)}
+                onChange={(next) => setActionDrafts((prev) => ({ ...prev, [field.name]: next }))}
+                fieldNames={calculableNames(field.name)}
+                idPrefix={`prepare-form-fieldprop-${field.name}`}
+                showCalculate={field.type === 'text'}
+              />
+            )}
+            <FieldDataActionsControl
+              value={dataOf(field)}
+              onChange={(next) => setDataDrafts((prev) => ({ ...prev, [field.name]: next }))}
+              context={actionContext}
               idPrefix={`prepare-form-fieldprop-${field.name}`}
-              showCalculate={field.type === 'text'}
+              unauthorable={unauthorableOf(field)}
             />
             <button
               className="self-start bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded px-2 py-1 text-xs"
               data-testid={`prepare-form-fieldprop-apply-${field.name}`}
-              disabled={!actionDrafts[field.name] || applyingActions !== null}
+              disabled={
+                (!actionDrafts[field.name] && !dataDrafts[field.name]) || applyingActions !== null
+              }
               onClick={() => void applyActions(field)}
             >
               {applyingActions === field.name

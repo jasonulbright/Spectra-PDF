@@ -19,6 +19,7 @@ import {
   type SignaturePolicy,
 } from './lib/signatures';
 import { toEngineFormat } from './lib/af-emit';
+import { toEngineAction, type AuthoredAction, type WidgetAction } from './lib/field-actions';
 import type { FieldActions } from './lib/form-candidates';
 import type { EditImageMaskParam } from './lib/edit-images';
 import type { ParagraphEditOpts } from './lib/edit-paragraphs';
@@ -205,6 +206,16 @@ const panels: Record<Operation, React.ComponentType> = {
   tablereview: TableReviewPanel,
   scanenhance: ScanEnhancePanel,
   spelling: SpellingPanel,
+};
+
+/** What a built submission is saved as. `html` is
+ * `application/x-www-form-urlencoded` text, which has no extension of its own,
+ * so it takes the one a text editor will open. */
+const SUBMIT_EXTENSION: Record<'fdf' | 'xfdf' | 'html' | 'pdf', string> = {
+  fdf: '.fdf',
+  xfdf: '.xfdf',
+  html: '.txt',
+  pdf: '.pdf',
 };
 
 function AppContent(): React.ReactElement {
@@ -976,24 +987,36 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
-  // A pushbutton widget clicked in fill mode. Reset runs for REAL (the
-  // engine op, undoable). A URI is SHOWN and offered to the clipboard — this
-  // app deliberately opens no external URLs itself (the notify-only-updates
-  // posture: no general shell-open surface exists to misuse). JavaScript and
-  // submit actions are reported honestly rather than half-simulated.
-  const handleFormButton = useCallback(
-    async (
-      path: string,
-      fieldName: string,
-      action:
-        | { kind: 'uri'; uri: string }
-        | { kind: 'reset'; fields: string[] | null; exclude: boolean }
-        | { kind: 'javascript' }
-        | { kind: 'submit' }
-        | { kind: 'named'; name: string }
-        | { kind: 'other' }
-        | null,
-    ) => {
+  // An address this app will not open is still an address the user wants.
+  // One implementation, so every "we don't open this — here it is" path
+  // reports a clipboard failure the same way.
+  const copyToClipboard = useCallback(
+    async (text: string) => {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        await showNotice(
+          tChrome('app.formButton.title'),
+          tChrome('app.formButton.clipboardFailed'),
+        );
+      }
+    },
+    [showNotice],
+  );
+
+  // A widget's data action, fired by the gesture the document authored it on.
+  //
+  // Every kind that carries no code RUNS: go-to navigates, reset and show/hide
+  // and import are engine ops (undoable through the ordinary snapshot), and
+  // submit BUILDS the submission in full. What it does not do is send it.
+  // This app performs no outbound request and opens no external address —
+  // there is no general shell-open surface for a document-supplied string to
+  // reach — so a submission lands in a file the user names and its destination
+  // is reported and offered to the clipboard, which is the treatment a `/URI`
+  // has always had here. A script, a go-to into another file and an action
+  // this build does not know are reported by name and run nothing.
+  const handleWidgetAction = useCallback(
+    async (path: string, fieldName: string, action: WidgetAction | null) => {
       if (!action) {
         await showNotice(
           tChrome('app.formButton.title'),
@@ -1002,6 +1025,25 @@ function AppContent(): React.ReactElement {
         return;
       }
       switch (action.kind) {
+        case 'goto': {
+          if (action.page === null) {
+            await showNotice(
+              tChrome('app.formButton.title'),
+              tChrome('app.formButton.gotoUnresolved', { field: fieldName }),
+            );
+            return;
+          }
+          // Ids are opaque, so the jump resolves the page NUMBER against live
+          // workspace state rather than building one.
+          const landed = getCanvasServices()?.jumpToFilePage(path, action.page + 1) ?? false;
+          if (!landed) {
+            await showNotice(
+              tChrome('app.formButton.title'),
+              tChrome('app.formButton.gotoUnresolved', { field: fieldName }),
+            );
+          }
+          return;
+        }
         case 'reset': {
           const params: Record<string, unknown> = {};
           if (action.fields) params.fields = action.fields;
@@ -1010,21 +1052,80 @@ function AppContent(): React.ReactElement {
           await performOperation(path, 'reset_form_fields', params);
           return;
         }
+        case 'hide': {
+          if (action.targets.length === 0) return;
+          const f = state.files.get(path);
+          if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+          // A visibility change writes the annotation's own /F bit: the page
+          // raster is drawn from the file, so a widget hidden only in memory
+          // is still on the page every other reader sees.
+          if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'annotate'))) return;
+          await performOperation(path, 'set_widget_visibility', {
+            targets: action.targets,
+            hide: action.hide,
+          });
+          return;
+        }
+        case 'import': {
+          // The action names a file; this app asks the user instead, so a
+          // document can never make it read a path nobody chose. The authored
+          // name is shown so the user can find the right file.
+          const proceed = await showProceedConfirm(
+            tChrome('app.formButton.importTitle'),
+            tChrome('app.formButton.import', {
+              field: fieldName,
+              file: action.file || tChrome('app.formButton.importNoFile'),
+            }),
+          );
+          if (!proceed) return;
+          const chosen = await dialog.pickFormDataFile();
+          if (!chosen) return;
+          await performOperation(path, 'import_form_data', {
+            data: chosen,
+            font_dir: await app.getEditFontPath(),
+          });
+          return;
+        }
+        case 'submit': {
+          const proceed = await showProceedConfirm(
+            tChrome('app.formButton.submitTitle'),
+            tChrome('app.formButton.submit', {
+              field: fieldName,
+              url: action.url,
+              format: action.format,
+            }),
+          );
+          if (!proceed) return;
+          const f = state.files.get(path);
+          if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+          const stem = (f.name || 'form').replace(/\.pdf$/i, '');
+          const target = await dialog.saveFormDataFile(
+            `${stem}${SUBMIT_EXTENSION[action.format]}`,
+          );
+          if (!target) return;
+          // Read-only against the document, so it takes the gated call and
+          // writes its payload beside — never through performOperation, which
+          // would replace the file with its own submission.
+          await call('export_form_data', {
+            file: f.workingPath,
+            output: target,
+            format: action.format,
+            ...(action.fields ? { fields: action.fields, exclude: action.exclude } : {}),
+            include_empty: action.includeEmpty,
+          });
+          const copy = await showProceedConfirm(
+            tChrome('app.formButton.submitBuiltTitle'),
+            tChrome('app.formButton.submitBuilt', { file: target, url: action.url }),
+          );
+          if (copy) await copyToClipboard(action.url);
+          return;
+        }
         case 'uri': {
           const copy = await showProceedConfirm(
             tChrome('app.formButton.externalTitle'),
             tChrome('app.formButton.uri', { field: fieldName, uri: action.uri }),
           );
-          if (copy) {
-            try {
-              await navigator.clipboard.writeText(action.uri);
-            } catch {
-              await showNotice(
-                tChrome('app.formButton.title'),
-                tChrome('app.formButton.clipboardFailed'),
-              );
-            }
-          }
+          if (copy) await copyToClipboard(action.uri);
           return;
         }
         case 'javascript':
@@ -1033,10 +1134,13 @@ function AppContent(): React.ReactElement {
             tChrome('app.formButton.javascript', { field: fieldName }),
           );
           return;
-        case 'submit':
+        case 'remote':
           await showNotice(
             tChrome('app.formButton.title'),
-            tChrome('app.formButton.submit', { field: fieldName }),
+            tChrome('app.formButton.remote', {
+              field: fieldName,
+              file: action.file || tChrome('app.formButton.importNoFile'),
+            }),
           );
           return;
         case 'named':
@@ -1052,7 +1156,15 @@ function AppContent(): React.ReactElement {
           );
       }
     },
-    [performOperation, showNotice, showProceedConfirm],
+    [
+      state.files,
+      call,
+      performOperation,
+      confirmEditOfSignedDoc,
+      showNotice,
+      showProceedConfirm,
+      copyToClipboard,
+    ],
   );
 
   // Link authoring writes /Link annotations, so it is an annotate-class edit:
@@ -1204,21 +1316,33 @@ function AppContent(): React.ReactElement {
   );
 
   const handleSetFieldActions = useCallback(
-    async (path: string, field: string, actions: FieldActions): Promise<boolean> => {
+    async (
+      path: string,
+      field: string,
+      actions: FieldActions | null,
+      data?: AuthoredAction[],
+    ): Promise<boolean> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return false;
-      // The door is total: every member absent from `actions` is CLEARED, so
-      // the request names what to clear rather than relying on an omission the
-      // wire cannot distinguish from "leave it".
+      // The door is total over what it is ASKED about and inert about the
+      // rest. `clear` names the members this call addresses, because the wire
+      // cannot distinguish an omitted member from "leave it": passing
+      // `actions` takes over the value half, passing `data` takes over every
+      // data trigger, and a null/absent half leaves the document's own alone.
+      // A button edit must not silently destroy a script it never mentioned.
       await performOperation(path, 'set_field_actions', {
         field,
         allow_signed: true,
-        clear: ['format', 'validate', 'calculate', 'default_value'],
-        ...(actions.format ? { format: toEngineFormat(actions.format) } : {}),
-        ...(actions.validate ? { validate: actions.validate } : {}),
-        ...(actions.calculate ? { calculate: actions.calculate } : {}),
-        ...(actions.defaultValue !== undefined ? { default_value: actions.defaultValue } : {}),
+        clear: [
+          ...(actions ? ['format', 'validate', 'calculate', 'default_value'] : []),
+          ...(data ? ['actions'] : []),
+        ],
+        ...(actions?.format ? { format: toEngineFormat(actions.format) } : {}),
+        ...(actions?.validate ? { validate: actions.validate } : {}),
+        ...(actions?.calculate ? { calculate: actions.calculate } : {}),
+        ...(actions?.defaultValue !== undefined ? { default_value: actions.defaultValue } : {}),
+        ...(data ? { actions: data.map(toEngineAction) } : {}),
       });
       return true;
     },
@@ -2098,7 +2222,8 @@ function AppContent(): React.ReactElement {
       minimizeToTray: () => h.current.minimizeToTray(),
       sanitizeDocument: (path, request) => h.current.sanitizeDocument(path, request),
       setFieldLock: (path, field, lock) => h.current.setFieldLock(path, field, lock),
-      setFieldActions: (path, field, actions) => h.current.setFieldActions(path, field, actions),
+      setFieldActions: (path, field, actions, data) =>
+        h.current.setFieldActions(path, field, actions, data),
     });
     setCommandStateSource(() => ({ state: stateRef.current, dispatch }));
     return () => {
@@ -2456,7 +2581,7 @@ function AppContent(): React.ReactElement {
                   onExtractText={handleExtractFromCanvas}
                   onRedactFile={handleRedactFile}
                   onSaveRedactionMarks={handleSaveRedactionMarks}
-                  onFormButton={handleFormButton}
+                  onWidgetAction={handleWidgetAction}
                   onAddLinks={handleAddLinks}
                   onApplyOcrLayer={handleApplyOcrLayer}
                   onEditImage={handleEditImage}

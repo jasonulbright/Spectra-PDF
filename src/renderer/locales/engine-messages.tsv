@@ -138,6 +138,9 @@ form_detect.scanMustAutoNever	exact	form_detect	scan must be "auto", "never" or 
 form_prepare.unknownFieldKindChoose	pattern	form_prepare	unknown field kind: {{v0}} (choose from {{v1}})
 forms.acroformFieldTreeNested	exact	forms	AcroForm field tree nested too deeply
 forms.couldnTRegenerateAppearance	pattern	forms	couldn't regenerate the appearance for {{v0}}: {{exc}}
+forms.nameFormDataFile	exact	forms	Name the form-data file to import.
+forms.nameFormFieldsShow	exact	forms	Name the form fields to show or hide.
+forms.unknownSubmissionFormatExpected	pattern	forms	unknown submission format {{fmt}}; expected one of {{v1}}
 forms.valueContainsCharactersOutside	exact	forms	value contains characters outside the form font's encoding (WinAnsi)
 glyph_outlines.fontProgramProducedCurve	exact	glyph_outlines	A font program produced a curve segment with an unexpected number of points.
 glyph_outlines.fontProgramProducedQuadratic	exact	glyph_outlines	A font program produced a quadratic curve segment the outline emitter cannot place.

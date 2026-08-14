@@ -34,7 +34,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Dictionary, Name
 
-from engine import afcalc
+from engine import afcalc, fieldactions, formdata
 from engine.acroform import calculation_order_names
 from engine.afscript import recognize
 from engine.document_js import decode_js
@@ -458,56 +458,15 @@ def _widget_geometry(
     return out
 
 
-def _button_action(field: _Field) -> dict | None:
-    """A pushbutton's /A action, classified for the fill overlay.
+def _widget_actions(pdf: pikepdf.Pdf, field: _Field) -> dict:
+    """``{trigger: classified action}`` for a field, through the one
+    classifier (`engine.fieldactions`) the writer's inverse also uses.
 
-    The renderer acts only on what it can act on HONESTLY: reset runs for
-    real (reset_form_fields), a URI is SHOWN (this app deliberately has no
-    general shell-open — the notify-only-updates posture), and the rest
-    report their kind. The /A is read from the field or its first widget.
+    A field's data actions are reported for EVERY trigger it carries, not
+    only the pushbutton activation the fill overlay used to read: an action
+    on mouse-enter is an action the author wrote, and one this app runs.
     """
-    node = field.attr("/A")
-    if node is None:
-        for w in field.widgets:
-            try:
-                node = w.get("/A")
-            except Exception:
-                node = None
-            if node is not None:
-                break
-    if node is None:
-        return None
-    try:
-        s = str(node.get("/S"))
-    except Exception:
-        return {"kind": "other"}
-    if s == "/URI":
-        uri = node.get("/URI")
-        return {"kind": "uri", "uri": str(uri) if uri is not None else ""}
-    if s == "/ResetForm":
-        # /Fields lists targets (names or refs); bit 1 of /Flags inverts it
-        # to an EXCLUDE list. Refs are skipped best-effort — a reset scoped
-        # by refs degrades to all-fields, never to a crash.
-        names: list[str] = []
-        try:
-            for entry in node.get("/Fields") or []:
-                if isinstance(entry, pikepdf.String):
-                    names.append(str(entry))
-        except Exception:
-            names = []
-        try:
-            exclude = bool(int(node.get("/Flags") or 0) & 1)
-        except Exception:
-            exclude = False
-        return {"kind": "reset", "fields": names or None, "exclude": exclude}
-    if s == "/JavaScript":
-        return {"kind": "javascript"}
-    if s == "/SubmitForm":
-        return {"kind": "submit"}
-    if s == "/Named":
-        n = node.get("/N")
-        return {"kind": "named", "name": str(n) if n is not None else ""}
-    return {"kind": "other"}
+    return fieldactions.read_actions(pdf, field.obj)
 
 
 # ── Field scripts (/AA) and the calculation order (/CO) ───────────────────
@@ -615,10 +574,12 @@ def read_form_fields(file: str) -> dict:
                 # The seed an unsigned field carries binds whoever signs it
                 # later, so the preparer surface reads it from here.
                 entry["lock"] = lock_of_field_dict(field.obj)
-            if ftype == "button":
-                action = _button_action(field)
-                if action is not None:
-                    entry["action"] = action
+            # The data actions this field carries, by trigger — the /AA and
+            # /A kinds that are not scripts, so all of them can be both
+            # reported and run without a JavaScript engine.
+            data_actions = _widget_actions(pdf, field)
+            if data_actions:
+                entry["field_actions"] = data_actions
             # The field's own scripts, as RAW /JS text: the renderer runs its
             # own recognizer over these (the twin), and the two are pinned
             # against tests/fixtures/af-corpus.json. `scripts_not_run` is this
@@ -1021,6 +982,215 @@ def _script_problem(name: str, value: str, problem) -> str:
     return f'{name}: "{value}" is not a valid number'
 
 
+def _in_scope(name: str, named: list | None, exclude: bool) -> bool:
+    """Whether a field falls inside an action's `/Fields` scope.
+
+    A named field covers its CHILDREN too (``Address`` covers ``Address.City``)
+    -- that is what naming a hierarchy parent means -- and `/Flags` bit 1
+    inverts the whole test into an exclude list. One implementation, because
+    reset, submit and import all scope the same way and a second answer to
+    "which fields does this act on" is a second answer to what it did.
+    """
+    if not named:
+        return True
+    hit = any(name == n or name.startswith(str(n) + ".") for n in named)
+    return hit != bool(exclude)
+
+
+def form_data_values(
+    pdf: pikepdf.Pdf,
+    fields: list | None = None,
+    exclude: bool = False,
+    include_empty: bool = False,
+) -> dict:
+    """``{field name: value}`` for a submission or an export.
+
+    Buttons and signatures carry no submittable value and are never included.
+    An empty field is left out unless ``include_empty`` says the receiver
+    wants to see it, which is what `/SubmitForm`'s IncludeNoValueFields bit
+    asks for.
+    """
+    out: dict = {}
+    for field in _all_fields(pdf):
+        ftype = _classify(field)
+        if ftype in ("button", "signature", "unknown"):
+            continue
+        if not _in_scope(field.name, fields, exclude):
+            continue
+        value = _field_value(field, ftype)
+        empty = value in (None, "", False) or (isinstance(value, list) and not value)
+        if empty and not include_empty:
+            continue
+        out[field.name] = "" if value is None else value
+    return out
+
+
+def export_form_data(
+    file: str,
+    output: str,
+    format: str = "fdf",
+    fields: list | None = None,
+    exclude: bool = False,
+    include_empty: bool = False,
+    source: str = "",
+) -> dict:
+    """Write this document's field values as FDF, XFDF, HTML or the PDF itself.
+
+    This is the whole of `/SubmitForm` except the request. **Nothing is sent.**
+    The app performs no outbound request and opens no external address; the
+    submission lands in a file the caller names and the destination is
+    reported back so a human can complete it.
+
+    ``format`` ``pdf`` copies the document, which is what SubmitPDF means.
+    """
+    fmt = str(format or "fdf")
+    if fmt not in formdata.FORMAT_EXTENSION:
+        raise ValueError(
+            f"unknown submission format {fmt}; expected one of "
+            f"{', '.join(sorted(formdata.FORMAT_EXTENSION))}"
+        )
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if fmt == "pdf":
+        if Path(file).resolve() != output_path.resolve():
+            shutil.copyfile(file, output_path)
+        return {"output": str(output_path), "format": fmt, "count": 0}
+    with pikepdf.open(file) as pdf:
+        values = form_data_values(pdf, fields, exclude, include_empty)
+    name = source or Path(file).name
+    if fmt == "fdf":
+        payload = formdata.write_fdf(values, name)
+    elif fmt == "xfdf":
+        payload = formdata.write_xfdf_fields(values, name)
+    else:
+        payload = formdata.write_html_form_data(values)
+    output_path.write_bytes(payload)
+    return {"output": str(output_path), "format": fmt, "count": len(values)}
+
+
+def import_form_data(
+    file: str,
+    output: str,
+    data: str = "",
+    fields: list | None = None,
+    exclude: bool = False,
+    font_dir: str = "",
+) -> dict:
+    """Fill this document from an FDF or XFDF data file.
+
+    `/ImportData`'s honest half. The data file is read from the LOCAL path the
+    caller names -- never from the path the action itself carries, which is
+    the document telling the app to open a file the user never chose.
+
+    A name the document does not have is REPORTED, not fatal: a data file
+    written for a revision of the form is the ordinary case, and refusing the
+    whole import over one stale name would lose every value that does fit.
+    Implemented as a delegated fill, so the import inherits keystroke
+    validation, the calculation pass, appearance regeneration and signature
+    preservation without a second implementation to drift.
+    """
+    if not str(data or "").strip():
+        raise ValueError("Name the form-data file to import.")
+    values = formdata.parse_form_data(str(data))
+    with pikepdf.open(file) as pdf:
+        known: dict = {}
+        for field in _all_fields(pdf):
+            known[field.name] = _classify(field)
+    edits: dict = {}
+    unknown: list[str] = []
+    skipped: list[str] = []
+    for name, value in values.items():
+        ftype = known.get(name)
+        if ftype is None:
+            unknown.append(name)
+            continue
+        if ftype in ("button", "signature", "unknown"):
+            skipped.append(name)
+            continue
+        if not _in_scope(name, fields, exclude):
+            continue
+        if ftype == "checkbox":
+            edits[name] = str(value).strip().lower() not in ("", "off", "false", "no", "0")
+        elif ftype == "optionlist":
+            edits[name] = value if isinstance(value, list) else [str(value)]
+        else:
+            edits[name] = value[0] if isinstance(value, list) and value else (
+                "" if isinstance(value, list) else str(value)
+            )
+    if not edits:
+        if Path(file).resolve() != Path(output).resolve():
+            shutil.copyfile(file, output)
+        out = {"output": str(output), "imported": 0}
+        if unknown:
+            out["unknown"] = unknown
+        if skipped:
+            out["skipped"] = skipped
+        return out
+    result = fill_form_fields(file, output, edits, font_dir=font_dir)
+    out = {"output": result["output"], "imported": result["filled"]}
+    if unknown:
+        out["unknown"] = unknown
+    if skipped:
+        out["skipped"] = skipped
+    for key in ("calculated", "scripts_not_run", "signatures_preserved"):
+        if result.get(key):
+            out[key] = result[key]
+    return out
+
+
+def set_widget_visibility(
+    file: str,
+    output: str,
+    targets: list | None = None,
+    hide: bool = True,
+) -> dict:
+    """Show or hide the widgets of the named fields -- the `/Hide` action.
+
+    A visibility change is a real change to the document, not view state: the
+    page raster is drawn from the file's own annotations, so a widget hidden
+    only in a viewer's memory is still on the page every other reader sees.
+    It is written as the annotation `/F` Hidden bit, which is exactly what
+    `/Hide` means, and the caller's undo covers it like any other edit.
+    """
+    names = [str(n) for n in (targets or []) if str(n).strip()]
+    if not names:
+        raise ValueError("Name the form fields to show or hide.")
+    input_path = Path(file)
+    output_path = Path(output)
+    same_file = input_path.resolve() == output_path.resolve()
+    changed = 0
+    missing: list[str] = []
+    with pikepdf.open(file) as pdf:
+        by_name = {f.name: f for f in _all_fields(pdf)}
+        acted: list[str] = []
+        for name in names:
+            field = by_name.get(name)
+            if field is None:
+                missing.append(name)
+                continue
+            acted.append(name)
+            changed += fieldactions.set_widget_hidden(field.obj, bool(hide))
+        if missing and not acted:
+            raise ValueError(
+                "this document has no form field named " + ", ".join(missing)
+            )
+        if same_file:
+            with tempfile.NamedTemporaryFile(
+                suffix=".pdf", delete=False, dir=str(input_path.parent)
+            ) as tmp:
+                staged = tmp.name
+            save_pdf(pdf, staged)
+        else:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            save_pdf(pdf, output_path)
+    if same_file:
+        shutil.move(staged, str(output_path))
+    out = {"output": str(output_path), "changed": changed, "hidden": bool(hide)}
+    if missing:
+        out["missing"] = missing
+    return out
+
+
 def reset_form_fields(
     file: str,
     output: str,
@@ -1043,10 +1213,7 @@ def reset_form_fields(
     named = [str(n) for n in fields] if fields else None
 
     def _chosen(name: str) -> bool:
-        if named is None:
-            return True
-        hit = any(name == n or name.startswith(n + ".") for n in named)
-        return hit != bool(exclude)
+        return _in_scope(name, named, exclude)
 
     values: dict = {}
     skipped_bad_dv: list[str] = []

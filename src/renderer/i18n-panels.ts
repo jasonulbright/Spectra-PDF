@@ -430,6 +430,21 @@ export const PANEL_STRINGS = {
     '{{count}} field carries a calculation, but this document declares no calculation order, so it was not run.',
   'panel.forms.noCalculationOrder_other':
     '{{count}} fields carry calculations, but this document declares no calculation order, so they were not run.',
+  // The stated position on document scripts, and the disclosure that makes it
+  // one: what was refused, on which field, and the script itself, readable.
+  'panel.forms.scriptsTitle': 'Scripts this app does not run',
+  'panel.forms.scriptsPosition':
+    'This app runs no form script it cannot verify. It runs the standard formatting, validation and calculation calls, which are declarative and carry no code; anything else is left in the document exactly as it was, and reported here.',
+  'panel.forms.scriptShow': 'Show the script',
+  'panel.forms.scriptHide': 'Hide the script',
+  'panel.forms.scriptTrigger.K': 'When a value is typed',
+  'panel.forms.scriptTrigger.V': 'When a value is checked',
+  'panel.forms.scriptTrigger.C': 'When the form recalculates',
+  'panel.forms.scriptTrigger.F': 'When a value is displayed',
+  'panel.forms.dataActionRow': '{{trigger}}: {{action}}',
+  // The whole sentence, not a suffix bolted onto the row above: a translation
+  // orders the clause where its own grammar wants it.
+  'panel.forms.dataActionRowReported': '{{trigger}}: {{action}} — reported, not performed',
 
   'panel.compare.open': 'Open a PDF to compare',
   'panel.compare.comparingLabel': 'Comparing:',
@@ -1569,6 +1584,51 @@ export const PANEL_STRINGS = {
   'panel.fieldActions.expressionInvalid':
     'This expression cannot be read, so no viewer would compute it the same way.',
   'panel.fieldActions.defaultValue': 'Starts as',
+  // The data actions — the `/AA` kinds that carry no code, so all of them can
+  // be both authored and performed.
+  'panel.fieldActions.actions': 'Does',
+  'panel.fieldActions.actionsNone': 'This field does nothing when it is used.',
+  'panel.fieldActions.actionAdd': 'Add an action',
+  'panel.fieldActions.actionRemove': 'Remove',
+  'panel.fieldActions.actionKind': 'Action',
+  'panel.fieldActions.actionDirection': 'Effect',
+  'panel.fieldActions.actionTrigger': 'When',
+  'panel.fieldActions.actionGoto': 'Go to a page',
+  'panel.fieldActions.actionUri': 'Open a link',
+  'panel.fieldActions.actionReset': 'Reset the form',
+  'panel.fieldActions.actionSubmit': 'Submit the form',
+  'panel.fieldActions.actionHide': 'Show or hide fields',
+  'panel.fieldActions.actionImport': 'Import form data',
+  'panel.fieldActions.actionNamed': 'A viewer command',
+  'panel.fieldActions.actionJavascript': 'Run a script',
+  'panel.fieldActions.actionRemote': 'Go to another document',
+  'panel.fieldActions.actionOther': 'An action this app does not know',
+  'panel.fieldActions.triggerActivate': 'It is clicked',
+  'panel.fieldActions.triggerDown': 'The mouse goes down',
+  'panel.fieldActions.triggerUp': 'The mouse comes up',
+  'panel.fieldActions.triggerEnter': 'The pointer enters it',
+  'panel.fieldActions.triggerExit': 'The pointer leaves it',
+  'panel.fieldActions.triggerFocus': 'It gains focus',
+  'panel.fieldActions.triggerBlur': 'It loses focus',
+  'panel.fieldActions.actionPage': 'Page',
+  'panel.fieldActions.actionAddress': 'Address',
+  'panel.fieldActions.actionFile': 'File',
+  'panel.fieldActions.actionFormat': 'Send as',
+  'panel.fieldActions.actionMethod': 'Method',
+  'panel.fieldActions.actionMethodPost': 'POST',
+  'panel.fieldActions.actionMethodGet': 'GET',
+  'panel.fieldActions.actionIncludeEmpty': 'Include fields with no value',
+  'panel.fieldActions.actionShow': 'Show them',
+  'panel.fieldActions.actionHideThem': 'Hide them',
+  'panel.fieldActions.actionScopeAll': 'Every field',
+  'panel.fieldActions.actionScopeOnly': 'Only the fields below',
+  'panel.fieldActions.actionScopeExcept': 'Every field except those below',
+  'panel.fieldActions.actionScope': 'Fields',
+  'panel.fieldActions.actionTargets': 'Fields',
+  'panel.fieldActions.actionSubmitNote':
+    'The submission is built in full and saved to a file you choose. This app sends nothing over the network itself.',
+  'panel.fieldActions.actionUnauthorable':
+    'This field also carries an action this app does not author ({{kinds}}). Applying here removes it.',
   'panel.prepareForm.reasonRuleWithoutLabel':
     'Page {{page}}: {{count}} line(s) with no label beside them were left out — they read as a table, not a fill-in.',
   'panel.prepareForm.reasonCovered':

@@ -216,8 +216,13 @@ interface WorkspaceCanvasViewProps {
   // Persist the pending marks as the file's /Redact annotation set
   // (same performOperation shape — undoable; the reload re-seeds).
   onSaveRedactionMarks: (path: string, regions: RedactionRegion[]) => Promise<void>;
-  // A pushbutton widget clicked in fill mode, with its classified /A.
-  onFormButton: (path: string, fieldName: string, action: import('../../lib/forms').ButtonAction | null) => Promise<void>;
+  // A widget's data action, fired by the gesture the document authored it on
+  // (a pushbutton's `/A` on a click, the `/AA` triggers on theirs).
+  onWidgetAction: (
+    path: string,
+    fieldName: string,
+    action: import('../../lib/field-actions').WidgetAction | null,
+  ) => Promise<void>;
   // Author link regions from a text selection (same performOperation shape:
   // gate flush -> snapshot -> engine add_links -> reload, so it undoes).
   onAddLinks: (path: string, links: LinkSpec[]) => Promise<void>;
@@ -510,7 +515,7 @@ export function WorkspaceCanvasView({
   onExtractText,
   onRedactFile,
   onSaveRedactionMarks,
-  onFormButton,
+  onWidgetAction,
   onAddLinks,
   onApplyOcrLayer,
   onEditImage,
@@ -6241,7 +6246,11 @@ export function WorkspaceCanvasView({
             formValuesByPath: formDisplayValues,
             onSetFormValue,
             onSignFieldRequest,
-            onFormButton: (p: string, f: string, a: import('../../lib/forms').ButtonAction | null) => void onFormButton(p, f, a),
+            onWidgetAction: (
+              p: string,
+              f: string,
+              a: import('../../lib/field-actions').WidgetAction | null,
+            ) => void onWidgetAction(p, f, a),
             newFieldPlacement: liveNewFieldPlacement,
             onSetNewFieldRect,
             onClearNewFieldPlacement,
@@ -6504,7 +6513,7 @@ export function WorkspaceCanvasView({
           formValuesByPath={formDisplayValues}
           onSetFormValue={onSetFormValue}
           onSignFieldRequest={onSignFieldRequest}
-          onFormButton={(p, f, a) => void onFormButton(p, f, a)}
+          onWidgetAction={(p, f, a) => void onWidgetAction(p, f, a)}
           newFieldPlacement={liveNewFieldPlacement}
           onSetNewFieldRect={onSetNewFieldRect}
           onClearNewFieldPlacement={onClearNewFieldPlacement}
