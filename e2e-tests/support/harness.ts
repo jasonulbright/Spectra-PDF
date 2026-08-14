@@ -1110,6 +1110,30 @@ export async function applyCanvasFormValues(): Promise<void> {
   }
 }
 
+/** What the overlay SHOWS for a field — the typed value, or the one the
+ * document's own calculation order computes from it, formatted as the page
+ * draws it. Null when nothing overrides the stored value. */
+export async function canvasFormShownValue(
+  path: string,
+  fieldName: string,
+): Promise<string | null> {
+  return browser.executeAsync<string | null, [string, string]>(
+    function (p, name, done) {
+      (window as any).__SPECTRA_TEST__.canvasFormShownValue(p, name)
+        .then((v: string | null) => done(v))
+        .catch(() => done(null));
+    },
+    path,
+    fieldName,
+  );
+}
+
+export async function canvasFormScriptsNotRun(path: string): Promise<string[]> {
+  return browser.execute(function (p) {
+    return (window as any).__SPECTRA_TEST__.canvasFormScriptsNotRun(p);
+  }, path);
+}
+
 export async function formWidgetCount(path: string): Promise<number> {
   return browser.execute(function (p) {
     return (window as any).__SPECTRA_TEST__.formWidgetCount(p);

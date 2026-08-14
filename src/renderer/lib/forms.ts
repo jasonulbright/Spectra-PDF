@@ -39,6 +39,17 @@ export interface FormWidgetPlacement {
   hidden: boolean;
 }
 
+/** The field's `/AA` scripts as RAW `/JS` text, keyed by trigger — keystroke,
+ * validate, calculate, format. The renderer runs its OWN recognizer over
+ * these (`lib/af-script.ts`); the engine's verdict arrives separately as
+ * `scriptsNotRun`, so a panel can name a refusal without re-deriving it. */
+export interface FormFieldActions {
+  K?: string;
+  V?: string;
+  C?: string;
+  F?: string;
+}
+
 export interface FormField {
   name: string;
   type: FormFieldType;
@@ -47,6 +58,14 @@ export interface FormField {
   readOnly: boolean;
   required: boolean;
   multiline?: boolean; // text only
+  // Raw /JS bodies of the field's own action triggers, when it has any.
+  actions?: FormFieldActions;
+  // Triggers whose script this app does not run — their /JS bytes stay
+  // untouched and every other field still calculates.
+  scriptsNotRun?: string[];
+  // The document's /CO names this field, so its value is computed rather
+  // than typed.
+  calculated?: boolean;
   // Whether this field can be filled: a supported input kind and not read-only.
   // buttons/signatures are always false; so are read-only fields of any kind.
   editable: boolean;
@@ -75,6 +94,10 @@ export type ButtonAction =
 export interface FormReadResult {
   fields: FormField[];
   hasXFA: boolean;
+  /** The document's declared calculation order, as fully-qualified names.
+   * Empty means calculations do not run at all — the format puts the order
+   * here, and inventing one would compute a number no other viewer computes. */
+  calculationOrder: string[];
 }
 
 const EDITABLE_TYPES = new Set<FormFieldType>([
@@ -114,6 +137,9 @@ interface EngineField {
   lock?: { action?: string; fields?: unknown[] } | null;
   action?: ButtonAction;
   widgets?: EngineWidget[];
+  actions?: Record<string, string>;
+  scripts_not_run?: string[];
+  calculated?: boolean;
 }
 
 /** The engine's lock read, narrowed to the wire vocabulary. An action this
@@ -127,6 +153,26 @@ function lockOfEngineField(raw: EngineField['lock']): FieldLock | null {
 interface EngineReadResult {
   has_xfa?: boolean;
   fields?: EngineField[];
+  calculation_order?: string[];
+}
+
+const TRIGGERS = ['K', 'V', 'C', 'F'] as const;
+
+/** The engine's raw `/JS` bodies, narrowed to the four field triggers. A key
+ * this build does not know is dropped rather than carried as an unusable
+ * script. */
+function actionsOfEngineField(raw: EngineField['actions']): FormFieldActions | null {
+  if (!raw) return null;
+  const out: FormFieldActions = {};
+  let any = false;
+  for (const trigger of TRIGGERS) {
+    const js = raw[trigger];
+    if (typeof js === 'string') {
+      out[trigger] = js;
+      any = true;
+    }
+  }
+  return any ? out : null;
 }
 
 // Coerce the engine `value` into the FormFieldValue the field's type expects.
@@ -168,6 +214,7 @@ export function mapEngineField(ef: EngineField): FormField | null {
       ...(typeof w.option === 'string' ? { radioOption: w.option } : {}),
     });
   }
+  const actions = actionsOfEngineField(ef.actions);
   return {
     name: ef.name,
     type,
@@ -176,6 +223,9 @@ export function mapEngineField(ef: EngineField): FormField | null {
     readOnly,
     required: Boolean(ef.required),
     ...(ef.multiline !== undefined ? { multiline: Boolean(ef.multiline) } : {}),
+    ...(actions ? { actions } : {}),
+    ...(ef.scripts_not_run?.length ? { scriptsNotRun: [...ef.scripts_not_run] } : {}),
+    ...(ef.calculated ? { calculated: true } : {}),
     editable: EDITABLE_TYPES.has(type) && !readOnly,
     widgets,
     ...(type === 'signature' ? { filled: Boolean(ef.filled), lock: lockOfEngineField(ef.lock) } : {}),
@@ -197,5 +247,9 @@ export async function readFormFields(call: EngineCall, path: string): Promise<Fo
     const mapped = mapEngineField(ef);
     if (mapped) fields.push(mapped);
   }
-  return { fields, hasXFA: Boolean(res.has_xfa) };
+  return {
+    fields,
+    hasXFA: Boolean(res.has_xfa),
+    calculationOrder: (res.calculation_order ?? []).map((n) => String(n)),
+  };
 }

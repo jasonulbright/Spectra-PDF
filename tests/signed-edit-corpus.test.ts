@@ -15,8 +15,13 @@ interface Case {
   policy: SignaturePolicy;
   class: EditClass;
   fields?: string[];
+  /** The caller's own half of `fields`; the rest is what the document's
+   * calculation order recomputes as a result. */
+  typed?: string[];
   kind: 'proceed' | 'warn' | 'refuse';
   reason?: string;
+  locked?: string[];
+  indirect?: boolean;
 }
 
 const corpus = JSON.parse(
@@ -26,9 +31,19 @@ const corpus = JSON.parse(
 describe('signed-edit corpus', () => {
   for (const c of corpus.cases) {
     it(c.name, () => {
-      const decision = signedEditDecision(c.policy, c.class, c.fields ?? null);
+      const decision = signedEditDecision(c.policy, c.class, c.fields ?? null, c.typed ?? null);
       expect(decision.kind).toBe(c.kind);
       expect(decision.kind === 'proceed' ? undefined : decision.reason).toBe(c.reason);
+      if (c.locked !== undefined) {
+        expect(decision.kind === 'proceed' ? undefined : decision.fields).toEqual(c.locked);
+      }
+      if (c.indirect !== undefined) {
+        const key = decision.kind === 'proceed' ? undefined : decision.bodyKey;
+        expect(key === 'app.signedEdit.lockedByCalculation').toBe(c.indirect);
+        expect(decision.kind === 'proceed' ? undefined : decision.typed).toEqual(
+          c.indirect ? c.typed : undefined,
+        );
+      }
     });
   }
 

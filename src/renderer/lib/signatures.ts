@@ -298,7 +298,8 @@ export type SignedEditKey =
   | 'app.signedEdit.certifiedWarnAnnotate'
   | 'app.signedEdit.certifiedWarnUnknown'
   | 'app.signedEdit.lockedTitle'
-  | 'app.signedEdit.lockedRefused';
+  | 'app.signedEdit.lockedRefused'
+  | 'app.signedEdit.lockedByCalculation';
 
 /** Why an edit was refused or warned about — a stable name, never display
  * text. A surface renders a catalog string from it; a sweep with no surface
@@ -321,6 +322,10 @@ export type SignedEditDecision =
       /** The locked field names a `fields-locked` refusal stopped; empty on
        * every other reason. */
       fields?: string[];
+      /** Set only when every locked field was reached through a CALCULATION
+       * rather than named by the caller: the fields the caller did name, so
+       * the refusal can say which typing caused it. */
+      typed?: string[];
     };
 
 // A structural edit is never in this table: page removal, reordering, content
@@ -356,6 +361,7 @@ function lockRefusal(
   policy: SignaturePolicy,
   editClass: EditClass,
   fields: readonly string[] | null,
+  typed: readonly string[] | null,
 ): SignedEditDecision | null {
   if (editClass !== 'form-fill') return null;
   const locks = policy.locks ?? [];
@@ -371,12 +377,18 @@ function lockRefusal(
     );
     if (hit.length === 0) return null;
   }
+  // Indirect only when NOTHING the caller named is itself locked: a fill that
+  // also names a locked field is refused for that, and naming the calculation
+  // as the cause would misdescribe it.
+  const indirect =
+    typed !== null && typed.length > 0 && hit.length > 0 && !hit.some((name) => typed.includes(name));
   return {
     kind: 'refuse',
     reason: 'fields-locked',
     titleKey: 'app.signedEdit.lockedTitle',
-    bodyKey: 'app.signedEdit.lockedRefused',
+    bodyKey: indirect ? 'app.signedEdit.lockedByCalculation' : 'app.signedEdit.lockedRefused',
     fields: hit,
+    ...(indirect ? { typed: [...typed] } : {}),
   };
 }
 
@@ -394,6 +406,7 @@ export function signedEditDecision(
   policy: SignaturePolicy,
   editClass: EditClass,
   fields: readonly string[] | null = null,
+  typed: readonly string[] | null = null,
 ): SignedEditDecision {
   if (!policy.signed && !policy.certified) return { kind: 'proceed' };
   if (policy.certified && policy.level === 'none') {
@@ -404,7 +417,7 @@ export function signedEditDecision(
       bodyKey: 'app.signedEdit.certifiedRefused',
     };
   }
-  const locked = lockRefusal(policy, editClass, fields);
+  const locked = lockRefusal(policy, editClass, fields, typed);
   if (locked) return locked;
   if (!policy.certified) {
     if (PERMITTED_CLASSES.uncertified.includes(editClass)) return { kind: 'proceed' };
