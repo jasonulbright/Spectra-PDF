@@ -10,7 +10,9 @@ import {
   PDFDict,
   PDFString,
   PDFArray,
+  PDFHexString,
   PDFRawStream,
+  PDFRef,
   decodePDFRawStream,
 } from 'pdf-lib';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -26,6 +28,9 @@ import {
   canvasFormShownValue,
   canvasFormScriptsNotRun,
   applyCanvasFormValues,
+  invokeAppCommand,
+  placeNewField,
+  createPlacedField,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -203,3 +208,121 @@ describe('a form that calculates', () => {
     expect(message).toContain('outside the allowed range');
   });
 });
+
+// ── authoring: the placement card writes the stock scripts ────────────────
+//
+// The whole point of writing the ecosystem's own call shapes is that OTHER
+// viewers execute them. So the assertions read the authored `/AA` back through
+// pdf.js — a second implementation, not ours — and require the exact bodies,
+// then fill the form and require the Total the document itself declares.
+describe('a form this app authors', () => {
+  let tmp: string;
+  let source: string;
+
+  before(async () => {
+    tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-form-author-'));
+    source = resolve(tmp, 'blank.pdf');
+    const doc = await PDFDocument.create();
+    doc.addPage([600, 400]);
+    writeFileSync(source, await doc.save());
+  });
+
+  after(async () => {
+    await closeAllFiles();
+    if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('authors a summed, money-formatted total through the placement card', async () => {
+    await waitForHarness();
+    await closeAllFiles();
+    await openByPaths([source]);
+    await setView('canvas');
+    expect(await invokeAppCommand('tools.panel.prepareform')).toBe(true);
+
+    await placeNewField({ x: 0.1, y: 0.2, w: 0.4, h: 0.06 });
+    await createPlacedField({ name: 'Item1', type: 'text' }, { path: source });
+    await placeNewField({ x: 0.1, y: 0.35, w: 0.4, h: 0.06 });
+    await createPlacedField({ name: 'Item2', type: 'text' }, { path: source });
+    await placeNewField({ x: 0.1, y: 0.5, w: 0.4, h: 0.06 });
+    await createPlacedField(
+      {
+        name: 'Total',
+        type: 'text',
+        actions: {
+          format: {
+            kind: 'number',
+            decimals: 2,
+            sepStyle: 0,
+            negStyle: 0,
+            currency: '',
+            currencyPrepend: true,
+          },
+          calculate: { op: 'SUM', fields: ['Item1', 'Item2'] },
+        },
+      },
+      { path: source },
+    );
+
+    const authored = resolve(tmp, 'authored.pdf');
+    await saveActiveAs(authored);
+
+    // Read back through pdf.js: what a DIFFERENT implementation sees is what
+    // decides whether another viewer computes the same total.
+    const fields = await readFields(authored);
+    expect(fields.get('Total')?.actions.Calculate).toEqual([
+      'AFSimple_Calculate("SUM", new Array("Item1","Item2"));',
+    ]);
+    expect(fields.get('Total')?.actions.Format).toEqual([
+      'AFNumber_Format(2, 0, 0, 0, "", true);',
+    ]);
+    expect(fields.get('Total')?.actions.Keystroke).toEqual([
+      'AFNumber_Keystroke(2, 0, 0, 0, "", true);',
+    ]);
+    expect(await calculationOrder(authored)).toEqual(['Total']);
+  });
+
+  it('computes the authored total when the form is filled', async () => {
+    expect(await setCanvasFormValue(source, 'Item1', '10')).toBe(true);
+    expect(await setCanvasFormValue(source, 'Item2', '1234.5')).toBe(true);
+    expect(await canvasFormShownValue(source, 'Total')).toBe('1,244.50');
+
+    await applyCanvasFormValues();
+    const filled = resolve(tmp, 'authored-filled.pdf');
+    await saveActiveAs(filled);
+
+    const fields = await readFields(filled);
+    expect(fields.get('Total')?.value).toBe('1244.5');
+    expect(await appearanceOf(filled, 'Total')).toContain('(1,244.50) Tj');
+  });
+
+  it('refuses a calculation that would depend on itself', async () => {
+    await placeNewField({ x: 0.1, y: 0.65, w: 0.4, h: 0.06 });
+    let message = '';
+    try {
+      await createPlacedField({
+        name: 'Loop',
+        type: 'text',
+        actions: { calculate: { op: 'SUM', fields: ['Loop'] } },
+      });
+    } catch (err) {
+      message = String(err);
+    }
+    expect(message).toContain('depends on itself');
+  });
+});
+
+/** The `/CO` the saved document declares, by field name. */
+async function calculationOrder(path: string): Promise<string[]> {
+  const doc = await PDFDocument.load(new Uint8Array(readFileSync(path)));
+  const acro = doc.catalog.lookup(PDFName.of('AcroForm'), PDFDict);
+  const co = acro.lookupMaybe(PDFName.of('CO'), PDFArray);
+  const names: string[] = [];
+  for (let i = 0; i < (co?.size() ?? 0); i++) {
+    const entry = co!.get(i);
+    const dict = entry instanceof PDFRef ? doc.context.lookup(entry) : entry;
+    if (!(dict instanceof PDFDict)) continue;
+    const t = dict.get(PDFName.of('T'));
+    if (t instanceof PDFString || t instanceof PDFHexString) names.push(t.decodeText());
+  }
+  return names;
+}

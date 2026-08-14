@@ -18,7 +18,8 @@
     "",
     "`js` is a raw /JS body. `script` is the recognized structure, or null",
     "when the body is not one this app runs — that field keeps its bytes and",
-    "is reported by name while the rest of the form still calculates."
+    "is reported by name while the rest of the form still calculates.",
+    "`emit` pins the AUTHORING half: a format/validate/calculate choice and the exact /JS bodies both twins write for it. Every body here reads back through the recognizer, so a script this app writes is always one it runs, and the strings are the call shapes the ecosystem writes so every other viewer executes them identically. `order` pins the /CO a batch produces: a topological sort over the dependency graph, an existing order never re-sorted, and a cycle refused by the chain that proves it."
   ],
   "entry_points": [
     "AFDate_Format",
@@ -1968,5 +1969,768 @@
     "AFRange_Validate(true, 0, true, 100);",
     "AFSimple_Calculate(\"SUM\", new Array(\"Item.1\",\"Item.2\",\"Item.3\"));",
     "event.value = Subtotal + Tax;"
+  ],
+  "emit": [
+    {
+      "name": "money, two decimals, US separators, prepended symbol",
+      "spec": {
+        "format": {
+          "kind": "number",
+          "decimals": 2,
+          "sep_style": 0,
+          "neg_style": 0,
+          "currency": "$",
+          "currency_prepend": true
+        }
+      },
+      "scripts": {
+        "F": "AFNumber_Format(2, 0, 0, 0, \"$\", true);",
+        "K": "AFNumber_Keystroke(2, 0, 0, 0, \"$\", true);"
+      }
+    },
+    {
+      "name": "a plain number with no symbol",
+      "spec": {
+        "format": {
+          "kind": "number",
+          "decimals": 0,
+          "sep_style": 0,
+          "neg_style": 0,
+          "currency": "",
+          "currency_prepend": true
+        }
+      },
+      "scripts": {
+        "F": "AFNumber_Format(0, 0, 0, 0, \"\", true);",
+        "K": "AFNumber_Keystroke(0, 0, 0, 0, \"\", true);"
+      }
+    },
+    {
+      "name": "European separators, symbol appended, parenthesised negatives",
+      "spec": {
+        "format": {
+          "kind": "number",
+          "decimals": 2,
+          "sep_style": 2,
+          "neg_style": 1,
+          "currency": " €",
+          "currency_prepend": false
+        }
+      },
+      "scripts": {
+        "F": "AFNumber_Format(2, 2, 1, 0, \" €\", false);",
+        "K": "AFNumber_Keystroke(2, 2, 1, 0, \" €\", false);"
+      }
+    },
+    {
+      "name": "Swiss separators, red negatives",
+      "spec": {
+        "format": {
+          "kind": "number",
+          "decimals": 2,
+          "sep_style": 4,
+          "neg_style": 2,
+          "currency": "",
+          "currency_prepend": true
+        }
+      },
+      "scripts": {
+        "F": "AFNumber_Format(2, 4, 2, 0, \"\", true);",
+        "K": "AFNumber_Keystroke(2, 4, 2, 0, \"\", true);"
+      }
+    },
+    {
+      "name": "no thousands separator, comma decimal, red parenthesised negatives",
+      "spec": {
+        "format": {
+          "kind": "number",
+          "decimals": 3,
+          "sep_style": 3,
+          "neg_style": 3,
+          "currency": "",
+          "currency_prepend": true
+        }
+      },
+      "scripts": {
+        "F": "AFNumber_Format(3, 3, 3, 0, \"\", true);",
+        "K": "AFNumber_Keystroke(3, 3, 3, 0, \"\", true);"
+      }
+    },
+    {
+      "name": "a percent with one decimal",
+      "spec": {
+        "format": {
+          "kind": "percent",
+          "decimals": 1,
+          "sep_style": 0
+        }
+      },
+      "scripts": {
+        "F": "AFPercent_Format(1, 0);",
+        "K": "AFPercent_Keystroke(1, 0);"
+      }
+    },
+    {
+      "name": "a percent whose sign leads",
+      "spec": {
+        "format": {
+          "kind": "percent",
+          "decimals": 0,
+          "sep_style": 0,
+          "prepend": true
+        }
+      },
+      "scripts": {
+        "F": "AFPercent_Format(0, 0, true);",
+        "K": "AFPercent_Keystroke(0, 0);"
+      }
+    },
+    {
+      "name": "a date in the short US mask",
+      "spec": {
+        "format": {
+          "kind": "date",
+          "mask": "mm/dd/yy"
+        }
+      },
+      "scripts": {
+        "F": "AFDate_FormatEx(\"mm/dd/yy\");",
+        "K": "AFDate_KeystrokeEx(\"mm/dd/yy\");"
+      }
+    },
+    {
+      "name": "a date in the long month mask",
+      "spec": {
+        "format": {
+          "kind": "date",
+          "mask": "mmmm d, yyyy"
+        }
+      },
+      "scripts": {
+        "F": "AFDate_FormatEx(\"mmmm d, yyyy\");",
+        "K": "AFDate_KeystrokeEx(\"mmmm d, yyyy\");"
+      }
+    },
+    {
+      "name": "a 24-hour time",
+      "spec": {
+        "format": {
+          "kind": "time",
+          "mask": "HH:MM"
+        }
+      },
+      "scripts": {
+        "F": "AFTime_FormatEx(\"HH:MM\");",
+        "K": "AFTime_KeystrokeEx(\"HH:MM\");"
+      }
+    },
+    {
+      "name": "a 12-hour time with seconds",
+      "spec": {
+        "format": {
+          "kind": "time",
+          "mask": "h:MM:ss tt"
+        }
+      },
+      "scripts": {
+        "F": "AFTime_FormatEx(\"h:MM:ss tt\");",
+        "K": "AFTime_KeystrokeEx(\"h:MM:ss tt\");"
+      }
+    },
+    {
+      "name": "a zip code",
+      "spec": {
+        "format": {
+          "kind": "special",
+          "psf": 0
+        }
+      },
+      "scripts": {
+        "F": "AFSpecial_Format(0);",
+        "K": "AFSpecial_Keystroke(0);"
+      }
+    },
+    {
+      "name": "a zip+4",
+      "spec": {
+        "format": {
+          "kind": "special",
+          "psf": 1
+        }
+      },
+      "scripts": {
+        "F": "AFSpecial_Format(1);",
+        "K": "AFSpecial_Keystroke(1);"
+      }
+    },
+    {
+      "name": "a telephone number",
+      "spec": {
+        "format": {
+          "kind": "special",
+          "psf": 2
+        }
+      },
+      "scripts": {
+        "F": "AFSpecial_Format(2);",
+        "K": "AFSpecial_Keystroke(2);"
+      }
+    },
+    {
+      "name": "a social security number",
+      "spec": {
+        "format": {
+          "kind": "special",
+          "psf": 3
+        }
+      },
+      "scripts": {
+        "F": "AFSpecial_Format(3);",
+        "K": "AFSpecial_Keystroke(3);"
+      }
+    },
+    {
+      "name": "an arbitrary mask, keystroke only",
+      "spec": {
+        "format": {
+          "kind": "mask",
+          "mask": "AA-9999-O"
+        }
+      },
+      "scripts": {
+        "K": "AFSpecial_KeystrokeEx(\"AA-9999-O\");"
+      }
+    },
+    {
+      "name": "a range with both bounds",
+      "spec": {
+        "validate": {
+          "min": 0,
+          "max": 100
+        }
+      },
+      "scripts": {
+        "V": "AFRange_Validate(true, 0, true, 100);"
+      }
+    },
+    {
+      "name": "a smallest value only",
+      "spec": {
+        "validate": {
+          "min": 1
+        }
+      },
+      "scripts": {
+        "V": "AFRange_Validate(true, 1, false, 0);"
+      }
+    },
+    {
+      "name": "a largest value only",
+      "spec": {
+        "validate": {
+          "max": 99.5
+        }
+      },
+      "scripts": {
+        "V": "AFRange_Validate(false, 0, true, 99.5);"
+      }
+    },
+    {
+      "name": "a negative smallest value",
+      "spec": {
+        "validate": {
+          "min": -40,
+          "max": 40
+        }
+      },
+      "scripts": {
+        "V": "AFRange_Validate(true, -40, true, 40);"
+      }
+    },
+    {
+      "name": "a sum over three line items",
+      "spec": {
+        "calculate": {
+          "op": "SUM",
+          "fields": [
+            "Item.1",
+            "Item.2",
+            "Item.3"
+          ]
+        }
+      },
+      "scripts": {
+        "C": "AFSimple_Calculate(\"SUM\", new Array(\"Item.1\",\"Item.2\",\"Item.3\"));"
+      },
+      "inputs": [
+        "Item.1",
+        "Item.2",
+        "Item.3"
+      ]
+    },
+    {
+      "name": "a product of two fields",
+      "spec": {
+        "calculate": {
+          "op": "PRD",
+          "fields": [
+            "Price",
+            "Qty"
+          ]
+        }
+      },
+      "scripts": {
+        "C": "AFSimple_Calculate(\"PRD\", new Array(\"Price\",\"Qty\"));"
+      },
+      "inputs": [
+        "Price",
+        "Qty"
+      ]
+    },
+    {
+      "name": "an average",
+      "spec": {
+        "calculate": {
+          "op": "AVG",
+          "fields": [
+            "Score1",
+            "Score2"
+          ]
+        }
+      },
+      "scripts": {
+        "C": "AFSimple_Calculate(\"AVG\", new Array(\"Score1\",\"Score2\"));"
+      },
+      "inputs": [
+        "Score1",
+        "Score2"
+      ]
+    },
+    {
+      "name": "a minimum",
+      "spec": {
+        "calculate": {
+          "op": "MIN",
+          "fields": [
+            "Bid A",
+            "Bid B"
+          ]
+        }
+      },
+      "scripts": {
+        "C": "AFSimple_Calculate(\"MIN\", new Array(\"Bid A\",\"Bid B\"));"
+      },
+      "inputs": [
+        "Bid A",
+        "Bid B"
+      ]
+    },
+    {
+      "name": "a maximum",
+      "spec": {
+        "calculate": {
+          "op": "MAX",
+          "fields": [
+            "Bid A",
+            "Bid B"
+          ]
+        }
+      },
+      "scripts": {
+        "C": "AFSimple_Calculate(\"MAX\", new Array(\"Bid A\",\"Bid B\"));"
+      },
+      "inputs": [
+        "Bid A",
+        "Bid B"
+      ]
+    },
+    {
+      "name": "simplified field notation, addition",
+      "spec": {
+        "calculate": {
+          "sfn": "Subtotal + Tax"
+        }
+      },
+      "scripts": {
+        "C": "event.value = Subtotal + Tax;"
+      },
+      "inputs": [
+        "Subtotal",
+        "Tax"
+      ]
+    },
+    {
+      "name": "simplified field notation, parenthesised",
+      "spec": {
+        "calculate": {
+          "sfn": "(Price * Qty) - Discount"
+        }
+      },
+      "scripts": {
+        "C": "event.value = (Price * Qty) - Discount;"
+      },
+      "inputs": [
+        "Price",
+        "Qty",
+        "Discount"
+      ]
+    },
+    {
+      "name": "simplified field notation over a dotted name",
+      "spec": {
+        "calculate": {
+          "sfn": "Item.1 + Item.2"
+        }
+      },
+      "scripts": {
+        "C": "event.value = Item.1 + Item.2;"
+      },
+      "inputs": [
+        "Item.1",
+        "Item.2"
+      ]
+    },
+    {
+      "name": "money that also calculates and validates",
+      "spec": {
+        "format": {
+          "kind": "number",
+          "decimals": 2,
+          "sep_style": 0,
+          "neg_style": 0,
+          "currency": "",
+          "currency_prepend": true
+        },
+        "validate": {
+          "min": 0,
+          "max": 10000
+        },
+        "calculate": {
+          "op": "SUM",
+          "fields": [
+            "Item.1",
+            "Item.2"
+          ]
+        }
+      },
+      "scripts": {
+        "F": "AFNumber_Format(2, 0, 0, 0, \"\", true);",
+        "K": "AFNumber_Keystroke(2, 0, 0, 0, \"\", true);",
+        "V": "AFRange_Validate(true, 0, true, 10000);",
+        "C": "AFSimple_Calculate(\"SUM\", new Array(\"Item.1\",\"Item.2\"));"
+      },
+      "inputs": [
+        "Item.1",
+        "Item.2"
+      ]
+    },
+    {
+      "name": "a range with neither bound refuses",
+      "spec": {
+        "validate": {}
+      },
+      "refuses": true
+    },
+    {
+      "name": "a range whose smallest is larger than its largest refuses",
+      "spec": {
+        "validate": {
+          "min": 10,
+          "max": 1
+        }
+      },
+      "refuses": true
+    },
+    {
+      "name": "a calculation naming no fields refuses",
+      "spec": {
+        "calculate": {
+          "op": "SUM",
+          "fields": []
+        }
+      },
+      "refuses": true
+    },
+    {
+      "name": "an unknown calculation refuses",
+      "spec": {
+        "calculate": {
+          "op": "TOTAL",
+          "fields": [
+            "A"
+          ]
+        }
+      },
+      "refuses": true
+    },
+    {
+      "name": "an expression the recognizer cannot read refuses",
+      "spec": {
+        "calculate": {
+          "sfn": "this.getField('A').value"
+        }
+      },
+      "refuses": true
+    },
+    {
+      "name": "an unknown format refuses",
+      "spec": {
+        "format": {
+          "kind": "roman"
+        }
+      },
+      "refuses": true
+    },
+    {
+      "name": "a date with no mask refuses",
+      "spec": {
+        "format": {
+          "kind": "date",
+          "mask": ""
+        }
+      },
+      "refuses": true
+    },
+    {
+      "name": "a separator style outside the table refuses",
+      "spec": {
+        "format": {
+          "kind": "number",
+          "decimals": 2,
+          "sep_style": 9,
+          "neg_style": 0,
+          "currency": "",
+          "currency_prepend": true
+        }
+      },
+      "refuses": true
+    }
+  ],
+  "order": [
+    {
+      "name": "a total lands after the items it reads",
+      "existing": [],
+      "existing_inputs": {},
+      "new": [
+        [
+          "Total",
+          [
+            "Item1",
+            "Item2"
+          ]
+        ],
+        [
+          "Item1",
+          []
+        ],
+        [
+          "Item2",
+          []
+        ]
+      ],
+      "order": [
+        "Item1",
+        "Item2",
+        "Total"
+      ]
+    },
+    {
+      "name": "a chain sorts into its own dependency order",
+      "existing": [],
+      "existing_inputs": {},
+      "new": [
+        [
+          "Grand",
+          [
+            "Sub"
+          ]
+        ],
+        [
+          "Sub",
+          [
+            "A",
+            "B"
+          ]
+        ]
+      ],
+      "order": [
+        "Sub",
+        "Grand"
+      ]
+    },
+    {
+      "name": "independent calculations keep their authoring order",
+      "existing": [],
+      "existing_inputs": {},
+      "new": [
+        [
+          "First",
+          [
+            "A"
+          ]
+        ],
+        [
+          "Second",
+          [
+            "B"
+          ]
+        ]
+      ],
+      "order": [
+        "First",
+        "Second"
+      ]
+    },
+    {
+      "name": "an existing order is never re-sorted",
+      "existing": [
+        "Late",
+        "Early"
+      ],
+      "existing_inputs": {
+        "Late": [
+          "Early"
+        ],
+        "Early": [
+          "A"
+        ]
+      },
+      "new": [
+        [
+          "Newest",
+          [
+            "Late"
+          ]
+        ]
+      ],
+      "order": [
+        "Late",
+        "Newest",
+        "Early"
+      ]
+    },
+    {
+      "name": "a new entry lands after the existing entry it reads",
+      "existing": [
+        "Sub",
+        "Other"
+      ],
+      "existing_inputs": {
+        "Sub": [
+          "A"
+        ],
+        "Other": [
+          "B"
+        ]
+      },
+      "new": [
+        [
+          "Grand",
+          [
+            "Sub"
+          ]
+        ]
+      ],
+      "order": [
+        "Sub",
+        "Grand",
+        "Other"
+      ]
+    },
+    {
+      "name": "re-authoring an existing entry moves it to satisfy its inputs",
+      "existing": [
+        "Total",
+        "Sub"
+      ],
+      "existing_inputs": {
+        "Total": [
+          "Sub"
+        ],
+        "Sub": [
+          "A"
+        ]
+      },
+      "new": [
+        [
+          "Total",
+          [
+            "Sub"
+          ]
+        ]
+      ],
+      "order": [
+        "Sub",
+        "Total"
+      ]
+    },
+    {
+      "name": "two fields that read each other refuse by name",
+      "existing": [],
+      "existing_inputs": {},
+      "new": [
+        [
+          "A",
+          [
+            "B"
+          ]
+        ],
+        [
+          "B",
+          [
+            "A"
+          ]
+        ]
+      ],
+      "cycle": true,
+      "chain": [
+        "A",
+        "B",
+        "A"
+      ]
+    },
+    {
+      "name": "a field that reads itself refuses",
+      "existing": [],
+      "existing_inputs": {},
+      "new": [
+        [
+          "A",
+          [
+            "A"
+          ]
+        ]
+      ],
+      "cycle": true,
+      "chain": [
+        "A",
+        "A"
+      ]
+    },
+    {
+      "name": "a cycle through an existing entry refuses",
+      "existing": [
+        "Total"
+      ],
+      "existing_inputs": {
+        "Total": [
+          "Sub"
+        ]
+      },
+      "new": [
+        [
+          "Sub",
+          [
+            "Total"
+          ]
+        ]
+      ],
+      "cycle": true,
+      "chain": [
+        "Sub",
+        "Total",
+        "Sub"
+      ]
+    }
   ]
 }

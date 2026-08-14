@@ -895,6 +895,11 @@ export interface CanvasFormsHandlers {
     type: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'optionlist' | 'signature';
     options?: string[];
     multiline?: boolean;
+    comb?: boolean;
+    maxLength?: number;
+    /** Format / accepted range / calculation, in the renderer's own spelling —
+     * the same object the card's control produces. */
+    actions?: import('./lib/form-candidates').FieldActions;
     lock?: { action: 'all' | 'include' | 'exclude' | null; fields: string[] };
   }) => Promise<void>;
   // Sign into an existing empty signature field of the ACTIVE file —
@@ -1270,6 +1275,11 @@ export interface TestHarness {
     type: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'optionlist' | 'signature';
     options?: string[];
     multiline?: boolean;
+    comb?: boolean;
+    maxLength?: number;
+    /** Format / accepted range / calculation, in the renderer's own spelling —
+     * the same object the card's control produces. */
+    actions?: import('./lib/form-candidates').FieldActions;
     lock?: { action: 'all' | 'include' | 'exclude' | null; fields: string[] };
   }) => Promise<void>;
   /** Sign into an existing empty signature field of the active file

@@ -21,6 +21,7 @@ creates EVERY candidate, because a run with no reviewer has nobody to ask.
 from pathlib import Path
 import shutil
 
+from engine.afemit import DETECTED_DATE_FORMAT
 from engine.form_authoring import add_form_fields, existing_field_names
 from engine.form_detect import MAX_CANDIDATES_DEFAULT, detect_form_fields
 
@@ -122,6 +123,11 @@ def specs_from_candidates(candidates, existing_names=None) -> list:
             if comb and not row.get("multiline"):
                 spec["comb"] = True
                 spec["max_length"] = int(comb)
+            # The detector's own format hint, carried into the spec so a
+            # detected date field lands with a date format rather than with the
+            # hint stopping at the review surface.
+            if row.get("format") == "date":
+                spec["format"] = dict(DETECTED_DATE_FORMAT)
         specs.append(spec)
     return specs
 

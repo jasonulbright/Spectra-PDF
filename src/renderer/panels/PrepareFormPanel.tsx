@@ -4,6 +4,14 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { FieldLockControl } from '../components/FieldLockControl';
+import {
+  FieldActionsControl,
+  actionsToDraft,
+  draftToActions,
+  type FieldActionsDraft,
+} from '../components/FieldActionsControl';
+import { DATE_FORMATS, TIME_FORMATS } from '../lib/af-calc';
+import { actionsFromScripts } from '../lib/af-emit';
 import { getCanvasServices, getCommandContext, invokeCommand } from '../commands/context';
 import { ghostscriptPath, tesseractPath } from '../lib/ocr-recognize';
 import { DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
@@ -23,6 +31,8 @@ import {
   renameCandidate,
   retypeCandidate,
   selectionState,
+  effectiveActions,
+  setCandidateActions,
   setCandidateLock,
   setCandidateMultiline,
   setCheckedAll,
@@ -97,6 +107,11 @@ export function PrepareFormPanel(): React.ReactElement {
   // deliberately, never on every keystroke of a checkbox list.
   const [lockDrafts, setLockDrafts] = useState<Record<string, LockOptions>>({});
   const [applyingLock, setApplyingLock] = useState<string | null>(null);
+  // Per-field pending property edits, keyed by field name. Like the lock
+  // drafts, an edit is applied deliberately — writing a property rewrites the
+  // file, so it is not a per-keystroke act.
+  const [actionDrafts, setActionDrafts] = useState<Record<string, FieldActionsDraft>>({});
+  const [applyingActions, setApplyingActions] = useState<string | null>(null);
 
   const path = activeFile?.path ?? null;
   const workingPath = activeFile?.workingPath ?? null;
@@ -143,6 +158,7 @@ export function PrepareFormPanel(): React.ReactElement {
         // The file is the baseline: a draft that survived the write would show
         // the document as carrying something it does not.
         setLockDrafts({});
+        setActionDrafts({});
       })
       .catch(() => {
         if (!cancelled) setFields([]);
@@ -242,6 +258,65 @@ export function PrepareFormPanel(): React.ReactElement {
   }, [fields, candidates]);
 
   const signatureFields = useMemo(() => fields.filter((f) => f.type === 'signature'), [fields]);
+
+  /** The fields whose Format / Accepted range / Calculate can be edited. A
+   * calculation writes a value, which only a text field holds; a format shows
+   * one, which a dropdown does too. */
+  const propertyFields = useMemo(
+    () => fields.filter((f) => f.type === 'text' || f.type === 'dropdown'),
+    [fields],
+  );
+
+  /** What a calculation on `field` may read: every other field of the
+   * document. A field cannot read itself, and the write refuses if it tries. */
+  const calculableNames = useCallback(
+    (field: string) => propertyFields.filter((f) => f.name !== field).map((f) => f.name),
+    [propertyFields],
+  );
+
+  /** The draft for a field: the pending edit when there is one, and otherwise
+   * what the document itself carries, read back through the emitter's own
+   * inverse so the editor shows the choice that wrote the scripts. */
+  const actionsOf = useCallback(
+    (field: FormField): FieldActionsDraft => {
+      const pending = actionDrafts[field.name];
+      if (pending) return pending;
+      const read = actionsFromScripts(field.actions ?? {}, DATE_FORMATS, TIME_FORMATS);
+      return actionsToDraft(Object.keys(read).length > 0 ? read : null);
+    },
+    [actionDrafts],
+  );
+
+  const applyActions = useCallback(
+    async (field: FormField) => {
+      const draft = actionDrafts[field.name];
+      if (!path || !draft) return;
+      setApplyingActions(field.name);
+      setError(null);
+      try {
+        // Through the app handler, not the engine directly: writing a property
+        // rewrites the file, and the signed-document decision belongs to the
+        // one place every other edit takes it.
+        const handlers = getCommandContext()?.app;
+        if (!handlers) return;
+        const written = await handlers.setFieldActions(
+          path,
+          field.name,
+          draftToActions(draft),
+        );
+        setStatus(
+          written
+            ? tChrome('panel.prepareForm.propsApplied', { field: field.name })
+            : tChrome('panel.prepareForm.lockDeclined'),
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setApplyingActions(null);
+      }
+    },
+    [actionDrafts, path],
+  );
 
   const lockOf = useCallback(
     (field: FormField): LockOptions =>
@@ -494,6 +569,16 @@ export function PrepareFormPanel(): React.ReactElement {
                     </span>
                   )}
                 </div>
+                {candidate.kind === 'text' && (
+                  <FieldActionsControl
+                    value={actionsToDraft(effectiveActions(candidate))}
+                    onChange={(next) =>
+                      publish(setCandidateActions(candidates, candidate.id, draftToActions(next)))
+                    }
+                    fieldNames={calculableNames(candidate.name)}
+                    idPrefix={`prepare-form-candidate-${candidate.name}`}
+                  />
+                )}
                 {candidate.kind === 'signature' && (
                   <FieldLockControl
                     value={
@@ -593,6 +678,42 @@ export function PrepareFormPanel(): React.ReactElement {
                 </button>
               </>
             )}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-2 border-t border-neutral-700 pt-3" data-testid="prepare-form-fieldprops">
+        <div className="text-sm text-neutral-300">{tChrome('panel.prepareForm.fieldProps')}</div>
+        <p className="text-xs text-neutral-400">{tChrome('panel.prepareForm.fieldPropsBlurb')}</p>
+        {propertyFields.length === 0 && (
+          <div className="text-xs text-neutral-500" data-testid="prepare-form-fieldprops-none">
+            {tChrome('panel.prepareForm.fieldPropsNone')}
+          </div>
+        )}
+        {propertyFields.map((field) => (
+          <div
+            key={field.name}
+            className="flex flex-col gap-1.5 rounded border border-neutral-700 p-2"
+            data-testid={`prepare-form-fieldprop-${field.name}`}
+          >
+            <div className="text-xs text-neutral-200 truncate">{field.name}</div>
+            <FieldActionsControl
+              value={actionsOf(field)}
+              onChange={(next) => setActionDrafts((prev) => ({ ...prev, [field.name]: next }))}
+              fieldNames={calculableNames(field.name)}
+              idPrefix={`prepare-form-fieldprop-${field.name}`}
+              showCalculate={field.type === 'text'}
+            />
+            <button
+              className="self-start bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded px-2 py-1 text-xs"
+              data-testid={`prepare-form-fieldprop-apply-${field.name}`}
+              disabled={!actionDrafts[field.name] || applyingActions !== null}
+              onClick={() => void applyActions(field)}
+            >
+              {applyingActions === field.name
+                ? tChrome('panel.prepareForm.propsApplying')
+                : tChrome('panel.prepareForm.propsApply')}
+            </button>
           </div>
         ))}
       </div>

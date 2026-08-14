@@ -93,6 +93,27 @@ export const REFUSAL_STRINGS = {
     'There is no form field named "{{name}}", so that field cannot be locked.',
   'refusal.field.lockSelf':
     'A signature field cannot lock itself: "{{name}}" names the field being signed.',
+  // Format, Validate and Calculate. The kind rules are about what a field can
+  // hold; the rest are conditions the script emitter states.
+  'refusal.field.formatKindOnly':
+    'Only a text or dropdown field can carry a format or an accepted range.',
+  'refusal.field.calculateKindOnly': 'Only a text field can be calculated.',
+  'refusal.field.defaultOnSignature': 'A signature field has no default value.',
+  'refusal.field.formatUnknown': '"{{value}}" is not a format this app writes.',
+  'refusal.field.formatSetting': '"{{value}}" is not a setting this format has.',
+  'refusal.field.maskRequired': 'This format needs a mask.',
+  'refusal.field.rangeNeedsBound':
+    'An accepted range needs a smallest value, a largest value, or both.',
+  'refusal.field.rangeNotNumber': 'A range bound must be a number.',
+  'refusal.field.rangeInverted':
+    'The smallest accepted value cannot be larger than the largest.',
+  'refusal.field.calcUnknown': '"{{value}}" is not a calculation this app writes.',
+  'refusal.field.calcNeedsFields': 'Choose at least one field to calculate from.',
+  'refusal.field.sfnEmpty': 'Enter the expression this field is calculated from.',
+  'refusal.field.sfnUnreadable': 'This expression cannot be read: {{value}}',
+  'refusal.field.calcUnknownField':
+    'The calculation names "{{name}}", which this document does not have.',
+  'refusal.field.calcCycle': 'The calculation depends on itself through {{chain}}.',
   // A batch reports every problem at once, so each one says which field it is
   // about; the parts stay separate keys because only the wrapper is a sentence.
   'refusal.field.inField': '{{field}}: {{problem}}',

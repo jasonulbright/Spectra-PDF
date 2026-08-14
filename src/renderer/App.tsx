@@ -18,6 +18,8 @@ import {
   type FieldLock,
   type SignaturePolicy,
 } from './lib/signatures';
+import { toEngineFormat } from './lib/af-emit';
+import type { FieldActions } from './lib/form-candidates';
 import type { EditImageMaskParam } from './lib/edit-images';
 import type { ParagraphEditOpts } from './lib/edit-paragraphs';
 import { ConfirmDialog, ConfirmResult } from './components/ConfirmDialog';
@@ -1201,6 +1203,28 @@ function AppContent(): React.ReactElement {
     [state.files, performOperation, confirmEditOfSignedDoc],
   );
 
+  const handleSetFieldActions = useCallback(
+    async (path: string, field: string, actions: FieldActions): Promise<boolean> => {
+      const f = state.files.get(path);
+      if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return false;
+      // The door is total: every member absent from `actions` is CLEARED, so
+      // the request names what to clear rather than relying on an omission the
+      // wire cannot distinguish from "leave it".
+      await performOperation(path, 'set_field_actions', {
+        field,
+        allow_signed: true,
+        clear: ['format', 'validate', 'calculate', 'default_value'],
+        ...(actions.format ? { format: toEngineFormat(actions.format) } : {}),
+        ...(actions.validate ? { validate: actions.validate } : {}),
+        ...(actions.calculate ? { calculate: actions.calculate } : {}),
+        ...(actions.defaultValue !== undefined ? { default_value: actions.defaultValue } : {}),
+      });
+      return true;
+    },
+    [state.files, performOperation, confirmEditOfSignedDoc],
+  );
+
   const handleApplyOcrLayer = useCallback(
     async (
       path: string,
@@ -2028,6 +2052,7 @@ function AppContent(): React.ReactElement {
     minimizeToTray: async () => { await app.hideToTray(); },
     sanitizeDocument: handleSanitizeDocument,
     setFieldLock: handleSetFieldLock,
+    setFieldActions: handleSetFieldActions,
   };
   const commandHandlersRef = useRef(commandHandlers);
   commandHandlersRef.current = commandHandlers;
@@ -2073,6 +2098,7 @@ function AppContent(): React.ReactElement {
       minimizeToTray: () => h.current.minimizeToTray(),
       sanitizeDocument: (path, request) => h.current.sanitizeDocument(path, request),
       setFieldLock: (path, field, lock) => h.current.setFieldLock(path, field, lock),
+      setFieldActions: (path, field, actions) => h.current.setFieldActions(path, field, actions),
     });
     setCommandStateSource(() => ({ state: stateRef.current, dispatch }));
     return () => {

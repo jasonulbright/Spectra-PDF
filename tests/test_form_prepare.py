@@ -13,7 +13,9 @@ import pathlib
 import pikepdf
 import pytest
 
-from engine.acroform import form_field_forest
+from engine.acroform import calculation_order_names, form_field_forest
+from engine.afscript import recognize
+from engine.document_js import decode_js
 from engine.fieldmdp import lock_of_field_dict
 from engine.form_authoring import FieldSpecError, add_form_fields
 from engine.form_detect import detect_form_fields
@@ -199,3 +201,73 @@ def test_a_row_naming_a_page_the_document_does_not_have_refuses(tmp_path):
     row["page"] = 9
     with pytest.raises(FieldSpecError):
         create_detected_fields(src, str(tmp_path / "out.pdf"), [row])
+
+
+# ── the /AA + /CO half of the same pin ────────────────────────────────────
+
+# The wording each corpus condition carries on THIS side; the renderer states
+# the same conditions through its own catalog keys.
+ACTION_REFUSAL_TEXT = {
+    "calc_cycle": "depends on itself through",
+    "calc_unknown_field": "which this document does not have",
+    "format_kind_only": "belongs to a text or dropdown field",
+    "calculate_kind_only": "belongs to a text field",
+    "range_needs_bound": "a smallest value, a largest value, or both",
+}
+
+
+def _authored_actions(path):
+    """{field: {trigger: raw /JS}}, the /DV each field carries, and the /CO."""
+    actions = {}
+    defaults = {}
+    with pikepdf.open(path) as pdf:
+        for name, node in form_field_forest(pdf).items():
+            aa = node.get("/AA")
+            if aa is not None and isinstance(aa, pikepdf.Dictionary):
+                entry = {}
+                for key in ("/F", "/K", "/V", "/C"):
+                    action = aa.get(key)
+                    if action is None:
+                        continue
+                    js = decode_js(action)
+                    if js is not None:
+                        entry[key[1:]] = js
+                if entry:
+                    actions[name] = entry
+            dv = node.get("/DV")
+            if dv is not None:
+                defaults[name] = str(dv)
+        return actions, defaults, calculation_order_names(pdf)
+
+
+@pytest.mark.parametrize("case", CORPUS["action_cases"], ids=lambda c: c["name"])
+def test_authored_actions_match_the_corpus(case, tmp_path):
+    src = _lock_base(tmp_path / "base.pdf", case["existing"])
+    out = str(tmp_path / "authored.pdf")
+    if case.get("refuses"):
+        with pytest.raises(FieldSpecError) as excinfo:
+            add_form_fields(src, out, case["specs"])
+        assert ACTION_REFUSAL_TEXT[case["refuses"]] in str(excinfo.value)
+        assert excinfo.value.problems == case["problems"]
+        return
+    add_form_fields(src, out, case["specs"])
+    actions, defaults, order = _authored_actions(out)
+    assert actions == case["actions"]
+    assert order == case["co"]
+    assert defaults == case.get("defaults", {})
+    # Every body this app writes is a body this app runs, and the fields it
+    # names are the ones /CO ordered it after.
+    for entry in actions.values():
+        for js in entry.values():
+            assert recognize(js) is not None
+
+
+def test_the_action_corpus_covers_every_trigger_and_both_outcomes():
+    triggers = {
+        trigger
+        for case in CORPUS["action_cases"]
+        for entry in (case.get("actions") or {}).values()
+        for trigger in entry
+    }
+    assert triggers == {"F", "K", "V", "C"}
+    assert {bool(case.get("refuses")) for case in CORPUS["action_cases"]} == {True, False}

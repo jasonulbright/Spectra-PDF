@@ -150,6 +150,13 @@ import {
 import type { OverlayWidget } from '../../lib/form-overlay';
 import { readFormFields, type FormFieldValue } from '../../lib/forms';
 import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
+import {
+  EMPTY_ACTIONS,
+  FieldActionsControl,
+  draftToActions,
+  type FieldActionsDraft,
+} from '../../components/FieldActionsControl';
+import type { FieldActions } from '../../lib/form-candidates';
 import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasCrop, registerCanvasSnapshot, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge, registerCanvasEditImages } from '../../testHarness';
 import { invokeCommand, registerCanvasServices, pushEscapeInterceptor } from '../../commands/context';
 import { buildPageContextMenu } from '../../lib/page-context-menu';
@@ -1177,6 +1184,12 @@ export function WorkspaceCanvasView({
   const [nfType, setNfType] = useState<NewFieldType>('text');
   const [nfOptions, setNfOptions] = useState('');
   const [nfMultiline, setNfMultiline] = useState(false);
+  // Comb + character limit: spec members the writers have always accepted and
+  // the card never offered.
+  const [nfComb, setNfComb] = useState(false);
+  const [nfMaxLength, setNfMaxLength] = useState('');
+  // What the field shows, what it accepts and what it calculates from.
+  const [nfActions, setNfActions] = useState<FieldActionsDraft>(EMPTY_ACTIONS);
   // The `/Lock` seed a new SIGNATURE field is authored with — what whoever
   // signs it later is bound by, placed without the preparer signing anything.
   const [nfLock, setNfLock] = useState<LockOptions>(DEFAULT_LOCK);
@@ -1216,6 +1229,16 @@ export function WorkspaceCanvasView({
       .map((f) => f.name);
   }, [newFieldPlacement, workspaceForms]);
 
+  // The names a new field's calculation can read: the placement document's own
+  // text and dropdown fields. Same settled read the lock names come from.
+  const newFieldCalcNames = useMemo(() => {
+    const path = newFieldPlacement?.path;
+    if (!path) return NO_LOCK_NAMES;
+    return (workspaceForms.get(path)?.fields ?? [])
+      .filter((f) => f.type === 'text' || f.type === 'dropdown')
+      .map((f) => f.name);
+  }, [newFieldPlacement, workspaceForms]);
+
   // Placement whose page still exists (mirrors liveSigPlacement).
   const liveNewFieldPlacement = useMemo(() => {
     if (!newFieldPlacement) return null;
@@ -1237,6 +1260,9 @@ export function WorkspaceCanvasView({
       type: NewFieldType;
       options?: string[];
       multiline?: boolean;
+      comb?: boolean;
+      maxLength?: number;
+      actions?: FieldActions;
       lock?: LockOptions;
     }): Promise<void> => {
       if (creatingFieldRef.current) return; // re-entry: the button is disabled while creating
@@ -1273,6 +1299,13 @@ export function WorkspaceCanvasView({
           rect: built.appearance.rect,
           ...(params.options && params.options.length > 0 ? { options: params.options } : {}),
           ...(params.type === 'text' && params.multiline ? { multiline: true } : {}),
+          ...(params.type === 'text' && params.comb ? { comb: true } : {}),
+          ...(params.type === 'text' && params.maxLength ? { maxLength: params.maxLength } : {}),
+          // Format, accepted range and calculation belong to the kinds that
+          // carry a typed value; the write refuses them anywhere else.
+          ...(params.actions && (params.type === 'text' || params.type === 'dropdown')
+            ? params.actions
+            : {}),
           // Only a signature field carries one, and only the two list actions
           // carry names — `all` ignores them, so sending them would discard
           // what was chosen (the write refuses that pair).
@@ -1291,6 +1324,9 @@ export function WorkspaceCanvasView({
         setNfName('');
         setNfOptions('');
         setNfMultiline(false);
+        setNfComb(false);
+        setNfMaxLength('');
+        setNfActions(EMPTY_ACTIONS);
         setNfLock(DEFAULT_LOCK);
         // Stay in Prepare Form's own mode, ready to place the next field.
         //
@@ -1322,9 +1358,22 @@ export function WorkspaceCanvasView({
       type: nfType,
       ...(options ? { options } : {}),
       multiline: nfMultiline,
+      comb: nfComb,
+      ...(nfMaxLength.trim() ? { maxLength: Number(nfMaxLength) } : {}),
+      actions: draftToActions(nfActions),
       lock: nfLock,
     }).catch(() => undefined); // surfaced via nfError; the card stays open
-  }, [createFieldFromPlacement, nfName, nfType, nfOptions, nfMultiline, nfLock]);
+  }, [
+    createFieldFromPlacement,
+    nfName,
+    nfType,
+    nfOptions,
+    nfMultiline,
+    nfComb,
+    nfMaxLength,
+    nfActions,
+    nfLock,
+  ]);
 
   // --- Add Text ------------------------------------------------------
   // Same placement lifecycle as the new-field card (single, transient, dies
@@ -6812,15 +6861,50 @@ export function WorkspaceCanvasView({
             </select>
           </div>
           {nfType === 'text' && (
-            <label className="flex items-center gap-2 cursor-pointer text-xs text-neutral-400">
-              <input
-                type="checkbox"
-                checked={nfMultiline}
-                onChange={() => setNfMultiline((v) => !v)}
-                className="rounded bg-neutral-800 border-neutral-700"
-              />
-              {tChrome('canvas.newfield.multiline')}
-            </label>
+            <>
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-neutral-400">
+                <input
+                  type="checkbox"
+                  checked={nfMultiline}
+                  onChange={() => setNfMultiline((v) => !v)}
+                  className="rounded bg-neutral-800 border-neutral-700"
+                />
+                {tChrome('canvas.newfield.multiline')}
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-neutral-400">
+                <input
+                  data-testid="new-field-comb"
+                  type="checkbox"
+                  checked={nfComb}
+                  disabled={nfMultiline}
+                  onChange={() => setNfComb((v) => !v)}
+                  className="rounded bg-neutral-800 border-neutral-700"
+                />
+                {tChrome('canvas.newfield.comb')}
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-neutral-400 w-20 shrink-0">
+                  {tChrome('canvas.newfield.maxLength')}
+                </span>
+                <input
+                  data-testid="new-field-maxlength"
+                  type="number"
+                  min={1}
+                  value={nfMaxLength}
+                  onChange={(e) => setNfMaxLength(e.target.value)}
+                  className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </>
+          )}
+          {(nfType === 'text' || nfType === 'dropdown') && (
+            <FieldActionsControl
+              value={nfActions}
+              onChange={setNfActions}
+              fieldNames={newFieldCalcNames}
+              idPrefix="new-field"
+              showCalculate={nfType === 'text'}
+            />
           )}
           {nfType === 'signature' && (
             <FieldLockControl
