@@ -342,7 +342,7 @@ def test_an_action_kind_this_app_does_not_run_is_reported_not_dropped(tmp_path):
         pdf.save(out)
     assert _actions_of(out) == {
         "A": {"kind": "named", "name": "NextPage"},
-        "U": {"kind": "remote", "file": "other.pdf", "page": None},
+        "U": {"kind": "remote", "file": "other.pdf"},
         "D": {"kind": "other", "action": "Movie"},
     }
 

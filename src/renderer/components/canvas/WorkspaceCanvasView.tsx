@@ -4947,6 +4947,8 @@ export function WorkspaceCanvasView({
       existing_field: params.fieldName,
     })) as unknown as { signer: string | null; output: string; valid: boolean; intact: boolean; covers_whole_document: boolean };
   };
+  const onWidgetActionRef = useRef(onWidgetAction);
+  onWidgetActionRef.current = onWidgetAction;
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerCanvasForms({
@@ -4992,6 +4994,19 @@ export function WorkspaceCanvasView({
         (workspaceFormsRef.current.get(path)?.fields ?? [])
           .filter((f) => f.scriptsNotRun?.length)
           .map((f) => f.name),
+      dataActionsFor: (path, fieldName) =>
+        workspaceFormsRef.current.get(path)?.fields.find((f) => f.name === fieldName)
+          ?.fieldActions ?? null,
+      fireDataAction: async (path, fieldName, trigger) => {
+        // The SAME handler the widget's own gesture calls — a harness that
+        // reimplemented the dispatch would prove the harness.
+        const action = workspaceFormsRef.current
+          .get(path)
+          ?.fields.find((f) => f.name === fieldName)?.fieldActions?.[trigger];
+        if (!action) return false;
+        await onWidgetActionRef.current(path, fieldName, action);
+        return true;
+      },
       widgetCountFor: (path) => {
         const info = workspaceFormsRef.current.get(path);
         if (!info) return 0;

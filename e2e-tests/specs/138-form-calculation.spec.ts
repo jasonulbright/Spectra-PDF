@@ -27,7 +27,12 @@ import {
   setCanvasFormValue,
   canvasFormShownValue,
   canvasFormScriptsNotRun,
+  canvasFormDataActions,
+  fireCanvasFormAction,
+  setFieldDataActions,
   applyCanvasFormValues,
+  formWidgetCount,
+  getState,
   invokeAppCommand,
   placeNewField,
   createPlacedField,
@@ -308,6 +313,210 @@ describe('a form this app authors', () => {
       message = String(err);
     }
     expect(message).toContain('depends on itself');
+  });
+});
+
+// ── the /AA action kinds that are data ────────────────────────────────────
+//
+// Actions that carry no code are both REPORTED and RUN. What this proves is
+// the whole loop, not a unit of it: a document authored with pdf-lib is read
+// back through this app's classifier, one action is fired through the SAME
+// handler the widget's own gesture calls, and the document is asserted to have
+// changed. Submit and import are covered at the engine level instead — both
+// open a native file dialog, which no harness can answer without becoming the
+// thing under test.
+describe('a form whose fields DO things', () => {
+  let tmp: string;
+  let source: string;
+
+  /** A form carrying every action kind this app performs, plus two it only
+   * reports, spread across the trigger sites. */
+  async function makeActionFixture(path: string): Promise<void> {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([600, 400]);
+    doc.addPage([600, 400]);
+    const form = doc.getForm();
+    const context = doc.context;
+
+    const name = form.createTextField('Name');
+    name.addToPage(page, { x: 50, y: 340, width: 200, height: 22 });
+    name.setText('typed');
+    const helper = form.createTextField('Helper');
+    helper.addToPage(page, { x: 50, y: 300, width: 200, height: 22 });
+
+    const button = form.createTextField('Actions');
+    button.addToPage(page, { x: 320, y: 340, width: 120, height: 22 });
+    const widget = button.acroField.getWidgets()[0];
+
+    // /GoTo the second page, by an explicit destination array.
+    const second = doc.getPage(1).ref;
+    widget.dict.set(
+      PDFName.of('A'),
+      context.register(
+        context.obj({
+          S: PDFName.of('GoTo'),
+          D: (() => {
+            const dest = PDFArray.withContext(context);
+            dest.push(second);
+            dest.push(PDFName.of('Fit'));
+            return dest;
+          })(),
+        }),
+      ),
+    );
+    const aa = context.obj({});
+    // /ResetForm scoped to one field, on mouse-up.
+    aa.set(
+      PDFName.of('U'),
+      context.register(
+        context.obj({
+          S: PDFName.of('ResetForm'),
+          Fields: (() => {
+            const list = PDFArray.withContext(context);
+            list.push(PDFString.of('Name'));
+            return list;
+          })(),
+        }),
+      ),
+    );
+    // /Hide the helper field, on pointer-enter.
+    aa.set(
+      PDFName.of('E'),
+      context.register(
+        context.obj({
+          S: PDFName.of('Hide'),
+          T: PDFString.of('Helper'),
+          H: true,
+        }),
+      ),
+    );
+    // Two kinds this app reports and never performs.
+    aa.set(
+      PDFName.of('X'),
+      context.register(context.obj({ S: PDFName.of('Named'), N: PDFName.of('NextPage') })),
+    );
+    aa.set(
+      PDFName.of('Fo'),
+      context.register(
+        context.obj({ S: PDFName.of('GoToR'), F: PDFString.of('elsewhere.pdf') }),
+      ),
+    );
+    widget.dict.set(PDFName.of('AA'), aa);
+
+    writeFileSync(path, await doc.save());
+  }
+
+  before(async () => {
+    tmp = mkdtempSync(resolve(tmpdir(), 'spectra-e2e-form-actions-'));
+    source = resolve(tmp, 'actions.pdf');
+    await makeActionFixture(source);
+  });
+
+  after(async () => {
+    await closeAllFiles();
+    if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('reports every action the document carries, by trigger', async () => {
+    await waitForHarness();
+    await closeAllFiles();
+    await openByPaths([source]);
+    await setView('canvas');
+
+    const actions = await canvasFormDataActions(source, 'Actions');
+    expect(actions).not.toBeNull();
+    expect(actions!.A).toEqual({ kind: 'goto', page: 1 });
+    expect(actions!.U).toEqual({ kind: 'reset', fields: ['Name'], exclude: false });
+    expect(actions!.E).toEqual({ kind: 'hide', targets: ['Helper'], hide: true });
+    // Reported, never performed — and named rather than dropped.
+    expect(actions!.X).toEqual({ kind: 'named', name: 'NextPage' });
+    expect(actions!.Fo).toEqual({ kind: 'remote', file: 'elsewhere.pdf' });
+  });
+
+  it('goes to the page a go-to names', async () => {
+    const before = await getState();
+    expect(await fireCanvasFormAction(source, 'Actions', 'A')).toBe(true);
+    await browser.waitUntil(
+      async () => (await getState()).currentPageId !== before.currentPageId,
+      { timeout: 10_000, timeoutMsg: 'the go-to action never landed on another page' },
+    );
+  });
+
+  it('resets only the fields a reset action names', async () => {
+    expect(await setCanvasFormValue(source, 'Helper', 'kept')).toBe(true);
+    await applyCanvasFormValues();
+    expect(await fireCanvasFormAction(source, 'Actions', 'U')).toBe(true);
+
+    const saved = resolve(tmp, 'after-reset.pdf');
+    await saveActiveAs(saved);
+    const fields = await readFields(saved);
+    // "Name" was in the action's own scope and cleared; "Helper" was not.
+    expect(fields.get('Name')?.value ?? '').toBe('');
+    expect(fields.get('Helper')?.value).toBe('kept');
+  });
+
+  it('hides a field for real — in the document, not only on screen', async () => {
+    const before = await formWidgetCount(source);
+    expect(await fireCanvasFormAction(source, 'Actions', 'E')).toBe(true);
+    await browser.waitUntil(async () => (await formWidgetCount(source)) < before, {
+      timeout: 10_000,
+      timeoutMsg: 'the hide action never removed the widget from the overlay',
+    });
+
+    const saved = resolve(tmp, 'after-hide.pdf');
+    await saveActiveAs(saved);
+    const doc = await PDFDocument.load(new Uint8Array(readFileSync(saved)));
+    const hidden = doc.getForm().getTextField('Helper').acroField.getWidgets()[0];
+    const flags = hidden.dict.get(PDFName.of('F'));
+    expect(Number(flags?.toString() ?? 0) & 2).toBe(2);
+  });
+
+  it('authors an action, and another implementation reads back what it wrote', async () => {
+    expect(
+      await setFieldDataActions(source, 'Actions', [
+        { trigger: 'A', kind: 'uri', uri: 'https://example.invalid/help' },
+        { trigger: 'D', kind: 'hide', targets: ['Helper'], hide: false },
+      ]),
+    ).toBe(true);
+
+    // Read back through THIS app first — the properties editor's own inverse.
+    await browser.waitUntil(
+      async () => {
+        const actions = await canvasFormDataActions(source, 'Actions');
+        return actions?.A?.kind === 'uri';
+      },
+      { timeout: 10_000, timeoutMsg: 'the authored action never came back through the reader' },
+    );
+    const actions = await canvasFormDataActions(source, 'Actions');
+    expect(actions!.A).toEqual({ kind: 'uri', uri: 'https://example.invalid/help' });
+    expect(actions!.D).toEqual({ kind: 'hide', targets: ['Helper'], hide: false });
+    // The door is TOTAL over the triggers it authors: the reset, the /Named
+    // and the remote go-to were on triggers it writes, so they are gone.
+    expect(Object.keys(actions!).sort()).toEqual(['A', 'D']);
+
+    // Then through pdf-lib — a different implementation, which is what decides
+    // whether another viewer performs what this app authored.
+    const authored = resolve(tmp, 'authored-actions.pdf');
+    await saveActiveAs(authored);
+    const doc = await PDFDocument.load(new Uint8Array(readFileSync(authored)));
+    const widget = doc.getForm().getTextField('Actions').acroField.getWidgets()[0];
+    const action = doc.context.lookup(widget.dict.get(PDFName.of('A')), PDFDict);
+    expect(action.get(PDFName.of('S'))?.toString()).toBe('/URI');
+    expect((action.get(PDFName.of('URI')) as PDFString).decodeText()).toBe(
+      'https://example.invalid/help',
+    );
+  });
+
+  it('refuses an action naming a page the document does not have', async () => {
+    let message = '';
+    try {
+      await setFieldDataActions(source, 'Actions', [
+        { trigger: 'A', kind: 'goto', page: 99 },
+      ]);
+    } catch (err) {
+      message = String(err);
+    }
+    expect(message).toContain('outside this document');
   });
 });
 
