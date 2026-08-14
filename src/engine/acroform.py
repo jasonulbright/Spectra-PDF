@@ -369,6 +369,53 @@ def carry_doc_form_extras(dst: pikepdf.Pdf, src: pikepdf.Pdf, renamed: dict) -> 
             dst.Root["/AA"] = dst.copy_foreign(handle)
 
 
+def calculation_order_names(pdf: pikepdf.Pdf) -> list:
+    """`/CO` as fully-qualified names, in the order the document declares.
+
+    Absent or empty means calculations do not run at all: the format puts
+    calculation order here, and inventing one (document order, name order)
+    would compute a number no other viewer computes.
+    """
+    acro = pdf.Root.get("/AcroForm")
+    if acro is None:
+        return []
+    co = acro.get("/CO")
+    if co is None:
+        return []
+    out: list = []
+    for entry in co:
+        try:
+            name = fq_field_name(entry)
+        except Exception:
+            name = None
+        if name:
+            out.append(name)
+    return out
+
+
+def write_calculation_order(pdf: pikepdf.Pdf, names) -> None:
+    """Rewrite `/CO` as indirect references to the named fields, in this order.
+
+    A name the forest does not carry is dropped rather than written as a
+    dangling reference; an empty result removes the key, since an empty `/CO`
+    and no `/CO` mean the same thing and only one of them is tidy.
+    """
+    acro = pdf.Root.get("/AcroForm")
+    if acro is None:
+        return
+    forest = _forest_names(pdf)
+    entries = []
+    for name in names:
+        node = forest.get(str(name))
+        if node is None:
+            continue
+        entries.append(node if node.is_indirect else pdf.make_indirect(node))
+    if entries:
+        acro["/CO"] = Array(entries)
+    elif acro.get("/CO") is not None:
+        del acro["/CO"]
+
+
 def _reconcile_co_in_place(pdf: pikepdf.Pdf) -> None:
     """Drop /CO entries whose field no longer sits under the (pruned) /Fields
     forest; remove an emptied /CO."""

@@ -10,12 +10,24 @@ A spec is the shape the renderer already speaks::
 
     {"name", "type", "page_index" (0-based), "rect" [x0,y0,x1,y1],
      "options": [str | {"label", "rect"}], "multiline", "comb", "max_length",
-     "lock": {"action", "fields"}}
+     "lock": {"action", "fields"},
+     "format": {"kind", ...}, "validate": {"min", "max"},
+     "calculate": {"op", "fields"} | {"sfn"}, "default_value"}
 
 ``lock`` belongs to a signature field alone and is the seed whoever signs that
 field later is bound by. Its names are validated against the document AND
 against the batch's own new fields: laying out a form and locking the fields
 being laid out in the same pass is the ordinary case.
+
+``format``, ``validate`` and ``calculate`` become the field's ``/AA`` scripts
+-- the stock ``AF*`` call shapes, written by ``engine.afemit`` so every other
+viewer executes what this app authors. A ``calculate`` also puts the field into
+``/AcroForm /CO``, ordered by a topological sort over the dependency graph: a
+field placed before what it reads computes a stale value everywhere. A cycle
+refuses the batch by name, and so does a calculation naming a field neither the
+document nor the batch has.
+
+``default_value`` is ``/DV``: what ``reset_form_fields`` restores to.
 
 Validation is fail-closed and PRE-mutation: every problem in the batch is
 reported at once, each naming the field it belongs to, and nothing is written
@@ -35,7 +47,14 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
-from engine.acroform import form_field_forest, refuse_if_xfa
+from engine import afemit
+from engine.acroform import (
+    calculation_order_names,
+    form_field_forest,
+    refuse_if_xfa,
+    write_calculation_order,
+)
+from engine.document_js import _BOM_BE, decode_js
 from engine.fieldmdp import lock_dictionary, validated_lock
 from engine.forms import (
     FF_COMBO,
@@ -142,6 +161,165 @@ def _lock_of(spec: dict) -> dict | None:
     return raw if isinstance(raw, dict) else None
 
 
+# ── Field actions (/AA), the calculation order (/CO) and /DV ──────────────
+
+
+def _dict_of(spec: dict, key: str) -> dict | None:
+    raw = spec.get(key)
+    return raw if isinstance(raw, dict) else None
+
+
+def _calculate_of(spec: dict) -> dict | None:
+    return _dict_of(spec, "calculate")
+
+
+def _existing_calculations(pdf: pikepdf.Pdf) -> tuple[list, dict]:
+    """The document's own ``/CO`` order and, for each entry, the names its
+    calculate script reads. An entry whose script this app does not recognize
+    contributes no edge: nothing here can say what it reads.
+    """
+    order = calculation_order_names(pdf)
+    forest = form_field_forest(pdf)
+    inputs: dict = {}
+    for name in order:
+        node = forest.get(name)
+        if node is None:
+            continue
+        aa = node.get("/AA")
+        if aa is None or not isinstance(aa, Dictionary):
+            continue
+        action = aa.get("/C")
+        if action is None or not isinstance(action, Dictionary):
+            continue
+        js = decode_js(action)
+        if js is not None:
+            inputs[name] = afemit.script_inputs(js)
+    return order, inputs
+
+
+def _batch_calculations(specs: list) -> list:
+    """``[(name, [input names])]`` for every spec that carries a calculation,
+    in authoring order — the batch half of the topological sort."""
+    entries = []
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        calc = _calculate_of(spec)
+        name = str(spec.get("name", "")).strip()
+        if calc is None or not name:
+            continue
+        try:
+            entries.append((name, afemit.calculate_inputs(calc)))
+        except afemit.EmitError:
+            # The emission problem is reported on its own row; an unreadable
+            # calculation contributes no ordering edge.
+            continue
+    return entries
+
+
+def _js_object(pdf: pikepdf.Pdf, js: str):
+    """A ``/JavaScript`` action carrying this body.
+
+    ASCII rides as a PDF string, which is what the ecosystem writes and what
+    keeps a stock call byte-identical to the same call from any other producer.
+    Anything else -- a currency symbol, a mask carrying an accented literal --
+    goes as a UTF-16BE stream, the convention ``document_js.py`` already uses.
+    """
+    try:
+        js.encode("ascii")
+    except UnicodeEncodeError:
+        body = pdf.make_stream(_BOM_BE + js.encode("utf-16-be"))
+    else:
+        body = String(js)
+    return pdf.make_indirect(Dictionary(S=Name("/JavaScript"), JS=body))
+
+
+def _apply_actions(pdf: pikepdf.Pdf, field, spec: dict) -> None:
+    """Write the spec's ``/AA`` scripts and ``/DV`` onto a field dictionary.
+
+    Every trigger this app authors is REPLACED wholesale and every other key of
+    an existing ``/AA`` is left alone: a widget trigger (``/E``, ``/U``) is not
+    this door's business, and a spec that no longer carries a format must not
+    leave the old format's ``/F`` behind.
+    """
+    scripts = afemit.emitted_scripts(spec)
+    aa = field.get("/AA")
+    if not isinstance(aa, Dictionary):
+        aa = None
+    for trigger in ("F", "K", "V", "C"):
+        key = "/" + trigger
+        if trigger in scripts:
+            if aa is None:
+                aa = Dictionary()
+                field["/AA"] = aa
+            aa[key] = _js_object(pdf, scripts[trigger])
+        elif aa is not None and key in aa:
+            del aa[key]
+    if aa is not None and len(aa.keys()) == 0:
+        del field["/AA"]
+    if "default_value" in spec:
+        _apply_default(field, spec)
+
+
+def _apply_default(field, spec: dict) -> None:
+    """``/DV`` -- the value ``reset_form_fields`` restores to. None removes it,
+    so "this field defaults to nothing" is a value rather than an operation."""
+    value = spec.get("default_value")
+    if value is None:
+        if field.get("/DV") is not None:
+            del field["/DV"]
+        return
+    kind = str(spec.get("type", "")) or _kind_of_field(field)
+    if kind in ("checkbox", "radio"):
+        name = "/Off"
+        if kind == "checkbox":
+            name = "/Yes" if value is True or str(value) not in ("", "Off", "false") else "/Off"
+        else:
+            name = "/" + str(value) if str(value) else "/Off"
+        field["/DV"] = Name(name)
+        return
+    if isinstance(value, list):
+        field["/DV"] = Array([String(str(v)) for v in value])
+        return
+    field["/DV"] = String(str(value))
+
+
+def _kind_of_field(field) -> str:
+    ft = _effective_ft(field)
+    if ft == "/Btn":
+        return "radio" if int(field.get("/Ff", 0)) & FF_RADIO else "checkbox"
+    if ft == "/Ch":
+        return "dropdown" if int(field.get("/Ff", 0)) & FF_COMBO else "optionlist"
+    if ft == "/Sig":
+        return "signature"
+    return "text"
+
+
+def _action_problems(spec: dict, kind: str) -> list:
+    """Every problem the spec's format/validate/calculate carries, in the
+    engine's own English. The emitter states the condition; the type rules are
+    this module's, because they are about what a field can hold."""
+    problems: list = []
+    for key, allowed, label in (
+        ("format", afemit.FORMAT_TYPES, "a format"),
+        ("validate", afemit.VALIDATE_TYPES, "a range check"),
+        ("calculate", afemit.CALCULATE_TYPES, "a calculation"),
+    ):
+        if spec.get(key) is None:
+            continue
+        if kind not in allowed:
+            problems.append(
+                f"{label} belongs to a {' or '.join(allowed)} field, not a {kind or '(none)'} field"
+            )
+    if spec.get("default_value") is not None and kind == "signature":
+        problems.append("a signature field has no default value")
+    try:
+        afemit.emitted_scripts(spec)
+    except afemit.EmitError as exc:
+        problems.extend(exc.problems)
+    return problems
+
+
 def _validate(pdf: pikepdf.Pdf, specs: list) -> None:
     problems: list[str] = []
     taken = _top_level_names(pdf)
@@ -207,6 +385,22 @@ def _validate(pdf: pikepdf.Pdf, specs: list) -> None:
                     problem("a comb field needs a maximum length to divide its box into")
                 if spec.get("multiline"):
                     problem("a comb field cannot also be multiline")
+        for text in _action_problems(spec, kind):
+            problem(text)
+        calc = _calculate_of(spec)
+        if calc is not None:
+            try:
+                targets = afemit.calculate_inputs(calc)
+            except afemit.EmitError:
+                targets = []
+            for target in targets:
+                # The same rule /Lock already applies to its targets: a
+                # calculation naming a field nothing has reads nothing, and
+                # silently contributes a zero to somebody's total.
+                if not afemit.resolves(target, lockable):
+                    problem(
+                        f'its calculation names "{target}", which this document does not have'
+                    )
         lock = _lock_of(spec)
         if lock is not None:
             if kind != "signature":
@@ -223,6 +417,20 @@ def _validate(pdf: pikepdf.Pdf, specs: list) -> None:
                 problem(f"a field named {name} already exists")
             else:
                 taken.add(name)
+
+    # The batch's /CO, checked before anything is written: a cycle is a
+    # calculation that can never settle, and one pass over it computes a number
+    # no viewer agrees with. Reported by the chain that proves it.
+    entries = _batch_calculations(specs)
+    if entries:
+        order, inputs = _existing_calculations(pdf)
+        try:
+            afemit.calculation_order(order, inputs, entries)
+        except afemit.CycleError as exc:
+            head = exc.chain[0]
+            chain = " -> ".join(exc.chain)
+            text = f"its calculation depends on itself through {chain}"
+            problems.append(f"{head}: {text}" if batch else text)
 
     if problems:
         joined = "; ".join(problems)
@@ -387,6 +595,7 @@ def _create_text(pdf: pikepdf.Pdf, page, spec: dict, rect: tuple):
     if spec.get("max_length"):
         field["/MaxLen"] = int(spec["max_length"])
     field["/AP"] = Dictionary(N=_text_ap(pdf, w, h))
+    _apply_actions(pdf, field, spec)
     return pdf.make_indirect(field)
 
 
@@ -402,6 +611,7 @@ def _create_checkbox(pdf: pikepdf.Pdf, page, spec: dict, rect: tuple):
     states["/Yes"] = _button_ap(pdf, w, h, "4")
     states["/Off"] = _off_ap(pdf, w, h)
     field["/AP"] = Dictionary(N=states)
+    _apply_actions(pdf, field, spec)
     return pdf.make_indirect(field)
 
 
@@ -446,6 +656,7 @@ def _create_radio(pdf: pikepdf.Pdf, page, spec: dict, rect: tuple, options: list
             Kids=Array(),
         )
     )
+    _apply_actions(pdf, field, spec)
     boxes = [_rect_of(o) for o in options] if all(o["rect"] for o in options) else None
     if boxes is None:
         boxes = _option_cells(rect, len(options))
@@ -475,6 +686,7 @@ def _create_choice(pdf: pikepdf.Pdf, page, spec: dict, rect: tuple, options: lis
     field["/Opt"] = Array([String(o["label"]) for o in options])
     field["/Ff"] = FF_COMBO if spec["type"] == "dropdown" else FF_MULTISELECT
     field["/AP"] = Dictionary(N=_text_ap(pdf, w, h))
+    _apply_actions(pdf, field, spec)
     return pdf.make_indirect(field)
 
 
@@ -500,6 +712,21 @@ def _create(pdf: pikepdf.Pdf, spec: dict) -> list:
         field = _create_text(pdf, page, spec, rect)
     _attach(pdf, page, field)
     return [field]
+
+
+def _write_order(pdf: pikepdf.Pdf, specs: list) -> None:
+    """Rewrite ``/CO`` for the calculations this batch just created.
+
+    Run AFTER the fields exist, so the entries are references to real objects;
+    the order itself was already proved acyclic before anything was written.
+    """
+    entries = _batch_calculations(specs)
+    if not entries:
+        return
+    order, inputs = _existing_calculations(pdf)
+    # The batch's own entries are not in the document's /CO yet, so their
+    # inputs come from the batch half alone.
+    write_calculation_order(pdf, afemit.calculation_order(order, inputs, entries))
 
 
 # ── The door ──────────────────────────────────────────────────────────────
@@ -558,6 +785,7 @@ def add_form_fields(
         if has_signature:
             # A document that can hold signatures advertises it.
             acro["/SigFlags"] = int(acro.get("/SigFlags", 0)) | 1
+        _write_order(pdf, specs)
         if same_file:
             with tempfile.NamedTemporaryFile(
                 suffix=".pdf", delete=False, dir=str(input_path.parent)
@@ -657,3 +885,130 @@ def set_field_lock(
     if same_file:
         shutil.move(staged, str(output_path))
     return {"output": str(output_path), "field": name, "lock": seed}
+
+
+def set_field_actions(
+    file: str,
+    output: str,
+    field: str = "",
+    format=None,
+    validate=None,
+    calculate=None,
+    default_value=None,
+    clear=None,
+    allow_signed: bool = False,
+) -> dict:
+    """Set the Format, Validate and Calculate an EXISTING field carries.
+
+    Returns ``{output, field, scripts, calculation_order}``. The door is total:
+    every one of the four triggers this app authors is rewritten from the
+    arguments, so omitting an argument REMOVES that action rather than leaving
+    the previous one behind. ``clear`` names the members to remove explicitly
+    (``["format", "validate", "calculate", "default_value"]``), which is how a
+    caller distinguishes "leave the default value alone" from "there is none".
+    Every other ``/AA`` key -- a widget trigger, a script this app does not run
+    -- is left untouched.
+
+    ``/CO`` is rewritten by the same topological rule the create path uses, so
+    a calculation added here lands after the fields it reads. A cycle refuses.
+
+    Writing a field property rewrites the file, so the signed decision is taken
+    where every other structural edit takes it.
+    """
+    name = str(field or "").strip()
+    if not name:
+        raise ValueError("Name the form field whose actions are being set.")
+    validate_pdf(file)
+    decision = signed_edit_decision(signature_policy(file), "structural")
+    if decision["kind"] == "refuse":
+        raise RuntimeError(
+            "this document is certified to allow no changes, so setting a field "
+            "action would produce a file that reports as illegally modified"
+        )
+    if decision["kind"] == "warn" and not allow_signed:
+        raise RuntimeError(
+            "this document is signed and setting a field action invalidates its "
+            "signatures -- the run must state that signed documents are "
+            "included before it will touch one"
+        )
+
+    input_path = Path(file)
+    output_path = Path(output)
+    same_file = input_path.resolve() == output_path.resolve()
+    dropped = set(clear or ())
+    with pikepdf.open(file) as pdf:
+        refuse_if_xfa(pdf, input_path, "setting a field action")
+        forest = form_field_forest(pdf)
+        target = forest.get(name)
+        if target is None:
+            raise ValueError(f'This document has no form field named "{name}".')
+        kind = _kind_of_field(target)
+        spec = {"name": name, "type": kind}
+        if format is not None:
+            spec["format"] = format
+        if validate is not None:
+            spec["validate"] = validate
+        if calculate is not None:
+            spec["calculate"] = calculate
+        if default_value is not None or "default_value" in dropped:
+            spec["default_value"] = default_value
+        problems = _action_problems(spec, kind)
+        if calculate is not None:
+            known = set(forest)
+            for terminal in _all_fields(pdf):
+                known.add(terminal.name)
+            try:
+                targets = afemit.calculate_inputs(calculate)
+            except afemit.EmitError:
+                targets = []
+            for candidate in targets:
+                if candidate == name:
+                    problems.append(f'its calculation names "{candidate}", which is itself')
+                elif not afemit.resolves(candidate, known):
+                    problems.append(
+                        f'its calculation names "{candidate}", which this document does not have'
+                    )
+        if problems:
+            labelled = [f"{name}: {problem}" for problem in problems]
+            raise FieldSpecError(
+                f"this form field's actions cannot be set: {'; '.join(labelled)}",
+                labelled,
+            )
+
+        order, inputs = _existing_calculations(pdf)
+        entries = []
+        if calculate is not None:
+            entries.append((name, afemit.calculate_inputs(calculate)))
+            inputs.pop(name, None)
+        try:
+            new_order = afemit.calculation_order(order, inputs, entries)
+        except afemit.CycleError as exc:
+            chain = " -> ".join(exc.chain)
+            text = f"{name}: its calculation depends on itself through {chain}"
+            raise FieldSpecError(
+                f"this form field's actions cannot be set: {text}", [text]
+            ) from exc
+        if calculate is None and name in new_order:
+            # The calculation was removed, so the field no longer belongs to
+            # the order it was in.
+            new_order = [entry for entry in new_order if entry != name]
+
+        _apply_actions(pdf, target, spec)
+        write_calculation_order(pdf, new_order)
+        if same_file:
+            with tempfile.NamedTemporaryFile(
+                suffix=".pdf", delete=False, dir=str(input_path.parent)
+            ) as tmp:
+                staged = tmp.name
+            save_pdf(pdf, staged)
+        else:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            save_pdf(pdf, output_path)
+    if same_file:
+        shutil.move(staged, str(output_path))
+    return {
+        "output": str(output_path),
+        "field": name,
+        "scripts": afemit.emitted_scripts(spec),
+        "calculation_order": new_order,
+    }

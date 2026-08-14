@@ -25,6 +25,7 @@ from engine.afcalc import (
     run,
     unrunnable,
 )
+from engine import afemit
 from engine.afscript import ENTRY_POINTS, recognize
 
 CORPUS = json.loads(
@@ -134,3 +135,62 @@ def test_the_corpus_pins_every_separator_style():
         if case["name"].startswith("separator style")
     }
     assert shown == {"1,234.50", "1234.50", "1.234,50", "1234,50", "1'234.50"}
+
+
+# ── the authoring half ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("case", CORPUS["emit"], ids=lambda c: c["name"])
+def test_emission_writes_the_scripts_the_corpus_names(case):
+    if case.get("refuses"):
+        with pytest.raises(afemit.EmitError):
+            afemit.emitted_scripts(case["spec"])
+        return
+    scripts = afemit.emitted_scripts(case["spec"])
+    assert scripts == case["scripts"]
+    # Every body this app writes is a body this app runs — asserted, not hoped
+    # for. A viewer that executes the stock call gets the same answer the fill
+    # computes.
+    for js in scripts.values():
+        assert recognize(js) is not None
+        assert afemit.recognizable(js)
+    if "inputs" in case:
+        assert afemit.calculate_inputs(case["spec"]["calculate"]) == case["inputs"]
+
+
+@pytest.mark.parametrize("case", CORPUS["order"], ids=lambda c: c["name"])
+def test_the_calculation_order_is_topological(case):
+    if case.get("cycle"):
+        with pytest.raises(afemit.CycleError) as excinfo:
+            afemit.calculation_order(case["existing"], case["existing_inputs"], case["new"])
+        assert excinfo.value.chain == case["chain"]
+        return
+    order = afemit.calculation_order(
+        case["existing"], case["existing_inputs"], case["new"]
+    )
+    assert order == case["order"]
+    # The property the corpus row exists to hold: nothing reads a batch field
+    # that has not been computed yet.
+    positions = {name: index for index, name in enumerate(order)}
+    for name, inputs in case["new"]:
+        for dep in inputs:
+            if dep in positions and dep != name:
+                assert positions[dep] < positions[name]
+
+
+def test_the_corpus_covers_every_format_kind_and_every_calculation():
+    kinds = {
+        case["spec"]["format"]["kind"]
+        for case in CORPUS["emit"]
+        if not case.get("refuses") and "format" in case["spec"]
+    }
+    assert kinds == set(afemit.FORMAT_KINDS)
+    functions = {
+        case["spec"]["calculate"]["op"]
+        for case in CORPUS["emit"]
+        if not case.get("refuses")
+        and "calculate" in case["spec"]
+        and "op" in case["spec"]["calculate"]
+    }
+    assert functions == set(afemit.CALC_FUNCTIONS)
+    assert any(case.get("refuses") for case in CORPUS["emit"])

@@ -1522,6 +1522,53 @@ export const PANEL_STRINGS = {
   'panel.prepareForm.lockApplying': 'Applying…',
   'panel.prepareForm.lockApplied': 'Lock set on {{field}}.',
   'panel.prepareForm.lockDeclined': 'The document was left alone.',
+  'panel.prepareForm.fieldProps': 'Field properties',
+  'panel.prepareForm.fieldPropsBlurb':
+    'What a field shows, what it accepts, and what it calculates from the fields around it. Every other viewer runs the same rules.',
+  'panel.prepareForm.fieldPropsNone': 'This document has no text or dropdown fields.',
+  'panel.prepareForm.propsApply': 'Apply properties',
+  'panel.prepareForm.propsApplying': 'Applying…',
+  'panel.prepareForm.propsApplied': 'Properties set on {{field}}.',
+
+  // The Format / Accepted range / Calculate editor, shared by the placement
+  // card, the detection review row and the field-properties section. A
+  // typographic choice is offered as a SAMPLE, so nothing here names a
+  // separator style or a mask by number.
+  'panel.fieldActions.format': 'Shows as',
+  'panel.fieldActions.formatNone': 'Plain text',
+  'panel.fieldActions.formatNumber': 'Number',
+  'panel.fieldActions.formatPercent': 'Percentage',
+  'panel.fieldActions.formatDate': 'Date',
+  'panel.fieldActions.formatTime': 'Time',
+  'panel.fieldActions.formatSpecial': 'Fixed pattern',
+  'panel.fieldActions.formatMask': 'Custom pattern',
+  'panel.fieldActions.decimals': 'Decimal places',
+  'panel.fieldActions.separator': 'Separators',
+  'panel.fieldActions.negative': 'Negative values',
+  'panel.fieldActions.currency': 'Symbol',
+  'panel.fieldActions.currencyPrepend': 'Symbol before the number',
+  'panel.fieldActions.mask': 'Pattern',
+  'panel.fieldActions.maskHint':
+    'In a pattern, 9 accepts a digit, A a letter, O a letter or a digit, X anything; every other character must be typed as written.',
+  'panel.fieldActions.sample': 'On the page: {{sample}}',
+  'panel.fieldActions.validate': 'Accepts',
+  'panel.fieldActions.min': 'Smallest',
+  'panel.fieldActions.max': 'Largest',
+  'panel.fieldActions.calculate': 'Calculate',
+  'panel.fieldActions.calculateNone': 'Not calculated',
+  'panel.fieldActions.calculateExpression': 'From an expression',
+  'panel.fieldActions.opSum': 'Sum of fields',
+  'panel.fieldActions.opPrd': 'Product of fields',
+  'panel.fieldActions.opAvg': 'Average of fields',
+  'panel.fieldActions.opMin': 'Smallest of fields',
+  'panel.fieldActions.opMax': 'Largest of fields',
+  'panel.fieldActions.fields': 'From',
+  'panel.fieldActions.noFields': 'This document has no other fields to calculate from.',
+  'panel.fieldActions.expression': 'Expression',
+  'panel.fieldActions.expressionPlaceholder': 'Subtotal + Tax',
+  'panel.fieldActions.expressionInvalid':
+    'This expression cannot be read, so no viewer would compute it the same way.',
+  'panel.fieldActions.defaultValue': 'Starts as',
   'panel.prepareForm.reasonRuleWithoutLabel':
     'Page {{page}}: {{count}} line(s) with no label beside them were left out — they read as a table, not a fill-in.',
   'panel.prepareForm.reasonCovered':

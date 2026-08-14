@@ -89,6 +89,7 @@ const noopHandlers = (): AppCommandHandlers => ({
   minimizeToTray: vi.fn(async () => {}),
   sanitizeDocument: vi.fn(async () => true),
   setFieldLock: vi.fn(async () => true),
+  setFieldActions: vi.fn(async () => true),
 });
 
 afterEach(() => {
