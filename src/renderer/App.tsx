@@ -79,7 +79,7 @@ import { setCommitGate, runCommitGate } from './lib/commit-gate';
 import { initialViewPlan, parseInitialView, planIsInert } from './lib/initial-view';
 import { readFormFields } from './lib/forms';
 import type { FormFieldValue } from './lib/forms';
-import { resolveFillTargets } from './lib/form-overlay';
+import { fillClosure, formCalculation, resolveFillTargets } from './lib/form-overlay';
 import { addFormFields } from './lib/form-authoring';
 import type { NewFieldSpec } from './lib/form-authoring';
 import { DropZone } from './components/DropZone';
@@ -365,15 +365,23 @@ function AppContent(): React.ReactElement {
       workingPath: string,
       editClass: EditClass,
       fields: readonly string[] | null = null,
+      /** Of `fields`, the ones the caller actually named — the rest are what
+       * the document's own calculations would change as a result. A lock that
+       * bites only those has to say so, or a user told "Total is locked" after
+       * typing into "Item 1" has been told nothing. */
+      typed: readonly string[] | null = null,
     ): Promise<boolean> => {
       const policy = (await call('signature_policy', {
         path: workingPath,
       })) as unknown as SignaturePolicy;
-      const decision = signedEditDecision(policy, editClass, fields);
+      const decision = signedEditDecision(policy, editClass, fields, typed);
       if (decision.kind === 'proceed') return true;
       // The locked-field refusal names what it stopped; every other decision
       // takes no values, and passing an unused one is harmless.
-      const body = tChrome(decision.bodyKey, { fields: (decision.fields ?? []).join(', ') });
+      const body = tChrome(decision.bodyKey, {
+        fields: (decision.fields ?? []).join(', '),
+        typed: (decision.typed ?? []).join(', '),
+      });
       if (decision.kind === 'refuse') {
         await showNotice(tChrome(decision.titleKey), body);
         return false;
@@ -1062,15 +1070,23 @@ function AppContent(): React.ReactElement {
     async (path: string, values: Record<string, FormFieldValue>) => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'form-fill', Object.keys(values))))
-        return;
       // Pre/post reads route through the engine — `read_form_fields` is
       // INTERNAL, so neither read runs the commit gate. The pre-read sees the
       // current working copy (== buffer); `file.snapshot` then flushes pending
       // page edits, and the post-read sees those committed bytes, so the
       // fingerprint/rename-family re-resolution below still detects an import
-      // carry's field rename exactly as with the old pdf-lib read.
-      const preFields = f.buffer ? (await readFormFields(call, f.workingPath)).fields : [];
+      // carry's field rename exactly as with the old pdf-lib read. It happens
+      // BEFORE the signed-edit question because that question has to be asked
+      // about the TRANSITIVE set — filling an unlocked line item that
+      // recalculates a locked Total produces a document reporting as altered,
+      // and a decision taken on the typed names alone would never see it.
+      const pre = f.buffer ? await readFormFields(call, f.workingPath) : null;
+      const preFields = pre?.fields ?? [];
+      const typed = Object.keys(values);
+      const targets = pre
+        ? fillClosure(formCalculation(pre.fields, pre.calculationOrder), typed)
+        : typed;
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'form-fill', targets, typed))) return;
       const snapshotPath = await file.snapshot(f.workingPath);
       const postFields = (await readFormFields(call, f.workingPath)).fields;
       const { resolved, skipped } = resolveFillTargets(preFields, postFields, values);

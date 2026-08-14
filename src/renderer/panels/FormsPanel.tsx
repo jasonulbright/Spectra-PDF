@@ -41,6 +41,7 @@ export function FormsPanel(): React.ReactElement {
   const touched = useRef<Set<string>>(new Set());
   const [fields, setFields] = useState<FormField[]>([]);
   const [hasXFA, setHasXFA] = useState(false);
+  const [calculationOrder, setCalculationOrder] = useState<string[]>([]);
   const [values, setValues] = useState<Record<string, FormFieldValue>>({});
   const [flatten, setFlatten] = useState(false);
   const [reading, setReading] = useState(false);
@@ -63,6 +64,7 @@ export function FormsPanel(): React.ReactElement {
     if (!buffer || !workingPath) {
       setFields([]);
       setHasXFA(false);
+      setCalculationOrder([]);
       setValues({});
       touched.current.clear();
       return;
@@ -77,6 +79,7 @@ export function FormsPanel(): React.ReactElement {
         if (cancelled) return;
         setFields(result.fields);
         setHasXFA(result.hasXFA);
+        setCalculationOrder(result.calculationOrder);
         const seed: Record<string, FormFieldValue> = {};
         for (const f of result.fields) seed[f.name] = f.value;
         // The file is always the BASELINE — Apply diffs against it, so it must
@@ -89,6 +92,7 @@ export function FormsPanel(): React.ReactElement {
         if (cancelled) return;
         setFields([]);
         setHasXFA(false);
+        setCalculationOrder([]);
         setStatus(tChrome('panel.forms.errorReading', { message: e instanceof Error ? e.message : String(e) }));
       })
       .finally(() => {
@@ -105,6 +109,13 @@ export function FormsPanel(): React.ReactElement {
   }, []);
 
   const editableCount = fields.filter((f) => f.editable).length;
+  // Fields whose /JS this app does not run, and calculations the document
+  // declared no order for. Both are reported rather than silently absent: a
+  // Total that stays empty because nothing said when to compute it is exactly
+  // the failure this row exists to end.
+  const scriptsNotRunCount = fields.filter((f) => f.scriptsNotRun?.length).length;
+  const unorderedCalcCount =
+    calculationOrder.length === 0 ? fields.filter((f) => f.actions?.C).length : 0;
 
   const handleApply = useCallback(async () => {
     if (!activeFile) return;
@@ -179,6 +190,24 @@ export function FormsPanel(): React.ReactElement {
         </div>
       )}
 
+      {unorderedCalcCount > 0 && (
+        <div
+          data-testid="forms-unordered-calculations"
+          className="shrink-0 px-3 py-2 bg-amber-500/15 border border-amber-500/40 rounded text-xs text-amber-200"
+        >
+          {tChromeCount('panel.forms.noCalculationOrder', unorderedCalcCount)}
+        </div>
+      )}
+
+      {scriptsNotRunCount > 0 && (
+        <div
+          data-testid="forms-scripts-not-run"
+          className="shrink-0 px-3 py-2 bg-neutral-800/60 border border-neutral-700 rounded text-xs text-neutral-300"
+        >
+          {tChromeCount('panel.forms.scriptsNotRun', scriptsNotRunCount)}
+        </div>
+      )}
+
       {reading ? (
         <div className="text-sm text-neutral-500">{tChrome('panel.forms.reading')}</div>
       ) : fields.length === 0 ? (
@@ -237,6 +266,11 @@ function FieldRow({
       <span className="text-sm text-neutral-300">{field.name}</span>
       {field.required && <span className="text-[10px] text-amber-400 uppercase">{tChrome('panel.forms.required')}</span>}
       {field.readOnly && <span className="text-[10px] text-neutral-500 uppercase">{tChrome('panel.forms.readOnly')}</span>}
+      {field.calculated && (
+        <span data-testid={`form-calculated-${field.name}`} className="text-[10px] text-sky-400 uppercase">
+          {tChrome('panel.forms.calculated')}
+        </span>
+      )}
       {(field.type === 'button' || field.type === 'signature') && (
         <span className="text-[10px] text-neutral-500 uppercase">{field.type}</span>
       )}

@@ -880,6 +880,12 @@ export interface CanvasFormsHandlers {
   pendingCount: () => number;
   apply: () => Promise<string[]>; // per-file failure messages; empty = success
   widgetCountFor: (path: string) => number;
+  // What the overlay SHOWS for a field: what the user typed, or what the
+  // document's own calculation order computes from it. Null when the file has
+  // no such field or nothing overrides its stored value.
+  shownValueFor: (path: string, fieldName: string) => string | null;
+  // Fields carrying a script this app does not run, by name.
+  scriptsNotRunFor: (path: string) => string[];
   // Add-field authoring — place on the active file's first page
   // (display-normalized rect), then create through the REAL conversion +
   // whole-file-op flow the card's Create button runs.
@@ -1240,6 +1246,16 @@ export interface TestHarness {
   applyCanvasFormValues: () => Promise<void>;
   /** Overlay widget count read for a file (0 until the async read lands). */
   formWidgetCount: (path: string) => number;
+  /** What the overlay SHOWS for a field — the typed value, or the one the
+   * document's /CO computes from it. Null when nothing overrides the stored
+   * value. Polls for the async forms read. */
+  canvasFormShownValue: (
+    path: string,
+    fieldName: string,
+    timeoutMs?: number,
+  ) => Promise<string | null>;
+  /** Fields of a file carrying a script this app does not run. */
+  canvasFormScriptsNotRun: (path: string) => string[];
   /** Place a new-field box on the active file's first canvas page,
    * waiting for the canvas + indexer like placeSignature. */
   placeNewField: (
@@ -2108,6 +2124,17 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     formWidgetCount: (path) => canvasForms?.widgetCountFor(path) ?? 0,
+    canvasFormShownValue: async (path, fieldName, timeoutMs = 10_000) => {
+      // The recompute rides the same async forms read the setter polls for.
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const shown = canvasForms?.shownValueFor(path, fieldName) ?? null;
+        if (shown !== null) return shown;
+        if (Date.now() >= deadline) return null;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    },
+    canvasFormScriptsNotRun: (path) => canvasForms?.scriptsNotRunFor(path) ?? [],
     placeNewField: async (rect, timeoutMs = 10_000) => {
       const deadline = Date.now() + timeoutMs;
       let placed = canvasForms?.placeNewFieldOnFirstPage(rect) ?? false;

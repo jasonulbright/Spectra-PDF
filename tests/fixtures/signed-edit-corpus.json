@@ -12,97 +12,172 @@
     "the other writes it into a report. A `proceed` case carries no reason.",
     "",
     "`fields` names what a form fill targets. Absent means the caller cannot",
-    "name them, which a lock covering ALL fields is still decidable against."
+    "name them, which a lock covering ALL fields is still decidable against.",
+    "",
+    "`typed` names the caller's own half of `fields`; the rest is what the",
+    "document's own calculation order would recompute as a result. When a lock",
+    "bites ONLY that computed half the refusal is `indirect`, because a user",
+    "told \"Total is locked\" after typing into \"Item 1\" has been told nothing."
   ],
   "cases": [
     {
       "name": "an unsigned document permits every class",
-      "policy": { "signed": false, "count": 0, "certified": false, "level": null },
+      "policy": {
+        "signed": false,
+        "count": 0,
+        "certified": false,
+        "level": null
+      },
       "class": "structural",
       "kind": "proceed"
     },
     {
       "name": "an unsigned document permits an annotation",
-      "policy": { "signed": false, "count": 0, "certified": false, "level": null },
+      "policy": {
+        "signed": false,
+        "count": 0,
+        "certified": false,
+        "level": null
+      },
       "class": "annotate",
       "kind": "proceed"
     },
     {
       "name": "signed but uncertified: an annotation rides the incremental tier",
-      "policy": { "signed": true, "count": 1, "certified": false, "level": null },
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null
+      },
       "class": "annotate",
       "kind": "proceed"
     },
     {
       "name": "signed but uncertified: a form fill rides the incremental tier",
-      "policy": { "signed": true, "count": 2, "certified": false, "level": null },
+      "policy": {
+        "signed": true,
+        "count": 2,
+        "certified": false,
+        "level": null
+      },
       "class": "form-fill",
       "kind": "proceed"
     },
     {
       "name": "signed but uncertified: a structural edit warns",
-      "policy": { "signed": true, "count": 1, "certified": false, "level": null },
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null
+      },
       "class": "structural",
       "kind": "warn",
       "reason": "signed"
     },
     {
       "name": "certified to allow no changes: an annotation is refused",
-      "policy": { "signed": true, "count": 1, "certified": true, "level": "none" },
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": true,
+        "level": "none"
+      },
       "class": "annotate",
       "kind": "refuse",
       "reason": "certified-no-changes"
     },
     {
       "name": "certified to allow no changes: a structural edit is refused",
-      "policy": { "signed": true, "count": 1, "certified": true, "level": "none" },
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": true,
+        "level": "none"
+      },
       "class": "structural",
       "kind": "refuse",
       "reason": "certified-no-changes"
     },
     {
       "name": "certified for form filling: a form fill proceeds",
-      "policy": { "signed": true, "count": 1, "certified": true, "level": "form-fill" },
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": true,
+        "level": "form-fill"
+      },
       "class": "form-fill",
       "kind": "proceed"
     },
     {
       "name": "certified for form filling: an annotation warns",
-      "policy": { "signed": true, "count": 1, "certified": true, "level": "form-fill" },
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": true,
+        "level": "form-fill"
+      },
       "class": "annotate",
       "kind": "warn",
       "reason": "certified-form-fill"
     },
     {
       "name": "certified for form filling: a structural edit warns",
-      "policy": { "signed": true, "count": 1, "certified": true, "level": "form-fill" },
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": true,
+        "level": "form-fill"
+      },
       "class": "structural",
       "kind": "warn",
       "reason": "certified-form-fill"
     },
     {
       "name": "certified for annotation: an annotation proceeds",
-      "policy": { "signed": true, "count": 1, "certified": true, "level": "annotate" },
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": true,
+        "level": "annotate"
+      },
       "class": "annotate",
       "kind": "proceed"
     },
     {
       "name": "certified for annotation: a structural edit warns",
-      "policy": { "signed": true, "count": 1, "certified": true, "level": "annotate" },
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": true,
+        "level": "annotate"
+      },
       "class": "structural",
       "kind": "warn",
       "reason": "certified-annotate"
     },
     {
       "name": "a certification level this build cannot name permits nothing",
-      "policy": { "signed": true, "count": 1, "certified": true, "level": null },
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": true,
+        "level": null
+      },
       "class": "form-fill",
       "kind": "warn",
       "reason": "certified-unknown"
     },
     {
       "name": "a certification with no live signature field still governs",
-      "policy": { "signed": false, "count": 0, "certified": true, "level": "annotate" },
+      "policy": {
+        "signed": false,
+        "count": 0,
+        "certified": true,
+        "level": "annotate"
+      },
       "class": "structural",
       "kind": "warn",
       "reason": "certified-annotate"
@@ -110,19 +185,37 @@
     {
       "name": "a lock covering every field refuses a form fill",
       "policy": {
-        "signed": true, "count": 1, "certified": false, "level": null,
-        "locks": [{ "action": "all", "fields": [] }]
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "all",
+            "fields": []
+          }
+        ]
       },
       "class": "form-fill",
-      "fields": ["Name"],
+      "fields": [
+        "Name"
+      ],
       "kind": "refuse",
       "reason": "fields-locked"
     },
     {
       "name": "a lock covering every field refuses a fill that cannot name its targets",
       "policy": {
-        "signed": true, "count": 1, "certified": false, "level": null,
-        "locks": [{ "action": "all", "fields": [] }]
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "all",
+            "fields": []
+          }
+        ]
       },
       "class": "form-fill",
       "kind": "refuse",
@@ -131,29 +224,64 @@
     {
       "name": "an include lock refuses a fill of a field it names",
       "policy": {
-        "signed": true, "count": 1, "certified": false, "level": null,
-        "locks": [{ "action": "include", "fields": ["Total"] }]
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "include",
+            "fields": [
+              "Total"
+            ]
+          }
+        ]
       },
       "class": "form-fill",
-      "fields": ["Name", "Total"],
+      "fields": [
+        "Name",
+        "Total"
+      ],
       "kind": "refuse",
       "reason": "fields-locked"
     },
     {
       "name": "an include lock lets a fill of a field it does not name proceed",
       "policy": {
-        "signed": true, "count": 1, "certified": false, "level": null,
-        "locks": [{ "action": "include", "fields": ["Total"] }]
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "include",
+            "fields": [
+              "Total"
+            ]
+          }
+        ]
       },
       "class": "form-fill",
-      "fields": ["Name"],
+      "fields": [
+        "Name"
+      ],
       "kind": "proceed"
     },
     {
       "name": "a list lock cannot be adjudicated against unnamed targets",
       "policy": {
-        "signed": true, "count": 1, "certified": false, "level": null,
-        "locks": [{ "action": "include", "fields": ["Total"] }]
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "include",
+            "fields": [
+              "Total"
+            ]
+          }
+        ]
       },
       "class": "form-fill",
       "kind": "proceed"
@@ -161,40 +289,84 @@
     {
       "name": "an exclude lock refuses a fill of a field it does not name",
       "policy": {
-        "signed": true, "count": 1, "certified": false, "level": null,
-        "locks": [{ "action": "exclude", "fields": ["Name"] }]
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "exclude",
+            "fields": [
+              "Name"
+            ]
+          }
+        ]
       },
       "class": "form-fill",
-      "fields": ["Total"],
+      "fields": [
+        "Total"
+      ],
       "kind": "refuse",
       "reason": "fields-locked"
     },
     {
       "name": "an exclude lock lets a fill of a field it names proceed",
       "policy": {
-        "signed": true, "count": 1, "certified": false, "level": null,
-        "locks": [{ "action": "exclude", "fields": ["Name"] }]
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "exclude",
+            "fields": [
+              "Name"
+            ]
+          }
+        ]
       },
       "class": "form-fill",
-      "fields": ["Name"],
+      "fields": [
+        "Name"
+      ],
       "kind": "proceed"
     },
     {
       "name": "a lock naming a parent covers the fields beneath it",
       "policy": {
-        "signed": true, "count": 1, "certified": false, "level": null,
-        "locks": [{ "action": "include", "fields": ["Buyer"] }]
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "include",
+            "fields": [
+              "Buyer"
+            ]
+          }
+        ]
       },
       "class": "form-fill",
-      "fields": ["Buyer.Name"],
+      "fields": [
+        "Buyer.Name"
+      ],
       "kind": "refuse",
       "reason": "fields-locked"
     },
     {
       "name": "a lock governs form fields only, so an annotation proceeds",
       "policy": {
-        "signed": true, "count": 1, "certified": false, "level": null,
-        "locks": [{ "action": "all", "fields": [] }]
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "all",
+            "fields": []
+          }
+        ]
       },
       "class": "annotate",
       "kind": "proceed"
@@ -202,8 +374,16 @@
     {
       "name": "a lock does not change what a structural edit warns about",
       "policy": {
-        "signed": true, "count": 1, "certified": false, "level": null,
-        "locks": [{ "action": "all", "fields": [] }]
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "all",
+            "fields": []
+          }
+        ]
       },
       "class": "structural",
       "kind": "warn",
@@ -212,38 +392,227 @@
     {
       "name": "a locked field is refused under a certification that would permit the fill",
       "policy": {
-        "signed": true, "count": 2, "certified": true, "level": "form-fill",
-        "locks": [{ "action": "include", "fields": ["Total"] }]
+        "signed": true,
+        "count": 2,
+        "certified": true,
+        "level": "form-fill",
+        "locks": [
+          {
+            "action": "include",
+            "fields": [
+              "Total"
+            ]
+          }
+        ]
       },
       "class": "form-fill",
-      "fields": ["Total"],
+      "fields": [
+        "Total"
+      ],
       "kind": "refuse",
       "reason": "fields-locked"
     },
     {
       "name": "a no-changes certification outranks a field lock",
       "policy": {
-        "signed": true, "count": 1, "certified": true, "level": "none",
-        "locks": [{ "action": "include", "fields": ["Total"] }]
+        "signed": true,
+        "count": 1,
+        "certified": true,
+        "level": "none",
+        "locks": [
+          {
+            "action": "include",
+            "fields": [
+              "Total"
+            ]
+          }
+        ]
       },
       "class": "form-fill",
-      "fields": ["Total"],
+      "fields": [
+        "Total"
+      ],
       "kind": "refuse",
       "reason": "certified-no-changes"
     },
     {
       "name": "two signatures lock different sets and either one bites",
       "policy": {
-        "signed": true, "count": 2, "certified": false, "level": null,
+        "signed": true,
+        "count": 2,
+        "certified": false,
+        "level": null,
         "locks": [
-          { "action": "include", "fields": ["Total"] },
-          { "action": "include", "fields": ["Name"] }
+          {
+            "action": "include",
+            "fields": [
+              "Total"
+            ]
+          },
+          {
+            "action": "include",
+            "fields": [
+              "Name"
+            ]
+          }
         ]
       },
       "class": "form-fill",
-      "fields": ["Name"],
+      "fields": [
+        "Name"
+      ],
       "kind": "refuse",
       "reason": "fields-locked"
+    },
+    {
+      "name": "a fill whose calculation reaches a locked Total refuses, naming the typing that caused it",
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "include",
+            "fields": [
+              "Total"
+            ]
+          }
+        ]
+      },
+      "class": "form-fill",
+      "fields": [
+        "Item1",
+        "Total"
+      ],
+      "typed": [
+        "Item1"
+      ],
+      "kind": "refuse",
+      "reason": "fields-locked",
+      "locked": [
+        "Total"
+      ],
+      "indirect": true
+    },
+    {
+      "name": "a fill that names the locked field itself is refused directly, not as a calculation",
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "include",
+            "fields": [
+              "Total"
+            ]
+          }
+        ]
+      },
+      "class": "form-fill",
+      "fields": [
+        "Total"
+      ],
+      "typed": [
+        "Total"
+      ],
+      "kind": "refuse",
+      "reason": "fields-locked",
+      "locked": [
+        "Total"
+      ],
+      "indirect": false
+    },
+    {
+      "name": "a lock biting both a typed field and a calculated one reports directly",
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "include",
+            "fields": [
+              "Name",
+              "Total"
+            ]
+          }
+        ]
+      },
+      "class": "form-fill",
+      "fields": [
+        "Name",
+        "Total"
+      ],
+      "typed": [
+        "Name"
+      ],
+      "kind": "refuse",
+      "reason": "fields-locked",
+      "locked": [
+        "Name",
+        "Total"
+      ],
+      "indirect": false
+    },
+    {
+      "name": "a calculation that reaches nothing locked proceeds",
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "include",
+            "fields": [
+              "Total"
+            ]
+          }
+        ]
+      },
+      "class": "form-fill",
+      "fields": [
+        "Item1",
+        "Sub"
+      ],
+      "typed": [
+        "Item1"
+      ],
+      "kind": "proceed"
+    },
+    {
+      "name": "a lock covering every field bites a calculated dependent too",
+      "policy": {
+        "signed": true,
+        "count": 1,
+        "certified": false,
+        "level": null,
+        "locks": [
+          {
+            "action": "all",
+            "fields": []
+          }
+        ]
+      },
+      "class": "form-fill",
+      "fields": [
+        "Item1",
+        "Total"
+      ],
+      "typed": [
+        "Item1"
+      ],
+      "kind": "refuse",
+      "reason": "fields-locked",
+      "locked": [
+        "Item1",
+        "Total"
+      ],
+      "indirect": false
     }
   ]
 }
