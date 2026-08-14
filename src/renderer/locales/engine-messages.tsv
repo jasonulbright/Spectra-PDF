@@ -10,6 +10,7 @@
 # and `key` names the catalog entry (engine.<key>) that renders it in the UI
 # language. A message NOT in this table passes through verbatim — nothing is
 # ever swallowed. Keys are STABLE: rewording a message keeps its key.
+key	kind	modules	message
 acroform.containsXmlFormXfa	pattern	acroform	{{v0}} contains an XML form (XFA). Page operations would detach the form from its pages, so {{operation}} is not available for this document. Fill the form, or flatten it with another tool first.
 acroform.regeneratedFileSPage	exact	acroform	The regenerated file's page count differs from the original; cannot reattach its form fields.
 attachments.attachmentNamed	pattern	attachments	no attachment named {{name}}
@@ -120,10 +121,14 @@ font_fallback.textEmbed	exact	font_fallback	no text to embed
 font_fallback.verticalFallbackFontCannot	pattern	font_fallback	the vertical fallback font cannot express {{ch}}
 form_authoring.documentCertifiedAllowChanges	exact	form_authoring	this document is certified to allow no changes, so adding form fields would produce a file that reports as illegally modified
 form_authoring.documentCertifiedAllowChanges2	exact	form_authoring	this document is certified to allow no changes, so setting a field lock would produce a file that reports as illegally modified
+form_authoring.documentCertifiedAllowChanges3	exact	form_authoring	this document is certified to allow no changes, so setting a field action would produce a file that reports as illegally modified
 form_authoring.documentFormFieldNamed	pattern	form_authoring	This document has no form field named "{{name}}".
 form_authoring.documentSignedAddingForm	exact	form_authoring	this document is signed and adding form fields invalidates its signatures -- the run must state that signed documents are included before it will touch one
 form_authoring.documentSignedSettingField	exact	form_authoring	this document is signed and setting a field lock invalidates its signatures -- the run must state that signed documents are included before it will touch one
+form_authoring.documentSignedSettingField2	exact	form_authoring	this document is signed and setting a field action invalidates its signatures -- the run must state that signed documents are included before it will touch one
+form_authoring.formFieldSActions	pattern	form_authoring	this form field's actions cannot be set: {{text}}
 form_authoring.formFieldSignatureField	pattern	form_authoring	Form field "{{name}}" is not a signature field, and only a signature field can lock form fields.
+form_authoring.nameFormFieldWhose	exact	form_authoring	Name the form field whose actions are being set.
 form_authoring.nameSignatureFieldWhose	exact	form_authoring	Name the signature field whose lock is being set.
 form_authoring.signatureFieldAlreadySigned	pattern	form_authoring	Signature field "{{name}}" is already signed, so its field lock can no longer change. Its lock is part of what that signature covers.
 form_authoring.theseFormFieldsCannot	pattern	form_authoring	these form fields cannot be created: {{joined}}
@@ -192,7 +197,6 @@ ink_manager.inkUsedPatternTool	pattern	ink_manager	Ink "{{name}}" is used by a p
 ink_manager.nameLeastOneInk	exact	ink_manager	Name at least one ink to convert.
 ink_manager.processInksCannotAliased	exact	ink_manager	Process inks cannot be aliased to a spot colour.
 inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
-key	kind	modules	message
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 links.linkIndexOutRange	pattern	links	link index {{index}} is out of range (page has {{v1}})
 links.linksAdd	exact	links	no links to add

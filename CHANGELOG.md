@@ -15,6 +15,19 @@
 - Filling a field that recalculates one a signature locks now says so, naming what you typed and what it would have changed — before it changes anything.
 - The command line's `forms --set` calculates the same way.
 
+### Building a form that calculates
+- The field you place on a page now carries a display format: a number with the separators and currency symbol you choose, a percentage, a date or a time in a mask you pick, a postcode, a telephone number, or a pattern of your own.
+- The format picker shows a live sample of what the page will read, so a choice of separators is a choice between `1,234.56` and `1.234,56` rather than between two numbers.
+- A field can accept only values inside a range you set, and can start out holding a default value that a form reset returns it to.
+- A field can be calculated: the sum, product, average, smallest or largest of the fields you tick, or any arithmetic expression over their names.
+- An expression is checked as you type, so an unreadable one is refused before the field exists rather than after.
+- Fields are put in an order that runs every calculation after the fields it reads, whatever order you created them in — so a total is never one edit behind.
+- A calculation that would depend on itself is refused, naming the chain that proves it, and so is one naming a field the document does not have.
+- Everything written is the same form scripting the rest of the PDF world writes, so a form built here calculates identically in other viewers.
+- **Prepare Form** gains a Field properties section: the format, accepted range and calculation of any existing text or dropdown field can be changed without recreating it.
+- A detected date field is now created with a date format, instead of the detection noting the date and the field forgetting it.
+- The placement card also offers the character limit and the one-box-per-character comb layout it always accepted but never showed.
+
 ## 1.0.29
 
 *Released 2026-08-10*

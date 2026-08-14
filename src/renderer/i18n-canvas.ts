@@ -555,6 +555,8 @@ export const CANVAS_STRINGS = {
   'canvas.newfield.type.optionlist': 'Option list',
   'canvas.newfield.type.signature': 'Signature (empty)',
   'canvas.newfield.multiline': 'Multiline',
+  'canvas.newfield.comb': 'One box per character',
+  'canvas.newfield.maxLength': 'Character limit',
   'canvas.newfield.options': 'Options',
   'canvas.newfield.optionsPlaceholder': 'one per line (or comma-separated)',
   'canvas.newfield.creating': 'Creating…',

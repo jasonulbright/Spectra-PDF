@@ -10,7 +10,21 @@
 // space and the cell, and a second one here would be a second answer to where
 // a rectangle is.
 import type { NewFieldSpec, NewFieldType } from './form-authoring';
+import { DETECTED_DATE_FORMAT } from './af-emit';
+import type { FieldCalculate, FieldFormat, FieldValidate } from './af-emit';
 import type { FieldLock } from './signatures';
+
+/** The Format / Validate / Calculate a field is authored with — the three
+ * spec members that become its `/AA` scripts, held together because every
+ * surface that offers one offers all three. */
+export interface FieldActions {
+  format?: FieldFormat;
+  validate?: FieldValidate;
+  calculate?: FieldCalculate;
+  defaultValue?: string;
+}
+
+export const NO_ACTIONS: FieldActions = {};
 
 export type CandidateKind = 'text' | 'checkbox' | 'radio' | 'signature';
 
@@ -74,6 +88,11 @@ export interface FieldCandidate {
    * Detection never proposes one — a drawn rule cannot imply what a signature
    * should bind — so it is null until the reviewer chooses it. */
   lock: FieldLock | null;
+  /** The Format/Validate/Calculate the reviewer chose. `null` means "whatever
+   * the detection hint implies" — a date-labelled candidate then lands with a
+   * date format; an EMPTY object is the reviewer having taken it away, which
+   * is a different answer and must survive as one. */
+  actions: FieldActions | null;
 }
 
 /** The kinds the review surface offers, with anything else falling back to a
@@ -162,21 +181,43 @@ export function retypeCandidate(
   return candidates.map((c) => {
     if (c.id !== id) return c;
     // Only a signature field can carry a lock, so leaving that kind drops it
-    // rather than keeping a seed the write would refuse.
+    // rather than keeping a seed the write would refuse — and only a text
+    // field carries a format, a range or a calculation.
     const lock = kind === 'signature' ? c.lock : null;
+    const actions = kind === 'text' ? c.actions : null;
     if (c.group && kind !== 'radio') {
       return {
         ...c,
         kind,
         lock,
+        actions,
         group: null,
         exportValue: null,
         name: sanitizeFieldName(c.exportValue ?? c.label ?? c.name),
         multiline: false,
       };
     }
-    return { ...c, kind, lock, multiline: kind === 'text' ? c.multiline : false };
+    return { ...c, kind, lock, actions, multiline: kind === 'text' ? c.multiline : false };
   });
+}
+
+/** Set the Format/Validate/Calculate a candidate will be authored with. */
+export function setCandidateActions(
+  candidates: readonly FieldCandidate[],
+  id: string,
+  actions: FieldActions,
+): FieldCandidate[] {
+  return candidates.map((c) => (c.id === id ? { ...c, actions } : c));
+}
+
+/** What a candidate is authored with today: the reviewer's choice when there
+ * is one, and otherwise what the detection hint implies. */
+export function effectiveActions(candidate: FieldCandidate): FieldActions {
+  if (candidate.actions !== null) return candidate.actions;
+  if (candidate.kind === 'text' && candidate.format === 'date') {
+    return { format: DETECTED_DATE_FORMAT };
+  }
+  return NO_ACTIONS;
 }
 
 /** Set (or clear) the `/Lock` a signature candidate will be authored with. */
@@ -346,6 +387,14 @@ export function buildFieldSpecs(
         spec.comb = true;
         spec.maxLength = candidate.comb;
       }
+      // The detector's own format hint, carried into the spec so a detected
+      // date field lands with a date format rather than with the hint stopping
+      // at the review surface.
+      const actions = effectiveActions(candidate);
+      if (actions.format) spec.format = actions.format;
+      if (actions.validate) spec.validate = actions.validate;
+      if (actions.calculate) spec.calculate = actions.calculate;
+      if (actions.defaultValue !== undefined) spec.defaultValue = actions.defaultValue;
     }
     if (candidate.kind === 'signature' && candidate.lock) spec.lock = candidate.lock;
     specs.push(spec);
@@ -400,6 +449,7 @@ export function candidatesFromDetection(
       warnings: row.warnings,
       checked: false,
       lock: null,
+      actions: null,
     });
   }
   return { candidates, skipped };

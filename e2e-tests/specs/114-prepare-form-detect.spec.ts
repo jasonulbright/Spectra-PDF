@@ -10,7 +10,7 @@ import { resolve } from 'node:path';
 import { readFileSync, writeFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { expect } from '@wdio/globals';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFString, StandardFonts, rgb } from 'pdf-lib';
 import {
   waitForHarness,
   openByPaths,
@@ -23,7 +23,16 @@ import {
   pressGlobalKey,
 } from '../support/harness.js';
 
-const LABELS = ['First name:', 'Last name:', 'Email address:', 'Telephone:'] as const;
+// "Date of birth" is here for the carry the detector's format hint earns: it
+// already reported a date-shaped label, and the created field must land
+// carrying a date format rather than dropping the hint at the review surface.
+const LABELS = [
+  'First name:',
+  'Last name:',
+  'Email address:',
+  'Telephone:',
+  'Date of birth:',
+] as const;
 
 /** A ruled fill-in form: four labelled rules, plus a two-row table whose rules
  * carry no label — those must be reported and not offered. */
@@ -62,6 +71,26 @@ async function fieldNames(path: string): Promise<string[]> {
     .getFields()
     .map((f) => f.getName())
     .sort();
+}
+
+/** The `/AA` scripts a saved field carries, by trigger. Read off the raw
+ * dictionary: what the file says is what another viewer will run. */
+async function fieldActions(path: string, name: string): Promise<Record<string, string>> {
+  const doc = await PDFDocument.load(new Uint8Array(readFileSync(path)), {
+    ignoreEncryption: true,
+  });
+  const field = doc
+    .getForm()
+    .getFields()
+    .find((f) => f.getName() === name);
+  const aa = field?.acroField.dict.lookupMaybe(PDFName.of('AA'), PDFDict);
+  const out: Record<string, string> = {};
+  for (const trigger of ['F', 'K', 'V', 'C']) {
+    const action = aa?.lookupMaybe(PDFName.of(trigger), PDFDict);
+    const js = action?.get(PDFName.of('JS'));
+    if (js instanceof PDFString || js instanceof PDFHexString) out[trigger] = js.decodeText();
+  }
+  return out;
 }
 
 async function clickEl(selector: string): Promise<void> {
@@ -140,7 +169,20 @@ describe('Prepare Form field detection', () => {
     });
 
     await saveActiveAs(output);
-    expect(await fieldNames(output)).toEqual(['Email_address', 'First_name', 'Last_name']);
+    expect(await fieldNames(output)).toEqual([
+      'Date_of_birth',
+      'Email_address',
+      'First_name',
+      'Last_name',
+    ]);
+
+    // The cross-cut: the detector's date hint reached the document, as the
+    // stock format/keystroke pair every other viewer executes.
+    expect(await fieldActions(output, 'Date_of_birth')).toEqual({
+      F: 'AFDate_FormatEx("mm/dd/yy");',
+      K: 'AFDate_KeystrokeEx("mm/dd/yy");',
+    });
+    expect(await fieldActions(output, 'First_name')).toEqual({});
 
     // ONE undo removes the whole batch — the proof that the accept is a single
     // operation, not one per field.
@@ -186,6 +228,7 @@ describe('Prepare Form field detection', () => {
     const scanOut = resolve(tmp, 'scan-out.pdf');
     await saveActiveAs(scanOut);
     expect(await fieldNames(scanOut)).toEqual([
+      'Date_of_birth',
       'Email_address',
       'First_name',
       'Last_name',
