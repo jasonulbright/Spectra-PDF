@@ -130,7 +130,11 @@ interface DocumentRowProps {
   formValuesByPath: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
   onSignFieldRequest: (path: string, fieldName: string) => void;
-  onFormButton: (path: string, fieldName: string, action: import('../../lib/forms').ButtonAction | null) => void;
+  onWidgetAction: (
+    path: string,
+    fieldName: string,
+    action: import('../../lib/field-actions').WidgetAction | null,
+  ) => void;
   // Add-field placement.
   newFieldPlacement: SignaturePlacement | null;
   onSetNewFieldRect: (
@@ -286,7 +290,7 @@ function DocumentRowImpl({
   formValuesByPath,
   onSetFormValue,
   onSignFieldRequest,
-  onFormButton,
+  onWidgetAction,
   newFieldPlacement,
   onSetNewFieldRect,
   onClearNewFieldPlacement,
@@ -429,7 +433,7 @@ function DocumentRowImpl({
         formValues={formValuesByPath.get(page.sourceDocId)}
         onSetFormValue={onSetFormValue}
         onSignFieldRequest={onSignFieldRequest}
-        onFormButton={onFormButton}
+        onWidgetAction={onWidgetAction}
         newFieldPlacement={newFieldPlacement?.pageId === page.id ? newFieldPlacement : null}
         onSetNewFieldRect={onSetNewFieldRect}
         onClearNewFieldPlacement={onClearNewFieldPlacement}

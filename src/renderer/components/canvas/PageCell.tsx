@@ -59,6 +59,7 @@ import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { SnapshotPlacement } from '../../lib/snapshot-capture';
 import { shownValue } from '../../lib/form-overlay';
 import type { OverlayWidget } from '../../lib/form-overlay';
+import { ACTION_KIND_LABEL, type ActionTrigger } from '../../lib/field-actions';
 import type { FormFieldValue } from '../../lib/forms';
 import { PageView } from './PageView';
 import { useSeparationRaster } from '../../hooks/useSeparationPreview';
@@ -414,7 +415,7 @@ function FormWidgetView({
   fontPx,
   onSetFormValue,
   onSignFieldRequest,
-  onFormButton,
+  onWidgetAction,
   spellLang,
 }: {
   widget: OverlayWidget;
@@ -431,7 +432,11 @@ function FormWidgetView({
   spellLang?: string;
   onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
   onSignFieldRequest: (path: string, fieldName: string) => void;
-  onFormButton: (path: string, fieldName: string, action: import('../../lib/forms').ButtonAction | null) => void;
+  onWidgetAction: (
+    path: string,
+    fieldName: string,
+    action: import('../../lib/field-actions').WidgetAction | null,
+  ) => void;
 }): React.JSX.Element | null {
   useTranslation();
   const hasPending = pending !== undefined;
@@ -457,12 +462,31 @@ function FormWidgetView({
   }
   const set = (v: FormFieldValue): void => onSetFormValue(widget.path, widget.fieldName, v);
   const effective = pending ?? widget.value;
+  // The document's own data actions, fired by the gesture each was authored
+  // on. A trigger the widget does not carry attaches no handler at all, so a
+  // form with no actions behaves exactly as it did before.
+  const actions = widget.fieldActions;
+  const fire = (trigger: ActionTrigger): void => {
+    const action = actions?.[trigger];
+    if (action) onWidgetAction(widget.path, widget.fieldName, action);
+  };
+  const triggers = actions
+    ? {
+        ...(actions.D ? { onPointerDown: (e: React.PointerEvent) => { stop(e); fire('D'); } } : {}),
+        ...(actions.U ? { onPointerUp: () => fire('U') } : {}),
+        ...(actions.E ? { onPointerEnter: () => fire('E') } : {}),
+        ...(actions.X ? { onPointerLeave: () => fire('X') } : {}),
+        ...(actions.Fo ? { onFocus: () => fire('Fo') } : {}),
+        ...(actions.Bl ? { onBlur: () => fire('Bl') } : {}),
+      }
+    : {};
   const common = {
     'data-testid': `form-widget-${widget.fieldName}`,
     onPointerDown: stop,
     onClick: stop,
     onDoubleClick: stop,
     onContextMenu: stop,
+    ...triggers,
   } as const;
   if (widget.type === 'signature') {
     // An EMPTY, non-read-only signature field is clickable: the
@@ -506,17 +530,17 @@ function FormWidgetView({
   }
   if (widget.type === 'button') {
     // Pushbuttons ACT — the page raster already draws the button's own
-    // face, so the overlay is a transparent click surface. What the click
-    // does is the classified /A action; App runs reset for real and stays
-    // honest about the rest (no shell-open, no JS engine).
+    // face, so the overlay is a transparent click surface. What the click does
+    // is the widget's `/A`: go-to, reset, show/hide and import run for real,
+    // submit builds the submission, and a script or an unknown kind is
+    // reported by name rather than half-simulated.
+    const activate = actions?.A ?? null;
     const label =
-      widget.action?.kind === 'reset'
-        ? tChrome('canvas.widget.action.reset')
-        : widget.action?.kind === 'uri'
-          ? tChrome('canvas.widget.action.uri', { uri: widget.action.uri })
-          : widget.action
-            ? tChrome('canvas.widget.action.other', { kind: widget.action.kind })
-            : tChrome('canvas.widget.action.none');
+      activate === null
+        ? tChrome('canvas.widget.action.none')
+        : activate.kind === 'uri'
+          ? tChrome('canvas.widget.action.uri', { uri: activate.uri })
+          : tChrome(ACTION_KIND_LABEL[activate.kind]);
     return (
       <button
         {...common}
@@ -526,7 +550,7 @@ function FormWidgetView({
         title={tChrome('canvas.widget.button', { field: widget.fieldName, action: label })}
         onClick={(e) => {
           stop(e);
-          onFormButton(widget.path, widget.fieldName, widget.action ?? null);
+          onWidgetAction(widget.path, widget.fieldName, activate);
         }}
       />
     );
@@ -842,7 +866,11 @@ interface PageCellProps {
   // (the sign card opens in fill-this-field mode).
   onSignFieldRequest: (path: string, fieldName: string) => void;
   // A pushbutton widget's click, with its classified /A action.
-  onFormButton: (path: string, fieldName: string, action: import('../../lib/forms').ButtonAction | null) => void;
+  onWidgetAction: (
+    path: string,
+    fieldName: string,
+    action: import('../../lib/field-actions').WidgetAction | null,
+  ) => void;
   // band instead of being inert on empty page area.
   // Pending new-field placement, when it sits on THIS page (transient view
   // state with the signature-placement lifecycle).
@@ -1179,7 +1207,7 @@ function PageCellImpl({
   formValues,
   onSetFormValue,
   onSignFieldRequest,
-  onFormButton,
+  onWidgetAction,
   newFieldPlacement,
   onSetNewFieldRect,
   addTextPlacement,
@@ -4153,7 +4181,7 @@ function PageCellImpl({
           fontPx={freetextFontPx * (10 / 12)}
           onSetFormValue={onSetFormValue}
           onSignFieldRequest={onSignFieldRequest}
-          onFormButton={onFormButton}
+          onWidgetAction={onWidgetAction}
           spellLang={spellLang}
         />
       ))}

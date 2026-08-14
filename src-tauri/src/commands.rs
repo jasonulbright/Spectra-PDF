@@ -625,6 +625,57 @@ pub async fn save_image_file_dialog(
     }
 }
 
+/// Pick a form-DATA file to import (`/ImportData`). FDF and XFDF carry field
+/// values; the reader chooses by what the file contains, so the filter is a
+/// convenience rather than the decision.
+#[tauri::command]
+pub async fn pick_form_data_file(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    let result = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("Form data", &["fdf", "xfdf"])
+        .add_filter("All files", &["*"])
+        .blocking_pick_file();
+    match result {
+        Some(p) => match p.into_path() {
+            Ok(pb) => Ok(Some(pb.to_string_lossy().to_string())),
+            Err(e) => Err(format!("Path error: {}", e)),
+        },
+        None => Ok(None),
+    }
+}
+
+/// Where a form SUBMISSION is written. The app builds the submission in full
+/// and performs no outbound request, so the payload needs a destination on
+/// disk the user chose.
+#[tauri::command]
+pub async fn save_form_data_file(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    default_name: Option<String>,
+) -> Result<Option<String>, String> {
+    let mut builder = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("Form data", &["fdf", "xfdf", "txt", "pdf"])
+        .add_filter("All files", &["*"]);
+    if let Some(ref name) = default_name {
+        builder = builder.set_file_name(name);
+    }
+    match builder.blocking_save_file() {
+        Some(p) => match p.into_path() {
+            Ok(pb) => Ok(Some(pb.to_string_lossy().to_string())),
+            Err(e) => Err(format!("Path error: {}", e)),
+        },
+        None => Ok(None),
+    }
+}
+
 /// True when both paths exist and are the SAME physical file/directory
 /// (volume serial + file index — not string comparison). Canonical strings
 /// can disagree about one physical file (UNC vs mapped letter, hardlinks);

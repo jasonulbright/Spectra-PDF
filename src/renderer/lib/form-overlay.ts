@@ -45,8 +45,11 @@ export interface OverlayWidget {
   multiline?: boolean;
   radioOption?: string;
   sigFilled?: boolean;
-  /** button only: the classified /A action the click acts on. */
-  action?: import('./forms').ButtonAction;
+  /** The data actions this widget carries, by trigger. A pushbutton's `A` is
+   * what a click does; the rest fire on the gesture they name. */
+  fieldActions?: Partial<
+    Record<import('./field-actions').ActionTrigger, import('./field-actions').WidgetAction>
+  >;
   /** text-ish only: the field's own format script. The input shows the RAW
    * value while it has focus and this script's output when it does not,
    * which is the reference input experience. */
@@ -98,7 +101,7 @@ export function projectFieldWidgets(
       ...(field.multiline !== undefined ? { multiline: field.multiline } : {}),
       ...(w.radioOption !== undefined ? { radioOption: w.radioOption } : {}),
       ...(field.type === 'signature' ? { sigFilled: field.filled ?? false } : {}),
-      ...(field.type === 'button' && field.action ? { action: field.action } : {}),
+      ...(field.fieldActions ? { fieldActions: field.fieldActions } : {}),
       ...(format ? { format } : {}),
       ...(field.calculated ? { calculated: true } : {}),
     };

@@ -186,11 +186,23 @@ export const WORKBENCH_STRINGS = {
   'app.formButton.clipboardFailed': 'Could not access the clipboard.',
   'app.formButton.javascript':
     '"{{field}}" runs document JavaScript, which this app does not execute.',
-  'app.formButton.submit':
-    '"{{field}}" submits the form to a server, which this app does not do. Fill the form and save or export it instead.',
   'app.formButton.named':
     '"{{field}}" triggers the viewer action "{{action}}", which this app does not map.',
   'app.formButton.unsupported': '"{{field}}" carries an action this app does not support.',
+  'app.formButton.gotoUnresolved':
+    '"{{field}}" goes to a page this document no longer has.',
+  'app.formButton.importTitle': 'Import form data',
+  'app.formButton.import':
+    '"{{field}}" imports form data from:\n\n{{file}}\n\nThis app opens only a file you choose. Pick the data file now?',
+  'app.formButton.importNoFile': '(no file named)',
+  'app.formButton.remote':
+    '"{{field}}" goes to another document ({{file}}), which this app does not follow.',
+  'app.formButton.submitTitle': 'Submit form',
+  'app.formButton.submit':
+    '"{{field}}" submits this form to:\n\n{{url}}\n\nThe submission will be built in full, as {{format}}, and saved to a file you choose. This app sends nothing itself. Build it now?',
+  'app.formButton.submitBuiltTitle': 'Submission built',
+  'app.formButton.submitBuilt':
+    'The submission was written to:\n\n{{file}}\n\nSend it to {{url}} yourself. Copy the address to the clipboard?',
 
   'app.sanitize.title': 'Document is signed',
   'app.sanitize.signed_one':

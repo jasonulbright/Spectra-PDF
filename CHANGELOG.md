@@ -28,6 +28,22 @@
 - A detected date field is now created with a date format, instead of the detection noting the date and the field forgetting it.
 - The placement card also offers the character limit and the one-box-per-character comb layout it always accepted but never showed.
 
+### What a form field does when you use it
+- A button that goes to a page now goes there, whether the document names the page directly or by a name it keeps in its own list.
+- A button that resets the form resets it, honouring the fields the button says it covers — or every field except those, when that is what it says.
+- A button that shows or hides fields does so, and the change is part of the document, so it is still there when the file is reopened and it can be undone like any other edit.
+- A button that imports form data imports it — from a file you pick, never from a path the document names for you. FDF and XFDF are both read, and whichever one it is is worked out from what the file contains rather than what it is called.
+- A field name in the data file that the form does not have is reported, and every value that does fit is still filled in.
+- A button that submits the form now builds the whole submission — as FDF, XFDF, web form data or the document itself, whichever the button asks for — and saves it to a file you choose. Where it was meant to go is shown and can be copied. This app sends nothing over the network itself.
+- Actions on the other gestures a field can carry — pointer in, pointer out, mouse down, mouse up, focus, focus lost — run too, not only a click.
+- An action this app does not perform (a script, a jump into another document, one it does not recognise) is named rather than half-simulated, and nothing in the document is changed.
+- **Prepare Form** ▸ Field properties now lists buttons, and lets you give any field an action: go to a page, open a link, reset or submit the form, show or hide fields, or import data — each on the gesture you choose.
+- Command line: `forms --reset`, `forms --import-data`, and `forms --export-data` with `--data-format fdf|xfdf|html|pdf`, scoped by `--field` and `--exclude-fields`.
+
+### Scripts this app does not run
+- The forms panel now lists every script the document carries that this app declines to run: which field, which moment it would have run at, and the script itself, readable in place.
+- The standing position is stated where the list is: the standard formatting, checking and calculation calls are declarative and carry no code, so those run; anything else stays in the document exactly as it was and is reported rather than executed.
+
 ## 1.0.29
 
 *Released 2026-08-10*

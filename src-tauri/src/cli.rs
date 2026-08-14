@@ -1890,6 +1890,36 @@ pub struct FormsArgs {
     /// Remove the field's lock, leaving whoever signs it unbound.
     #[arg(long, requires = "sig_field", conflicts_with = "lock")]
     pub clear_lock: bool,
+    /// Restore every field to its default value — the Reset Form action, run
+    /// headlessly.
+    #[arg(long, requires = "output")]
+    pub reset: bool,
+    /// Fill from a form-data file (FDF or XFDF). A name the document does not
+    /// have is reported, not fatal.
+    #[arg(long = "import-data", value_name = "FILE", requires = "output")]
+    pub import_data: Option<PathBuf>,
+    /// Write this document's field values out as form data — the Submit Form
+    /// payload, built in full. Nothing is sent anywhere.
+    #[arg(long = "export-data", value_name = "FILE")]
+    pub export_data: Option<PathBuf>,
+    /// The form-data format --export-data writes: fdf | xfdf | html | pdf.
+    #[arg(
+        long = "data-format",
+        default_value = "fdf",
+        value_parser = ["fdf", "xfdf", "html", "pdf"]
+    )]
+    pub data_format: String,
+    /// Include fields with no value in --export-data (the submission flag a
+    /// receiver sets when it wants to see the blanks).
+    #[arg(long)]
+    pub include_empty: bool,
+    /// Scope --reset / --import-data / --export-data to these fields;
+    /// repeatable. A name covers its children.
+    #[arg(long = "field", value_name = "NAME")]
+    pub field: Vec<String>,
+    /// Invert --field into an exclude list.
+    #[arg(long, requires = "field")]
+    pub exclude_fields: bool,
 }
 
 #[derive(Args)]
@@ -4361,6 +4391,41 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     params["lock_fields"] = json!(args.lock_field);
                 }
                 return engine.call("set_field_lock", params);
+            }
+            // The scope every data arm shares: a field list, optionally
+            // inverted, exactly as /ResetForm and /SubmitForm encode it.
+            let scope = |params: &mut serde_json::Value| {
+                if !args.field.is_empty() {
+                    params["fields"] = json!(args.field);
+                    params["exclude"] = json!(args.exclude_fields);
+                }
+            };
+            if let Some(target) = &args.export_data {
+                // Read-only against the document: the payload lands in its own
+                // file and nothing is transmitted.
+                let mut params = json!({
+                    "file": input,
+                    "output": abs(target).to_string_lossy().to_string(),
+                    "format": args.data_format,
+                    "include_empty": args.include_empty,
+                });
+                scope(&mut params);
+                return engine.call("export_form_data", params);
+            }
+            if args.reset || args.import_data.is_some() {
+                let output = abs(args.output.as_ref().unwrap()).to_string_lossy().to_string();
+                let fonts = resolve_fonts().to_string_lossy().to_string();
+                let mut params = json!({
+                    "file": input,
+                    "output": output,
+                    "font_dir": fonts,
+                });
+                scope(&mut params);
+                if let Some(data) = &args.import_data {
+                    params["data"] = json!(abs(data).to_string_lossy().to_string());
+                    return engine.call("import_form_data", params);
+                }
+                return engine.call("reset_form_fields", params);
             }
             if args.set.is_empty() && !args.flatten {
                 return engine.call("read_form_fields", json!({ "file": input }));

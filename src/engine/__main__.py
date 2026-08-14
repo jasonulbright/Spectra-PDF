@@ -124,7 +124,14 @@ from engine.compare import compare_text, compare_visual
 from engine.form_detect import detect_form_fields
 from engine.form_authoring import set_field_actions, set_field_lock
 from engine.form_prepare import create_detected_fields, prepare_form_fields
-from engine.forms import read_form_fields, fill_form_fields, reset_form_fields
+from engine.forms import (
+    export_form_data,
+    fill_form_fields,
+    import_form_data,
+    read_form_fields,
+    reset_form_fields,
+    set_widget_visibility,
+)
 from engine.enhance_scan import analyze_scan, enhance_scan
 from engine.ocr_layer import apply_ocr_layer
 from engine.recognize import recognize
@@ -305,6 +312,9 @@ def main() -> None:
     server.register("read_form_fields", read_form_fields)
     server.register("fill_form_fields", fill_form_fields)
     server.register("reset_form_fields", reset_form_fields)
+    server.register("export_form_data", export_form_data)
+    server.register("import_form_data", import_form_data)
+    server.register("set_widget_visibility", set_widget_visibility)
     server.register("detect_form_fields", detect_form_fields)
     server.register("create_detected_fields", create_detected_fields)
     server.register("prepare_form_fields", prepare_form_fields)

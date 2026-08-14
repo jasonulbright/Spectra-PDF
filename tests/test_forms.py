@@ -878,16 +878,23 @@ class TestButtonActionsAndReset:
     """Pushbutton /A classification + the ResetForm engine op."""
 
     def test_read_reports_button_actions(self, tmp_dir):
+        # The activation action rides the `field_actions` trigger map now:
+        # a data action is not the pushbutton's alone, and `/A` is one trigger
+        # among the seven a widget can carry.
         src = os.path.join(tmp_dir, "b.pdf")
         _make_button_form(src)
         by_name = {f["name"]: f for f in read_form_fields(src)["fields"]}
-        assert by_name["visit"]["action"] == {"kind": "uri", "uri": "https://example.com/x"}
-        assert by_name["resetall"]["action"] == {"kind": "reset", "fields": None, "exclude": False}
-        assert by_name["resetname"]["action"] == {
-            "kind": "reset", "fields": ["name"], "exclude": False,
+        assert by_name["visit"]["field_actions"] == {
+            "A": {"kind": "uri", "uri": "https://example.com/x"}
         }
-        assert by_name["compute"]["action"] == {"kind": "javascript"}
-        assert "action" not in by_name["name"]  # only buttons carry it
+        assert by_name["resetall"]["field_actions"] == {
+            "A": {"kind": "reset", "fields": None, "exclude": False}
+        }
+        assert by_name["resetname"]["field_actions"] == {
+            "A": {"kind": "reset", "fields": ["name"], "exclude": False}
+        }
+        assert by_name["compute"]["field_actions"] == {"A": {"kind": "javascript"}}
+        assert "field_actions" not in by_name["name"]  # it carries none
 
     def test_reset_restores_dv_and_clears(self, tmp_dir):
         src = os.path.join(tmp_dir, "b.pdf")

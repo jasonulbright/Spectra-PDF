@@ -76,17 +76,31 @@ describe('projectFieldWidgets', () => {
   it('INVERSION — buttons PROJECT as click surfaces carrying their action', () => {
     // This pinned the exclusion ("never an overlay surface");
     // pushbuttons act now, so they project like everything else, with the
-    // classified /A action riding the entry.
+    // classified action map riding the entry.
     const button = textField({
       type: 'button',
-      action: { kind: 'uri', uri: 'https://example.com/x' },
+      fieldActions: { A: { kind: 'uri', uri: 'https://example.com/x' } },
       widgets: [{ pageIndex: 0, rect: [10, 10, 60, 30], hidden: false }],
     });
     const byPage = projectFieldWidgets('a.pdf', button, () => ({ box: BOX, bakedRotate: 0 }));
     expect(byPage.size).toBe(1);
     const entry = byPage.get(0)![0];
     expect(entry.type).toBe('button');
-    expect(entry.action).toEqual({ kind: 'uri', uri: 'https://example.com/x' });
+    expect(entry.fieldActions?.A).toEqual({ kind: 'uri', uri: 'https://example.com/x' });
+  });
+
+  it('carries every trigger a widget acts on, not only the activation one', () => {
+    const widget = textField({
+      fieldActions: {
+        E: { kind: 'hide', targets: ['Help'], hide: false },
+        X: { kind: 'hide', targets: ['Help'], hide: true },
+      },
+      widgets: [{ pageIndex: 0, rect: [10, 10, 60, 30], hidden: false }],
+    });
+    const entry = projectFieldWidgets('a.pdf', widget, () => ({ box: BOX, bakedRotate: 0 })).get(
+      0,
+    )![0];
+    expect(Object.keys(entry.fieldActions ?? {})).toEqual(['E', 'X']);
   });
 
   it('carries radio option mapping and signature filled state', () => {
