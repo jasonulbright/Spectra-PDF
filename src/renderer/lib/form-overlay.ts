@@ -17,6 +17,15 @@
 // editable, or value shape no longer matches the field's type) and dropped
 // with the file (a path absent from the read map).
 import { pdfRectToDisplay } from './pdfx-build';
+import {
+  calculate,
+  closure,
+  formatDisplay,
+  recognize,
+  unrunnable,
+  type FieldActions,
+  type FieldScript,
+} from './af-calc';
 import type { FormField, FormFieldType, FormFieldValue } from './forms';
 
 export interface OverlayWidget {
@@ -38,6 +47,12 @@ export interface OverlayWidget {
   sigFilled?: boolean;
   /** button only: the classified /A action the click acts on. */
   action?: import('./forms').ButtonAction;
+  /** text-ish only: the field's own format script. The input shows the RAW
+   * value while it has focus and this script's output when it does not,
+   * which is the reference input experience. */
+  format?: FieldScript;
+  /** The document's /CO names this field, so its value is computed. */
+  calculated?: boolean;
 }
 
 export interface PageBox {
@@ -58,6 +73,7 @@ export function projectFieldWidgets(
   geometryFor: (pageIndex: number) => { box: PageBox; bakedRotate: number } | null,
 ): Map<number, OverlayWidget[]> {
   const byPage = new Map<number, OverlayWidget[]>();
+  const format = scriptOf(field.actions?.F);
   // Buttons used to be excluded here ("never an overlay surface").
   // A pushbutton projects as a CLICK surface whose classified
   // /A action the renderer acts on (reset for real, the rest honestly).
@@ -83,12 +99,106 @@ export function projectFieldWidgets(
       ...(w.radioOption !== undefined ? { radioOption: w.radioOption } : {}),
       ...(field.type === 'signature' ? { sigFilled: field.filled ?? false } : {}),
       ...(field.type === 'button' && field.action ? { action: field.action } : {}),
+      ...(format ? { format } : {}),
+      ...(field.calculated ? { calculated: true } : {}),
     };
     const arr = byPage.get(w.pageIndex);
     if (arr) arr.push(entry);
     else byPage.set(w.pageIndex, [entry]);
   }
   return byPage;
+}
+
+// ---- field scripts: the live preview -------------------------------------
+// The engine is authoritative for what a fill writes; this half exists so the
+// canvas can show a dependent Total the moment a line item is typed.
+//
+// Recomputed values are DERIVED, never written into the pending map: the fill
+// names what the pending map holds, and a calculated Total is routinely
+// read-only, which the engine's fill refuses by name. The engine runs the same
+// pass over the same /CO when the fill lands, so the saved value and the
+// previewed one come from one rule either way.
+
+/** One recognized script, or undefined when the body is not one this app runs
+ * (or is one it cannot run whatever the value). */
+function scriptOf(js: string | undefined): FieldScript | undefined {
+  if (js === undefined) return undefined;
+  const script = recognize(js);
+  return script === null || unrunnable(script) ? undefined : script;
+}
+
+/** One field's format script, when it carries one this app runs. */
+export function formatScriptOf(field: FormField): FieldScript | undefined {
+  return scriptOf(field.actions?.F);
+}
+
+/** A document's field scripts and calculation order, recognized once per
+ * read rather than per keystroke. */
+export interface FormCalculation {
+  scripts: Record<string, FieldActions>;
+  order: string[];
+  terminals: string[];
+}
+
+export function formCalculation(
+  fields: readonly FormField[],
+  order: readonly string[],
+): FormCalculation {
+  const scripts: Record<string, FieldActions> = {};
+  for (const field of fields) {
+    if (!field.actions) continue;
+    const entry: FieldActions = {};
+    let any = false;
+    for (const trigger of ['K', 'V', 'C', 'F'] as const) {
+      const script = scriptOf(field.actions[trigger]);
+      if (script) {
+        entry[trigger] = script;
+        any = true;
+      }
+    }
+    if (any) scripts[field.name] = entry;
+  }
+  return { scripts, order: [...order], terminals: fields.map((f) => f.name) };
+}
+
+/** The values `/CO` computes given the file's fields and what the user has
+ * typed so far — only the fields whose value differs from the file's. */
+export function computedValues(
+  calc: FormCalculation,
+  fields: readonly FormField[],
+  pending: ReadonlyMap<string, FormFieldValue> | undefined,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  if (calc.order.length === 0) return out;
+  const values: Record<string, string> = {};
+  for (const field of fields) {
+    values[field.name] = typeof field.value === 'string' ? field.value : '';
+  }
+  for (const [name, value] of pending ?? []) {
+    if (typeof value === 'string') values[name] = value;
+  }
+  for (const [name, value] of Object.entries(calculate(values, calc.scripts, calc.order, calc.terminals))) {
+    out.set(name, value);
+  }
+  return out;
+}
+
+/** Everything a fill of `typed` can change — the set the signed-edit decision
+ * must be asked about, because filling an unlocked line item that recalculates
+ * a locked Total produces a document that reports as altered. */
+export function fillClosure(calc: FormCalculation, typed: readonly string[]): string[] {
+  return closure(typed, calc.scripts, calc.order, calc.terminals);
+}
+
+/** What a widget draws for a raw value: its format script's output, or the
+ * raw value when it carries none or the script cannot run this value. */
+export function shownValue(format: FieldScript | undefined, raw: string): string {
+  if (!format) return raw;
+  try {
+    return formatDisplay(format, raw);
+  } catch {
+    return raw;
+  }
 }
 
 // Whether a pending value's SHAPE is still compatible with the field it

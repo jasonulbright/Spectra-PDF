@@ -218,6 +218,11 @@ export const WORKBENCH_STRINGS = {
   'app.signedEdit.lockedTitle': 'Form fields are locked',
   'app.signedEdit.lockedRefused':
     'A signature on this document locks these form fields against further change: {{fields}}. Filling them would produce a file that reports as altered. Save a copy and fill that instead — the copy is no longer the signed document.',
+  // The typed field is not itself locked; the form's own calculation carries
+  // the change into one that is. Naming only the locked field would tell a
+  // user who typed somewhere else nothing.
+  'app.signedEdit.lockedByCalculation':
+    'Filling {{typed}} recalculates {{fields}}, which a signature on this document locks. That would produce a file that reports as altered. Save a copy and fill that instead — the copy is no longer the signed document.',
 
   'app.sendEmail.title': 'Send by Email',
 

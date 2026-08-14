@@ -139,7 +139,14 @@ import { runCommitGate } from '../../lib/commit-gate';
 
 import { buildMergedPageRefs, pathBlockedFromClose } from '../../lib/merge-docs';
 import { useWorkspaceForms } from '../../hooks/useWorkspaceForms';
-import { placementDocsCurrent, pruneFormValues, valueShapeMatches } from '../../lib/form-overlay';
+import {
+  computedValues,
+  formatScriptOf,
+  placementDocsCurrent,
+  pruneFormValues,
+  shownValue,
+  valueShapeMatches,
+} from '../../lib/form-overlay';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import { readFormFields, type FormFieldValue } from '../../lib/forms';
 import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
@@ -1118,6 +1125,28 @@ export function WorkspaceCanvasView({
   }, []);
 
   const clearFormValues = useCallback(() => setPendingFormValues(NO_FORM_VALUES), []);
+
+  // What the widgets DRAW: the values the user typed plus the dependents the
+  // document's own /CO computes from them. The computed half is derived here
+  // rather than written into `pendingFormValues`, because the fill names what
+  // that map holds and a calculated Total is routinely read-only — which the
+  // engine's fill refuses by name. The engine runs the same pass over the same
+  // /CO when the fill lands, so the previewed value and the saved one come
+  // from one rule either way.
+  const formDisplayValues = useMemo(() => {
+    if (workspaceForms.size === 0) return pendingFormValues;
+    let changed = false;
+    const next = new Map<string, ReadonlyMap<string, FormFieldValue>>(pendingFormValues);
+    for (const [path, info] of workspaceForms) {
+      const computed = computedValues(info.calculation, info.fields, pendingFormValues.get(path));
+      if (computed.size === 0) continue;
+      const merged = new Map<string, FormFieldValue>(next.get(path) ?? []);
+      for (const [name, value] of computed) merged.set(name, value);
+      next.set(path, merged);
+      changed = true;
+    }
+    return changed ? next : pendingFormValues;
+  }, [workspaceForms, pendingFormValues]);
 
   // pageId -> widgets, resolved through (sourceDocId, sourcePageIndex) — an
   // in-memory moved page keeps its widgets because both travel with the ref.
@@ -4801,6 +4830,8 @@ export function WorkspaceCanvasView({
   workspaceFormsRef.current = workspaceForms;
   const pendingFormValuesRef = useRef(pendingFormValues);
   pendingFormValuesRef.current = pendingFormValues;
+  const formDisplayValuesRef = useRef(formDisplayValues);
+  formDisplayValuesRef.current = formDisplayValues;
   const applyFormValuesRef = useRef(applyFormValues);
   applyFormValuesRef.current = applyFormValues;
   const setFormValueRef = useRef(onSetFormValue);
@@ -4897,6 +4928,16 @@ export function WorkspaceCanvasView({
         return n;
       },
       apply: () => applyFormValuesRef.current(),
+      shownValueFor: (path, fieldName) => {
+        const value = formDisplayValuesRef.current.get(path)?.get(fieldName);
+        if (typeof value !== 'string') return null;
+        const field = workspaceFormsRef.current.get(path)?.fields.find((f) => f.name === fieldName);
+        return shownValue(field ? formatScriptOf(field) : undefined, value);
+      },
+      scriptsNotRunFor: (path) =>
+        (workspaceFormsRef.current.get(path)?.fields ?? [])
+          .filter((f) => f.scriptsNotRun?.length)
+          .map((f) => f.name),
       widgetCountFor: (path) => {
         const info = workspaceFormsRef.current.get(path);
         if (!info) return 0;
@@ -6148,7 +6189,7 @@ export function WorkspaceCanvasView({
             findWordsByPage,
             readAloudByPage,
             formWidgetsByPage,
-            formValuesByPath: pendingFormValues,
+            formValuesByPath: formDisplayValues,
             onSetFormValue,
             onSignFieldRequest,
             onFormButton: (p: string, f: string, a: import('../../lib/forms').ButtonAction | null) => void onFormButton(p, f, a),
@@ -6411,7 +6452,7 @@ export function WorkspaceCanvasView({
           findWordsByPage={findWordsByPage}
           readAloudByPage={readAloudByPage}
           formWidgetsByPage={formWidgetsByPage}
-          formValuesByPath={pendingFormValues}
+          formValuesByPath={formDisplayValues}
           onSetFormValue={onSetFormValue}
           onSignFieldRequest={onSignFieldRequest}
           onFormButton={(p, f, a) => void onFormButton(p, f, a)}

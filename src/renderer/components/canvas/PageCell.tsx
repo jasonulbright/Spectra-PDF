@@ -57,6 +57,7 @@ import {
 } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import type { SnapshotPlacement } from '../../lib/snapshot-capture';
+import { shownValue } from '../../lib/form-overlay';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import type { FormFieldValue } from '../../lib/forms';
 import { PageView } from './PageView';
@@ -359,6 +360,47 @@ function MaybeTurn({
   );
 }
 
+// A text field's on-canvas input. The value it SHOWS is the raw one while it
+// has focus and its own format script's output when it does not, which is the
+// reference input experience: a consumer reads 1234.5 out of the file and the
+// page draws 1,234.50. What is typed is always stored raw — formatting a
+// stored value would corrupt the next calculation that reads it.
+function FormTextInput({
+  widget,
+  raw,
+  hasPending,
+  style,
+  fontPx,
+  spellLang,
+  common,
+  onChange,
+}: {
+  widget: OverlayWidget;
+  raw: string;
+  hasPending: boolean;
+  style: React.CSSProperties;
+  fontPx: number;
+  spellLang?: string;
+  common: Record<string, unknown>;
+  onChange: (value: FormFieldValue) => void;
+}): React.JSX.Element {
+  const [focused, setFocused] = useState(false);
+  const shown = focused ? raw : shownValue(widget.format, raw);
+  const props = {
+    ...common,
+    className: 'page-form-widget page-form-input' + (hasPending ? ' pending' : ''),
+    style: { ...style, fontSize: fontPx },
+    value: shown,
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      onChange(e.target.value),
+    onFocus: () => setFocused(true),
+    onBlur: () => setFocused(false),
+    spellCheck: true,
+    lang: spellLang,
+  };
+  return widget.multiline ? <textarea {...props} /> : <input {...props} type="text" />;
+}
+
 // One form widget on the page. Interactive only in forms mode; in
 // any other tool a widget with a pending value renders as an inert badge so
 // pending state is never invisible (the redaction-mark precedent). Every
@@ -490,38 +532,40 @@ function FormWidgetView({
     );
   }
   if (!widget.editable) {
+    // A calculated field is routinely read-only, and its whole point is the
+    // value the document computes into it — so this branch DRAWS that value
+    // (formatted, as the page will show it once the fill lands) instead of
+    // the bare inert plate every other read-only widget gets.
+    const computed = widget.calculated && typeof effective === 'string' ? effective : null;
     return (
       <div
         {...common}
-        className="page-form-widget page-form-locked"
-        style={style}
-        title={tChrome('canvas.widget.readonly', { field: widget.fieldName })}
-      />
+        className={
+          'page-form-widget page-form-locked' +
+          (computed !== null ? ' page-form-computed' : '') +
+          (hasPending ? ' pending' : '')
+        }
+        style={computed !== null ? { ...style, fontSize: fontPx } : style}
+        title={tChrome(
+          widget.calculated ? 'canvas.widget.calculated' : 'canvas.widget.readonly',
+          { field: widget.fieldName },
+        )}
+      >
+        {computed !== null ? shownValue(widget.format, computed) : null}
+      </div>
     );
   }
   if (widget.type === 'text') {
-    const str = typeof effective === 'string' ? effective : '';
-    const cls = 'page-form-widget page-form-input' + (hasPending ? ' pending' : '');
-    return widget.multiline ? (
-      <textarea
-        {...common}
-        className={cls}
-        style={{ ...style, fontSize: fontPx }}
-        value={str}
-        onChange={(e) => set(e.target.value)}
-        spellCheck
-        lang={spellLang}
-      />
-    ) : (
-      <input
-        {...common}
-        className={cls}
-        style={{ ...style, fontSize: fontPx }}
-        type="text"
-        value={str}
-        onChange={(e) => set(e.target.value)}
-        spellCheck
-        lang={spellLang}
+    return (
+      <FormTextInput
+        widget={widget}
+        raw={typeof effective === 'string' ? effective : ''}
+        hasPending={hasPending}
+        style={style}
+        fontPx={fontPx}
+        spellLang={spellLang}
+        common={common}
+        onChange={set}
       />
     );
   }
