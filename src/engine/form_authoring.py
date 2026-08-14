@@ -47,7 +47,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
-from engine import afemit
+from engine import afemit, fieldactions
 from engine.acroform import (
     calculation_order_names,
     form_field_forest,
@@ -234,19 +234,32 @@ def _js_object(pdf: pikepdf.Pdf, js: str):
     return pdf.make_indirect(Dictionary(S=Name("/JavaScript"), JS=body))
 
 
-def _apply_actions(pdf: pikepdf.Pdf, field, spec: dict) -> None:
+#: Which value triggers each spec member owns. A caller that does not address
+#: a member leaves its triggers alone -- writing a button's action must not
+#: silently destroy a calculation the caller never mentioned.
+_MEMBER_TRIGGERS = {"format": ("F", "K"), "validate": ("V",), "calculate": ("C",)}
+
+#: Every value trigger, for the create path, where there is nothing to
+#: preserve.
+ALL_VALUE_TRIGGERS = ("F", "K", "V", "C")
+
+
+def _apply_actions(pdf: pikepdf.Pdf, field, spec: dict, addressed=ALL_VALUE_TRIGGERS) -> None:
     """Write the spec's ``/AA`` scripts and ``/DV`` onto a field dictionary.
 
-    Every trigger this app authors is REPLACED wholesale and every other key of
-    an existing ``/AA`` is left alone: a widget trigger (``/E``, ``/U``) is not
-    this door's business, and a spec that no longer carries a format must not
-    leave the old format's ``/F`` behind.
+    Every ADDRESSED trigger is REPLACED wholesale and every other key of an
+    existing ``/AA`` is left alone: a widget trigger (``/E``, ``/U``) is not
+    this door's business, a spec that no longer carries a format must not leave
+    the old format's ``/F`` behind, and a trigger nobody addressed must not
+    lose the script it already had.
     """
     scripts = afemit.emitted_scripts(spec)
     aa = field.get("/AA")
     if not isinstance(aa, Dictionary):
         aa = None
-    for trigger in ("F", "K", "V", "C"):
+    for trigger in ALL_VALUE_TRIGGERS:
+        if trigger not in addressed:
+            continue
         key = "/" + trigger
         if trigger in scripts:
             if aa is None:
@@ -895,19 +908,30 @@ def set_field_actions(
     validate=None,
     calculate=None,
     default_value=None,
+    actions=None,
     clear=None,
     allow_signed: bool = False,
 ) -> dict:
-    """Set the Format, Validate and Calculate an EXISTING field carries.
+    """Set the Format, Validate, Calculate and data actions an EXISTING field
+    carries.
 
-    Returns ``{output, field, scripts, calculation_order}``. The door is total:
-    every one of the four triggers this app authors is rewritten from the
-    arguments, so omitting an argument REMOVES that action rather than leaving
-    the previous one behind. ``clear`` names the members to remove explicitly
-    (``["format", "validate", "calculate", "default_value"]``), which is how a
-    caller distinguishes "leave the default value alone" from "there is none".
-    Every other ``/AA`` key -- a widget trigger, a script this app does not run
-    -- is left untouched.
+    Returns ``{output, field, scripts, data_actions, calculation_order}``. The
+    door is total: every one of the four value triggers this app authors is
+    rewritten from the arguments, so omitting an argument REMOVES that action
+    rather than leaving the previous one behind. ``clear`` names the members to
+    remove explicitly (``["format", "validate", "calculate", "default_value",
+    "actions"]``), which is how a caller distinguishes "leave the default value
+    alone" from "there is none". Every other ``/AA`` key -- a script this app
+    does not run -- is left untouched.
+
+    ``actions`` is the DATA half: the `/GoTo`, `/URI`, `/ResetForm`,
+    `/SubmitForm`, `/Hide` and `/ImportData` kinds, each on its own trigger
+    (``A`` activation, ``D`` ``U`` ``E`` ``X`` ``Fo`` ``Bl``). It is total the
+    same way -- a trigger absent from the list loses its action -- and it is
+    written onto the WIDGETS, which is where a consumer looks for the thing a
+    click does. Passing it at all takes over every one of those triggers, so a
+    caller that means to leave them alone omits it and does not name it in
+    ``clear``.
 
     ``/CO`` is rewritten by the same topological rule the create path uses, so
     a calculation added here lands after the fields it reads. A cycle refuses.
@@ -952,7 +976,25 @@ def set_field_actions(
             spec["calculate"] = calculate
         if default_value is not None or "default_value" in dropped:
             spec["default_value"] = default_value
+        # A member is ADDRESSED when the caller either supplied it or named it
+        # in `clear`. Anything else is left as the document has it, so a caller
+        # editing one half of this door never destroys the other.
+        addressed = tuple(
+            trigger
+            for member, triggers in _MEMBER_TRIGGERS.items()
+            if member in spec or member in dropped
+            for trigger in triggers
+        )
         problems = _action_problems(spec, kind)
+        writes_actions = actions is not None or "actions" in dropped
+        data_actions = list(actions or ())
+        if writes_actions:
+            known_names = set(forest)
+            for terminal in _all_fields(pdf):
+                known_names.add(terminal.name)
+            problems.extend(
+                fieldactions.action_problems(data_actions, known_names, len(pdf.pages))
+            )
         if calculate is not None:
             known = set(forest)
             for terminal in _all_fields(pdf):
@@ -988,12 +1030,14 @@ def set_field_actions(
             raise FieldSpecError(
                 f"this form field's actions cannot be set: {text}", [text]
             ) from exc
-        if calculate is None and name in new_order:
+        if calculate is None and "C" in addressed and name in new_order:
             # The calculation was removed, so the field no longer belongs to
-            # the order it was in.
+            # the order it was in. A calculation nobody addressed keeps both.
             new_order = [entry for entry in new_order if entry != name]
 
-        _apply_actions(pdf, target, spec)
+        _apply_actions(pdf, target, spec, addressed)
+        if writes_actions:
+            fieldactions.write_actions(pdf, target, data_actions)
         write_calculation_order(pdf, new_order)
         if same_file:
             with tempfile.NamedTemporaryFile(
@@ -1009,6 +1053,7 @@ def set_field_actions(
     return {
         "output": str(output_path),
         "field": name,
-        "scripts": afemit.emitted_scripts(spec),
+        "scripts": afemit.emitted_scripts(spec) if addressed else {},
+        "data_actions": data_actions if writes_actions else None,
         "calculation_order": new_order,
     }

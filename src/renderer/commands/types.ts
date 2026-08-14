@@ -146,17 +146,22 @@ export interface AppCommandHandlers {
     field: string,
     lock: import('../lib/signatures').FieldLock | null,
   ): Promise<boolean>;
-  /** Set the Format, Accepted range and Calculate an EXISTING field carries.
+  /** Set the Format, Accepted range, Calculate and data actions an EXISTING
+   * field carries.
    *
    * Total, like the lock door: every action this app authors is rewritten from
    * `actions`, so a member left out is REMOVED rather than kept. `/CO` is
    * re-sorted so a calculation lands after the fields it reads, and a cycle
-   * refuses. Structural, so the signed decision is taken where every other
-   * edit takes it; returns false when the warning was declined. */
+   * refuses. `data` is the same contract for the `/AA` kinds that carry no
+   * code — omitting it leaves every trigger alone, passing one (empty
+   * included) takes over all of them. Structural, so the signed decision is
+   * taken where every other edit takes it; returns false when the warning was
+   * declined. */
   setFieldActions(
     path: string,
     field: string,
-    actions: import('../lib/form-candidates').FieldActions,
+    actions: import('../lib/form-candidates').FieldActions | null,
+    data?: import('../lib/field-actions').AuthoredAction[],
   ): Promise<boolean>;
 }
 

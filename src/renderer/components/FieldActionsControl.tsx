@@ -17,6 +17,18 @@ import React, { useMemo } from 'react';
 import { tChrome } from '../i18n';
 import { DATE_FORMATS, TIME_FORMATS, asStored, recognize, run } from '../lib/af-calc';
 import {
+  ACTION_KIND_LABEL,
+  ACTION_TRIGGERS,
+  ACTION_TRIGGER_LABEL,
+  AUTHORED_KINDS,
+  SUBMIT_FORMATS,
+  defaultAction,
+  type ActionTrigger,
+  type AuthoredAction,
+  type AuthoredKind,
+  type SubmitFormat,
+} from '../lib/field-actions';
+import {
   CALC_FUNCTIONS,
   NEG_STYLES,
   SEP_STYLES,
@@ -527,6 +539,344 @@ export function FieldActionsControl({
           onChange={(e) => set({ defaultValue: e.target.value })}
         />,
       )}
+    </div>
+  );
+}
+
+// ── the data actions ──────────────────────────────────────────────────────
+//
+// The `/AA` and `/A` kinds that carry no code, and are therefore both authored
+// here and PERFORMED on the canvas. Kept a separate control from the value
+// actions above because they answer a different question — that one is "what
+// does this field hold", this one is "what does this field DO" — and because
+// only the field-properties home edits them.
+//
+// One rule it exists to hold: a submission is described honestly at the point
+// it is authored. The note under the address says what will happen when the
+// button is used, so nobody authors a submit expecting this app to send it.
+
+/** The field names an action may scope itself to, plus what a page picker
+ * ranges over. */
+export interface ActionContext {
+  fieldNames: readonly string[];
+  pageCount: number;
+}
+
+function scopeMode(action: AuthoredAction): 'all' | 'only' | 'except' {
+  if (action.kind !== 'reset' && action.kind !== 'submit') return 'all';
+  if (!action.fields || action.fields.length === 0) return 'all';
+  return action.exclude ? 'except' : 'only';
+}
+
+export function FieldDataActionsControl({
+  value,
+  onChange,
+  context,
+  idPrefix,
+  unauthorable = [],
+}: {
+  value: readonly AuthoredAction[];
+  onChange: (next: AuthoredAction[]) => void;
+  context: ActionContext;
+  idPrefix: string;
+  /** Triggers carrying a kind this app does not author. Applying here removes
+   * them, so the editor says so rather than dropping them silently. */
+  unauthorable?: readonly ActionTrigger[];
+}): React.ReactElement {
+  const used = new Set(value.map((a) => a.trigger));
+  const free = ACTION_TRIGGERS.filter((t) => !used.has(t));
+  const replace = (index: number, next: AuthoredAction): void =>
+    onChange(value.map((a, i) => (i === index ? next : a)));
+  const names = (list: string[] | null): string[] => list ?? [];
+
+  const scopeControls = (
+    action: Extract<AuthoredAction, { kind: 'reset' | 'submit' }>,
+    index: number,
+  ): React.ReactElement => {
+    const mode = scopeMode(action);
+    return (
+      <>
+        {labelled(
+          tChrome('panel.fieldActions.actionScope'),
+          <select
+            data-testid={`${idPrefix}-action-${index}-scope`}
+            aria-label={tChrome('panel.fieldActions.actionScope')}
+            className={SELECT}
+            value={mode}
+            onChange={(e) => {
+              const next = e.target.value;
+              replace(index, {
+                ...action,
+                fields: next === 'all' ? null : names(action.fields),
+                exclude: next === 'except',
+              });
+            }}
+          >
+            <option value="all">{tChrome('panel.fieldActions.actionScopeAll')}</option>
+            <option value="only">{tChrome('panel.fieldActions.actionScopeOnly')}</option>
+            <option value="except">{tChrome('panel.fieldActions.actionScopeExcept')}</option>
+          </select>,
+        )}
+        {mode !== 'all' &&
+          fieldPicker(
+            `${idPrefix}-action-${index}-fields`,
+            context.fieldNames,
+            names(action.fields),
+            (next) => replace(index, { ...action, fields: next }),
+          )}
+      </>
+    );
+  };
+
+  return (
+    <div className="flex flex-col gap-2" data-testid={`${idPrefix}-data-actions`}>
+      <span className="text-xs text-neutral-400">{tChrome('panel.fieldActions.actions')}</span>
+      {value.length === 0 && (
+        <p className="text-[11px] text-neutral-500">
+          {tChrome('panel.fieldActions.actionsNone')}
+        </p>
+      )}
+      {value.map((action, index) => (
+        <div
+          key={action.trigger}
+          className="flex flex-col gap-1.5 rounded border border-neutral-700 p-2"
+          data-testid={`${idPrefix}-action-${index}`}
+        >
+          {labelled(
+            tChrome('panel.fieldActions.actionTrigger'),
+            <select
+              data-testid={`${idPrefix}-action-${index}-trigger`}
+              aria-label={tChrome('panel.fieldActions.actionTrigger')}
+              className={SELECT}
+              value={action.trigger}
+              onChange={(e) =>
+                replace(index, { ...action, trigger: e.target.value as ActionTrigger })
+              }
+            >
+              {ACTION_TRIGGERS.filter((t) => t === action.trigger || !used.has(t)).map((t) => (
+                <option key={t} value={t}>
+                  {tChrome(ACTION_TRIGGER_LABEL[t])}
+                </option>
+              ))}
+            </select>,
+          )}
+          {labelled(
+            tChrome('panel.fieldActions.actionKind'),
+            <select
+              data-testid={`${idPrefix}-action-${index}-kind`}
+              aria-label={tChrome('panel.fieldActions.actionKind')}
+              className={SELECT}
+              value={action.kind}
+              onChange={(e) =>
+                // A fresh action of the new kind: switching from Go to a page
+                // to Submit must not leave a page behind as the new kind's
+                // only member.
+                replace(index, defaultAction(e.target.value as AuthoredKind, action.trigger))
+              }
+            >
+              {AUTHORED_KINDS.map((kind) => (
+                <option key={kind} value={kind}>
+                  {tChrome(ACTION_KIND_LABEL[kind])}
+                </option>
+              ))}
+            </select>,
+          )}
+
+          {action.kind === 'goto' &&
+            labelled(
+              tChrome('panel.fieldActions.actionPage'),
+              <input
+                data-testid={`${idPrefix}-action-${index}-page`}
+                type="number"
+                min={1}
+                max={Math.max(1, context.pageCount)}
+                className={INPUT}
+                value={action.page + 1}
+                onChange={(e) =>
+                  replace(index, {
+                    ...action,
+                    page: Math.max(0, Number(e.target.value) - 1),
+                  })
+                }
+              />,
+            )}
+
+          {action.kind === 'uri' &&
+            labelled(
+              tChrome('panel.fieldActions.actionAddress'),
+              <input
+                data-testid={`${idPrefix}-action-${index}-uri`}
+                type="text"
+                className={INPUT}
+                value={action.uri}
+                onChange={(e) => replace(index, { ...action, uri: e.target.value })}
+              />,
+            )}
+
+          {action.kind === 'import' &&
+            labelled(
+              tChrome('panel.fieldActions.actionFile'),
+              <input
+                data-testid={`${idPrefix}-action-${index}-file`}
+                type="text"
+                className={INPUT}
+                value={action.file}
+                onChange={(e) => replace(index, { ...action, file: e.target.value })}
+              />,
+            )}
+
+          {action.kind === 'hide' && (
+            <>
+              {labelled(
+                tChrome('panel.fieldActions.actionDirection'),
+                <select
+                  data-testid={`${idPrefix}-action-${index}-hide`}
+                  aria-label={tChrome('panel.fieldActions.actionDirection')}
+                  className={SELECT}
+                  value={action.hide ? 'hide' : 'show'}
+                  onChange={(e) =>
+                    replace(index, { ...action, hide: e.target.value === 'hide' })
+                  }
+                >
+                  <option value="hide">{tChrome('panel.fieldActions.actionHideThem')}</option>
+                  <option value="show">{tChrome('panel.fieldActions.actionShow')}</option>
+                </select>,
+              )}
+              {fieldPicker(
+                `${idPrefix}-action-${index}-targets`,
+                context.fieldNames,
+                action.targets,
+                (next) => replace(index, { ...action, targets: next }),
+              )}
+            </>
+          )}
+
+          {action.kind === 'reset' && scopeControls(action, index)}
+
+          {action.kind === 'submit' && (
+            <>
+              {labelled(
+                tChrome('panel.fieldActions.actionAddress'),
+                <input
+                  data-testid={`${idPrefix}-action-${index}-url`}
+                  type="text"
+                  className={INPUT}
+                  value={action.url}
+                  onChange={(e) => replace(index, { ...action, url: e.target.value })}
+                />,
+              )}
+              {labelled(
+                tChrome('panel.fieldActions.actionFormat'),
+                <select
+                  data-testid={`${idPrefix}-action-${index}-format`}
+                  aria-label={tChrome('panel.fieldActions.actionFormat')}
+                  className={SELECT}
+                  value={action.format}
+                  onChange={(e) =>
+                    replace(index, { ...action, format: e.target.value as SubmitFormat })
+                  }
+                >
+                  {SUBMIT_FORMATS.map((format) => (
+                    <option key={format} value={format}>
+                      {format.toUpperCase()}
+                    </option>
+                  ))}
+                </select>,
+              )}
+              {labelled(
+                tChrome('panel.fieldActions.actionMethod'),
+                <select
+                  data-testid={`${idPrefix}-action-${index}-method`}
+                  aria-label={tChrome('panel.fieldActions.actionMethod')}
+                  className={SELECT}
+                  value={action.method}
+                  onChange={(e) =>
+                    replace(index, { ...action, method: e.target.value === 'get' ? 'get' : 'post' })
+                  }
+                >
+                  <option value="post">{tChrome('panel.fieldActions.actionMethodPost')}</option>
+                  <option value="get">{tChrome('panel.fieldActions.actionMethodGet')}</option>
+                </select>,
+              )}
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-neutral-400">
+                <input
+                  type="checkbox"
+                  checked={action.includeEmpty}
+                  onChange={() => replace(index, { ...action, includeEmpty: !action.includeEmpty })}
+                  className="rounded bg-neutral-800 border-neutral-700"
+                />
+                {tChrome('panel.fieldActions.actionIncludeEmpty')}
+              </label>
+              {scopeControls(action, index)}
+              <p className="text-[11px] text-neutral-500">
+                {tChrome('panel.fieldActions.actionSubmitNote')}
+              </p>
+            </>
+          )}
+
+          <button
+            type="button"
+            data-testid={`${idPrefix}-action-${index}-remove`}
+            className="self-start text-[11px] text-neutral-400 hover:text-neutral-200 underline"
+            onClick={() => onChange(value.filter((_, i) => i !== index))}
+          >
+            {tChrome('panel.fieldActions.actionRemove')}
+          </button>
+        </div>
+      ))}
+      {free.length > 0 && (
+        <button
+          type="button"
+          data-testid={`${idPrefix}-action-add`}
+          className="self-start rounded border border-neutral-700 px-2 py-1 text-xs hover:border-neutral-500"
+          onClick={() => onChange([...value, defaultAction('goto', free[0])])}
+        >
+          {tChrome('panel.fieldActions.actionAdd')}
+        </button>
+      )}
+      {unauthorable.length > 0 && (
+        <p className="text-[11px] text-amber-300" data-testid={`${idPrefix}-action-unauthorable`}>
+          {tChrome('panel.fieldActions.actionUnauthorable', {
+            kinds: unauthorable.join(', '),
+          })}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A checkbox list of field names — the shape the calculate picker already
+ * uses, shared so a scope and a calculation are chosen the same way. */
+function fieldPicker(
+  id: string,
+  names: readonly string[],
+  chosen: readonly string[],
+  onChange: (next: string[]) => void,
+): React.ReactElement {
+  if (names.length === 0) {
+    return <p className="text-[11px] text-neutral-500">{tChrome('panel.fieldActions.noFields')}</p>;
+  }
+  return (
+    <div
+      className="max-h-32 overflow-auto rounded border border-neutral-700 bg-neutral-800 p-1.5 flex flex-col gap-1"
+      role="group"
+      aria-label={tChrome('panel.fieldActions.actionTargets')}
+    >
+      {names.map((name) => (
+        <label key={name} className="flex items-center gap-2 text-xs text-neutral-300">
+          <input
+            data-testid={`${id}-${name}`}
+            type="checkbox"
+            checked={chosen.includes(name)}
+            onChange={(e) =>
+              onChange(
+                e.target.checked ? [...chosen, name] : chosen.filter((n) => n !== name),
+              )
+            }
+          />
+          <span className="truncate">{name}</span>
+        </label>
+      ))}
     </div>
   );
 }
