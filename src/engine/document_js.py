@@ -28,7 +28,7 @@ _BOM_BE = b"\xfe\xff"
 _BOM_LE = b"\xff\xfe"
 
 
-def _decode_js(action) -> str | None:
+def decode_js(action) -> str | None:
     """The JavaScript text of a `/JavaScript` action, or None if it carries no
     `/JS`. `/JS` may be a PDF String (pikepdf decodes the text-string encoding
     for us) or a Stream (raw bytes we decode by BOM, else PDFDocEncoding)."""
@@ -86,7 +86,7 @@ def list_document_js(file: str) -> dict:
             for name, action in pikepdf.NameTree(tree).items():
                 if not isinstance(action, pikepdf.Dictionary):
                     continue
-                js = _decode_js(action)
+                js = decode_js(action)
                 if js is not None:
                     scripts.append({"name": str(name), "js": js})
     scripts.sort(key=lambda s: s["name"])

@@ -24,9 +24,16 @@ CORPUS = json.loads(
 
 @pytest.mark.parametrize("case", CORPUS["cases"], ids=lambda c: c["name"])
 def test_corpus_case(case):
-    decision = signed_edit_decision(case["policy"], case["class"], case.get("fields"))
+    decision = signed_edit_decision(
+        case["policy"], case["class"], case.get("fields"), case.get("typed")
+    )
     assert decision["kind"] == case["kind"]
     assert decision.get("reason") == case.get("reason")
+    if "locked" in case:
+        assert decision.get("fields") == case["locked"]
+    if "indirect" in case:
+        assert bool(decision.get("indirect")) == case["indirect"]
+        assert decision.get("typed", []) == (case["typed"] if case["indirect"] else [])
 
 
 def test_corpus_covers_every_kind():

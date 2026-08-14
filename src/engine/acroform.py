@@ -267,7 +267,7 @@ def carry_pure_data_fields(dst: pikepdf.Pdf, src: pikepdf.Pdf) -> list[dict]:
     return renamed
 
 
-def _fq_name(node) -> str | None:
+def fq_field_name(node) -> str | None:
     """Fully-qualified field name: /T segments joined with '.', climbing
     /Parent. None when no segment carries a /T (nameless — nothing stable to
     reconcile on)."""
@@ -348,7 +348,7 @@ def carry_doc_form_extras(dst: pikepdf.Pdf, src: pikepdf.Pdf, renamed: dict) -> 
             dst_names = _forest_names(dst)
             resolved = []
             for entry in co:
-                name = _fq_name(entry)
+                name = fq_field_name(entry)
                 if name is None:
                     continue
                 target = dst_names.get(_apply_renames(name, renamed))
@@ -381,7 +381,7 @@ def _reconcile_co_in_place(pdf: pikepdf.Pdf) -> None:
     live = _forest_names(pdf)
     keep = []
     for entry in co:
-        name = _fq_name(entry)
+        name = fq_field_name(entry)
         if name is not None and live.get(name) is not None:
             keep.append(entry)
     if not keep:

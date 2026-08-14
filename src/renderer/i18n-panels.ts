@@ -420,7 +420,16 @@ export const PANEL_STRINGS = {
   'panel.forms.errorReading': 'Error reading fields: {{message}}',
   'panel.forms.required': 'required',
   'panel.forms.readOnly': 'read-only',
+  'panel.forms.calculated': 'calculated',
   'panel.forms.none': '— none —',
+  'panel.forms.scriptsNotRun_one':
+    '{{count}} field carries a script this app does not run. Its own value is left alone; every other field still calculates.',
+  'panel.forms.scriptsNotRun_other':
+    '{{count}} fields carry scripts this app does not run. Their own values are left alone; every other field still calculates.',
+  'panel.forms.noCalculationOrder_one':
+    '{{count}} field carries a calculation, but this document declares no calculation order, so it was not run.',
+  'panel.forms.noCalculationOrder_other':
+    '{{count}} fields carry calculations, but this document declares no calculation order, so they were not run.',
 
   'panel.compare.open': 'Open a PDF to compare',
   'panel.compare.comparingLabel': 'Comparing:',

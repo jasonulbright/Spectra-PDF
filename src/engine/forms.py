@@ -34,6 +34,10 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Dictionary, Name
 
+from engine import afcalc
+from engine.acroform import fq_field_name
+from engine.afscript import recognize
+from engine.document_js import decode_js
 from engine.fieldmdp import lock_of_field_dict
 from engine.pdf_metrics import (
     GLYPH_HEIGHT_EM,
@@ -506,10 +510,95 @@ def _button_action(field: _Field) -> dict | None:
     return {"kind": "other"}
 
 
+# ── Field scripts (/AA) and the calculation order (/CO) ───────────────────
+#
+# The four FIELD additional-action triggers, in the order a commit runs them:
+# keystroke (may reject or rewrite), validate (may reject), calculate (writes
+# this field from others), format (produces the display string). Every other
+# /AA key is a widget trigger and carries no value semantics.
+_TRIGGERS = {"/K": "K", "/V": "V", "/C": "C", "/F": "F"}
+
+
+def _field_action_sources(field: _Field) -> dict:
+    """{trigger: raw /JS text} for the field's `/AA`. An action whose `/S` is
+    not `/JavaScript` carries no script and is not one."""
+    aa = field.obj.get("/AA")
+    if aa is None or not isinstance(aa, pikepdf.Dictionary):
+        return {}
+    out: dict = {}
+    for key, trigger in _TRIGGERS.items():
+        action = aa.get(key)
+        if action is None or not isinstance(action, pikepdf.Dictionary):
+            continue
+        try:
+            if str(action.get("/S")) != "/JavaScript":
+                continue
+        except Exception:
+            continue
+        js = decode_js(action)
+        if js is not None:
+            out[trigger] = js
+    return out
+
+
+def _field_scripts(field: _Field) -> tuple[dict, list[str]]:
+    """({trigger: recognized script}, [triggers this app does not run]).
+
+    A script the recognizer does not accept keeps its `/JS` bytes untouched
+    and is reported by name; the rest of the form still calculates.
+    """
+    scripts: dict = {}
+    not_run: list[str] = []
+    for trigger, js in _field_action_sources(field).items():
+        script = recognize(js)
+        if script is None or afcalc.unrunnable(script):
+            not_run.append(trigger)
+        else:
+            scripts[trigger] = script
+    return scripts, not_run
+
+
+def _calculation_order(pdf: pikepdf.Pdf) -> list[str]:
+    """`/CO` as fully-qualified names, in the order the document declares.
+
+    Absent or empty means calculations do not run at all: the format puts
+    calculation order here, and inventing one (document order, name order)
+    would compute a number no other viewer computes.
+    """
+    acro = _acroform(pdf)
+    if acro is None:
+        return []
+    co = acro.get("/CO")
+    if co is None:
+        return []
+    out: list[str] = []
+    for entry in co:
+        try:
+            name = fq_field_name(entry)
+        except Exception:
+            name = None
+        if name:
+            out.append(name)
+    return out
+
+
+def _calc_value(field: _Field, ftype: str) -> str:
+    """A field's current value as the evaluator sees it — the raw text, never
+    a formatted display string, which would corrupt the next calculation."""
+    value = _field_value(field, ftype)
+    if isinstance(value, bool):
+        return "Yes" if value else "Off"
+    if isinstance(value, list):
+        return value[0] if value else ""
+    return str(value) if value is not None else ""
+
+
 def read_form_fields(file: str) -> dict:
     """Enumerate AcroForm fields (read-only)."""
     with pikepdf.open(file) as pdf:
         annot_map, page_map = _page_index_maps(pdf)
+        order = _calculation_order(pdf)
+        calculated = set(order)
         fields = []
         for field in _all_fields(pdf):
             ftype = _classify(field)
@@ -544,8 +633,28 @@ def read_form_fields(file: str) -> dict:
                 action = _button_action(field)
                 if action is not None:
                     entry["action"] = action
+            # The field's own scripts, as RAW /JS text: the renderer runs its
+            # own recognizer over these (the twin), and the two are pinned
+            # against tests/fixtures/af-corpus.json. `scripts_not_run` is this
+            # side's verdict, so a panel can report the refusal by name without
+            # re-deriving it.
+            sources = _field_action_sources(field)
+            if sources:
+                entry["actions"] = sources
+                _, not_run = _field_scripts(field)
+                if not_run:
+                    entry["scripts_not_run"] = not_run
+            if field.name in calculated:
+                entry["calculated"] = True
             fields.append(entry)
-        return {"has_xfa": _has_xfa(pdf), "fields": fields, "count": len(fields)}
+        return {
+            "has_xfa": _has_xfa(pdf),
+            "fields": fields,
+            "count": len(fields),
+            # The declared calculation order. Empty means calculations do not
+            # run — see `_calculation_order`.
+            "calculation_order": order,
+        }
 
 
 # ── Appearance generation ─────────────────────────────────────────────────
@@ -906,6 +1015,26 @@ def _text_value_problem(name: str, text: str, da: str | None, font_dir: str) -> 
     return None
 
 
+def _script_problem(name: str, value: str, problem) -> str:
+    """A keystroke or validate rejection, worded for the batch's problem list.
+
+    Built from the structured refusal kind the evaluator reports, never by
+    matching text: the kinds are stable and the wording is not.
+    """
+    kind, args = problem
+    if kind == "range":
+        return f"{name}: {value} is outside the allowed range {args[0]}–{args[1]}"
+    if kind == "min":
+        return f"{name}: {value} is below the allowed minimum {args[0]}"
+    if kind == "max":
+        return f"{name}: {value} is above the allowed maximum {args[0]}"
+    if kind == "date":
+        return f'{name}: "{value}" is not a valid date in the format {args[0]}'
+    if kind == "mask":
+        return f'{name}: "{value}" does not match the pattern {args[0]}'
+    return f'{name}: "{value}" is not a valid number'
+
+
 def reset_form_fields(
     file: str,
     output: str,
@@ -1091,6 +1220,108 @@ def fill_form_fields(
                         plan.append((field, ftype, chosen))
             else:
                 problems.append(f"field {name} has type {ftype!r}, which is not fillable")
+
+        # ── the field-script pass ─────────────────────────────────────────
+        #
+        # Keystroke and validate run over the caller's values BEFORE anything
+        # is stored, so a rejected value never triggers a recalculation and
+        # every problem is reported with the rest. The calculation then runs
+        # once over `/CO`, and its results form a SECOND, DERIVED plan half —
+        # structurally separate, never a flag threaded through the plan above,
+        # because that separation IS the scope of the read-only bypass below.
+        scripts_by_name: dict = {}
+        scripts_not_run: list[str] = []
+        for name, field in fields.items():
+            entry, not_run = _field_scripts(field)
+            if entry:
+                scripts_by_name[name] = entry
+            if not_run:
+                scripts_not_run.append(name)
+        order = _calculation_order(pdf)
+        terminals = list(fields.keys())
+
+        checked: list[tuple[_Field, str, object]] = []
+        for field, ftype, value in plan:
+            entry = scripts_by_name.get(field.name, {})
+            if not isinstance(value, str) or not entry:
+                checked.append((field, ftype, value))
+                continue
+            stored = value
+            rejected = False
+            for trigger in ("K", "V"):
+                script = entry.get(trigger)
+                if script is None:
+                    continue
+                try:
+                    event = afcalc.run(script, stored)
+                except afcalc.Unsupported:
+                    if field.name not in scripts_not_run:
+                        scripts_not_run.append(field.name)
+                    continue
+                if not event.rc:
+                    problems.append(_script_problem(field.name, stored, event.problem))
+                    rejected = True
+                    break
+                stored = afcalc.as_stored(event.value)
+            if not rejected:
+                checked.append((field, ftype, stored))
+        plan = checked
+
+        values_now = {name: _calc_value(f, _classify(f)) for name, f in fields.items()}
+        for field, _ftype, value in plan:
+            if isinstance(value, str):
+                values_now[field.name] = value
+        recalculated = afcalc.calculate(values_now, scripts_by_name, order, terminals)
+
+        planned = {field.name for field, _t, _v in plan}
+        derived: list[tuple[_Field, str, str]] = []
+        calc_skipped: list[str] = []
+        for name, value in recalculated.items():
+            field = fields.get(name)
+            if field is None:
+                continue
+            ftype = _classify(field)
+            if ftype not in ("text", "dropdown"):
+                # A calculation into a checkbox or a radio has no value shape
+                # to write. Counted, never silently dropped.
+                calc_skipped.append(name)
+                continue
+            if name in planned:
+                plan = [(f, t, value if f.name == name else v) for f, t, v in plan]
+            else:
+                # Read-only means "the user may not type here", not "the
+                # document may not compute here": a calculated Total is
+                # routinely read-only and the reference computes into it. The
+                # bypass is scoped to fields reached through /CO, which is
+                # exactly what this list contains. A caller who NAMES a
+                # read-only field still refuses, above.
+                derived.append((field, ftype, value))
+
+        # The appearance draws the FORMATTED value while /V keeps the raw one.
+        display: dict[str, str] = {}
+        for field, _ftype, value in [*plan, *derived]:
+            if not isinstance(value, str):
+                continue
+            script = scripts_by_name.get(field.name, {}).get("F")
+            if script is None:
+                continue
+            try:
+                shown = afcalc.format_display(script, value)
+            except afcalc.Unsupported:
+                if field.name not in scripts_not_run:
+                    scripts_not_run.append(field.name)
+                continue
+            display[field.name] = shown
+            prob = _text_value_problem(field.name, shown, _field_da(field, acro), font_dir)
+            if prob is not None:
+                problems.append(prob)
+        for field, _ftype, value in derived:
+            if field.name in display:
+                continue
+            prob = _text_value_problem(field.name, value, _field_da(field, acro), font_dir)
+            if prob is not None:
+                problems.append(prob)
+
         if problems:
             raise ValueError("; ".join(problems))
 
@@ -1103,7 +1334,7 @@ def fill_form_fields(
 
         filled = 0
         fonts_substituted: list[str] = []
-        for field, ftype, value in plan:
+        for field, ftype, value in [*plan, *derived]:
             da = _field_da(field, acro)
             q = field.attr("/Q")
             try:
@@ -1166,8 +1397,11 @@ def fill_form_fields(
                     appearance_text = "\n".join(exports)  # one selected item per line
                     multiline = True
                 else:
-                    appearance_text = str(value)
-                    field.obj["/V"] = pikepdf.String(appearance_text)
+                    # /V holds the RAW value and /AP draws the FORMATTED one.
+                    # A fill that stored the formatted string would corrupt
+                    # the value for the next calculation that reads it.
+                    field.obj["/V"] = pikepdf.String(str(value))
+                    appearance_text = display.get(field.name, str(value))
                     if "/I" in field.obj:
                         del field.obj["/I"]
                     multiline = ftype == "text" and bool(field.flags & FF_MULTILINE)
@@ -1183,6 +1417,9 @@ def fill_form_fields(
                         f"couldn't regenerate the appearance for {field.name}: {exc}"
                     ) from None
             filled += 1
+        # The caller's own fields; the recalculated ones are reported apart so
+        # a count of "what the user changed" stays what it was.
+        filled -= len(derived)
 
         if acro is not None and "/NeedAppearances" in acro:
             del acro["/NeedAppearances"]
@@ -1224,6 +1461,15 @@ def fill_form_fields(
         # render (honestly) in Helvetica. Surfaced, never silent.
         "fonts_substituted": fonts_substituted,
     }
+    if derived:
+        # Fields the DOCUMENT computed rather than the caller naming them.
+        result["calculated"] = [f.name for f, _t, _v in derived]
+    if calc_skipped:
+        result["calculation_unwritable"] = calc_skipped
+    if scripts_not_run:
+        # Fields carrying a script this app does not run. Their /JS bytes are
+        # untouched and every other field still calculated.
+        result["scripts_not_run"] = scripts_not_run
     if preserved.get("preserved"):
         result["signatures_preserved"] = True
     return result

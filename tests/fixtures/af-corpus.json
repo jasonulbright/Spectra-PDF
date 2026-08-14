@@ -1,0 +1,1972 @@
+{
+  "note": [
+    "The pin that keeps ONE field-script evaluator honest across two",
+    "implementations: engine/afcalc.py + engine/afscript.py (authoritative —",
+    "the fill writes what it computes) and renderer/lib/af-calc.ts +",
+    "af-script.ts (the live-preview twin, which never writes bytes). Read by",
+    "tests/test_afcalc.py and tests/af-corpus.test.ts, which must agree case",
+    "for case.",
+    "",
+    "Every expectation here was computed by the evaluator and then checked",
+    "against the reference implementation extracted from the AcroForm",
+    "scripting host that ships, unused, inside the pdf.js dependency — so a",
+    "row records what the reference does, not what a transcription of it",
+    "recalled. Rows that look wrong are the reference being reproduced:",
+    "\"1,234\" parses as 1.234, a non-finite value formats empty, a",
+    "calculation over no values is 0, and month names are English whatever",
+    "the reader's language.",
+    "",
+    "`js` is a raw /JS body. `script` is the recognized structure, or null",
+    "when the body is not one this app runs — that field keeps its bytes and",
+    "is reported by name while the rest of the form still calculates."
+  ],
+  "entry_points": [
+    "AFDate_Format",
+    "AFDate_FormatEx",
+    "AFDate_Keystroke",
+    "AFDate_KeystrokeEx",
+    "AFNumber_Format",
+    "AFNumber_Keystroke",
+    "AFPercent_Format",
+    "AFPercent_Keystroke",
+    "AFRange_Validate",
+    "AFSimple",
+    "AFSimple_Calculate",
+    "AFSpecial_Format",
+    "AFSpecial_Keystroke",
+    "AFSpecial_KeystrokeEx",
+    "AFTime_Format",
+    "AFTime_FormatEx",
+    "AFTime_Keystroke",
+    "AFTime_KeystrokeEx"
+  ],
+  "date_formats": [
+    "m/d",
+    "m/d/yy",
+    "mm/dd/yy",
+    "mm/yy",
+    "d-mmm",
+    "d-mmm-yy",
+    "dd-mmm-yy",
+    "yy-mm-dd",
+    "mmm-yy",
+    "mmmm-yy",
+    "mmm d, yyyy",
+    "mmmm d, yyyy",
+    "m/d/yy h:MM tt",
+    "m/d/yy HH:MM"
+  ],
+  "time_formats": [
+    "HH:MM",
+    "h:MM tt",
+    "HH:MM:ss",
+    "h:MM:ss tt"
+  ],
+  "recognize": [
+    {
+      "name": "number format, two decimals, US separators",
+      "js": "AFNumber_Format(2, 0, 0, 0, \"\", true);",
+      "script": {
+        "fn": "AFNumber_Format",
+        "args": [
+          2,
+          0,
+          0,
+          0,
+          "",
+          true
+        ]
+      }
+    },
+    {
+      "name": "number keystroke, the format's mandatory partner",
+      "js": "AFNumber_Keystroke(2, 0, 0, 0, \"\", true);",
+      "script": {
+        "fn": "AFNumber_Keystroke",
+        "args": [
+          2,
+          0,
+          0,
+          0,
+          "",
+          true
+        ]
+      }
+    },
+    {
+      "name": "number format with a prepended currency",
+      "js": "AFNumber_Format(2, 0, 0, 0, \"$\", true);",
+      "script": {
+        "fn": "AFNumber_Format",
+        "args": [
+          2,
+          0,
+          0,
+          0,
+          "$",
+          true
+        ]
+      }
+    },
+    {
+      "name": "percent format",
+      "js": "AFPercent_Format(1, 0);",
+      "script": {
+        "fn": "AFPercent_Format",
+        "args": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "percent format with the optional third argument",
+      "js": "AFPercent_Format(1, 0, true);",
+      "script": {
+        "fn": "AFPercent_Format",
+        "args": [
+          1,
+          0,
+          true
+        ]
+      }
+    },
+    {
+      "name": "percent keystroke",
+      "js": "AFPercent_Keystroke(1, 0);",
+      "script": {
+        "fn": "AFPercent_Keystroke",
+        "args": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "date format by table index",
+      "js": "AFDate_Format(2);",
+      "script": {
+        "fn": "AFDate_Format",
+        "args": [
+          2
+        ]
+      }
+    },
+    {
+      "name": "date format by literal mask",
+      "js": "AFDate_FormatEx(\"mm/dd/yy\");",
+      "script": {
+        "fn": "AFDate_FormatEx",
+        "args": [
+          "mm/dd/yy"
+        ]
+      }
+    },
+    {
+      "name": "date keystroke by table index",
+      "js": "AFDate_Keystroke(2);",
+      "script": {
+        "fn": "AFDate_Keystroke",
+        "args": [
+          2
+        ]
+      }
+    },
+    {
+      "name": "date keystroke by literal mask",
+      "js": "AFDate_KeystrokeEx(\"mm/dd/yy\");",
+      "script": {
+        "fn": "AFDate_KeystrokeEx",
+        "args": [
+          "mm/dd/yy"
+        ]
+      }
+    },
+    {
+      "name": "time format by table index",
+      "js": "AFTime_Format(1);",
+      "script": {
+        "fn": "AFTime_Format",
+        "args": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "time format by literal mask",
+      "js": "AFTime_FormatEx(\"HH:MM\");",
+      "script": {
+        "fn": "AFTime_FormatEx",
+        "args": [
+          "HH:MM"
+        ]
+      }
+    },
+    {
+      "name": "time keystroke by table index",
+      "js": "AFTime_Keystroke(1);",
+      "script": {
+        "fn": "AFTime_Keystroke",
+        "args": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "time keystroke by literal mask",
+      "js": "AFTime_KeystrokeEx(\"HH:MM\");",
+      "script": {
+        "fn": "AFTime_KeystrokeEx",
+        "args": [
+          "HH:MM"
+        ]
+      }
+    },
+    {
+      "name": "special format, social security number",
+      "js": "AFSpecial_Format(3);",
+      "script": {
+        "fn": "AFSpecial_Format",
+        "args": [
+          3
+        ]
+      }
+    },
+    {
+      "name": "special keystroke, phone",
+      "js": "AFSpecial_Keystroke(2);",
+      "script": {
+        "fn": "AFSpecial_Keystroke",
+        "args": [
+          2
+        ]
+      }
+    },
+    {
+      "name": "special keystroke with an arbitrary mask",
+      "js": "AFSpecial_KeystrokeEx(\"AA-9999-O\");",
+      "script": {
+        "fn": "AFSpecial_KeystrokeEx",
+        "args": [
+          "AA-9999-O"
+        ]
+      }
+    },
+    {
+      "name": "simple calculate over a comma list",
+      "js": "AFSimple_Calculate(\"SUM\", \"Item.1,Item.2,Item.3\");",
+      "script": {
+        "fn": "AFSimple_Calculate",
+        "args": [
+          "SUM",
+          "Item.1,Item.2,Item.3"
+        ]
+      }
+    },
+    {
+      "name": "simple calculate over new Array",
+      "js": "AFSimple_Calculate(\"SUM\", new Array(\"Item.1\",\"Item.2\"));",
+      "script": {
+        "fn": "AFSimple_Calculate",
+        "args": [
+          "SUM",
+          [
+            "Item.1",
+            "Item.2"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "simple calculate over an array literal",
+      "js": "AFSimple_Calculate(\"PRD\", [\"Price\",\"Qty\"]);",
+      "script": {
+        "fn": "AFSimple_Calculate",
+        "args": [
+          "PRD",
+          [
+            "Price",
+            "Qty"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "the two-operand simple form",
+      "js": "AFSimple(\"AVG\", 10, 20);",
+      "script": {
+        "fn": "AFSimple",
+        "args": [
+          "AVG",
+          10,
+          20
+        ]
+      }
+    },
+    {
+      "name": "range validate with both bounds",
+      "js": "AFRange_Validate(true, 0, true, 100);",
+      "script": {
+        "fn": "AFRange_Validate",
+        "args": [
+          true,
+          0,
+          true,
+          100
+        ]
+      }
+    },
+    {
+      "name": "simplified field notation: a sum",
+      "js": "event.value = Subtotal + Tax;",
+      "script": {
+        "fn": "SFN",
+        "expr": {
+          "op": "+",
+          "l": {
+            "field": "Subtotal"
+          },
+          "r": {
+            "field": "Tax"
+          }
+        }
+      }
+    },
+    {
+      "name": "simplified field notation: precedence and parentheses",
+      "js": "event.value = (Price * Qty) - Discount;",
+      "script": {
+        "fn": "SFN",
+        "expr": {
+          "op": "-",
+          "l": {
+            "op": "*",
+            "l": {
+              "field": "Price"
+            },
+            "r": {
+              "field": "Qty"
+            }
+          },
+          "r": {
+            "field": "Discount"
+          }
+        }
+      }
+    },
+    {
+      "name": "simplified field notation: unary minus",
+      "js": "event.value = -Adjustment + Base;",
+      "script": {
+        "fn": "SFN",
+        "expr": {
+          "op": "+",
+          "l": {
+            "op": "neg",
+            "v": {
+              "field": "Adjustment"
+            }
+          },
+          "r": {
+            "field": "Base"
+          }
+        }
+      }
+    },
+    {
+      "name": "simplified field notation: a quoted name carrying a space",
+      "js": "event.value = \"Line Total\" / 2;",
+      "script": {
+        "fn": "SFN",
+        "expr": {
+          "op": "/",
+          "l": {
+            "field": "Line Total"
+          },
+          "r": {
+            "num": 2.0
+          }
+        }
+      }
+    },
+    {
+      "name": "simplified field notation: a dotted name",
+      "js": "event.value = Item.1 + Item.2;",
+      "script": {
+        "fn": "SFN",
+        "expr": {
+          "op": "+",
+          "l": {
+            "field": "Item.1"
+          },
+          "r": {
+            "field": "Item.2"
+          }
+        }
+      }
+    },
+    {
+      "name": "a comment before the call is not a second statement",
+      "js": "// total\nAFPercent_Format(1, 0);",
+      "script": {
+        "fn": "AFPercent_Format",
+        "args": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "whitespace and a missing semicolon are accepted",
+      "js": "  AFPercent_Format(1, 0)  ",
+      "script": {
+        "fn": "AFPercent_Format",
+        "args": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "a custom script is not recognized",
+      "js": "this.getField('x').value = 'y';",
+      "script": null
+    },
+    {
+      "name": "a script calling an AF function it then post-processes is not recognized",
+      "js": "AFNumber_Format(2, 0, 0, 0, \"\", true); event.value = event.value + \"!\";",
+      "script": null
+    },
+    {
+      "name": "an AF call with a computed argument is not recognized",
+      "js": "AFSimple_Calculate(\"SUM\", this.getField(\"x\").value);",
+      "script": null
+    },
+    {
+      "name": "an AF call with the wrong argument count is not recognized",
+      "js": "AFNumber_Format(2, 0);",
+      "script": null
+    },
+    {
+      "name": "a name outside the table is not recognized",
+      "js": "AFTotal_Format(2, 0);",
+      "script": null
+    },
+    {
+      "name": "an assignment to something other than event.value is not recognized",
+      "js": "total = A + B;",
+      "script": null
+    },
+    {
+      "name": "a comparison is not an assignment",
+      "js": "event.value == A;",
+      "script": null
+    },
+    {
+      "name": "simplified field notation with a call in it is not recognized",
+      "js": "event.value = sum(A, B);",
+      "script": null
+    },
+    {
+      "name": "an empty body is not recognized",
+      "js": "",
+      "script": null
+    }
+  ],
+  "format": [
+    {
+      "name": "separator style 0: the form's own convention, never the reader's locale",
+      "js": "AFNumber_Format(2, 0, 0, 0, \"\", true);",
+      "value": "1234.5",
+      "shown": "1,234.50"
+    },
+    {
+      "name": "separator style 1: the form's own convention, never the reader's locale",
+      "js": "AFNumber_Format(2, 1, 0, 0, \"\", true);",
+      "value": "1234.5",
+      "shown": "1234.50"
+    },
+    {
+      "name": "separator style 2: the form's own convention, never the reader's locale",
+      "js": "AFNumber_Format(2, 2, 0, 0, \"\", true);",
+      "value": "1234.5",
+      "shown": "1.234,50"
+    },
+    {
+      "name": "separator style 3: the form's own convention, never the reader's locale",
+      "js": "AFNumber_Format(2, 3, 0, 0, \"\", true);",
+      "value": "1234.5",
+      "shown": "1234,50"
+    },
+    {
+      "name": "separator style 4: the form's own convention, never the reader's locale",
+      "js": "AFNumber_Format(2, 4, 0, 0, \"\", true);",
+      "value": "1234.5",
+      "shown": "1'234.50"
+    },
+    {
+      "name": "a value with no digits formats empty",
+      "js": "AFNumber_Format(2, 0, 0, 0, \"\", true);",
+      "value": "n/a",
+      "shown": ""
+    },
+    {
+      "name": "a non-finite value formats empty, so division by zero needs no rule",
+      "js": "AFNumber_Format(2, 0, 0, 0, \"\", true);",
+      "value": "Infinity",
+      "shown": ""
+    },
+    {
+      "name": "the comma quirk: one comma is a decimal point, not a thousands mark",
+      "js": "AFNumber_Format(3, 1, 0, 0, \"\", true);",
+      "value": "1,234",
+      "shown": "1.234"
+    },
+    {
+      "name": "a prepended currency",
+      "js": "AFNumber_Format(2, 0, 0, 0, \"$\", true);",
+      "value": "1234.5",
+      "shown": "$1,234.50"
+    },
+    {
+      "name": "an appended currency",
+      "js": "AFNumber_Format(2, 2, 0, 0, \" €\", false);",
+      "value": "1234.5",
+      "shown": "1.234,50 €"
+    },
+    {
+      "name": "negative style 0 with a prepended currency keeps the sign outside",
+      "js": "AFNumber_Format(2, 0, 0, 0, \"$\", true);",
+      "value": "-1234.5",
+      "shown": "-$1,234.50"
+    },
+    {
+      "name": "negative style 2 parenthesizes",
+      "js": "AFNumber_Format(2, 0, 2, 0, \"$\", true);",
+      "value": "-1234.5",
+      "shown": "($1,234.50)"
+    },
+    {
+      "name": "rounding carries into the integer part",
+      "js": "AFNumber_Format(0, 0, 0, 0, \"\", true);",
+      "value": "0.5",
+      "shown": "1"
+    },
+    {
+      "name": "percent multiplies by a hundred",
+      "js": "AFPercent_Format(1, 0);",
+      "value": "0.125",
+      "shown": "12.5%"
+    },
+    {
+      "name": "percent prepends when asked",
+      "js": "AFPercent_Format(2, 0, true);",
+      "value": "0.075",
+      "shown": "%7.50"
+    },
+    {
+      "name": "percent of a non-number is a bare sign",
+      "js": "AFPercent_Format(1, 0);",
+      "value": "n/a",
+      "shown": "%"
+    },
+    {
+      "name": "percent with more than 512 decimals is a bare sign",
+      "js": "AFPercent_Format(513, 0);",
+      "value": "0.5",
+      "shown": "%"
+    },
+    {
+      "name": "date table entry 0 (m/d)",
+      "js": "AFDate_Format(0);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "3/14"
+    },
+    {
+      "name": "date table entry 1 (m/d/yy)",
+      "js": "AFDate_Format(1);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "3/14/26"
+    },
+    {
+      "name": "date table entry 2 (mm/dd/yy)",
+      "js": "AFDate_Format(2);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "03/14/26"
+    },
+    {
+      "name": "date table entry 3 (mm/yy)",
+      "js": "AFDate_Format(3);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "03/26"
+    },
+    {
+      "name": "date table entry 4 (d-mmm)",
+      "js": "AFDate_Format(4);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "14-Mar"
+    },
+    {
+      "name": "date table entry 5 (d-mmm-yy)",
+      "js": "AFDate_Format(5);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "14-Mar-26"
+    },
+    {
+      "name": "date table entry 6 (dd-mmm-yy)",
+      "js": "AFDate_Format(6);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "14-Mar-26"
+    },
+    {
+      "name": "date table entry 7 (yy-mm-dd)",
+      "js": "AFDate_Format(7);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "26-03-14"
+    },
+    {
+      "name": "date table entry 8 (mmm-yy)",
+      "js": "AFDate_Format(8);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "Mar-26"
+    },
+    {
+      "name": "date table entry 9 (mmmm-yy)",
+      "js": "AFDate_Format(9);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "March-26"
+    },
+    {
+      "name": "date table entry 10 (mmm d, yyyy)",
+      "js": "AFDate_Format(10);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "Mar 14, 2026"
+    },
+    {
+      "name": "date table entry 11 (mmmm d, yyyy)",
+      "js": "AFDate_Format(11);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "March 14, 2026"
+    },
+    {
+      "name": "date table entry 12 (m/d/yy h:MM tt)",
+      "js": "AFDate_Format(12);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "3/14/26 3:04 pm"
+    },
+    {
+      "name": "date table entry 13 (m/d/yy HH:MM)",
+      "js": "AFDate_Format(13);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "3/14/26 15:04"
+    },
+    {
+      "name": "time table entry 0 (HH:MM)",
+      "js": "AFTime_Format(0);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "15:04"
+    },
+    {
+      "name": "time table entry 1 (h:MM tt)",
+      "js": "AFTime_Format(1);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "3:04 pm"
+    },
+    {
+      "name": "time table entry 2 (HH:MM:ss)",
+      "js": "AFTime_Format(2);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "15:04:05"
+    },
+    {
+      "name": "time table entry 3 (h:MM:ss tt)",
+      "js": "AFTime_Format(3);",
+      "value": "2026-03-14T15:04:05",
+      "shown": "3:04:05 pm"
+    },
+    {
+      "name": "month names are English whatever the reader's language",
+      "js": "AFDate_FormatEx(\"mmmm d, yyyy\");",
+      "value": "March 14, 2026",
+      "shown": "March 14, 2026"
+    },
+    {
+      "name": "a value the mask cannot parse falls back to the ISO form",
+      "js": "AFDate_FormatEx(\"mmmm d, yyyy\");",
+      "value": "2026-03-14",
+      "shown": "March 14, 2026"
+    },
+    {
+      "name": "a mask the value cannot satisfy leaves the value alone",
+      "js": "AFDate_FormatEx(\"mm/dd/yy\");",
+      "value": "not a date",
+      "shown": "not a date"
+    },
+    {
+      "name": "an empty value is left alone",
+      "js": "AFDate_FormatEx(\"mm/dd/yy\");",
+      "value": "",
+      "shown": ""
+    },
+    {
+      "name": "special format: zip",
+      "js": "AFSpecial_Format(0);",
+      "value": "902101234",
+      "shown": "90210"
+    },
+    {
+      "name": "special format: zip plus four",
+      "js": "AFSpecial_Format(1);",
+      "value": "902101234",
+      "shown": "90210-1234"
+    },
+    {
+      "name": "special format: a ten-digit phone",
+      "js": "AFSpecial_Format(2);",
+      "value": "5551234567",
+      "shown": "(555) 123-4567"
+    },
+    {
+      "name": "special format: a seven-digit phone",
+      "js": "AFSpecial_Format(2);",
+      "value": "1234567",
+      "shown": "123-4567"
+    },
+    {
+      "name": "special format: social security number",
+      "js": "AFSpecial_Format(3);",
+      "value": "123456789",
+      "shown": "123-45-6789"
+    }
+  ],
+  "keystroke": [
+    {
+      "name": "a plain number commits",
+      "js": "AFNumber_Keystroke(2, 0, 0, 0, \"\", true);",
+      "value": "1234.5",
+      "ok": true,
+      "stored": "1234.5",
+      "problem": null
+    },
+    {
+      "name": "a comma decimal is rejected under a dot separator style",
+      "js": "AFNumber_Keystroke(2, 0, 0, 0, \"\", true);",
+      "value": "1234,5",
+      "ok": false,
+      "stored": "1234,5",
+      "problem": {
+        "kind": "number",
+        "args": []
+      }
+    },
+    {
+      "name": "a comma decimal commits under a comma separator style, rewriting the stored value",
+      "js": "AFNumber_Keystroke(2, 2, 0, 0, \"\", true);",
+      "value": "1234,5",
+      "ok": true,
+      "stored": "1234.5",
+      "problem": null
+    },
+    {
+      "name": "letters are rejected",
+      "js": "AFNumber_Keystroke(2, 0, 0, 0, \"\", true);",
+      "value": "twelve",
+      "ok": false,
+      "stored": "twelve",
+      "problem": {
+        "kind": "number",
+        "args": []
+      }
+    },
+    {
+      "name": "an empty value commits",
+      "js": "AFNumber_Keystroke(2, 0, 0, 0, \"\", true);",
+      "value": "",
+      "ok": true,
+      "stored": "",
+      "problem": null
+    },
+    {
+      "name": "percent keystroke delegates to the number one",
+      "js": "AFPercent_Keystroke(1, 0);",
+      "value": "0.5",
+      "ok": true,
+      "stored": "0.5",
+      "problem": null
+    },
+    {
+      "name": "a date matching the mask commits",
+      "js": "AFDate_KeystrokeEx(\"mm/dd/yy\");",
+      "value": "03/14/26",
+      "ok": true,
+      "stored": "03/14/26",
+      "problem": null
+    },
+    {
+      "name": "a date the mask cannot parse is rejected",
+      "js": "AFDate_KeystrokeEx(\"mm/dd/yy\");",
+      "value": "the ides",
+      "ok": false,
+      "stored": "the ides",
+      "problem": {
+        "kind": "date",
+        "args": [
+          "mm/dd/yy"
+        ]
+      }
+    },
+    {
+      "name": "a time matching the mask commits",
+      "js": "AFTime_Keystroke(0);",
+      "value": "15:04",
+      "ok": true,
+      "stored": "15:04",
+      "problem": null
+    },
+    {
+      "name": "a five-digit zip commits",
+      "js": "AFSpecial_Keystroke(0);",
+      "value": "90210",
+      "ok": true,
+      "stored": "90210",
+      "problem": null
+    },
+    {
+      "name": "a four-digit zip is rejected",
+      "js": "AFSpecial_Keystroke(0);",
+      "value": "9021",
+      "ok": false,
+      "stored": "9021",
+      "problem": {
+        "kind": "mask",
+        "args": [
+          "99999"
+        ]
+      }
+    },
+    {
+      "name": "a punctuated phone commits",
+      "js": "AFSpecial_Keystroke(2);",
+      "value": "(555) 123-4567",
+      "ok": true,
+      "stored": "(555) 123-4567",
+      "problem": null
+    },
+    {
+      "name": "a bare ten-digit phone commits",
+      "js": "AFSpecial_Keystroke(2);",
+      "value": "5551234567",
+      "ok": true,
+      "stored": "5551234567",
+      "problem": null
+    },
+    {
+      "name": "a seven-digit phone commits",
+      "js": "AFSpecial_Keystroke(2);",
+      "value": "123-4567",
+      "ok": true,
+      "stored": "123-4567",
+      "problem": null
+    },
+    {
+      "name": "a social security number commits",
+      "js": "AFSpecial_Keystroke(3);",
+      "value": "123-45-9999",
+      "ok": true,
+      "stored": "123-45-9999",
+      "problem": null
+    },
+    {
+      "name": "an arbitrary mask over 9 A O and a literal",
+      "js": "AFSpecial_KeystrokeEx(\"AA-9999-O\");",
+      "value": "XY-1234-7",
+      "ok": true,
+      "stored": "XY-1234-7",
+      "problem": null
+    },
+    {
+      "name": "the same mask rejects a digit where it wants a letter",
+      "js": "AFSpecial_KeystrokeEx(\"AA-9999-O\");",
+      "value": "1Y-1234-7",
+      "ok": false,
+      "stored": "1Y-1234-7",
+      "problem": {
+        "kind": "mask",
+        "args": [
+          "AA-9999-O"
+        ]
+      }
+    },
+    {
+      "name": "an X in a mask accepts anything",
+      "js": "AFSpecial_KeystrokeEx(\"XXX\");",
+      "value": "a1!",
+      "ok": true,
+      "stored": "a1!",
+      "problem": null
+    },
+    {
+      "name": "a value shorter than the mask is rejected",
+      "js": "AFSpecial_KeystrokeEx(\"AA-9999-O\");",
+      "value": "XY-1234",
+      "ok": false,
+      "stored": "XY-1234",
+      "problem": {
+        "kind": "mask",
+        "args": [
+          "AA-9999-O"
+        ]
+      }
+    }
+  ],
+  "validate": [
+    {
+      "name": "inside both bounds",
+      "js": "AFRange_Validate(true, 0, true, 100);",
+      "value": "50",
+      "ok": true,
+      "problem": null
+    },
+    {
+      "name": "above the upper bound",
+      "js": "AFRange_Validate(true, 0, true, 100);",
+      "value": "150",
+      "ok": false,
+      "problem": {
+        "kind": "range",
+        "args": [
+          "0",
+          "100"
+        ]
+      }
+    },
+    {
+      "name": "below the lower bound",
+      "js": "AFRange_Validate(true, 0, true, 100);",
+      "value": "-1",
+      "ok": false,
+      "problem": {
+        "kind": "range",
+        "args": [
+          "0",
+          "100"
+        ]
+      }
+    },
+    {
+      "name": "a lower bound alone",
+      "js": "AFRange_Validate(true, 10, false, 0);",
+      "value": "5",
+      "ok": false,
+      "problem": {
+        "kind": "min",
+        "args": [
+          "10"
+        ]
+      }
+    },
+    {
+      "name": "an upper bound alone",
+      "js": "AFRange_Validate(false, 0, true, 10);",
+      "value": "50",
+      "ok": false,
+      "problem": {
+        "kind": "max",
+        "args": [
+          "10"
+        ]
+      }
+    },
+    {
+      "name": "neither bound passes everything",
+      "js": "AFRange_Validate(false, 0, false, 0);",
+      "value": "99999",
+      "ok": false,
+      "problem": {
+        "kind": "max",
+        "args": [
+          "0"
+        ]
+      }
+    },
+    {
+      "name": "an empty value passes, because required-ness is a separate flag",
+      "js": "AFRange_Validate(true, 0, true, 100);",
+      "value": "",
+      "ok": true,
+      "problem": null
+    },
+    {
+      "name": "a non-numeric value passes",
+      "js": "AFRange_Validate(true, 0, true, 100);",
+      "value": "n/a",
+      "ok": true,
+      "problem": null
+    },
+    {
+      "name": "the bound is compared inclusively",
+      "js": "AFRange_Validate(true, 0, true, 100);",
+      "value": "100",
+      "ok": true,
+      "problem": null
+    }
+  ],
+  "evaluate": [
+    {
+      "name": "sum of three line items",
+      "fields": {
+        "Item.1": "10",
+        "Item.2": "20",
+        "Item.3": "12.5"
+      },
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Item.3",
+        "Total"
+      ],
+      "scripts": {
+        "Total": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item.1,Item.2,Item.3\");"
+        }
+      },
+      "co": [
+        "Total"
+      ],
+      "expect": {
+        "Total": "42.5"
+      },
+      "shown": {
+        "Total": "42.5"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "a name the document does not have is skipped, not an error",
+      "fields": {
+        "Item.1": "10"
+      },
+      "terminals": [
+        "Item.1",
+        "Total"
+      ],
+      "scripts": {
+        "Total": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item.1,Nowhere\");"
+        }
+      },
+      "co": [
+        "Total"
+      ],
+      "expect": {
+        "Total": "10"
+      },
+      "shown": {
+        "Total": "10"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "a non-numeric child contributes zero rather than being skipped",
+      "fields": {
+        "Item.1": "10",
+        "Item.2": "n/a"
+      },
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Total"
+      ],
+      "scripts": {
+        "Total": {
+          "C": "AFSimple_Calculate(\"AVG\", \"Item.1,Item.2\");"
+        }
+      },
+      "co": [
+        "Total"
+      ],
+      "expect": {
+        "Total": "5"
+      },
+      "shown": {
+        "Total": "5"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "no contributing values at all computes zero, not empty",
+      "fields": {},
+      "terminals": [
+        "Total"
+      ],
+      "scripts": {
+        "Total": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Nowhere\");"
+        }
+      },
+      "co": [
+        "Total"
+      ],
+      "expect": {
+        "Total": "0"
+      },
+      "shown": {
+        "Total": "0"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "a parent field contributes every one of its children",
+      "fields": {
+        "Item.1": "1",
+        "Item.2": "2",
+        "Item.3": "4"
+      },
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Item.3",
+        "Total"
+      ],
+      "scripts": {
+        "Total": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item\");"
+        }
+      },
+      "co": [
+        "Total"
+      ],
+      "expect": {
+        "Total": "7"
+      },
+      "shown": {
+        "Total": "7"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "the product of two fields",
+      "fields": {
+        "Price": "19.99",
+        "Qty": "3"
+      },
+      "terminals": [
+        "Price",
+        "Qty",
+        "Line"
+      ],
+      "scripts": {
+        "Line": {
+          "C": "AFSimple_Calculate(\"PRD\", new Array(\"Price\",\"Qty\"));"
+        }
+      },
+      "co": [
+        "Line"
+      ],
+      "expect": {
+        "Line": "59.97"
+      },
+      "shown": {
+        "Line": "59.97"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "the smallest of three",
+      "fields": {
+        "A": "5",
+        "B": "-2",
+        "C": "9"
+      },
+      "terminals": [
+        "A",
+        "B",
+        "C",
+        "Least"
+      ],
+      "scripts": {
+        "Least": {
+          "C": "AFSimple_Calculate(\"MIN\", \"A,B,C\");"
+        }
+      },
+      "co": [
+        "Least"
+      ],
+      "expect": {
+        "Least": "-2"
+      },
+      "shown": {
+        "Least": "-2"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "the largest of three",
+      "fields": {
+        "A": "5",
+        "B": "-2",
+        "C": "9"
+      },
+      "terminals": [
+        "A",
+        "B",
+        "C",
+        "Most"
+      ],
+      "scripts": {
+        "Most": {
+          "C": "AFSimple_Calculate(\"MAX\", \"A,B,C\");"
+        }
+      },
+      "co": [
+        "Most"
+      ],
+      "expect": {
+        "Most": "9"
+      },
+      "shown": {
+        "Most": "9"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "the result is rounded to six decimals",
+      "fields": {
+        "A": "1",
+        "B": "3",
+        "C": "0"
+      },
+      "terminals": [
+        "A",
+        "B",
+        "C",
+        "Avg"
+      ],
+      "scripts": {
+        "Avg": {
+          "C": "AFSimple_Calculate(\"AVG\", \"A,B,C\");"
+        }
+      },
+      "co": [
+        "Avg"
+      ],
+      "expect": {
+        "Avg": "1.333333"
+      },
+      "shown": {
+        "Avg": "1.333333"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "an exactly-rounded sum of values a naive accumulator would drift on",
+      "fields": {
+        "A": "0.1",
+        "B": "0.2",
+        "C": "0.3",
+        "D": "0.4"
+      },
+      "terminals": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "Total"
+      ],
+      "scripts": {
+        "Total": {
+          "C": "AFSimple_Calculate(\"SUM\", \"A,B,C,D\");"
+        }
+      },
+      "co": [
+        "Total"
+      ],
+      "expect": {
+        "Total": "1"
+      },
+      "shown": {
+        "Total": "1"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "simplified field notation: precedence without parentheses",
+      "fields": {
+        "Price": "10",
+        "Qty": "3",
+        "Discount": "5"
+      },
+      "terminals": [
+        "Price",
+        "Qty",
+        "Discount",
+        "Line"
+      ],
+      "scripts": {
+        "Line": {
+          "C": "event.value = Price * Qty - Discount;"
+        }
+      },
+      "co": [
+        "Line"
+      ],
+      "expect": {
+        "Line": "25"
+      },
+      "shown": {
+        "Line": "25"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "simplified field notation: parentheses override precedence",
+      "fields": {
+        "Price": "10",
+        "Qty": "3",
+        "Discount": "5"
+      },
+      "terminals": [
+        "Price",
+        "Qty",
+        "Discount",
+        "Line"
+      ],
+      "scripts": {
+        "Line": {
+          "C": "event.value = Price * (Qty - Discount);"
+        }
+      },
+      "co": [
+        "Line"
+      ],
+      "expect": {
+        "Line": "-20"
+      },
+      "shown": {
+        "Line": "-20"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "simplified field notation: unary minus",
+      "fields": {
+        "Base": "10",
+        "Adjustment": "3"
+      },
+      "terminals": [
+        "Base",
+        "Adjustment",
+        "Net"
+      ],
+      "scripts": {
+        "Net": {
+          "C": "event.value = -Adjustment + Base;"
+        }
+      },
+      "co": [
+        "Net"
+      ],
+      "expect": {
+        "Net": "7"
+      },
+      "shown": {
+        "Net": "7"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "simplified field notation: a quoted name carrying a space",
+      "fields": {
+        "Line Total": "50"
+      },
+      "terminals": [
+        "Line Total",
+        "Half"
+      ],
+      "scripts": {
+        "Half": {
+          "C": "event.value = \"Line Total\" / 2;"
+        }
+      },
+      "co": [
+        "Half"
+      ],
+      "expect": {
+        "Half": "25"
+      },
+      "shown": {
+        "Half": "25"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "simplified field notation: a missing name contributes zero, never a skip",
+      "fields": {
+        "A": "10"
+      },
+      "terminals": [
+        "A",
+        "Net"
+      ],
+      "scripts": {
+        "Net": {
+          "C": "event.value = A - B;"
+        }
+      },
+      "co": [
+        "Net"
+      ],
+      "expect": {
+        "Net": "10"
+      },
+      "shown": {
+        "Net": "10"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "simplified field notation: division by zero is empty, not a refusal",
+      "fields": {
+        "A": "10",
+        "B": "0"
+      },
+      "terminals": [
+        "A",
+        "B",
+        "Ratio"
+      ],
+      "scripts": {
+        "Ratio": {
+          "C": "event.value = A / B;",
+          "F": "AFNumber_Format(2, 0, 0, 0, \"\", true);"
+        }
+      },
+      "co": [
+        "Ratio"
+      ],
+      "expect": {
+        "Ratio": "Infinity"
+      },
+      "shown": {
+        "Ratio": ""
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "a chain calculates in the order the document declares",
+      "fields": {
+        "Item.1": "10",
+        "Item.2": "20",
+        "Item.3": "5",
+        "Rate": "0.1"
+      },
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Item.3",
+        "Rate",
+        "Sub",
+        "Tax",
+        "Total"
+      ],
+      "scripts": {
+        "Sub": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item.1,Item.2,Item.3\");"
+        },
+        "Tax": {
+          "C": "event.value = Sub * Rate;"
+        },
+        "Total": {
+          "C": "event.value = Sub + Tax;"
+        }
+      },
+      "co": [
+        "Sub",
+        "Tax",
+        "Total"
+      ],
+      "expect": {
+        "Sub": "35",
+        "Tax": "3.5",
+        "Total": "38.5"
+      },
+      "shown": {
+        "Sub": "35",
+        "Tax": "3.5",
+        "Total": "38.5"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "one pass, never a fixpoint: a misordered order computes the stale value",
+      "fields": {
+        "Item.1": "10",
+        "Item.2": "20",
+        "Item.3": "5",
+        "Rate": "0.1"
+      },
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Item.3",
+        "Rate",
+        "Sub",
+        "Tax",
+        "Total"
+      ],
+      "scripts": {
+        "Sub": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item.1,Item.2,Item.3\");"
+        },
+        "Tax": {
+          "C": "event.value = Sub * Rate;"
+        },
+        "Total": {
+          "C": "event.value = Sub + Tax;"
+        }
+      },
+      "co": [
+        "Total",
+        "Tax",
+        "Sub"
+      ],
+      "expect": {
+        "Total": "0",
+        "Tax": "0",
+        "Sub": "35"
+      },
+      "shown": {
+        "Total": "0",
+        "Tax": "0",
+        "Sub": "35"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "a loop in the declared order terminates: one pass, no iteration",
+      "fields": {
+        "A": "1",
+        "B": "2"
+      },
+      "terminals": [
+        "A",
+        "B"
+      ],
+      "scripts": {
+        "A": {
+          "C": "event.value = B + 1;"
+        },
+        "B": {
+          "C": "event.value = A + 1;"
+        }
+      },
+      "co": [
+        "A",
+        "B"
+      ],
+      "expect": {
+        "A": "3",
+        "B": "4"
+      },
+      "shown": {
+        "A": "3",
+        "B": "4"
+      },
+      "unrecognized": []
+    },
+    {
+      "name": "calculations present but no declared order: nothing runs",
+      "fields": {
+        "Item.1": "10",
+        "Item.2": "20",
+        "Item.3": "5"
+      },
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Item.3",
+        "Total"
+      ],
+      "scripts": {
+        "Total": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item.1,Item.2,Item.3\");"
+        }
+      },
+      "co": [],
+      "expect": {},
+      "shown": {},
+      "unrecognized": []
+    },
+    {
+      "name": "a field carrying a script this app does not run leaves its neighbours computing",
+      "fields": {
+        "Item.1": "10",
+        "Item.2": "20",
+        "Item.3": "5"
+      },
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Item.3",
+        "Total",
+        "Custom"
+      ],
+      "scripts": {
+        "Total": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item.1,Item.2,Item.3\");"
+        },
+        "Custom": {
+          "C": "this.getField('x').value = 'y';"
+        }
+      },
+      "co": [
+        "Custom",
+        "Total"
+      ],
+      "expect": {
+        "Total": "35"
+      },
+      "shown": {
+        "Total": "35"
+      },
+      "unrecognized": [
+        "Custom"
+      ]
+    },
+    {
+      "name": "an unknown function is a script this app does not run",
+      "fields": {
+        "Item.1": "10"
+      },
+      "terminals": [
+        "Item.1",
+        "Total"
+      ],
+      "scripts": {
+        "Total": {
+          "C": "AFSimple_Calculate(\"MEDIAN\", \"Item.1\");"
+        }
+      },
+      "co": [
+        "Total"
+      ],
+      "expect": {},
+      "shown": {},
+      "unrecognized": [
+        "Total"
+      ]
+    },
+    {
+      "name": "a computed value already equal to the stored one is not a change",
+      "fields": {
+        "Item.1": "10",
+        "Item.2": "20",
+        "Item.3": "12.5",
+        "Total": "42.5"
+      },
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Item.3",
+        "Total"
+      ],
+      "scripts": {
+        "Total": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item.1,Item.2,Item.3\");"
+        }
+      },
+      "co": [
+        "Total"
+      ],
+      "expect": {},
+      "shown": {},
+      "unrecognized": []
+    },
+    {
+      "name": "a right-to-left form computes the same value its separator style renders",
+      "fields": {
+        "البند.1": "10",
+        "البند.2": "20"
+      },
+      "terminals": [
+        "البند.1",
+        "البند.2",
+        "المجموع"
+      ],
+      "scripts": {
+        "المجموع": {
+          "C": "AFSimple_Calculate(\"SUM\", \"البند\");",
+          "F": "AFNumber_Format(2, 0, 0, 0, \"\", true);"
+        }
+      },
+      "co": [
+        "المجموع"
+      ],
+      "expect": {
+        "المجموع": "30"
+      },
+      "shown": {
+        "المجموع": "30.00"
+      },
+      "unrecognized": []
+    }
+  ],
+  "closure": [
+    {
+      "name": "typing a line item reaches the subtotal and everything past it",
+      "typed": [
+        "Item.1"
+      ],
+      "scripts": {
+        "Sub": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item.1,Item.2,Item.3\");"
+        },
+        "Tax": {
+          "C": "event.value = Sub * Rate;"
+        },
+        "Total": {
+          "C": "event.value = Sub + Tax;"
+        }
+      },
+      "co": [
+        "Sub",
+        "Tax",
+        "Total"
+      ],
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Item.3",
+        "Rate",
+        "Sub",
+        "Tax",
+        "Total",
+        "Note"
+      ],
+      "transitive": [
+        "Item.1",
+        "Sub",
+        "Tax",
+        "Total"
+      ]
+    },
+    {
+      "name": "typing a field nothing reads reaches only itself",
+      "typed": [
+        "Note"
+      ],
+      "scripts": {
+        "Sub": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item.1,Item.2,Item.3\");"
+        },
+        "Tax": {
+          "C": "event.value = Sub * Rate;"
+        },
+        "Total": {
+          "C": "event.value = Sub + Tax;"
+        }
+      },
+      "co": [
+        "Sub",
+        "Tax",
+        "Total"
+      ],
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Item.3",
+        "Rate",
+        "Sub",
+        "Tax",
+        "Total",
+        "Note"
+      ],
+      "transitive": [
+        "Note"
+      ]
+    },
+    {
+      "name": "typing the rate reaches the tax and the total but not the subtotal",
+      "typed": [
+        "Rate"
+      ],
+      "scripts": {
+        "Sub": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item.1,Item.2,Item.3\");"
+        },
+        "Tax": {
+          "C": "event.value = Sub * Rate;"
+        },
+        "Total": {
+          "C": "event.value = Sub + Tax;"
+        }
+      },
+      "co": [
+        "Sub",
+        "Tax",
+        "Total"
+      ],
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Item.3",
+        "Rate",
+        "Sub",
+        "Tax",
+        "Total",
+        "Note"
+      ],
+      "transitive": [
+        "Rate",
+        "Tax",
+        "Total"
+      ]
+    },
+    {
+      "name": "a parent's child reaches a calculation naming the parent",
+      "typed": [
+        "Item.2"
+      ],
+      "scripts": {
+        "Total": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item\");"
+        }
+      },
+      "co": [
+        "Total"
+      ],
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Total"
+      ],
+      "transitive": [
+        "Item.2",
+        "Total"
+      ]
+    },
+    {
+      "name": "no declared order means nothing recalculates, so nothing else is reached",
+      "typed": [
+        "Item.1"
+      ],
+      "scripts": {
+        "Sub": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item.1,Item.2,Item.3\");"
+        },
+        "Tax": {
+          "C": "event.value = Sub * Rate;"
+        },
+        "Total": {
+          "C": "event.value = Sub + Tax;"
+        }
+      },
+      "co": [],
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Item.3",
+        "Rate",
+        "Sub",
+        "Tax",
+        "Total",
+        "Note"
+      ],
+      "transitive": [
+        "Item.1"
+      ]
+    },
+    {
+      "name": "a misordered chain still reaches everything downstream of the typed field",
+      "typed": [
+        "Item.1"
+      ],
+      "scripts": {
+        "Sub": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item.1,Item.2,Item.3\");"
+        },
+        "Tax": {
+          "C": "event.value = Sub * Rate;"
+        },
+        "Total": {
+          "C": "event.value = Sub + Tax;"
+        }
+      },
+      "co": [
+        "Total",
+        "Tax",
+        "Sub"
+      ],
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Item.3",
+        "Rate",
+        "Sub",
+        "Tax",
+        "Total",
+        "Note"
+      ],
+      "transitive": [
+        "Item.1",
+        "Sub"
+      ]
+    },
+    {
+      "name": "typing several fields reaches the union",
+      "typed": [
+        "Item.1",
+        "Note"
+      ],
+      "scripts": {
+        "Sub": {
+          "C": "AFSimple_Calculate(\"SUM\", \"Item.1,Item.2,Item.3\");"
+        },
+        "Tax": {
+          "C": "event.value = Sub * Rate;"
+        },
+        "Total": {
+          "C": "event.value = Sub + Tax;"
+        }
+      },
+      "co": [
+        "Sub",
+        "Tax",
+        "Total"
+      ],
+      "terminals": [
+        "Item.1",
+        "Item.2",
+        "Item.3",
+        "Rate",
+        "Sub",
+        "Tax",
+        "Total",
+        "Note"
+      ],
+      "transitive": [
+        "Item.1",
+        "Note",
+        "Sub",
+        "Tax",
+        "Total"
+      ]
+    }
+  ],
+  "round_trip": [
+    "AFNumber_Format(2, 0, 0, 0, \"\", true);",
+    "AFNumber_Keystroke(2, 0, 0, 0, \"\", true);",
+    "AFPercent_Format(1, 0);",
+    "AFPercent_Keystroke(1, 0);",
+    "AFDate_FormatEx(\"mm/dd/yy\");",
+    "AFDate_KeystrokeEx(\"mm/dd/yy\");",
+    "AFTime_FormatEx(\"HH:MM\");",
+    "AFTime_KeystrokeEx(\"HH:MM\");",
+    "AFSpecial_Format(3);",
+    "AFSpecial_Keystroke(3);",
+    "AFSpecial_KeystrokeEx(\"AA-9999-O\");",
+    "AFRange_Validate(true, 0, true, 100);",
+    "AFSimple_Calculate(\"SUM\", new Array(\"Item.1\",\"Item.2\",\"Item.3\"));",
+    "event.value = Subtotal + Tax;"
+  ]
+}

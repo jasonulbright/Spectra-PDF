@@ -160,7 +160,7 @@ _PERMITTED_CLASSES: dict = {
 EDIT_CLASSES = ("form-fill", "annotate", "structural")
 
 
-def _lock_refusal(policy: dict, edit_class: str, fields) -> dict | None:
+def _lock_refusal(policy: dict, edit_class: str, fields, typed=None) -> dict | None:
     """The field-lock verdict for a form fill, or None when no lock bites.
 
     A locked field's update is rejected by the difference analysis whether or
@@ -183,10 +183,17 @@ def _lock_refusal(policy: dict, edit_class: str, fields) -> dict | None:
     hit = locked_fields(locks, list(fields))
     if not hit:
         return None
+    # Indirect only when NOTHING the caller named is itself locked: a fill that
+    # also names a locked field is refused for that, and naming the calculation
+    # as the cause would misdescribe it.
+    named = list(typed) if typed is not None else []
+    if named and not any(name in named for name in hit):
+        return {"kind": "refuse", "reason": "fields-locked", "fields": hit,
+                "indirect": True, "typed": named}
     return {"kind": "refuse", "reason": "fields-locked", "fields": hit}
 
 
-def signed_edit_decision(policy: dict, edit_class: str, fields=None) -> dict:
+def signed_edit_decision(policy: dict, edit_class: str, fields=None, typed=None) -> dict:
     """Whether an edit of this class may proceed against this document's policy.
 
     ``{"kind": "proceed"}`` or ``{"kind": "refuse"|"warn", "reason": <enum>}``.
@@ -195,7 +202,11 @@ def signed_edit_decision(policy: dict, edit_class: str, fields=None) -> dict:
     field names it stopped.
 
     ``fields`` names what a form fill targets, or None when the caller cannot
-    name them.
+    name them. With a calculating form that is the TRANSITIVE set — everything
+    typed plus everything the document's ``/CO`` recomputes as a result —
+    because filling an unlocked line item that changes a locked Total produces
+    a file that reports as altered. ``typed`` names the caller's own half of
+    that set, so a refusal caused only by the calculation can say so.
 
     A no-changes certification REFUSES rather than warns: the author's policy
     forbids every change, the signing machinery will not counter-sign such a
@@ -215,7 +226,7 @@ def signed_edit_decision(policy: dict, edit_class: str, fields=None) -> dict:
         return {"kind": "proceed"}
     if certified and level == "none":
         return {"kind": "refuse", "reason": "certified-no-changes"}
-    locked = _lock_refusal(policy, edit_class, fields)
+    locked = _lock_refusal(policy, edit_class, fields, typed)
     if locked is not None:
         return locked
     if not certified:

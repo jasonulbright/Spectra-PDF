@@ -415,12 +415,12 @@ def _make_calc_form(path: str, *, names=("rate", "total"), with_xfa=False,
 
 def _co_names(pdf) -> list:
     """FQ names of the /CO entries, climbing /Parent."""
-    from engine.acroform import _fq_name
+    from engine.acroform import fq_field_name
     acro = pdf.Root.get("/AcroForm")
     co = acro.get("/CO") if acro is not None else None
     if co is None:
         return []
-    return [_fq_name(e) for e in co]
+    return [fq_field_name(e) for e in co]
 
 
 class TestDocFormExtras:

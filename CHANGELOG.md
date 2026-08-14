@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.30
+
+*Unreleased*
+
+### Form fields that calculate
+- A form whose fields carry calculations now calculates them: fill a line item and the Total appears.
+- The Total updates on the page as you type, before anything is saved.
+- A field with a display format shows the formatted value — thousands separators, currency, percentages, dates — while the file still stores the plain value a spreadsheet or another program can read.
+- A value outside the range a field declares is refused by name, with the range it had to be inside.
+- A field whose value the form computes is marked as calculated and cannot be typed into, but is still filled in for you even when the form locks it against typing.
+- A form that carries a calculation but never says in what order to run them reports that, rather than quietly leaving the totals empty.
+- A field carrying a script this app does not run is reported by name, its own contents are left exactly as they were, and every other field on the form still calculates. No script embedded in a document is ever executed.
+- Filling a field that recalculates one a signature locks now says so, naming what you typed and what it would have changed — before it changes anything.
+- The command line's `forms --set` calculates the same way.
+
 ## 1.0.29
 
 *Released 2026-08-10*

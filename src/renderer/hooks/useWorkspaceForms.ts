@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { readFormFields } from '../lib/forms';
 import type { FormField } from '../lib/forms';
 import type { EngineCall } from '../lib/engine-call';
-import { projectFieldWidgets } from '../lib/form-overlay';
-import type { OverlayWidget, PageBox } from '../lib/form-overlay';
+import { formCalculation, projectFieldWidgets } from '../lib/form-overlay';
+import type { FormCalculation, OverlayWidget, PageBox } from '../lib/form-overlay';
 import { requestDocumentProxy } from '../lib/pdfDocCache';
 import type { OpenFile, PdfBuffer } from '../state/types';
 
@@ -12,6 +12,11 @@ export interface FileFormInfo {
   // sourcePageIndex -> widgets, display-normalized at the page's BAKED
   // orientation (PageCell projects by the in-memory rotation at render).
   widgetsByPage: ReadonlyMap<number, OverlayWidget[]>;
+  // The file's recognized field scripts and declared calculation order,
+  // resolved once per read: the overlay recomputes dependents from this as
+  // the user types, and the fill asks it which fields a signature's lock has
+  // to be consulted about.
+  calculation: FormCalculation;
 }
 
 interface CacheEntry {
@@ -79,7 +84,7 @@ export function useWorkspaceForms(
               // from `buffer`'s proxy below. `read_form_fields` is INTERNAL, so
               // this never runs the commit gate (a passive overlay read must
               // not flush pending page edits).
-              const { fields } = await readFormFields(call, f.workingPath);
+              const { fields, calculationOrder } = await readFormFields(call, f.workingPath);
               const pageIndexes = new Set<number>();
               for (const field of fields) {
                 for (const w of field.widgets) pageIndexes.add(w.pageIndex);
@@ -122,7 +127,7 @@ export function useWorkspaceForms(
                   else widgetsByPage.set(pi, arr);
                 }
               }
-              info = { fields, widgetsByPage };
+              info = { fields, widgetsByPage, calculation: formCalculation(fields, calculationOrder) };
               failsRef.current.delete(path);
             } catch {
               // A failed re-read keeps the PREVIOUS good read published

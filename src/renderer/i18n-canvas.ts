@@ -336,6 +336,7 @@ export const CANVAS_STRINGS = {
   'canvas.widget.signed': '{{field}} — already signed',
   'canvas.widget.readonlySig': '{{field}} — read-only signature field',
   'canvas.widget.readonly': '{{field}} — read-only',
+  'canvas.widget.calculated': '{{field}} — calculated by the form',
   'canvas.widget.radio': '{{field}}: {{option}}',
   'canvas.widget.radioUnmapped': '(unmapped option)',
   'canvas.widget.button': '{{field}} — {{action}}',
