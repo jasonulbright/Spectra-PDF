@@ -19,7 +19,7 @@ the renderer speaks (``src/renderer/lib/field-actions.ts``)::
     {"kind": "import", "file": str}
     {"kind": "named",  "name": str}
     {"kind": "javascript"}
-    {"kind": "remote", "file": str, "page": int | None}
+    {"kind": "remote", "file": str}
     {"kind": "other",  "action": str}
 
 ``javascript``, ``remote`` and ``other`` are REPORTED and never run: the first
@@ -241,11 +241,9 @@ def classify(pdf: pikepdf.Pdf, node) -> dict | None:
     if subtype == "/GoTo":
         return {"kind": "goto", "page": destination_page(pdf, node.get("/D"))}
     if subtype in ("/GoToR", "/GoToE"):
-        return {
-            "kind": "remote",
-            "file": _file_spec(node.get("/F")),
-            "page": None,
-        }
+        # No page: the destination lives in the OTHER document, which this
+        # reader does not open, so there is nothing here that could resolve it.
+        return {"kind": "remote", "file": _file_spec(node.get("/F"))}
     if subtype == "/URI":
         return {"kind": "uri", "uri": _text(node.get("/URI"))}
     if subtype == "/ResetForm":
@@ -315,20 +313,20 @@ def read_actions(pdf: pikepdf.Pdf, node) -> dict:
     one that belongs to no widget.
     """
     out: dict = {}
-    nodes = [node]
+    sources = [node]
     for widget in widget_nodes(node):
         if widget is not node:
-            nodes.append(widget)
-    for node in nodes:
+            sources.append(widget)
+    for source in sources:
         try:
-            activation = node.get("/A")
+            activation = source.get("/A")
         except AttributeError:
             continue
         if "A" not in out:
             classified = classify(pdf, activation)
             if classified is not None:
                 out["A"] = classified
-        aa = node.get("/AA")
+        aa = source.get("/AA")
         if not isinstance(aa, Dictionary):
             continue
         for trigger in TRIGGERS:

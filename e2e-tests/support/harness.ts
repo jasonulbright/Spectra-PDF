@@ -1134,6 +1134,67 @@ export async function canvasFormScriptsNotRun(path: string): Promise<string[]> {
   }, path);
 }
 
+/** The DATA actions a field carries, by trigger — what the reader classified
+ * out of the document. */
+export async function canvasFormDataActions(
+  path: string,
+  fieldName: string,
+): Promise<Record<string, { kind: string } & Record<string, unknown>> | null> {
+  return browser.executeAsync<Record<string, never> | null, [string, string]>(
+    function (p, name, done) {
+      (window as any).__SPECTRA_TEST__.canvasFormDataActions(p, name)
+        .then((v: unknown) => done(v as any))
+        .catch(() => done(null));
+    },
+    path,
+    fieldName,
+  ) as Promise<Record<string, { kind: string } & Record<string, unknown>> | null>;
+}
+
+/** Fire one of them through the same handler the widget's gesture calls. */
+export async function fireCanvasFormAction(
+  path: string,
+  fieldName: string,
+  trigger: string,
+): Promise<boolean> {
+  const result = await browser.executeAsync<string | boolean, [string, string, string]>(
+    function (p, name, t, done) {
+      (window as any).__SPECTRA_TEST__.canvasFireFormAction(p, name, t)
+        .then((ok: boolean) => done(ok))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    path,
+    fieldName,
+    trigger,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`fireCanvasFormAction failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}
+
+/** Author a field's DATA actions through the properties editor's own door. */
+export async function setFieldDataActions(
+  path: string,
+  fieldName: string,
+  actions: Record<string, unknown>[],
+): Promise<boolean> {
+  const result = await browser.executeAsync<string | boolean, [string, string, Record<string, unknown>[]]>(
+    function (p, name, a, done) {
+      (window as any).__SPECTRA_TEST__.setFieldDataActions(p, name, a)
+        .then((ok: boolean) => done(ok))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    path,
+    fieldName,
+    actions,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`setFieldDataActions failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}
+
 export async function formWidgetCount(path: string): Promise<number> {
   return browser.execute(function (p) {
     return (window as any).__SPECTRA_TEST__.formWidgetCount(p);
