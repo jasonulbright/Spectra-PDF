@@ -104,6 +104,14 @@ export const dialog = {
    * extension). Null if cancelled. */
   saveImageFile: (defaultName?: string) =>
     invoke<string | null>('save_image_file_dialog', { defaultName }),
+  /** Pick a form-DATA file (FDF/XFDF) to import into the open form. Null if
+   * cancelled. An `/ImportData` action names a file of its own; this app asks
+   * the user instead, so a document can never make it open a path nobody
+   * chose. */
+  pickFormDataFile: () => invoke<string | null>('pick_form_data_file'),
+  /** Where a built form submission is written. Null if cancelled. */
+  saveFormDataFile: (defaultName?: string) =>
+    invoke<string | null>('save_form_data_file', { defaultName }),
 };
 
 // ── Image clipboard ───────────────────────────────────────────────────────

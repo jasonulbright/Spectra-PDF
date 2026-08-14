@@ -141,6 +141,8 @@ pub fn run() {
             commands::read_file_binary,
             commands::pick_image_file,
             commands::save_image_file_dialog,
+            commands::pick_form_data_file,
+            commands::save_form_data_file,
 
             commands::read_file_buffer,
             commands::create_working_copy,

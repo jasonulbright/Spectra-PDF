@@ -173,15 +173,32 @@ def test_the_edit_door_sets_a_format_on_a_field_created_without_one(tmp_path):
     assert _scripts(out, "Item1") == result["scripts"]
 
 
-def test_the_edit_door_is_total_so_an_omitted_action_is_removed(tmp_path):
+def test_the_edit_door_is_total_over_what_it_is_addressed_about(tmp_path):
+    """The door is total over the members the call ADDRESSES and inert about
+    the rest.
+
+    `clear` was always how a caller distinguished "leave the default value
+    alone" from "there is none" — the wire cannot tell an omitted member from
+    an unmentioned one — and every member reads it the same way. So a caller
+    that addresses `calculate` and supplies none REMOVES it (and drops the
+    field from `/CO` with it), while a caller that never mentions it keeps
+    what the document has. Without that, editing a button's action would
+    silently destroy a calculation nobody named.
+    """
     doc = _invoice(tmp_path)
-    out = str(tmp_path / "stripped.pdf")
-    # Total carries a format AND a calculation; setting only the format must
-    # leave no calculation behind, and must drop it from /CO with it.
-    set_field_actions(doc, out, "Total", format=MONEY)
-    assert set(_scripts(out, "Total")) == {"F", "K"}
-    with pikepdf.open(out) as pdf:
+    stripped = str(tmp_path / "stripped.pdf")
+    set_field_actions(
+        doc, stripped, "Total", format=MONEY, clear=["validate", "calculate"]
+    )
+    assert set(_scripts(stripped, "Total")) == {"F", "K"}
+    with pikepdf.open(stripped) as pdf:
         assert calculation_order_names(pdf) == []
+
+    kept = str(tmp_path / "kept.pdf")
+    set_field_actions(doc, kept, "Total", format=MONEY)
+    assert set(_scripts(kept, "Total")) == {"F", "K", "C"}
+    with pikepdf.open(kept) as pdf:
+        assert calculation_order_names(pdf) == ["Total"]
 
 
 def test_the_edit_door_leaves_a_trigger_it_does_not_author_untouched(tmp_path):

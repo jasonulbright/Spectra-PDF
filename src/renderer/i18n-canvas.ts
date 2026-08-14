@@ -340,11 +340,10 @@ export const CANVAS_STRINGS = {
   'canvas.widget.radio': '{{field}}: {{option}}',
   'canvas.widget.radioUnmapped': '(unmapped option)',
   'canvas.widget.button': '{{field}} — {{action}}',
-  'canvas.widget.action.reset': 'resets form fields',
+  // A button's own label is the kind it carries, named from the ONE table the
+  // properties editor names it from (`ACTION_KIND_LABEL`) — a link keeps its
+  // address, which is the only part of an action a hover needs to show.
   'canvas.widget.action.uri': 'links to {{uri}}',
-  // The action KIND is the PDF's own /A classification, verbatim inside the
-  // localized frame (the slice-D boundary).
-  'canvas.widget.action.other': '{{kind}} action',
   'canvas.widget.action.none': 'no action',
   'canvas.widget.badge.signHere': 'SIGN HERE',
   'canvas.widget.badge.signed': 'SIGNED',

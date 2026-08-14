@@ -1451,5 +1451,525 @@
         "a range needs a smallest value, a largest value, or both"
       ]
     }
+  ],
+  "data_action_note": "The /AA and /A action kinds that carry no code. Each row's `authored` list is written by set_field_actions into a real document and `read` is what read_form_fields classifies back out of it, so the pair records what the writer and the reader actually agree on rather than what either intends. The renderer half additionally requires the properties-editor inverse: narrowing `read`, taking the authorable actions and re-serializing them reproduces `authored` exactly, so a field opened and applied unchanged rewrites what it already had. MEASURED by f23c-corpus-build.local.py.",
+  "data_action_cases": [
+    {
+      "name": "a button that goes to a page",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "goto",
+          "page": 1
+        }
+      ],
+      "read": {
+        "A": {
+          "kind": "goto",
+          "page": 1
+        }
+      }
+    },
+    {
+      "name": "a button that opens a link",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "uri",
+          "uri": "https://example.invalid/help"
+        }
+      ],
+      "read": {
+        "A": {
+          "kind": "uri",
+          "uri": "https://example.invalid/help"
+        }
+      }
+    },
+    {
+      "name": "a button that resets the whole form",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "reset",
+          "fields": [],
+          "exclude": false
+        }
+      ],
+      "read": {
+        "A": {
+          "kind": "reset",
+          "fields": null,
+          "exclude": false
+        }
+      }
+    },
+    {
+      "name": "a button that resets only the fields it names",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "reset",
+          "fields": [
+            "Item1"
+          ],
+          "exclude": false
+        }
+      ],
+      "read": {
+        "A": {
+          "kind": "reset",
+          "fields": [
+            "Item1"
+          ],
+          "exclude": false
+        }
+      }
+    },
+    {
+      "name": "a button that resets everything except the fields it names",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "reset",
+          "fields": [
+            "Item1"
+          ],
+          "exclude": true
+        }
+      ],
+      "read": {
+        "A": {
+          "kind": "reset",
+          "fields": [
+            "Item1"
+          ],
+          "exclude": true
+        }
+      }
+    },
+    {
+      "name": "a button that submits as FDF",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "submit",
+          "url": "https://example.invalid/post",
+          "format": "fdf",
+          "method": "post",
+          "fields": [],
+          "exclude": false,
+          "include_empty": false
+        }
+      ],
+      "read": {
+        "A": {
+          "kind": "submit",
+          "url": "https://example.invalid/post",
+          "format": "fdf",
+          "method": "post",
+          "fields": null,
+          "exclude": false,
+          "include_empty": false
+        }
+      }
+    },
+    {
+      "name": "a button that submits selected fields as XFDF over GET, blanks included",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "submit",
+          "url": "https://example.invalid/post",
+          "format": "xfdf",
+          "method": "get",
+          "fields": [
+            "Item1",
+            "Item2"
+          ],
+          "exclude": false,
+          "include_empty": true
+        }
+      ],
+      "read": {
+        "A": {
+          "kind": "submit",
+          "url": "https://example.invalid/post",
+          "format": "xfdf",
+          "method": "get",
+          "fields": [
+            "Item1",
+            "Item2"
+          ],
+          "exclude": false,
+          "include_empty": true
+        }
+      }
+    },
+    {
+      "name": "a button that submits as HTML",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "submit",
+          "url": "https://example.invalid/post",
+          "format": "html",
+          "method": "post",
+          "fields": [],
+          "exclude": false,
+          "include_empty": false
+        }
+      ],
+      "read": {
+        "A": {
+          "kind": "submit",
+          "url": "https://example.invalid/post",
+          "format": "html",
+          "method": "post",
+          "fields": null,
+          "exclude": false,
+          "include_empty": false
+        }
+      }
+    },
+    {
+      "name": "a button that submits the whole document",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "submit",
+          "url": "https://example.invalid/post",
+          "format": "pdf",
+          "method": "post",
+          "fields": [],
+          "exclude": false,
+          "include_empty": false
+        }
+      ],
+      "read": {
+        "A": {
+          "kind": "submit",
+          "url": "https://example.invalid/post",
+          "format": "pdf",
+          "method": "post",
+          "fields": null,
+          "exclude": false,
+          "include_empty": false
+        }
+      }
+    },
+    {
+      "name": "a button that imports form data",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "import",
+          "file": "data.fdf"
+        }
+      ],
+      "read": {
+        "A": {
+          "kind": "import",
+          "file": "data.fdf"
+        }
+      }
+    },
+    {
+      "name": "a rollover that hides on enter and shows on exit",
+      "authored": [
+        {
+          "trigger": "E",
+          "kind": "hide",
+          "targets": [
+            "Item2"
+          ],
+          "hide": true
+        },
+        {
+          "trigger": "X",
+          "kind": "hide",
+          "targets": [
+            "Item2"
+          ],
+          "hide": false
+        }
+      ],
+      "read": {
+        "E": {
+          "kind": "hide",
+          "targets": [
+            "Item2"
+          ],
+          "hide": true
+        },
+        "X": {
+          "kind": "hide",
+          "targets": [
+            "Item2"
+          ],
+          "hide": false
+        }
+      }
+    },
+    {
+      "name": "every trigger at once",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "goto",
+          "page": 0
+        },
+        {
+          "trigger": "D",
+          "kind": "uri",
+          "uri": "https://example.invalid/d"
+        },
+        {
+          "trigger": "U",
+          "kind": "reset",
+          "fields": [],
+          "exclude": false
+        },
+        {
+          "trigger": "E",
+          "kind": "hide",
+          "targets": [
+            "Item1"
+          ],
+          "hide": true
+        },
+        {
+          "trigger": "X",
+          "kind": "hide",
+          "targets": [
+            "Item1"
+          ],
+          "hide": false
+        },
+        {
+          "trigger": "Fo",
+          "kind": "import",
+          "file": "seed.fdf"
+        },
+        {
+          "trigger": "Bl",
+          "kind": "submit",
+          "url": "https://example.invalid/blur",
+          "format": "fdf",
+          "method": "post",
+          "fields": [],
+          "exclude": false,
+          "include_empty": false
+        }
+      ],
+      "read": {
+        "A": {
+          "kind": "goto",
+          "page": 0
+        },
+        "D": {
+          "kind": "uri",
+          "uri": "https://example.invalid/d"
+        },
+        "U": {
+          "kind": "reset",
+          "fields": null,
+          "exclude": false
+        },
+        "E": {
+          "kind": "hide",
+          "targets": [
+            "Item1"
+          ],
+          "hide": true
+        },
+        "X": {
+          "kind": "hide",
+          "targets": [
+            "Item1"
+          ],
+          "hide": false
+        },
+        "Fo": {
+          "kind": "import",
+          "file": "seed.fdf"
+        },
+        "Bl": {
+          "kind": "submit",
+          "url": "https://example.invalid/blur",
+          "format": "fdf",
+          "method": "post",
+          "fields": null,
+          "exclude": false,
+          "include_empty": false
+        }
+      }
+    },
+    {
+      "name": "no actions at all",
+      "authored": [],
+      "read": {}
+    },
+    {
+      "name": "a go-to naming a page the document does not have refuses",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "goto",
+          "page": 9
+        }
+      ],
+      "refuses": "goto_page_out_of_range",
+      "problems": [
+        "Go: a go-to action names page 10, which is outside this document (2 pages)"
+      ]
+    },
+    {
+      "name": "an action naming a field the document does not have refuses",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "hide",
+          "targets": [
+            "Nope"
+          ],
+          "hide": true
+        }
+      ],
+      "refuses": "unknown_field",
+      "problems": [
+        "Go: an action names \"Nope\", which this document does not have"
+      ]
+    },
+    {
+      "name": "a link with no address refuses",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "uri",
+          "uri": ""
+        }
+      ],
+      "refuses": "no_address",
+      "problems": [
+        "Go: a uri action needs an address"
+      ]
+    },
+    {
+      "name": "a submission with no address refuses",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "submit",
+          "url": "",
+          "format": "fdf",
+          "method": "post",
+          "fields": [],
+          "exclude": false,
+          "include_empty": false
+        }
+      ],
+      "refuses": "no_address",
+      "problems": [
+        "Go: a submit action needs an address"
+      ]
+    },
+    {
+      "name": "a submission in a format this app does not write refuses",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "submit",
+          "url": "https://example.invalid/post",
+          "format": "csv",
+          "method": "post",
+          "fields": [],
+          "exclude": false,
+          "include_empty": false
+        }
+      ],
+      "refuses": "unknown_format",
+      "problems": [
+        "Go: unknown submission format csv"
+      ]
+    },
+    {
+      "name": "a show-or-hide naming nothing refuses",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "hide",
+          "targets": [],
+          "hide": true
+        }
+      ],
+      "refuses": "no_targets",
+      "problems": [
+        "Go: a show-or-hide action needs a field to act on"
+      ]
+    },
+    {
+      "name": "an import naming no file refuses",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "import",
+          "file": ""
+        }
+      ],
+      "refuses": "no_import_file",
+      "problems": [
+        "Go: an import action needs a file to import"
+      ]
+    },
+    {
+      "name": "two actions on one trigger refuse",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "reset",
+          "fields": [],
+          "exclude": false
+        },
+        {
+          "trigger": "A",
+          "kind": "uri",
+          "uri": "https://example.invalid/x"
+        }
+      ],
+      "refuses": "duplicate_trigger",
+      "problems": [
+        "Go: two actions on the same trigger A"
+      ]
+    },
+    {
+      "name": "a trigger this app does not know refuses",
+      "authored": [
+        {
+          "trigger": "PO",
+          "kind": "reset",
+          "fields": [],
+          "exclude": false
+        }
+      ],
+      "refuses": "unknown_trigger",
+      "problems": [
+        "Go: unknown trigger PO"
+      ]
+    },
+    {
+      "name": "an action kind this app does not author refuses",
+      "authored": [
+        {
+          "trigger": "A",
+          "kind": "named",
+          "name": "NextPage"
+        }
+      ],
+      "refuses": "unknown_kind",
+      "problems": [
+        "Go: unknown action named"
+      ]
+    }
   ]
 }

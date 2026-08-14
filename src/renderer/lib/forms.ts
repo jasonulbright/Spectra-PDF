@@ -8,6 +8,7 @@
 // are the shared contract consumed by the FormsPanel, the canvas overlay
 // (form-overlay.ts), and the fill fingerprint machinery.
 import type { EngineCall } from './engine-call';
+import { narrowActions, type ActionTrigger, type WidgetAction } from './field-actions';
 import type { FieldLock } from './signatures';
 
 export type FormFieldType =
@@ -77,19 +78,11 @@ export interface FormField {
   // signature only: the `/Lock` the field itself carries — the seed whoever
   // signs it later is bound by. Null when it carries none.
   lock?: FieldLock | null;
-  // button only: the pushbutton's classified /A action. `reset` runs
-  // for real; `uri` is SHOWN (this app deliberately opens no external
-  // URLs itself); the rest report their kind honestly.
-  action?: ButtonAction;
+  // The DATA actions this field carries, by trigger (`lib/field-actions.ts`):
+  // the `/AA` and `/A` kinds that are not scripts, so all of them can be both
+  // reported and run without a JavaScript engine. Absent when it carries none.
+  fieldActions?: Partial<Record<ActionTrigger, WidgetAction>>;
 }
-
-export type ButtonAction =
-  | { kind: 'uri'; uri: string }
-  | { kind: 'reset'; fields: string[] | null; exclude: boolean }
-  | { kind: 'javascript' }
-  | { kind: 'submit' }
-  | { kind: 'named'; name: string }
-  | { kind: 'other' };
 
 export interface FormReadResult {
   fields: FormField[];
@@ -135,9 +128,9 @@ interface EngineField {
   multiline?: boolean;
   filled?: boolean;
   lock?: { action?: string; fields?: unknown[] } | null;
-  action?: ButtonAction;
   widgets?: EngineWidget[];
   actions?: Record<string, string>;
+  field_actions?: Record<string, unknown>;
   scripts_not_run?: string[];
   calculated?: boolean;
 }
@@ -215,6 +208,7 @@ export function mapEngineField(ef: EngineField): FormField | null {
     });
   }
   const actions = actionsOfEngineField(ef.actions);
+  const fieldActions = narrowActions(ef.field_actions);
   return {
     name: ef.name,
     type,
@@ -224,12 +218,12 @@ export function mapEngineField(ef: EngineField): FormField | null {
     required: Boolean(ef.required),
     ...(ef.multiline !== undefined ? { multiline: Boolean(ef.multiline) } : {}),
     ...(actions ? { actions } : {}),
+    ...(Object.keys(fieldActions).length > 0 ? { fieldActions } : {}),
     ...(ef.scripts_not_run?.length ? { scriptsNotRun: [...ef.scripts_not_run] } : {}),
     ...(ef.calculated ? { calculated: true } : {}),
     editable: EDITABLE_TYPES.has(type) && !readOnly,
     widgets,
     ...(type === 'signature' ? { filled: Boolean(ef.filled), lock: lockOfEngineField(ef.lock) } : {}),
-    ...(type === 'button' && ef.action ? { action: ef.action } : {}),
   };
 }
 
