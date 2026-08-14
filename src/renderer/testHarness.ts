@@ -11,7 +11,11 @@
  */
 import { app, file, engine, scanner as scannerBridge } from './lib/tauri-bridge';
 import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
-import { invokeCommand as invokeRegisteredCommand, getCanvasServices } from './commands/context';
+import {
+  invokeCommand as invokeRegisteredCommand,
+  getCanvasServices,
+  getCommandContext,
+} from './commands/context';
 import { COMMANDS, type CommandId } from './commands/registry';
 import { setAppLanguage } from './i18n';
 import { getTakeoffSettings, setTakeoffSettings } from './lib/takeoff-settings';
@@ -886,6 +890,24 @@ export interface CanvasFormsHandlers {
   shownValueFor: (path: string, fieldName: string) => string | null;
   // Fields carrying a script this app does not run, by name.
   scriptsNotRunFor: (path: string) => string[];
+  // The DATA actions a field carries, by trigger — what the reader classified
+  // out of the document.
+  dataActionsFor: (
+    path: string,
+    fieldName: string,
+  ) => Partial<
+    Record<
+      import('./lib/field-actions').ActionTrigger,
+      import('./lib/field-actions').WidgetAction
+    >
+  > | null;
+  // Fire one of them through the SAME handler the widget's own gesture calls.
+  // False when the field carries nothing on that trigger.
+  fireDataAction: (
+    path: string,
+    fieldName: string,
+    trigger: import('./lib/field-actions').ActionTrigger,
+  ) => Promise<boolean>;
   // Add-field authoring — place on the active file's first page
   // (display-normalized rect), then create through the REAL conversion +
   // whole-file-op flow the card's Create button runs.
@@ -1261,6 +1283,26 @@ export interface TestHarness {
   ) => Promise<string | null>;
   /** Fields of a file carrying a script this app does not run. */
   canvasFormScriptsNotRun: (path: string) => string[];
+  /** The DATA actions a field carries, by trigger. Polls for the async read. */
+  canvasFormDataActions: (
+    path: string,
+    fieldName: string,
+    timeoutMs?: number,
+  ) => Promise<Record<string, unknown> | null>;
+  /** Fire one of them through the same handler the widget's gesture calls. */
+  canvasFireFormAction: (
+    path: string,
+    fieldName: string,
+    trigger: string,
+    timeoutMs?: number,
+  ) => Promise<boolean>;
+  /** Set a field's DATA actions through the app handler the properties editor
+   * uses — the real signed-edit decision and the real whole-file op. */
+  setFieldDataActions: (
+    path: string,
+    fieldName: string,
+    actions: import('./lib/field-actions').AuthoredAction[],
+  ) => Promise<boolean>;
   /** Place a new-field box on the active file's first canvas page,
    * waiting for the canvas + indexer like placeSignature. */
   placeNewField: (
@@ -2145,6 +2187,57 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     canvasFormScriptsNotRun: (path) => canvasForms?.scriptsNotRunFor(path) ?? [],
+    canvasFormDataActions: async (path, fieldName, timeoutMs = 10_000) => {
+      // The read is async (buffer -> readFormFields -> projection), so poll
+      // for it exactly as the value setter does.
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const actions = canvasForms?.dataActionsFor(path, fieldName) ?? null;
+        if (actions && Object.keys(actions).length > 0) {
+          return actions as Record<string, unknown>;
+        }
+        if (Date.now() >= deadline) return actions as Record<string, unknown> | null;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    },
+    canvasFireFormAction: async (path, fieldName, trigger, timeoutMs = 10_000) => {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        try {
+          if (
+            await canvasForms?.fireDataAction(
+              path,
+              fieldName,
+              trigger as import('./lib/field-actions').ActionTrigger,
+            )
+          ) {
+            return true;
+          }
+        } catch (err) {
+          captureError('canvasFireFormAction', err);
+          throw err;
+        }
+        if (Date.now() >= deadline) return false;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    },
+    setFieldDataActions: async (path, fieldName, actions) => {
+      const handlers = getCommandContext()?.app;
+      if (!handlers) {
+        const msg = 'setFieldDataActions: app handlers not registered';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        // Null value-half: this door writes the DATA actions and leaves the
+        // field's format, range and calculation exactly as the document has
+        // them, which is what the properties editor does for a button.
+        return await handlers.setFieldActions(path, fieldName, null, actions);
+      } catch (err) {
+        captureError('setFieldDataActions', err);
+        throw err;
+      }
+    },
     placeNewField: async (rect, timeoutMs = 10_000) => {
       const deadline = Date.now() + timeoutMs;
       let placed = canvasForms?.placeNewFieldOnFirstPage(rect) ?? false;
