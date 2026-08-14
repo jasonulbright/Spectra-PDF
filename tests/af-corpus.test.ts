@@ -3,6 +3,17 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ENTRY_POINTS, recognize, type FieldScript } from '../src/renderer/lib/af-script';
 import {
+  CycleError,
+  EmitError,
+  actionsFromScripts,
+  calculateInputs,
+  calculationOrder,
+  emittedScripts,
+  type FieldCalculate,
+  type FieldFormat,
+  type FieldValidate,
+} from '../src/renderer/lib/af-emit';
+import {
   DATE_FORMATS,
   TIME_FORMATS,
   asStored,
@@ -62,6 +73,29 @@ interface ClosureCase {
   terminals: string[];
   transitive: string[];
 }
+/** The corpus speaks the ENGINE's key spelling; the renderer spec is the same
+ * data under camelCase names, exactly as field-spec-corpus.test.ts converts. */
+interface CorpusEmitSpec {
+  format?: Record<string, unknown>;
+  validate?: FieldValidate;
+  calculate?: FieldCalculate;
+}
+interface EmitCase {
+  name: string;
+  spec: CorpusEmitSpec;
+  scripts?: Record<string, string>;
+  inputs?: string[];
+  refuses?: boolean;
+}
+interface OrderCase {
+  name: string;
+  existing: string[];
+  existing_inputs: Record<string, string[]>;
+  new: [string, string[]][];
+  order?: string[];
+  cycle?: boolean;
+  chain?: string[];
+}
 
 const corpus = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'af-corpus.json'), 'utf8')) as {
   entry_points: string[];
@@ -74,7 +108,31 @@ const corpus = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'af-corpus.js
   evaluate: EvaluateCase[];
   closure: ClosureCase[];
   round_trip: string[];
+  emit: EmitCase[];
+  order: OrderCase[];
 };
+
+function asFormat(raw: Record<string, unknown>): FieldFormat {
+  return {
+    kind: raw.kind,
+    decimals: raw.decimals,
+    sepStyle: raw.sep_style,
+    negStyle: raw.neg_style,
+    currency: raw.currency,
+    currencyPrepend: raw.currency_prepend,
+    prepend: raw.prepend,
+    mask: raw.mask,
+    psf: raw.psf,
+  } as unknown as FieldFormat;
+}
+
+function asEmitSpec(spec: CorpusEmitSpec): Parameters<typeof emittedScripts>[0] {
+  return {
+    ...(spec.format !== undefined ? { format: asFormat(spec.format) } : {}),
+    ...(spec.validate !== undefined ? { validate: spec.validate } : {}),
+    ...(spec.calculate !== undefined ? { calculate: spec.calculate } : {}),
+  };
+}
 
 /** The corpus' `{field: {trigger: js}}` recognized, plus the fields whose
  * script this app does not run. */
@@ -192,6 +250,73 @@ describe('transitive closure', () => {
       expect(closure(testCase.typed, scripts, testCase.co, testCase.terminals)).toEqual(
         testCase.transitive,
       );
+    });
+  }
+});
+
+// ── the authoring half ────────────────────────────────────────────────────
+
+describe('emission', () => {
+  for (const testCase of corpus.emit) {
+    it(testCase.name, () => {
+      const spec = asEmitSpec(testCase.spec);
+      if (testCase.refuses) {
+        expect(() => emittedScripts(spec)).toThrow(EmitError);
+        return;
+      }
+      const scripts = emittedScripts(spec);
+      expect(scripts).toEqual(testCase.scripts);
+      // Every body this app writes is a body this app runs — asserted, not
+      // hoped for. A viewer that executes the stock call gets the same answer
+      // the fill computes.
+      for (const [trigger, js] of Object.entries(scripts)) {
+        expect(recognize(js), `${trigger}: ${js}`).not.toBeNull();
+      }
+      if (testCase.inputs !== undefined) {
+        expect(calculateInputs(testCase.spec.calculate as FieldCalculate)).toEqual(testCase.inputs);
+      }
+      // The reader is the emitter's inverse: a field opened in the properties
+      // editor and applied again unchanged writes the same bytes. An inverse
+      // that lost a member would silently edit an existing form into a
+      // different one.
+      const readBack = actionsFromScripts(scripts, DATE_FORMATS, TIME_FORMATS);
+      expect(emittedScripts(readBack)).toEqual(scripts);
+    });
+  }
+
+  it('covers every format kind and every calculation', () => {
+    const kinds = new Set(
+      corpus.emit.filter((c) => !c.refuses && c.spec.format).map((c) => c.spec.format!.kind),
+    );
+    expect(kinds).toEqual(new Set(['number', 'percent', 'date', 'time', 'special', 'mask']));
+    const ops = new Set(
+      corpus.emit
+        .filter((c) => !c.refuses && c.spec.calculate && 'op' in c.spec.calculate)
+        .map((c) => (c.spec.calculate as { op: string }).op),
+    );
+    expect(ops).toEqual(new Set(['SUM', 'PRD', 'AVG', 'MIN', 'MAX']));
+    expect(corpus.emit.some((c) => c.refuses)).toBe(true);
+  });
+});
+
+describe('calculation order', () => {
+  for (const testCase of corpus.order) {
+    it(testCase.name, () => {
+      const existing = new Map(Object.entries(testCase.existing_inputs));
+      const run = (): string[] =>
+        calculationOrder(testCase.existing, existing, testCase.new);
+      if (testCase.cycle) {
+        expect(run).toThrow(CycleError);
+        let chain: readonly string[] = [];
+        try {
+          run();
+        } catch (err) {
+          chain = err instanceof CycleError ? err.chain : [];
+        }
+        expect(chain).toEqual(testCase.chain);
+        return;
+      }
+      expect(run()).toEqual(testCase.order);
     });
   }
 });

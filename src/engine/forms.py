@@ -35,7 +35,7 @@ import pikepdf
 from pikepdf import Dictionary, Name
 
 from engine import afcalc
-from engine.acroform import fq_field_name
+from engine.acroform import calculation_order_names
 from engine.afscript import recognize
 from engine.document_js import decode_js
 from engine.fieldmdp import lock_of_field_dict
@@ -561,25 +561,11 @@ def _field_scripts(field: _Field) -> tuple[dict, list[str]]:
 def _calculation_order(pdf: pikepdf.Pdf) -> list[str]:
     """`/CO` as fully-qualified names, in the order the document declares.
 
-    Absent or empty means calculations do not run at all: the format puts
-    calculation order here, and inventing one (document order, name order)
-    would compute a number no other viewer computes.
+    One reader for the key that `acroform.py` carries and `form_authoring.py`
+    writes — a second answer to "what order does this document declare" is a
+    second answer to what its Total is.
     """
-    acro = _acroform(pdf)
-    if acro is None:
-        return []
-    co = acro.get("/CO")
-    if co is None:
-        return []
-    out: list[str] = []
-    for entry in co:
-        try:
-            name = fq_field_name(entry)
-        except Exception:
-            name = None
-        if name:
-            out.append(name)
-    return out
+    return calculation_order_names(pdf)
 
 
 def _calc_value(field: _Field, ftype: str) -> str:

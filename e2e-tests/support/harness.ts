@@ -1160,6 +1160,11 @@ export async function createPlacedField(
     type: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'optionlist' | 'signature';
     options?: string[];
     multiline?: boolean;
+    comb?: boolean;
+    maxLength?: number;
+    /** Format / accepted range / calculation — the same object the card's own
+     * control produces, so the spec drives the real authoring path. */
+    actions?: Record<string, unknown>;
     /** The `/Lock` seed, signature fields only — what whoever signs it later
      * is bound by. */
     lock?: { action: 'all' | 'include' | 'exclude' | null; fields: string[] };

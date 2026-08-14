@@ -15,6 +15,22 @@
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRef, PDFString } from 'pdf-lib';
 import type { PdfBuffer } from '../state/types';
 import type { FieldLock, LockAction } from './signatures';
+import {
+  CALCULATE_TYPES,
+  CycleError,
+  EmitError,
+  FORMAT_TYPES,
+  VALIDATE_TYPES,
+  calculateInputs,
+  calculationOrder,
+  emittedScripts,
+  resolves,
+  scriptInputs,
+  type EmitProblem,
+  type FieldCalculate,
+  type FieldFormat,
+  type FieldValidate,
+} from './af-emit';
 // The spec problems are USER-FACING copy, so they resolve
 // through the catalog. i18n is itself a data module (catalogs + i18next), so
 // this file stays pure over bytes and unit-testable with no DOM.
@@ -52,6 +68,16 @@ export interface NewFieldSpec {
    * batch's own — a form laid out in one pass locks the fields laid out with
    * it. */
   lock?: FieldLock | null;
+  /** What the page SHOWS for the stored value — the `/AA /F` + `/K` pair, in
+   * the stock call shapes every other viewer executes. */
+  format?: FieldFormat;
+  /** `/AA /V`: the range a typed value must fall in. */
+  validate?: FieldValidate;
+  /** `/AA /C`, plus an entry in `/AcroForm /CO` ordered so this field lands
+   * after everything it reads. */
+  calculate?: FieldCalculate;
+  /** `/DV` — what a form reset restores this field to. */
+  defaultValue?: string | boolean | string[];
 }
 
 /** Wire action → the PDF name the `/Lock` dictionary carries. A table, not a
@@ -68,6 +94,24 @@ function lockListed(action: LockAction): boolean {
 }
 
 const CHOICE_TYPES: ReadonlySet<NewFieldType> = new Set(['radio', 'dropdown', 'optionlist']);
+
+/** The emitter states a CONDITION; each half of the twin renders it in its own
+ * vocabulary. A table, so a new condition cannot reach the user unrendered. */
+const EMIT_KEY = {
+  formatUnknown: 'refusal.field.formatUnknown',
+  decimalsRange: 'refusal.field.formatSetting',
+  sepStyleRange: 'refusal.field.formatSetting',
+  negStyleRange: 'refusal.field.formatSetting',
+  specialRange: 'refusal.field.formatSetting',
+  maskRequired: 'refusal.field.maskRequired',
+  rangeNeedsBound: 'refusal.field.rangeNeedsBound',
+  rangeNotNumber: 'refusal.field.rangeNotNumber',
+  rangeInverted: 'refusal.field.rangeInverted',
+  calcUnknown: 'refusal.field.calcUnknown',
+  calcNeedsFields: 'refusal.field.calcNeedsFields',
+  sfnEmpty: 'refusal.field.sfnEmpty',
+  sfnUnreadable: 'refusal.field.sfnUnreadable',
+} as const satisfies Record<EmitProblem, UiKey>;
 
 interface ResolvedOption {
   label: string;
@@ -174,12 +218,103 @@ function lockableNames(doc: PDFDocument, specs: readonly NewFieldSpec[]): Set<st
   return names;
 }
 
+function decodeName(value: unknown): string | null {
+  return value instanceof PDFString || value instanceof PDFHexString ? value.decodeText() : null;
+}
+
+/** Fully-qualified name → field dictionary for every node of the `/Fields`
+ * forest, INTERIOR NODES INCLUDED: `/CO` may legally reference any field that
+ * carries a `/C`, and a calculation may name a parent, which contributes every
+ * terminal beneath it. `getFields()` is terminal-only and cannot see either. */
+function fieldForest(doc: PDFDocument): Map<string, PDFDict> {
+  const out = new Map<string, PDFDict>();
+  const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+  const fields = acro?.lookupMaybe(PDFName.of('Fields'), PDFArray);
+  if (!fields) return out;
+  const walk = (entry: unknown, prefix: string, depth: number): void => {
+    if (depth > MAX_FIELD_DEPTH) return;
+    const dict = entry instanceof PDFRef ? doc.context.lookup(entry) : entry;
+    if (!(dict instanceof PDFDict)) return;
+    let t = dict.get(PDFName.of('T'));
+    if (t instanceof PDFRef) t = doc.context.lookup(t);
+    const own = decodeName(t);
+    const name = own === null ? prefix : prefix ? `${prefix}.${own}` : own;
+    if (name && !out.has(name)) out.set(name, dict);
+    const kids = dict.lookupMaybe(PDFName.of('Kids'), PDFArray);
+    for (let i = 0; i < (kids?.size() ?? 0); i++) walk(kids!.get(i), name, depth + 1);
+  };
+  for (let i = 0; i < fields.size(); i++) walk(fields.get(i), '', 0);
+  return out;
+}
+
+const MAX_FIELD_DEPTH = 32;
+
+/** The document's own `/CO` order and, for each entry, the names its calculate
+ * script reads. An entry whose script this app does not recognize contributes
+ * no edge: nothing here can say what it reads. */
+function existingCalculations(doc: PDFDocument): {
+  order: string[];
+  inputs: Map<string, string[]>;
+  forest: Map<string, PDFDict>;
+} {
+  const forest = fieldForest(doc);
+  const byDict = new Map<PDFDict, string>();
+  for (const [name, dict] of forest) if (!byDict.has(dict)) byDict.set(dict, name);
+  const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+  const co = acro?.lookupMaybe(PDFName.of('CO'), PDFArray);
+  const order: string[] = [];
+  const inputs = new Map<string, string[]>();
+  for (let i = 0; i < (co?.size() ?? 0); i++) {
+    const entry = co!.get(i);
+    const dict = entry instanceof PDFRef ? doc.context.lookup(entry) : entry;
+    if (!(dict instanceof PDFDict)) continue;
+    const name = byDict.get(dict);
+    if (name === undefined) continue;
+    order.push(name);
+    const js = calculateSourceOf(doc, dict);
+    if (js !== null) inputs.set(name, scriptInputs(js));
+  }
+  return { order, inputs, forest };
+}
+
+/** The raw `/AA /C` JavaScript a field carries, or null. */
+function calculateSourceOf(doc: PDFDocument, dict: PDFDict): string | null {
+  const aa = dict.lookupMaybe(PDFName.of('AA'), PDFDict);
+  const action = aa?.lookupMaybe(PDFName.of('C'), PDFDict);
+  const js = action?.get(PDFName.of('JS'));
+  const resolved = js instanceof PDFRef ? doc.context.lookup(js) : js;
+  return decodeName(resolved);
+}
+
+/** `[(name, [input names])]` for every spec that carries a calculation, in
+ * authoring order — the batch half of the topological sort. */
+function batchCalculations(specs: readonly NewFieldSpec[]): [string, string[]][] {
+  const entries: [string, string[]][] = [];
+  for (const spec of specs) {
+    const name = spec.name.trim();
+    if (!spec.calculate || !name) continue;
+    try {
+      entries.push([name, calculateInputs(spec.calculate)]);
+    } catch {
+      // The emission problem is reported on its own row; an unreadable
+      // calculation contributes no ordering edge.
+    }
+  }
+  return entries;
+}
+
 function validateSpecs(doc: PDFDocument, specs: readonly NewFieldSpec[]): void {
   const problems: FieldProblem[] = [];
   const taken = topLevelFieldNames(doc);
   // Only walked when the batch actually carries a lock: the terminal-field walk
   // is work no other rule needs.
   const lockable = specs.some((s) => s.lock) ? lockableNames(doc, specs) : new Set<string>();
+  // What a calculation may name: the same set a lock may name, plus the
+  // document's interior nodes — a calculation naming a parent contributes
+  // every terminal beneath it, which `getFields()` alone cannot see.
+  const calcKnown = specs.some((s) => s.calculate)
+    ? new Set([...lockableNames(doc, specs), ...fieldForest(doc).keys()])
+    : new Set<string>();
   const batch = specs.length > 1;
   specs.forEach((spec, index) => {
     const name = spec.name.trim();
@@ -220,6 +355,44 @@ function validateSpecs(doc: PDFDocument, specs: readonly NewFieldSpec[]): void {
         push('refusal.field.maxLengthPositive');
       }
     }
+    // Format and Validate belong to the kinds that carry a typed value;
+    // Calculate writes one, which only a text field can hold.
+    if (spec.format !== undefined && !FORMAT_TYPES.includes(spec.type)) {
+      push('refusal.field.formatKindOnly');
+    }
+    if (spec.validate !== undefined && !VALIDATE_TYPES.includes(spec.type)) {
+      push('refusal.field.formatKindOnly');
+    }
+    if (spec.calculate !== undefined && !CALCULATE_TYPES.includes(spec.type)) {
+      push('refusal.field.calculateKindOnly');
+    }
+    if (spec.defaultValue !== undefined && spec.type === 'signature') {
+      push('refusal.field.defaultOnSignature');
+    }
+    try {
+      emittedScripts(spec);
+    } catch (err) {
+      if (!(err instanceof EmitError)) throw err;
+      push(EMIT_KEY[err.problem], { value: err.detail });
+    }
+    if (spec.calculate !== undefined) {
+      let targets: string[];
+      try {
+        targets = calculateInputs(spec.calculate);
+      } catch {
+        // The emission problem is reported on its own row; an unreadable
+        // calculation names nothing that could be checked.
+        targets = [];
+      }
+      for (const target of targets) {
+        // The same rule /Lock already applies to its targets: a calculation
+        // naming a field nothing has reads nothing, and silently contributes a
+        // zero to somebody's total.
+        if (!resolves(target, calcKnown)) {
+          push('refusal.field.calcUnknownField', { name: target });
+        }
+      }
+    }
     const lock = spec.lock ?? null;
     if (lock) {
       if (spec.type !== 'signature') {
@@ -257,6 +430,23 @@ function validateSpecs(doc: PDFDocument, specs: readonly NewFieldSpec[]): void {
       }
     }
   });
+  // The batch's /CO, checked before anything is written: a cycle is a
+  // calculation that can never settle, and one pass over it computes a number
+  // no viewer agrees with. Reported by the chain that proves it.
+  const entries = batchCalculations(specs);
+  if (entries.length > 0) {
+    const { order, inputs } = existingCalculations(doc);
+    try {
+      calculationOrder(order, inputs, entries);
+    } catch (err) {
+      if (!(err instanceof CycleError)) throw err;
+      problems.push({
+        key: 'refusal.field.calcCycle',
+        vars: { chain: err.chain.join(' → ') },
+        field: batch ? err.chain[0] : undefined,
+      });
+    }
+  }
   // Ensure /AcroForm exists (getForm() lazily creates it, and strips /XFA —
   // the standing pure-AcroForm posture); addSignatureField relies on it.
   doc.getForm();
@@ -323,6 +513,81 @@ function toBox(rect: readonly [number, number, number, number]): {
   return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
 }
 
+/** A `/JavaScript` action carrying this body.
+ *
+ * ASCII rides as a PDF string, which is what the ecosystem writes and what
+ * keeps a stock call byte-identical to the same call from any other producer.
+ * Anything else — a currency symbol, a mask carrying an accented literal —
+ * goes as a UTF-16BE stream, the convention the engine half already uses;
+ * `PDFString.of` writes one byte per code unit and would corrupt it. */
+function jsAction(doc: PDFDocument, js: string): PDFRef {
+  // eslint-disable-next-line no-control-regex
+  const ascii = /^[\x00-\x7F]*$/.test(js);
+  const body = ascii
+    ? PDFString.of(js)
+    : doc.context.register(doc.context.stream(Uint8Array.from([0xfe, 0xff, ...utf16beBytes(js)])));
+  return doc.context.register(doc.context.obj({ S: 'JavaScript', JS: body }) as PDFDict);
+}
+
+function utf16beBytes(text: string): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    out.push((code >> 8) & 0xff, code & 0xff);
+  }
+  return out;
+}
+
+/** Write the spec's `/AA` scripts and `/DV` onto a field dictionary.
+ *
+ * Every trigger this app authors is REPLACED wholesale and every other key of
+ * an existing `/AA` is left alone: a widget trigger (`/E`, `/U`) is not this
+ * door's business, and a spec that no longer carries a format must not leave
+ * the old format's `/F` behind. */
+function applyActions(doc: PDFDocument, dict: PDFDict, spec: NewFieldSpec): void {
+  const scripts = emittedScripts(spec);
+  let aa = dict.lookupMaybe(PDFName.of('AA'), PDFDict);
+  for (const trigger of ['F', 'K', 'V', 'C'] as const) {
+    const js = scripts[trigger];
+    if (js !== undefined) {
+      if (!aa) {
+        aa = doc.context.obj({}) as PDFDict;
+        dict.set(PDFName.of('AA'), aa);
+      }
+      aa.set(PDFName.of(trigger), jsAction(doc, js));
+    } else if (aa) {
+      aa.delete(PDFName.of(trigger));
+    }
+  }
+  if (aa && aa.keys().length === 0) dict.delete(PDFName.of('AA'));
+  if (spec.defaultValue !== undefined) applyDefault(doc, dict, spec);
+}
+
+/** `/DV` — the value a form reset restores to. */
+function applyDefault(doc: PDFDocument, dict: PDFDict, spec: NewFieldSpec): void {
+  const value = spec.defaultValue;
+  if (value === undefined || value === null) {
+    dict.delete(PDFName.of('DV'));
+    return;
+  }
+  if (spec.type === 'checkbox') {
+    dict.set(PDFName.of('DV'), PDFName.of(value === true || value === 'Yes' ? 'Yes' : 'Off'));
+    return;
+  }
+  if (spec.type === 'radio') {
+    dict.set(PDFName.of('DV'), PDFName.of(String(value) || 'Off'));
+    return;
+  }
+  if (Array.isArray(value)) {
+    dict.set(
+      PDFName.of('DV'),
+      doc.context.obj(value.map((v) => PDFHexString.fromText(String(v)))) as PDFArray,
+    );
+    return;
+  }
+  dict.set(PDFName.of('DV'), PDFHexString.fromText(String(value)));
+}
+
 function createField(doc: PDFDocument, spec: NewFieldSpec): void {
   const name = spec.name.trim();
   const box = toBox(spec.rect);
@@ -339,14 +604,18 @@ function createField(doc: PDFDocument, spec: NewFieldSpec): void {
       if (spec.maxLength) field.setMaxLength(spec.maxLength);
       if (spec.comb) field.enableCombing();
       field.addToPage(page, box);
+      applyActions(doc, field.acroField.dict, spec);
       break;
     }
     case 'checkbox': {
-      form.createCheckBox(name).addToPage(page, box);
+      const field = form.createCheckBox(name);
+      field.addToPage(page, box);
+      applyActions(doc, field.acroField.dict, spec);
       break;
     }
     case 'radio': {
       const group = form.createRadioGroup(name);
+      applyActions(doc, group.acroField.dict, spec);
       const placed = options.every((o) => o.rect);
       if (placed) {
         // Each option was drawn where it is; the enclosing rectangle is only
@@ -375,6 +644,7 @@ function createField(doc: PDFDocument, spec: NewFieldSpec): void {
       const field = form.createDropdown(name);
       field.addOptions(options.map((o) => o.label));
       field.addToPage(page, box);
+      applyActions(doc, field.acroField.dict, spec);
       break;
     }
     case 'optionlist': {
@@ -382,6 +652,7 @@ function createField(doc: PDFDocument, spec: NewFieldSpec): void {
       field.setOptions(options.map((o) => o.label));
       field.enableMultiselect();
       field.addToPage(page, box);
+      applyActions(doc, field.acroField.dict, spec);
       break;
     }
     case 'signature': {
@@ -414,7 +685,33 @@ export async function addFormFields(
   const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
   validateSpecs(doc, specs);
   for (const spec of specs) createField(doc, spec);
+  writeCalculationOrder(doc, specs);
   return doc.save();
+}
+
+/** Rewrite `/CO` for the calculations this batch just created.
+ *
+ * Run AFTER the fields exist, so the entries are references to real objects;
+ * the order itself was already proved acyclic before anything was written. An
+ * existing order is never re-sorted — the author declared it and it may encode
+ * intent the graph does not show. */
+function writeCalculationOrder(doc: PDFDocument, specs: readonly NewFieldSpec[]): void {
+  const entries = batchCalculations(specs);
+  if (entries.length === 0) return;
+  const { order, inputs, forest } = existingCalculations(doc);
+  const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+  if (!acro) return;
+  // The forest is re-walked after creation so the batch's own fields resolve.
+  const live = fieldForest(doc);
+  const refs: PDFRef[] = [];
+  for (const name of calculationOrder(order, inputs, entries)) {
+    const dict = live.get(name) ?? forest.get(name);
+    if (!dict) continue;
+    const ref = doc.context.getObjectRef(dict);
+    if (ref) refs.push(ref);
+  }
+  if (refs.length > 0) acro.set(PDFName.of('CO'), doc.context.obj(refs) as PDFArray);
+  else acro.delete(PDFName.of('CO'));
 }
 
 /**

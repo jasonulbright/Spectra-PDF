@@ -122,7 +122,7 @@ from engine.space_audit import audit_space_usage
 from engine.watermark import watermark
 from engine.compare import compare_text, compare_visual
 from engine.form_detect import detect_form_fields
-from engine.form_authoring import set_field_lock
+from engine.form_authoring import set_field_actions, set_field_lock
 from engine.form_prepare import create_detected_fields, prepare_form_fields
 from engine.forms import read_form_fields, fill_form_fields, reset_form_fields
 from engine.enhance_scan import analyze_scan, enhance_scan
@@ -309,6 +309,7 @@ def main() -> None:
     server.register("create_detected_fields", create_detected_fields)
     server.register("prepare_form_fields", prepare_form_fields)
     server.register("set_field_lock", set_field_lock)
+    server.register("set_field_actions", set_field_actions)
     server.register("apply_ocr_layer", apply_ocr_layer)
     server.register("recognize", recognize)
     server.register("analyze_scan", analyze_scan)
