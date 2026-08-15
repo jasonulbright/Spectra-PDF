@@ -124,6 +124,59 @@ def untagged(path):
     return save(pdf, path)
 
 
+def perm_blocked(path):
+    """Encryption whose permissions forbid extraction for accessibility.
+
+    R3 deliberately: from revision 4 the accessibility bit is ignored by every
+    writer (and by qpdf), so a document that actually blocks assistive
+    technology is an OLD one — which is exactly the document a checker has to
+    catch. The passwords are empty, so the permission is the whole restriction.
+    """
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    make_conformant(pdf, page)
+    pdf.save(
+        str(path),
+        encryption=pikepdf.Encryption(
+            owner="",
+            user="",
+            R=3,
+            aes=False,
+            metadata=False,
+            allow=pikepdf.Permissions(accessibility=False, extract=False),
+        ),
+    )
+    pdf.close()
+    return str(path)
+
+
+def perm_blocked_owner_password(path):
+    """The same restriction, held by an owner password this app does not have.
+
+    The fix REFUSES here: the permissions cannot be rewritten without
+    reproducing that password, and replacing it with one nobody chose — or
+    dropping the encryption — is not a repair.
+    """
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    make_conformant(pdf, page)
+    pdf.save(
+        str(path),
+        encryption=pikepdf.Encryption(
+            owner="the-owner",
+            user="",
+            R=3,
+            aes=False,
+            metadata=False,
+            allow=pikepdf.Permissions(accessibility=False, extract=False),
+        ),
+    )
+    pdf.close()
+    return str(path)
+
+
 def no_lang(path):
     pdf = new_pdf()
     page = pdf.pages[0]
@@ -166,6 +219,40 @@ def no_bookmarks_long(path):
         page.obj[Name.StructParents] = i
         nums.append(i)
         nums.append(pdf.make_indirect(Array([para])))
+    doc[Name.K] = Array(kids)
+    root[Name.K] = doc
+    root[Name.ParentTree] = pdf.make_indirect(Dictionary(Nums=nums))
+    root[Name.ParentTreeNextKey] = len(pdf.pages)
+    make_conformant(pdf, pdf.pages[0])
+    return save(pdf, path)
+
+
+def no_bookmarks_long_with_headings(path):
+    """The same warning, on a document bookmarks CAN be derived from.
+
+    `no_bookmarks_long` has no headings, so `outline_from_structure` refuses
+    it — which is the route case, not the fix case. This is the twin the
+    automatic fix is measured on.
+    """
+    pdf = new_pdf(pages=12)
+    for page in pdf.pages:
+        draw(
+            pdf,
+            page,
+            "/H1 <</MCID 0>> BDC BT /F1 20 Tf 40 720 Td (A section heading) Tj ET EMC\n"
+            "/P <</MCID 1>> BDC BT /F1 11 Tf 40 700 Td (Body copy.) Tj ET EMC",
+        )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    kids = []
+    nums = Array()
+    for i, page in enumerate(pdf.pages):
+        head = elem(pdf, "H1", doc, page=page, mcid=0)
+        para = elem(pdf, "P", doc, page=page, mcid=1)
+        kids.extend([head, para])
+        page.obj[Name.StructParents] = i
+        nums.append(i)
+        nums.append(pdf.make_indirect(Array([head, para])))
     doc[Name.K] = Array(kids)
     root[Name.K] = doc
     root[Name.ParentTree] = pdf.make_indirect(Dictionary(Nums=nums))
@@ -823,10 +910,13 @@ def moves_with(check_id: str) -> frozenset:
 ROSTER = {
     "baseline": (baseline, None, None),
     "untagged": (untagged, "tagged", "fail"),
+    "perm_blocked": (perm_blocked, "permissions", "fail"),
+    "perm_blocked_owner_password": (perm_blocked_owner_password, "permissions", "fail"),
     "no_lang": (no_lang, "lang", "fail"),
     "no_title": (no_title, "title", "fail"),
     "title_not_displayed": (title_not_displayed, "title", "warn"),
     "no_bookmarks_long": (no_bookmarks_long, "bookmarks", "warn"),
+    "no_bookmarks_long_with_headings": (no_bookmarks_long_with_headings, "bookmarks", "warn"),
     "low_contrast": (low_contrast, "contrast", "fail"),
     "contrast_over_image_ok": (contrast_over_image_ok, "contrast", "needs_review"),
     "large_text_contrast_ok": (large_text_contrast_ok, "contrast", "pass"),

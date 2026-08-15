@@ -763,7 +763,11 @@ def _check_bookmarks(check, pdf, tree):
         check.status = PASS
         return
     check.status = WARN
-    check.data = {"pages": total, "tagged": bool(tree["tagged"])}
+    # `headings` is what decides whether deriving bookmarks is offered at all:
+    # `outline_from_structure` refuses a document with none, and a fix button
+    # that can only refuse is worse than a route to the panel that can.
+    headings = sum(1 for n in tree["nodes"] if n.level is not None) if tree["tagged"] else 0
+    check.data = {"pages": total, "tagged": bool(tree["tagged"]), "headings": headings}
     check.findings = [_finding(_object_address(), "no_bookmarks", values={"pages": total})]
 
 
@@ -1073,6 +1077,18 @@ def _check_field_descriptions(check, fields):
     _verdict(check, len(fields), findings)
 
 
+def _described_by_ancestor(node) -> bool:
+    """Is this element covered by an ancestor's own alternate description?
+
+    An `/Alt` describes the element AND everything it tags (ISO 32000
+    §14.9.4): a reader that announces it does not descend. So a figure inside
+    an alt-carrying ancestor IS described, and reporting it as undescribed is
+    the false-failure class this checker exists not to be — it is check 21's
+    finding, once, on the nesting itself.
+    """
+    return any(a.alt for a in node.ancestors())
+
+
 def _check_figures_alt(check, tree, mcid_tables):
     if not tree["tagged"]:
         check.status = NA
@@ -1083,7 +1099,7 @@ def _check_figures_alt(check, tree, mcid_tables):
         return
     findings = []
     for node in figures:
-        if node.alt or node.actual_text:
+        if node.alt or node.actual_text or _described_by_ancestor(node):
             continue
         preview, rect = _node_preview(node, mcid_tables)
         findings.append(
@@ -1191,7 +1207,7 @@ def _check_other_elements_alt(check, tree, annots, fields, mcid_tables):
     og_address = {(a["page"], a["index"]): a["objgen"] for a in annots}
     findings = []
     for node in targets:
-        if node.alt or node.actual_text or node.title:
+        if node.alt or node.actual_text or node.title or _described_by_ancestor(node):
             continue
         described = False
         for objr in node.objrs:

@@ -1053,6 +1053,25 @@ export const PANEL_STRINGS = {
   'panel.a11y.explain.heading_nesting':
     'Headings are how a document is skimmed; a skipped level breaks the outline.',
 
+  'panel.a11y.fix': 'Fix',
+  'panel.a11y.fixTitle': 'Repair this without leaving the report',
+  'panel.a11y.fixing': 'Applying the fix…',
+  'panel.a11y.fixed': 'Fix applied — re-checking the document.',
+  'panel.a11y.apply': 'Apply',
+  'panel.a11y.needsValue': 'Type the value this fix needs, then choose Apply.',
+  'panel.a11y.langPick': 'Pick a language',
+
+  'panel.a11y.field.alt': 'Alternate text',
+  'panel.a11y.field.summary': 'Summary',
+  'panel.a11y.field.description': 'Description',
+  'panel.a11y.field.title': 'Title',
+  'panel.a11y.field.lang': 'Language',
+  'panel.a11y.hint.alt': 'What this picture shows, in a sentence',
+  'panel.a11y.hint.summary': 'What this table shows, before it is read cell by cell',
+  'panel.a11y.hint.description': 'What this field is for, as a reader would hear it',
+  'panel.a11y.hint.title': 'The document’s title, not its file name',
+  'panel.a11y.hint.lang': 'A language tag, for example en-GB',
+
   'panel.a11y.detail.alt_nested_inside_alt':
     'The alternate text here sits inside an element that already carries one, so it is never read.',
   'panel.a11y.detail.alt_references_no_content':

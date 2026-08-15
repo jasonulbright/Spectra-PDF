@@ -58,6 +58,27 @@ _TEXT_PROPS = {
     "lang": "/Lang",
 }
 
+# The table attributes set_struct_props manages, prop key → PDF key. These are
+# not element keys: they live in an /A attribute dictionary owned by /Table,
+# which is where the spec puts them AND where a reader looks first. Writing a
+# bare element key instead would be overridden by any attribute dictionary the
+# producer already left behind, so the fix would not clear the check.
+_TABLE_PROPS = {
+    "summary": "/Summary",
+    "scope": "/Scope",
+}
+
+# /Scope's whole vocabulary (ISO 32000 table 349).
+_SCOPES = ("Row", "Column", "Both")
+
+# The roles each table attribute means something on. A /Summary on a paragraph
+# and a /Scope on a data cell are both keys a reader ignores, so writing one is
+# a silent no-op rather than a fix.
+_TABLE_PROP_ROLES = {
+    "summary": ("Table",),
+    "scope": ("TH",),
+}
+
 
 def _root(pdf):
     st = pdf.Root.get("/StructTreeRoot")
@@ -228,16 +249,79 @@ def get_struct_tree(file: str) -> dict:
         return {"tagged": True, "count": count, "root": root_nodes, "role_map": role_map}
 
 
+def _resolved_role(pdf, elem) -> str:
+    """This element's STANDARD role, through the document's /RoleMap.
+
+    Imported at call time because `derived_nav` imports this module; the
+    resolution itself is not re-implemented here — one levelling and mapping
+    rule, one place.
+    """
+    from engine.derived_nav import _elem_tag, _resolve_role, _role_map
+
+    st = pdf.Root.get("/StructTreeRoot")
+    return _resolve_role(_elem_tag(elem), _role_map(st) if st is not None else {})
+
+
+def _attr_dicts_of(elem) -> list:
+    value = elem.get("/A")
+    if value is None:
+        return []
+    items = list(value) if isinstance(value, pikepdf.Array) else [value]
+    return [i for i in items if isinstance(i, Dictionary) and not isinstance(i, pikepdf.Stream)]
+
+
+def _set_table_attr(pdf, elem, pdf_key: str, value) -> None:
+    """Write one attribute into the element's ``/Table``-owned attribute
+    dictionary, and take the direct element key off.
+
+    A key spelled in both places is a document that answers the same question
+    twice; the attribute dictionary is the spec's own place and the audit reads
+    it last, so the direct key is removed rather than left to disagree.
+    """
+    if pdf_key in elem:
+        del elem[Name(pdf_key)]
+    owned = None
+    for attrs in _attr_dicts_of(elem):
+        owner = attrs.get("/O")
+        if owner is not None and str(owner) == "/Table":
+            owned = attrs
+            break
+    if value is None:
+        for attrs in _attr_dicts_of(elem):
+            if pdf_key in attrs:
+                del attrs[Name(pdf_key)]
+        return
+    if owned is None:
+        owned = pdf.make_indirect(Dictionary(O=Name.Table))
+        existing = elem.get("/A")
+        if existing is None:
+            elem[Name.A] = owned
+        elif isinstance(existing, pikepdf.Array):
+            existing.append(owned)
+        else:
+            elem[Name.A] = Array([existing, owned])
+    owned[Name(pdf_key)] = value
+
+
 def set_struct_props(file: str, output: str, path: list, props: dict) -> dict:
-    """Set the tag type and/or text-alternative properties of one element.
-    `props` keys: type (non-empty), title/alt/actual_text/lang (empty clears)."""
+    """Set the tag type and/or the properties of one element.
+
+    `props` keys: type (non-empty), title/alt/actual_text/lang (empty clears),
+    and the two table attributes summary/scope (empty clears). The table
+    attributes land in the element's ``/Table`` attribute dictionary, not as
+    element keys."""
     if not path:
         raise ValueError("path must name an element, not the tree root")
     if not props:
         raise ValueError("no properties to set")
-    unknown = set(props) - {"type", *_TEXT_PROPS}
+    unknown = set(props) - {"type", *_TEXT_PROPS, *_TABLE_PROPS}
     if unknown:
         raise ValueError(f"unknown properties: {sorted(unknown)}")
+    scope = str(props.get("scope", "")).strip().lstrip("/")
+    if "scope" in props and scope and scope not in _SCOPES:
+        raise ValueError(
+            f'"{scope}" is not a header scope; a header cell reads Row, Column or Both.'
+        )
     input_path, output_path = Path(file), Path(output)
     same_file = input_path.resolve() == output_path.resolve()
     with pikepdf.open(file) as pdf:
@@ -255,6 +339,26 @@ def set_struct_props(file: str, output: str, path: list, props: dict) -> dict:
                 elem[Name(pdf_key)] = String(value)
             elif pdf_key in elem:
                 del elem[Name(pdf_key)]
+        if set(props) & set(_TABLE_PROPS):
+            role = _resolved_role(pdf, elem)
+            tag = _str_or_empty(elem, "/S").lstrip("/") or "(none)"
+            for prop, pdf_key in _TABLE_PROPS.items():
+                if prop not in props:
+                    continue
+                allowed = _TABLE_PROP_ROLES[prop]
+                text = scope if prop == "scope" else str(props[prop])
+                if text and role not in allowed:
+                    if prop == "summary":
+                        raise ValueError(
+                            f'/Summary belongs on a Table element; this one is tagged "{tag}".'
+                        )
+                    raise ValueError(
+                        f'/Scope belongs on a TH header cell; this one is tagged "{tag}".'
+                    )
+                if prop == "scope":
+                    _set_table_attr(pdf, elem, pdf_key, Name("/" + text) if text else None)
+                else:
+                    _set_table_attr(pdf, elem, pdf_key, String(text) if text else None)
         _save(pdf, input_path, output_path, same_file)
     return {"output": str(output_path), "path": list(path)}
 

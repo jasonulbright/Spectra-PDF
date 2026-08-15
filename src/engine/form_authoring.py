@@ -900,6 +900,70 @@ def set_field_lock(
     return {"output": str(output_path), "field": name, "lock": seed}
 
 
+def set_field_description(
+    file: str,
+    output: str,
+    field: str = "",
+    description: str = "",
+    allow_signed: bool = False,
+) -> dict:
+    """Set the ``/TU`` description of an EXISTING field, and write ``output``.
+
+    ``/TU`` is what assistive technology announces when it reaches the field.
+    A field without one is announced by its internal name or not at all, which
+    is why the checker reports it — and why the field's own name is offered as
+    a STARTING SUGGESTION in the surface and never written here silently: a
+    description that merely repeats `Text1` is the same failure wearing a
+    different key.
+
+    An empty description removes the key: "this field has none" is a value, not
+    a separate operation.
+    """
+    name = str(field or "").strip()
+    if not name:
+        raise ValueError("Name the form field whose description is being set.")
+    text = str(description or "").strip()
+    validate_pdf(file)
+    decision = signed_edit_decision(signature_policy(file), "structural")
+    if decision["kind"] == "refuse":
+        raise RuntimeError(
+            "this document is certified to allow no changes, so setting a field "
+            "description would produce a file that reports as illegally modified"
+        )
+    if decision["kind"] == "warn" and not allow_signed:
+        raise RuntimeError(
+            "this document is signed and setting a field description invalidates its "
+            "signatures -- the run must state that signed documents are "
+            "included before it will touch one"
+        )
+
+    input_path = Path(file)
+    output_path = Path(output)
+    same_file = input_path.resolve() == output_path.resolve()
+    with pikepdf.open(file) as pdf:
+        refuse_if_xfa(pdf, input_path, "setting a field description")
+        forest = form_field_forest(pdf)
+        target = forest.get(name)
+        if target is None:
+            raise ValueError(f'This document has no form field named "{name}".')
+        if text:
+            target[Name.TU] = String(text)
+        elif "/TU" in target:
+            del target["/TU"]
+        if same_file:
+            with tempfile.NamedTemporaryFile(
+                suffix=".pdf", delete=False, dir=str(input_path.parent)
+            ) as tmp:
+                staged = tmp.name
+            save_pdf(pdf, staged)
+        else:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            save_pdf(pdf, output_path)
+    if same_file:
+        shutil.move(staged, str(output_path))
+    return {"output": str(output_path), "field": name, "description": text}
+
+
 def set_field_actions(
     file: str,
     output: str,
