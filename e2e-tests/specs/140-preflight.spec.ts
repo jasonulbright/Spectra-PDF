@@ -220,14 +220,18 @@ describe('Print preflight', () => {
 
   it('draws a content finding on the page and takes it off again', async () => {
     await preflightShow('hairlines_absent');
-    await browser.waitUntil(async () => (await a11yFindingsOnPage()).length > 0, {
-      timeout: 15000,
-      timeoutMsg: 'the hairline never reached the page',
-    });
-    const drawn = await a11yFindingsOnPage();
-    expect(drawn[0].checkId).toBe('hairlines_absent');
+    // The check the drawn finding belongs to is asserted INSIDE the wait: a
+    // re-check clears what is on the page, so a length read that passed and a
+    // row read that followed are two different moments.
+    await browser.waitUntil(
+      async () => (await a11yFindingsOnPage())[0]?.checkId === 'hairlines_absent',
+      { timeout: 15000, timeoutMsg: 'the hairline never reached the page' },
+    );
     await preflightShow('hairlines_absent');
-    expect(await a11yFindingsOnPage()).toHaveLength(0);
+    await browser.waitUntil(async () => (await a11yFindingsOnPage()).length === 0, {
+      timeout: 15000,
+      timeoutMsg: 'the hairline never left the page',
+    });
   });
 
   it('lands each address kind somewhere different', async () => {

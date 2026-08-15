@@ -493,6 +493,9 @@ export interface FolderPreflightHandlers {
   snapshot: () => {
     phase: 'setup' | 'running' | 'done';
     fileCount: number | null;
+    /** The picker's resolved list. The shipped profiles are an ENGINE read, so
+     * a run driven before it lands would fall back to whatever is there. */
+    profiles: string[];
     report: {
       mode: string;
       total: number;

@@ -33,6 +33,8 @@ import {
   waitForHarness,
   invokeAppCommand,
   closeAllFiles,
+  openByPaths,
+  getState,
   folderPreflightSetFolders,
   folderPreflightSetProfile,
   folderPreflightSetMode,
@@ -73,7 +75,11 @@ function digest(root: string): Record<string, number> {
   return out;
 }
 
-describe('Preflight a folder', () => {
+describe('Preflight a folder', function () {
+  // A sweep is one engine call over a whole tree, and the fix arm runs
+  // Ghostscript per document — longer than the suite default by construction.
+  this.timeout(180_000);
+
   let dir: string;
   let source: string;
   let outside: string;
@@ -90,12 +96,42 @@ describe('Preflight a folder', () => {
     await buildSource(resolve(source, 'inner', 'insert.pdf'), true);
     // The one that must never be read: it is not under the source root.
     await buildSource(resolve(outside, 'untouched.pdf'), true);
+    // The rule the fix run measures against, in the store the picker reads.
+    // It goes in BEFORE the dialog first mounts: the picker reads the user
+    // store once, at mount, and the droplet needs no open document to author
+    // a rule through.
+    await browser.execute(function () {
+      localStorage.setItem('spectra-preflight-profiles', JSON.stringify([{
+        schema: 1,
+        id: 'droplet_rule',
+        name: 'Droplet rule',
+        checks: {
+          ink_coverage_max: { enabled: false },
+          embedded_files: { severity: 'fail', allow: false },
+        },
+        fixups: [{ id: 'remove_attachments', params: {} }],
+      }]));
+    });
   });
 
   after(async () => {
+    await browser.execute(() => {
+      localStorage.removeItem('guided-actions');
+      localStorage.removeItem('spectra-preflight-profiles');
+    });
     await closeAllFiles();
     rmSync(dir, { recursive: true, force: true });
   });
+
+  /** Shut the modal so the next thing this spec opens is reachable. */
+  async function closeDialog(): Promise<void> {
+    const shut = await $('[data-testid="folder-preflight-x"]');
+    if (await shut.isDisplayed()) await shut.click();
+    await $('[data-testid="folder-preflight-dialog"]').waitForDisplayed({
+      timeout: 10000,
+      reverse: true,
+    });
+  }
 
   async function openDialog(): Promise<void> {
     expect(await invokeAppCommand('tools.folderPreflight')).toBe(true);
@@ -109,6 +145,13 @@ describe('Preflight a folder', () => {
     await browser.waitUntil(
       async () => (await folderPreflightSnapshot())?.fileCount === 3,
       { timeout: 20000, timeoutMsg: 'the source never enumerated three documents' },
+    );
+    // The shipped profiles are an ENGINE read. Selecting one before it lands
+    // silently falls back to whatever the picker already had, which is a run
+    // against a rule nobody chose.
+    await browser.waitUntil(
+      async () => !!(await folderPreflightSnapshot())?.profiles.includes(profile),
+      { timeout: 20000, timeoutMsg: `the picker never offered ${profile}` },
     );
     await folderPreflightSetProfile(profile);
     await folderPreflightSetMode(mode);
@@ -166,26 +209,8 @@ describe('Preflight a folder', () => {
   });
 
   it('fixes a mirrored copy and re-checks it, leaving the sources alone', async () => {
-    // A profile whose only fixup is the one this document needs, so the
-    // assertion is about the pass rather than about Ghostscript. It is put in
-    // the store the picker reads rather than imported through the panel: the
-    // droplet needs no open document, and mounting one to author a rule would
-    // make this spec about the panel instead.
-    await browser.execute(function () {
-      localStorage.setItem('spectra-preflight-profiles', JSON.stringify([{
-        schema: 1,
-        id: 'droplet_rule',
-        name: 'Droplet rule',
-        checks: {
-          ink_coverage_max: { enabled: false },
-          embedded_files: { severity: 'fail', allow: false },
-        },
-        fixups: [{ id: 'remove_attachments', params: {} }],
-      }]));
-    });
-
-    await closeAllFiles();
-    await openDialog();
+    // `droplet_rule` carries exactly one fixup — the one these documents
+    // need — so the assertion is about the pass rather than about Ghostscript.
     const before = digest(source);
     const dest = resolve(dir, 'fix-out');
     await runInto(dest, 'fix', 'droplet_rule');
@@ -205,14 +230,18 @@ describe('Preflight a folder', () => {
     // The re-check is not optional: the report is the state AFTER the fixups.
     const row = report.results.find((r) => r.rel === 'catalogue.pdf')!;
     expect(row.applied).toEqual(['remove_attachments']);
-    expect(row.before!.failed).toBe(1);
-    expect(row.after!.failed).toBe(0);
+    expect(row.after!.failed).toBeLessThan(row.before!.failed);
     const written = JSON.parse(readFileSync(row.report!, 'utf8'));
     const status = Object.fromEntries(
       (written.checks as { id: string; status: string }[]).map((c) => [c.id, c.status]),
     );
+    // The row the fixup answers is clear, and the ones it does not carry a
+    // door for are untouched — a pass this document did not earn is the
+    // wrongness the whole round exists to end.
     expect(status.embedded_files).toBe('pass');
-    expect(report.clean).toBe(3);
+    expect(status.fonts_embedded).toBe('fail');
+    const clean = report.results.find((r) => r.rel === 'clean.pdf')!;
+    expect(clean.applied).toEqual([]);
   });
 
   it('produces the same sweep from the command line', async () => {
@@ -243,7 +272,13 @@ describe('Preflight a folder', () => {
     expect(refusal).not.toBe('NO REFUSAL');
     expect(refusal.toLowerCase()).toContain('forbidden path');
 
-    await closeAllFiles();
+    await closeDialog();
+    // The actions panel is a document surface: it needs one open to sit on.
+    await openByPaths([resolve(source, 'clean.pdf')]);
+    await browser.waitUntil(async () => (await getState()).view === 'canvas', {
+      timeout: 20000,
+      timeoutMsg: 'opening the fixture did not land on canvas',
+    });
     expect(await invokeAppCommand('tools.open.actions')).toBe(true);
     await $('[data-testid="action-new"]').waitForDisplayed({ timeout: 10000 });
     await $('[data-testid="action-new"]').click();
@@ -306,10 +341,7 @@ describe('Preflight a folder', () => {
     )) as string | null;
     expect(imported).toBeNull();
 
-    await browser.execute(() => {
-      localStorage.removeItem('guided-actions');
-      localStorage.removeItem('spectra-preflight-profiles');
-    });
+    await browser.execute(() => localStorage.removeItem('guided-actions'));
     await invokeAppCommand('tools.close');
   });
 });
