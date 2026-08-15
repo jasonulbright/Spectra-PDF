@@ -94,6 +94,16 @@ export interface SourceRow {
   /** Why this row could not be used — set from the engine's own per-row
    * report, so a skipped member is a visible state and never a silent drop. */
   error?: string;
+  /** Where the row came from, when it was not picked. Changes only what the
+   * row is CALLED: a scratch name is not a thing a user recognises, and the
+   * kind badge stays the engine's own answer either way. */
+  origin?: 'clipboard' | 'web';
+  /** For a clipboard row: which flavour arrived (`lib/clipboard-source.ts`). */
+  clipboardKind?: 'image' | 'html' | 'text';
+  /** For a web-capture row: the address the page came from, and the title the
+   * page gave itself — which is what its bookmark is called. */
+  captureUrl?: string;
+  captureTitle?: string;
 }
 
 let nextRowId = 0;

@@ -90,18 +90,42 @@ const INVARIANT_PLURALS: Record<string, PluralPolicy> = {
       'panel.tags.summary',
     ],
   },
+  // German `Zeichen` is a neuter noun whose plural is identical to its
+  // singular (ein Zeichen / drei Zeichen), and it is the only word for a
+  // character of text. Every other German count in this catalog inflects
+  // (Seite/Seiten in the same round's page counts is still gated).
+  de: {
+    keys: [
+      'dialog.createPdf.clipboardHtmlChars',
+      'dialog.createPdf.clipboardHtmlFrom',
+      'dialog.createPdf.clipboardTextChars',
+    ],
+  },
   // Danish `sprog` is a neuter noun whose plural is identical to its singular
   // (et sprog / to sprog); no inflecting synonym names a recognition language.
-  da: { keys: ['dialog.ocr.langCount'] },
+  // `tegn` is the same shape (et tegn / to tegn) and is the only word for a
+  // character of text.
+  da: {
+    keys: [
+      'dialog.ocr.langCount',
+      'dialog.createPdf.clipboardHtmlChars',
+      'dialog.createPdf.clipboardHtmlFrom',
+      'dialog.createPdf.clipboardTextChars',
+    ],
+  },
   // Swedish neuter nouns ending in a consonant take a bare plural: ett fält /
   // flera fält, ett språk / språk, ett objekt / objekt, ett certifikat /
-  // certifikat, en byte / byte. Every one of these messages is the noun alone
-  // after the numeral, with no participle or predicative adjective to agree —
+  // certifikat, ett tecken / tecken, en byte / byte. Every one of these
+  // messages counts that noun after the numeral, with no participle or
+  // predicative adjective to agree —
   // where one exists the plural IS written (movedCount, pageLabels.applied,
   // prepareForm.created, formPrep.candidates), so this list is the residue.
   sv: {
     keys: [
       'chrome.status.fillFields',
+      'dialog.createPdf.clipboardHtmlChars',
+      'dialog.createPdf.clipboardHtmlFrom',
+      'dialog.createPdf.clipboardTextChars',
       'dialog.formPrep.existingFields',
       'dialog.ocr.langCount',
       'dialog.props.bytes',
@@ -111,11 +135,15 @@ const INVARIANT_PLURALS: Record<string, PluralPolicy> = {
     ],
   },
   // Norwegian Bokmål neuter monosyllables take a bare plural: et treff / flere
-  // treff, et språk / språk, en byte / byte. `treff` is the only word for a
-  // search hit, and every other Norwegian count in this catalog inflects.
+  // treff, et språk / språk, et tegn / tegn, en byte / byte. `treff` is the
+  // only word for a search hit and `tegn` the only word for a character of
+  // text; every other Norwegian count in this catalog inflects.
   nb: {
     keys: [
       'canvas.find.summary',
+      'dialog.createPdf.clipboardHtmlChars',
+      'dialog.createPdf.clipboardHtmlFrom',
+      'dialog.createPdf.clipboardTextChars',
       'dialog.diskRedact.hits',
       'dialog.ocr.langCount',
       'dialog.props.bytes',

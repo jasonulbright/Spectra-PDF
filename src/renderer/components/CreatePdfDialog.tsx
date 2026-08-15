@@ -6,7 +6,7 @@ import { app, dialog } from '../lib/tauri-bridge';
 import { ensureGsPath } from '../panels/SettingsPanel';
 import { TEST_HARNESS_ENABLED, registerCreatePdf, type CreatePdfRunOptions } from '../testHarness';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tChromeCount, type UiKey } from '../i18n';
+import { tChrome, tChromeCount, type UiKey, type UiPluralKey } from '../i18n';
 import {
   KIND_LABEL_KEYS,
   ORIENTATIONS,
@@ -18,6 +18,7 @@ import {
   addPaths,
   baseName,
   blankRow,
+  rowFromPath,
   defaultOutputPath,
   hasUnsupported,
   moveRow,
@@ -26,6 +27,15 @@ import {
   reorderRows,
   toEngineSources,
 } from '../lib/create-pdf';
+import {
+  CLIPBOARD_KIND_LABEL_KEYS,
+  clipboardRow,
+  clipboardSummary,
+  type ClipboardKind,
+  type ClipboardSourceResult,
+} from '../lib/clipboard-source';
+import { outlineFromRows, type CaptureResult } from '../lib/web-capture';
+import { WebCaptureDialog } from './WebCaptureDialog';
 
 // File ▸ Create PDF: ONE door for images, Office /
 // text / web documents, PostScript and a blank page. A MENU dialog, not a
@@ -56,6 +66,7 @@ export function CreatePdfDialog({
   onClose,
   onOpenResult,
   initialPaths,
+  autoStart,
 }: {
   onClose: () => void;
   /** Open the created PDF through the normal open funnel; rejection is
@@ -65,6 +76,9 @@ export function CreatePdfDialog({
   /** Sources the dialog opens pre-populated with — a drop of non-PDF files
    * on the window lands here rather than doing nothing. */
   initialPaths?: readonly string[];
+  /** The acquisition to start on, when the dialog was opened from one of the
+   * File ▸ Create siblings rather than from Create PDF itself. */
+  autoStart?: 'clipboard' | 'web' | null;
 }): React.JSX.Element {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
@@ -78,6 +92,11 @@ export function CreatePdfDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CreatePdfResult | null>(null);
+  const [showWebCapture, setShowWebCapture] = useState(false);
+  // What each clipboard row actually carried, keyed by row id — the summary
+  // line ("Image, 1200 x 800") is about the PAYLOAD and cannot be recovered
+  // from the scratch path.
+  const [clipboardInfo, setClipboardInfo] = useState<Record<string, ClipboardSourceResult>>({});
   const dragFrom = useRef<number | null>(null);
   // Ref, not state: convert()'s reentrancy window opens BEFORE any state
   // updates land (the whole native save-dialog round trip) — a second
@@ -117,6 +136,55 @@ export function CreatePdfDialog({
     setResult(null);
   }, []);
 
+  // The clipboard payload becomes an ORDINARY source row: Rust writes it to a
+  // scratch file whose extension the engine already accepts, so nothing here
+  // converts and nothing in the engine had to learn what a clipboard is.
+  const addClipboard = useCallback(async () => {
+    setError(null);
+    setResult(null);
+    try {
+      const clip = await app.readClipboardSource();
+      const row = clipboardRow(clip);
+      setClipboardInfo((prev) => ({ ...prev, [row.id]: clip }));
+      setRows((prev) => [...prev, row]);
+      return clip;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  }, []);
+
+  // A capture arrives as one row per captured page, in capture order, each
+  // carrying the title its bookmark will use.
+  const addCaptured = useCallback((capture: CaptureResult) => {
+    setError(null);
+    setResult(null);
+    setRows((prev) => [
+      ...prev,
+      ...capture.pages.map((page) => ({
+        ...rowFromPath(page.path),
+        origin: 'web' as const,
+        captureUrl: page.url,
+        captureTitle: page.title,
+      })),
+    ]);
+    setShowWebCapture(false);
+  }, []);
+
+  // The File ▸ Create sibling that opened this dialog starts its own
+  // acquisition. ONCE per mount, through a ref: re-reading the clipboard on a
+  // re-render would add the same payload twice, and `addPaths`'s duplicate
+  // suppression cannot see it — every read writes a NEW scratch file.
+  const startedRef = useRef(false);
+  const autoStartRef = useRef({ addClipboard });
+  autoStartRef.current = { addClipboard };
+  React.useEffect(() => {
+    if (!autoStart || startedRef.current) return;
+    startedRef.current = true;
+    if (autoStart === 'clipboard') void autoStartRef.current.addClipboard();
+    else setShowWebCapture(true);
+  }, [autoStart]);
+
   const convertTo = useCallback(
     async (sourceRows: readonly SourceRow[], out: string, options: CreatePdfRunOptions) => {
       if (convertingRef.current) return null;
@@ -141,6 +209,22 @@ export function CreatePdfDialog({
         const r = (await track('create_pdf', { file: out }, () =>
           callRaw('create_pdf', params),
         )) as unknown as CreatePdfResult;
+        // The captured link structure lands as bookmarks, through the SHIPPED
+        // set_outline. Offsets come from what each source ACTUALLY
+        // contributed, so a captured site mixed with local files still gets
+        // its bookmarks on the pages the captures landed on. A failure here
+        // is reported and never discards the document that was built.
+        const outline = outlineFromRows(
+          sourceRows,
+          (r.sources ?? []).map((row) => row.pages),
+        );
+        if (outline.length > 0) {
+          try {
+            await callRaw('set_outline', { file: out, outline, output: out });
+          } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+          }
+        }
         setResult(r);
         return r;
       } catch (err) {
@@ -173,8 +257,8 @@ export function CreatePdfDialog({
   // the source LIST and runs the REAL conversion path. `addPaths` is the same
   // function the picker's result goes through, so an injected list and a
   // picked one cannot diverge.
-  const harnessRef = useRef({ convertTo });
-  harnessRef.current = { convertTo };
+  const harnessRef = useRef({ convertTo, addClipboard, rows });
+  harnessRef.current = { convertTo, addClipboard, rows };
   React.useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerCreatePdf({
@@ -188,6 +272,16 @@ export function CreatePdfDialog({
           .convertTo(injected, out, options ?? {})
           .then((r) => (r === null ? null : { output: r.output, pages: r.pages }));
       },
+      addClipboard: () =>
+        harnessRef.current
+          .addClipboard()
+          .then((clip) =>
+            clip === null ? null : { path: clip.path, kind: clip.kind, format: clip.format },
+          ),
+      convertCurrent: (out, options) =>
+        harnessRef.current
+          .convertTo(harnessRef.current.rows, out, options ?? {})
+          .then((r) => (r === null ? null : { output: r.output, pages: r.pages })),
     });
     return () => registerCreatePdf(null);
   }, []);
@@ -210,6 +304,24 @@ export function CreatePdfDialog({
             disabled={busy}
           >
             {tChrome('dialog.createPdf.addFiles')}
+          </button>
+          <button
+            type="button"
+            data-testid="create-pdf-add-clipboard"
+            className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
+            onClick={() => void addClipboard()}
+            disabled={busy}
+          >
+            {tChrome('dialog.createPdf.addClipboard')}
+          </button>
+          <button
+            type="button"
+            data-testid="create-pdf-add-web"
+            className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
+            onClick={() => setShowWebCapture(true)}
+            disabled={busy}
+          >
+            {tChrome('dialog.createPdf.addWebPage')}
           </button>
           <button
             type="button"
@@ -256,12 +368,18 @@ export function CreatePdfDialog({
                     : tChrome('dialog.createPdf.kindUnsupported')}
                 </span>
                 <span
-                  className={`flex-1 truncate ${row.kind ? 'text-neutral-300' : 'text-red-400'}`}
-                  title={row.path ?? ''}
+                  className={`flex-1 min-w-0 ${row.kind ? 'text-neutral-300' : 'text-red-400'}`}
+                  title={row.origin === 'web' ? (row.captureUrl ?? '') : (row.path ?? '')}
                 >
-                  {row.kind === 'blank'
-                    ? tChrome('dialog.createPdf.blankPage')
-                    : baseName(row.path ?? '')}
+                  <span className="block truncate">{rowName(row)}</span>
+                  {rowDetail(row, clipboardInfo[row.id]) && (
+                    <span
+                      className="block truncate text-[10px] text-neutral-500"
+                      data-testid="create-pdf-row-detail"
+                    >
+                      {rowDetail(row, clipboardInfo[row.id])}
+                    </span>
+                  )}
                 </span>
                 <button
                   type="button"
@@ -451,8 +569,45 @@ export function CreatePdfDialog({
           </button>
         </div>
       </div>
+      {showWebCapture && (
+        <WebCaptureDialog onClose={() => setShowWebCapture(false)} onCaptured={addCaptured} />
+      )}
     </Shell>
   );
+}
+
+/**
+ * What a row is CALLED. A picked file is its own basename; a clipboard row is
+ * what arrived (a scratch name like `clipboard-1755…-0.dib` is not a thing a
+ * user recognises); a captured page is the title the page gave itself.
+ */
+function rowName(row: SourceRow): string {
+  if (row.kind === 'blank') return tChrome('dialog.createPdf.blankPage');
+  if (row.origin === 'web') return (row.captureTitle ?? '').trim() || (row.captureUrl ?? '');
+  if (row.origin === 'clipboard') {
+    return tChrome(
+      CLIPBOARD_KIND_LABEL_KEYS[(row.clipboardKind ?? 'text') as ClipboardKind] as UiKey,
+    );
+  }
+  return baseName(row.path ?? '');
+}
+
+/**
+ * The second line: how much arrived, or where a captured page came from.
+ *
+ * A separate string rather than an interpolation into the name — the two are
+ * different facts and joining them would be the banned concatenation with
+ * extra steps.
+ */
+function rowDetail(row: SourceRow, clip: ClipboardSourceResult | undefined): string {
+  if (row.origin === 'web') return row.captureUrl ?? '';
+  if (row.origin === 'clipboard' && clip) {
+    const summary = clipboardSummary(clip);
+    return summary.count === undefined
+      ? tChrome(summary.key as UiKey, summary.params)
+      : tChromeCount(summary.key as UiPluralKey, summary.count, summary.params);
+  }
+  return '';
 }
 
 function Shell({ children, onClose }: { children: React.ReactNode; onClose: () => void }): React.JSX.Element {
