@@ -12,6 +12,8 @@
 # ever swallowed. Keys are STABLE: rewording a message keeps its key.
 key	kind	modules	message
 accessibility.unknownAccessibilityCategoryExpected	pattern	accessibility	unknown accessibility category '{{category}}' (expected one of: {{v1}})
+accessibility_fixes.automaticAccessibilityFixExists	pattern	accessibility_fixes	no automatic accessibility fix exists for {{v0}} (the automatic ones are: {{v1}})
+accessibility_fixes.thereNothingHereFix	exact	accessibility_fixes	There is nothing here for that fix to repair.
 acroform.containsXmlFormXfa	pattern	acroform	{{v0}} contains an XML form (XFA). Page operations would detach the form from its pages, so {{operation}} is not available for this document. Fill the form, or flatten it with another tool first.
 acroform.regeneratedFileSPage	exact	acroform	The regenerated file's page count differs from the original; cannot reattach its form fields.
 attachments.attachmentNamed	pattern	attachments	no attachment named {{name}}
@@ -82,17 +84,37 @@ distill.outputMustDifferentFile	exact	distill	output must be a different file fr
 distill.postscriptFileMissingHeader	exact	distill	not a PostScript file (missing the '%!' header)
 distill.unknownPresetScreenEbook	pattern	distill	unknown preset {{preset}} (screen, ebook, printer, prepress, default)
 doc_properties.directionMustLR	pattern	doc_properties	direction must be 'L2R' or 'R2L', got {{direction}}
+doc_properties.documentCertifiedAllowChanges	exact	doc_properties	this document is certified to allow no changes, so setting the document language would produce a file that reports as illegally modified
+doc_properties.documentCertifiedAllowChanges2	exact	doc_properties	this document is certified to allow no changes, so setting the document title would produce a file that reports as illegally modified
+doc_properties.documentCertifiedAllowChanges3	exact	doc_properties	this document is certified to allow no changes, so setting the tab order would produce a file that reports as illegally modified
 doc_properties.documentSOpenAction	exact	doc_properties	the document's open action is a script, not a destination; it was left unchanged
+doc_properties.documentSignedSettingDocument	exact	doc_properties	this document is signed and setting the document language invalidates its signatures -- the run must state that signed documents are included before it will touch one
+doc_properties.documentSignedSettingDocument2	exact	doc_properties	this document is signed and setting the document title invalidates its signatures -- the run must state that signed documents are included before it will touch one
+doc_properties.documentSignedSettingTab	exact	doc_properties	this document is signed and setting the tab order invalidates its signatures -- the run must state that signed documents are included before it will touch one
+doc_properties.nameLanguageExampleEn	exact	doc_properties	Name the language, for example en-GB.
 doc_properties.openPageOutRange	pattern	doc_properties	open_page {{page_number}} is out of range (1-{{total}})
+doc_properties.pageHereCarriesAnnotation	exact	doc_properties	No page here carries an annotation, so there is no tab order to declare: /Tabs on a page with nothing to order says nothing.
 doc_properties.pageLayoutMustDefault	pattern	doc_properties	page_layout must be 'default' or one of {{v0}}, got {{page_layout}}
 doc_properties.pageModeMustDefault	pattern	doc_properties	page_mode must be 'default' or one of {{v0}}, got {{page_mode}}
+doc_properties.tabOrderMustS	pattern	doc_properties	tab order must be S, R or C, got {{order}}
+doc_properties.titleDisplaySettingWrite	exact	doc_properties	no title and no display setting to write
 doc_properties.trappedMustOneGot	pattern	doc_properties	trapped must be one of {{v0}}, got {{trapped}}
+doc_properties.wellFormedLanguageTag	pattern	doc_properties	"{{text}}" is not a well-formed language tag: "x-" needs at least one private-use subtag after it.
+doc_properties.wellFormedLanguageTag2	pattern	doc_properties	"{{text}}" is not a well-formed language tag: it has an empty subtag (two hyphens in a row, or a hyphen at an end).
+doc_properties.wellFormedLanguageTag3	pattern	doc_properties	"{{text}}" is not a well-formed language tag: the extension "{{singleton}}" carries no subtag.
+doc_properties.wellFormedLanguageTag4	pattern	doc_properties	"{{text}}" is not a well-formed language tag: the language subtag "{{head}}" must be two to eight letters, as in en, de or haw.
+doc_properties.wellFormedLanguageTag5	pattern	doc_properties	"{{text}}" is not a well-formed language tag: the subtag "{{part}}" is longer than eight characters.
+doc_properties.wellFormedLanguageTag6	pattern	doc_properties	"{{text}}" is not a well-formed language tag: the subtag "{{part}}" may contain only letters and digits.
+doc_properties.wellFormedLanguageTag7	pattern	doc_properties	"{{text}}" is not a well-formed language tag: the subtag "{{v1}}" is not in a position a language tag allows.
 doc_properties.zoomMustOneGot	pattern	doc_properties	zoom must be one of {{v0}}, got {{zoom}}
 doc_properties.zoomPercentMustBetween	pattern	doc_properties	zoom_percent must be between {{minimum}} and {{maximum}}, got {{zoom_percent}}
 doc_properties.zoomPercentNeedsZoom	exact	doc_properties	zoom 'percent' needs a zoom_percent
 document_js.duplicateDocumentScriptName	pattern	document_js	Duplicate document-script name: {{name}}.
 document_js.eachDocumentScriptMust	exact	document_js	Each document script must be an object with name and js.
 document_js.eachDocumentScriptNeeds	exact	document_js	Each document script needs a non-empty name.
+encrypt.documentAlreadyAllowsAssistive	exact	encrypt	This document already allows assistive technology to read it.
+encrypt.documentEncryptedNothingStopping	exact	encrypt	This document is not encrypted, so nothing is stopping assistive technology from reading it.
+encrypt.documentSPermissionsHeld	exact	encrypt	This document's permissions are held by an owner password, which is needed to change them. Open it with that password first.
 enhance_scan.backgroundStrengthMustGot	pattern	enhance_scan	the background strength must be 0-1, got {{strength}}
 enhance_scan.enhancementAskedTurnDeskew	exact	enhance_scan	no enhancement was asked for — turn on deskew, despeckle, background removal or orientation detection
 enhance_scan.jpegQualityMustGot	pattern	enhance_scan	the JPEG quality must be 1-100, got {{quality}}
@@ -123,13 +145,16 @@ font_fallback.verticalFallbackFontCannot	pattern	font_fallback	the vertical fall
 form_authoring.documentCertifiedAllowChanges	exact	form_authoring	this document is certified to allow no changes, so adding form fields would produce a file that reports as illegally modified
 form_authoring.documentCertifiedAllowChanges2	exact	form_authoring	this document is certified to allow no changes, so setting a field lock would produce a file that reports as illegally modified
 form_authoring.documentCertifiedAllowChanges3	exact	form_authoring	this document is certified to allow no changes, so setting a field action would produce a file that reports as illegally modified
+form_authoring.documentCertifiedAllowChanges4	exact	form_authoring	this document is certified to allow no changes, so setting a field description would produce a file that reports as illegally modified
 form_authoring.documentFormFieldNamed	pattern	form_authoring	This document has no form field named "{{name}}".
 form_authoring.documentSignedAddingForm	exact	form_authoring	this document is signed and adding form fields invalidates its signatures -- the run must state that signed documents are included before it will touch one
 form_authoring.documentSignedSettingField	exact	form_authoring	this document is signed and setting a field lock invalidates its signatures -- the run must state that signed documents are included before it will touch one
 form_authoring.documentSignedSettingField2	exact	form_authoring	this document is signed and setting a field action invalidates its signatures -- the run must state that signed documents are included before it will touch one
+form_authoring.documentSignedSettingField3	exact	form_authoring	this document is signed and setting a field description invalidates its signatures -- the run must state that signed documents are included before it will touch one
 form_authoring.formFieldSActions	pattern	form_authoring	this form field's actions cannot be set: {{text}}
 form_authoring.formFieldSignatureField	pattern	form_authoring	Form field "{{name}}" is not a signature field, and only a signature field can lock form fields.
 form_authoring.nameFormFieldWhose	exact	form_authoring	Name the form field whose actions are being set.
+form_authoring.nameFormFieldWhose2	exact	form_authoring	Name the form field whose description is being set.
 form_authoring.nameSignatureFieldWhose	exact	form_authoring	Name the signature field whose lock is being set.
 form_authoring.signatureFieldAlreadySigned	pattern	form_authoring	Signature field "{{name}}" is already signed, so its field lock can no longer change. Its lock is part of what that signature covers.
 form_authoring.theseFormFieldsCannot	pattern	form_authoring	these form fields cannot be created: {{joined}}
@@ -204,7 +229,7 @@ inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 links.linkIndexOutRange	pattern	links	link index {{index}} is out of range (page has {{v1}})
 links.linksAdd	exact	links	no links to add
-links.pageOutRange	pattern	enhance_scan,form_detect,links,page_images,page_vectors,read_aloud,redact_marks,search_regions,slide_export,spelling,table_export,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
+links.pageOutRange	pattern	doc_properties,enhance_scan,form_detect,links,page_images,page_vectors,read_aloud,redact_marks,search_regions,slide_export,spelling,table_export,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
 links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive width and height
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
 links.urlMustEmpty	exact	links	url must not be empty
@@ -474,14 +499,22 @@ split.pagesPerFileMust	pattern	split	pages per file must be a whole number, got 
 split.pagesPerFileMust2	pattern	split	pages per file must be at least 1, got {{every_n}}
 split.splitModeMustOne	pattern	split	split mode must be one of {{v0}}, got {{mode}}
 split.splitNeedsOutputFolder	exact	split	split needs an output folder
+struct_fix.headerScopeHeaderCell	pattern	struct_fix,struct_tree	"{{scope}}" is not a header scope; a header cell reads Row, Column or Both.
+struct_fix.pathMustNameTable	exact	struct_fix	path must name a table, not the tree root
+struct_fix.pathNamesElementDocument	pattern	struct_fix	path {{v0}} names no element in this document's tree
+struct_fix.pathNamesElementTagged	pattern	struct_fix	path {{v0}} names an element tagged "{{v1}}", not a table.
+struct_fix.tableRowsFirstRow	exact	struct_fix	this table has no rows, so it has no first row to promote.
+struct_fix.tableSFirstRow	exact	struct_fix	this table's first row has no cells to promote.
 struct_tree.directionMustOneUp	exact	struct_tree	direction must be one of up, down, indent, outdent, to
 struct_tree.directionNeedsIndex	exact	struct_tree	direction 'to' needs an index
-struct_tree.documentStructureTreeUntagged	exact	struct_tree	document has no structure tree (it is untagged)
+struct_tree.documentStructureTreeUntagged	exact	struct_fix,struct_tree	document has no structure tree (it is untagged)
 struct_tree.indexMustNegative	exact	struct_tree	index must not be negative
 struct_tree.pathMustNameElement	exact	struct_tree	path must name an element, not the tree root
 struct_tree.pathOutRangeStep	pattern	struct_tree	path {{v0}} is out of range at step {{depth}} (index {{idx}}, node has {{v3}} child tags)
 struct_tree.previousSiblingTagNest	exact	struct_tree	no previous sibling tag to nest under
 struct_tree.propertiesSet	exact	struct_tree	no properties to set
+struct_tree.scopeBelongsThHeader	pattern	struct_tree	/Scope belongs on a TH header cell; this one is tagged "{{tag}}".
+struct_tree.summaryBelongsTableElement	pattern	struct_tree	/Summary belongs on a Table element; this one is tagged "{{tag}}".
 struct_tree.tagAlreadyAmongSiblings	pattern	struct_tree	the tag is already {{which}} among its siblings
 struct_tree.tagAlreadyTopLevel	exact	struct_tree	the tag is already at the top level
 struct_tree.typeMustEmpty	exact	struct_tree	type must not be empty

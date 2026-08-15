@@ -76,6 +76,71 @@ def encrypt(
     }
 
 
+def grant_accessibility_permission(file: str, output: str) -> dict:
+    """Re-save an encrypted document with assistive-technology reading allowed.
+
+    The accessibility permission is a bit in the encryption dictionary, so
+    granting it means writing the encryption again — every other permission the
+    document declares is carried across unchanged, and so is its revision and
+    its cipher: the document is not silently strengthened, weakened, or
+    decrypted.
+
+    The passwords cannot be carried across because they cannot be read back, so
+    the door only proceeds where they are EMPTY — which `owner_password_matched`
+    against the empty password is exactly the test for. A document whose
+    restrictions are gated by an owner password refuses and says so, rather than
+    replacing that password with one nobody chose or dropping the encryption
+    altogether.
+    """
+    output_path = Path(output)
+    with pikepdf.open(file) as pdf:
+        if not pdf.is_encrypted:
+            raise ValueError(
+                "This document is not encrypted, so nothing is stopping assistive "
+                "technology from reading it."
+            )
+        if pdf.allow.accessibility:
+            raise ValueError(
+                "This document already allows assistive technology to read it."
+            )
+        if not pdf.owner_password_matched:
+            raise RuntimeError(
+                "This document's permissions are held by an owner password, which is "
+                "needed to change them. Open it with that password first."
+            )
+        info = pdf.encryption
+        revision = int(info.R)
+        allow = pikepdf.Permissions(
+            accessibility=True,
+            extract=bool(pdf.allow.extract),
+            modify_annotation=bool(pdf.allow.modify_annotation),
+            modify_assembly=bool(pdf.allow.modify_assembly),
+            modify_form=bool(pdf.allow.modify_form),
+            modify_other=bool(pdf.allow.modify_other),
+            print_lowres=bool(pdf.allow.print_lowres),
+            print_highres=bool(pdf.allow.print_highres),
+        )
+        enc_kwargs = dict(
+            owner="",
+            user="",
+            R=revision,
+            aes=revision >= 5 or str(info.stream_method).endswith("aes"),
+            allow=allow,
+        )
+        # R2/R3 have no metadata-encryption switch at all, and pikepdf refuses
+        # the default rather than ignoring it.
+        if revision < 4:
+            enc_kwargs["metadata"] = False
+        encryption = pikepdf.Encryption(**enc_kwargs)
+        if is_same_file(file, output):
+            staged = staging_target(output_path)
+            save_pdf(pdf, staged, encryption=encryption)
+            finish_staged(staged, output_path)
+        else:
+            save_pdf(pdf, output_path, encryption=encryption)
+    return {"output": str(output_path), "revision": revision}
+
+
 def decrypt(file: str, output: str, password: str = "") -> dict:
     """Decrypt a PDF.
 

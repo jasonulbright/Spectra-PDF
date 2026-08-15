@@ -145,7 +145,12 @@ pub enum CliCommand {
     /// Show or hide a layer by index
     LayerSet(LayerSetArgs),
     /// Run the accessibility checker (JSON report)
-    Accessibility(AccessibilityArgs),
+    Accessibility(AccessibilityCheckArgs),
+    /// Apply the accessibility fixes that need nothing authored. The authored
+    /// ones (alt text, a table summary, a language, a field description) have
+    /// no headless arm: a command line cannot supply a value it cannot see,
+    /// and inventing one writes a placeholder, which is worse than none
+    AccessibilityFix(AccessibilityFixArgs),
     /// Run print-production preflight (JSON report)
     Preflight(AccessibilityArgs),
     /// List every markup comment in the document (JSON)
@@ -1062,6 +1067,33 @@ pub struct LayerListArgs {
 pub struct AccessibilityArgs {
     /// Input PDF file
     pub input: PathBuf,
+}
+
+#[derive(Args)]
+pub struct AccessibilityCheckArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Run one category only: document, page_content, forms, alt_text,
+    /// tables, lists or headings. Every other check still appears, reporting
+    /// not_applicable, so the report has one shape
+    #[arg(long)]
+    pub category: Option<String>,
+}
+
+#[derive(Args)]
+pub struct AccessibilityFixArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// A check id to fix; repeatable. Omit for every automatic fix
+    #[arg(long = "fix")]
+    pub fixes: Vec<String>,
+    /// Repair signed documents too. A repair rewrites the file, so it
+    /// invalidates every signature it carries — the run has to say so
+    #[arg(long)]
+    pub allow_signed: bool,
 }
 
 #[derive(Args)]
@@ -3905,7 +3937,20 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
 
         CliCommand::Accessibility(args) => engine.call(
             "check_accessibility",
-            json!({ "file": abs(&args.input).to_string_lossy() }),
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "category": args.category,
+            }),
+        ),
+
+        CliCommand::AccessibilityFix(args) => engine.call(
+            "apply_accessibility_fixes",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "checks": if args.fixes.is_empty() { None } else { Some(args.fixes.clone()) },
+                "allow_signed": args.allow_signed,
+            }),
         ),
 
         CliCommand::Preflight(args) => engine.call(

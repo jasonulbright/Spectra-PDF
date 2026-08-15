@@ -1,0 +1,254 @@
+"""The accessibility fixes that need nothing authored.
+
+One table, in one place: check id → the door that repairs it. The panel's row
+buttons and the command line's ``--fix`` both call THIS, so "what does fixing
+`heading_nesting` mean" has a single answer rather than one per surface — the
+same reason `form_authoring` and `lib/forms.ts` are pinned against a shared
+corpus rather than left to drift.
+
+An AUTOMATIC fix is one whose result is decided by the document: the level that
+closes a heading gap, the first row of a table, the tab order a page with
+annotations needs. Everything that needs a value a machine cannot invent — alt
+text, a table summary, a language, a field description — is an AUTHORED fix and
+lives on its own door, called per finding, because inventing that value is
+worse than leaving the finding standing.
+
+Fixes are applied in a fixed order and every one of them is path-stable: none
+reshapes the tree, so the addresses the single report run produced still name
+what they named. `autotag` is the exception and needs none — it only applies to
+an untagged document, where every structure check reported `not_applicable` and
+has no address to go stale.
+
+A door that refuses does not stop the run: its refusal is recorded against its
+check and the rest still land. A run where NOTHING landed and something refused
+raises, so a caller asking for one fix gets that fix's own refusal rather than
+an empty success.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from engine.accessibility import check_accessibility
+from engine.autotag import autotag
+from engine.derived_nav import outline_from_structure
+from engine.doc_properties import set_document_title, set_page_tab_order
+from engine.encrypt import grant_accessibility_permission
+from engine.struct_fix import set_table_headers
+from engine.struct_tree import set_struct_props
+
+# The checks whose fix needs no authored value, in application order.
+#
+# `permissions` runs first because everything after it writes the file, and
+# `tagged` runs before the structure checks because autotag is what gives them
+# a tree to address at all.
+AUTOMATIC_CHECKS = (
+    "permissions",
+    "tagged",
+    "title",
+    "bookmarks",
+    "tab_order",
+    "heading_nesting",
+    "table_headers",
+    "nested_alt",
+    "alt_hides_annotation",
+)
+
+# The checks that carry an AUTHORED fix — one value the user supplies, per
+# finding. Named here so a surface can ask this module which kind a check is
+# rather than keeping a second list of its own.
+AUTHORED_CHECKS = (
+    "lang",
+    "title",
+    "field_descriptions",
+    "figures_alt",
+    "table_summary",
+)
+
+# `title` is in BOTH lists, and that is the check itself rather than an
+# untidiness: a document with a title it does not show needs no value from
+# anyone, while a document with no title needs the one thing a machine must
+# never invent. The automatic arm fires only on the first.
+
+# The verdicts a fix is offered against. A `warn` is short of the
+# recommendation, which is still something the door repairs.
+_FIXABLE_STATES = ("fail", "warn")
+
+
+def _findings(report: dict, check_id: str) -> list:
+    for check in report["checks"]:
+        if check["id"] == check_id:
+            return check["findings"] if check["status"] in _FIXABLE_STATES else []
+    return []
+
+
+def _status(report: dict, check_id: str) -> str:
+    for check in report["checks"]:
+        if check["id"] == check_id:
+            return check["status"]
+    return "not_applicable"
+
+
+def _fix_permissions(source: str, output: str, report: dict, allow_signed: bool) -> int:
+    grant_accessibility_permission(source, output)
+    return 1
+
+
+def _fix_tagged(source: str, output: str, report: dict, allow_signed: bool) -> int:
+    autotag(source, output)
+    return 1
+
+
+def _fix_title(source: str, output: str, report: dict, allow_signed: bool) -> int:
+    # A `warn` is "there is a title and the reader is set to show the file name
+    # instead", which needs no value from anyone. A `fail` is "there is no
+    # title", and inventing one is exactly what the authored fix exists for.
+    if _status(report, "title") != "warn":
+        return 0
+    set_document_title(source, output, display=True, allow_signed=allow_signed)
+    return 1
+
+
+def _fix_bookmarks(source: str, output: str, report: dict, allow_signed: bool) -> int:
+    outline_from_structure(source, output)
+    return 1
+
+
+def _fix_tab_order(source: str, output: str, report: dict, allow_signed: bool) -> int:
+    pages = sorted(
+        {
+            int(f["address"]["page"])
+            for f in _findings(report, "tab_order")
+            if f["address"].get("page") is not None
+        }
+    )
+    if not pages:
+        return 0
+    set_page_tab_order(source, output, pages=pages, allow_signed=allow_signed)
+    return len(pages)
+
+
+def _fix_heading_nesting(source: str, output: str, report: dict, allow_signed: bool) -> int:
+    applied = 0
+    current = source
+    for finding in _findings(report, "heading_nesting"):
+        previous = int(finding.get("values", {}).get("from", 0))
+        # The level that CLOSES the gap: one below the heading before it. A
+        # deeper guess would be a judgment about the document's outline.
+        set_struct_props(current, output, finding["address"]["path"], {"type": f"H{previous + 1}"})
+        current = output
+        applied += 1
+    return applied
+
+
+def _fix_table_headers(source: str, output: str, report: dict, allow_signed: bool) -> int:
+    applied = 0
+    current = source
+    for finding in _findings(report, "table_headers"):
+        if finding["detail_key"] == "table_has_no_header_cells":
+            set_table_headers(current, output, finding["address"]["path"])
+        else:
+            set_struct_props(current, output, finding["address"]["path"], {"scope": "Column"})
+        current = output
+        applied += 1
+    return applied
+
+
+def _clear_alt(check_id: str):
+    def run(source: str, output: str, report: dict, allow_signed: bool) -> int:
+        applied = 0
+        current = source
+        for finding in _findings(report, check_id):
+            set_struct_props(current, output, finding["address"]["path"], {"alt": ""})
+            current = output
+            applied += 1
+        return applied
+
+    return run
+
+
+_DOORS = {
+    "permissions": _fix_permissions,
+    "tagged": _fix_tagged,
+    "title": _fix_title,
+    "bookmarks": _fix_bookmarks,
+    "tab_order": _fix_tab_order,
+    "heading_nesting": _fix_heading_nesting,
+    "table_headers": _fix_table_headers,
+    "nested_alt": _clear_alt("nested_alt"),
+    "alt_hides_annotation": _clear_alt("alt_hides_annotation"),
+}
+
+
+def apply_accessibility_fixes(
+    file: str, output: str, checks=None, allow_signed: bool = False
+) -> dict:
+    """Apply every automatic fix the document needs, or the named ones.
+
+    Args:
+        file: Input PDF path.
+        output: Output PDF path (may equal `file`).
+        checks: Check ids to fix, or None for every automatic one. A check with
+            no automatic fix, or one this document passes, is reported in
+            `skipped` rather than refused — asking to repair what is already
+            right is not an error.
+        allow_signed: The signed-document decision, taken ONCE for the whole
+            run rather than per door: repairing a document is one act, and a
+            reader asked the same question eight times has been asked nothing.
+
+    Returns ``{output, applied, skipped, refused}``. `applied` names each check
+    and how many findings its door repaired.
+    """
+    wanted = list(AUTOMATIC_CHECKS) if checks is None else [str(c) for c in checks]
+    unknown = [c for c in wanted if c not in _DOORS]
+    if unknown:
+        raise ValueError(
+            f"no automatic accessibility fix exists for {', '.join(sorted(unknown))} "
+            f"(the automatic ones are: {', '.join(AUTOMATIC_CHECKS)})"
+        )
+
+    output_path = Path(output)
+    report = check_accessibility(file)
+    source = str(file)
+    applied: list = []
+    skipped: list = []
+    refused: list = []
+    for check_id in AUTOMATIC_CHECKS:
+        if check_id not in wanted:
+            continue
+        if _status(report, check_id) not in _FIXABLE_STATES:
+            skipped.append({"check": check_id, "status": _status(report, check_id)})
+            continue
+        try:
+            count = _DOORS[check_id](source, str(output_path), report, allow_signed)
+        except (ValueError, RuntimeError) as exc:
+            refused.append({"check": check_id, "reason": str(exc)})
+            continue
+        if count == 0:
+            skipped.append({"check": check_id, "status": _status(report, check_id)})
+            continue
+        applied.append({"check": check_id, "findings": count})
+        # Every later door reads the file the previous one wrote.
+        source = str(output_path)
+    if not applied and refused:
+        raise RuntimeError(refused[0]["reason"])
+    if not applied and checks is not None:
+        # A caller that NAMED its fixes is told when none of them ran: a sweep
+        # over a folder reports "nothing to repair" as a result, but a surface
+        # that reported success after changing nothing would be lying about
+        # the row the reader just clicked.
+        # The reason is in `skipped`, structured. It is NOT composed into the
+        # sentence: a refusal that interpolated its own English explanation
+        # would re-emit that English inside every translated one.
+        raise ValueError("There is nothing here for that fix to repair.")
+    if not applied and source != str(output_path) and Path(file).resolve() != output_path.resolve():
+        # Nothing to repair, and the caller asked for a copy: an output path
+        # that does not exist would report a success that wrote no file.
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(Path(file).read_bytes())
+    return {
+        "output": str(output_path),
+        "applied": applied,
+        "skipped": skipped,
+        "refused": refused,
+    }

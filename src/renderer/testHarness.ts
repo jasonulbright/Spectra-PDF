@@ -387,6 +387,9 @@ export interface AccessibilityHandlers {
       counted: number;
       findings: number;
       addressKinds: string[];
+      /** What the row offers right now: an automatic button, an authored
+       * field, or nothing (the check routes instead). */
+      fix: string | null;
     }[];
     expandedCategories: string[];
     shownCheck: string | null;
@@ -395,6 +398,8 @@ export interface AccessibilityHandlers {
   jump: (checkId: string, index: number) => Promise<void>;
   show: (checkId: string) => Promise<void>;
   exportTo: (destPath: string) => Promise<string>;
+  fix: (checkId: string) => Promise<void>;
+  authoredFix: (checkId: string, index: number | null, value: string) => Promise<void>;
 }
 
 let accessibility: AccessibilityHandlers | null = null;
@@ -1494,6 +1499,11 @@ export interface TestHarness {
   /** Write the report (bypasses the native save dialog; the extension picks
    *  the emitter). Returns the path written. */
   a11yExport: (destPath: string) => Promise<string>;
+  /** Click a check row's automatic Fix. */
+  a11yFix: (checkId: string) => Promise<void>;
+  /** Type one authored value and Apply it. `index` is null for a check-scope
+   * editor (the language and the title), a finding position otherwise. */
+  a11yAuthoredFix: (checkId: string, index: number | null, value: string) => Promise<void>;
   /** The findings drawn on the pages right now. */
   a11yFindingsOnPage: () => {
     id: string;
@@ -2649,6 +2659,32 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         return await accessibility.exportTo(destPath);
       } catch (err) {
         captureError('a11yExport', err);
+        throw err;
+      }
+    },
+    a11yFix: async (checkId) => {
+      if (!accessibility) {
+        const msg = 'a11yFix: the accessibility panel is not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await accessibility.fix(checkId);
+      } catch (err) {
+        captureError('a11yFix', err);
+        throw err;
+      }
+    },
+    a11yAuthoredFix: async (checkId, index, value) => {
+      if (!accessibility) {
+        const msg = 'a11yAuthoredFix: the accessibility panel is not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await accessibility.authoredFix(checkId, index, value);
+      } catch (err) {
+        captureError('a11yAuthoredFix', err);
         throw err;
       }
     },
