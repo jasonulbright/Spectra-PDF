@@ -5,6 +5,7 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
+import { localizeEngineMessage } from '../lib/engine-messages';
 import {
   DEFAULT_INK_DENSITY,
   MAX_INK_DENSITY,
@@ -13,6 +14,7 @@ import {
   MIN_TAC_LIMIT,
   coverageRows,
   inkRows,
+  inventoryIsComplete,
   orderInks,
   type Ink,
   type InkRow,
@@ -33,14 +35,21 @@ export function OutputPreviewPanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const {
-    armed, setArmed, inks, plates, coverage, hidden, toggleInk, showAllInks, hideAllInks,
-    densities, setDensity, aliases, sequence, limitPct, setLimitPct, alarm, setAlarm,
-    overprint, setOverprint, stats, busy, error,
+    armed, setArmed, inks, inkUnknown, plates, coverage, hidden, toggleInk, showAllInks,
+    hideAllInks, densities, setDensity, aliases, sequence, limitPct, setLimitPct, alarm,
+    setAlarm, overprint, setOverprint, stats, busy, error,
   } = useSeparationPreview();
 
   if (!activeFile) {
     return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.outputPreview.open')} />;
   }
+
+  // The preview still renders: a plate that IS known is honest, and withholding
+  // it would trade a stated gap for a blank panel. What the engine could not
+  // read is stated beside it, and every figure measured over the plate set
+  // carries the caveat that the set may be short one ink.
+  const unknown = inkUnknown.map(localizeEngineMessage);
+  const complete = inventoryIsComplete({ unknown: inkUnknown });
 
   const coverageByName = new Map(coverageRows(coverage).map((row) => [row.name, row.pct]));
   const nonInks: Ink[] = inks.filter((i) => i.kind === 'all' || i.kind === 'none');
@@ -129,6 +138,12 @@ export function OutputPreviewPanel(): React.ReactElement {
 
       <p className="text-xs text-neutral-500">{tChrome('panel.outputPreview.blurb')}</p>
 
+      {!complete && (
+        <div className="text-xs text-amber-400" data-testid="output-preview-unknown">
+          {tChrome('panel.outputPreview.unknownNote', { reasons: unknown.join(' ') })}
+        </div>
+      )}
+
       <div className="flex flex-col gap-2">
         <label className="flex items-center gap-2 text-sm text-neutral-300">
           <input
@@ -179,6 +194,11 @@ export function OutputPreviewPanel(): React.ReactElement {
                 })
               : tChrome('panel.outputPreview.withinLimit', { limit: limitPct })}
           </div>
+          {!complete && (
+            <div className="text-xs text-amber-400" data-testid="output-preview-tac-caveat">
+              {tChrome('panel.outputPreview.figuresCaveat')}
+            </div>
+          )}
         </div>
       )}
 
@@ -215,6 +235,11 @@ export function OutputPreviewPanel(): React.ReactElement {
         {plates.length === 0 && !busy && (
           <div className="text-xs text-neutral-500" data-testid="output-preview-empty">
             {tChrome('panel.outputPreview.noPlates')}
+          </div>
+        )}
+        {!complete && (
+          <div className="text-xs text-amber-400" data-testid="output-preview-plates-caveat">
+            {tChrome('panel.outputPreview.platesCaveat')}
           </div>
         )}
       </div>
