@@ -1002,6 +1002,16 @@ export interface CanvasEditImagesHandlers {
     smallCaps?: boolean;
     alternates?: boolean;
     altIndex?: number;
+    writingMode?: 'horizontal' | 'vertical' | 'vertical-rl' | 'vertical-lr';
+    spans?: {
+      start: number;
+      end: number;
+      size?: number;
+      color?: [number, number, number];
+      bold?: boolean;
+      italic?: boolean;
+      tcy?: boolean;
+    }[];
   }) => Promise<void>;
   // Vector objects.
   vectorPageIds: () => string[];
