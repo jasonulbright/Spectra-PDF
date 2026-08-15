@@ -78,6 +78,7 @@ const noopHandlers = (): AppCommandHandlers => ({
   openScheduledRuns: vi.fn(),
   openWatchedFolders: vi.fn(),
   openCreatePdf: vi.fn(),
+  openCreatePdfFrom: vi.fn(),
   openScan: vi.fn(),
   insertBlankPage: vi.fn(async () => {}),
   insertPagesFromFile: vi.fn(async () => {}),

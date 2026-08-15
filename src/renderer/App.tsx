@@ -257,6 +257,9 @@ function AppContent(): React.ReactElement {
   const [showSchedules, setShowSchedules] = useState(false);
   const [showWatchers, setShowWatchers] = useState(false);
   const [showCreatePdf, setShowCreatePdf] = useState(false);
+  // Which acquisition the dialog starts on, when it was opened from one of
+  // the File ▸ Create siblings rather than from Create PDF itself.
+  const [createPdfAutoStart, setCreatePdfAutoStart] = useState<'clipboard' | 'web' | null>(null);
   // Which destination the scan dialog was opened for. `null` = closed; the
   // mode is settled at the entry point rather than inside the dialog, because
   // "append" is only meaningful where there is a document to append to.
@@ -2163,6 +2166,12 @@ function AppContent(): React.ReactElement {
     openWatchedFolders: () => setShowWatchers(true),
     openCreatePdf: () => {
       setCreatePdfSeed([]);
+      setCreatePdfAutoStart(null);
+      setShowCreatePdf(true);
+    },
+    openCreatePdfFrom: (source) => {
+      setCreatePdfSeed([]);
+      setCreatePdfAutoStart(source);
       setShowCreatePdf(true);
     },
     // An append with nowhere to append to is a new document, not a disabled
@@ -2229,6 +2238,7 @@ function AppContent(): React.ReactElement {
       openScheduledRuns: () => h.current.openScheduledRuns(),
       openWatchedFolders: () => h.current.openWatchedFolders(),
       openCreatePdf: () => h.current.openCreatePdf(),
+      openCreatePdfFrom: (source) => h.current.openCreatePdfFrom(source),
       openScan: (wanted) => h.current.openScan(wanted),
       openExportImages: () => h.current.openExportImages(),
       openExportDocument: (format) => h.current.openExportDocument(format),
@@ -2693,9 +2703,11 @@ function AppContent(): React.ReactElement {
       {showCreatePdf && (
         <CreatePdfDialog
           initialPaths={createPdfSeed}
+          autoStart={createPdfAutoStart}
           onClose={() => {
             setShowCreatePdf(false);
             setCreatePdfSeed([]);
+            setCreatePdfAutoStart(null);
           }}
           onOpenResult={(path) => openByPaths([path])}
         />

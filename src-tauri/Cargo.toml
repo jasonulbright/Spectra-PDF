@@ -44,6 +44,16 @@ windows = { version = "0.62", features = ["UI_ViewManagement", "Win32_Graphics_P
 # to the older windows-core another crate in the graph pulls in, so the
 # generated COM vtable fails to typecheck against the interface it implements.
 windows-core = "0.62"
+# WebView2's own COM bindings, already in the tree because tauri-runtime-wry
+# uses them -- promoted to a direct dependency so the web capture can reach
+# ICoreWebView2_7::PrintToPdf, which is Chromium's own print pipeline.
+webview2-com = "0.38"
+# Those bindings are generated against windows-core 0.61, and an interface
+# cast only typechecks against the `Interface` trait from the SAME
+# windows-core the interface was generated with -- so 0.61 is named alongside
+# the 0.62 the rest of the crate uses. Neither version is a browser-runtime
+# pin: they track the crates, not the installed WebView2.
+windows-core-webview2 = { package = "windows-core", version = "0.61" }
 tokio = { version = "1", features = ["sync", "io-util"] }
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
