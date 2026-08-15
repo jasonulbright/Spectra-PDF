@@ -1596,6 +1596,7 @@
   "dock.close": "Werkzeugbereich schließen",
   "dock.paneLabel": "Werkzeugbereich",
   "dock.resize": "Zum Ändern der Größe ziehen",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "unbekannte Barrierefreiheitskategorie: „{{category}}“ (erwartet eine aus: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} enthält ein XML-Formular (XFA). Seitenvorgänge würden das Formular von seinen Seiten lösen, daher ist {{operation}} für dieses Dokument nicht verfügbar. Füllen Sie das Formular aus oder reduzieren Sie es zuvor mit einem anderen Werkzeug.",
   "engine.acroform.regeneratedFileSPage": "Die Seitenzahl der neu erzeugten Datei weicht von der des Originals ab; ihre Formularfelder können nicht wieder angehängt werden.",
   "engine.attachments.attachmentNamed": "keine Anlage namens {{name}}",

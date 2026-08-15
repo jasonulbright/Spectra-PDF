@@ -59,6 +59,7 @@ from engine.redact import (
 from engine.text_metrics import (
     _child_state,
     _FontCache,
+    _lookup_font,
     _run_metrics,
     measurable,
     show_bytes,
@@ -578,6 +579,14 @@ def _walk_analysis(
                         "off_layer": hidden_at is not None,
                         "ocr_form": in_ocr_form,
                         "empty": not text.strip(),
+                        # The rendered size and the font's own name. Read by
+                        # the contrast check, whose threshold is a function of
+                        # both (WCAG's large-text rule). The size is the Tf
+                        # operand scaled by the text+CTM matrix's vertical
+                        # magnitude, so a run scaled by its matrix reports the
+                        # size it is painted at.
+                        "size": _rendered_size(state, combined),
+                        "font": _base_font(state.font_name, resources, fallback),
                     },
                 )
             )
@@ -636,6 +645,71 @@ def _note_scan(an: _Analysis, box: Rect) -> None:
     an.scan_cover = max(an.scan_cover, _area(box) / page_area)
 
 
+def _base_font(name, resources, fallback) -> str:
+    """The /BaseFont of the font a /Tf name resolves to, or "" — the weight the
+    large-text contrast threshold reads is spelled in that name, not in the
+    resource key."""
+    try:
+        font = _lookup_font(name, resources, fallback)
+    except Exception:
+        return ""
+    if font is None:
+        return ""
+    try:
+        base = font.get("/BaseFont")
+        return str(base) if base is not None else ""
+    except Exception:
+        return ""
+
+
+def _rendered_size(state, combined: Matrix) -> float:
+    """The run's font size in page units: the /Tf operand carried through the
+    text and current transformation matrices' vertical magnitude."""
+    try:
+        size = float(state.font_size)
+    except (TypeError, ValueError):
+        return 0.0
+    try:
+        scale = (float(combined[2]) ** 2 + float(combined[3]) ** 2) ** 0.5
+    except (TypeError, ValueError, IndexError):
+        scale = 1.0
+    # The /Tf operand is applied OUTSIDE the text matrix, so the two multiply.
+    # A degenerate matrix leaves the declared size alone rather than reporting
+    # a zero-point run.
+    return abs(size) * (scale if scale > MIN_EXTENT else 1.0)
+
+
+def backdrop_under(events: list, position: int, rect: Rect) -> tuple:
+    """(sRGB, trusted) of what is painted under the event at `position`.
+
+    The last cover CONTAINING the rect wins, and the answer is trusted only
+    when that cover is one this walk trusts (an axis-aligned rectangle or
+    image placement). An untrusted cover — a general path, a shading, an image
+    whose colour this walk never resolved — still ANSWERS, and answers
+    untrusted: the run is over something, and what it is over is unknown.
+    White is the page's own default, and it is trusted.
+    """
+    rgb = [1.0, 1.0, 1.0]
+    trusted = True
+    for i, event in enumerate(events):
+        if i > position:
+            break
+        if event.kind != "cover":
+            continue
+        if not _contains(event.rect, rect):
+            continue
+        payload = event.payload
+        if payload["trusted"] and payload["rgb"] is not None:
+            rgb = payload["rgb"]
+            trusted = True
+        else:
+            # An opaque cover whose colour is unknowable (an image, a shading)
+            # or whose shape is not a rectangle: it IS the backdrop, and it is
+            # not measurable.
+            trusted = False
+    return rgb, trusted
+
+
 def _classify(an: _Analysis) -> list:
     """Turn the ordered event list into the hidden runs. Background is the last
     trusted cover painted UNDER the run; concealment is any trusted cover
@@ -661,15 +735,13 @@ def _classify(an: _Analysis) -> list:
             out.append(HiddenRun(info["index"], kind, info["text"], rect))
             continue
         if info["mode"] in FILL_MODES:
-            background = [1.0, 1.0, 1.0]
-            for i, cover in covers:
-                if i > position:
-                    break
-                if cover.payload["trusted"] and cover.payload["rgb"] is not None and _contains(
-                    cover.rect, rect
-                ):
-                    background = cover.payload["rgb"]
-            if _colors_match(info["rgb"], background):
+            # The hidden-text question and the contrast question read the SAME
+            # backdrop: one walk, one answer about what is painted under a run.
+            # An untrusted answer withholds the claim entirely — a run over an
+            # image or a general path may be perfectly legible, and matching it
+            # against the trusted cover further down would delete visible text.
+            background, trusted = backdrop_under(an.events, position, rect)
+            if trusted and _colors_match(info["rgb"], background):
                 out.append(HiddenRun(info["index"], "background_fill", info["text"], rect))
                 continue
         covered = False
@@ -705,10 +777,22 @@ def _page_box(page) -> Rect:
 def analyze_page(pdf, page, off_set: set) -> dict:
     """Hidden runs on one page, plus how many hidden optional-content blocks
     its streams carry."""
+    an = page_events(pdf, page, off_set)
+    return {"runs": _classify(an), "layer_blocks": an.layer_blocks}
+
+
+def page_events(pdf, page, off_set: set) -> _Analysis:
+    """The raw ordered paint-event walk of one page.
+
+    `analyze_page`'s sibling: the same walk, stopping before the hidden-text
+    classification, so a second question about paint order (contrast against
+    the backdrop) is answered from the same events rather than from a second
+    traversal.
+    """
     resources = _resolve_resources(page)
     an = _Analysis(pdf, off_set, _page_box(page))
     _walk_analysis(an, pikepdf.parse_content_stream(page), resources, None, IDENTITY, 0)
-    return {"runs": _classify(an), "layer_blocks": an.layer_blocks}
+    return an
 
 
 # ── removing hidden optional content ──────────────────────────────────────

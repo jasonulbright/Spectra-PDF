@@ -11,6 +11,7 @@
 # language. A message NOT in this table passes through verbatim — nothing is
 # ever swallowed. Keys are STABLE: rewording a message keeps its key.
 key	kind	modules	message
+accessibility.unknownAccessibilityCategoryExpected	pattern	accessibility	unknown accessibility category '{{category}}' (expected one of: {{v1}})
 acroform.containsXmlFormXfa	pattern	acroform	{{v0}} contains an XML form (XFA). Page operations would detach the form from its pages, so {{operation}} is not available for this document. Fill the form, or flatten it with another tool first.
 acroform.regeneratedFileSPage	exact	acroform	The regenerated file's page count differs from the original; cannot reattach its form fields.
 attachments.attachmentNamed	pattern	attachments	no attachment named {{name}}
