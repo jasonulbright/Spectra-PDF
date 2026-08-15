@@ -2483,12 +2483,32 @@ export async function preflightJump(checkId: string, index: number): Promise<voi
   );
 }
 
+/**
+ * Toggle one check's findings onto the page, or off again.
+ *
+ * The call returns once the PANEL agrees with the page: `shownCheck` is what
+ * the next toggle branches on, so returning while it is still uncommitted
+ * would make that next toggle publish instead of clear. Reading the drawn set
+ * and the panel in one predicate keeps them one moment rather than two.
+ */
 export async function preflightShow(checkId: string): Promise<void> {
   await browser.executeAsync<void, [string]>(
     function (id, done) {
       (window as any).__SPECTRA_TEST__.preflightShow(id).then(() => done(undefined as any));
     },
     checkId,
+  );
+  await browser.waitUntil(
+    async () => {
+      const [drawn, snapshot] = await Promise.all([
+        a11yFindingsOnPage(),
+        preflightSnapshot(),
+      ]);
+      if (!snapshot) return false;
+      const on = drawn.some((finding) => finding.checkId === checkId);
+      return on ? snapshot.shownCheck === checkId : snapshot.shownCheck !== checkId;
+    },
+    { timeout: 15000, timeoutMsg: `preflightShow(${checkId}): the panel never settled` },
   );
 }
 
