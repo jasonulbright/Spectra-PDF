@@ -345,6 +345,34 @@ portfolio.memberNamed	pattern	portfolio	no member named {{name}}
 portfolio.memberSourceFound	pattern	portfolio	member source not found: {{s}}
 portfolio.portfolioNeedsLeastOne	exact	portfolio	a portfolio needs at least one member file
 portfolio.portfolioOutputCannotOne	exact	portfolio	the portfolio output cannot be one of its own members
+preflight_profiles.giveEitherPreflightProfile	exact	preflight_profiles	Give either a preflight profile id or a profile file, not both.
+preflight_profiles.preflightProfileBasedMust	pattern	preflight_profiles	preflight profile: 'based_on' must be text, got {{based_on}}
+preflight_profiles.preflightProfileCannotBoth	pattern	preflight_profiles	preflight profile: '{{first}}' and '{{second}}' cannot both run — each undoes what the other did. Name one.
+preflight_profiles.preflightProfileCheckApp	pattern	preflight_profiles	preflight profile: '{{check_id}}' is not a check this app runs. A typo here would silently disable a rule.
+preflight_profiles.preflightProfileCheckParameter	pattern	preflight_profiles	preflight profile: check '{{check_id}}' has no parameter '{{name}}' (it takes: {{known}}).
+preflight_profiles.preflightProfileChecksMust	pattern	preflight_profiles	preflight profile: 'checks' must be an object, got {{raw_checks}}
+preflight_profiles.preflightProfileCouldRead	pattern	preflight_profiles	The preflight profile could not be read: {{exc}}
+preflight_profiles.preflightProfileDownsampleImages	pattern	preflight_profiles	preflight profile: downsample_images.dpi is {{v0}} but image_min_dpi_contone.min_dpi is {{v1}} — the fixup would create the failure it is meant to clear.
+preflight_profiles.preflightProfileEnabledMust	pattern	preflight_profiles	preflight profile: {{check_id}}.enabled must be true or false, got {{raw}}
+preflight_profiles.preflightProfileEntryCheck	pattern	preflight_profiles	preflight profile: the entry for check '{{check_id}}' must be an object, got {{entry}}
+preflight_profiles.preflightProfileExpectedObject	pattern	preflight_profiles	preflight profile: expected an object, got {{profile}}
+preflight_profiles.preflightProfileFixupApp	pattern	preflight_profiles	preflight profile: '{{fid}}' is not a fixup this app performs (it knows: {{v1}}).
+preflight_profiles.preflightProfileFixupEntry	pattern	preflight_profiles	preflight profile: a fixup entry must name an id, got {{entry}}
+preflight_profiles.preflightProfileFixupsMust	pattern	preflight_profiles	preflight profile: 'fixups' must be a list, got {{fixups}}
+preflight_profiles.preflightProfileIdMust	exact	preflight_profiles	preflight profile: 'id' must be a non-empty name.
+preflight_profiles.preflightProfileMustList	pattern	preflight_profiles	preflight profile: {{check_id}}.{{name}} must be a list of text values, got {{item}} in it
+preflight_profiles.preflightProfileMustList2	pattern	preflight_profiles	preflight profile: {{check_id}}.{{name}} must be a list of text values, got {{raw}}
+preflight_profiles.preflightProfileMustNumber	pattern	preflight_profiles	preflight profile: {{check_id}}.{{name}} must be a number, got {{raw}}
+preflight_profiles.preflightProfileMustText	pattern	preflight_profiles	preflight profile: {{check_id}}.{{name}} must be text, got {{raw}}
+preflight_profiles.preflightProfileMustTrue	pattern	preflight_profiles	preflight profile: {{check_id}}.{{name}} must be true or false, got {{raw}}
+preflight_profiles.preflightProfileNameMust	pattern	preflight_profiles	preflight profile: 'name' must be text, got {{name}}
+preflight_profiles.preflightProfileParametersFixup	pattern	preflight_profiles	preflight profile: the parameters of fixup '{{fid}}' must be an object, got {{params}}
+preflight_profiles.preflightProfileProfileApp	pattern	preflight_profiles	preflight profile: '{{pid}}' is a profile this app ships and cannot be replaced. Save it under a different id.
+preflight_profiles.preflightProfileSchemaOne	pattern	preflight_profiles	preflight profile: schema {{schema}} is not one this app reads (it reads schema {{SCHEMA}}).
+preflight_profiles.preflightProfileSeverityMust	pattern	preflight_profiles	preflight profile: {{check_id}}.severity is {{raw}}; it must be one of {{v2}}.
+preflight_profiles.preflightProfileValidJson	pattern	preflight_profiles	The preflight profile is not valid JSON: {{exc}}
+preflight_profiles.preflightProfileWhichMust	pattern	preflight_profiles	preflight profile: {{check_id}}.{{name}} is {{value}}, which must be {{bound}}.
+preflight_profiles.therePreflightProfileCalled	pattern	preflight_profiles	There is no preflight profile called '{{pid}}' (this app ships: {{v1}}).
 prepress.couldExtractBundledProfile	pattern	prepress	Could not extract the bundled profile {{name}}: {{v1}}
 prepress.destinationIccProfileFound	pattern	prepress	Destination ICC profile not found: {{profile}}
 prepress.ghostscriptCmykConversionFailed	pattern	prepress	Ghostscript CMYK conversion failed: {{v0}}
