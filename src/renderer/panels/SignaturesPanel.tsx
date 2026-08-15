@@ -33,7 +33,10 @@ import {
 import { FieldLockControl } from '../components/FieldLockControl';
 import { readFormFields } from '../lib/forms';
 import {
+  eutlProvenance,
+  eutlUnavailable,
   loadTrustConfig,
+  saveEutl,
   saveSystemStore,
   saveTrustAnchors,
   systemStoreUnavailable,
@@ -124,9 +127,10 @@ export function SignaturesPanel(): React.ReactElement {
   const [lockableFields, setLockableFields] = useState<string[]>([]);
 
   // Trust management: user-chosen CA anchors, plus an explicit opt-in to the
-  // OS certificate store. Both persisted, both off/empty by default — with
-  // neither, nothing can make `trusted` true, which is the explicit-trust
-  // posture the panel has always stated.
+  // OS certificate store and one to the bundled EU trusted lists. All
+  // persisted, all off/empty by default — with none of them, nothing can make
+  // `trusted` true, which is the explicit-trust posture the panel has always
+  // stated.
   const [trust, setTrust] = useState<TrustConfig>(loadTrustConfig);
   const trustRoots = trust.anchors;
   const saveTrustRoots = useCallback((roots: string[]) => {
@@ -137,6 +141,14 @@ export function SignaturesPanel(): React.ReactElement {
     setTrust((t) => ({ ...t, systemStore: on }));
     saveSystemStore(on);
   }, []);
+  const setEutl = useCallback((on: boolean) => {
+    setTrust((t) => ({ ...t, eutl: on }));
+    saveEutl(on);
+  }, []);
+
+  // The bundle's own provenance, which only a verification can report — the
+  // panel never asserts a fetch date the engine did not just state.
+  const provenance = eutlProvenance(result);
 
   const path = activeFile?.path ?? null;
   const workingPath = activeFile?.workingPath ?? null;
@@ -539,6 +551,34 @@ export function SignaturesPanel(): React.ReactElement {
             {tChrome('panel.sig.systemStoreUnavailable')}
           </p>
         )}
+        {/* The third source: certificates the EU trusted lists publish, bundled
+            with the app rather than fetched. Its provenance is shown because a
+            shipped feed that cannot say how old it is invites being read as
+            current. */}
+        <label className="flex items-center gap-2 text-xs text-neutral-300 mt-1">
+          <input
+            data-testid="trust-eutl"
+            type="checkbox"
+            checked={trust.eutl}
+            onChange={(e) => setEutl(e.target.checked)}
+          />
+          {tChrome('panel.sig.eutl')}
+        </label>
+        <p className="text-[11px] text-neutral-500">{tChrome('panel.sig.eutlHint')}</p>
+        {eutlUnavailable(result) && (
+          <p data-testid="trust-eutl-unavailable" className="text-[11px] text-amber-200/90">
+            {tChrome('panel.sig.eutlUnavailable')}
+          </p>
+        )}
+        {provenance && (
+          <p data-testid="trust-eutl-provenance" className="text-[11px] text-neutral-500">
+            {tChrome('panel.sig.eutlProvenance', {
+              date: provenance.fetched,
+              lists: provenance.lists,
+              anchors: provenance.anchors,
+            })}
+          </p>
+        )}
       </div>
 
       {showSign && (
@@ -772,9 +812,11 @@ function TrustStatusBox({
       ? tChrome('panel.sig.trustFailed')
       : summary === 'system'
         ? tChrome('panel.sig.trustVerifiedSystem')
-        : summary === 'mixed'
-          ? tChrome('panel.sig.trustVerifiedMixed')
-          : tChromeCount('panel.sig.trustVerified', trust.anchors.length);
+        : summary === 'eutl'
+          ? tChrome('panel.sig.trustVerifiedEutl')
+          : summary === 'mixed'
+            ? tChrome('panel.sig.trustVerifiedMixed')
+            : tChromeCount('panel.sig.trustVerified', trust.anchors.length);
   return (
     <div
       data-testid="trust-status"
