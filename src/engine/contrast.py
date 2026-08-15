@@ -134,6 +134,11 @@ def _entry(page_no, info, rect, ink, background, ratio, required, status) -> dic
         "ratio": round(float(ratio), 2) if ratio is not None else None,
         "required": required,
         "status": status,
+        # The ink's own space and components, carried through from the paint
+        # walk. The contrast question is answered in sRGB; "how many inks is
+        # this small black text built from" cannot be, and both ride one walk.
+        "ink_space": info.get("ink", {}).get("family", ""),
+        "ink_components": list(info.get("ink", {}).get("components", [])),
     }
 
 
