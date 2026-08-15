@@ -104,6 +104,15 @@ describe('Print preflight', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  /** A jump opens a panel through a dispatch, so the op is settled-for rather
+   * than read once — the state snapshot is flat, `activeOp` at its top. */
+  async function expectActiveOp(op: string): Promise<void> {
+    await browser.waitUntil(async () => (await getState()).activeOp === op, {
+      timeout: 15000,
+      timeoutMsg: `the jump never landed on ${op}`,
+    });
+  }
+
   it('reports 37 checks as a categorized tree, with the failing categories open', async () => {
     await openByPaths([source]);
     await setView('canvas');
@@ -220,12 +229,12 @@ describe('Print preflight', () => {
     // stays where it is.
     await preflightJump('hairlines_absent', 0);
     expect((await preflightSnapshot())!.shownCheck).toBe('hairlines_absent');
-    expect((await getState()).ui.activeOp).toBe('preflight');
+    await expectActiveOp('preflight');
 
     // object: the annotation's own panel.
     await invokeAppCommand('tools.panel.preflight');
     await preflightJump('printing_annotations', 0);
-    expect((await getState()).ui.activeOp).toBe('comments');
+    await expectActiveOp('comments');
 
     // page: the surface that owns the edit — a different one again.
     await invokeAppCommand('tools.panel.preflight');
@@ -234,7 +243,7 @@ describe('Print preflight', () => {
       timeoutMsg: 'the preflight report never came back',
     });
     await preflightJump('trim_box', 0);
-    expect((await getState()).ui.activeOp).toBe('pagebox');
+    await expectActiveOp('pagebox');
   });
 
   it('exports both formats, carrying every check id AND its parameters', async () => {
