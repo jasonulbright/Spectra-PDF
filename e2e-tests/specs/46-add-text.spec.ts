@@ -293,10 +293,10 @@ describe('add text', () => {
     expect(await invokeAppCommand('edit.undo')).toBe(true);
   });
 
-  // T29 — vertical AUTHORING. The embed side (Identity-V, /W2) and the edit
-  // side (the orientation model, vertical reflow) both shipped before
-  // creation existed, so a user could restyle and reflow a column and never
-  // make one. These two cases are the wire for the half that was missing.
+  // Vertical AUTHORING. The embed side (Identity-V, /W2) and the edit side
+  // (the orientation model, vertical reflow) both worked before creation
+  // did, so a user could restyle and reflow a column and never make one.
+  // These two cases are the wire for the half that was missing.
   it('authors a VERTICAL column through the card and reflows it', async function () {
     this.timeout(180_000);
     await waitForHarness();
@@ -343,19 +343,24 @@ describe('add text', () => {
 
     // …and it reflows through the shipped vertical machinery, which is the
     // whole point of authoring into the same model rather than beside it.
+    // The retype REARRANGES the authored characters rather than introducing
+    // new ones: an authored box embeds a subset of exactly what it drew, so
+    // a character it never contained is a font CONVERT (the editor's own
+    // explicit offer) and not the reflow this is about.
+    const retyped = '段落は日本語です。';
     await openParagraphEditor(column!.pageId, column!.index);
     await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
-    await setContentEditableValue('[data-testid="edit-para-input"]', '縦書きを書き換えた。');
+    await setContentEditableValue('[data-testid="edit-para-input"]', retyped);
     await browser.keys(['Enter']);
-    await browser.waitUntil(async () => (await authoredParagraph('書き換えた')) !== null, {
+    await browser.waitUntil(async () => (await authoredParagraph(retyped)) !== null, {
       timeout: 30_000,
       timeoutMsg: 'the retyped column never re-listed',
     });
-    expect((await authoredParagraph('書き換えた'))?.orientation).toBe('vertical-rl');
+    expect((await authoredParagraph(retyped))?.orientation).toBe('vertical-rl');
 
     // Undo peels the reflow, then the authoring.
     expect(await invokeAppCommand('edit.undo')).toBe(true);
-    await browser.waitUntil(async () => (await authoredParagraph('書き換えた')) === null, {
+    await browser.waitUntil(async () => (await authoredParagraph(retyped)) === null, {
       timeout: 30_000,
       timeoutMsg: 'undo did not take back the reflow',
     });
