@@ -311,6 +311,7 @@
 ### Fixes
 - Exporting or importing a guided action to a folder of your own now works.
 - It only ever succeeded inside the app's own temporary folder, and refused everywhere else.
+- Updated bundled and build-time dependencies, clearing GHSA-jmr9-qjv8-65gv in a test-only archive extractor.
 
 ## 1.0.29
 
