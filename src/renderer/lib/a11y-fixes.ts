@@ -18,7 +18,7 @@ import type { Check, Finding } from './accessibility-report';
 export type FixKind = 'auto' | 'authored';
 
 /** What an authored fix asks for. */
-export type FixInput = 'text' | 'language';
+export type FixInput = 'text' | 'language' | 'role';
 
 export interface AuthoredFix {
   /** The control the value is typed into. */
@@ -26,8 +26,12 @@ export interface AuthoredFix {
   /** Whether the value repairs the whole check at once or one finding. */
   scope: 'check' | 'finding';
   /** Catalog suffix for the field's label and its placeholder. */
-  field: 'alt' | 'summary' | 'description' | 'title' | 'lang';
+  field: 'alt' | 'summary' | 'description' | 'title' | 'lang' | 'role';
 }
+
+/** The two answers binding untagged content takes. There is no third: content
+ * a reader should hear, or page furniture it should not. */
+export const CONTENT_ROLES = ['P', 'Artifact'] as const;
 
 export interface FixOffer {
   kind: FixKind;
@@ -49,11 +53,17 @@ export const AUTOMATIC_CHECKS: readonly string[] = [
   'table_headers',
   'nested_alt',
   'alt_hides_annotation',
+  // Binding an annotation into the tree needs no value from anyone: the
+  // element's role follows from the annotation's own subtype.
+  'tagged_annotations',
+  'tagged_multimedia',
+  'tagged_form_fields',
 ];
 
 /** The engine's authored set, mirrored (`AUTHORED_CHECKS`). */
 export const AUTHORED_CHECKS: readonly string[] = [
   'lang',
+  'tagged_content',
   'title',
   'field_descriptions',
   'figures_alt',
@@ -62,6 +72,7 @@ export const AUTHORED_CHECKS: readonly string[] = [
 
 const AUTHORED: Record<string, AuthoredFix> = {
   lang: { input: 'language', scope: 'check', field: 'lang' },
+  tagged_content: { input: 'role', scope: 'finding', field: 'role' },
   title: { input: 'text', scope: 'check', field: 'title' },
   field_descriptions: { input: 'text', scope: 'finding', field: 'description' },
   figures_alt: { input: 'text', scope: 'finding', field: 'alt' },
@@ -149,6 +160,16 @@ export function authoredCall(
       if (!path || !text) return null;
       return { method: 'set_struct_props', params: { path, props: { summary: text } } };
     }
+    case 'tagged_content': {
+      const page = finding?.address.page;
+      const run = finding?.address.run;
+      if (typeof page !== 'number' || typeof run !== 'number') return null;
+      if (!(CONTENT_ROLES as readonly string[]).includes(text)) return null;
+      return {
+        method: 'tag_page_content',
+        params: { page, targets: [{ run }], role: text, ...signed },
+      };
+    }
     default:
       return null;
   }
@@ -171,4 +192,37 @@ export function draftKey(checkId: string, findingIndex: number | null): string {
 export function suggestionFor(checkId: string, finding: Finding | null): string {
   if (checkId === 'field_descriptions') return finding?.address.field ?? '';
   return '';
+}
+
+/**
+ * "Declare the rest decoration" — every untagged run this check named, as
+ * artifacts, ONE CALL PER PAGE.
+ *
+ * Per page because marked-content ids are page-scoped: a single call spanning
+ * two pages would have to allocate two numbering spaces, which is the rule the
+ * door exists to keep. Each page is therefore its own undoable step, and a
+ * page of running heads — the case this action exists for — is one step.
+ */
+export function artifactCalls(check: Check, allowSigned: boolean): AuthoredCall[] {
+  const byPage = new Map<number, number[]>();
+  for (const item of check.findings) {
+    const page = item.address.page;
+    const run = item.address.run;
+    if (item.address.kind !== 'content') continue;
+    if (typeof page !== 'number' || typeof run !== 'number') continue;
+    const runs = byPage.get(page) ?? [];
+    runs.push(run);
+    byPage.set(page, runs);
+  }
+  return [...byPage.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([page, runs]) => ({
+      method: 'tag_page_content',
+      params: {
+        page,
+        targets: [...new Set(runs)].sort((a, b) => a - b).map((run) => ({ run })),
+        role: 'Artifact',
+        allow_signed: allowSigned,
+      },
+    }));
 }

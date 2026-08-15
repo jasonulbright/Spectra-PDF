@@ -82,6 +82,7 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   set_document_title: 'Set Document Title',
   set_field_description: 'Set Field Description',
   set_struct_props: 'Edit Tag',
+  tag_page_content: 'Tag Page Content',
   move_struct_node: 'Move Tag',
   delete_struct_node: 'Delete Tag',
   add_struct_node: 'New Tag',
