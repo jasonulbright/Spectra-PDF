@@ -219,6 +219,7 @@ export const COMMAND_IDS = [
   'tools.formPrepFolder',
   'tools.folderExport',
   'tools.folderCreatePdf',
+  'tools.folderPreflight',
   'tools.scheduledRuns',
   'tools.watchedFolders',
   'file.createPdf',
@@ -591,6 +592,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'One PDF per Folder…',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openFolderCreatePdf(),
+  },
+  // Same no-document shape again: it measures a picked tree against one print
+  // profile and mirrors the reports — and, in fix mode, the repaired copies.
+  'tools.folderPreflight': {
+    title: 'Preflight a Folder…',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openFolderPreflight(),
   },
   // Request 5 — same no-document shape as Batch OCR: it manages schedules over
   // picked folder trees, nothing to do with what is open.

@@ -666,6 +666,47 @@ def _convert_shadings(pdf, target_names: set[str]) -> int:
     return converted
 
 
+def _names_selecting(resources, key: str) -> bool:
+    """Does anything in these resources still SELECT this colour-space key by
+    name? An image or a shading may carry `/ColorSpace /S2` rather than the
+    array itself, and those two are converted by their own passes only where
+    the array is inline — so a key one of them still names stays."""
+    wanted = pikepdf.Name("/" + key.lstrip("/"))
+    for group_key in ("/XObject", "/Shading", "/Pattern"):
+        group = resources.get(group_key)
+        if not isinstance(group, pikepdf.Dictionary):
+            continue
+        for entry in list(group.keys()):
+            try:
+                obj = group[entry]
+                if obj.get("/ColorSpace") == wanted:
+                    return True
+                shading = obj.get("/Shading")
+                if shading is not None and shading.get("/ColorSpace") == wanted:
+                    return True
+            except Exception:  # noqa: BLE001 — an unreadable entry keeps the key
+                return True
+    return False
+
+
+def _drop_converted_spaces(resources, table, targets: dict) -> None:
+    """Remove the declarations the rewrite just stopped using.
+
+    Converting the PAINTS and leaving the `/Separation` in `/ColorSpace` left
+    the plate still declared: every reader that counts plates from the
+    resource tables — this app's own ink list among them — went on reporting a
+    colorant nothing prints. A conversion that does not remove the declaration
+    has not converted the plate, only the marks on it.
+    """
+    for key in targets:
+        if _names_selecting(resources, key):
+            continue
+        try:
+            del table[pikepdf.Name("/" + key.lstrip("/"))]
+        except Exception:  # noqa: BLE001 — a key that will not delete stays
+            continue
+
+
 def spot_to_process(
     file: str,
     output: str,
@@ -744,6 +785,7 @@ def spot_to_process(
                 converted_spaces += 1
             if targets:
                 changed_paints += _rewrite_stream(pdf, owner, targets, alt_cache)
+                _drop_converted_spaces(resources, table, targets)
 
         changed_images = _convert_images(pdf, wanted)
         changed_shadings = _convert_shadings(pdf, wanted)

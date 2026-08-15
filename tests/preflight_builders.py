@@ -234,6 +234,17 @@ def _bleed_too_small(doc) -> None:
     })
 
 
+def _bleed_box_at_trim(doc) -> None:
+    """A bleed box flush with the trim: no bleed at all, and a sheet with room
+    for one. The fixup's success case, as distinct from `bleed_too_small`,
+    whose trim runs to within 2 pt of the sheet edge and where growing a bleed
+    box has nowhere to go."""
+    w, h = LETTER
+    add_page(doc, _base_resources(doc), b"", boxes={
+        "/TrimBox": [18, 18, w - 18, h - 18], "/BleedBox": [18, 18, w - 18, h - 18],
+    })
+
+
 def _page_count_odd(doc) -> None:
     for _ in range(3):
         add_page(doc, _base_resources(doc), b"", boxes=_full_boxes())
@@ -596,6 +607,7 @@ BUILDERS = {
     "no_trim_box": _no_trim_box,
     "trim_equals_media": _trim_equals_media,
     "bleed_too_small": _bleed_too_small,
+    "bleed_box_at_trim": _bleed_box_at_trim,
     "page_count_odd": _page_count_odd,
     "rgb_content": _rgb_content,
     "rgb_image_only": _rgb_image_only,

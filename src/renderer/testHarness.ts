@@ -439,10 +439,15 @@ export interface PreflightHandlers {
       addressKinds: string[];
       /** The rule the row was measured against, resolved. */
       params: Record<string, unknown>;
+      /** What this row's fix control offers right now, or null for nothing —
+       * a function of the verdict AND of what the profile carries. */
+      fix: 'auto' | 'authored' | null;
     }[];
     profiles: string[];
     expandedCategories: string[];
     shownCheck: string | null;
+    /** The checks "fix what this profile can" would repair. */
+    fixable: string[];
   } | null;
   recheck: () => Promise<void>;
   selectProfile: (id: string) => Promise<void>;
@@ -454,12 +459,66 @@ export interface PreflightHandlers {
   importProfileFrom: (fromPath: string) => Promise<string>;
   /** Write the selected profile out in the shape the import accepts. */
   exportProfileTo: (destPath: string) => Promise<string>;
+  /** Repair one row, the same call its Fix control makes. */
+  fix: (checkId: string) => Promise<boolean>;
+  /** "Fix what this profile can" — one act, one undo entry. */
+  fixAll: () => Promise<boolean>;
+  /** Type an authored value and apply it. `index` is null for a check-scope
+   * fixup and the finding's position for a per-finding one. */
+  authoredFix: (
+    checkId: string,
+    index: number | null,
+    value: string,
+  ) => Promise<boolean>;
 }
 
 let preflight: PreflightHandlers | null = null;
 
 export function registerPreflight(handlers: PreflightHandlers | null): void {
   preflight = handlers;
+}
+
+/**
+ * The droplet: a profile over a folder. The folder pickers are native, so e2e
+ * injects both paths into the SAME selection flow the buttons run and then
+ * drives the real sweep. `reportsWritten` counts the LOCALIZED reports the
+ * post-pass emitted, which is the half a command-line run does not have.
+ */
+export interface FolderPreflightHandlers {
+  setSource: (path: string) => Promise<void>;
+  setDest: (path: string) => void;
+  setProfile: (id: string) => void;
+  setMode: (mode: string) => void;
+  run: () => Promise<void>;
+  snapshot: () => {
+    phase: 'setup' | 'running' | 'done';
+    fileCount: number | null;
+    report: {
+      mode: string;
+      total: number;
+      ok: number;
+      failed: number;
+      clean: number;
+      in_place: boolean;
+      log_path?: string;
+      results: {
+        rel: string;
+        status: string;
+        before?: { failed: number; passed: number };
+        after?: { failed: number; passed: number };
+        applied?: string[];
+        report?: string;
+        error?: string;
+      }[];
+    } | null;
+    reportsWritten: number;
+  };
+}
+
+let folderPreflight: FolderPreflightHandlers | null = null;
+
+export function registerFolderPreflight(handlers: FolderPreflightHandlers | null): void {
+  folderPreflight = handlers;
 }
 
 /** What the Tags panel currently has selected — the landing side of an
@@ -1559,6 +1618,23 @@ export interface TestHarness {
   preflightImportProfile: (fromPath: string) => Promise<string>;
   /** Export the selected profile; returns the path written. */
   preflightExportProfile: (destPath: string) => Promise<string>;
+  /** Droplet injectors (dialog must be open — `tools.folderPreflight`). */
+  folderPreflightSetFolders: (source: string, dest: string) => Promise<void>;
+  folderPreflightSetProfile: (id: string) => void;
+  folderPreflightSetMode: (mode: string) => void;
+  folderPreflightRun: () => Promise<void>;
+  folderPreflightSnapshot: () => ReturnType<FolderPreflightHandlers['snapshot']> | null;
+  /** Repair one row — the same engine call its Fix control makes, and one
+   * undo entry. */
+  preflightFix: (checkId: string) => Promise<boolean>;
+  /** "Fix what this profile can": every automatic row in one act. */
+  preflightFixAll: () => Promise<boolean>;
+  /** Apply one authored fixup's value (title, trapping state, bleed, ink). */
+  preflightAuthoredFix: (
+    checkId: string,
+    index: number | null,
+    value: string,
+  ) => Promise<boolean>;
   /** The accessibility report (the panel must be open — `tools.panel.accessibility`). */
   a11ySnapshot: () => ReturnType<AccessibilityHandlers['snapshot']> | null;
   a11yRecheck: () => Promise<void>;
@@ -1934,6 +2010,16 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     const msg = err instanceof Error ? err.message : String(err);
     lastError = `${label}: ${msg}`;
   };
+
+  /** The droplet dialog, or the refusal that says it is not open. */
+  function requireFolderPreflight(label: string): FolderPreflightHandlers {
+    if (!folderPreflight) {
+      const msg = `${label}: the folder preflight dialog is not open`;
+      captureError(label, msg);
+      throw new Error(msg);
+    }
+    return folderPreflight;
+  }
 
   /** The preflight panel, or the refusal that says it is not mounted. A spec
    * that drove a closed panel would otherwise read as a passing no-op. */
@@ -2735,6 +2821,54 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         return await handlers.importProfileFrom(fromPath);
       } catch (err) {
         captureError('preflightImportProfile', err);
+        throw err;
+      }
+    },
+    folderPreflightSetFolders: async (source, dest) => {
+      const handlers = requireFolderPreflight('folderPreflightSetFolders');
+      await handlers.setSource(source);
+      if (dest) handlers.setDest(dest);
+    },
+    folderPreflightSetProfile: (id) => {
+      requireFolderPreflight('folderPreflightSetProfile').setProfile(id);
+    },
+    folderPreflightSetMode: (mode) => {
+      requireFolderPreflight('folderPreflightSetMode').setMode(mode);
+    },
+    folderPreflightRun: async () => {
+      const handlers = requireFolderPreflight('folderPreflightRun');
+      try {
+        await handlers.run();
+      } catch (err) {
+        captureError('folderPreflightRun', err);
+        throw err;
+      }
+    },
+    folderPreflightSnapshot: () => folderPreflight?.snapshot() ?? null,
+    preflightFix: async (checkId) => {
+      const handlers = requirePreflight('preflightFix');
+      try {
+        return await handlers.fix(checkId);
+      } catch (err) {
+        captureError('preflightFix', err);
+        throw err;
+      }
+    },
+    preflightFixAll: async () => {
+      const handlers = requirePreflight('preflightFixAll');
+      try {
+        return await handlers.fixAll();
+      } catch (err) {
+        captureError('preflightFixAll', err);
+        throw err;
+      }
+    },
+    preflightAuthoredFix: async (checkId, index, value) => {
+      const handlers = requirePreflight('preflightAuthoredFix');
+      try {
+        return await handlers.authoredFix(checkId, index, value);
+      } catch (err) {
+        captureError('preflightAuthoredFix', err);
         throw err;
       }
     },

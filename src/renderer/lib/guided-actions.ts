@@ -33,6 +33,7 @@ export type GuidedStepOp =
   | 'optimize'
   | 'grayscale'
   | 'convert_pdfa'
+  | 'preflight'
   | 'strip_metadata'
   | 'sanitize'
   | 'search_redact'
@@ -199,6 +200,29 @@ export const STEP_CATALOG: readonly StepDef[] = [
           { value: '3b', label: 'PDF/A-3b' },
         ],
         defaultValue: '2b',
+      },
+    ],
+  },
+  {
+    // A print profile inside a longer authored action. It calls the SAME
+    // `apply_fixups` door the panel button, the command line and the droplet
+    // call, so what repairing a finding means is not answered a second time.
+    // Fix only: every step here TRANSFORMS the document it is handed, and a
+    // check produces a report an action has nowhere to put — Tools ▸ Preflight
+    // a Folder is where a check over a folder lives.
+    op: 'preflight',
+    title: 'Bring Up to a Print Profile',
+    needsGs: true,
+    needsFontDir: true,
+    needsTesseract: true,
+    params: [
+      {
+        key: 'profile',
+        label: 'Profile',
+        kind: 'text',
+        defaultValue: 'sheetfed_offset',
+        required: true,
+        hint: 'A profile id — the command line lists them with preflight-profiles.',
       },
     ],
   },
