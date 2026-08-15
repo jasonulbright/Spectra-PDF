@@ -149,7 +149,7 @@ font_fallback.fallbackFontCannotExpress	pattern	font_fallback	the fallback font 
 font_fallback.fallbackFontFound	pattern	font_fallback	no fallback font found in {{font_path}}
 font_fallback.fallbackFontLostGlyph	pattern	font_fallback	the fallback font lost glyph {{g}} while subsetting
 font_fallback.fontCannotCarryBoth	pattern	font_fallback	this font cannot carry both spellings of one glyph ({{prior}} and {{spells}})
-font_fallback.fontVerticalMetricsPick	exact	font_fallback,text_paragraphs	that font has no vertical metrics — pick one that does
+font_fallback.fontVerticalMetricsPick	exact	font_fallback,text_authoring,text_paragraphs	that font has no vertical metrics — pick one that does
 font_fallback.libertinusSerifFeatureFont	pattern	font_fallback	Libertinus Serif (feature font) not found in {{font_path}}
 font_fallback.textEmbed	exact	font_fallback	no text to embed
 font_fallback.verticalFallbackFontCannot	pattern	font_fallback	the vertical fallback font cannot express {{ch}}
@@ -620,14 +620,23 @@ text_authoring.familyMustSerifSans	exact	text_authoring,text_paragraphs	family m
 text_authoring.italicMustTrueFalse	pattern	text_authoring	italic must be true or false (got {{italic}})
 text_authoring.kernMustTrueFalse	pattern	text_authoring	kern must be true or false (got {{kern}})
 text_authoring.rotateMustNumberDegrees	pattern	text_authoring	rotate must be a number of degrees (got {{rotate}})
+text_authoring.rotatedBoxCannotAlso	exact	text_authoring	a rotated box cannot also have a vertical writing mode
 text_authoring.smallCapsAlternatesDo	exact	text_authoring	small caps and alternates do not apply to this script
+text_authoring.smallCapsAlternatesDo2	exact	text_authoring	small caps and alternates do not apply to vertical text
 text_authoring.spanColorMustR	exact	text_authoring	span color must be [r,g,b] in 0..1
 text_authoring.spanMustTrueFalse	pattern	text_authoring	span {{key}} must be true or false
 text_authoring.spanOutRange	pattern	text_authoring	span [{{start}},{{end}}) is out of range
 text_authoring.spanSizeOutRange	exact	text_authoring	span size out of range
 text_authoring.spansMustAscendingNon	exact	text_authoring	spans must be ascending and non-overlapping
 text_authoring.styleChangeInsideJoined	exact	text_authoring	a style change inside a joined word cannot be drawn — style whole words in this script
+text_authoring.tateChuYokoBlock	exact	text_authoring	a tate-chu-yoko block cannot contain joining characters
+text_authoring.tateChuYokoBlock2	exact	text_authoring	a tate-chu-yoko block cannot contain spaces
+text_authoring.tateChuYokoBlock3	exact	text_authoring	a tate-chu-yoko block cannot share a box with a shaped script
+text_authoring.tateChuYokoOnly	exact	text_authoring	tate-chu-yoko only applies inside a vertical column
 text_authoring.textAdd	exact	text_authoring	no text to add
+text_authoring.textSetsColumnsLeft	exact	text_authoring	this text sets columns left to right — use vertical-lr
+text_authoring.textSetsColumnsRight	exact	text_authoring	this text sets columns right to left — use vertical-rl
+text_authoring.writingModeMustHorizontal	pattern	text_authoring	writing_mode must be horizontal, vertical, vertical-rl or vertical-lr (got {{writing_mode}})
 text_export.documentTextLayerThere	exact	text_export	this document has no text layer, so there is nothing to export as text -- run OCR on it first to add one
 text_export.unknownTextLayoutChoose	pattern	text_export	unknown text layout {{layout}} (choose reading or layout)
 text_match.unknownPatternBuiltPatterns	pattern	text_match	unknown pattern {{pattern_id}} — the built-in patterns are: {{known}}
@@ -649,7 +658,7 @@ text_paragraphs.editedTextEmptyDelete	exact	text_paragraphs	the edited text is e
 text_paragraphs.editedTextNeedsSpan	exact	text_paragraphs	edited text needs its span map
 text_paragraphs.fallbackFontPathRequired	exact	text_paragraphs	fallback font path is required to convert
 text_paragraphs.fallbackFontPathRequired2	exact	text_paragraphs	fallback font path is required to restyle
-text_paragraphs.fontVerticalFormsPick	exact	text_paragraphs	that font has no vertical forms — pick one that does
+text_paragraphs.fontVerticalFormsPick	exact	text_authoring,text_paragraphs	that font has no vertical forms — pick one that does
 text_paragraphs.nextParagraphMerge	exact	text_paragraphs	no next paragraph to merge with
 text_paragraphs.pageSTextChanged	exact	text_paragraphs	the page's text changed underneath this edit — reopen the editor
 text_paragraphs.paragraphCannotWrapWidth	exact	text_paragraphs	the paragraph cannot wrap to that width — a word is wider than the box
