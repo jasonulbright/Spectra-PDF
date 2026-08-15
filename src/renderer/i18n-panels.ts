@@ -633,6 +633,11 @@ export const PANEL_STRINGS = {
     'Coverage is the share of the page each process ink covers, averaged over the whole page. The limit above measures the heaviest single pixel instead.',
   'panel.outputPreview.specialInks': 'Not separate plates: {{names}}',
   'panel.outputPreview.merged': 'with {{names}}',
+  'panel.outputPreview.unknownNote':
+    'Part of this document could not be read, so this page may use inks that are not listed below: {{reasons}}',
+  'panel.outputPreview.platesCaveat': 'This may not be every ink on the page.',
+  'panel.outputPreview.figuresCaveat':
+    'These figures cover only the plates listed below, so the real totals may be higher.',
 
   'panel.inkManager.open': 'Open a PDF to manage its inks',
   'panel.inkManager.blurb':

@@ -24,6 +24,14 @@ from separation_builders import (
     many_spots_pdf,
     overprint_pdf,
     tac_ladder_pdf,
+    unreadable_colorspace_table_pdf,
+)
+from transparency_builders import (
+    over_depth_forms_pdf,
+    unreadable_child_subtype_pdf,
+    unreadable_form_gstate_pdf,
+    unreadable_form_resources_pdf,
+    unreadable_page_gstate_pdf,
 )
 
 np = pytest.importorskip("numpy")
@@ -82,6 +90,66 @@ class TestInkInventory:
         assert ink_kind("PANTONE 185 C") == "spot"
         assert ink_kind("All") == "all"
         assert ink_kind("None") == "none"
+
+    def test_a_document_read_whole_reports_nothing_unknown(self, tmp_path):
+        src = inks_everywhere_pdf(tmp_path / "everywhere.pdf")
+        assert list_inks(src)["unknown"] == []
+
+
+class TestInventoryReportsWhatItCouldNotRead:
+    """An ink inventory answers with what it found AND what it could not look at.
+
+    Every case here used to return an ink list alone: the walk skipped the
+    branch, the colorant it could have held never arrived, and the panel
+    rendered the absence as the document's whole plate set — with the
+    total-ink figures measured over that same short set.
+    """
+
+    def test_an_unreadable_colorspace_table_is_reported_beside_the_inks(self, tmp_path):
+        src = unreadable_colorspace_table_pdf(tmp_path / "broken.pdf")
+        result = list_inks(src)
+        # The ink it DID reach is still returned — the read degrades, it does
+        # not refuse.
+        assert "PANTONE 185 C" in {e["name"] for e in result["inks"]}
+        assert len(result["unknown"]) == 1
+        assert "Page 1" in result["unknown"][0]
+        assert "cannot all be established" in result["unknown"][0]
+
+    def test_the_page_named_is_the_page_the_branch_is_on(self, tmp_path):
+        src = unreadable_colorspace_table_pdf(tmp_path / "p2.pdf", pages=2, broken_on=2)
+        assert "Page 2" in list_inks(src)["unknown"][0]
+
+    def test_only_the_requested_pages_are_reported(self, tmp_path):
+        src = unreadable_colorspace_table_pdf(tmp_path / "p2.pdf", pages=2, broken_on=2)
+        assert list_inks(src, pages=[1])["unknown"] == []
+
+    @pytest.mark.parametrize("builder", [
+        unreadable_form_resources_pdf,
+        unreadable_child_subtype_pdf,
+        over_depth_forms_pdf,
+    ])
+    def test_a_subtree_that_will_not_read_could_hold_a_colorant(self, tmp_path, builder):
+        src = builder(str(tmp_path / f"{builder.__name__}.pdf"))
+        assert list_inks(src)["unknown"], builder.__name__
+
+    @pytest.mark.parametrize("builder", [
+        unreadable_form_gstate_pdf,
+        unreadable_page_gstate_pdf,
+    ])
+    def test_an_unreadable_graphics_state_hides_no_ink(self, tmp_path, builder):
+        """A skip only clouds the answers that read from it — a graphics state
+        carries alpha, never a colorant."""
+        src = builder(str(tmp_path / f"{builder.__name__}.pdf"))
+        assert list_inks(src)["unknown"] == [], builder.__name__
+
+    def test_the_render_still_runs_over_the_plates_that_are_known(self, tmp_path):
+        """The preview is not withheld: plates that ARE known stay honest, and
+        the panel states what could not be read alongside them."""
+        src = unreadable_colorspace_table_pdf(tmp_path / "broken.pdf")
+        result = list_inks(src, pages=[1])
+        assert result["spot_count"] == 1
+        assert result["pages"] == [1]
+        assert result["unknown"]
 
 
 class TestPlateNameEscape:

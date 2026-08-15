@@ -12,12 +12,14 @@ import {
   compositeRequest,
   coverageRows,
   inkRows,
+  inventoryIsComplete,
   isToggleableInk,
   moveInSequence,
   orderInks,
   plateCacheKey,
   previewDpi,
   prunePlateCache,
+  readInventory,
   resolveAlias,
   totalInk,
   visiblePlates,
@@ -266,5 +268,43 @@ describe('the limit alarm', () => {
   it('trips only when a pixel is over the limit', () => {
     expect(alarmTripped({ over_pixels: 0 })).toBe(false);
     expect(alarmTripped({ over_pixels: 1 })).toBe(true);
+  });
+});
+
+describe('what the ink inventory could not read', () => {
+  const INK = {
+    name: 'PANTONE 185 C', kind: 'spot' as const, alternate: 'DeviceCMYK',
+    display_rgb: [228, 0, 43], pages: [1], used_in: ['content'],
+  };
+
+  it('carries the engine\'s unknown list beside the inks', () => {
+    const res = readInventory({ inks: [INK], unknown: ['Page 1 uses a colour space…'] });
+    expect(res.inks).toEqual([INK]);
+    expect(res.unknown).toEqual(['Page 1 uses a colour space…']);
+    expect(inventoryIsComplete(res)).toBe(false);
+  });
+
+  it('reports a document the engine read whole as complete', () => {
+    const res = readInventory({ inks: [INK], unknown: [] });
+    expect(inventoryIsComplete(res)).toBe(true);
+  });
+
+  // The plates that ARE known stay honest: a stated gap beats a blank panel,
+  // so the ink list survives the unknown branch rather than being withheld.
+  it('keeps the inks it did reach when part of the document would not read', () => {
+    expect(readInventory({ inks: [INK], unknown: ['x'] }).inks).toHaveLength(1);
+  });
+
+  it('reads a payload carrying neither field as empty, not as clean', () => {
+    // `inks` empty and `unknown` empty is the shape of "nothing found",
+    // which is also the shape of a response that never arrived — the guard
+    // here is that neither field is invented.
+    expect(readInventory({})).toEqual({ inks: [], unknown: [] });
+    expect(readInventory(null)).toEqual({ inks: [], unknown: [] });
+    expect(readInventory({ inks: 'nope', unknown: 'nope' })).toEqual({ inks: [], unknown: [] });
+  });
+
+  it('renders every unknown reason as a string', () => {
+    expect(readInventory({ unknown: [1, null] }).unknown).toEqual(['1', 'null']);
   });
 });
