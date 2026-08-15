@@ -192,12 +192,20 @@ def _appearance_matrix(annot, stream):
     return mat_mult(matrix, fit)
 
 
-def _appearance_streams(annot):
+def _appearance_streams(annot, unreadable: list | None = None):
     """Every appearance stream the annotation can present, with the `/AP`
-    entry and state key needed to replace it in place."""
+    entry and state key needed to replace it in place.
+
+    An `/AP` branch that will not read is appended to `unreadable` when a
+    collector is supplied: a measurement that reports a count owes its caller
+    the places it could not measure. The fixer supplies none — it rewrites
+    what it can reach and reports what it changed.
+    """
     try:
         ap = annot.get("/AP")
-    except Exception:
+    except Exception as exc:
+        if unreadable is not None:
+            unreadable.append(f"appearances will not read: {exc}")
         return []
     if ap is None:
         return []
@@ -209,7 +217,9 @@ def _appearance_streams(annot):
             continue
         try:
             states = list(entry.keys())
-        except Exception:
+        except Exception as exc:
+            if unreadable is not None:
+                unreadable.append(f"an appearance state will not read: {exc}")
             continue
         for state in states:
             candidate = entry[state]
@@ -425,6 +435,11 @@ def list_hairlines(
     The count and the width histogram are what the panel shows BEFORE the fix
     runs, so "how many strokes, at what widths" is answered by measurement
     rather than by running the change and seeing what happened.
+
+    `unreadable` carries every place the measurement could not run — a page
+    whose content stream will not parse, an annotation border or appearance
+    that will not read. A count is a floor while that list is non-empty, and
+    the preflight row that reads this reports so rather than a clean page.
     """
     threshold = float(threshold_pt)
     if threshold <= 0:
@@ -433,6 +448,7 @@ def list_hairlines(
 
     rows: list[dict] = []
     histogram: dict[float, int] = {}
+    unreadable: list[str] = []
     strokes = 0
     borders = 0
     with pikepdf.open(file) as pdf:
@@ -446,6 +462,7 @@ def list_hairlines(
                 # the run continues: one broken page never sinks a document
                 # report.
                 row["error"] = str(exc)
+                unreadable.append(f"page {number} will not parse: {exc}")
                 rows.append(row)
                 continue
             for entry in targets:
@@ -459,7 +476,11 @@ def list_hairlines(
                 for index, annot in enumerate(list(annots) if annots is not None else []):
                     try:
                         width, source = _border_width(annot)
-                    except Exception:
+                    except Exception as exc:
+                        unreadable.append(
+                            f"page {number} annotation {index}: border will "
+                            f"not read: {exc}"
+                        )
                         continue
                     subtype = str(annot.get("/Subtype", ""))
                     if width is not None and width != 0 and width < threshold:
@@ -469,14 +490,21 @@ def list_hairlines(
                         })
                         borders += 1
                         histogram[round(width, 3)] = histogram.get(round(width, 3), 0) + 1
-                    for _holder, _ap_key, _state, stream in _appearance_streams(annot):
+                    ap_unreadable: list[str] = []
+                    for _holder, _ap_key, _state, stream in _appearance_streams(
+                        annot, ap_unreadable
+                    ):
                         try:
                             ctm = _appearance_matrix(annot, stream)
                             vectors = _walk_vectors(
                                 list(pikepdf.parse_content_stream(stream)),
                                 pdf=pdf, resources=stream.get("/Resources"), base_ctm=ctm,
                             )
-                        except Exception:
+                        except Exception as exc:
+                            unreadable.append(
+                                f"page {number} annotation {index}: appearance "
+                                f"will not read: {exc}"
+                            )
                             continue
                         for entry in vectors:
                             if entry["kind"] not in _STROKING:
@@ -494,6 +522,10 @@ def list_hairlines(
                             borders += 1
                             key = round(entry["effective_line_width"], 3)
                             histogram[key] = histogram.get(key, 0) + 1
+                    for reason in ap_unreadable:
+                        unreadable.append(
+                            f"page {number} annotation {index}: {reason}"
+                        )
             rows.append(row)
 
     return {
@@ -503,6 +535,7 @@ def list_hairlines(
         "annotation_count": borders,
         "widths": [{"effective_pt": w, "count": n} for w, n in sorted(histogram.items())],
         "pages": rows,
+        "unreadable": unreadable,
     }
 
 
@@ -595,18 +628,25 @@ def fix_hairlines(
 
 
 def hairline_check(file: str, threshold_pt: float = DEFAULT_THRESHOLD_PT) -> dict:
-    """The preflight row: how many hairlines, and the thinnest one found.
+    """The preflight row: how many hairlines, the thinnest one found, and what
+    could not be measured.
 
     Preflight is the reporter of print-readiness, and a hairline is a
-    print-readiness failure that no proof shows.
+    print-readiness failure that no proof shows. A count of zero therefore
+    means "none found" only when `unreadable` is empty: a measurement that
+    could not run over part of the document is reported, never rendered as a
+    clean page.
     """
     try:
         report = list_hairlines(file, threshold_pt=threshold_pt)
-    except Exception:
-        return {"count": 0, "thinnest_pt": None, "threshold_pt": float(threshold_pt)}
+    except Exception as exc:
+        return {"count": 0, "thinnest_pt": None,
+                "threshold_pt": float(threshold_pt),
+                "unreadable": [f"stroke widths could not be measured: {exc}"]}
     widths = [row["effective_pt"] for row in report["widths"]]
     return {
         "count": report["count"],
         "thinnest_pt": min(widths) if widths else None,
         "threshold_pt": report["threshold_pt"],
+        "unreadable": list(report["unreadable"]),
     }

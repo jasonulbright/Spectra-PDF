@@ -14,7 +14,8 @@ export type FlattenCategory =
   | 'rasterized'
   | 'outlined_strokes'
   | 'outlined_text'
-  | 'expanded_patterns';
+  | 'expanded_patterns'
+  | 'unknown';
 
 export const FLATTEN_CATEGORIES: readonly FlattenCategory[] = [
   'transparent',
@@ -23,6 +24,7 @@ export const FLATTEN_CATEGORIES: readonly FlattenCategory[] = [
   'outlined_strokes',
   'outlined_text',
   'expanded_patterns',
+  'unknown',
 ];
 
 /** The resolutions offered. Below 72 a region raster is coarser than the page
@@ -38,6 +40,8 @@ export interface FlattenObject {
   transparent: boolean;
   pattern: boolean;
   clipped: boolean;
+  /** The walk could not judge this object. Not the same as "opaque". */
+  unknown: boolean;
   categories: FlattenCategory[];
 }
 
@@ -51,6 +55,9 @@ export interface FlattenPageReport {
   region_pixels?: number[][];
   whole_page: boolean;
   counts: Record<FlattenCategory, number>;
+  /** The refusal sentences a flatten of this page would raise, one per
+   *  distinct reason — stated before the apply, never only after it. */
+  unknown: string[];
 }
 
 export interface FlattenReport {
@@ -58,6 +65,7 @@ export interface FlattenReport {
   balance: number;
   dpi: number;
   transparent_pages: number[];
+  unknown_pages: number[];
 }
 
 /** What converting text and strokes to outlines would do, per page. */
@@ -96,14 +104,33 @@ export function outlinesArmed(options: OutlineOptions): boolean {
 }
 
 /**
- * Whether Apply has anything to do.
+ * Whether Apply has anything to do, and can honestly do it.
  *
  * Regions alone was the rule while flattening was the only transform. A
  * conversion needs no transparency at all, so a document with none must still
  * reach the button once either option is on.
+ *
+ * An unjudgeable object closes the button entirely. The engine refuses the
+ * whole flatten for such a document — the alternative is a success report over
+ * content that may still composite — so an enabled button here would be a
+ * button that cannot succeed. The reasons are shown beside it.
  */
 export function canApply(report: FlattenReport | null, options: OutlineOptions): boolean {
+  if (unknownReasons(report).length > 0) return false;
   return regionCount(report) > 0 || outlinesArmed(options);
+}
+
+/** Every distinct reason the document cannot be flattened, in page order.
+ *  The engine's own English; the panel localizes it at the boundary. */
+export function unknownReasons(report: FlattenReport | null): string[] {
+  if (!report) return [];
+  const out: string[] = [];
+  for (const page of report.pages) {
+    for (const reason of page.unknown ?? []) {
+      if (!out.includes(reason)) out.push(reason);
+    }
+  }
+  return out;
 }
 
 /** The refusals the conversion reported, empty when nothing is armed — a
