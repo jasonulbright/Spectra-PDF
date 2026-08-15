@@ -5,11 +5,21 @@ import { useAppDispatch } from '../state/AppStateProvider';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
+import { useOperations } from '../hooks/useOperations';
 import { getCanvasServices } from '../commands/context';
 import { dialog, report as reportFile } from '../lib/tauri-bridge';
 import { parkStructSelection } from '../lib/a11y-jump';
+import { mergeUntouched } from '../lib/late-read';
 import { TEST_HARNESS_ENABLED, registerAccessibility } from '../testHarness';
-import { tChrome } from '../i18n';
+import { LOCALE_NATIVE_NAMES, SHIPPED_LOCALES, tChrome } from '../i18n';
+import {
+  authoredCall,
+  draftKey,
+  fixFor,
+  suggestionFor,
+  type AuthoredFix,
+  type FixOffer,
+} from '../lib/a11y-fixes';
 import type { PlaceableFinding } from '../lib/a11y-findings';
 import {
   categoryCount,
@@ -31,17 +41,29 @@ import {
 } from '../lib/accessibility-report';
 
 // The accessibility report surface: the 32 checks as a categorized tree, each
-// failure carrying the findings that produced it and a jump to the thing it
-// names.
+// failure carrying the findings that produced it, a jump to the thing it
+// names, and — where the repair is one the app can actually perform — the fix
+// itself.
 //
-// The panel renders the report and NOTHING ELSE — every jump lands on the
-// surface that owns the edit, and no control here writes to the document. That
-// is what keeps the claim honest: a report that also repaired what it measured
-// would be reporting on its own work.
+// Two gestures, two outcomes, and they never trade places: clicking a finding
+// JUMPS to the surface that owns it, and a fix control REPAIRS without moving.
+// Nineteen of the checks have no fix here at all; a jump is what they get,
+// because inventing a repair the app cannot perform is worse than naming the
+// place a person can.
+//
+// A fix takes one of two shapes. An AUTOMATIC one is a button: the result is
+// decided by the document (the level that closes a heading gap, the first row
+// of a table), so one call repairs every finding of that check as one undoable
+// act. An AUTHORED one is a field and an Apply: alt text, a title, a table
+// summary, a language, a field description — the values a machine must never
+// invent, one finding at a time.
 //
 // The report is re-run on every buffer change, because a structure path never
 // outlives the tree it was read from. A finding therefore never carries an
-// address older than the report on screen.
+// address older than the report on screen — and that re-run is also what makes
+// a fixed row flip live, since applying a fix is what changes the buffer. The
+// same re-run is why every authored editor is late-read protected: a re-check
+// landing mid-typing must reseed what nobody touched and nothing else.
 
 // A needs-review row shows neither a tick nor a cross: it has not been
 // decided, and borrowing either glyph is the claim the checker refuses to
@@ -79,6 +101,70 @@ function findingKey(check: Check, index: number): string {
   return `${check.id}:${index}`;
 }
 
+/** One authored value and its Apply — the Tags panel's draft/apply shape.
+ *
+ * The language variant offers the app's own 28 languages by their native
+ * names AND stays a free text box: the document's language is not the reader's
+ * language, and a picker that could only offer the shipped ones would be
+ * unable to say `haw` or `cy-GB`. */
+function AuthoredEditor({
+  testId,
+  authored,
+  value,
+  placeholder,
+  busy,
+  onChange,
+  onApply,
+}: {
+  testId: string;
+  authored: AuthoredFix;
+  value: string;
+  placeholder: string;
+  busy: boolean;
+  onChange: (next: string) => void;
+  onApply: () => void;
+}): React.ReactElement {
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1">
+      <label className="text-xs text-neutral-400" htmlFor={`${testId}-input`}>
+        {tChrome(`panel.a11y.field.${authored.field}` as Parameters<typeof tChrome>[0])}
+      </label>
+      {authored.input === 'language' && (
+        <select
+          data-testid={`${testId}-pick`}
+          aria-label={tChrome('panel.a11y.langPick')}
+          className="bg-neutral-900 border border-neutral-700 rounded px-1 py-0.5 text-xs text-neutral-200"
+          value={SHIPPED_LOCALES.includes(value) ? value : ''}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">{tChrome('panel.a11y.langPick')}</option>
+          {SHIPPED_LOCALES.map((locale) => (
+            <option key={locale} value={locale}>
+              {LOCALE_NATIVE_NAMES[locale] ?? locale} ({locale})
+            </option>
+          ))}
+        </select>
+      )}
+      <input
+        id={`${testId}-input`}
+        data-testid={`${testId}-input`}
+        className="min-w-0 flex-1 bg-neutral-900 border border-neutral-700 rounded px-1 py-0.5 text-xs text-neutral-200"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <button
+        data-testid={`${testId}-apply`}
+        disabled={busy || !value.trim()}
+        onClick={onApply}
+        className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+      >
+        {tChrome('panel.a11y.apply')}
+      </button>
+    </div>
+  );
+}
+
 /** The findings of `check` that have a place on a page. */
 function placeable(check: Check): PlaceableFinding[] {
   const out: PlaceableFinding[] = [];
@@ -97,11 +183,15 @@ function placeable(check: Check): PlaceableFinding[] {
   return out;
 }
 
+/** Every draft editor on screen, keyed by `draftKey`. */
+type Drafts = Record<string, string>;
+
 export function AccessibilityPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
+  const { performOperation, confirmSignedEdit } = useOperations();
   const dispatch = useAppDispatch();
   const [report, setReport] = useState<AccessibilityReport | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -109,6 +199,13 @@ export function AccessibilityPanel(): React.ReactElement {
   const [shownCheck, setShownCheck] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [drafts, setDrafts] = useState<Drafts>({});
+  // Which draft editors the user has typed into. The report re-runs on every
+  // buffer change and reseeds the drafts from it, and a re-run landing
+  // mid-typing must not revert what someone is half way through writing —
+  // the exact bug `lib/late-read.ts` documents, which this panel has one
+  // editor per finding's worth of chances to make.
+  const touchedDrafts = useRef<Set<string>>(new Set());
 
   const buffer = activeFile?.buffer ?? null;
   const workingPath = activeFile?.workingPath ?? null;
@@ -168,6 +265,93 @@ export function AccessibilityPanel(): React.ReactElement {
   }, [path]);
 
   const categories = useMemo(() => (report ? orderedCategories(report) : []), [report]);
+
+  // Every draft editor the current report calls for, empty. A value is never
+  // seeded from the document: the finding IS that the document has none.
+  const draftSeed = useMemo(() => {
+    const seed: Drafts = {};
+    for (const category of categories) {
+      for (const check of category.checks) {
+        const offer = fixFor(check);
+        if (offer?.kind !== 'authored' || !offer.authored) continue;
+        if (offer.authored.scope === 'check') seed[draftKey(check.id, null)] = '';
+        else check.findings.forEach((_f, i) => (seed[draftKey(check.id, i)] = ''));
+      }
+    }
+    return seed;
+  }, [categories]);
+
+  useEffect(() => {
+    setDrafts((prev) => mergeUntouched(draftSeed, prev, touchedDrafts.current));
+  }, [draftSeed]);
+
+  // Every draft input goes through this, so "touched" means exactly "the user
+  // typed here" — not "state changed", which a reseed also does.
+  const editDraft = useCallback((key: string, value: string) => {
+    touchedDrafts.current.add(key);
+    setDrafts((d) => ({ ...d, [key]: value }));
+  }, []);
+
+  /** Repair every finding of one check as ONE undoable act. The engine owns
+   * what that means (`engine/accessibility_fixes.py`); this only asks. */
+  const applyAutoFix = useCallback(
+    async (check: Check) => {
+      if (!activeFile) return;
+      if (!(await confirmSignedEdit(activeFile.path, activeFile.workingPath, 'structural'))) {
+        return;
+      }
+      setBusy(true);
+      setStatus(tChrome('panel.a11y.fixing'));
+      try {
+        await performOperation(activeFile.path, 'apply_accessibility_fixes', {
+          checks: [check.id],
+          allow_signed: true,
+        });
+        // The buffer changed, so the report re-runs and the row flips itself.
+        setStatus(tChrome('panel.a11y.fixed'));
+      } catch (e: unknown) {
+        setStatus(
+          tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }),
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeFile, confirmSignedEdit, performOperation],
+  );
+
+  /** Write one authored value at one finding. */
+  const applyAuthoredFix = useCallback(
+    async (check: Check, finding: Finding | null, index: number | null) => {
+      if (!activeFile) return;
+      const key = draftKey(check.id, index);
+      const spec = authoredCall(check.id, finding, drafts[key] ?? '', true);
+      if (!spec) {
+        setStatus(tChrome('panel.a11y.needsValue'));
+        return;
+      }
+      if (!(await confirmSignedEdit(activeFile.path, activeFile.workingPath, 'structural'))) {
+        return;
+      }
+      setBusy(true);
+      setStatus(tChrome('panel.a11y.fixing'));
+      try {
+        await performOperation(activeFile.path, spec.method, spec.params);
+        // The value is written, so the re-check that follows owns this editor
+        // again — keeping it "touched" would freeze the empty draft the next
+        // report seeds against.
+        touchedDrafts.current.delete(key);
+        setStatus(tChrome('panel.a11y.fixed'));
+      } catch (e: unknown) {
+        setStatus(
+          tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }),
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeFile, confirmSignedEdit, drafts, performOperation],
+  );
 
   const toggleCategory = useCallback((id: string) => {
     setExpanded((prev) => {
@@ -282,6 +466,7 @@ export function AccessibilityPanel(): React.ReactElement {
                   counted: check.counted,
                   findings: check.findings.length,
                   addressKinds: [...new Set(check.findings.map((f) => f.address.kind))],
+                  fix: fixFor(check)?.kind ?? null,
                 })),
               ),
               expandedCategories: [...expanded],
@@ -305,9 +490,50 @@ export function AccessibilityPanel(): React.ReactElement {
         if (!report) throw new Error('a11yExport: the report has not run yet');
         return writeReport(destPath, report);
       },
+      fix: async (checkId) => {
+        const check = categories.flatMap((c) => c.checks).find((c) => c.id === checkId);
+        if (!check) throw new Error(`no check ${checkId}`);
+        if (fixFor(check)?.kind !== 'auto') {
+          throw new Error(`a11yFix: ${checkId} has no automatic fix right now`);
+        }
+        await applyAutoFix(check);
+      },
+      authoredFix: async (checkId, index, value) => {
+        const check = categories.flatMap((c) => c.checks).find((c) => c.id === checkId);
+        if (!check) throw new Error(`no check ${checkId}`);
+        const finding = index === null ? null : (check.findings[index] ?? null);
+        if (index !== null && !finding) throw new Error(`no finding ${checkId}[${index}]`);
+        setOpenCheck(checkId);
+        editDraft(draftKey(checkId, index), value);
+        // The draft is state; the apply reads the value it was handed rather
+        // than racing React's next render for it.
+        const spec = authoredCall(checkId, finding, value, true);
+        if (!spec) throw new Error(`a11yAuthoredFix: ${checkId} takes no value like that`);
+        if (!activeFile) throw new Error('a11yAuthoredFix: no document is open');
+        setBusy(true);
+        try {
+          await performOperation(activeFile.path, spec.method, spec.params);
+          touchedDrafts.current.delete(draftKey(checkId, index));
+        } finally {
+          setBusy(false);
+        }
+      },
     });
     return () => registerAccessibility(null);
-  }, [report, categories, expanded, shownCheck, run, jump, showOnPage, writeReport]);
+  }, [
+    report,
+    categories,
+    expanded,
+    shownCheck,
+    run,
+    jump,
+    showOnPage,
+    writeReport,
+    applyAutoFix,
+    activeFile,
+    editDraft,
+    performOperation,
+  ]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.a11y.open')} />;
 
@@ -372,6 +598,8 @@ export function AccessibilityPanel(): React.ReactElement {
                     const hidden = check.findings.length - listed.length;
                     const onPage = placeable(check).length > 0;
                     const isOpen = openCheck === check.id;
+                    const offer: FixOffer | null = fixFor(check);
+                    const authored = offer?.kind === 'authored' ? offer.authored : undefined;
                     return (
                       <div
                         key={check.id}
@@ -432,12 +660,38 @@ export function AccessibilityPanel(): React.ReactElement {
                                 : tChrome('panel.a11y.show')}
                             </button>
                           )}
+                          {offer?.kind === 'auto' && (
+                            <button
+                              data-testid={`a11y-fix-${check.id}`}
+                              title={tChrome('panel.a11y.fixTitle')}
+                              disabled={busy}
+                              onClick={() => void applyAutoFix(check)}
+                              className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50 shrink-0"
+                            >
+                              {tChrome('panel.a11y.fix')}
+                            </button>
+                          )}
                         </div>
                         {isOpen && (
                           <div className="px-3 pb-2">
                             <div className="text-xs text-neutral-400">
                               {checkExplanation(check.id)}
                             </div>
+                            {authored?.scope === 'check' && (
+                              <AuthoredEditor
+                                testId={`a11y-authored-${check.id}`}
+                                authored={authored}
+                                busy={busy}
+                                value={drafts[draftKey(check.id, null)] ?? ''}
+                                placeholder={tChrome(
+                                  `panel.a11y.hint.${authored.field}` as Parameters<
+                                    typeof tChrome
+                                  >[0],
+                                )}
+                                onChange={(next) => editDraft(draftKey(check.id, null), next)}
+                                onApply={() => void applyAuthoredFix(check, null, null)}
+                              />
+                            )}
                             {listed.length > 0 && (
                               <ul className="mt-1 flex flex-col gap-0.5">
                                 {listed.map((finding, index) => (
@@ -459,6 +713,26 @@ export function AccessibilityPanel(): React.ReactElement {
                                         </span>
                                       )}
                                     </button>
+                                    {authored?.scope === 'finding' && (
+                                      <AuthoredEditor
+                                        testId={`a11y-authored-${check.id}-${index}`}
+                                        authored={authored}
+                                        busy={busy}
+                                        value={drafts[draftKey(check.id, index)] ?? ''}
+                                        placeholder={
+                                          suggestionFor(check.id, finding) ||
+                                          tChrome(
+                                            `panel.a11y.hint.${authored.field}` as Parameters<
+                                              typeof tChrome
+                                            >[0],
+                                          )
+                                        }
+                                        onChange={(next) =>
+                                          editDraft(draftKey(check.id, index), next)
+                                        }
+                                        onApply={() => void applyAuthoredFix(check, finding, index)}
+                                      />
+                                    )}
                                   </li>
                                 ))}
                               </ul>
