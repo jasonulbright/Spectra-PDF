@@ -39,14 +39,19 @@ describe('layers + accessibility panels', () => {
     await openByPaths([source]);
     await setView('operations');
     await setActiveOp('accessibility');
-    // The checklist runs on open; a plain PDF fails "tagged" and passes "text".
-    await $('[data-testid="a11y-check-tagged"]').waitForDisplayed({ timeout: 20_000 });
-    const tagged = await $('[data-testid="a11y-check-tagged"]').getText();
-    expect(tagged).toContain('tagged');
+    // The report runs on open. A plain PDF fails "tagged", and the row it
+    // fails on carries its own verdict.
+    const tagged = await $('[data-testid="a11y-check-tagged"]');
+    await tagged.waitForDisplayed({ timeout: 20_000 });
+    expect(await tagged.getAttribute('data-a11y-status')).toBe('fail');
+    expect(await tagged.getText()).toContain('tagged');
     const summary = await $('[data-testid="a11y-summary"]').getText();
     expect(summary.toLowerCase()).toContain('failed');
-    // The extractable-text check passes (the fixture has real text).
-    expect(await $('[data-testid="a11y-check-text"]').isDisplayed()).toBe(true);
+    // The image-only check passes — the fixture has real text — and its row is
+    // in the same category, so it renders beside the failure.
+    const imageOnly = await $('[data-testid="a11y-check-image_only"]');
+    expect(await imageOnly.isDisplayed()).toBe(true);
+    expect(await imageOnly.getAttribute('data-a11y-status')).toBe('pass');
   });
 
   it('preflight flags a non-embedded standard font', async () => {

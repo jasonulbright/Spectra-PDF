@@ -6,6 +6,8 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { getDocumentProxy } from '../lib/pdfDocCache';
 import { mergeUntouched } from '../lib/late-read';
+import { drainStructSelection } from '../lib/a11y-jump';
+import { TEST_HARNESS_ENABLED, registerTagsPanel } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import {
@@ -69,6 +71,29 @@ export function TagsPanel(): React.ReactElement {
   const buffer = activeFile?.buffer ?? null;
   const workingPath = activeFile?.workingPath ?? null;
   const path = activeFile?.path ?? null;
+  // Read inside `refresh` without making it depend on the document — the two
+  // change together, and an extra dependency would refetch the tree.
+  const pathRef = useRef<string | null>(null);
+  pathRef.current = path;
+
+  /** Select `path` and open every ancestor so the row is reachable. A path the
+   * tree no longer has selects nothing and reports it — an addressed jump that
+   * silently lands somewhere else is worse than one that does not land. */
+  const revealPath = useCallback((root: StructNode[], target: number[]): void => {
+    const key = pathKey(target);
+    if (!findByKey(root, key)) {
+      setSelectedKey(null);
+      setStatus(tChrome('panel.tags.jumpGone'));
+      return;
+    }
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (let i = 1; i <= target.length; i += 1) next.add(pathKey(target.slice(0, i)));
+      return next;
+    });
+    setSelectedKey(key);
+    setStatus('');
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!workingPath) return;
@@ -89,6 +114,14 @@ export function TagsPanel(): React.ReactElement {
         walk(res.root);
         setExpanded(seed);
       }
+      // A jump parked by the accessibility report outranks the selection a
+      // mutation asked to keep: the user just clicked a finding.
+      const jumped = drainStructSelection(pathRef.current);
+      if (jumped) {
+        pendingSelect.current = null;
+        revealPath(res.root, jumped);
+        return;
+      }
       const wanted = pendingSelect.current;
       pendingSelect.current = null;
       const next = wanted ?? selectedKeyRef.current;
@@ -96,12 +129,25 @@ export function TagsPanel(): React.ReactElement {
     } catch {
       setTree(null);
     }
-  }, [workingPath, call]);
+  }, [workingPath, call, revealPath]);
 
   // The selection the refresh should try to keep, without making refresh
   // depend on selection state (that would refetch on every row click).
   const selectedKeyRef = useRef<string | null>(null);
   selectedKeyRef.current = selectedKey;
+
+  // The landing side of an accessibility report's `struct` jump: what a spec
+  // can read to prove the finding selected the element it named.
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerTagsPanel({
+      selectedPath: () =>
+        selectedKeyRef.current === null
+          ? null
+          : selectedKeyRef.current.split('.').map((part) => Number(part)),
+    });
+    return () => registerTagsPanel(null);
+  }, []);
 
   useEffect(() => {
     if (!buffer || !workingPath) {

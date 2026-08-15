@@ -363,6 +363,59 @@ export function registerFolderExport(handlers: FolderExportHandlers | null): voi
 }
 
 /**
+ * The accessibility report surface. `exportTo` bypasses the NATIVE save
+ * dialog and nothing else — the path it is given goes into the same emitter
+ * and the same write the button uses, so the spec proves the real artefact.
+ * `jump` and `show` are the row's own handlers, reached by check id and
+ * position because a finding row has no stable id of its own.
+ */
+export interface AccessibilityHandlers {
+  snapshot: () => {
+    summary: {
+      passed: number;
+      failed: number;
+      warnings: number;
+      needs_review: number;
+      not_applicable: number;
+      applicable: number;
+      total: number;
+    };
+    checks: {
+      id: string;
+      category: string;
+      status: string;
+      counted: number;
+      findings: number;
+      addressKinds: string[];
+    }[];
+    expandedCategories: string[];
+    shownCheck: string | null;
+  } | null;
+  recheck: () => Promise<void>;
+  jump: (checkId: string, index: number) => Promise<void>;
+  show: (checkId: string) => Promise<void>;
+  exportTo: (destPath: string) => Promise<string>;
+}
+
+let accessibility: AccessibilityHandlers | null = null;
+
+export function registerAccessibility(handlers: AccessibilityHandlers | null): void {
+  accessibility = handlers;
+}
+
+/** What the Tags panel currently has selected — the landing side of an
+ * accessibility report's `struct` jump. */
+export interface TagsHandlers {
+  selectedPath: () => number[] | null;
+}
+
+let tagsPanel: TagsHandlers | null = null;
+
+export function registerTagsPanel(handlers: TagsHandlers | null): void {
+  tagsPanel = handlers;
+}
+
+/**
  * One PDF per folder: the folder pickers are native dialogs, so e2e injects
  * both paths into the SAME selection flow the buttons run and then drives the
  * real run. The snapshot counts FOLDERS, not files — the run's unit.
@@ -1431,6 +1484,26 @@ export interface TestHarness {
   folderExportSetFormat: (format: string) => void;
   folderExportRun: () => Promise<void>;
   folderExportSnapshot: () => ReturnType<FolderExportHandlers['snapshot']> | null;
+  /** The accessibility report (the panel must be open — `tools.panel.accessibility`). */
+  a11ySnapshot: () => ReturnType<AccessibilityHandlers['snapshot']> | null;
+  a11yRecheck: () => Promise<void>;
+  /** Click one finding row: the same jump the row performs. */
+  a11yJump: (checkId: string, index: number) => Promise<void>;
+  /** Draw one check's page findings on the document. */
+  a11yShow: (checkId: string) => Promise<void>;
+  /** Write the report (bypasses the native save dialog; the extension picks
+   *  the emitter). Returns the path written. */
+  a11yExport: (destPath: string) => Promise<string>;
+  /** The findings drawn on the pages right now. */
+  a11yFindingsOnPage: () => {
+    id: string;
+    page: number;
+    checkId: string;
+    detailKey: string;
+    preview: string;
+  }[];
+  /** What the Tags panel has selected (the `struct` jump's landing). */
+  tagsSelectedPath: () => number[] | null;
   /** One-PDF-per-folder injectors (dialog must be open —
    * `tools.folderCreatePdf`). */
   folderCreatePdfSetFolders: (source: string, dest: string) => Promise<void>;
@@ -2541,6 +2614,53 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     folderExportSnapshot: () => folderExport?.snapshot() ?? null,
+    a11ySnapshot: () => accessibility?.snapshot() ?? null,
+    a11yRecheck: async () => {
+      if (!accessibility) {
+        const msg = 'a11yRecheck: the accessibility panel is not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      await accessibility.recheck();
+    },
+    a11yJump: async (checkId, index) => {
+      if (!accessibility) {
+        const msg = 'a11yJump: the accessibility panel is not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      await accessibility.jump(checkId, index);
+    },
+    a11yShow: async (checkId) => {
+      if (!accessibility) {
+        const msg = 'a11yShow: the accessibility panel is not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      await accessibility.show(checkId);
+    },
+    a11yExport: async (destPath) => {
+      if (!accessibility) {
+        const msg = 'a11yExport: the accessibility panel is not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        return await accessibility.exportTo(destPath);
+      } catch (err) {
+        captureError('a11yExport', err);
+        throw err;
+      }
+    },
+    a11yFindingsOnPage: () =>
+      (getCanvasServices()?.a11yFindings.list() ?? []).map((f) => ({
+        id: f.id,
+        page: f.page,
+        checkId: f.checkId,
+        detailKey: f.detailKey,
+        preview: f.preview,
+      })),
+    tagsSelectedPath: () => tagsPanel?.selectedPath() ?? null,
     folderCreatePdfSetFolders: async (source, dest) => {
       if (!folderCreatePdf) {
         const msg = 'folderCreatePdfSetFolders: one-PDF-per-folder dialog not mounted';
