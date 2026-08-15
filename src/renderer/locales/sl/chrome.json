@@ -1698,6 +1698,7 @@
   "dock.close": "Zapri podokno z orodji",
   "dock.paneLabel": "Podokno z orodji",
   "dock.resize": "Povlecite za spremembo velikosti",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "neznana kategorija dostopnosti: »{{category}}« (pričakovana ena od: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} vsebuje obrazec XML (XFA). Opravila nad stranmi bi obrazec ločila od njegovih strani, zato {{operation}} za ta dokument ni na voljo. Izpolnite obrazec ali ga najprej sploščite z drugim orodjem.",
   "engine.acroform.regeneratedFileSPage": "Število strani na novo ustvarjene datoteke se razlikuje od izvirnikovega; njegovih polj obrazca ni mogoče znova pripeti.",
   "engine.attachments.attachmentNamed": "priloge z imenom {{name}} ni",

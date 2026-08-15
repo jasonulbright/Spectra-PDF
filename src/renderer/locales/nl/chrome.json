@@ -1596,6 +1596,7 @@
   "dock.close": "Het gereedschapsdeelvenster sluiten",
   "dock.paneLabel": "Gereedschapsdeelvenster",
   "dock.resize": "Sleep om het formaat te wijzigen",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "onbekende toegankelijkheidscategorie: ‘{{category}}’ (verwacht een van: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} bevat een XML-formulier (XFA). Paginabewerkingen zouden het formulier van de pagina's losmaken, dus {{operation}} is niet beschikbaar voor dit document. Vul het formulier in of vlak het eerst met een ander programma af.",
   "engine.acroform.regeneratedFileSPage": "Het aantal pagina's van het opnieuw opgebouwde bestand verschilt van het origineel; de formuliervelden kunnen niet opnieuw worden gekoppeld.",
   "engine.attachments.attachmentNamed": "geen bijlage met de naam {{name}}",

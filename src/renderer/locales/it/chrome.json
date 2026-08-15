@@ -1647,6 +1647,7 @@
   "dock.close": "Chiudi il riquadro degli strumenti",
   "dock.paneLabel": "Riquadro degli strumenti",
   "dock.resize": "Trascinare per ridimensionare",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "categoria di accessibilità sconosciuta: «{{category}}» (attesa una tra: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} contiene un modulo XML (XFA). Le operazioni sulle pagine staccherebbero il modulo dalle sue pagine, quindi {{operation}} non è disponibile per questo documento. Compilare il modulo, oppure appiattirlo prima con un altro strumento.",
   "engine.acroform.regeneratedFileSPage": "Il numero di pagine del file rigenerato è diverso da quello dell’originale; impossibile ricollegare i suoi campi modulo.",
   "engine.attachments.attachmentNamed": "nessun allegato di nome {{name}}",

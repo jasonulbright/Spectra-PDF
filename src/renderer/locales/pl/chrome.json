@@ -1698,6 +1698,7 @@
   "dock.close": "Zamknij panel narzędzia",
   "dock.paneLabel": "Panel narzędzia",
   "dock.resize": "Przeciągnij, aby zmienić rozmiar",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "nieznana kategoria dostępności: „{{category}}” (oczekiwano jednej z: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} zawiera formularz XML (XFA). Operacje na stronach odłączyłyby formularz od jego stron, więc {{operation}} jest niedostępne dla tego dokumentu. Wypełnij formularz albo najpierw spłaszcz go innym narzędziem.",
   "engine.acroform.regeneratedFileSPage": "Liczba stron odtworzonego pliku różni się od pierwotnej; nie można ponownie dołączyć pól jego formularza.",
   "engine.attachments.attachmentNamed": "brak załącznika o nazwie {{name}}",

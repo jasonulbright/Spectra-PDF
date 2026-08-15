@@ -1545,6 +1545,7 @@
   "dock.close": "도구창 닫기",
   "dock.paneLabel": "도구창",
   "dock.resize": "드래그하여 크기 조정",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "알 수 없는 접근성 범주: ‘{{category}}’({{v1}} 중 하나여야 합니다)",
   "engine.acroform.containsXmlFormXfa": "{{v0}} 파일에 XML 양식(XFA)이 있습니다. 페이지 작업은 양식을 페이지에서 분리하므로 이 문서에서는 {{operation}} 작업을 사용할 수 없습니다. 양식을 작성하거나 다른 도구로 먼저 병합하십시오.",
   "engine.acroform.regeneratedFileSPage": "다시 만든 파일의 페이지 수가 원본과 달라 양식 필드를 다시 붙일 수 없습니다.",
   "engine.attachments.attachmentNamed": "{{name}} 이름의 첨부 파일이 없습니다",

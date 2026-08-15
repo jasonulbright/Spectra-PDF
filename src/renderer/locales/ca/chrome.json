@@ -1647,6 +1647,7 @@
   "dock.close": "Tanca el quadre d'eines",
   "dock.paneLabel": "Quadre d'eines",
   "dock.resize": "Arrossegueu per redimensionar",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "categoria d'accessibilitat desconeguda: «{{category}}» (s'esperava una de: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} conté un formulari XML (XFA). Les operacions de pàgina separarien el formulari de les seves pàgines, de manera que {{operation}} no és disponible per a aquest document. Ompliu el formulari, o aplaneu-lo abans amb una altra eina.",
   "engine.acroform.regeneratedFileSPage": "El nombre de pàgines del fitxer regenerat difereix del de l'original; no se'n poden tornar a associar els camps de formulari.",
   "engine.attachments.attachmentNamed": "no hi ha cap adjunció anomenada {{name}}",
