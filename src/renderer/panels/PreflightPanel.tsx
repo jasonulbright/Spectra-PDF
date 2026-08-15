@@ -826,9 +826,13 @@ export function PreflightPanel(): React.ReactElement {
             }
           : null,
       recheck: () => run(profileId),
+      // The picker sets the id and the `profileId` effect owns the run. Running
+      // here as well starts a second, overlapping run: the caller's wait is
+      // satisfied by the first, and the second lands later and clears both the
+      // drawn findings and `shownCheck` — which turns a following toggle into a
+      // publish.
       selectProfile: async (id: string) => {
         setProfileId(id);
-        await run(id);
       },
       jump: async (checkId, index) => {
         const check = categories.flatMap((c) => c.checks).find((c) => c.id === checkId);
