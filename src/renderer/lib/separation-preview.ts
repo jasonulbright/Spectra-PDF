@@ -18,6 +18,20 @@ export interface Ink {
   used_in: string[];
 }
 
+/**
+ * What one `list_inks` call answered.
+ *
+ * `unknown` is the other half of the answer, not a detail: a resource branch
+ * the engine could not read may hold a colorant, so a spot can be missing
+ * from `inks` — and therefore from the plate list and from every total-ink
+ * figure measured over it — with nothing else saying so. An empty list means
+ * the document was read whole.
+ */
+export interface InkInventory {
+  inks: Ink[];
+  unknown: string[];
+}
+
 /** One rasterized plate of a page. */
 export interface Plate {
   name: string;
@@ -308,4 +322,31 @@ export function coverageRows(coverage: Record<string, number>): Array<{ name: st
 /** Does this composite trip the limit? */
 export function alarmTripped(result: Pick<CompositeResult, 'over_pixels'>): boolean {
   return result.over_pixels > 0;
+}
+
+/**
+ * The engine's inventory as the panel reads it.
+ *
+ * A response missing either field is read as "could not tell", never as a
+ * clean document: an older or partial payload that defaulted `unknown` to
+ * empty would restore exactly the silent gap this reports.
+ */
+export function readInventory(payload: unknown): InkInventory {
+  const raw = (payload ?? {}) as { inks?: unknown; unknown?: unknown };
+  return {
+    inks: Array.isArray(raw.inks) ? (raw.inks as Ink[]) : [],
+    unknown: Array.isArray(raw.unknown) ? raw.unknown.map((r) => String(r)) : [],
+  };
+}
+
+/**
+ * Is the plate list complete?
+ *
+ * The gate on every claim the panel makes about the WHOLE page — the plate
+ * inventory, the coverage rows and the total-ink figures. Each is measured
+ * over the plates that exist; an ink the engine could not reach is in none of
+ * them, so the numbers are a floor rather than the page's total.
+ */
+export function inventoryIsComplete(inventory: Pick<InkInventory, 'unknown'>): boolean {
+  return inventory.unknown.length === 0;
 }

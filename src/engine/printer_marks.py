@@ -24,7 +24,9 @@ no plate of its own and paints it onto every plate, so a mark drawn this way
 reaches all four; a black one would reach the black plate alone and tell a
 press operator nothing about registration. Colour bars are the deliberate
 exception — a patch exists to show ONE ink, so a process patch paints in
-DeviceCMYK and a spot patch in that spot's own `/Separation` space.
+DeviceCMYK and a spot patch in that spot's own `/Separation` space. A bar
+whose spot set could not be established refuses: this writes a document, and
+a printed sheet has no room to carry a caveat.
 
 `/AcroForm` is not at risk here: this appends content to existing pages and
 copies no page, so no widget's field registration moves.
@@ -42,8 +44,8 @@ from pikepdf import Array, Dictionary, Name
 
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import walk_inheritable
-from engine.preflight import walk_page_resources
-from engine.separations import ink_kind
+from engine.preflight import COLORSPACE, walk_page_resources
+from engine.separations import ink_kind, refuse_unknown_colorants
 from engine.validate import validate_pdf
 
 MARK_KINDS = ("crop", "registration", "colorbars", "pageinfo")
@@ -211,6 +213,11 @@ def _find_all_space(pages):
 
     A document that already declares one keeps a single `/All` space instead
     of gaining a second that means exactly the same thing.
+
+    A branch this walk cannot read is not a refusal here, and this is the one
+    colorant walk in the module that does not refuse: missing an existing
+    `/All` space costs a second object meaning the same thing, and `/All` has
+    no plate of its own to be absent from. Nothing printed differs.
     """
     found = [None]
 
@@ -240,16 +247,30 @@ def _name_text(obj) -> str:
     return text[1:] if text.startswith("/") else text
 
 
-def _spot_spaces(pages) -> dict:
-    """{spot name: a colour space that paints THAT ink alone}.
+def _spot_spaces(targets) -> dict:
+    """{spot name: a colour space that paints THAT ink alone}, over (number, page).
 
     A `/Separation` array paints its one colorant directly. A `/DeviceN`
     component does not — its components go through one shared transform — so
     it contributes a patch only when the document supplies the component's own
     `/Attributes /Colorants` entry. A spot with no such entry gets no patch
     rather than a patch painted in the wrong space.
+
+    A resource branch the walk cannot read may hold a spot, and this is a
+    WRITE: the bar would be printed one patch short with nothing on the sheet
+    to say so, and a press operator reads ink density off exactly those
+    patches. So an unreadable branch refuses by name rather than producing a
+    bar whose completeness nobody established.
     """
     spaces: dict[str, object] = {}
+    skipped: list[str] = []
+
+    def on_unreadable(facts, reason: str) -> None:
+        # Recorded, not raised here. The walk catches whatever its callbacks
+        # throw, so a refusal raised inside this one is swallowed and the bar
+        # prints anyway; the raise belongs after the walk returns.
+        if COLORSPACE in facts:
+            skipped.append(reason)
 
     def on_colorspace(cs, _category):
         if not isinstance(cs, pikepdf.Array) or len(cs) < 4:
@@ -277,8 +298,12 @@ def _spot_spaces(pages) -> dict:
                 if own is not None:
                     spaces.setdefault(name, own)
 
-    for page in pages:
-        walk_page_resources(page, on_colorspace=on_colorspace)
+    for number, page in targets:
+        del skipped[:]
+        walk_page_resources(page, on_colorspace=on_colorspace,
+                            on_unreadable=on_unreadable)
+        if skipped:
+            refuse_unknown_colorants(number, skipped[0])
     return spaces
 
 
@@ -646,7 +671,7 @@ def add_printer_marks(
             existing = _find_all_space([p for _i, p in targets])
             all_space = existing if existing is not None else _make_all_space(pdf)
             if "colorbars" in kinds:
-                spot_spaces = _spot_spaces([p for _i, p in targets])
+                spot_spaces = _spot_spaces(targets)
 
         for index, page in targets:
             _restore(pdf, page)

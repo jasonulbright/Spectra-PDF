@@ -91,6 +91,7 @@
 - The transparency flattener now says when it cannot judge an object rather than treating it as opaque. A form whose contents cannot be read, one that declares no bounds, one nested past the depth the analysis reaches, and a graphics state that will not read are each named on the page they are on.
 - Such a document is refused by name instead of being written: a flatten that reported success while live transparency survived it is the one result this tool must never produce.
 - The preview lists the same objects and the same reasons before you press anything, and highlights them on the page.
+- **Output Preview says when a page may use inks it could not find**, and marks the plate list and the total-ink figures as covering only the plates it did find; a colour bar is refused outright instead of being printed one patch short, because a printed sheet cannot carry that caveat.
 
 ## 1.0.29
 

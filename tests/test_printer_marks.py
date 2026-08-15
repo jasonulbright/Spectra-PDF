@@ -26,7 +26,8 @@ from engine.printer_marks import (
     remove_printer_marks,
     resolve_trim,
 )
-from separation_builders import cmyk_spot_pdf
+from separation_builders import cmyk_spot_pdf, unreadable_colorspace_table_pdf
+from transparency_builders import unreadable_page_gstate_pdf
 
 FONTS_DIR = os.path.join(os.path.dirname(__file__), "..", "resources", "fonts")
 HAS_FONTS = os.path.isfile(os.path.join(FONTS_DIR, "LiberationSans-Regular.ttf"))
@@ -283,6 +284,61 @@ class TestColourBar:
 
     def test_a_document_with_no_spots_gets_the_process_bar_alone(self, tmp_dir):
         src = _plain_pdf(os.path.join(tmp_dir, "s.pdf"))
+        out = os.path.join(tmp_dir, "m.pdf")
+        assert add_printer_marks(src, out, marks=["colorbars"])["spot_patches"] == []
+
+
+class TestABarOverUnknownColorantsRefuses:
+    """A colour bar is a WRITE, so an unreadable colorant branch refuses.
+
+    A patch exists so a press operator can read one ink's density off the
+    printed sheet. A bar silently one patch short is a sheet that says the
+    document has fewer inks than it does, and paper carries no caveat — so the
+    add refuses by name and writes nothing, rather than producing it.
+    """
+
+    def test_the_add_refuses_naming_the_page(self, tmp_dir):
+        src = unreadable_colorspace_table_pdf(os.path.join(tmp_dir, "s.pdf"))
+        out = os.path.join(tmp_dir, "m.pdf")
+        with pytest.raises(ValueError, match="cannot all be established"):
+            add_printer_marks(src, out, marks=["colorbars"])
+
+    def test_the_refusal_names_the_page_the_branch_is_on(self, tmp_dir):
+        src = unreadable_colorspace_table_pdf(
+            os.path.join(tmp_dir, "s.pdf"), pages=2, broken_on=2)
+        out = os.path.join(tmp_dir, "m.pdf")
+        with pytest.raises(ValueError, match=r"^Page 2 "):
+            add_printer_marks(src, out, marks=["colorbars"])
+
+    def test_a_refused_add_writes_nothing(self, tmp_dir):
+        src = unreadable_colorspace_table_pdf(os.path.join(tmp_dir, "s.pdf"))
+        out = os.path.join(tmp_dir, "m.pdf")
+        with pytest.raises(ValueError):
+            add_printer_marks(src, out, marks=["colorbars"])
+        assert not os.path.exists(out)
+
+    def test_marks_that_read_no_colorant_are_unaffected(self, tmp_dir):
+        """Crop marks, registration targets and page information paint in
+        `/Separation /All` and enumerate no ink, so the same document marks
+        normally when no bar is asked for."""
+        src = unreadable_colorspace_table_pdf(os.path.join(tmp_dir, "s.pdf"))
+        out = os.path.join(tmp_dir, "m.pdf")
+        result = add_printer_marks(src, out, marks=["crop", "registration"])
+        assert result["marked"] == 1
+        assert os.path.isfile(out)
+
+    def test_a_page_outside_the_request_does_not_refuse(self, tmp_dir):
+        """The refusal is scoped to the pages being marked — an unreadable
+        branch on a page nobody asked to mark bars nothing."""
+        src = unreadable_colorspace_table_pdf(
+            os.path.join(tmp_dir, "s.pdf"), pages=2, broken_on=2)
+        out = os.path.join(tmp_dir, "m.pdf")
+        assert add_printer_marks(src, out, marks=["colorbars"], pages=[1])["marked"] == 1
+
+    def test_an_unreadable_graphics_state_bars_nothing(self, tmp_dir):
+        """A skip only clouds what reads from it: a graphics state carries
+        alpha, never a colorant, so the bar is still complete."""
+        src = unreadable_page_gstate_pdf(os.path.join(tmp_dir, "s.pdf"))
         out = os.path.join(tmp_dir, "m.pdf")
         assert add_printer_marks(src, out, marks=["colorbars"])["spot_patches"] == []
 
