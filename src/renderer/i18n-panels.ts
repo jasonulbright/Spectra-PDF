@@ -316,6 +316,10 @@ export const PANEL_STRINGS = {
   'panel.tags.addChildTitle': 'Add an empty child tag under <{{type}}>',
   'panel.tags.addTopTitle': 'Add an empty top-level tag',
   'panel.tags.treeAria': 'Structure tags',
+  // An addressed jump that cannot land says so. A tag path never outlives the
+  // tree it was read from, and silently selecting something else would make an
+  // accessibility finding point at the wrong element.
+  'panel.tags.jumpGone': 'That tag is no longer in this document — re-check to refresh the report.',
   'panel.tags.collapse': 'Collapse {{type}}',
   'panel.tags.expand': 'Expand {{type}}',
   'panel.tags.altTitle': 'Alt text: {{alt}}',
@@ -903,14 +907,217 @@ export const PANEL_STRINGS = {
   'panel.order.moveLater': 'Move later in the reading order',
   'panel.order.updated': 'Reading order updated',
 
+  // ── The accessibility report ──────────────────────────────────────────
+  // The panel and both export emitters read the SAME keys, so a verdict can
+  // never be worded one way on screen and another in the saved file.
+  //
+  // A check NAME and its EXPLANATION are two keys, never a concatenation: the
+  // row shows the name and the detail block shows the explanation. A finding's
+  // sentence is keyed by the engine's `detail_key` and interpolates the
+  // measured values — nothing downstream ever matches on the rendered text.
   'panel.a11y.open': 'Open a PDF to check its accessibility',
   'panel.a11y.checking': 'Checking…',
   'panel.a11y.recheck': 'Re-check',
-  'panel.a11y.allPassed': 'All {{count}} checks passed.',
-  'panel.a11y.passed': '{{count}} passed',
-  'panel.a11y.toReview': '{{count}} to review',
-  'panel.a11y.failed': '{{count}} failed',
-  'panel.a11y.ofTotal': 'of {{count}}.',
+  'panel.a11y.export': 'Export…',
+  'panel.a11y.exporting': 'Saving the report…',
+  'panel.a11y.exported': 'Report saved to {{path}}',
+  'panel.a11y.show': 'Show',
+  'panel.a11y.hide': 'Hide',
+  'panel.a11y.noCanvas': 'Open the document to show findings on its pages.',
+  'panel.a11y.nothingToShow': 'Nothing in this check has a place on a page.',
+  'panel.a11y.findingCount': '{{count}} of {{counted}}',
+  'panel.a11y.moreFindings':
+    '{{count}} more are not listed here — the exported report carries every one.',
+  'panel.a11y.jumpTitle': 'Go to this item',
+  'panel.a11y.findingLabel': '{{check}} — {{preview}}',
+  'panel.a11y.summaryLine':
+    '{{passed}} passed · {{failed}} failed · {{warnings}} to improve · {{review}} to review · {{notApplicable}} not applicable — {{applicable}} of {{total}} checks apply',
+  'panel.a11y.categoryCount': '{{passed}} / {{applicable}}',
+  'panel.a11y.categoryNone': 'nothing to check',
+  'panel.a11y.reportTitle': 'Accessibility report',
+  'panel.a11y.reportDocument': 'Document: {{name}}',
+  'panel.a11y.reportRunAt': 'Checked: {{when}}',
+  'panel.a11y.reportFooter':
+    'This report states which of 32 checks the document passes. It is not a conformance certificate.',
+  'panel.a11y.unreadableHeading': 'Pages that could not be read',
+  'panel.a11y.unreadablePage': 'Page {{page}}',
+
+  'panel.a11y.where.tag': 'Tag {{path}}',
+  'panel.a11y.where.page': 'Page {{page}}',
+  'panel.a11y.where.field': 'Field “{{name}}”',
+  'panel.a11y.where.annotation': 'Annotation on page {{page}}',
+  'panel.a11y.where.document': 'Document',
+
+  'panel.a11y.verdict.pass': 'Passed',
+  'panel.a11y.verdict.fail': 'Failed',
+  'panel.a11y.verdict.warn': 'Short of the recommendation',
+  'panel.a11y.verdict.needs_review': 'Needs review',
+  'panel.a11y.verdict.not_applicable': 'Not applicable',
+
+  'panel.a11y.category.document': 'Document',
+  'panel.a11y.category.page_content': 'Page content',
+  'panel.a11y.category.forms': 'Forms',
+  'panel.a11y.category.alt_text': 'Alternate text',
+  'panel.a11y.category.tables': 'Tables',
+  'panel.a11y.category.lists': 'Lists',
+  'panel.a11y.category.headings': 'Headings',
+
+  'panel.a11y.check.permissions': 'Assistive technology may read the document',
+  'panel.a11y.explain.permissions':
+    'Encryption permissions must allow text extraction for accessibility.',
+  'panel.a11y.check.image_only': 'Pages are not image-only',
+  'panel.a11y.explain.image_only':
+    'A scanned page with no recognized text has nothing to read aloud.',
+  'panel.a11y.check.tagged': 'Document is tagged',
+  'panel.a11y.explain.tagged':
+    'Structure tags let assistive technology read content in a defined order.',
+  'panel.a11y.check.reading_order': 'Reading order follows the page',
+  'panel.a11y.explain.reading_order':
+    'Tag order is what is read; where it disagrees with the layout, a person decides.',
+  'panel.a11y.check.lang': 'Document language is set',
+  'panel.a11y.explain.lang': 'A declared language is what picks the right pronunciation.',
+  'panel.a11y.check.title': 'Document has a title, and shows it',
+  'panel.a11y.explain.title':
+    'The title names the document in the window bar instead of the file name.',
+  'panel.a11y.check.bookmarks': 'Long document has bookmarks',
+  'panel.a11y.explain.bookmarks':
+    'Bookmarks are how a long document is navigated without reading it through.',
+  'panel.a11y.check.contrast': 'Text has sufficient colour contrast',
+  'panel.a11y.explain.contrast':
+    'Text must stand out from what is painted under it, at the published ratio.',
+  'panel.a11y.check.tagged_content': 'All page content is tagged',
+  'panel.a11y.explain.tagged_content':
+    'Text covered by no tag and not declared decoration is never read.',
+  'panel.a11y.check.tagged_annotations': 'Annotations are tagged',
+  'panel.a11y.explain.tagged_annotations':
+    'An annotation outside the structure tree has no place in the reading order.',
+  'panel.a11y.check.tab_order': 'Pages with annotations declare a tab order',
+  'panel.a11y.explain.tab_order':
+    'Without a structure tab order, keyboard focus follows the order of the file.',
+  'panel.a11y.check.character_encoding': 'Characters map to readable text',
+  'panel.a11y.explain.character_encoding':
+    'A font whose bytes map to no character cannot be read aloud or searched.',
+  'panel.a11y.check.tagged_multimedia': 'Multimedia is tagged',
+  'panel.a11y.explain.tagged_multimedia':
+    'Sound and video annotations need a place in the structure like any content.',
+  'panel.a11y.check.screen_flicker': 'Nothing flashes the screen',
+  'panel.a11y.explain.screen_flicker':
+    'Page actions and scripts can flash the screen; each site needs a look.',
+  'panel.a11y.check.scripts': 'Scripts are accessible',
+  'panel.a11y.explain.scripts':
+    'A script that changes the page must not leave assistive technology behind.',
+  'panel.a11y.check.timed_responses': 'Nothing is on a timer',
+  'panel.a11y.explain.timed_responses':
+    'A response the reader has to give before a clock runs out needs a way out.',
+  'panel.a11y.check.navigation_links': 'Navigation links are distinguishable',
+  'panel.a11y.explain.navigation_links':
+    'Links reading alike but going elsewhere cannot be told apart out of context.',
+  'panel.a11y.check.tagged_form_fields': 'Form fields are tagged',
+  'panel.a11y.explain.tagged_form_fields':
+    'A field outside the structure tree is not reached in the reading order.',
+  'panel.a11y.check.field_descriptions': 'Form fields have descriptions',
+  'panel.a11y.explain.field_descriptions':
+    'A field with no description is announced by its internal name, or not at all.',
+  'panel.a11y.check.figures_alt': 'Figures have alternate text',
+  'panel.a11y.explain.figures_alt':
+    'A figure with no description conveys nothing to a reader who cannot see it.',
+  'panel.a11y.check.nested_alt': 'No alternate text inside alternate text',
+  'panel.a11y.explain.nested_alt': 'A description inside another description is never read.',
+  'panel.a11y.check.alt_no_content': 'Alternate text is attached to content',
+  'panel.a11y.explain.alt_no_content':
+    'A description on an element that tags nothing describes nothing.',
+  'panel.a11y.check.alt_hides_annotation': 'Alternate text does not hide an annotation',
+  'panel.a11y.explain.alt_hides_annotation':
+    'A description on a tag wrapping an annotation replaces the annotation’s own.',
+  'panel.a11y.check.other_elements_alt': 'Links, forms and formulas are described',
+  'panel.a11y.explain.other_elements_alt':
+    'These elements need a description of their own or one on the object they name.',
+  'panel.a11y.check.table_rows': 'Rows are inside a table',
+  'panel.a11y.explain.table_rows': 'A row outside a table is not read as part of one.',
+  'panel.a11y.check.table_cells': 'Cells are inside a row',
+  'panel.a11y.explain.table_cells': 'A cell outside a row has no position in the table.',
+  'panel.a11y.check.table_headers': 'Tables have header cells',
+  'panel.a11y.explain.table_headers':
+    'Header cells and their scope are what associate a value with what it means.',
+  'panel.a11y.check.table_regularity': 'Table rows have the same width',
+  'panel.a11y.explain.table_regularity':
+    'Rows of different widths cannot be navigated cell by cell.',
+  'panel.a11y.check.table_summary': 'Tables have a summary',
+  'panel.a11y.explain.table_summary':
+    'A summary states what a complex table shows before it is read cell by cell.',
+  'panel.a11y.check.list_items': 'List items are inside a list',
+  'panel.a11y.explain.list_items': 'An item outside a list is not announced as part of one.',
+  'panel.a11y.check.list_labels': 'Labels and bodies are inside a list item',
+  'panel.a11y.explain.list_labels': 'A label or body outside its item loses the item it belongs to.',
+  'panel.a11y.check.heading_nesting': 'Heading levels are not skipped',
+  'panel.a11y.explain.heading_nesting':
+    'Headings are how a document is skimmed; a skipped level breaks the outline.',
+
+  'panel.a11y.detail.alt_nested_inside_alt':
+    'The alternate text here sits inside an element that already carries one, so it is never read.',
+  'panel.a11y.detail.alt_references_no_content':
+    'This element carries alternate text but tags no content at all.',
+  'panel.a11y.detail.alt_replaces_annotation':
+    'This alternate text replaces the annotation’s own description: “{{hidden}}”.',
+  'panel.a11y.detail.annotation_not_tagged':
+    'A {{subtype}} annotation on page {{page}} is outside the structure tree.',
+  'panel.a11y.detail.cell_outside_row': 'This cell’s parent is {{parent}}, not a table row.',
+  'panel.a11y.detail.content_not_tagged':
+    'Text on page {{page}} is covered by no tag and is not declared as decoration.',
+  'panel.a11y.detail.contrast_below_threshold':
+    'On page {{page}}, {{ink}} on {{background}} measures {{ratio}}:1 against the required {{required}}:1.',
+  'panel.a11y.detail.contrast_unknown_backdrop':
+    'On page {{page}}, {{ink}} measures {{ratio}}:1 against {{background}} (the ratio required is {{required}}:1), but what is painted under it could not be resolved.',
+  'panel.a11y.detail.document_language_missing': 'The document declares no language.',
+  'panel.a11y.detail.element_missing_description':
+    'This {{role}} element has no description of its own, and the object it names carries none either.',
+  'panel.a11y.detail.field_has_no_description': 'This {{type}} field has no description.',
+  'panel.a11y.detail.figure_missing_alt':
+    'This {{role}} has neither alternate text nor actual text.',
+  'panel.a11y.detail.font_has_no_unicode_mapping':
+    'On page {{page}}, {{font}} maps to no readable characters ({{reason}}).',
+  'panel.a11y.detail.form_field_not_tagged':
+    'A form field on page {{page}} is outside the structure tree.',
+  'panel.a11y.detail.header_cell_has_no_scope':
+    'This header cell declares no scope, and no cell points at it.',
+  'panel.a11y.detail.heading_level_skipped':
+    'The outline jumps from level {{from}} to level {{to}}.',
+  'panel.a11y.detail.label_outside_list_item':
+    'This {{role}}’s parent is {{parent}}, not a list item.',
+  'panel.a11y.detail.list_item_has_no_label': 'This list item has a body but no label.',
+  'panel.a11y.detail.list_item_outside_list': 'This item’s parent is {{parent}}, not a list.',
+  'panel.a11y.detail.mark_info_missing':
+    'The document has a structure tree but does not declare itself tagged.',
+  'panel.a11y.detail.multimedia_not_tagged':
+    'A {{subtype}} annotation on page {{page}} is outside the structure tree.',
+  'panel.a11y.detail.no_bookmarks': 'A document of {{pages}} pages has no bookmarks.',
+  'panel.a11y.detail.no_extractable_text': 'No text could be extracted from this document.',
+  'panel.a11y.detail.page_is_an_image': 'Page {{page}} is a picture with no recognized text.',
+  'panel.a11y.detail.page_unreadable':
+    'Page {{page}} could not be read, so this check could not decide it.',
+  'panel.a11y.detail.permission_blocks_extraction':
+    'The encryption permissions do not allow text extraction.',
+  'panel.a11y.detail.reading_order_disagrees':
+    'On page {{page}}, {{inversions}} of {{items}} tagged items are read in a different order than they are laid out.',
+  'panel.a11y.detail.repeated_target_across_pages':
+    'The same target is linked {{count}} times, on pages {{pages}}.',
+  'panel.a11y.detail.row_outside_table': 'This row’s parent is {{parent}}, not a table.',
+  'panel.a11y.detail.same_label_different_targets':
+    'The same link text leads to {{count}} different targets: {{targets}}.',
+  'panel.a11y.detail.script_site': 'A {{kind}} script named {{name}}.',
+  'panel.a11y.detail.structure_tree_missing': 'The document has no structure tree.',
+  'panel.a11y.detail.tab_order_missing':
+    'Page {{page}} carries annotations and declares no tab order.',
+  'panel.a11y.detail.tab_order_not_structure':
+    'Page {{page}} declares tab order {{tabs}} rather than the structure order.',
+  'panel.a11y.detail.table_has_no_header_cells':
+    'This table has {{rows}} rows and {{cells}} cells, none of them a header.',
+  'panel.a11y.detail.table_has_no_summary': 'This table has no summary.',
+  'panel.a11y.detail.table_rows_have_different_widths':
+    'The rows of this table are {{widths}} cells wide.',
+  'panel.a11y.detail.title_missing': 'The document has no title.',
+  'panel.a11y.detail.title_not_displayed':
+    'The document has a title but is set to show its file name instead.',
 
   'panel.layers.open': 'Open a PDF to manage its layers',
   'panel.layers.empty': 'This document has no layers.',

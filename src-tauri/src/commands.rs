@@ -625,6 +625,51 @@ pub async fn save_image_file_dialog(
     }
 }
 
+/// Where a saved accessibility report goes. Two formats, one picker: the
+/// extension the user lands on is what the renderer emits, so the filter names
+/// both rather than the dialog being opened twice.
+#[tauri::command]
+pub async fn save_report_file(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    default_name: Option<String>,
+) -> Result<Option<String>, String> {
+    let mut builder = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("Web page", &["html"])
+        .add_filter("Text file", &["txt"]);
+    if let Some(ref name) = default_name {
+        builder = builder.set_file_name(name);
+    }
+    match builder.blocking_save_file() {
+        Some(p) => match p.into_path() {
+            Ok(pb) => Ok(Some(pb.to_string_lossy().to_string())),
+            Err(e) => Err(format!("Path error: {}", e)),
+        },
+        None => Ok(None),
+    }
+}
+
+/// Write a report to a path the save dialog returned. The capability-scoped
+/// filesystem plugin reaches only the app's own temp tree, so a user-chosen
+/// destination goes through a command instead — the `save_snapshot_png` shape.
+///
+/// The extension is checked here rather than trusted from the caller: this is
+/// the app's only arbitrary-path text write, and it stays a REPORT write.
+#[tauri::command]
+pub async fn write_report_file(path: String, contents: String) -> Result<String, String> {
+    let ext_ok = std::path::Path::new(&path)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("txt") || e.eq_ignore_ascii_case("html"));
+    if !ext_ok {
+        return Err(format!("not a report file name: {path}"));
+    }
+    fs::write(&path, contents).map_err(|e| format!("Failed to write the report: {}", e))?;
+    Ok(path)
+}
+
 /// Pick a form-DATA file to import (`/ImportData`). FDF and XFDF carry field
 /// values; the reader chooses by what the file contains, so the filter is a
 /// convenience rather than the decision.

@@ -4316,6 +4316,38 @@
   cursor: nwse-resize;
 }
 
+/* An accessibility finding: where the checker looked, never something the app
+   would write. Amber rather than the teal a detected table wears, and no
+   handles at all — the only gesture is the click that selects it. */
+.page-a11y-finding {
+  position: absolute;
+  padding: 0;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1.5px dashed rgba(251, 191, 36, 0.9);
+  border-radius: 2px;
+  cursor: pointer;
+  text-align: start;
+}
+.page-a11y-finding.is-selected {
+  background: rgba(251, 191, 36, 0.24);
+  border-style: solid;
+  border-color: var(--accent, #3b82f6);
+}
+.page-a11y-finding-label {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 1px 3px;
+  font-size: 8px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: rgba(253, 224, 138, 0.95);
+  pointer-events: none;
+}
+.page-a11y-finding.is-selected .page-a11y-finding-label {
+  color: var(--accent, #3b82f6);
+}
+
 /* ── OS forced colors ─────────────────────────────────────────────────────
    A Windows contrast theme puts the webview into forced-colors mode: every
    author colour is replaced from the system palette, ignoring specificity,
