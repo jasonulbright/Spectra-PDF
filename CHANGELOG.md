@@ -106,11 +106,11 @@
 
 ### Reading the preflight report, and writing your own profile
 - **The report is a tree by category** — Document, Pages, Colour, Fonts, Images, Content, Metadata — each heading carrying how many of the checks that apply to this file it passes, so a long report is skimmable before it is read.
-- **A finding takes you to where it is**: to the page, to the annotation, or to the ink it names. A finding with no place on a page says so rather than doing nothing when clicked.
+- **A finding takes you to the thing it names.** One that has a place on the page is drawn on it; one that names an ink, a font or a setting opens the panel that owns it; one that has neither says so rather than doing nothing when clicked.
 - **Parts the reader could not get through are listed separately**, so a check that could not finish is never mistaken for a check that passed.
 - **The report exports as text or as a web page**, naming the document, the profile and when it was checked. It carries every finding, including the ones the panel summarised as a count of further items; the export states in its own footer that it is not a certificate of conformance.
 - **Any shipped profile can be made your own.** Duplicate it, change the numbers a check measures against, switch a check between a failure and a note, or turn it off entirely. Editing a shipped profile saves a copy instead of overwriting it, so the press figures it came with are always there to return to.
-- **A profile is a file you can hand to someone.** Export it, import one you were sent, and delete the ones you made. An import that is not a profile, is written to a schema this version does not read, or would replace a profile the app ships, is refused by name and says what to do about it.
+- **A profile is a file you can hand to someone.** Export it, import one you were sent, and delete the ones you made. An import that is not JSON, is not a profile, carries no id, holds something else, or is written to a schema this version does not read, is refused with the reason; one that would replace a profile the app ships is refused too, and says to rename it first.
 - Ink names and font names reach the report exactly as the document spells them, in every language.
 
 ## 1.0.29
