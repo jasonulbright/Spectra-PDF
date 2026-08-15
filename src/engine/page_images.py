@@ -134,6 +134,47 @@ def _listed_crop(instructions, t, enclosing):
     ]
 
 
+def _image_facts(obj) -> dict:
+    """Bit depth, filter chain and colour-space family of one image.
+
+    Read AT THE PLACEMENT, because that is the only place the object is in
+    hand: a later pairing by resource name cannot survive a nested form's own
+    `/Resources`, where the same name means a different image. A placement
+    that is not a raster (a marked vector form) reports the empty answer, and
+    an `/ImageMask` is one bit by definition even though it declares no
+    `/BitsPerComponent`.
+    """
+    if obj is None:
+        return {"bpc": 0, "filters": [], "colour_family": ""}
+    try:
+        bpc = int(obj.get("/BitsPerComponent") or 0)
+    except (TypeError, ValueError):
+        bpc = 0
+    try:
+        if not bpc and bool(obj.get("/ImageMask")):
+            bpc = 1
+    except Exception:
+        pass
+    filters: list[str] = []
+    try:
+        declared = obj.get("/Filter")
+        if declared is not None:
+            entries = declared if isinstance(declared, pikepdf.Array) else [declared]
+            filters = [str(entry) for entry in entries]
+    except Exception:
+        filters = []
+    family = ""
+    try:
+        cs = obj.get("/ColorSpace")
+        if isinstance(cs, (pikepdf.Name, str)):
+            family = str(cs).lstrip("/")
+        elif isinstance(cs, pikepdf.Array) and len(cs) > 0:
+            family = str(cs[0]).lstrip("/")
+    except Exception:
+        family = ""
+    return {"bpc": bpc, "filters": filters, "colour_family": family}
+
+
 def _walk_placements(
     pdf,
     instructions,
@@ -243,6 +284,7 @@ def _walk_placements(
                     "nested": nested,
                     "native_width": nw,
                     "native_height": nh,
+                    **_image_facts(obj),
                     "opacity": round(alpha, 4),
                     # The effective blend mode at this draw (seed).
                     "blend": blend,
@@ -292,6 +334,7 @@ def _walk_placements(
                         "nested": nested,
                         "native_width": nw,
                         "native_height": nh,
+                        **_image_facts(None if vector_marker is not None else xobj),
                         # Effective fill alpha at this draw (the opacity
                         # slider's honest seed).
                         "opacity": round(alpha, 4),

@@ -152,7 +152,9 @@ pub enum CliCommand {
     /// and inventing one writes a placeholder, which is worse than none
     AccessibilityFix(AccessibilityFixArgs),
     /// Run print-production preflight (JSON report)
-    Preflight(AccessibilityArgs),
+    Preflight(PreflightArgs),
+    /// List the shipped preflight profiles and the check inventory (JSON)
+    PreflightProfiles,
     /// List every markup comment in the document (JSON)
     CommentsList(AccessibilityArgs),
     /// Delete all markup comments (keeps links and form fields)
@@ -1078,6 +1080,20 @@ pub struct AccessibilityCheckArgs {
     /// not_applicable, so the report has one shape
     #[arg(long)]
     pub category: Option<String>,
+}
+
+#[derive(Args)]
+pub struct PreflightArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// A shipped profile id (see `preflight-profiles`). Defaults to the
+    /// sheetfed offset profile
+    #[arg(long)]
+    pub profile: Option<String>,
+    /// A profile JSON file. Give either this or --profile, never both: two
+    /// rules is no rule
+    #[arg(long)]
+    pub profile_path: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -3955,8 +3971,20 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
 
         CliCommand::Preflight(args) => engine.call(
             "preflight",
-            json!({ "file": abs(&args.input).to_string_lossy() }),
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "profile": args.profile,
+                "profile_path": args.profile_path.as_ref()
+                    .map(|p| abs(p).to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                // The bundled device. Total area coverage is the one check
+                // that needs it, and a missing one is reported by the check
+                // rather than refused by the run.
+                "gs_path": resolve_gs().to_string_lossy(),
+            }),
         ),
+
+        CliCommand::PreflightProfiles => engine.call("list_preflight_profiles", json!({})),
 
         CliCommand::CommentsList(args) => engine.call(
             "list_annotations",

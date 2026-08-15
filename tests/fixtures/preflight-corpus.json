@@ -1,0 +1,3033 @@
+{
+  "note": [
+    "The preflight verdict of every PDF in the tree, pinned per profile.",
+    "The full verdict map is the default profile; the other eight are pinned as their summary tuple (passed/failed/warnings/needs_review/not_applicable).",
+    "Total area coverage is disabled here and pinned separately over constructed fixtures.",
+    "Regenerate with f25-corpus-build.local.py and review the diff."
+  ],
+  "default_profile": "sheetfed_offset",
+  "profiles": [
+    "sheetfed_offset",
+    "web_offset_heatset",
+    "newsprint",
+    "digital_printing",
+    "large_format",
+    "pdfx_1a",
+    "pdfx_3",
+    "pdfx_4",
+    "office_print"
+  ],
+  "summary_keys": [
+    "passed",
+    "failed",
+    "warnings",
+    "needs_review",
+    "not_applicable"
+  ],
+  "documents": [
+    {
+      "path": "e2e-tests/fixtures/bookmarked.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "pass",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "web_offset_heatset": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "newsprint": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "digital_printing": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "large_format": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "pdfx_1a": [
+          13,
+          3,
+          1,
+          0,
+          20
+        ],
+        "pdfx_3": [
+          13,
+          3,
+          1,
+          0,
+          20
+        ],
+        "pdfx_4": [
+          11,
+          3,
+          1,
+          0,
+          22
+        ],
+        "office_print": [
+          4,
+          0,
+          0,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/codec-ccitt.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "fail",
+        "image_max_dpi": "pass",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          7,
+          1,
+          1,
+          0,
+          28
+        ],
+        "web_offset_heatset": [
+          7,
+          1,
+          1,
+          0,
+          28
+        ],
+        "newsprint": [
+          7,
+          1,
+          1,
+          0,
+          28
+        ],
+        "digital_printing": [
+          6,
+          1,
+          1,
+          0,
+          29
+        ],
+        "large_format": [
+          6,
+          1,
+          1,
+          0,
+          29
+        ],
+        "pdfx_1a": [
+          11,
+          6,
+          1,
+          0,
+          19
+        ],
+        "pdfx_3": [
+          11,
+          6,
+          1,
+          0,
+          19
+        ],
+        "pdfx_4": [
+          8,
+          6,
+          1,
+          0,
+          22
+        ],
+        "office_print": [
+          3,
+          0,
+          1,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/codec-jbig2.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "pass",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "fail",
+        "image_max_dpi": "pass",
+        "image_compression": "not_applicable",
+        "image_colour_space": "pass",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          9,
+          1,
+          1,
+          0,
+          26
+        ],
+        "web_offset_heatset": [
+          9,
+          1,
+          1,
+          0,
+          26
+        ],
+        "newsprint": [
+          9,
+          1,
+          1,
+          0,
+          26
+        ],
+        "digital_printing": [
+          8,
+          1,
+          1,
+          0,
+          27
+        ],
+        "large_format": [
+          8,
+          1,
+          1,
+          0,
+          27
+        ],
+        "pdfx_1a": [
+          14,
+          6,
+          1,
+          0,
+          16
+        ],
+        "pdfx_3": [
+          13,
+          6,
+          1,
+          0,
+          17
+        ],
+        "pdfx_4": [
+          10,
+          6,
+          1,
+          0,
+          20
+        ],
+        "office_print": [
+          3,
+          0,
+          1,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/codec-jpx.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "fail",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "pass",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          7,
+          1,
+          1,
+          0,
+          28
+        ],
+        "web_offset_heatset": [
+          7,
+          1,
+          1,
+          0,
+          28
+        ],
+        "newsprint": [
+          8,
+          0,
+          1,
+          0,
+          28
+        ],
+        "digital_printing": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "large_format": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "pdfx_1a": [
+          10,
+          7,
+          1,
+          0,
+          19
+        ],
+        "pdfx_3": [
+          10,
+          7,
+          1,
+          0,
+          19
+        ],
+        "pdfx_4": [
+          8,
+          6,
+          1,
+          0,
+          22
+        ],
+        "office_print": [
+          4,
+          0,
+          0,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/derived-nav.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "pass",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "fail",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "pass",
+        "small_text_k_only": "pass",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          9,
+          1,
+          1,
+          0,
+          26
+        ],
+        "web_offset_heatset": [
+          9,
+          1,
+          1,
+          0,
+          26
+        ],
+        "newsprint": [
+          9,
+          1,
+          1,
+          0,
+          26
+        ],
+        "digital_printing": [
+          8,
+          1,
+          1,
+          0,
+          27
+        ],
+        "large_format": [
+          8,
+          1,
+          1,
+          0,
+          27
+        ],
+        "pdfx_1a": [
+          13,
+          6,
+          1,
+          0,
+          17
+        ],
+        "pdfx_3": [
+          13,
+          6,
+          1,
+          0,
+          17
+        ],
+        "pdfx_4": [
+          11,
+          6,
+          1,
+          0,
+          19
+        ],
+        "office_print": [
+          5,
+          1,
+          0,
+          0,
+          31
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/encrypted.pdf",
+      "refused": "C:\\projects\\spectra-studio\\e2e-tests\\fixtures\\encrypted.pdf: invalid password"
+    },
+    {
+      "path": "e2e-tests/fixtures/hairlines-ladder.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "warn",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          5,
+          0,
+          2,
+          0,
+          30
+        ],
+        "web_offset_heatset": [
+          5,
+          0,
+          2,
+          0,
+          30
+        ],
+        "newsprint": [
+          5,
+          0,
+          2,
+          0,
+          30
+        ],
+        "digital_printing": [
+          4,
+          0,
+          2,
+          0,
+          31
+        ],
+        "large_format": [
+          4,
+          0,
+          2,
+          0,
+          31
+        ],
+        "pdfx_1a": [
+          9,
+          5,
+          2,
+          0,
+          21
+        ],
+        "pdfx_3": [
+          9,
+          5,
+          2,
+          0,
+          21
+        ],
+        "pdfx_4": [
+          7,
+          5,
+          2,
+          0,
+          23
+        ],
+        "office_print": [
+          3,
+          0,
+          0,
+          0,
+          34
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/inline-image.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "fail",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "fail",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "pass",
+        "image_compression": "not_applicable",
+        "image_colour_space": "fail",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          7,
+          3,
+          1,
+          0,
+          26
+        ],
+        "web_offset_heatset": [
+          7,
+          3,
+          1,
+          0,
+          26
+        ],
+        "newsprint": [
+          7,
+          3,
+          1,
+          0,
+          26
+        ],
+        "digital_printing": [
+          6,
+          1,
+          3,
+          0,
+          27
+        ],
+        "large_format": [
+          6,
+          1,
+          3,
+          0,
+          27
+        ],
+        "pdfx_1a": [
+          12,
+          8,
+          1,
+          0,
+          16
+        ],
+        "pdfx_3": [
+          11,
+          8,
+          1,
+          0,
+          17
+        ],
+        "pdfx_4": [
+          8,
+          8,
+          1,
+          0,
+          20
+        ],
+        "office_print": [
+          3,
+          0,
+          1,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/malformed.pdf",
+      "refused": "C:\\projects\\spectra-studio\\e2e-tests\\fixtures\\malformed.pdf: unable to find trailer dictionary while recovering damaged file"
+    },
+    {
+      "path": "e2e-tests/fixtures/mongolian-columns.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "pass",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "pass",
+        "small_text_k_only": "pass",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          9,
+          0,
+          1,
+          0,
+          27
+        ],
+        "web_offset_heatset": [
+          9,
+          0,
+          1,
+          0,
+          27
+        ],
+        "newsprint": [
+          9,
+          0,
+          1,
+          0,
+          27
+        ],
+        "digital_printing": [
+          8,
+          0,
+          1,
+          0,
+          28
+        ],
+        "large_format": [
+          8,
+          0,
+          1,
+          0,
+          28
+        ],
+        "pdfx_1a": [
+          13,
+          5,
+          1,
+          0,
+          18
+        ],
+        "pdfx_3": [
+          13,
+          5,
+          1,
+          0,
+          18
+        ],
+        "pdfx_4": [
+          11,
+          5,
+          1,
+          0,
+          20
+        ],
+        "office_print": [
+          5,
+          0,
+          0,
+          0,
+          32
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/nested-vector.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "web_offset_heatset": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "newsprint": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "digital_printing": [
+          5,
+          0,
+          1,
+          0,
+          31
+        ],
+        "large_format": [
+          5,
+          0,
+          1,
+          0,
+          31
+        ],
+        "pdfx_1a": [
+          10,
+          5,
+          1,
+          0,
+          21
+        ],
+        "pdfx_3": [
+          10,
+          5,
+          1,
+          0,
+          21
+        ],
+        "pdfx_4": [
+          8,
+          5,
+          1,
+          0,
+          23
+        ],
+        "office_print": [
+          3,
+          0,
+          0,
+          0,
+          34
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/sample.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "pass",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "web_offset_heatset": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "newsprint": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "digital_printing": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "large_format": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "pdfx_1a": [
+          13,
+          3,
+          1,
+          0,
+          20
+        ],
+        "pdfx_3": [
+          13,
+          3,
+          1,
+          0,
+          20
+        ],
+        "pdfx_4": [
+          11,
+          3,
+          1,
+          0,
+          22
+        ],
+        "office_print": [
+          4,
+          0,
+          0,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/scanned.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "fail",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "fail",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "pass",
+        "image_compression": "not_applicable",
+        "image_colour_space": "fail",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          7,
+          3,
+          1,
+          0,
+          26
+        ],
+        "web_offset_heatset": [
+          7,
+          3,
+          1,
+          0,
+          26
+        ],
+        "newsprint": [
+          7,
+          3,
+          1,
+          0,
+          26
+        ],
+        "digital_printing": [
+          6,
+          1,
+          3,
+          0,
+          27
+        ],
+        "large_format": [
+          7,
+          0,
+          3,
+          0,
+          27
+        ],
+        "pdfx_1a": [
+          12,
+          8,
+          1,
+          0,
+          16
+        ],
+        "pdfx_3": [
+          11,
+          8,
+          1,
+          0,
+          17
+        ],
+        "pdfx_4": [
+          8,
+          8,
+          1,
+          0,
+          20
+        ],
+        "office_print": [
+          4,
+          0,
+          0,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/separations-spot.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "pass",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "pass",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          8,
+          0,
+          1,
+          0,
+          28
+        ],
+        "web_offset_heatset": [
+          8,
+          0,
+          1,
+          0,
+          28
+        ],
+        "newsprint": [
+          7,
+          0,
+          2,
+          0,
+          28
+        ],
+        "digital_printing": [
+          6,
+          1,
+          1,
+          0,
+          29
+        ],
+        "large_format": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "pdfx_1a": [
+          12,
+          5,
+          1,
+          0,
+          19
+        ],
+        "pdfx_3": [
+          11,
+          5,
+          1,
+          0,
+          20
+        ],
+        "pdfx_4": [
+          9,
+          5,
+          1,
+          0,
+          22
+        ],
+        "office_print": [
+          3,
+          0,
+          0,
+          0,
+          34
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/separations-tac.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "web_offset_heatset": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "newsprint": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "digital_printing": [
+          5,
+          0,
+          1,
+          0,
+          31
+        ],
+        "large_format": [
+          5,
+          0,
+          1,
+          0,
+          31
+        ],
+        "pdfx_1a": [
+          10,
+          5,
+          1,
+          0,
+          21
+        ],
+        "pdfx_3": [
+          10,
+          5,
+          1,
+          0,
+          21
+        ],
+        "pdfx_4": [
+          8,
+          5,
+          1,
+          0,
+          23
+        ],
+        "office_print": [
+          3,
+          0,
+          0,
+          0,
+          34
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/signed.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "web_offset_heatset": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "newsprint": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "digital_printing": [
+          5,
+          0,
+          1,
+          0,
+          31
+        ],
+        "large_format": [
+          5,
+          0,
+          1,
+          0,
+          31
+        ],
+        "pdfx_1a": [
+          9,
+          6,
+          1,
+          0,
+          21
+        ],
+        "pdfx_3": [
+          9,
+          6,
+          1,
+          0,
+          21
+        ],
+        "pdfx_4": [
+          7,
+          6,
+          1,
+          0,
+          23
+        ],
+        "office_print": [
+          3,
+          0,
+          0,
+          0,
+          34
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/transparency-page.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "fail",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "pass",
+        "small_text_k_only": "pass",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "warn",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          7,
+          1,
+          2,
+          0,
+          27
+        ],
+        "web_offset_heatset": [
+          7,
+          1,
+          2,
+          0,
+          27
+        ],
+        "newsprint": [
+          7,
+          1,
+          2,
+          0,
+          27
+        ],
+        "digital_printing": [
+          7,
+          1,
+          1,
+          0,
+          28
+        ],
+        "large_format": [
+          7,
+          1,
+          1,
+          0,
+          28
+        ],
+        "pdfx_1a": [
+          11,
+          7,
+          1,
+          0,
+          18
+        ],
+        "pdfx_3": [
+          11,
+          7,
+          1,
+          0,
+          18
+        ],
+        "pdfx_4": [
+          10,
+          6,
+          1,
+          0,
+          20
+        ],
+        "office_print": [
+          4,
+          1,
+          0,
+          0,
+          32
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/type3-text.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "pass",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "web_offset_heatset": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "newsprint": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "digital_printing": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "large_format": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "pdfx_1a": [
+          11,
+          5,
+          1,
+          0,
+          20
+        ],
+        "pdfx_3": [
+          11,
+          5,
+          1,
+          0,
+          20
+        ],
+        "pdfx_4": [
+          9,
+          5,
+          1,
+          0,
+          22
+        ],
+        "office_print": [
+          4,
+          0,
+          0,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/vertical-orientations.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "fail",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "pass",
+        "small_text_k_only": "pass",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          8,
+          1,
+          1,
+          0,
+          27
+        ],
+        "web_offset_heatset": [
+          8,
+          1,
+          1,
+          0,
+          27
+        ],
+        "newsprint": [
+          8,
+          1,
+          1,
+          0,
+          27
+        ],
+        "digital_printing": [
+          7,
+          1,
+          1,
+          0,
+          28
+        ],
+        "large_format": [
+          7,
+          1,
+          1,
+          0,
+          28
+        ],
+        "pdfx_1a": [
+          12,
+          6,
+          1,
+          0,
+          18
+        ],
+        "pdfx_3": [
+          12,
+          6,
+          1,
+          0,
+          18
+        ],
+        "pdfx_4": [
+          10,
+          6,
+          1,
+          0,
+          20
+        ],
+        "office_print": [
+          4,
+          1,
+          0,
+          0,
+          32
+        ]
+      }
+    },
+    {
+      "path": "e2e-tests/fixtures/vertical-text.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "fail",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "pass",
+        "small_text_k_only": "pass",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          8,
+          1,
+          1,
+          0,
+          27
+        ],
+        "web_offset_heatset": [
+          8,
+          1,
+          1,
+          0,
+          27
+        ],
+        "newsprint": [
+          8,
+          1,
+          1,
+          0,
+          27
+        ],
+        "digital_printing": [
+          7,
+          1,
+          1,
+          0,
+          28
+        ],
+        "large_format": [
+          7,
+          1,
+          1,
+          0,
+          28
+        ],
+        "pdfx_1a": [
+          12,
+          6,
+          1,
+          0,
+          18
+        ],
+        "pdfx_3": [
+          12,
+          6,
+          1,
+          0,
+          18
+        ],
+        "pdfx_4": [
+          10,
+          6,
+          1,
+          0,
+          20
+        ],
+        "office_print": [
+          4,
+          1,
+          0,
+          0,
+          32
+        ]
+      }
+    },
+    {
+      "path": "tests/fixtures/form-pdflib.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "fail",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          6,
+          1,
+          1,
+          0,
+          29
+        ],
+        "web_offset_heatset": [
+          6,
+          1,
+          1,
+          0,
+          29
+        ],
+        "newsprint": [
+          6,
+          1,
+          1,
+          0,
+          29
+        ],
+        "digital_printing": [
+          5,
+          1,
+          1,
+          0,
+          30
+        ],
+        "large_format": [
+          5,
+          1,
+          1,
+          0,
+          30
+        ],
+        "pdfx_1a": [
+          8,
+          8,
+          1,
+          0,
+          20
+        ],
+        "pdfx_3": [
+          8,
+          8,
+          1,
+          0,
+          20
+        ],
+        "pdfx_4": [
+          6,
+          8,
+          1,
+          0,
+          22
+        ],
+        "office_print": [
+          3,
+          1,
+          0,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "tests/fixtures/sample.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "pass",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "web_offset_heatset": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "newsprint": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "digital_printing": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "large_format": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "pdfx_1a": [
+          13,
+          3,
+          1,
+          0,
+          20
+        ],
+        "pdfx_3": [
+          13,
+          3,
+          1,
+          0,
+          20
+        ],
+        "pdfx_4": [
+          11,
+          3,
+          1,
+          0,
+          22
+        ],
+        "office_print": [
+          4,
+          0,
+          0,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "tests/fixtures/sample2.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "pass",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "web_offset_heatset": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "newsprint": [
+          7,
+          0,
+          1,
+          0,
+          29
+        ],
+        "digital_printing": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "large_format": [
+          6,
+          0,
+          1,
+          0,
+          30
+        ],
+        "pdfx_1a": [
+          11,
+          5,
+          1,
+          0,
+          20
+        ],
+        "pdfx_3": [
+          11,
+          5,
+          1,
+          0,
+          20
+        ],
+        "pdfx_4": [
+          9,
+          5,
+          1,
+          0,
+          22
+        ],
+        "office_print": [
+          4,
+          0,
+          0,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "tests/fixtures/scan-dim.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "fail",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "pass",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "pass",
+        "image_compression": "not_applicable",
+        "image_colour_space": "fail",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "web_offset_heatset": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "newsprint": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "digital_printing": [
+          7,
+          0,
+          3,
+          0,
+          27
+        ],
+        "large_format": [
+          6,
+          0,
+          4,
+          0,
+          27
+        ],
+        "pdfx_1a": [
+          13,
+          7,
+          1,
+          0,
+          16
+        ],
+        "pdfx_3": [
+          12,
+          7,
+          1,
+          0,
+          17
+        ],
+        "pdfx_4": [
+          9,
+          7,
+          1,
+          0,
+          20
+        ],
+        "office_print": [
+          4,
+          0,
+          0,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "tests/fixtures/scan-form.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "fail",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "pass",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "pass",
+        "image_compression": "not_applicable",
+        "image_colour_space": "fail",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "web_offset_heatset": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "newsprint": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "digital_printing": [
+          7,
+          0,
+          3,
+          0,
+          27
+        ],
+        "large_format": [
+          6,
+          0,
+          4,
+          0,
+          27
+        ],
+        "pdfx_1a": [
+          12,
+          8,
+          1,
+          0,
+          16
+        ],
+        "pdfx_3": [
+          11,
+          8,
+          1,
+          0,
+          17
+        ],
+        "pdfx_4": [
+          8,
+          8,
+          1,
+          0,
+          20
+        ],
+        "office_print": [
+          4,
+          0,
+          0,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "tests/fixtures/scan-photo.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "fail",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "pass",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "pass",
+        "image_compression": "not_applicable",
+        "image_colour_space": "fail",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "web_offset_heatset": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "newsprint": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "digital_printing": [
+          7,
+          0,
+          3,
+          0,
+          27
+        ],
+        "large_format": [
+          6,
+          0,
+          4,
+          0,
+          27
+        ],
+        "pdfx_1a": [
+          13,
+          7,
+          1,
+          0,
+          16
+        ],
+        "pdfx_3": [
+          12,
+          7,
+          1,
+          0,
+          17
+        ],
+        "pdfx_4": [
+          9,
+          7,
+          1,
+          0,
+          20
+        ],
+        "office_print": [
+          4,
+          0,
+          0,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "tests/fixtures/scan-sideways.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "fail",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "pass",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "pass",
+        "image_compression": "not_applicable",
+        "image_colour_space": "fail",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "web_offset_heatset": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "newsprint": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "digital_printing": [
+          7,
+          0,
+          3,
+          0,
+          27
+        ],
+        "large_format": [
+          6,
+          0,
+          4,
+          0,
+          27
+        ],
+        "pdfx_1a": [
+          13,
+          7,
+          1,
+          0,
+          16
+        ],
+        "pdfx_3": [
+          12,
+          7,
+          1,
+          0,
+          17
+        ],
+        "pdfx_4": [
+          9,
+          7,
+          1,
+          0,
+          20
+        ],
+        "office_print": [
+          4,
+          0,
+          0,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "tests/fixtures/scan-skew.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "fail",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "pass",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "pass",
+        "image_compression": "not_applicable",
+        "image_colour_space": "fail",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "web_offset_heatset": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "newsprint": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "digital_printing": [
+          7,
+          0,
+          3,
+          0,
+          27
+        ],
+        "large_format": [
+          6,
+          0,
+          4,
+          0,
+          27
+        ],
+        "pdfx_1a": [
+          13,
+          7,
+          1,
+          0,
+          16
+        ],
+        "pdfx_3": [
+          12,
+          7,
+          1,
+          0,
+          17
+        ],
+        "pdfx_4": [
+          9,
+          7,
+          1,
+          0,
+          20
+        ],
+        "office_print": [
+          4,
+          0,
+          0,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "tests/fixtures/scan-speckle.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "fail",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "pass",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "pass",
+        "image_compression": "not_applicable",
+        "image_colour_space": "fail",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "web_offset_heatset": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "newsprint": [
+          8,
+          2,
+          1,
+          0,
+          26
+        ],
+        "digital_printing": [
+          7,
+          0,
+          3,
+          0,
+          27
+        ],
+        "large_format": [
+          6,
+          0,
+          4,
+          0,
+          27
+        ],
+        "pdfx_1a": [
+          13,
+          7,
+          1,
+          0,
+          16
+        ],
+        "pdfx_3": [
+          12,
+          7,
+          1,
+          0,
+          17
+        ],
+        "pdfx_4": [
+          9,
+          7,
+          1,
+          0,
+          20
+        ],
+        "office_print": [
+          4,
+          0,
+          0,
+          0,
+          33
+        ]
+      }
+    },
+    {
+      "path": "tests/fixtures/scan-text.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "not_applicable",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "fail",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "fail",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "pass",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "pass",
+        "image_compression": "not_applicable",
+        "image_colour_space": "fail",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          8,
+          3,
+          1,
+          0,
+          25
+        ],
+        "web_offset_heatset": [
+          8,
+          3,
+          1,
+          0,
+          25
+        ],
+        "newsprint": [
+          8,
+          3,
+          1,
+          0,
+          25
+        ],
+        "digital_printing": [
+          7,
+          1,
+          3,
+          0,
+          26
+        ],
+        "large_format": [
+          6,
+          1,
+          4,
+          0,
+          26
+        ],
+        "pdfx_1a": [
+          13,
+          8,
+          1,
+          0,
+          15
+        ],
+        "pdfx_3": [
+          12,
+          8,
+          1,
+          0,
+          16
+        ],
+        "pdfx_4": [
+          9,
+          8,
+          1,
+          0,
+          19
+        ],
+        "office_print": [
+          4,
+          1,
+          0,
+          0,
+          32
+        ]
+      }
+    }
+  ]
+}
