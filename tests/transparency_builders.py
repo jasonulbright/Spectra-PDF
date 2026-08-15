@@ -184,3 +184,105 @@ def opaque_only_pdf(path):
     pdf.save(path)
     pdf.close()
     return str(path)
+
+
+# ── the unjudgeable cases ──────────────────────────────────────────────────
+#
+# Each page below places an object the transparency walk CANNOT judge, one
+# per formerly-swallowed branch. A scalar where a dictionary belongs is what
+# makes the read fail: pikepdf hands back a Python int, whose `.get`/`.keys`
+# raise, which is exactly the malformed-object shape these branches met in
+# the wild.
+
+
+def _unjudgeable_page(path, mutate):
+    """A page placing one form XObject, with `mutate(pdf, form)` breaking it."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(400.0, 400.0))
+    form = pikepdf.Stream(pdf, b"0 0 1 rg 0 0 60 60 re f")
+    form.Type = Name.XObject
+    form.Subtype = Name.Form
+    form.BBox = Array([0, 0, 60, 60])
+    form.Resources = Dictionary()
+    mutate(pdf, form)
+    page.Resources = Dictionary(
+        XObject=Dictionary(Fm0=pdf.make_indirect(form)),
+        Font=Dictionary(F0=_helvetica(pdf)),
+    )
+    page.Contents = pdf.make_stream(b"\n".join([
+        b"BT /F0 12 Tf 1 0 0 1 20 40 Tm (live text, clear of the form) Tj ET",
+        b"q 1 0 0 1 200 200 cm /Fm0 Do Q",
+    ]))
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
+def unreadable_form_resources_pdf(path):
+    """The form's `/Resources` is a number, so nothing inside it can be read."""
+    def mutate(_pdf, form):
+        form.Resources = 7
+    return _unjudgeable_page(path, mutate)
+
+
+def unreadable_form_gstate_pdf(path):
+    """The form names an `/ExtGState` whose entry is a number: applying it
+    throws, and the alpha it would have set is unknown."""
+    def mutate(_pdf, form):
+        form.Resources = Dictionary(ExtGState=Dictionary(GS0=9))
+    return _unjudgeable_page(path, mutate)
+
+
+def unreadable_child_subtype_pdf(path):
+    """The form holds a child XObject that is a number, so its subtype — and
+    whether it is a masked image or a nested group — cannot be read."""
+    def mutate(_pdf, form):
+        form.Resources = Dictionary(XObject=Dictionary(Ch0=11))
+    return _unjudgeable_page(path, mutate)
+
+
+def no_bbox_form_pdf(path):
+    """The form declares no `/BBox`, so the area it covers cannot be
+    measured. The `Do` used to emit nothing at all."""
+    def mutate(_pdf, form):
+        del form["/BBox"]
+    return _unjudgeable_page(path, mutate)
+
+
+def over_depth_forms_pdf(path, depth: int = 20):
+    """Forms nested past the walk's cap: what the innermost one paints is
+    beyond reach, and the cap is not evidence of opacity."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(400.0, 400.0))
+    child = None
+    for level in range(depth):
+        stream = pikepdf.Stream(
+            pdf, b"0 0 1 rg 0 0 60 60 re f" if child is None else b"/Ch Do")
+        stream.Type = Name.XObject
+        stream.Subtype = Name.Form
+        stream.BBox = Array([0, 0, 60, 60])
+        stream.Resources = (
+            Dictionary() if child is None
+            else Dictionary(XObject=Dictionary(Ch=child))
+        )
+        if child is None and level == 0:
+            stream.Group = Dictionary(S=Name("/Transparency"),
+                                      CS=Name.DeviceRGB, Type=Name("/Group"))
+        child = pdf.make_indirect(stream)
+    page.Resources = Dictionary(XObject=Dictionary(Fm0=child))
+    page.Contents = pdf.make_stream(b"q 1 0 0 1 200 200 cm /Fm0 Do Q")
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
+def unreadable_page_gstate_pdf(path):
+    """The PAGE's `gs` names an `/ExtGState` entry that is a number: every
+    object drawn through it composites at an alpha nobody can read."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(400.0, 400.0))
+    page.Resources = Dictionary(ExtGState=Dictionary(GA=13))
+    page.Contents = pdf.make_stream(b"q /GA gs 1 0 0 rg 40 40 120 120 re f Q")
+    pdf.save(path)
+    pdf.close()
+    return str(path)
