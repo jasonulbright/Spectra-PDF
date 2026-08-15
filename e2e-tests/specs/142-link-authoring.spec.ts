@@ -92,6 +92,12 @@ describe('link authoring', () => {
     })) as { x: number; y: number; w: number; h: number } | null;
   }
 
+  async function scrollTop(): Promise<number> {
+    return (await browser.execute(
+      () => (document.querySelector('[data-testid="document-view"]') as HTMLElement | null)?.scrollTop ?? 0,
+    )) as number;
+  }
+
   async function dragBand(): Promise<void> {
     const at = (f: [number, number]): { x: number; y: number } => ({
       x: Math.round(pr.x + pr.w * f[0]),
@@ -192,10 +198,20 @@ describe('link authoring', () => {
     // The listing names the kind the document actually carries.
     expect(await $('[data-testid="link-item"]').getAttribute('data-link-kind')).toBe('internal');
 
-    // Jump to the link's OWN page (page 1 — where the rectangle is).
+    // Go to lands on the link's OWN page (page 1 — where the rectangle is).
+    // Measured as a real scroll, from a reading position that is somewhere
+    // else: asserting from page 1 that we are on page 1 measures nothing.
+    await $('[data-testid="page-nav-box"]').click();
+    await setReactInputValue('[data-testid="page-nav-box"]', '3');
+    await browser.keys(['Enter']);
+    await browser.waitUntil(async () => (await scrollTop()) > 0, {
+      timeout: 10_000,
+      timeoutMsg: 'the reading view never left the first page',
+    });
+
     await setActiveOp('links');
     await $('[data-testid="link-jump-1-0"]').click();
-    await browser.waitUntil(async () => (await getState()).currentPage === 1, {
+    await browser.waitUntil(async () => (await scrollTop()) === 0, {
       timeout: 10_000,
       timeoutMsg: 'Go to never landed on the link’s page',
     });

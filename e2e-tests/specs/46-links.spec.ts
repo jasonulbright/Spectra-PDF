@@ -78,7 +78,9 @@ describe('links manager', () => {
     expect(await item.getText()).toContain('old.example.com');
 
     await $('[data-testid="link-edit-1-0"]').click();
-    await setReactInputValue('[data-testid="link-url-input-1-0"]', 'https://new.example.com');
+    // Edit opens the target editor bound to this link; a URI link opens on the
+    // address it already carries.
+    await setReactInputValue('[data-testid="link-edit-1-0-url"]', 'https://new.example.com');
     await $('[data-testid="link-save-1-0"]').click();
     const dest = resolve(tmp, 'retargeted.pdf');
     await applyAndSave(dest);
