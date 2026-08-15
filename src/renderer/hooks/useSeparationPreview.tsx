@@ -21,6 +21,7 @@ import {
   previewDpi,
   aliasIsAllowed,
   moveInSequence,
+  readInventory,
   type CacheEntry,
   type CompositeResult,
   type Ink,
@@ -44,6 +45,11 @@ export interface SeparationPreviewValue {
   setArmed: (armed: boolean) => void;
   /** The document's whole colorant inventory, including `/All` and `/None`. */
   inks: Ink[];
+  /** What the engine could NOT read while taking that inventory, as engine
+   *  messages. Non-empty means a spot may be missing from `plates` and from
+   *  every figure measured over them, so the panel says so rather than
+   *  presenting the short list as the page's whole ink set. */
+  inkUnknown: string[];
   /** The plates the current page actually rasterized to — the toggle list. */
   plates: Plate[];
   coverage: Record<string, number>;
@@ -108,6 +114,7 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
   const armed = state.ui.tool === 'outputpreview';
 
   const [inks, setInks] = useState<Ink[]>([]);
+  const [inkUnknown, setInkUnknown] = useState<string[]>([]);
   const [plates, setPlates] = useState<Plate[]>([]);
   const [coverage, setCoverage] = useState<Record<string, number>>({});
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set<string>());
@@ -237,13 +244,17 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
   useEffect(() => {
     if (!armed || !inventoryPath) {
       setInks([]);
+      setInkUnknown([]);
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
         const res = await call('list_inks', { file: inventoryPath });
-        if (!cancelled) setInks((res as unknown as { inks?: Ink[] }).inks ?? []);
+        if (cancelled) return;
+        const inventory = readInventory(res);
+        setInks(inventory.inks);
+        setInkUnknown(inventory.unknown);
       } catch (e: unknown) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
@@ -351,13 +362,14 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
 
   const value = useMemo<SeparationPreviewValue>(
     () => ({
-      armed, setArmed, inks, plates, coverage, hidden, toggleInk, showAllInks, hideAllInks,
-      densities, setDensity, aliases, setAlias, sequence, moveInk, limitPct, setLimitPct,
-      alarm, setAlarm, overprint, setOverprint, stats, busy, error, invalidate, rasterFor,
+      armed, setArmed, inks, inkUnknown, plates, coverage, hidden, toggleInk, showAllInks,
+      hideAllInks, densities, setDensity, aliases, setAlias, sequence, moveInk, limitPct,
+      setLimitPct, alarm, setAlarm, overprint, setOverprint, stats, busy, error, invalidate,
+      rasterFor,
     }),
-    [armed, setArmed, inks, plates, coverage, hidden, toggleInk, showAllInks, hideAllInks,
-      densities, setDensity, aliases, setAlias, sequence, moveInk, limitPct, setLimitPct,
-      alarm, overprint, stats, busy, error, invalidate, rasterFor],
+    [armed, setArmed, inks, inkUnknown, plates, coverage, hidden, toggleInk, showAllInks,
+      hideAllInks, densities, setDensity, aliases, setAlias, sequence, moveInk, limitPct,
+      setLimitPct, alarm, overprint, stats, busy, error, invalidate, rasterFor],
   );
 
   return <PreviewContext.Provider value={value}>{children}</PreviewContext.Provider>;

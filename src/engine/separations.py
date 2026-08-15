@@ -3,7 +3,10 @@
 Three capabilities, in the order the preview uses them.
 
 `list_inks` enumerates the `/Separation` and `/DeviceN` colorants a page can
-paint with, resolving each to a display colour through `color_spaces`.
+paint with, resolving each to a display colour through `color_spaces`. It
+reports what it could NOT read beside what it found: a resource branch the
+walk skipped may hold an ink, and a plate inventory that answered only with
+what it reached would hide one.
 
 `render_separations` rasterizes one page to one 8-bit grayscale plate per
 separation through Ghostscript's `tiffsep` device. **Plate polarity is
@@ -41,7 +44,7 @@ import pikepdf
 
 from . import budget
 from .color_spaces import build_resolver
-from .preflight import walk_page_resources
+from .preflight import COLORSPACE, walk_page_resources
 from .validate import validate_pdf
 
 # The four exact spellings the separation device uses for process inks. A
@@ -96,6 +99,35 @@ def ink_kind(name: str) -> str:
     if name in PROCESS_INKS:
         return "process"
     return "spot"
+
+
+def refuse_unknown_colorants(page: int, detail: str) -> None:
+    """State that a page's inks could not all be established, as a refusal.
+
+    The one place the sentence exists. The inventory REPORTS it (a read may
+    still return the inks it did reach) and the printer-mark colour bar
+    RAISES it (a write over an unknown colorant would print a bar missing a
+    patch, with nothing on the sheet to say so), so both consumers make one
+    claim about one document.
+    """
+    raise ValueError(
+        f"Page {page} uses a colour space this engine cannot read, so the "
+        f"inks on it cannot all be established: {detail}"
+    )
+
+
+def unknown_colorant_message(page: int, detail: str) -> str:
+    """The sentence the refusal carries, for the report that must not raise.
+
+    Asking the refusal itself keeps one wording: an inventory that described
+    an unreadable colorant branch differently from the refusal it predicts
+    would be two claims about one document.
+    """
+    try:
+        refuse_unknown_colorants(page, detail)
+    except ValueError as exc:
+        return str(exc)
+    return ""
 
 
 def _name_text(obj) -> str:
@@ -189,15 +221,33 @@ def list_inks(file: str, pages=None) -> dict:
     content and is never translated), its kind, its alternate space, an sRGB
     display colour taken at full tint, the pages it appears on, and the
     resource categories it was reached through.
+
+    `unknown` is the other half of the answer. A resource branch the walk
+    could not read may hold a colorant, so an inventory that reported only
+    what it reached would present a plate list it has not earned — the ink
+    would be missing from the plate inventory and from every total-ink figure
+    measured over it, with nothing saying so. The list is empty on a document
+    the walk read whole, and a caller must not read a non-empty one as
+    "nothing else there".
     """
     validate_pdf(file)
     found: dict[str, dict] = {}
+    unknown: list[str] = []
 
     with pikepdf.open(file) as pdf:
         numbers = _page_numbers(pdf, pages)
         for number in numbers:
             page = pdf.pages[number - 1]
             resources = page.obj.get("/Resources")
+
+            def on_unreadable(facts, reason: str, _n=number) -> None:
+                # Only a branch that could have held a COLORANT clouds an ink
+                # inventory: an unreadable font table hides no plate.
+                if COLORSPACE not in facts:
+                    return
+                message = unknown_colorant_message(_n, reason)
+                if message not in unknown:
+                    unknown.append(message)
 
             def record(name: str, kind: str, alternate: str, rgb, category: str) -> None:
                 entry = found.get(name)
@@ -236,7 +286,8 @@ def list_inks(file: str, pages=None) -> dict:
                                _devicen_component_display(cs, _res, index, len(names)),
                                category)
 
-            walk_page_resources(page, on_colorspace=on_colorspace)
+            walk_page_resources(page, on_colorspace=on_colorspace,
+                                on_unreadable=on_unreadable)
 
     inks = sorted(
         found.values(),
@@ -249,6 +300,7 @@ def list_inks(file: str, pages=None) -> dict:
         "inks": inks,
         "spot_count": len(spots),
         "pages": numbers,
+        "unknown": unknown,
     }
 
 

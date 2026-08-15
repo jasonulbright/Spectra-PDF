@@ -268,3 +268,35 @@ def inks_everywhere_pdf(path):
     pdf.save(path)
     pdf.close()
     return str(path)
+
+
+def unreadable_colorspace_table_pdf(path, spot: str = "PANTONE 185 C",
+                                    pages: int = 1, broken_on: int = 1):
+    """`pages` pages painting one readable spot; `broken_on` also carries a
+    Form XObject whose `/ColorSpace` table is a number.
+
+    The readable spot is what makes the case bite. The inventory still returns
+    an ink list and the preview still rasters, so the failure this guards is
+    not a crash — it is the branch that will not enumerate being rendered as
+    "no further inks", which is exactly where a second spot would hide.
+    """
+    pdf = pikepdf.new()
+    for number in range(1, int(pages) + 1):
+        page = pdf.add_blank_page(page_size=(300, 300))
+        resources = Dictionary(ColorSpace=Dictionary(
+            CS0=separation_space(pdf, spot, (0.0, 1.0, 0.75, 0.0)),
+        ))
+        body = [b"/CS0 cs 1 scn 10 250 80 30 re f"]
+        if number == int(broken_on):
+            form = pikepdf.Stream(pdf, b"0 0 40 40 re f")
+            form.Type = Name.XObject
+            form.Subtype = Name.Form
+            form.BBox = Array([0, 0, 40, 40])
+            form.Resources = Dictionary(ColorSpace=17)
+            resources[Name("/XObject")] = Dictionary(Fm0=pdf.make_indirect(form))
+            body.append(b"q 1 0 0 1 10 100 cm /Fm0 Do Q")
+        page.Resources = resources
+        page.Contents = pdf.make_stream(b"\n".join(body))
+    pdf.save(path)
+    pdf.close()
+    return str(path)
