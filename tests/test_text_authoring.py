@@ -1110,7 +1110,7 @@ def _ops(path, name):
 
 
 class TestVerticalAuthoring:
-    """T29 — authoring a column. Two boundaries carry it (the box enters the
+    """Authoring a column. Two boundaries carry it (the box enters the
     writing frame, the anchor leaves it); everything between is the
     horizontal layout, which is why a horizontal box stays byte-identical."""
 

@@ -1293,9 +1293,9 @@ export async function commitAddText(params: {
   smallCaps?: boolean;
   alternates?: boolean;
   altIndex?: number;
-  // T29 — the writing mode, and per-span styling (`tcy` marks a
-  // tate-chu-yoko block). CJK text reaches the card through
-  // `setReactInputValue`, never WebDriver keys.
+  // The writing mode, and per-span styling (`tcy` marks a tate-chu-yoko
+  // block). CJK text reaches the card through `setReactInputValue`, never
+  // WebDriver keys.
   writingMode?: 'horizontal' | 'vertical' | 'vertical-rl' | 'vertical-lr';
   spans?: {
     start: number;
