@@ -1698,6 +1698,7 @@
   "dock.close": "Zavřít panel nástroje",
   "dock.paneLabel": "Panel nástroje",
   "dock.resize": "Táhnutím změníte velikost",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "neznámá kategorie přístupnosti: „{{category}}“ (očekávána jedna z: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} obsahuje formulář XML (XFA). Operace se stránkami by formulář odpojily od jeho stránek, takže {{operation}} není pro tento dokument k dispozici. Vyplňte formulář nebo jej nejprve slučte jiným nástrojem.",
   "engine.acroform.regeneratedFileSPage": "Počet stránek znovu vytvořeného souboru se liší od původního; jeho pole formuláře nelze znovu připojit.",
   "engine.attachments.attachmentNamed": "příloha s názvem {{name}} neexistuje",

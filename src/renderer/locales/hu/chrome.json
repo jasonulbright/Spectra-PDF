@@ -1596,6 +1596,7 @@
   "dock.close": "Az eszközablak bezárása",
   "dock.paneLabel": "Eszközablak",
   "dock.resize": "Húzza az átméretezéshez",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "ismeretlen akadálymentességi kategória: „{{category}}” (ezek egyike volt várható: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "A(z) {{v0}} fájl XML-űrlapot (XFA) tartalmaz. Az oldalműveletek leválasztanák az űrlapot az oldalairól, ezért a(z) {{operation}} művelet nem érhető el ehhez a dokumentumhoz. Töltse ki az űrlapot, vagy előbb simítsa el egy másik eszközzel.",
   "engine.acroform.regeneratedFileSPage": "Az újraépített fájl oldalszáma eltér az eredetitől; az űrlapmezői nem csatolhatók vissza.",
   "engine.attachments.attachmentNamed": "nincs ilyen nevű melléklet: {{name}}",

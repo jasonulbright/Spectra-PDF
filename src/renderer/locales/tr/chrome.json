@@ -1596,6 +1596,7 @@
   "dock.close": "Araç bölmesini kapat",
   "dock.paneLabel": "Araç bölmesi",
   "dock.resize": "Yeniden boyutlandırmak için sürükleyin",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "bilinmeyen erişilebilirlik kategorisi: “{{category}}” ({{v1}} arasından biri bekleniyordu)",
   "engine.acroform.containsXmlFormXfa": "{{v0}} dosyası bir XML formu (XFA) içeriyor. Sayfa işlemleri formu sayfalarından koparırdı; bu nedenle {{operation}} işlemi bu belge için kullanılamaz. Formu doldurun veya önce başka bir araçla düzleştirin.",
   "engine.acroform.regeneratedFileSPage": "Yeniden oluşturulan dosyanın sayfa sayısı özgün dosyadan farklı; form alanları yeniden bağlanamıyor.",
   "engine.attachments.attachmentNamed": "şu adı taşıyan bir ek yok: {{name}}",

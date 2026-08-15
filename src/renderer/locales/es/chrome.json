@@ -1647,6 +1647,7 @@
   "dock.close": "Cerrar el panel de herramientas",
   "dock.paneLabel": "Panel de herramientas",
   "dock.resize": "Arrastre para cambiar el tamaño",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "categoría de accesibilidad desconocida: '{{category}}' (se esperaba una de: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} contiene un formulario XML (XFA). Las operaciones de página separarían el formulario de sus páginas, por lo que {{operation}} no está disponible para este documento. Rellene el formulario o acóplelo con otra herramienta primero.",
   "engine.acroform.regeneratedFileSPage": "El número de páginas del archivo regenerado difiere del original; no se pueden volver a adjuntar sus campos de formulario.",
   "engine.attachments.attachmentNamed": "no hay ningún archivo adjunto llamado {{name}}",

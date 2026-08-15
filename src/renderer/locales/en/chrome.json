@@ -1596,6 +1596,7 @@
   "dock.close": "Close the tool pane",
   "dock.paneLabel": "Tool pane",
   "dock.resize": "Drag to resize",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "unknown accessibility category '{{category}}' (expected one of: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} contains an XML form (XFA). Page operations would detach the form from its pages, so {{operation}} is not available for this document. Fill the form, or flatten it with another tool first.",
   "engine.acroform.regeneratedFileSPage": "The regenerated file's page count differs from the original; cannot reattach its form fields.",
   "engine.attachments.attachmentNamed": "no attachment named {{name}}",

@@ -1698,6 +1698,7 @@
   "dock.close": "Закрыть панель инструмента",
   "dock.paneLabel": "Панель инструмента",
   "dock.resize": "Потяните, чтобы изменить размер",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "неизвестная категория доступности: «{{category}}» (ожидалась одна из: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} содержит XML-форму (XFA). Операции со страницами отсоединили бы форму от её страниц, поэтому {{operation}} недоступно для этого документа. Заполните форму или сначала сведите её другим инструментом.",
   "engine.acroform.regeneratedFileSPage": "Количество страниц пересозданного файла отличается от исходного; повторно присоединить поля его формы невозможно.",
   "engine.attachments.attachmentNamed": "вложения с именем {{name}} нет",

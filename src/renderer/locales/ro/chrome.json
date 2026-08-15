@@ -1647,6 +1647,7 @@
   "dock.close": "Închiderea panoului de instrumente",
   "dock.paneLabel": "Panou de instrumente",
   "dock.resize": "Trageți pentru redimensionare",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "categorie de accesibilitate necunoscută: „{{category}}” (se aștepta una dintre: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} conține un formular XML (XFA). Operațiile pe pagini ar desprinde formularul de paginile lui, așa că {{operation}} nu este disponibilă pentru acest document. Completați formularul sau aplatizați-l mai întâi cu alt instrument.",
   "engine.acroform.regeneratedFileSPage": "Numărul de pagini al fișierului regenerat diferă de al originalului; nu se pot reatașa câmpurile lui de formular.",
   "engine.attachments.attachmentNamed": "nu există nicio atașare cu numele {{name}}",

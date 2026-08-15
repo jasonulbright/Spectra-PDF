@@ -1800,6 +1800,7 @@
   "dock.close": "إغلاق جزء الأدوات",
   "dock.paneLabel": "جزء الأدوات",
   "dock.resize": "اسحب لتغيير الحجم",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "فئة إتاحة غير معروفة: «{{category}}» — القيم المتوقعة: {{v1}}",
   "engine.acroform.containsXmlFormXfa": "يحتوي الملف {{v0}} على نموذج XML من نوع XFA. تؤدي عمليات الصفحات إلى فصل النموذج عن صفحاته، لذا فإن العملية {{operation}} غير متاحة لهذا المستند. عبّئ النموذج، أو سطّحه بأداة أخرى أولًا.",
   "engine.acroform.regeneratedFileSPage": "يختلف عدد صفحات الملف الذي أعيد إنشاؤه عن الأصل؛ لا يمكن إعادة إرفاق حقول النموذج الخاصة به.",
   "engine.attachments.attachmentNamed": "لا يوجد مرفق باسم {{name}}",
