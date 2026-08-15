@@ -2705,6 +2705,7 @@ export interface SweepRowSnapshot {
 export interface FolderPreflightSnapshot {
   phase: string;
   fileCount: number | null;
+  profiles: string[];
   report: {
     mode: string;
     total: number;
