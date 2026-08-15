@@ -138,6 +138,18 @@ export const profileFile = {
     new Uint8Array(await invoke<ArrayBuffer>('read_file_binary', { filePath: path })),
 };
 
+/** A guided action at a path the user picked — the same shape, for the same
+ * reason: an action is exported so it can be handed to someone or fed to the
+ * command line, and the scoped filesystem plugin reaches only the app's own
+ * temp tree. Its own Rust command, so neither arbitrary-path write can be
+ * steered into producing the other's artifact. */
+export const actionFile = {
+  write: (path: string, contents: string) =>
+    invoke<string>('write_action_file', { path, contents }),
+  read: async (path: string) =>
+    new Uint8Array(await invoke<ArrayBuffer>('read_file_binary', { filePath: path })),
+};
+
 // ── Image clipboard ───────────────────────────────────────────────────────
 
 /** What the clipboard HOLDS afterwards — read back out of its own DIB header

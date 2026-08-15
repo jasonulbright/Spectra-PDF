@@ -75,19 +75,77 @@ def list_annotations(file: str) -> dict:
         return {"annotations": out, "count": len(out), "by_type": by_type}
 
 
-def delete_all_annotations(file: str, output: str) -> dict:
-    """Remove every markup annotation (and its popup). Keeps form fields and
-    links. A page left with no annotations drops its /Annots entirely."""
+#: /F bit position 3 — "print". An annotation without it never reaches a
+#: plate, which is why a preflight sweep can be narrowed to the ones that do.
+_PRINT_FLAG = 1 << 2
+
+
+def _prints(annot) -> bool:
+    try:
+        return bool(int(annot.get("/F", 0)) & _PRINT_FLAG)
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
+def _sweep_set(subtypes) -> set:
+    """The subtypes one call removes. An empty selection is the shipped markup
+    set, never nothing — an empty list would silently remove no annotation and
+    report a success."""
+    if not subtypes:
+        return set(_SWEEP)
+    wanted = {f"/{str(s).lstrip('/')}" for s in subtypes}
+    unknown = sorted(s for s in wanted if s not in _MARKUP)
+    if unknown:
+        raise ValueError(
+            "not a comment annotation subtype: "
+            f"{', '.join(s.lstrip('/') for s in unknown)}"
+        )
+    # A popup rides its parent, so it is swept with whatever it belongs to
+    # rather than needing to be named.
+    return wanted
+
+
+def delete_all_annotations(file: str, output: str, subtypes: list | None = None,
+                           printing_only: bool = False) -> dict:
+    """Remove markup annotations (and their popups). Keeps form fields and
+    links. A page left with no annotations drops its /Annots entirely.
+
+    Args:
+        file: Input PDF path.
+        output: Output PDF path (may equal `file`).
+        subtypes: Restrict the sweep to these comment subtypes; empty = all.
+        printing_only: Remove only annotations flagged to print. A note that
+            never reaches a plate is not what a press job is asking about, and
+            removing it would take a comment the reader wanted to keep.
+    """
     input_path = Path(file)
     output_path = Path(output)
     same_file = input_path.resolve() == output_path.resolve()
 
+    wanted = _sweep_set(subtypes)
     removed = 0
     with pikepdf.open(file) as pdf:
         for page in pdf.pages:
             annots = page.obj.get("/Annots")
             if annots is None:
                 continue
+            # A popup whose parent is swept goes with it whatever its own
+            # flags say — an orphan popup is a comment with nothing to open.
+            doomed_popups: set = set()
+            for a in annots:
+                try:
+                    if str(a.get("/Subtype")) not in wanted:
+                        continue
+                    if printing_only and not _prints(a):
+                        continue
+                    popup = a.get("/Popup")
+                except Exception:
+                    continue
+                if popup is not None:
+                    try:
+                        doomed_popups.add(popup.objgen)
+                    except AttributeError:
+                        pass
             kept = []
             for a in annots:
                 try:
@@ -95,7 +153,13 @@ def delete_all_annotations(file: str, output: str) -> dict:
                 except Exception:
                     kept.append(a)
                     continue
-                if subtype in _SWEEP:
+                try:
+                    is_doomed_popup = a.objgen in doomed_popups
+                except AttributeError:
+                    is_doomed_popup = False
+                if is_doomed_popup or (
+                    subtype in wanted and not (printing_only and not _prints(a))
+                ):
                     removed += 1
                     continue
                 kept.append(a)

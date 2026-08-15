@@ -48,6 +48,8 @@ from engine.preflight import (
     preflight,
     validate_preflight_profile,
 )
+from engine.preflight_fixups import apply_fixups
+from engine.preflight_sweep import run_preflight_sweep
 from engine.separations import (
     composite_separations,
     list_inks,
@@ -252,6 +254,8 @@ def main() -> None:
     server.register("preflight", preflight)
     server.register("list_preflight_profiles", list_preflight_profiles)
     server.register("validate_preflight_profile", validate_preflight_profile)
+    server.register("apply_preflight_fixups", apply_fixups)
+    server.register("run_preflight_sweep", run_preflight_sweep)
     server.register("list_inks", list_inks)
     server.register("render_separations", render_separations)
     server.register("composite_separations", composite_separations)

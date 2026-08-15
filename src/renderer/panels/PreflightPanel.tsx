@@ -2,11 +2,13 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
+import { useOperations } from '../hooks/useOperations';
 import { useAppDispatch } from '../state/AppStateProvider';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { getCanvasServices } from '../commands/context';
-import { dialog, report as reportFile } from '../lib/tauri-bridge';
+import { app, dialog, report as reportFile } from '../lib/tauri-bridge';
+import { ensureGsPath } from './SettingsPanel';
 import { tChrome, tChromeCount } from '../i18n';
 import { TEST_HARNESS_ENABLED, registerPreflight } from '../testHarness';
 import type { PlaceableFinding } from '../lib/a11y-findings';
@@ -29,6 +31,15 @@ import {
   importProfileFromPath,
   keepProfile,
 } from '../lib/preflight-profile-io';
+import {
+  TRAPPED_STATES,
+  authoredFixProfile,
+  autoFixCall,
+  draftKey,
+  fixFor,
+  fixableChecks,
+  suggestionFor,
+} from '../lib/preflight-fixes';
 import {
   categoryCount,
   categoryName,
@@ -220,11 +231,82 @@ function ParamControl({
   );
 }
 
+/** One authored fixup's editor: the value, and the control that writes it.
+ *
+ * A value nobody typed is never sent — the four authored fixups exist because
+ * a trapping claim, a document title, a bleed margin and an ink alias are
+ * decisions, and a machine that invented one would be wrong more expensively
+ * than a row left standing. */
+function AuthoredFixEditor({
+  checkId,
+  findingIndex,
+  input,
+  field,
+  fixup,
+  busy,
+  value,
+  onChange,
+  onApply,
+}: {
+  checkId: string;
+  findingIndex: number | null;
+  input: string;
+  field: string;
+  fixup: string;
+  busy: boolean;
+  value: string;
+  onChange: (next: string) => void;
+  onApply: () => void;
+}): React.ReactElement {
+  const suffix = findingIndex === null ? '' : `-${findingIndex}`;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2 px-3 pb-2">
+      <span className="text-xs text-neutral-400">
+        {tChrome(`panel.preflight.fixField.${field}` as Parameters<typeof tChrome>[0])}
+      </span>
+      {input === 'trapped' ? (
+        <select
+          data-testid={`preflight-fix-value-${checkId}${suffix}`}
+          disabled={busy}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="bg-neutral-900 border border-neutral-700 rounded px-1 py-0.5 text-xs text-neutral-200"
+        >
+          {TRAPPED_STATES.map((state) => (
+            <option key={state} value={state}>
+              {tChrome(`panel.preflight.trapped.${state}` as Parameters<typeof tChrome>[0])}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          data-testid={`preflight-fix-value-${checkId}${suffix}`}
+          type={input === 'number' ? 'number' : 'text'}
+          step={input === 'number' ? 'any' : undefined}
+          disabled={busy}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="min-w-0 flex-1 bg-neutral-900 border border-neutral-700 rounded px-1 py-0.5 text-xs text-neutral-200"
+        />
+      )}
+      <button
+        data-testid={`preflight-fix-${checkId}${suffix}`}
+        disabled={busy}
+        onClick={onApply}
+        className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+      >
+        {tChrome(`panel.preflight.fixup.${fixup}` as Parameters<typeof tChrome>[0])}
+      </button>
+    </div>
+  );
+}
+
 export function PreflightPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
+  const { performOperation, confirmSignedEdit } = useOperations();
   const dispatch = useAppDispatch();
   const [report, setReport] = useState<PreflightReport | null>(null);
   const [shipped, setShipped] = useState<PreflightProfile[]>([]);
@@ -239,6 +321,7 @@ export function PreflightPanel(): React.ReactElement {
   const [shownCheck, setShownCheck] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   const buffer = activeFile?.buffer ?? null;
   const workingPath = activeFile?.workingPath ?? null;
@@ -277,6 +360,19 @@ export function PreflightPanel(): React.ReactElement {
     [profiles, profileId],
   );
 
+  /** The optional tools the checks and the fixups reach for. Total area
+   * coverage is a Ghostscript run per page and the colour, downsample and
+   * standard-conversion fixups are gs-backed, so the bundled device has to be
+   * NAMED — a bare `gs` only resolves on a machine that happens to have one on
+   * its path, and the check would report "not available" on every other. */
+  const tools = useCallback(
+    async () => ({
+      gs_path: await ensureGsPath(),
+      font_dir: await app.getEditFontPath(),
+    }),
+    [],
+  );
+
   const run = useCallback(
     async (usingId: string) => {
       if (!workingPath) return;
@@ -289,6 +385,7 @@ export function PreflightPanel(): React.ReactElement {
           // A user profile travels as the rule itself; a shipped one by id, so
           // the engine resolves its own constant rather than a copy of it.
           profile: user ?? usingId,
+          ...(await tools()),
         })) as unknown as PreflightReport;
         setReport(res);
         // The addresses in the previous run's findings were read from a
@@ -319,7 +416,7 @@ export function PreflightPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [workingPath, call, userProfiles],
+    [workingPath, call, userProfiles, tools],
   );
 
   useEffect(() => {
@@ -396,6 +493,127 @@ export function PreflightPanel(): React.ReactElement {
       else setStatus(tChrome('panel.preflight.nothingToShow'));
     },
     [dispatch, path, shownCheck],
+  );
+
+  // ── fixups ──────────────────────────────────────────────────────────────
+  //
+  // The ENGINE owns what repairing a finding means AND the canonical order a
+  // pass runs in, which no profile may change — so the panel sends CHECK ids
+  // and never a sequence of its own.
+  //
+  // **One invocation is ONE undoable entry**, and that is the honest answer
+  // rather than the convenient one: `performOperation` pushes one entry per
+  // call, the user asked for "fix this row" or "fix what this profile can"
+  // once, and the fixups inside a pass condition each other — undoing the
+  // hairline stage while the flatten that rasterized around it stood would
+  // leave a document the canonical order never produces.
+
+  /** The rule a fix run measures against: a shipped profile by id so the
+   * engine resolves its own constant, a user profile as the rule itself. */
+  const profileArg = useMemo(
+    () =>
+      activeProfile && !isShippedProfileId(activeProfile.id)
+        ? (activeProfile as unknown)
+        : (activeProfile?.id ?? DEFAULT_PROFILE_ID),
+    [activeProfile],
+  );
+  const carried = useMemo(
+    () => (activeProfile?.fixups ?? []).map((f) => f.id),
+    [activeProfile],
+  );
+
+  const runFix = useCallback(
+    async (params: Record<string, unknown>): Promise<boolean> => {
+      if (!activeFile) return false;
+      if (!(await confirmSignedEdit(activeFile.path, activeFile.workingPath, 'structural'))) {
+        return false;
+      }
+      setBusy(true);
+      setStatus(tChrome('panel.preflight.fixing'));
+      try {
+        await performOperation(activeFile.path, 'apply_preflight_fixups', {
+          ...params,
+          ...(await tools()),
+          tesseract_path: await app.getTesseractPath(),
+          // The report on screen is the one this repair is answering, and
+          // total area coverage is a Ghostscript run per page — so the
+          // measurement is handed on rather than taken twice. The re-check
+          // AFTER is never skipped.
+          ...(report ? { report } : {}),
+        });
+        // The buffer changed, so the report re-runs and the rows flip
+        // themselves — the re-check is never a claim the panel makes.
+        setStatus(tChrome('panel.preflight.fixed'));
+        return true;
+      } catch (e: unknown) {
+        setStatus(
+          tChrome('panel.common.error', {
+            message: e instanceof Error ? e.message : String(e),
+          }),
+        );
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeFile, confirmSignedEdit, performOperation, report, tools],
+  );
+
+  /** Repair one row: the engine resolves the check to its doors and applies
+   * them in its own order. */
+  const applyAutoFix = useCallback(
+    async (checkId: string): Promise<boolean> => {
+      const spec = autoFixCall(profileArg, [checkId]);
+      if (!spec) return false;
+      return runFix(spec.params);
+    },
+    [profileArg, runFix],
+  );
+
+  /** Everything this profile can repair, as one act. */
+  const applyAllFixes = useCallback(async (): Promise<boolean> => {
+    const all = categories.flatMap((c) => c.checks);
+    const spec = autoFixCall(profileArg, fixableChecks(all, carried));
+    if (!spec) {
+      setStatus(tChrome('panel.preflight.nothingToFix'));
+      return false;
+    }
+    return runFix(spec.params);
+  }, [categories, profileArg, carried, runFix]);
+
+  /** Write one authored value. It travels as a PARAMETER of the profile's own
+   * fixup entry rather than as a second argument, so the engine validates it
+   * exactly like any other rule — there is one validator and this is not it. */
+  const applyAuthoredFix = useCallback(
+    async (check: Check, findingIndex: number | null): Promise<boolean> => {
+      const offer = fixFor(check, carried);
+      if (!offer?.authored || !activeProfile) return false;
+      const key = draftKey(check.id, findingIndex);
+      const finding = findingIndex === null ? null : check.findings[findingIndex];
+      const extra =
+        offer.authored.fixup === 'alias_spot' && finding?.address.ink
+          ? { source: finding.address.ink }
+          : {};
+      const patched = authoredFixProfile(
+        activeProfile as unknown as {
+          fixups: { id: string; params: Record<string, unknown> }[];
+        },
+        offer.authored,
+        drafts[key] ?? '',
+        extra,
+      );
+      if (!patched) {
+        setStatus(tChrome('panel.preflight.needsValue'));
+        return false;
+      }
+      const applied = await runFix({
+        profile: patched.profile,
+        checks: patched.checks,
+      });
+      if (applied) setDrafts((d) => ({ ...d, [key]: '' }));
+      return applied;
+    },
+    [activeProfile, carried, drafts, runFix],
   );
 
   /** Emit the report to `target`. The extension the user landed on picks the
@@ -595,11 +813,16 @@ export function PreflightPanel(): React.ReactElement {
                   findings: check.finding_count,
                   addressKinds: [...new Set(check.findings.map((f) => f.address.kind))],
                   params: check.params,
+                  fix: fixFor(check, carried)?.kind ?? null,
                 })),
               ),
               profiles: profiles.map((p) => p.id),
               expandedCategories: [...expanded],
               shownCheck,
+              fixable: fixableChecks(
+                orderedCategories(report).flatMap((c) => c.checks),
+                carried,
+              ),
             }
           : null,
       recheck: () => run(profileId),
@@ -625,6 +848,30 @@ export function PreflightPanel(): React.ReactElement {
       },
       importProfileFrom: async (fromPath) => (await importProfile(fromPath)).id,
       exportProfileTo: exportProfile,
+      fix: applyAutoFix,
+      fixAll: applyAllFixes,
+      authoredFix: async (checkId, index, value) => {
+        const check = categories.flatMap((c) => c.checks).find((c) => c.id === checkId);
+        if (!check) throw new Error(`no check ${checkId}`);
+        setDrafts((d) => ({ ...d, [draftKey(checkId, index)]: value }));
+        // The draft state the editor reads is set above; the apply below takes
+        // the value directly, so the injector cannot race its own setState.
+        const offer = fixFor(check, carried);
+        if (!offer?.authored || !activeProfile) throw new Error(`no authored fix ${checkId}`);
+        const finding = index === null ? null : check.findings[index];
+        const patched = authoredFixProfile(
+          activeProfile as unknown as {
+            fixups: { id: string; params: Record<string, unknown> }[];
+          },
+          offer.authored,
+          value,
+          offer.authored.fixup === 'alias_spot' && finding?.address.ink
+            ? { source: finding.address.ink }
+            : {},
+        );
+        if (!patched) throw new Error(`preflightAuthoredFix: ${checkId} needs a value`);
+        return runFix({ profile: patched.profile, checks: patched.checks });
+      },
     });
     return () => registerPreflight(null);
   }, [
@@ -634,12 +881,17 @@ export function PreflightPanel(): React.ReactElement {
     profileId,
     expanded,
     shownCheck,
+    carried,
+    activeProfile,
     run,
     jump,
     showOnPage,
     writeReport,
     importProfile,
     exportProfile,
+    applyAutoFix,
+    applyAllFixes,
+    runFix,
   ]);
 
   if (!activeFile) {
@@ -799,6 +1051,16 @@ export function PreflightPanel(): React.ReactElement {
             {tChrome('panel.preflight.rerun')}
           </button>
           <button
+            data-testid="preflight-fix-all"
+            onClick={() => void applyAllFixes()}
+            disabled={busy || !report || fixableChecks(
+              categories.flatMap((c) => c.checks), carried,
+            ).length === 0}
+            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+          >
+            {tChrome('panel.preflight.fixAll')}
+          </button>
+          <button
             data-testid="preflight-export"
             onClick={() => void exportReport()}
             disabled={busy || !report}
@@ -905,6 +1167,7 @@ export function PreflightPanel(): React.ReactElement {
                       hiddenFindings(check) + (check.findings.length - listed.length);
                     const onPage = placeable(check).length > 0;
                     const isOpen = openCheck === check.id;
+                    const offer = fixFor(check, carried);
                     return (
                       <div
                         key={check.id}
@@ -963,7 +1226,44 @@ export function PreflightPanel(): React.ReactElement {
                                 : tChrome('panel.preflight.show')}
                             </button>
                           )}
+                          {/* The fix control never jumps and the finding row
+                              never fixes — two gestures, two outcomes. */}
+                          {offer?.kind === 'auto' && (
+                            <button
+                              data-testid={`preflight-fix-${check.id}`}
+                              disabled={busy}
+                              onClick={() => void applyAutoFix(check.id)}
+                              className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50 shrink-0"
+                            >
+                              {tChrome(
+                                `panel.preflight.fixup.${offer.fixups[0]}` as Parameters<
+                                  typeof tChrome
+                                >[0],
+                              )}
+                            </button>
+                          )}
                         </div>
+                        {offer?.kind === 'authored' &&
+                          offer.authored?.scope === 'check' && (
+                            <AuthoredFixEditor
+                              checkId={check.id}
+                              findingIndex={null}
+                              input={offer.authored.input}
+                              field={offer.authored.field}
+                              fixup={offer.authored.fixup}
+                              busy={busy}
+                              value={
+                                drafts[draftKey(check.id, null)] ?? suggestionFor(check)
+                              }
+                              onChange={(next) =>
+                                setDrafts((d) => ({
+                                  ...d,
+                                  [draftKey(check.id, null)]: next,
+                                }))
+                              }
+                              onApply={() => void applyAuthoredFix(check, null)}
+                            />
+                          )}
                         {isOpen && (
                           <div className="px-3 pb-2">
                             <div className="text-xs text-neutral-400">
@@ -999,6 +1299,27 @@ export function PreflightPanel(): React.ReactElement {
                                         </span>
                                       )}
                                     </button>
+                                    {offer?.kind === 'authored' &&
+                                      offer.authored?.scope === 'finding' && (
+                                        <AuthoredFixEditor
+                                          checkId={check.id}
+                                          findingIndex={index}
+                                          input={offer.authored.input}
+                                          field={offer.authored.field}
+                                          fixup={offer.authored.fixup}
+                                          busy={busy}
+                                          value={drafts[draftKey(check.id, index)] ?? ''}
+                                          onChange={(next) =>
+                                            setDrafts((d) => ({
+                                              ...d,
+                                              [draftKey(check.id, index)]: next,
+                                            }))
+                                          }
+                                          onApply={() =>
+                                            void applyAuthoredFix(check, index)
+                                          }
+                                        />
+                                      )}
                                   </li>
                                 ))}
                               </ul>

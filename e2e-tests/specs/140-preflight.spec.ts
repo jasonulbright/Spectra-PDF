@@ -11,6 +11,9 @@
 //     page finding opens the surface that owns the edit,
 //   · a profile exported and re-imported is the same rule, and it drives a
 //     run,
+//   · a per-row Fix and "fix what this profile can" both flip their rows on
+//     the automatic re-check, land as ONE undo entry each, and undo puts the
+//     verdicts back,
 //   · and the export writes a real artefact in both formats, carrying every
 //     check id AND its parameters.
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
@@ -32,6 +35,9 @@ import {
   preflightExport,
   preflightImportProfile,
   preflightExportProfile,
+  preflightFix,
+  preflightFixAll,
+  preflightAuthoredFix,
   a11yFindingsOnPage,
 } from '../support/harness.js';
 
@@ -244,6 +250,110 @@ describe('Print preflight', () => {
     });
     await preflightJump('trim_box', 0);
     await expectActiveOp('pagebox');
+  });
+
+  /** The report re-runs on the buffer the fix changed, so a row's verdict is
+   * settled-for rather than read once. */
+  async function expectStatus(checkId: string, status: string): Promise<void> {
+    await browser.waitUntil(
+      async () => {
+        const snapshot = await preflightSnapshot();
+        return snapshot?.checks.find((c) => c.id === checkId)?.status === status;
+      },
+      { timeout: 30000, timeoutMsg: `${checkId} never reached ${status}` },
+    );
+  }
+
+  describe('the fixup pass', () => {
+    before(async () => {
+      // A profile that carries doors for exactly what this document failed —
+      // a fix is offered only where the PROFILE carries the door, so the
+      // rule under test has to name them.
+      const target = resolve(dir, 'fixing-rule.json');
+      expect(await preflightExportProfile(target)).not.toContain('__SPECTRA_E2E_ERROR__');
+      const doc = JSON.parse(readFileSync(target, 'utf8'));
+      doc.profile.id = 'fixing_rule';
+      doc.profile.name = 'Fixing rule';
+      doc.profile.checks = {
+        ...doc.profile.checks,
+        ink_coverage_max: { enabled: false },
+        title_present: { severity: 'fail', require_title: true },
+      };
+      doc.profile.fixups = [
+        { id: 'remove_annotations', params: { printing_only: true } },
+        { id: 'set_trim_box', params: { from_box: 'crop' } },
+        { id: 'set_document_title', params: {} },
+      ];
+      writeFileSync(target, JSON.stringify(doc, null, 2));
+      expect(await preflightImportProfile(target)).toBe('fixing_rule');
+      await browser.waitUntil(
+        async () => (await preflightSnapshot())?.profile === 'fixing_rule',
+        { timeout: 30000, timeoutMsg: 'the fixing rule never ran' },
+      );
+    });
+
+    it('offers a fix only where the profile carries the door', async () => {
+      const snapshot = (await preflightSnapshot())!;
+      const by = Object.fromEntries(snapshot.checks.map((c) => [c.id, c]));
+      expect(by.trim_box.fix).toBe('auto');
+      expect(by.printing_annotations.fix).toBe('auto');
+      // An authored value nobody typed is never invented, so the title row
+      // gets a field rather than a button.
+      expect(by.title_present.fix).toBe('authored');
+      // The profile carries no colour conversion, so the failing colour row
+      // offers nothing rather than a button whose only outcome is a refusal.
+      expect(by.colour_family.status).toBe('fail');
+      expect(by.colour_family.fix).toBeNull();
+      expect(snapshot.fixable).toEqual(
+        expect.arrayContaining(['trim_box', 'printing_annotations']),
+      );
+      expect(snapshot.fixable).not.toContain('title_present');
+    });
+
+    it('repairs one row, and the row flips on the automatic re-check', async () => {
+      // The box checks are a WARN on the general profiles: a great many
+      // printable documents carry no trim box because their producer never
+      // wrote one, and a fix is offered against a warn too.
+      await expectStatus('trim_box', 'warn');
+      expect(await preflightFix('trim_box')).toBe(true);
+      await expectStatus('trim_box', 'pass');
+    });
+
+    it('puts the verdict back on ONE undo', async () => {
+      // One invocation is one undo entry, which is the honest answer rather
+      // than the convenient one: the fixups inside a pass condition each
+      // other, so undoing one stage while the next stood would leave a
+      // document the canonical order never produces.
+      expect(await invokeAppCommand('edit.undo')).toBe(true);
+      await expectStatus('trim_box', 'warn');
+    });
+
+    it('writes an authored value and clears its own row', async () => {
+      await expectStatus('title_present', 'fail');
+      expect(await preflightAuthoredFix('title_present', null, 'Spring catalogue'))
+        .toBe(true);
+      await expectStatus('title_present', 'pass');
+    });
+
+    it('fixes what the profile can, as one act', async () => {
+      const before = (await preflightSnapshot())!;
+      expect(before.fixable.length).toBeGreaterThan(0);
+      expect(await preflightFixAll()).toBe(true);
+      for (const checkId of before.fixable) await expectStatus(checkId, 'pass');
+      // What the profile does NOT carry is untouched: a pass this document did
+      // not earn is the wrongness the round exists to end.
+      const after = (await preflightSnapshot())!;
+      expect(after.checks.find((c) => c.id === 'colour_family')!.status).toBe('fail');
+    });
+
+    it('leaves the document readable, and comes back to the shipped rule', async () => {
+      expect((await getState()).view).toBe('canvas');
+      await preflightSelectProfile('sheetfed_offset');
+      await browser.waitUntil(
+        async () => (await preflightSnapshot())?.profile === 'sheetfed_offset',
+        { timeout: 30000, timeoutMsg: 'the sheetfed profile never came back' },
+      );
+    });
   });
 
   it('exports both formats, carrying every check id AND its parameters', async () => {

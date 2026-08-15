@@ -113,6 +113,32 @@
 - **A profile is a file you can hand to someone.** Export it, import one you were sent, and delete the ones you made. An import that is not JSON, is not a profile, carries no id, holds something else, or is written to a schema this version does not read, is refused with the reason; one that would replace a profile the app ships is refused too, and says to rename it first.
 - Ink names and font names reach the report exactly as the document spells them, in every language.
 
+### Repairing what the preflight check finds
+- **Twenty repairs, and they are on the rows that need them.** A failing check now offers the repair its profile carries: remove document JavaScript or embedded files, remove annotations that print, embed the fonts the file is missing, convert to CMYK or to grayscale, convert spot inks to process or move one onto another plate, downsample over-resolution images, thicken hairlines, flatten transparency, write a trim box or grow a bleed box, set the title, declare the trapping state, write the XMP packet, set the PDF version, convert to PDF/X or PDF/A, and add printer marks.
+- **"Fix what this profile can" repairs every row at once**, in the one order that makes the result right — hairlines before flattening, because a hairline inside a flattened region becomes pixels nothing can reach afterwards; printer marks after a standard conversion, because a conversion regenerates every object and marks added before it could never be removed again. A profile lists the repairs it wants; the order is not up to it.
+- **A repair is one undo away**, whether it was one row or all of them.
+- **The check re-runs itself after a repair**, so a row's verdict is what the file now says rather than what it said before.
+- **A missing font is embedded from the face the document actually names, or not at all.** A face installed under a different name, or one whose letter widths disagree with the widths the document already declares, is refused by name with both figures — because embedding it would reflow every line it sets. A font whose licence forbids embedding is refused with the foundry's own reason. Four missing fonts of which three are installed embeds three and names the fourth.
+- **A repair that needs a decision asks for it.** The document title, the trapping state, the bleed margin and which plate a spot ink moves onto are typed in, never invented — an invented title is the same fault under a different name, and whether a file is already trapped is a claim only a person may make.
+- **Nothing is offered that cannot run.** A check with no repair in the chosen profile routes to the panel that owns the edit instead of showing a button whose only outcome is a refusal.
+- Setting the PDF version now actually lowers it. Asking a PDF 2.0 file for 1.7 previously reported success and left the file at 2.0.
+- Converting a spot ink to process now removes the plate as well as the marks on it. The colorant stayed declared in the file, so every plate list — this app's included — went on reporting an ink nothing prints.
+- Removing annotations can now be narrowed to the ones flagged to print, and to particular kinds, so a repair takes exactly what the check reported and leaves the rest.
+- The command line gains `preflight-fix`.
+
+### Preflighting a whole folder
+- **Tools ▸ Preflight a Folder** measures every PDF in a folder against one profile. A check writes nothing at all to the folder it reads.
+- **Or it repairs them**: each document is copied, repaired with the profile's fixups, and checked again — so the report states what the file is now, not what it was when the run started. The originals are untouched unless you ask for them to be replaced.
+- **A report lands beside every document** in the destination, as text, as a web page, and as data another program can read.
+- Processed originals can be moved out of the intake folder, so the next run does not read them again.
+- A document that cannot be read is reported by name and the run carries on. A repair that fails leaves no half-processed file behind.
+- Settings can be saved under a name, so a folder swept every week is not set up every week.
+- A print profile can now be a step inside a guided action, so a folder of Office files can be converted, brought up to the house press rule, and stamped in one unattended run.
+- The command line gains `preflight-sweep`.
+
+### Fixes
+- Exporting or importing a guided action to a folder of your own now works. It only ever succeeded inside the app's own temporary folder, and refused everywhere else.
+
 ## 1.0.29
 
 *Released 2026-08-10*

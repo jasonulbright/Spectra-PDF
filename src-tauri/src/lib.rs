@@ -146,6 +146,7 @@ pub fn run() {
             commands::save_report_file,
             commands::write_report_file,
             commands::write_profile_file,
+            commands::write_action_file,
 
             commands::read_file_buffer,
             commands::create_working_copy,

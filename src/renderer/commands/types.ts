@@ -88,6 +88,9 @@ export interface AppCommandHandlers {
   openFormPrepFolder(): void;
   openFolderExport(): void;
   openFolderCreatePdf(): void;
+  /** Open the droplet (Tools ▸ Preflight a Folder…). Needs no open document:
+   * it measures a picked tree by path, entirely outside the workspace. */
+  openFolderPreflight(): void;
   openScheduledRuns(): void;
   /** Open the Watched Folders dialog (Tools ▸ Watched Folders…). */
   openWatchedFolders(): void;
