@@ -138,6 +138,27 @@ def _colors_match(a, b) -> bool:
     return all(abs(float(x) - float(y)) <= COLOR_TOLERANCE for x, y in zip(a, b))
 
 
+def _ink_state(color_state, resources) -> dict:
+    """The captured colour's own family and components, unconverted.
+
+    sRGB answers "what does this look like"; this answers "what is laid down",
+    which is a different question and the only one a press cares about. The
+    resolution rules live in `engine.overprint` — one answer, read twice.
+    """
+    from engine.overprint import resolve_ink
+
+    if color_state is None:
+        return {"family": "", "components": []}
+    try:
+        family, components = resolve_ink(color_state[0], color_state[1], resources)
+    except Exception:
+        return {"family": "", "components": []}
+    return {
+        "family": family,
+        "components": [round(float(v), 4) for v in components] if components else [],
+    }
+
+
 def _color_rgb(color_state, resources, pdf):
     """Best-effort sRGB for a captured colour state. Device operators resolve
     inline; a named space resolves through the stream's /ColorSpace."""
@@ -587,6 +608,12 @@ def _walk_analysis(
                         # size it is painted at.
                         "size": _rendered_size(state, combined),
                         "font": _base_font(state.font_name, resources, fallback),
+                        # The ink's own space and components, beside the sRGB
+                        # above. A four-ink rich black and a K-only black
+                        # resolve to the SAME sRGB and read identically on
+                        # screen, and only one of the two holds registration
+                        # on a press — the distinction survives only here.
+                        "ink": _ink_state(state.fill_color, resources),
                     },
                 )
             )

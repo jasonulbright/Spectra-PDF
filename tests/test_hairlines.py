@@ -279,9 +279,9 @@ class TestPreflightRow:
         from engine.preflight import preflight
 
         src = _ladder_pdf(os.path.join(tmp_dir, "s.pdf"))
-        row = next(c for c in preflight(src)["checks"] if c["id"] == "hairlines")
+        row = next(c for c in preflight(src)["checks"] if c["id"] == "hairlines_absent")
         assert row["status"] == "warn"
-        assert "5" in row["detail"]
+        assert row["finding_count"] == 5
 
     def test_preflight_passes_a_document_with_no_thin_strokes(self, tmp_dir):
         from engine.preflight import preflight
@@ -293,7 +293,7 @@ class TestPreflightRow:
         page.Contents = pdf.make_stream(b"1 w 10 10 m 90 90 l S")
         pdf.save(src)
         pdf.close()
-        row = next(c for c in preflight(src)["checks"] if c["id"] == "hairlines")
+        row = next(c for c in preflight(src)["checks"] if c["id"] == "hairlines_absent")
         assert row["status"] == "pass"
 
     def test_the_check_helper_reports_the_thinnest_width(self, tmp_dir):

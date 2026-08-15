@@ -10,8 +10,11 @@ interface Check {
   id: string;
   label: string;
   /** `needs_review` is the check the walk could not complete. It is not a
-   *  pass and not a finding — it is the report saying so. */
-  status: 'pass' | 'warn' | 'fail' | 'needs_review';
+   *  pass and not a finding — it is the report saying so. `not_applicable` is
+   *  the check with nothing to check, or the one the profile switched off;
+   *  both are excluded from the pass tally, so neither can be counted as a
+   *  document that came out clean. */
+  status: 'pass' | 'warn' | 'fail' | 'needs_review' | 'not_applicable';
   detail: string;
 }
 interface Report {
@@ -20,6 +23,7 @@ interface Report {
   warnings: number;
   failed: number;
   needs_review: number;
+  not_applicable: number;
   total: number;
   images: number;
   color_families: string[];
@@ -30,6 +34,7 @@ const ICON: Record<Check['status'], { glyph: string; color: string }> = {
   warn: { glyph: '!', color: '#fbbf24' },
   fail: { glyph: '✕', color: '#f87171' },
   needs_review: { glyph: '?', color: '#93c5fd' },
+  not_applicable: { glyph: '–', color: '#6b7280' },
 };
 
 export function PreflightPanel(): React.ReactElement {
@@ -87,7 +92,10 @@ export function PreflightPanel(): React.ReactElement {
 
       {report && (
         <div className="text-sm text-neutral-300" data-testid="preflight-summary">
-          {report.failed === 0 && report.warnings === 0 && report.needs_review === 0 ? (
+          {report.failed === 0 &&
+          report.warnings === 0 &&
+          report.needs_review === 0 &&
+          report.not_applicable === 0 ? (
             <span className="text-green-400">{tChrome('panel.preflight.allPassed', { count: report.total })}</span>
           ) : (
             <>

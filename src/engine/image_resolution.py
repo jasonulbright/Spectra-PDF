@@ -63,6 +63,12 @@ def _measure(placement: dict) -> dict | None:
         "dpi_x": int(round(dpi_x)),
         "dpi_y": int(round(dpi_y)),
         "dpi": int(round(min(dpi_x, dpi_y))),
+        # Read at the placement by the shared walk. A bitonal minimum and a
+        # contone minimum are different numbers on every press profile, and
+        # only the bit depth tells the two placements apart.
+        "bpc": int(placement.get("bpc") or 0),
+        "filters": list(placement.get("filters") or ()),
+        "colour_family": str(placement.get("colour_family") or ""),
     }
 
 
