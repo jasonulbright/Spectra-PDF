@@ -2412,6 +2412,8 @@ export interface A11yCheckRow {
   counted: number;
   findings: number;
   addressKinds: string[];
+  /** What the row offers right now: 'auto', 'authored', or null. */
+  fix: string | null;
 }
 
 export interface A11ySnapshot {
@@ -2472,6 +2474,50 @@ export async function a11yExport(destPath: string): Promise<string> {
         .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
     },
     destPath,
+  );
+}
+
+/** Click a check row's automatic Fix. Resolves to '' on success, or
+ *  '__SPECTRA_E2E_ERROR__:…' when the door refused. */
+export async function a11yFix(checkId: string): Promise<string> {
+  return await browser.executeAsync<string, [string]>(
+    function (id, done) {
+      (window as any).__SPECTRA_TEST__.a11yFix(id)
+        .then(() => done('' as any))
+        .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
+    },
+    checkId,
+  );
+}
+
+/** Type one authored value into a finding's editor and Apply it. `index` is
+ *  null for a check-scope editor (the language and the title). */
+export async function a11yAuthoredFix(
+  checkId: string,
+  index: number | null,
+  value: string,
+): Promise<string> {
+  return await browser.executeAsync<string, [string, number | null, string]>(
+    function (id, i, v, done) {
+      (window as any).__SPECTRA_TEST__.a11yAuthoredFix(id, i, v)
+        .then(() => done('' as any))
+        .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
+    },
+    checkId,
+    index,
+    value,
+  );
+}
+
+/** Declare every run one check named page furniture, a page at a time. */
+export async function a11yArtifactRest(checkId: string): Promise<string> {
+  return await browser.executeAsync<string, [string]>(
+    function (id, done) {
+      (window as any).__SPECTRA_TEST__.a11yArtifactRest(id)
+        .then(() => done('' as any))
+        .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
+    },
+    checkId,
   );
 }
 

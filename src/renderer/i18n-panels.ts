@@ -1066,11 +1066,18 @@ export const PANEL_STRINGS = {
   'panel.a11y.field.description': 'Description',
   'panel.a11y.field.title': 'Title',
   'panel.a11y.field.lang': 'Language',
+  'panel.a11y.field.role': 'Tag as',
   'panel.a11y.hint.alt': 'What this picture shows, in a sentence',
   'panel.a11y.hint.summary': 'What this table shows, before it is read cell by cell',
   'panel.a11y.hint.description': 'What this field is for, as a reader would hear it',
   'panel.a11y.hint.title': 'The document’s title, not its file name',
   'panel.a11y.hint.lang': 'A language tag, for example en-GB',
+  'panel.a11y.hint.role': 'Content a reader should hear, or furniture it should not',
+  'panel.a11y.role.P': 'Paragraph',
+  'panel.a11y.role.Artifact': 'Decoration — never read aloud',
+  'panel.a11y.artifactRest': 'Declare the rest decoration',
+  'panel.a11y.artifactRestTitle':
+    'Running heads and page numbers are furniture, not content — one step per page',
 
   'panel.a11y.detail.alt_nested_inside_alt':
     'The alternate text here sits inside an element that already carries one, so it is never read.',

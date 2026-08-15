@@ -27,6 +27,9 @@ import {
   a11yJump,
   a11yShow,
   a11yExport,
+  a11yFix,
+  a11yAuthoredFix,
+  a11yArtifactRest,
   a11yFindingsOnPage,
   tagsSelectedPath,
 } from '../support/harness.js';
@@ -142,6 +145,33 @@ async function buildFailingPdf(path: string): Promise<void> {
 /** Every check that failed, by id. */
 function failed(snapshot: { checks: { id: string; status: string }[] }): string[] {
   return snapshot.checks.filter((c) => c.status === 'fail').map((c) => c.id);
+}
+
+/** One check's row in the current report. */
+async function row(id: string) {
+  const snapshot = (await a11ySnapshot())!;
+  const found = snapshot.checks.find((c) => c.id === id);
+  if (!found) throw new Error(`no check ${id} in the report`);
+  return found;
+}
+
+/** Wait for a check to reach a verdict the fix was supposed to produce. The
+ * report re-runs on the buffer change the fix causes, so this is what proves
+ * the row flipped LIVE rather than after a manual re-check. */
+async function waitForVerdict(id: string, wanted: string[]): Promise<string> {
+  let seen = '';
+  await browser.waitUntil(
+    async () => {
+      seen = (await row(id)).status;
+      return wanted.includes(seen);
+    },
+    {
+      timeout: 60_000,
+      interval: 300,
+      timeoutMsg: `${id} never reached ${wanted.join('/')}`,
+    },
+  );
+  return seen;
 }
 
 describe('the accessibility report', () => {
@@ -361,5 +391,117 @@ describe('the accessibility report', () => {
       interval: 250,
       timeoutMsg: 'the checker never re-ran on the new bytes',
     });
+  });
+
+  // ── the fixes ───────────────────────────────────────────────────────────
+  //
+  // Each of these is the same round trip a person performs: the row FAILS,
+  // the control the row offers is used, and the row reaches a verdict that is
+  // no longer a failure — without a manual re-check, because applying a fix
+  // is what changes the buffer the report re-runs on.
+
+  it('offers a control on every failure it can repair, and none on the rest', async () => {
+    const snapshot = (await a11ySnapshot())!;
+    const offered = Object.fromEntries(snapshot.checks.map((c) => [c.id, c.fix]));
+    // Automatic: the document decides the result.
+    for (const id of ['tab_order', 'heading_nesting', 'table_headers', 'tagged_form_fields']) {
+      expect(offered[id]).toBe('auto');
+    }
+    // Authored: one value a machine must not invent.
+    for (const id of ['lang', 'title', 'field_descriptions', 'figures_alt', 'tagged_content']) {
+      expect(offered[id]).toBe('authored');
+    }
+    // A check that only routes offers nothing at all.
+    for (const id of ['reading_order', 'contrast', 'character_encoding']) {
+      expect(offered[id]).toBeNull();
+    }
+  });
+
+  it('fix 1 — the automatic button repairs a whole check at once', async () => {
+    expect((await row('tab_order')).status).toBe('fail');
+    expect(await a11yFix('tab_order')).toBe('');
+    expect(await waitForVerdict('tab_order', ['pass'])).toBe('pass');
+  });
+
+  it('fix 2 — a heading level and a table header row are computed, not asked for', async () => {
+    expect((await row('heading_nesting')).status).toBe('fail');
+    expect(await a11yFix('heading_nesting')).toBe('');
+    await waitForVerdict('heading_nesting', ['pass']);
+
+    expect((await row('table_headers')).status).toBe('fail');
+    expect(await a11yFix('table_headers')).toBe('');
+    await waitForVerdict('table_headers', ['pass']);
+  });
+
+  it('fix 3 — the language picker writes the tag it is given', async () => {
+    expect((await row('lang')).status).toBe('fail');
+    expect(await a11yAuthoredFix('lang', null, 'en-GB')).toBe('');
+    await waitForVerdict('lang', ['pass']);
+  });
+
+  it('fix 4 — a malformed language tag is refused by name and writes nothing', async () => {
+    const refusal = await a11yAuthoredFix('lang', null, 'en--GB');
+    expect(refusal).toContain('__SPECTRA_E2E_ERROR__');
+    // The document still carries the tag the previous case wrote.
+    expect((await row('lang')).status).toBe('pass');
+  });
+
+  it('fix 5 — a title is authored, and shown', async () => {
+    expect((await row('title')).status).toBe('fail');
+    expect(await a11yAuthoredFix('title', null, 'Quarterly report')).toBe('');
+    await waitForVerdict('title', ['pass']);
+  });
+
+  it('fix 6 — alt text is authored per figure', async () => {
+    expect((await row('figures_alt')).status).toBe('fail');
+    expect(await a11yAuthoredFix('figures_alt', 0, 'A grey placeholder chart')).toBe('');
+    await waitForVerdict('figures_alt', ['pass', 'not_applicable']);
+  });
+
+  it("fix 7 — a field's description is authored, never taken from its name", async () => {
+    expect((await row('field_descriptions')).status).toBe('fail');
+    expect(await a11yAuthoredFix('field_descriptions', 0, 'Who approved this report')).toBe('');
+    await waitForVerdict('field_descriptions', ['pass']);
+  });
+
+  it('fix 8 — an untagged widget is bound into the tree, both directions', async () => {
+    expect((await row('tagged_form_fields')).status).toBe('fail');
+    expect(await a11yFix('tagged_form_fields')).toBe('');
+    await waitForVerdict('tagged_form_fields', ['pass']);
+  });
+
+  it('fix 9 — untagged page content is bound, one authored answer at a time', async () => {
+    const before = await row('tagged_content');
+    expect(before.status).toBe('fail');
+    expect(before.findings).toBeGreaterThan(0);
+    // The choice is the whole fix: content a reader should hear, or furniture
+    // it should not. Nothing here guesses which.
+    expect(await a11yAuthoredFix('tagged_content', 0, 'P')).toBe('');
+    await waitForVerdict('tagged_content', ['pass', 'not_applicable']);
+    // The bound run really is in the tree now: the check that used to name it
+    // has nothing left to name.
+    expect((await row('tagged_content')).findings).toBe(0);
+  });
+
+  it('the whole report reflects the repairs, and undo takes the last one back', async () => {
+    const snapshot = (await a11ySnapshot())!;
+    for (const id of [
+      'lang',
+      'title',
+      'tab_order',
+      'heading_nesting',
+      'table_headers',
+      'field_descriptions',
+      'tagged_form_fields',
+    ]) {
+      expect(failed(snapshot)).not.toContain(id);
+    }
+    // Every fix went through the ordinary op path, so the last one is undoable
+    // and the check it repaired reports the failure again.
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await waitForVerdict('tagged_content', ['fail']);
+    // …and redoing it is the fix again, so the document is not left broken.
+    expect(await a11yArtifactRest('tagged_content')).toBe('');
+    await waitForVerdict('tagged_content', ['pass', 'not_applicable']);
   });
 });
