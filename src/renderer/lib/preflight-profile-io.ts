@@ -13,7 +13,7 @@
 // loudly and stores NOTHING on failure — a half-read rule set is a rule
 // nobody wrote.
 
-import { file } from './tauri-bridge';
+import { profileFile } from './tauri-bridge';
 import { tChrome } from '../i18n';
 import type { UiKey } from '../i18n';
 import {
@@ -31,7 +31,7 @@ import {
  * passes here and fails there is stored by neither.
  */
 export async function importProfileFromPath(path: string): Promise<PreflightProfile> {
-  const bytes = await file.readBuffer(path);
+  const bytes = await profileFile.read(path);
   const parsed = parseProfileFile(new TextDecoder().decode(bytes));
   if (!parsed.ok) {
     throw new Error(tChrome(parsed.refusal.key as UiKey, parsed.refusal.vars));
@@ -49,5 +49,5 @@ export async function exportProfileToPath(
   profile: PreflightProfile,
   path: string,
 ): Promise<void> {
-  await file.writeBuffer(path, new TextEncoder().encode(profileToJson(profile)));
+  await profileFile.write(path, profileToJson(profile));
 }

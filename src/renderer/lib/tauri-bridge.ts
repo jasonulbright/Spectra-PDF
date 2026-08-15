@@ -126,6 +126,18 @@ export const report = {
     invoke<string>('write_report_file', { path, contents }),
 };
 
+/** A preflight profile at a path the user picked. Both directions go around
+ * the capability-scoped filesystem plugin, which reaches only the app's own
+ * temp tree: a profile exists to be handed to someone, so it is written and
+ * read wherever they keep it. The Rust write refuses any name that is not a
+ * profile's, so this cannot become a general write. */
+export const profileFile = {
+  write: (path: string, contents: string) =>
+    invoke<string>('write_profile_file', { path, contents }),
+  read: async (path: string) =>
+    new Uint8Array(await invoke<ArrayBuffer>('read_file_binary', { filePath: path })),
+};
+
 // ── Image clipboard ───────────────────────────────────────────────────────
 
 /** What the clipboard HOLDS afterwards — read back out of its own DIB header
