@@ -35,6 +35,23 @@
 - Authorities for timestamps and authorities for signatures are kept apart, so each vouches only for what it is entitled to.
 - The command line gains the same option for checking and for signing.
 
+### PDFs from what you copied
+- File ▸ Create ▸ From Clipboard turns whatever you copied into a PDF: a picture, formatted text with its tables and colours, or plain text.
+- A copied picture keeps its own resolution, so a screenshot becomes a page the size the screenshot actually is.
+- Copied text and formatted text produce the same document a saved file of the same content would, because they take the same route through the app.
+- Formatted text you copied from a web page never reaches out for the images it mentions; only pictures the copy itself carried are drawn.
+- What you pasted joins the Create PDF list as an ordinary item, so you can reorder it, remove it, and combine it with files from disk.
+
+### PDFs from a web page
+- File ▸ Create ▸ From Web Page turns an address into a PDF, rendered by the same engine a browser uses.
+- A capture window opens where you can see it and loads the page in front of you. Nothing is fetched in the background, and the window closes when the capture finishes.
+- The dialog states the site it is about to contact and how many pages it may load, before it loads any.
+- Capture just the page, or follow its links one or two levels deep, with a page limit you set.
+- A capture never leaves the site you started on.
+- Choose the paper, the orientation, the margin, whether page headers and footers print, and whether background graphics print.
+- Each captured page becomes a bookmark named after the page's own title.
+- Only web and local addresses can be captured; anything else is refused by name.
+
 ## 1.0.30
 
 *Released 2026-08-15*

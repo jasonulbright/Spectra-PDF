@@ -495,7 +495,7 @@ export type UiKey =
   | WorkbenchKey
   | CanvasKey
   | RefusalKey;
-type UiPluralKey =
+export type UiPluralKey =
   | ChromePluralKey
   | { [K in PanelKey]: K extends `${infer B}_one` ? B : never }[PanelKey]
   | { [K in DialogKey]: K extends `${infer B}_one` ? B : never }[DialogKey]

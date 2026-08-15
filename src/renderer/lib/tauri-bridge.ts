@@ -11,6 +11,8 @@ import type {
   ScannerCapabilities,
   ScannerList,
 } from './scan';
+import type { ClipboardSourceResult } from './clipboard-source';
+import type { CaptureRequest, CaptureResult } from './web-capture';
 import {
   readFile as fsReadFile,
   writeFile as fsWriteFile,
@@ -440,6 +442,28 @@ export interface PrinterCapabilities {
 
 export const app = {
   getGsPath: () => invoke<string>('get_gs_path'),
+  /** Whatever is on the clipboard, written to a scratch file Create PDF
+   * already accepts. The BYTES never cross this boundary — a pasted
+   * screenshot is megabytes and the engine needs a file anyway. */
+  readClipboardSource: () => invoke<ClipboardSourceResult>('read_clipboard_source'),
+  /** Capture a web page in a VISIBLE browser window, through WebView2's own
+   * print-to-PDF. Every fetch this makes is one the user started and can
+   * watch; the engine is not involved and gains no network code. */
+  captureWebPage: (options: CaptureRequest) =>
+    invoke<CaptureResult>('capture_web_page', {
+      options: {
+        url: options.url,
+        depth: options.depth,
+        maxPages: options.maxPages,
+        pageWidthIn: options.pageWidthIn,
+        pageHeightIn: options.pageHeightIn,
+        orientation: options.orientation,
+        marginIn: options.marginIn,
+        headersFooters: options.headersFooters,
+        backgrounds: options.backgrounds,
+        scale: options.scale,
+      },
+    }),
   /** File ▸ Send To ▸ Email stages a copy of the
    * working file under the document's real name (mail clients may read the
    * attachment lazily — the live working copy would race later edits)… */

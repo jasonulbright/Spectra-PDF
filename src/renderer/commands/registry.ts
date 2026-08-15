@@ -224,6 +224,8 @@ export const COMMAND_IDS = [
   'tools.scheduledRuns',
   'tools.watchedFolders',
   'file.createPdf',
+  'file.createFromClipboard',
+  'file.createFromWebPage',
   'file.createFromScanner',
   ...CANVAS_TOOLS.map((t) => `tools.${t}` as const),
   ...OPERATIONS.map((op) => `tools.panel.${op}` as const),
@@ -624,6 +626,19 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Create PDF…',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => ctx.app!.openCreatePdf(),
+  },
+  // The clipboard and web siblings. Both open the SAME dialog, pre-seeded —
+  // a second create path is what leaves a surface behind, and a captured site
+  // or a pasted image is worth combining with local files anyway.
+  'file.createFromClipboard': {
+    title: 'Create PDF from Clipboard',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openCreatePdfFrom('clipboard'),
+  },
+  'file.createFromWebPage': {
+    title: 'Create PDF from Web Page…',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openCreatePdfFrom('web'),
   },
   // The Create PDF sibling: scanning needs no open document either, and the
   // pages it acquires go through the same DPI-honest image door.

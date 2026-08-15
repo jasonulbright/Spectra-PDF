@@ -106,6 +106,9 @@ export interface AppCommandHandlers {
   combineFiles(): Promise<void>;
   /** Create PDF from PostScript: open the distill dialog. */
   openCreatePdf(): void;
+  /** Create PDF, opened with one acquisition already started: the clipboard
+   * read runs, or the capture dialog is up. */
+  openCreatePdfFrom(source: 'clipboard' | 'web'): void;
   /** Open the scan dialog. `append` lands the pages in the open document at
    * the insertion anchor; with nothing to append to it opens for a new
    * document instead, because the destination is the part that has no answer,

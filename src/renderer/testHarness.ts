@@ -638,12 +638,57 @@ export interface CreatePdfHandlers {
     output: string,
     options?: CreatePdfRunOptions,
   ) => Promise<{ output: string; pages: number } | null>;
+  /** Add whatever is on the clipboard as a source row and report what
+   * arrived — the REAL Rust read, so a spec that seeds the clipboard proves
+   * the shipped path rather than a fixture. */
+  addClipboard: () => Promise<{ path: string; kind: string; format: string } | null>;
+  /** Convert the list AS IT STANDS. `run` REPLACES the rows, which is right
+   * for an injected list and useless for anything that depends on where a row
+   * came from — a captured page's bookmark is a property of the row, so it
+   * needs the rows the dialog actually holds. */
+  convertCurrent: (
+    output: string,
+    options?: CreatePdfRunOptions,
+  ) => Promise<{ output: string; pages: number } | null>;
 }
 
 let createPdf: CreatePdfHandlers | null = null;
 
 export function registerCreatePdf(handlers: CreatePdfHandlers | null): void {
   createPdf = handlers;
+}
+
+/**
+ * Web capture: the capture opens a real browser window and the URL field is
+ * an ordinary input, but a spec needs the request it ran to be exactly the
+ * one it asked for. The injected request goes through the SAME `buildRequest`
+ * clamp a clicked capture does.
+ */
+export interface WebCaptureHandlers {
+  run: (
+    request: { url: string } & Partial<{
+      depth: number;
+      maxPages: number;
+      pageWidthIn: number;
+      pageHeightIn: number;
+      orientation: 'portrait' | 'landscape';
+      marginIn: number;
+      headersFooters: boolean;
+      backgrounds: boolean;
+      scale: number;
+    }>,
+  ) => Promise<{
+    pages: { url: string; title: string; path: string }[];
+    visited: number;
+    truncated: boolean;
+    failures: string[];
+  } | null>;
+}
+
+let webCapture: WebCaptureHandlers | null = null;
+
+export function registerWebCapture(handlers: WebCaptureHandlers | null): void {
+  webCapture = handlers;
 }
 
 /**
@@ -1735,6 +1780,36 @@ export interface TestHarness {
     output: string,
     options?: CreatePdfRunOptions,
   ) => Promise<{ output: string; pages: number } | null>;
+  /** Create PDF (dialog must be open): add whatever is on the clipboard as a
+   * source row, through the REAL Rust read. Reports what arrived. */
+  createPdfAddClipboard: () => Promise<{ path: string; kind: string; format: string } | null>;
+  /** Create PDF (dialog must be open): convert the list AS IT STANDS, rather
+   * than replacing it with an injected one. */
+  createPdfConvertCurrent: (
+    output: string,
+    options?: CreatePdfRunOptions,
+  ) => Promise<{ output: string; pages: number } | null>;
+  /** Web capture (dialog must be open): run the REAL capture command with an
+   * injected request. Null result = the capture failed and the dialog says
+   * why; read it with `lastError` or the dialog's own error line. */
+  webCaptureRun: (
+    request: { url: string } & Partial<{
+      depth: number;
+      maxPages: number;
+      pageWidthIn: number;
+      pageHeightIn: number;
+      orientation: 'portrait' | 'landscape';
+      marginIn: number;
+      headersFooters: boolean;
+      backgrounds: boolean;
+      scale: number;
+    }>,
+  ) => Promise<{
+    pages: { url: string; title: string; path: string }[];
+    visited: number;
+    truncated: boolean;
+    failures: string[];
+  } | null>;
   /** Combine Files (dialog must be open). For `target: 'append'`
    * the result's `output` is empty and `pages` is what was imported. */
   combineRun: (
@@ -3129,6 +3204,30 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       return createPdf.run(sources, output, options);
+    },
+    createPdfAddClipboard: async () => {
+      if (!createPdf) {
+        const msg = 'createPdfAddClipboard: dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return createPdf.addClipboard();
+    },
+    createPdfConvertCurrent: async (output, options) => {
+      if (!createPdf) {
+        const msg = 'createPdfConvertCurrent: dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return createPdf.convertCurrent(output, options);
+    },
+    webCaptureRun: async (request) => {
+      if (!webCapture) {
+        const msg = 'webCaptureRun: dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return webCapture.run(request);
     },
     watermarkSetPdfSource: (path, page) => {
       if (!watermarkPanel) {
