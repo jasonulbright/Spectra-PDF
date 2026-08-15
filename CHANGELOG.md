@@ -2,16 +2,18 @@
 
 ## 1.0.31
 
-*Unreleased*
+*Released 2026-08-15*
 
 ### Links you draw
-- Pick Links and drag a rectangle anywhere on a page — over a figure, a table, a heading — not only over words you selected.
-- The rectangle waits in the panel until you say where it goes, so a mis-drag costs a redraw rather than an undo.
-- A link can go to a page in this document, at the view you choose: the page, its width, its height, a rectangle you name, or simply the page at whatever zoom the reader is already using.
+- Pick Links and drag a rectangle anywhere on a page, not only over words you selected.
+- The rectangle waits in the panel until you say where it goes, so a mis-drag costs only a redraw.
+- A link can go to a page in this document, at the view you choose.
+- The views are the whole page, its width, its height, a rectangle you name, or the reader's current zoom.
 - A link can go to a named destination the document declares, picked from the ones it actually has.
 - A link can go to another file, and to a page inside that file.
 - A link can go to a web address, as before.
-- A PDF a link names opens in this app once you confirm it. Any other file is named for you and never run.
+- A PDF a link names opens in this app once you confirm it.
+- Any other file a link names is named for you and never run.
 - A link to a program is read and reported by name; this app never writes one.
 
 ### Links you can see and change
@@ -28,25 +30,31 @@
 ### Signatures a European authority vouches for
 - Signature checking gains a third trust source: the certificate authorities the EU trusted lists publish.
 - It is off until you turn it on, like every other trust source, and it changes nothing until you do.
-- The list ships inside the app. Nothing is downloaded, then or ever, and checking a signature still works with no network at all.
-- The panel says when the list was bundled and how much of Europe it covers, so you can judge how current it is.
+- The list ships inside the app, and nothing is downloaded, then or ever.
+- Checking a signature still works with no network at all.
+- The panel says when the list was bundled and how much of Europe it covers.
 - A signature the lists vouch for says so by name, rather than only saying it is trusted.
 - Only authorities the lists record as currently granted count; a withdrawn one anchors nothing.
 - Authorities for timestamps and authorities for signatures are kept apart, so each vouches only for what it is entitled to.
 - The command line gains the same option for checking and for signing.
 
 ### PDFs from what you copied
-- File ▸ Create ▸ From Clipboard turns whatever you copied into a PDF: a picture, formatted text with its tables and colours, or plain text.
+- File ▸ Create ▸ From Clipboard turns whatever you copied into a PDF.
+- A picture, formatted text with its tables and colours, or plain text all work.
 - A copied picture keeps its own resolution, so a screenshot becomes a page the size the screenshot actually is.
-- Copied text and formatted text produce the same document a saved file of the same content would, because they take the same route through the app.
-- Formatted text you copied from a web page never reaches out for the images it mentions; only pictures the copy itself carried are drawn.
-- What you pasted joins the Create PDF list as an ordinary item, so you can reorder it, remove it, and combine it with files from disk.
+- Copied text and formatted text produce the same document a saved file of that content would.
+- Formatted text never reaches out for the images it mentions; only pictures the copy carried are drawn.
+- What you pasted joins the Create PDF list as an ordinary item, beside files from disk.
+- You can reorder it, remove it, and combine it with the rest.
 
 ### PDFs from a web page
-- File ▸ Create ▸ From Web Page turns an address into a PDF, rendered by the same engine a browser uses.
-- A capture window opens where you can see it and loads the page in front of you. Nothing is fetched in the background, and the window closes when the capture finishes.
-- The dialog states the site it is about to contact and how many pages it may load, before it loads any.
+- File ▸ Create ▸ From Web Page turns an address into a PDF.
+- The page is rendered by the same engine a browser uses.
+- A capture window opens where you can see it and loads the page in front of you.
+- Nothing is fetched in the background, and the window closes when the capture finishes.
+- The dialog states the site it will contact and how many pages it may load, before loading any.
 - Capture just the page, or follow its links one or two levels deep, with a page limit you set.
+- A capture that reaches your page limit says so, rather than looking complete.
 - A capture never leaves the site you started on.
 - Choose the paper, the orientation, the margin, whether page headers and footers print, and whether background graphics print.
 - Each captured page becomes a bookmark named after the page's own title.
@@ -55,13 +63,19 @@
 ### Text you add can run down the page
 - Add Text has a direction: horizontal, or vertical for the scripts written in columns.
 - A vertical box reads down the height of the box you drew, and its columns fill across its width.
-- Which way the columns run comes from the text itself — right to left for Japanese and Chinese, left to right for Mongolian — so a column you write is a column the editor reads back the same way.
+- Which way the columns run comes from the text itself, not from a setting you pick.
+- Japanese and Chinese run right to left; Mongolian runs left to right.
+- A column you write is a column the editor reads back the same way.
 - The card tells you which direction your text chose, as you type.
-- Vertical text is added in the bundled vertical typeface; the controls that cannot apply to a column say so instead of quietly doing nothing.
+- Vertical text is added in the bundled vertical typeface.
+- Controls that cannot apply to a column say so instead of quietly doing nothing.
 - A vertical box already turns the reading direction, so it is not also rotated.
-- Text in a column can carry a horizontal block — a year, a page number — set upright and fitted to one column width, the way vertical Japanese sets numbers.
-- Everything you add this way is ordinary text afterwards: searchable, restyleable, and it reflows in the paragraph editor like any other.
-- Text with no spaces now wraps where the script allows it to, in both directions, instead of running past the box.
+- Text in a column can carry a horizontal block, such as a year or a page number.
+- The block is set upright and fitted to one column width, the way vertical Japanese sets numbers.
+- Everything you add this way is ordinary text afterwards: searchable, restyleable, and it reflows in the paragraph editor.
+
+### Fixes
+- Text with no spaces, such as Japanese, now wraps instead of running past its box.
 
 ## 1.0.30
 

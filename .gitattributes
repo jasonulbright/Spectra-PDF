@@ -34,3 +34,11 @@
 *.ttf   binary
 *.otf   binary
 *.traineddata binary
+
+# The bundled EU trusted-list files record their own sha256 digests in
+# eutl-manifest.json, so a checkout that translates LF->CRLF makes every
+# recorded digest wrong and the bundle no longer verifies as the artifact that
+# was reviewed. `-text` disables EOL translation while keeping the textual diff
+# a pinned artifact's review depends on.
+
+src/engine/trust/* -text
