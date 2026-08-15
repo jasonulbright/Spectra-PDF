@@ -409,6 +409,59 @@ export function registerAccessibility(handlers: AccessibilityHandlers | null): v
   accessibility = handlers;
 }
 
+/**
+ * The print preflight surface. `exportTo` and the two profile paths bypass the
+ * NATIVE dialogs and nothing else — the path each is given goes into the same
+ * emitter and the same write the button uses, so a spec proves the real
+ * artefact. `selectProfile` runs the same re-check the picker runs, which is
+ * what makes "one document, two profiles, two answers" assertable.
+ */
+export interface PreflightHandlers {
+  snapshot: () => {
+    profile: string;
+    summary: {
+      passed: number;
+      failed: number;
+      warnings: number;
+      needs_review: number;
+      not_applicable: number;
+      applicable: number;
+      total: number;
+    };
+    checks: {
+      id: string;
+      category: string;
+      status: string;
+      /** What the PROFILE said dirty means for this row. */
+      severity: string;
+      counted: number;
+      findings: number;
+      addressKinds: string[];
+      /** The rule the row was measured against, resolved. */
+      params: Record<string, unknown>;
+    }[];
+    profiles: string[];
+    expandedCategories: string[];
+    shownCheck: string | null;
+  } | null;
+  recheck: () => Promise<void>;
+  selectProfile: (id: string) => Promise<void>;
+  jump: (checkId: string, index: number) => Promise<void>;
+  show: (checkId: string) => Promise<void>;
+  exportTo: (destPath: string) => Promise<string>;
+  /** Import a profile FILE the same way the picker's Import does. Returns the
+   * stored profile's id. */
+  importProfileFrom: (fromPath: string) => Promise<string>;
+  /** Write the selected profile out in the shape the import accepts. */
+  exportProfileTo: (destPath: string) => Promise<string>;
+}
+
+let preflight: PreflightHandlers | null = null;
+
+export function registerPreflight(handlers: PreflightHandlers | null): void {
+  preflight = handlers;
+}
+
 /** What the Tags panel currently has selected — the landing side of an
  * accessibility report's `struct` jump. */
 export interface TagsHandlers {
@@ -1490,6 +1543,22 @@ export interface TestHarness {
   folderExportSetFormat: (format: string) => void;
   folderExportRun: () => Promise<void>;
   folderExportSnapshot: () => ReturnType<FolderExportHandlers['snapshot']> | null;
+  /** The print preflight report (the panel must be open — `tools.panel.preflight`). */
+  preflightSnapshot: () => ReturnType<PreflightHandlers['snapshot']> | null;
+  preflightRecheck: () => Promise<void>;
+  /** Switch the profile and re-check: the same document, a different rule. */
+  preflightSelectProfile: (id: string) => Promise<void>;
+  /** Click one finding row: the same jump the row performs. */
+  preflightJump: (checkId: string, index: number) => Promise<void>;
+  /** Draw one check's page findings on the document. */
+  preflightShow: (checkId: string) => Promise<void>;
+  /** Write the report (bypasses the native save dialog; the extension picks
+   *  the emitter). Returns the path written. */
+  preflightExport: (destPath: string) => Promise<string>;
+  /** Import a profile file; returns the stored profile's id. */
+  preflightImportProfile: (fromPath: string) => Promise<string>;
+  /** Export the selected profile; returns the path written. */
+  preflightExportProfile: (destPath: string) => Promise<string>;
   /** The accessibility report (the panel must be open — `tools.panel.accessibility`). */
   a11ySnapshot: () => ReturnType<AccessibilityHandlers['snapshot']> | null;
   a11yRecheck: () => Promise<void>;
@@ -1864,6 +1933,17 @@ export function installTestHarness(deps: TestHarnessDeps): void {
   const captureError = (label: string, err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
     lastError = `${label}: ${msg}`;
+  };
+
+  /** The preflight panel, or the refusal that says it is not mounted. A spec
+   * that drove a closed panel would otherwise read as a passing no-op. */
+  const requirePreflight = (label: string): PreflightHandlers => {
+    if (!preflight) {
+      const msg = `${label}: the preflight panel is not mounted`;
+      lastError = msg;
+      throw new Error(msg);
+    }
+    return preflight;
   };
 
   let nextPingId = 1_000_000;
@@ -2627,6 +2707,46 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     folderExportSnapshot: () => folderExport?.snapshot() ?? null,
+    preflightSnapshot: () => preflight?.snapshot() ?? null,
+    preflightRecheck: async () => {
+      await requirePreflight('preflightRecheck').recheck();
+    },
+    preflightSelectProfile: async (id) => {
+      await requirePreflight('preflightSelectProfile').selectProfile(id);
+    },
+    preflightJump: async (checkId, index) => {
+      await requirePreflight('preflightJump').jump(checkId, index);
+    },
+    preflightShow: async (checkId) => {
+      await requirePreflight('preflightShow').show(checkId);
+    },
+    preflightExport: async (destPath) => {
+      const handlers = requirePreflight('preflightExport');
+      try {
+        return await handlers.exportTo(destPath);
+      } catch (err) {
+        captureError('preflightExport', err);
+        throw err;
+      }
+    },
+    preflightImportProfile: async (fromPath) => {
+      const handlers = requirePreflight('preflightImportProfile');
+      try {
+        return await handlers.importProfileFrom(fromPath);
+      } catch (err) {
+        captureError('preflightImportProfile', err);
+        throw err;
+      }
+    },
+    preflightExportProfile: async (destPath) => {
+      const handlers = requirePreflight('preflightExportProfile');
+      try {
+        return await handlers.exportProfileTo(destPath);
+      } catch (err) {
+        captureError('preflightExportProfile', err);
+        throw err;
+      }
+    },
     a11ySnapshot: () => accessibility?.snapshot() ?? null,
     a11yRecheck: async () => {
       if (!accessibility) {
