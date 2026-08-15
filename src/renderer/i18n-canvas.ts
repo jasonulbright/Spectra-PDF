@@ -593,6 +593,19 @@ export const CANVAS_STRINGS = {
   'canvas.addtext.family.sans': 'Sans-serif',
   'canvas.addtext.family.serif': 'Serif',
   'canvas.addtext.family.mono': 'Monospace',
+  'canvas.addtext.writingMode': 'Direction',
+  'canvas.addtext.writingMode.horizontal': 'Horizontal',
+  'canvas.addtext.writingMode.vertical': 'Vertical',
+  'canvas.addtext.writingModeTitle':
+    'Vertical text reads down the height of the box you drew, and its columns fill across its width.',
+  'canvas.addtext.columnsRtl': 'Columns run right to left.',
+  'canvas.addtext.columnsLtr': 'Columns run left to right.',
+  'canvas.addtext.verticalNoBundledFace':
+    'Vertical text uses the bundled vertical face — no vertical serif or monospace is available.',
+  'canvas.addtext.verticalNoFeatures':
+    'Small caps and alternates do not apply to vertical text.',
+  'canvas.addtext.verticalNoRotate':
+    'A vertical box already turns the reading direction, so it cannot also be rotated.',
   'canvas.addtext.size': 'Size',
   'canvas.addtext.degrees': '{{deg}}°',
   'canvas.addtext.rotateTitle':
