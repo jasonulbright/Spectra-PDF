@@ -2,142 +2,315 @@
 
 ## 1.0.30
 
-*Unreleased*
+*Released 2026-08-15*
 
 ### Form fields that calculate
 - A form whose fields carry calculations now calculates them: fill a line item and the Total appears.
 - The Total updates on the page as you type, before anything is saved.
-- A field with a display format shows the formatted value — thousands separators, currency, percentages, dates — while the file still stores the plain value a spreadsheet or another program can read.
+- A field with a display format shows the formatted value on the page.
+- Thousands separators, currency, percentages and dates are formats a field can display.
+- The file still stores the plain value a spreadsheet or another program can read.
 - A value outside the range a field declares is refused by name, with the range it had to be inside.
-- A field whose value the form computes is marked as calculated and cannot be typed into, but is still filled in for you even when the form locks it against typing.
-- A form that carries a calculation but never says in what order to run them reports that, rather than quietly leaving the totals empty.
-- A field carrying a script this app does not run is reported by name, its own contents are left exactly as they were, and every other field on the form still calculates. No script embedded in a document is ever executed.
-- Filling a field that recalculates one a signature locks now says so, naming what you typed and what it would have changed — before it changes anything.
+- A field the form computes is marked as calculated and cannot be typed into.
+- A calculated field is still filled in for you when the form locks it against typing.
+- A form carrying calculations but no order to run them in reports that, rather than leaving totals empty.
+- A field carrying a script this app does not run is reported by name.
+- Its own contents are left exactly as they were, and every other field still calculates.
+- No script embedded in a document is ever executed.
+- Filling a field that recalculates one a signature locks now says so before anything changes.
+- The warning names what you typed and what it would have changed.
 - The command line's `forms --set` calculates the same way.
 
 ### Building a form that calculates
-- The field you place on a page now carries a display format: a number with the separators and currency symbol you choose, a percentage, a date or a time in a mask you pick, a postcode, a telephone number, or a pattern of your own.
-- The format picker shows a live sample of what the page will read, so a choice of separators is a choice between `1,234.56` and `1.234,56` rather than between two numbers.
-- A field can accept only values inside a range you set, and can start out holding a default value that a form reset returns it to.
-- A field can be calculated: the sum, product, average, smallest or largest of the fields you tick, or any arithmetic expression over their names.
-- An expression is checked as you type, so an unreadable one is refused before the field exists rather than after.
-- Fields are put in an order that runs every calculation after the fields it reads, whatever order you created them in — so a total is never one edit behind.
-- A calculation that would depend on itself is refused, naming the chain that proves it, and so is one naming a field the document does not have.
-- Everything written is the same form scripting the rest of the PDF world writes, so a form built here calculates identically in other viewers.
-- **Prepare Form** gains a Field properties section: the format, accepted range and calculation of any existing text or dropdown field can be changed without recreating it.
-- A detected date field is now created with a date format, instead of the detection noting the date and the field forgetting it.
-- The placement card also offers the character limit and the one-box-per-character comb layout it always accepted but never showed.
+- The field you place on a page now carries a display format.
+- A number format takes the separators and currency symbol you choose.
+- A percentage, a date or a time takes a mask you pick.
+- A postcode, a telephone number, or a pattern of your own are formats too.
+- The format picker shows a live sample of what the page will read.
+- So a choice of separators reads as `1,234.56` against `1.234,56` rather than as two numbers.
+- A field can accept only values inside a range you set.
+- A field can start out holding a default value that a form reset returns it to.
+- A field can be calculated: the sum, product, average, smallest or largest of the fields you tick.
+- Or by any arithmetic expression written over the field names.
+- An expression is checked as you type, so an unreadable one is refused before the field exists.
+- Fields are put in an order that runs every calculation after the fields it reads.
+- The order you created them in does not matter, so a total is never one edit behind.
+- A calculation that would depend on itself is refused, naming the chain that proves it.
+- A calculation naming a field the document does not have is refused too.
+- Everything written is the same form scripting the rest of the PDF world writes.
+- A form built here calculates identically in other viewers.
+- **Prepare Form** gains a Field properties section for existing text and dropdown fields.
+- The format, accepted range and calculation can be changed there without recreating the field.
+- A detected date field is now created with a date format, which detection noted but never applied.
+- The placement card also offers the character limit and the one-box-per-character comb layout.
+- Both were always accepted and never shown.
 
 ### What a form field does when you use it
-- A button that goes to a page now goes there, whether the document names the page directly or by a name it keeps in its own list.
-- A button that resets the form resets it, honouring the fields the button says it covers — or every field except those, when that is what it says.
-- A button that shows or hides fields does so, and the change is part of the document, so it is still there when the file is reopened and it can be undone like any other edit.
-- A button that imports form data imports it — from a file you pick, never from a path the document names for you. FDF and XFDF are both read, and whichever one it is is worked out from what the file contains rather than what it is called.
-- A field name in the data file that the form does not have is reported, and every value that does fit is still filled in.
-- A button that submits the form now builds the whole submission — as FDF, XFDF, web form data or the document itself, whichever the button asks for — and saves it to a file you choose. Where it was meant to go is shown and can be copied. This app sends nothing over the network itself.
-- Actions on the other gestures a field can carry — pointer in, pointer out, mouse down, mouse up, focus, focus lost — run too, not only a click.
-- An action this app does not perform (a script, a jump into another document, one it does not recognise) is named rather than half-simulated, and nothing in the document is changed.
-- **Prepare Form** ▸ Field properties now lists buttons, and lets you give any field an action: go to a page, open a link, reset or submit the form, show or hide fields, or import data — each on the gesture you choose.
-- Command line: `forms --reset`, `forms --import-data`, and `forms --export-data` with `--data-format fdf|xfdf|html|pdf`, scoped by `--field` and `--exclude-fields`.
+- A button that goes to a page now goes there.
+- The page may be named directly or by a name the document keeps in its own list.
+- A button that resets the form resets it, honouring the fields it says it covers.
+- Or every field except those, when that is what the button says.
+- A button that shows or hides fields does so.
+- The change is part of the document, so it is still there when the file is reopened.
+- Such a change can be undone like any other edit.
+- A button that imports form data imports it, from a file you pick.
+- The path is never one the document names for you.
+- FDF and XFDF are both read, told apart by what the file contains rather than its name.
+- A field name in the data file that the form does not have is reported.
+- Every value that does fit is still filled in.
+- A button that submits the form now builds the whole submission and saves it.
+- The submission is FDF, XFDF, web form data or the document itself, whichever the button asks for.
+- You choose the file the submission is saved to.
+- Where it was meant to go is shown and can be copied.
+- This app sends nothing over the network itself.
+- Actions run on the other gestures a field can carry, not only a click.
+- Pointer in, pointer out, mouse down, mouse up, focus and focus lost all run.
+- An action this app does not perform is named rather than half-simulated.
+- Scripts, jumps into another document, and unrecognised actions are named this way.
+- Nothing in the document is changed by an action that is only named.
+- **Prepare Form** ▸ Field properties now lists buttons and gives any field an action.
+- The actions are go to a page, open a link, reset or submit the form.
+- Show or hide fields, and import data, are actions too.
+- Each action runs on the gesture you choose.
+- Command line: `forms --reset`, `forms --import-data`, and `forms --export-data` with `--data-format fdf|xfdf|html|pdf`.
+- Those commands are scoped by `--field` and `--exclude-fields`.
 
 ### Scripts this app does not run
-- The forms panel now lists every script the document carries that this app declines to run: which field, which moment it would have run at, and the script itself, readable in place.
-- The standing position is stated where the list is: the standard formatting, checking and calculation calls are declarative and carry no code, so those run; anything else stays in the document exactly as it was and is reported rather than executed.
+- The forms panel now lists every script the document carries that this app declines to run.
+- Each entry names the field, the moment it would have run at, and the readable script.
+- The standard formatting, checking and calculation calls are declarative, carry no code, and run.
+- Anything else stays in the document exactly as it was and is reported rather than executed.
+- This standing position is stated where the list is.
 
 ### The accessibility check now looks at the page, not just the file
-- The check grew from six questions about the document as a whole to **32 across seven areas** — Document, Page Content, Forms, Alternate Text, Tables, Lists and Headings. A document whose every figure is undescribed and whose every table has no header row used to pass; it no longer does.
-- New in Alternate Text: figures with no description, a description nested inside another one, a description attached to nothing, and a description that hides an annotation's own words.
-- New for tables: rows outside a table, cells outside a row, a table with no header cells, a header cell with no scope, rows of uneven width, and a missing summary.
-- New for lists and headings: items outside a list, labels outside an item, and a heading level skipped over.
-- New for page content: text that no tag covers and that is not declared decoration, untagged annotations, untagged form fields, a page with annotations and no tab order, a font whose characters map to nothing readable, untagged multimedia, and form fields with no description.
-- **Colour contrast is measured.** Every drawn line of text is checked against what is actually painted under it, at the published contrast ratio, with the easier threshold for large and bold text. Where the backdrop is a photograph, a gradient or an irregular shape, the check says it cannot tell instead of guessing.
-- **A check with nothing to check now says so.** A document with no tables reports its table checks as not applicable, and those are left out of the passed count rather than inflating it. The summary states how many checks actually applied.
-- **A check that cannot be certain says "needs review" instead of failing.** Reading order, scripts, timed responses, repetitive links and unmeasurable contrast come with the list of things to look at rather than a verdict nobody can stand behind.
-- Every failure now names WHERE it is — a tag, a place on a page, or an annotation or field — so the finding can be found.
-- A page whose contents cannot be read is named in the report, and every check that needed it says so. It is never counted as clean.
-- Automatic tagging picks the body text size by how much text is set in it rather than by how many blocks there are, so a page whose title, body and page number are all different sizes no longer turns its body copy into a heading. A page number or running head smaller than the body text and sitting in the page margin is now marked as decoration rather than tagged as a paragraph.
+- The accessibility check grew from six document-wide questions to **32 checks across seven areas**.
+- The areas are Document, Page Content, Forms, Alternate Text, Tables, Lists and Headings.
+- A document whose every figure is undescribed and every table headerless used to pass, and no longer does.
+- New in Alternate Text: figures with no description, and a description nested inside another one.
+- Also a description attached to nothing, and one that hides an annotation's own words.
+- New for tables: rows outside a table, cells outside a row, and rows of uneven width.
+- Also a table with no header cells, a header cell with no scope, and a missing summary.
+- New for lists and headings: items outside a list, labels outside an item, and a skipped heading level.
+- New for page content: text no tag covers that is not declared decoration.
+- Also untagged annotations, untagged form fields and untagged multimedia.
+- Also a page with annotations and no tab order, and form fields with no description.
+- Also a font whose characters map to nothing readable.
+- **Colour contrast is measured** against what is actually painted under each drawn line of text.
+- The published contrast ratio is used, with the easier threshold for large and bold text.
+- Where the backdrop is a photograph, a gradient or an irregular shape, the check says it cannot tell.
+- **A check with nothing to check now says so**, as not applicable rather than as a pass.
+- A document with no tables reports its table checks that way, and they leave the passed count.
+- The summary states how many checks actually applied.
+- **A check that cannot be certain says "needs review" instead of failing.**
+- Reading order, scripts, timed responses, repetitive links and unmeasurable contrast come with things to look at.
+- Every failure now names where it is: a tag, a place on a page, an annotation or a field.
+- A page whose contents cannot be read is named, and every check that needed it says so.
+- Such a page is never counted as clean.
+- Automatic tagging picks the body text size by how much text is set in it.
+- A page whose title, body and page number differ in size no longer turns body copy into a heading.
+- A page number or running head smaller than the body text, in the margin, is now marked decoration.
 
 ### Reading the accessibility check, and saving it
-- The check is now a grouped list rather than a flat one: seven areas, each showing how many of its checks passed out of the ones that applied. The areas with something to answer for are open when the report appears.
-- Opening a check shows what it is for in one line, and lists every item it found — with the text of the item, so a false alarm is recognizable at a glance.
-- **Clicking a finding takes you to it.** A tagged element opens the Tags panel with that tag selected. A place on a page draws a box on the page and scrolls to it. A field, a link or an annotation opens the panel that edits it.
-- **Show** draws every one of a check's page findings at once, so a page's untagged text can be looked over as a set. They come off again with the same button, and they clear themselves whenever the document changes.
-- **Export…** saves the report as a web page or as a plain text file. Both carry the same verdicts, the same counts and the same findings, and each row carries the check's short name beside its wording so two people reading in two languages can talk about the same row.
-- The saved web page is self-contained — it opens on a machine that has never seen this app, with nothing to download.
-- The report says which of the 32 checks a document passes. It does not claim conformance, because two of the checks cannot be settled by a machine.
-- Every word of the report — names, explanations, findings and the saved file itself — is in your own language, in all 28 of them.
+- The check is now a grouped list of seven areas rather than a flat one.
+- Each area shows how many of its checks passed out of the ones that applied.
+- The areas with something to answer for are open when the report appears.
+- Opening a check shows what it is for in one line, and lists every item it found.
+- Each item carries its own text, so a false alarm is recognizable at a glance.
+- **Clicking a finding takes you to it.**
+- A tagged element opens the Tags panel with that tag selected.
+- A place on a page draws a box on the page and scrolls to it.
+- A field, a link or an annotation opens the panel that edits it.
+- **Show** draws every one of a check's page findings at once, as a set.
+- They come off again with the same button, and clear themselves whenever the document changes.
+- **Export…** saves the report as a web page or as a plain text file.
+- Both carry the same verdicts, the same counts and the same findings.
+- Each row carries the check's short name beside its wording, so two languages name one row.
+- The saved web page is self-contained and opens on a machine that has never seen this app.
+- The report says which of the 32 checks a document passes.
+- It does not claim conformance, because two of the checks cannot be settled by a machine.
+- Every word of the report is in your own language, in all 28 of them.
+- Names, explanations, findings and the saved file itself are all translated.
 
 ### Repairing what the accessibility check finds
-- **Seventeen of the checks can now be repaired from the report itself.** A row that can be fixed carries the control that fixes it; the other fifteen take you to the panel that owns the edit, because a fix this app cannot actually perform is worse than a signpost to the place a person can.
-- **Twelve of them need nothing from you**, because the document decides the answer: allowing assistive technology to read an otherwise restricted file, tagging an untagged one, showing a title the document already has, deriving bookmarks from its headings, declaring the tab order on pages that carry fields or links, closing a skipped heading level, promoting a table's first row to header cells with a column scope, clearing a description that sits inside another one or that hides an annotation's own words, and putting untagged annotations, form fields and multimedia into the structure tree.
-- **Five take one value only you can supply** — the document's language, its title, a field's description, a figure's alternate text, a table's summary — typed on the finding itself, with the page still in view.
-- The language is picked from the 28 languages this app speaks, by their own names, or typed as any language tag; a malformed tag is refused with what is wrong with it, and nothing is written.
-- **Nothing is ever invented for you.** A field's own internal name is offered as a starting suggestion and never written as its description; a figure never gains placeholder alternate text; a language is never guessed. A check that needs a value it does not have stays a finding.
-- **Every fix is one undoable step, and the report re-checks itself the moment it lands** — so a row you have repaired turns green in front of you, and Undo turns it back.
-- Repairing a signed document asks first, in the same words every other edit of a signed document uses, and a document certified to allow no changes is refused rather than quietly altered.
-- Command line: `accessibility --category <area>` runs one area, and the new `accessibility-fix` applies the repairs that need no authored value. The ones that need a value have no headless form on purpose — a command line cannot describe a picture it cannot see, and a placeholder description is worse than none.
+- **Seventeen of the checks can now be repaired from the report itself.**
+- A row that can be fixed carries the control that fixes it.
+- The other fifteen take you to the panel that owns the edit instead.
+- A fix this app cannot actually perform is worse than a signpost to one a person can.
+- **Twelve of the repairs need nothing from you**, because the document decides the answer.
+- They allow assistive technology to read an otherwise restricted file, and tag an untagged one.
+- They show a title the document already has, and derive bookmarks from its headings.
+- They declare the tab order on pages that carry fields or links.
+- They close a skipped heading level and promote a table's first row to header cells with a column scope.
+- They clear a description that sits inside another one, or that hides an annotation's own words.
+- They put untagged annotations, form fields and multimedia into the structure tree.
+- **Five repairs take one value only you can supply**, typed on the finding with the page still in view.
+- Those values are the document's language and title, a field's description, a figure's alternate text, a table's summary.
+- The language is picked from the 28 languages this app speaks, by their own names.
+- Or typed as any language tag; a malformed tag is refused with what is wrong with it.
+- A refused language tag leaves the document unchanged.
+- **Nothing is ever invented for you** by any of the repairs.
+- A field's own internal name is offered as a starting suggestion and never written as its description.
+- A figure never gains placeholder alternate text, and a language is never guessed.
+- A check that needs a value it does not have stays a finding.
+- **Every fix is one undoable step, and the report re-checks itself the moment it lands.**
+- A row you have repaired turns green in front of you, and Undo turns it back.
+- Repairing a signed document asks first, in the same words every other edit of one uses.
+- A document certified to allow no changes is refused rather than quietly altered.
+- Command line: `accessibility --category <area>` runs one area.
+- The new `accessibility-fix` applies the repairs that need no authored value.
+- The repairs that need a value have no headless form on purpose.
+- A command line cannot describe a picture it cannot see, and a placeholder description is worse than none.
 
 ### Text and annotations that no tag covers
-- **Untagged text on a page can now be bound into the document's structure without leaving the report.** You choose what it is — a paragraph a reader should hear, or page furniture it should not — and nothing chooses for you.
-- Running heads and page numbers are the usual reason a page has untagged text, so one action declares all of a page's remaining untagged text decoration at once.
-- A newly tagged paragraph is placed where it is drawn, not at the end of the document, so the reading order stays the order of the page.
-- Untagged annotations, form fields and multimedia are bound in both directions — the structure points at the annotation and the annotation points back — so a document that reads correctly also maps back correctly.
-- Text drawn inside a reused graphic is refused by name rather than mis-tagged, because such text is numbered inside that graphic and not on the page.
+- **Untagged text on a page can now be bound into the document's structure from the report.**
+- You choose what untagged text is: a paragraph to hear or page furniture to skip, never the app.
+- Running heads and page numbers are the usual reason a page has untagged text.
+- So one action declares all of a page's remaining untagged text decoration at once.
+- A newly tagged paragraph is placed where it is drawn, not at the end of the document.
+- So the reading order stays the order of the page.
+- Untagged annotations, form fields and multimedia are bound in both directions.
+- The structure points at the annotation and the annotation points back.
+- Text drawn inside a reused graphic is refused by name rather than mis-tagged.
+- Such text is numbered inside that graphic and not on the page.
 
 ### Print checks that say what they could not read
-- **Print preflight gains a fourth answer: "could not be checked."** A check that could not read part of the document no longer reports a pass it did not earn. It names what it could not read, and the summary counts it separately from what passed.
-- A finding is still a finding: RGB colour found is reported as found, and a font that is not embedded still fails, whatever else on the page was unreadable.
+- **Print preflight gains a fourth answer: "could not be checked."**
+- A check that could not read part of the document no longer reports a pass it did not earn.
+- It names what it could not read, and the summary counts it separately from what passed.
+- A finding is still a finding: RGB colour found is reported as found.
+- A font that is not embedded still fails, whatever else on the page was unreadable.
 - A page whose strokes cannot be measured no longer reports "no hairline strokes".
-- The transparency flattener now says when it cannot judge an object rather than treating it as opaque. A form whose contents cannot be read, one that declares no bounds, one nested past the depth the analysis reaches, and a graphics state that will not read are each named on the page they are on.
-- Such a document is refused by name instead of being written: a flatten that reported success while live transparency survived it is the one result this tool must never produce.
-- The preview lists the same objects and the same reasons before you press anything, and highlights them on the page.
-- **Output Preview says when a page may use inks it could not find**, and marks the plate list and the total-ink figures as covering only the plates it did find; a colour bar is refused outright instead of being printed one patch short, because a printed sheet cannot carry that caveat.
+- The transparency flattener now says when it cannot judge an object rather than treating it as opaque.
+- A form whose contents cannot be read, and one that declares no bounds, are each named.
+- So are one nested past the depth the analysis reaches, and a graphics state that will not read.
+- Each is named on the page it is on.
+- Such a document is refused by name instead of being written.
+- A flatten that reported success while live transparency survived it is the one result this tool must never produce.
+- The preview lists the same objects and the same reasons before you press anything.
+- The preview also highlights them on the page.
+- **Output Preview says when a page may use inks it could not find.**
+- The plate list and the total-ink figures are marked as covering only the plates it did find.
+- A colour bar is refused outright instead of being printed one patch short.
+- A printed sheet cannot carry that caveat.
 
 ### Print preflight against a profile you choose
-- **Print preflight is now 37 checks across seven categories, measured against a profile.** It was five, and a file with 360 % total ink, a 7 dpi photograph, five spot inks, an overprinting white headline, no trim box and a printing sticky note came back with a clean sweep.
-- **Nine profiles ship**: sheetfed offset, heatset web, newsprint, digital printing, large format, PDF/X-1a, PDF/X-3, PDF/X-4, and an office one for "will this print on the machine down the hall". Every number in them is a press figure, not a guess.
-- **The same document under two profiles gives two answers**, and that is the point: a check decides whether the document is clean or dirty, and the profile decides whether dirty is a failure or a note.
-- **Every check row states the rule it was measured against** — the ink limit, the minimum resolution, the hairline width — so a saved report is readable a year later by someone who does not have the profile.
-- **A fifth answer joins the four**: "does not apply". A document with no images has nothing to say about image resolution, and a check the profile switched off says so rather than counting as a pass. Neither is included in the passed tally.
-- **Total area coverage is measured, not estimated.** The figure is the true per-pixel maximum. Where a document is longer than the profile's stated page budget, the remaining pages are named as unmeasured rather than guessed at from the ones that were, and a missing measurement tool is reported by the check instead of sinking the report.
-- **Overprinting white is now found** — ink set to overprint that lays down nothing, so the headline disappears on press. Overprinting black, which is correct practice, is not reported; nor is an overprint over ink the reader could not resolve, which is reported for review instead.
-- New checks include the PDF version, the actual printing permission (rather than merely "is it encrypted"), the output intent and the PDF/X claim, the trapping declaration, embedded files, page size and page count, the trim and bleed boxes, spot ink names and count, device-independent colour, minimum and maximum image resolution, image compression and colour space, small type and small black type built from more than one ink, optional content, printing annotations, interactive form fields, the title, document JavaScript and the XMP packet.
+- **Print preflight is now 37 checks across seven categories, measured against a profile.**
+- It was five, and a file no press would accept came back with a clean sweep.
+- That file had 360 % total ink, a 7 dpi photograph and five spot inks.
+- It also had an overprinting white headline, no trim box and a printing sticky note.
+- **Nine profiles ship**: sheetfed offset, heatset web, newsprint, digital printing and large format.
+- Also PDF/X-1a, PDF/X-3, PDF/X-4, and an office one for the machine down the hall.
+- Every number in the shipped profiles is a press figure, not a guess.
+- **The same document under two profiles gives two answers**, and that is the point.
+- A check decides whether the document is clean or dirty.
+- The profile decides whether dirty is a failure or a note.
+- **Every check row states the rule it was measured against**: the ink limit, resolution, hairline width.
+- So a saved report is readable a year later by someone who does not have the profile.
+- **A fifth answer joins the four**: "does not apply".
+- A document with no images has nothing to say about image resolution.
+- A check the profile switched off says so rather than counting as a pass.
+- Neither is included in the passed tally.
+- **Total area coverage is measured, not estimated**, as the true per-pixel maximum.
+- Where a document is longer than the profile's page budget, the remaining pages are named as unmeasured.
+- They are never guessed at from the pages that were measured.
+- A missing measurement tool is reported by the check instead of sinking the report.
+- **Overprinting white is now found**: ink set to overprint that lays down nothing.
+- Such a headline disappears on the printed sheet.
+- Overprinting black, which is correct practice, is not reported.
+- Nor is an overprint over ink the reader could not resolve, which is reported for review.
+- New checks include the PDF version and the actual printing permission, rather than merely "is it encrypted".
+- Also the output intent, the PDF/X claim, the trapping declaration and embedded files.
+- Also page size, page count, and the trim and bleed boxes.
+- Also spot ink names and count, and device-independent colour.
+- Also minimum and maximum image resolution, image compression and image colour space.
+- Also small type, and small black type built from more than one ink.
+- Also optional content, printing annotations, interactive form fields and the title.
+- Also document JavaScript and the XMP packet.
 - The command line gains `preflight --profile` and `preflight-profiles`.
 
 ### Reading the preflight report, and writing your own profile
-- **The report is a tree by category** — Document, Pages, Colour, Fonts, Images, Content, Metadata — each heading carrying how many of the checks that apply to this file it passes, so a long report is skimmable before it is read.
-- **A finding takes you to the thing it names.** One that has a place on the page is drawn on it; one that names an ink, a font or a setting opens the panel that owns it; one that has neither says so rather than doing nothing when clicked.
-- **Parts the reader could not get through are listed separately**, so a check that could not finish is never mistaken for a check that passed.
-- **The report exports as text or as a web page**, naming the document, the profile and when it was checked. It carries every finding, including the ones the panel summarised as a count of further items; the export states in its own footer that it is not a certificate of conformance.
-- **Any shipped profile can be made your own.** Duplicate it, change the numbers a check measures against, switch a check between a failure and a note, or turn it off entirely. Editing a shipped profile saves a copy instead of overwriting it, so the press figures it came with are always there to return to.
-- **A profile is a file you can hand to someone.** Export it, import one you were sent, and delete the ones you made. An import that is not JSON, is not a profile, carries no id, holds something else, or is written to a schema this version does not read, is refused with the reason; one that would replace a profile the app ships is refused too, and says to rename it first.
+- **The report is a tree by category**: Document, Pages, Colour, Fonts, Images, Content, Metadata.
+- Each heading carries how many of the checks that apply to this file it passes.
+- So a long report is skimmable before it is read.
+- **A finding takes you to the thing it names.**
+- One that has a place on the page is drawn on it.
+- One that names an ink, a font or a setting opens the panel that owns it.
+- One that has neither says so rather than doing nothing when clicked.
+- **Parts the reader could not get through are listed separately.**
+- So a check that could not finish is never mistaken for a check that passed.
+- **The report exports as text or as a web page**, naming the document and the profile.
+- The export also names when the document was checked.
+- It carries every finding, including the ones the panel summarised as a count of further items.
+- The export states in its own footer that it is not a certificate of conformance.
+- **Any shipped profile can be made your own.**
+- Duplicate it, change the numbers a check measures against, or switch a check between failure and note.
+- A check can be turned off entirely.
+- Editing a shipped profile saves a copy instead of overwriting it.
+- So the press figures it came with are always there to return to.
+- **A profile is a file you can hand to someone.**
+- Export it, import one you were sent, and delete the ones you made.
+- An import that is not JSON, is not a profile, or carries no id is refused with the reason.
+- So is one holding something else, or written to a schema this version does not read.
+- One that would replace a profile the app ships is refused, and says to rename it first.
 - Ink names and font names reach the report exactly as the document spells them, in every language.
 
 ### Repairing what the preflight check finds
-- **Twenty repairs, and they are on the rows that need them.** A failing check now offers the repair its profile carries: remove document JavaScript or embedded files, remove annotations that print, embed the fonts the file is missing, convert to CMYK or to grayscale, convert spot inks to process or move one onto another plate, downsample over-resolution images, thicken hairlines, flatten transparency, write a trim box or grow a bleed box, set the title, declare the trapping state, write the XMP packet, set the PDF version, convert to PDF/X or PDF/A, and add printer marks.
-- **"Fix what this profile can" repairs every row at once**, in the one order that makes the result right — hairlines before flattening, because a hairline inside a flattened region becomes pixels nothing can reach afterwards; printer marks after a standard conversion, because a conversion regenerates every object and marks added before it could never be removed again. A profile lists the repairs it wants; the order is not up to it.
+- **Twenty repairs, and they are on the rows that need them.**
+- A failing check now offers the repair its profile carries.
+- The repairs remove document JavaScript, embedded files, and annotations that print.
+- They embed the fonts the file is missing, and convert to CMYK or to grayscale.
+- They convert spot inks to process, or move one onto another plate.
+- They downsample over-resolution images, thicken hairlines and flatten transparency.
+- They write a trim box or grow a bleed box, and set the title.
+- They declare the trapping state, write the XMP packet and set the PDF version.
+- They convert to PDF/X or PDF/A, and add printer marks.
+- **"Fix what this profile can" repairs every row at once**, in the one order that makes it right.
+- Hairlines go before flattening, because a hairline inside a flattened region becomes pixels nothing can reach.
+- Printer marks go after a standard conversion, because a conversion regenerates every object.
+- Marks added before a conversion could never be removed again.
+- A profile lists the repairs it wants; the order is not up to it.
 - **A repair is one undo away**, whether it was one row or all of them.
-- **The check re-runs itself after a repair**, so a row's verdict is what the file now says rather than what it said before.
-- **A missing font is embedded from the face the document actually names, or not at all.** A face installed under a different name, or one whose letter widths disagree with the widths the document already declares, is refused by name with both figures — because embedding it would reflow every line it sets. A font whose licence forbids embedding is refused with the foundry's own reason. Four missing fonts of which three are installed embeds three and names the fourth.
-- **A repair that needs a decision asks for it.** The document title, the trapping state, the bleed margin and which plate a spot ink moves onto are typed in, never invented — an invented title is the same fault under a different name, and whether a file is already trapped is a claim only a person may make.
-- **Nothing is offered that cannot run.** A check with no repair in the chosen profile routes to the panel that owns the edit instead of showing a button whose only outcome is a refusal.
-- Setting the PDF version now actually lowers it. Asking a PDF 2.0 file for 1.7 previously reported success and left the file at 2.0.
-- Converting a spot ink to process now removes the plate as well as the marks on it. The colorant stayed declared in the file, so every plate list — this app's included — went on reporting an ink nothing prints.
-- Removing annotations can now be narrowed to the ones flagged to print, and to particular kinds, so a repair takes exactly what the check reported and leaves the rest.
-- The command line gains `preflight-fix`.
+- **The check re-runs itself after a repair**, so a row's verdict is what the file now says.
+- **A missing font is embedded from the face the document actually names, or not at all.**
+- A face installed under a different name is refused by name.
+- So is one whose letter widths disagree with the widths the document declares, with both figures.
+- Embedding such a face would reflow every line it sets.
+- A font whose licence forbids embedding is refused with the foundry's own reason.
+- Four missing fonts of which three are installed embeds three and names the fourth.
+- **A repair that needs a decision asks for it**, rather than inventing one.
+- The document title, the trapping state, the bleed margin and a spot ink's target plate are typed in.
+- An invented title is the same fault under a different name.
+- Whether a file is already trapped is a claim only a person may make.
+- **Nothing is offered that cannot actually run.**
+- A check with no repair in the chosen profile routes to the panel that owns the edit.
+- No button is shown whose only outcome is a refusal.
+- Setting the PDF version now actually lowers it.
+- Asking a PDF 2.0 file for 1.7 previously reported success and left the file at 2.0.
+- Converting a spot ink to process now removes the plate as well as the marks on it.
+- The colorant stayed declared, so every plate list went on reporting an ink nothing prints.
+- Removing annotations can now be narrowed to the ones flagged to print, and to particular kinds.
+- So a repair takes exactly what the check reported and leaves the rest.
+- The command line gains `preflight-fix` for these repairs.
 
 ### Preflighting a whole folder
-- **Tools ▸ Preflight a Folder** measures every PDF in a folder against one profile. A check writes nothing at all to the folder it reads.
-- **Or it repairs them**: each document is copied, repaired with the profile's fixups, and checked again — so the report states what the file is now, not what it was when the run started. The originals are untouched unless you ask for them to be replaced.
-- **A report lands beside every document** in the destination, as text, as a web page, and as data another program can read.
-- Processed originals can be moved out of the intake folder, so the next run does not read them again.
-- A document that cannot be read is reported by name and the run carries on. A repair that fails leaves no half-processed file behind.
-- Settings can be saved under a name, so a folder swept every week is not set up every week.
-- A print profile can now be a step inside a guided action, so a folder of Office files can be converted, brought up to the house press rule, and stamped in one unattended run.
-- The command line gains `preflight-sweep`.
+- **Tools ▸ Preflight a Folder** measures every PDF in a folder against one profile.
+- A check writes nothing at all to the folder it reads.
+- **Or it repairs them**: each document is copied, repaired with the profile's fixups, and checked again.
+- So the report states what the file is now, not what it was when the run started.
+- The originals are untouched unless you ask for them to be replaced.
+- **A report lands beside every document** in the destination, as text and as a web page.
+- A third report lands as data another program can read.
+- Processed originals can be moved out of the intake folder, so the next run skips them.
+- A document that cannot be read is reported by name and the run carries on.
+- A repair that fails leaves no half-processed file behind.
+- Settings can be saved under a name, so a folder swept every week is not set up weekly.
+- A print profile can now be a step inside a guided action.
+- So a folder of Office files can be converted, brought up to the house press rule, and stamped unattended.
+- The command line gains `preflight-sweep` for the folder run.
 
 ### Fixes
-- Exporting or importing a guided action to a folder of your own now works. It only ever succeeded inside the app's own temporary folder, and refused everywhere else.
+- Exporting or importing a guided action to a folder of your own now works.
+- It only ever succeeded inside the app's own temporary folder, and refused everywhere else.
 
 ## 1.0.29
 
