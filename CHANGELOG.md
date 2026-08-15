@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.0.31
+
+*Unreleased*
+
+### Links you draw
+- Pick Links and drag a rectangle anywhere on a page — over a figure, a table, a heading — not only over words you selected.
+- The rectangle waits in the panel until you say where it goes, so a mis-drag costs a redraw rather than an undo.
+- A link can go to a page in this document, at the view you choose: the page, its width, its height, a rectangle you name, or simply the page at whatever zoom the reader is already using.
+- A link can go to a named destination the document declares, picked from the ones it actually has.
+- A link can go to another file, and to a page inside that file.
+- A link can go to a web address, as before.
+- A PDF a link names opens in this app once you confirm it. Any other file is named for you and never run.
+- A link to a program is read and reported by name; this app never writes one.
+
+### Links you can see and change
+- A link's border is yours: a width, a solid, dashed or underlined line, and a colour.
+- Links stay invisible by default, which is what a finished document wants.
+- The click effect a reader sees — none, invert, outline or inset — is yours too.
+- With the Links tool open, every link the document already carries is drawn on the page.
+- Click one to open it, change where it goes or how it looks, or delete it.
+- The panel lists every link with its target, and a Go to that brings its page into view.
+- Creating, retargeting, restyling and deleting a link all ask the same question about a signed document, once, in one place.
+- A border a document carries that this app does not write is named rather than quietly relabelled.
+- Creating links from the web addresses in the text still works exactly as it did.
+
 ## 1.0.30
 
 *Released 2026-08-15*
