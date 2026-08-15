@@ -18,6 +18,7 @@ import {
   type FieldLock,
   type SignaturePolicy,
 } from './lib/signatures';
+import type { LinkSpec } from './lib/links';
 import { toEngineFormat } from './lib/af-emit';
 import { toEngineAction, type AuthoredAction, type WidgetAction } from './lib/field-actions';
 import type { FieldActions } from './lib/form-candidates';
@@ -1171,15 +1172,26 @@ function AppContent(): React.ReactElement {
 
   // Link authoring writes /Link annotations, so it is an annotate-class edit:
   // the incremental tier preserves it, and only a certification that forbids
-  // commenting has anything to say about it.
-  const handleAddLinks = useCallback(
-    async (path: string, links: { page: number; rect: [number, number, number, number]; url: string }[]) => {
+  // commenting has anything to say about it. EVERY link mutation routes
+  // through this one gate — the canvas gesture, the panel's Create, a
+  // retarget, a restyle, a delete — so a signed document is asked about once,
+  // in one place, whichever surface the edit came from.
+  const runLinkEdit = useCallback(
+    async (path: string, method: string, params: Record<string, unknown>): Promise<boolean> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'annotate'))) return;
-      await performOperation(path, 'add_links', { links });
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'annotate'))) return false;
+      await performOperation(path, method, params);
+      return true;
     },
     [state.files, performOperation, confirmEditOfSignedDoc],
+  );
+
+  const handleAddLinks = useCallback(
+    async (path: string, links: LinkSpec[]) => {
+      await runLinkEdit(path, 'add_links', { links });
+    },
+    [runLinkEdit],
   );
 
   const handleFillFormValues = useCallback(
@@ -2180,6 +2192,12 @@ function AppContent(): React.ReactElement {
     sanitizeDocument: handleSanitizeDocument,
     setFieldLock: handleSetFieldLock,
     setFieldActions: handleSetFieldActions,
+    addLinks: (path, links) => runLinkEdit(path, 'add_links', { links }),
+    retargetLink: (path, page, index, target) =>
+      runLinkEdit(path, 'set_link_target', { page, index, target }),
+    restyleLink: (path, page, index, appearance) =>
+      runLinkEdit(path, 'set_link_appearance', { page, index, appearance }),
+    removeLink: (path, page, index) => runLinkEdit(path, 'delete_link', { page, index }),
   };
   const commandHandlersRef = useRef(commandHandlers);
   commandHandlersRef.current = commandHandlers;
@@ -2228,6 +2246,12 @@ function AppContent(): React.ReactElement {
       setFieldLock: (path, field, lock) => h.current.setFieldLock(path, field, lock),
       setFieldActions: (path, field, actions, data) =>
         h.current.setFieldActions(path, field, actions, data),
+      addLinks: (path, links) => h.current.addLinks(path, links),
+      retargetLink: (path, page, index, target) =>
+        h.current.retargetLink(path, page, index, target),
+      restyleLink: (path, page, index, appearance) =>
+        h.current.restyleLink(path, page, index, appearance),
+      removeLink: (path, page, index) => h.current.removeLink(path, page, index),
     });
     setCommandStateSource(() => ({ state: stateRef.current, dispatch }));
     return () => {

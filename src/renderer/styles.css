@@ -4453,6 +4453,39 @@
   border-style: dashed;
 }
 
+/* Link band — the region a link will cover. Unfilled for the crop band's
+   reason (the rectangle marks a region of the page rather than a mark drawn
+   on it) and solid rather than dashed, because a link's rectangle is what the
+   reader will actually be able to click. */
+.page-annot-band.band-linkdraw {
+  background: color-mix(in srgb, #38bdf8 10%, transparent);
+  border-color: #38bdf8;
+}
+
+/* The file's existing links, shown only while the Links tool is open. Faint
+   by default: these are already part of the document, and the one being
+   authored has to stay the loudest thing on the page. */
+.page-link-region {
+  position: absolute;
+  padding: 0;
+  background: color-mix(in srgb, #38bdf8 8%, transparent);
+  border: 1px solid color-mix(in srgb, #38bdf8 55%, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.page-link-region:hover {
+  background: color-mix(in srgb, #38bdf8 18%, transparent);
+  border-color: #38bdf8;
+}
+.page-link-region-selected {
+  background: color-mix(in srgb, #38bdf8 22%, transparent);
+  border: 1.5px solid #38bdf8;
+}
+.page-link-region:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* Bookmarks-from-structure: the preview sits between the tree and the footer,
    so what is about to be written is read directly above the button that
    writes it. */
