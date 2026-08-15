@@ -1074,3 +1074,358 @@ class TestFreeRotation:
         import math as _math
 
         assert cms[0][0] == pytest.approx(_math.cos(_math.radians(200)), abs=1e-5)
+
+
+CJK_FACE = os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf")
+MONGOLIAN_FACE = os.path.join(FONTS_DIR, "NotoSansMongolian-Regular.ttf")
+_HAS_CJK = os.path.isfile(CJK_FACE)
+_HAS_MONGOLIAN = os.path.isfile(MONGOLIAN_FACE)
+
+# Mongolian, and a Japanese sentence long enough to need more than one column.
+_MONGOL = "\u182e\u1823\u1829\u182d\u1823\u182f"
+_NARAN = "\u1828\u1820\u1837\u1820\u1828"
+_JA = (
+    "\u65e5\u672c\u8a9e\u306e\u7e26\u66f8\u304d\u3067\u3059\u3002"
+    "\u3053\u308c\u306f\u9577\u3044\u6bb5\u843d\u3002"
+)
+
+
+def _tms(path):
+    """Every Tm the authored object writes, in emission order."""
+    with pikepdf.open(path) as pdf:
+        return [
+            [float(v) for v in i.operands]
+            for i in pikepdf.parse_content_stream(pdf.pages[0])
+            if str(i.operator) == "Tm"
+        ]
+
+
+def _ops(path, name):
+    with pikepdf.open(path) as pdf:
+        return [
+            [float(v) for v in i.operands]
+            for i in pikepdf.parse_content_stream(pdf.pages[0])
+            if str(i.operator) == name
+        ]
+
+
+class TestVerticalAuthoring:
+    """T29 — authoring a column. Two boundaries carry it (the box enters the
+    writing frame, the anchor leaves it); everything between is the
+    horizontal layout, which is why a horizontal box stays byte-identical."""
+
+    def test_horizontal_writing_mode_is_the_shipped_bytes(self, tmp_dir):
+        src = _blank(tmp_dir)
+        a = os.path.join(tmp_dir, "a.pdf")
+        b = os.path.join(tmp_dir, "b.pdf")
+        add_text_box(src, a, 1, [72, 600, 400, 720], "control text", font_path=FONTS_DIR)
+        add_text_box(
+            src, b, 1, [72, 600, 400, 720], "control text", font_path=FONTS_DIR,
+            writing_mode="horizontal",
+        )
+        assert _page_content(a) == _page_content(b)
+
+    def test_rejects_a_writing_mode_it_does_not_know(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        for bad in ("sideways", "", None, 90, True):
+            with pytest.raises(ValueError, match="writing_mode must be"):
+                add_text_box(
+                    src, out, 1, [72, 600, 400, 720], "x", font_path=FONTS_DIR,
+                    writing_mode=bad,
+                )
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_vertical_embeds_identity_v_with_w2(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_text_box(
+            src, out, 1, [380, 400, 460, 720], _JA, size=14, font_path=FONTS_DIR,
+            writing_mode="vertical",
+        )
+        with pikepdf.open(out) as pdf:
+            fonts = pdf.pages[0].obj["/Resources"]["/Font"]
+            font = next(iter(fonts.values()))
+            assert str(font["/Encoding"]) == "/Identity-V"
+            desc = font["/DescendantFonts"][0]
+            # The advances the CMap walks DOWN have to be stated.
+            assert "/W2" in desc or "/DW2" in desc
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_columns_advance_leftward_and_start_one_em_in(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        # Short enough on the READING axis (the drawn height) to force a
+        # second column — which is the thing being measured.
+        add_text_box(
+            src, out, 1, [380, 560, 460, 720], _JA, size=14, font_path=FONTS_DIR,
+            writing_mode="vertical",
+        )
+        tms = _tms(out)
+        assert len(tms) > 1, "the column never wrapped"
+        # Upright glyphs: the CMap advances the pen, so the matrix is the
+        # identity and only the anchor moves.
+        assert all(t[:4] == [1.0, 0.0, 0.0, 1.0] for t in tms)
+        xs = [t[4] for t in tms]
+        assert xs == sorted(xs, reverse=True), "columns did not advance leftward"
+        # Every column starts at the box top, one em in from its right edge —
+        # the transposed reading of "one em below the box top".
+        assert all(t[5] == pytest.approx(720, abs=0.01) for t in tms)
+        assert xs[0] == pytest.approx(460 - 14, abs=0.01)
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_the_authored_column_lists_back_as_a_column(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_text_box(
+            src, out, 1, [380, 400, 460, 720], _JA, size=14, font_path=FONTS_DIR,
+            writing_mode="vertical",
+        )
+        para = next(
+            p for p in list_text_paragraphs(out, 1)["paragraphs"] if _JA in p["text"]
+        )
+        assert para["orientation"] == "vertical-rl"
+        assert para["columns"] == "rtl"
+        assert para["vertical"] is True
+        assert para["editable"] is True
+
+    @pytest.mark.skipif(not _HAS_MONGOLIAN, reason="Mongolian face not provisioned")
+    def test_mongolian_authors_left_to_right_columns(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_text_box(
+            src, out, 1, [200, 500, 260, 720], _MONGOL + " " + _NARAN, size=14,
+            font_path=FONTS_DIR, writing_mode="vertical",
+        )
+        tms = _tms(out)
+        # A Mongolian face states no vertical advance, so it embeds
+        # HORIZONTALLY and the column is that run turned a quarter.
+        assert all(t[:4] == [0.0, -1.0, 1.0, 0.0] for t in tms)
+        if len(tms) > 1:
+            xs = [t[4] for t in tms]
+            assert xs == sorted(xs), "columns did not advance rightward"
+        para = next(
+            p for p in list_text_paragraphs(out, 1)["paragraphs"] if _MONGOL in p["text"]
+        )
+        assert para["orientation"] == "vertical-lr"
+        assert para["columns"] == "ltr"
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_an_explicit_direction_the_text_contradicts_refuses(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="sets columns right to left"):
+            add_text_box(
+                src, out, 1, [380, 400, 460, 720], _JA, size=14, font_path=FONTS_DIR,
+                writing_mode="vertical-lr",
+            )
+
+    @pytest.mark.skipif(not _HAS_MONGOLIAN, reason="Mongolian face not provisioned")
+    def test_mongolian_refuses_right_to_left_columns(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="sets columns left to right"):
+            add_text_box(
+                src, out, 1, [200, 500, 260, 720], _MONGOL, size=14,
+                font_path=FONTS_DIR, writing_mode="vertical-rl",
+            )
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_direction_free_text_takes_the_request(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        # Digits carry no column evidence, so the explicit spelling stands
+        # rather than refusing — the re-listing's own tiebreak discipline.
+        add_text_box(
+            src, out, 1, [380, 400, 460, 720], "2026", size=14, font_path=FONTS_DIR,
+            writing_mode="vertical-lr",
+        )
+        assert _tms(out)
+
+    def test_a_rotated_box_cannot_be_vertical(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        for angle in (90, 180, 270, 37):
+            with pytest.raises(ValueError, match="rotated box cannot also"):
+                add_text_box(
+                    src, out, 1, [380, 400, 460, 720], "x", font_path=FONTS_DIR,
+                    writing_mode="vertical", rotate=angle,
+                )
+
+    def test_a_latin_face_on_a_vertical_request_refuses_by_name(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        # The metrics gate, reached from the authoring side: a face with no
+        # `vmtx` can never reach an /Identity-V embed, whose /W2 would
+        # otherwise have to be invented.
+        with pytest.raises(ValueError, match="no vertical metrics"):
+            add_text_box(
+                src, out, 1, [380, 400, 460, 720], "Hello", size=14,
+                font_path=FONTS_DIR, writing_mode="vertical",
+                family=os.path.join(FONTS_DIR, "LiberationSans-Regular.ttf"),
+            )
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_features_do_not_apply_to_a_column(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="do not apply to vertical text"):
+            add_text_box(
+                src, out, 1, [380, 400, 460, 720], _JA, size=14, font_path=FONTS_DIR,
+                writing_mode="vertical", features=["small_caps"],
+            )
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_measure_agrees_with_the_commit_in_a_column(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        rect = [380, 400, 460, 720]
+        m = measure_text_box(
+            src, 1, rect, _JA, size=14, font_path=FONTS_DIR, writing_mode="vertical"
+        )
+        r = add_text_box(
+            src, out, 1, rect, _JA, size=14, font_path=FONTS_DIR,
+            writing_mode="vertical",
+        )
+        assert m["lines"] == r["lines"]
+        # `box_height` is the extent ACROSS the reading direction, which for
+        # a column is the drawn WIDTH.
+        assert m["box_height"] == pytest.approx(460 - 380)
+
+
+class TestNoSpaceWrap:
+    """A no-space script must wrap. Breaking only at spaces made a Japanese
+    sentence one word — one line, straight off the page — in every writing
+    mode, and a column is nothing but wrapping."""
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_cjk_wraps_horizontally(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        r = add_text_box(
+            src, out, 1, [72, 600, 232, 720], _JA, size=14, font_path=FONTS_DIR
+        )
+        assert r["lines"] > 1
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_no_space_is_invented_at_a_cjk_break(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_text_box(
+            src, out, 1, [72, 600, 232, 720], _JA, size=14, font_path=FONTS_DIR
+        )
+        # The wrap is a layout decision, never a text one.
+        assert " " not in extract_text(out)["text"].replace("\n", "")
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_a_closing_character_never_starts_a_line(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        text = "\u3042\u3044\u3046\u3048\u304a\u3002" * 4
+        add_text_box(
+            src, out, 1, [72, 600, 160, 720], text, size=14, font_path=FONTS_DIR
+        )
+        lines = [ln for ln in extract_text(out)["text"].splitlines() if ln]
+        assert lines
+        assert not any(ln.startswith("\u3002") for ln in lines)
+
+    def test_latin_wrapping_is_unchanged(self, tmp_dir):
+        src = _blank(tmp_dir)
+        a = os.path.join(tmp_dir, "a.pdf")
+        add_text_box(
+            src, a, 1, [72, 600, 200, 720],
+            "one two three four five six seven eight", size=12, font_path=FONTS_DIR,
+        )
+        text = extract_text(a)["text"]
+        assert "one two" in text and "eight" in text
+
+
+class TestAuthoredTateChuYoko:
+    """The construct, made from creation. The edit machinery could reflow a
+    tate-chu-yoko block and nothing could produce one — the same shape as the
+    defect the vertical restyle surface carried before it was fixed."""
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_the_block_is_condensed_and_the_state_restored(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        add_text_box(
+            src, out, 1, [400, 300, 460, 720], "\u5e73\u62102026\u5e74",
+            size=14, font_path=FONTS_DIR, writing_mode="vertical",
+            spans=[{"start": 2, "end": 6, "tcy": True}],
+        )
+        tzs = _ops(out, "Tz")
+        # Condensed to one em across the column, then back to 100 — Tz is
+        # text state and would otherwise follow the column down the page.
+        assert len(tzs) == 2
+        assert tzs[0][0] < 100
+        assert tzs[1][0] == 100
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_a_longer_year_takes_the_same_column_pitch(self, tmp_dir):
+        src = _blank(tmp_dir)
+        two = os.path.join(tmp_dir, "two.pdf")
+        four = os.path.join(tmp_dir, "four.pdf")
+        rect = [400, 300, 460, 720]
+        add_text_box(
+            src, two, 1, rect, "\u5e73\u621026\u5e74\u306e\u8a18\u9332", size=14,
+            font_path=FONTS_DIR, writing_mode="vertical",
+            spans=[{"start": 2, "end": 4, "tcy": True}],
+        )
+        add_text_box(
+            src, four, 1, rect, "\u5e73\u62102026\u5e74\u306e\u8a18\u9332", size=14,
+            font_path=FONTS_DIR, writing_mode="vertical",
+            spans=[{"start": 2, "end": 6, "tcy": True}],
+        )
+        # The block consumes ONE column em whatever it says, so the text
+        # after it starts at exactly the same place.
+        assert _tms(two)[-1][5] == pytest.approx(_tms(four)[-1][5])
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_the_block_is_read_back_inside_its_column(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        text = "\u5e73\u62102026\u5e74\u306e\u8a18\u9332"
+        add_text_box(
+            src, out, 1, [400, 300, 460, 720], text, size=14, font_path=FONTS_DIR,
+            writing_mode="vertical", spans=[{"start": 2, "end": 6, "tcy": True}],
+        )
+        paras = list_text_paragraphs(out, 1)["paragraphs"]
+        # ONE paragraph carrying the year in reading position: the block the
+        # emission wrote is the block the absorption recognises.
+        assert len(paras) == 1
+        assert paras[0]["text"] == text
+        assert paras[0]["orientation"] == "vertical-rl"
+        assert paras[0]["editable"] is True
+
+    def test_refuses_outside_a_column(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="only applies inside a vertical column"):
+            add_text_box(
+                src, out, 1, [72, 600, 300, 720], "abc 2026 def", size=14,
+                font_path=FONTS_DIR, spans=[{"start": 4, "end": 8, "tcy": True}],
+            )
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_refuses_a_block_with_a_space_in_it(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="cannot contain spaces"):
+            add_text_box(
+                src, out, 1, [400, 300, 460, 720], "\u5e73\u621020 26\u5e74", size=14,
+                font_path=FONTS_DIR, writing_mode="vertical",
+                spans=[{"start": 2, "end": 7, "tcy": True}],
+            )
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="CJK face not provisioned")
+    def test_refuses_joining_characters(self, tmp_dir):
+        src = _blank(tmp_dir)
+        out = os.path.join(tmp_dir, "o.pdf")
+        with pytest.raises(ValueError, match="joining characters"):
+            add_text_box(
+                src, out, 1, [400, 300, 460, 720],
+                "\u5e73\u6210\u0645\u0631\u062d\u5e74",
+                size=14, font_path=FONTS_DIR, writing_mode="vertical",
+                spans=[{"start": 2, "end": 5, "tcy": True}],
+            )
