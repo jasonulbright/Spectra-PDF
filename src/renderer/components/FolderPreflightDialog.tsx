@@ -255,8 +255,8 @@ export function FolderPreflightDialog({
   const harnessDeps = { selectSource, setDest, setProfileId, setMode, run };
   const harnessRef = useRef(harnessDeps);
   harnessRef.current = harnessDeps;
-  const stateRef = useRef({ entries, report, emitted });
-  stateRef.current = { entries, report, emitted };
+  const stateRef = useRef({ entries, report, emitted, profiles });
+  stateRef.current = { entries, report, emitted, profiles };
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerFolderPreflight({
@@ -268,6 +268,7 @@ export function FolderPreflightDialog({
       snapshot: () => ({
         phase: phaseRef.current,
         fileCount: stateRef.current.entries?.length ?? null,
+        profiles: stateRef.current.profiles.map((p) => p.id),
         report: stateRef.current.report,
         reportsWritten: stateRef.current.emitted?.written ?? 0,
       }),
