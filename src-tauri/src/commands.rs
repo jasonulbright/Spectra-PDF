@@ -656,8 +656,8 @@ pub async fn save_report_file(
 /// filesystem plugin reaches only the app's own temp tree, so a user-chosen
 /// destination goes through a command instead — the `save_snapshot_png` shape.
 ///
-/// The extension is checked here rather than trusted from the caller: this is
-/// the app's only arbitrary-path text write, and it stays a REPORT write.
+/// The extension is checked here rather than trusted from the caller: this
+/// write reaches any path, and it stays a REPORT write.
 #[tauri::command]
 pub async fn write_report_file(path: String, contents: String) -> Result<String, String> {
     let ext_ok = std::path::Path::new(&path)
@@ -667,6 +667,26 @@ pub async fn write_report_file(path: String, contents: String) -> Result<String,
         return Err(format!("not a report file name: {path}"));
     }
     fs::write(&path, contents).map_err(|e| format!("Failed to write the report: {}", e))?;
+    Ok(path)
+}
+
+/// Write a preflight profile to a path the save dialog returned. Same reason
+/// `write_report_file` exists — the capability-scoped filesystem plugin
+/// reaches only the app's own temp tree, and a profile is meant to be handed
+/// to someone, so its destination is wherever the user says.
+///
+/// Kept separate from the report write rather than widening that one's
+/// extension list: each arbitrary-path write states the one kind of file it
+/// may create, so neither can be steered into writing the other's.
+#[tauri::command]
+pub async fn write_profile_file(path: String, contents: String) -> Result<String, String> {
+    let ext_ok = std::path::Path::new(&path)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"));
+    if !ext_ok {
+        return Err(format!("not a profile file name: {path}"));
+    }
+    fs::write(&path, contents).map_err(|e| format!("Failed to write the profile: {}", e))?;
     Ok(path)
 }
 
