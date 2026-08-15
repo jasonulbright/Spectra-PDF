@@ -13,8 +13,15 @@ import { computeLayout, computeDropTarget, betweenSlotY, BASE_PAGE_HEIGHT, MIN_D
 import { usePageDrag } from '../../canvas/usePageDrag';
 import { uniqueDocName } from '../../lib/doc-names';
 import { primeSystemFonts } from '../../lib/system-fonts';
-import { insetsFromBand, publishDrawnCrop, roundInsets } from '../../lib/crop-draw';
-import { beadRectFromBand, publishDrawnBead } from '../../lib/article-beads';
+import { insetsFromBand, pageRectFromBand, publishDrawnCrop, roundInsets } from '../../lib/crop-draw';
+import { publishDrawnBead } from '../../lib/article-beads';
+import {
+  publishDrawnLink,
+  publishPickedLink,
+  type LinkRecord,
+  type LinkRegion,
+  type LinkSpec,
+} from '../../lib/links';
 import {
   hasCustomLabels,
   labelFor,
@@ -30,7 +37,7 @@ import {
   propertiesFromPayload,
   propertiesPayload,
 } from '../../lib/redaction-properties';
-import { buildLinkPayloads, type LinkSpec, type PageQuads } from '../../lib/text-selection-markup';
+import { buildLinkPayloads, type PageQuads } from '../../lib/text-selection-markup';
 import type { PageGeometry, RedactionMark, RedactionRegion } from '../../lib/redaction';
 import {
   buildFieldSpecs,
@@ -402,6 +409,7 @@ const NO_TABLES_BY_PAGE: ReadonlyMap<string, TableRegion[]> = new Map();
 const NO_A11Y_FINDINGS: A11yFinding[] = [];
 const NO_A11Y_FINDINGS_BY_PAGE: ReadonlyMap<string, A11yFinding[]> = new Map();
 const NO_ANNOTATIONS: readonly PageAnnotation[] = [];
+const NO_LINK_REGIONS: readonly LinkRegion[] = [];
 const NO_ANNOTATION_IDS: readonly string[] = [];
 
 // Rung 3: the right-click recalibrate popover — "this measures X unit" with
@@ -1541,11 +1549,46 @@ export function WorkspaceCanvasView({
         const proxy = await getDocumentProxy(page.sourceDocId, buffer);
         const p = await proxy.getPage(page.sourcePageIndex + 1);
         const view = p.view as [number, number, number, number];
-        const bead = beadRectFromBand(rect, view, rotationAtDraw);
+        const bead = pageRectFromBand(rect, view, rotationAtDraw);
         if (!bead) return; // a click, not a box
         const number = workspacePageNumber(docs, doc, page.id);
         if (number === null) return;
         publishDrawnBead({ page: number, rect: bead, path: doc.path });
+      })();
+    },
+    [docs, state.files],
+  );
+  // --- Link draw ------------------------------------------------------
+  // The bead band's contract exactly: the rect lands in the page's own user
+  // space and is PUBLISHED to the Links panel, which owns Create. Nothing
+  // reaches the document here — a link's target is a decision, not a drag,
+  // and a mis-drag costs a redraw rather than an undo.
+  const onSetLinkRect = useCallback(
+    (
+      docId: string,
+      pageId: string,
+      rect: { x: number; y: number; w: number; h: number },
+      rotationAtDraw: 0 | 90 | 180 | 270,
+    ) => {
+      const doc = docs.find((d) => d.id === docId);
+      const page = doc?.pages.find((p) => p.id === pageId);
+      if (!doc || !page) return;
+      if (!placementDocsCurrent(state.files, docs, doc.path)) return;
+      const f = state.files.get(page.sourceDocId);
+      if (!f?.buffer) return;
+      const buffer = f.buffer;
+      void (async () => {
+        const proxy = await getDocumentProxy(page.sourceDocId, buffer);
+        const p = await proxy.getPage(page.sourcePageIndex + 1);
+        const view = p.view as [number, number, number, number];
+        // The page's BAKED /Rotate is already in `view`'s orientation; the
+        // band was drawn under that plus the in-memory delta, which is what
+        // `rotationAtDraw` carries — the same composition the bead uses.
+        const region = pageRectFromBand(rect, view, rotationAtDraw);
+        if (!region) return; // a click, not a rectangle
+        const number = workspacePageNumber(docs, doc, page.id);
+        if (number === null) return;
+        publishDrawnLink({ page: number, rect: region, path: doc.path });
       })();
     },
     [docs, state.files],
@@ -2987,6 +3030,102 @@ export function WorkspaceCanvasView({
     [engineCallRaw, marksFromFileRects],
   );
 
+  // --- Link regions on the page ----------------------------------------
+  // The redaction-mark seed, one derivation over: the file's own links are
+  // read back and projected onto the canvas so an existing one can be picked
+  // and edited. `callRaw`, the documented exception the mark seed already
+  // holds — a read of the just-settled working file, where a gated call would
+  // queue a visible operation (and re-run the commit gate) on every settle.
+  //
+  // Seeding is QUEUED on the buffer change and drained on the docs change,
+  // for the mark seed's reason: the reindex is async, and binding regions to
+  // PageRefs a rebuild is about to kill puts every overlay on the wrong page.
+  const [linkRegions, setLinkRegions] = useState<LinkRegion[]>([]);
+  const [selectedLink, setSelectedLink] = useState<{ page: number; index: number } | null>(null);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const linkSeedSeqRef = useRef(new Map<string, number>());
+  const pendingLinkSeedRef = useRef<Set<string>>(new Set());
+
+  const seedLinksFromFile = useCallback(
+    async (path: string) => {
+      const f = filesRef.current.get(path);
+      if (!f?.buffer) return;
+      const seq = (linkSeedSeqRef.current.get(path) ?? 0) + 1;
+      linkSeedSeqRef.current.set(path, seq);
+      try {
+        const listed = (await engineCallRaw('list_links', {
+          file: f.workingPath,
+        })) as unknown as { links: LinkRecord[] };
+        if (linkSeedSeqRef.current.get(path) !== seq) return; // superseded
+        const entries = listed.links ?? [];
+        if (entries.length === 0) {
+          setLinkRegions((prev) => (prev.some((r) => r.path === path) ? prev.filter((r) => r.path !== path) : prev));
+          return;
+        }
+        const pages = docsRef.current.filter((d) => d.path === path).flatMap((d) => d.pages);
+        const seeded: LinkRegion[] = [];
+        let orphaned = 0;
+        for (const entry of entries) {
+          const pageRef = pages[entry.page - 1];
+          if (!pageRef || !entry.rect) {
+            orphaned += 1;
+            continue;
+          }
+          const proxy = await getDocumentProxy(pageRef.sourceDocId, f.buffer);
+          const p = await proxy.getPage(pageRef.sourcePageIndex + 1);
+          const [vx0, vy0, vx1, vy1] = p.view;
+          const composed = ((p.rotate + pageRef.rotation) % 360) as 0 | 90 | 180 | 270;
+          seeded.push({
+            path,
+            page: entry.page,
+            index: entry.index,
+            pageId: pageRef.id,
+            kind: entry.kind,
+            rect: pdfRectToDisplay(
+              entry.rect,
+              { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
+              composed,
+            ),
+          });
+        }
+        if (linkSeedSeqRef.current.get(path) !== seq) return;
+        setLinkRegions((prev) => [...prev.filter((r) => r.path !== path), ...seeded]);
+        if (orphaned > 0) {
+          setLinkError(
+            tChromeCount('canvas.link.seedOrphaned', orphaned, {
+              name: path.split(/[\\/]/).pop() || path,
+            }),
+          );
+        }
+      } catch (err) {
+        if (linkSeedSeqRef.current.get(path) !== seq) return; // superseded
+        // A listing that refuses is stated, never swallowed: a user editing
+        // links on a document whose existing ones are silently absent would
+        // draw a second link over one already there.
+        setLinkError(
+          tChrome('canvas.link.seedFailed', {
+            name: path.split(/[\\/]/).pop() || path,
+            message: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      }
+    },
+    [engineCallRaw],
+  );
+
+  const onPickLink = useCallback((region: LinkRegion) => {
+    setSelectedLink({ page: region.page, index: region.index });
+    publishPickedLink({ path: region.path, page: region.page, index: region.index });
+  }, []);
+
+  // The overlays draw only while the Links tool is open. A link's rectangle is
+  // invisible by design in a finished document; painting every one during
+  // ordinary reading shows the author's scaffolding to the reader.
+  const visibleLinkRegions = useMemo(
+    () => (tool === 'linkdraw' ? linkRegions : NO_LINK_REGIONS),
+    [tool, linkRegions],
+  );
+
   const lastBuffersRef = useRef<Map<string, PdfBuffer | null>>(new Map());
   useEffect(() => {
     const current = new Map<string, PdfBuffer | null>();
@@ -3008,6 +3147,9 @@ export function WorkspaceCanvasView({
     for (const path of current.keys()) {
       if (!prev.has(path) || (invalidated.has(path) && current.get(path))) {
         pendingSeedRef.current.add(path);
+        // Link regions share the mark seed's lifecycle exactly — same queue,
+        // same reason, and the same drain below.
+        pendingLinkSeedRef.current.add(path);
       }
     }
     if (invalidated.size > 0) {
@@ -3023,6 +3165,14 @@ export function WorkspaceCanvasView({
         const kept = withoutPaths(prev, invalidated);
         return kept.length === prev.length ? prev : kept;
       });
+      // Link regions carry positional PageRef ids; a rebuilt file's overlays
+      // must go rather than point at pages that no longer exist. The re-seed
+      // queued above puts back what the settled file actually carries.
+      setLinkRegions((prev) => {
+        const kept = prev.filter((r) => !invalidated.has(r.path));
+        return kept.length === prev.length ? prev : kept;
+      });
+      setSelectedLink(null);
       setSigPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
       // New-field placement shares the positional-id hazard — same lifecycle.
       setNewFieldPlacement((prev) => (prev && invalidated.has(prev.path) ? null : prev));
@@ -3056,6 +3206,16 @@ export function WorkspaceCanvasView({
       void seedMarksFromFile(path);
     }
   }, [docs, seedMarksFromFile]);
+
+  useEffect(() => {
+    if (pendingLinkSeedRef.current.size === 0) return;
+    const present = new Set(docs.map((d) => d.path));
+    for (const path of [...pendingLinkSeedRef.current]) {
+      if (!present.has(path)) continue;
+      pendingLinkSeedRef.current.delete(path);
+      void seedLinksFromFile(path);
+    }
+  }, [docs, seedLinksFromFile]);
 
   // Find overlays: matching pages, and per-word boxes where OCR words exist.
   const findMatchPageIds = find.active ? find.result.pageIds : NO_PAGE_IDS;
@@ -6393,6 +6553,10 @@ export function WorkspaceCanvasView({
             onSetCropRect,
             onSetBeadRect,
             onSetSnapshotRect,
+            onSetLinkRect,
+            linkRegions: visibleLinkRegions,
+            onPickLink,
+            selectedLink,
             snapshotPlacement: liveSnapshotPlacement,
             onClearSnapshotPlacement,
             onSaveSnapshot,
@@ -6659,6 +6823,10 @@ export function WorkspaceCanvasView({
           cropPlacement={liveCropPlacement}
           onClearCropPlacement={onClearCropPlacement}
           onSetSnapshotRect={onSetSnapshotRect}
+          onSetLinkRect={onSetLinkRect}
+          linkRegions={visibleLinkRegions}
+          onPickLink={onPickLink}
+          selectedLink={selectedLink}
           snapshotPlacement={liveSnapshotPlacement}
           onClearSnapshotPlacement={onClearSnapshotPlacement}
           onSaveSnapshot={onSaveSnapshot}
@@ -7474,6 +7642,21 @@ export function WorkspaceCanvasView({
           <span className="flex-1">{redactError}</span>
           <button
             onClick={() => setRedactError(null)}
+            className="text-red-300 hover:text-red-100"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {linkError && (
+        <div
+          data-testid="link-error"
+          className="absolute bottom-16 end-4 z-30 max-w-md flex items-start gap-2 px-3 py-2 bg-red-600/20 border border-red-500/40 rounded text-xs text-red-200 shadow-lg"
+        >
+          <span className="flex-1">{linkError}</span>
+          <button
+            onClick={() => setLinkError(null)}
             className="text-red-300 hover:text-red-100"
           >
             ×

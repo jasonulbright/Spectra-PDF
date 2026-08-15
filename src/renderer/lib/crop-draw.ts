@@ -93,6 +93,40 @@ export function insetsFromBand(
   }
 }
 
+/**
+ * The page-space rect a band covers, given the page's own view box
+ * `[x0, y0, x1, y1]` and the turn it was displayed at. The box's origin is
+ * added back — a page whose crop box does not start at (0, 0) would otherwise
+ * put every rect one offset away. Returns null for a band with no area: a
+ * click is not a box.
+ *
+ * The rotation half is `insetsFromBand`'s, read from the other side: a rect
+ * against the page box IS the insets the band left. Everything that turns a
+ * band into user space goes through this one function — an article bead, a
+ * link region — because two implementations of the quarter-turn rule is how a
+ * landscape scan gets its geometry on the wrong axis.
+ */
+export function pageRectFromBand(
+  band: NormRect,
+  view: readonly [number, number, number, number],
+  rotation = 0,
+): [number, number, number, number] | null {
+  const [vx0, vy0, vx1, vy1] = view;
+  const pageW = vx1 - vx0;
+  const pageH = vy1 - vy0;
+  if (!(pageW > 0) || !(pageH > 0)) return null;
+  const turned = rotation === 90 || rotation === 270;
+  const insets = insetsFromBand(band, turned ? pageH : pageW, turned ? pageW : pageH, rotation);
+  if (!insets) return null;
+  const x0 = vx0 + insets.left;
+  const y0 = vy0 + insets.bottom;
+  const x1 = vx1 - insets.right;
+  const y1 = vy1 - insets.top;
+  if (!(x1 > x0) || !(y1 > y0)) return null;
+  const r = (v: number): number => Number(v.toFixed(2));
+  return [r(x0), r(y0), r(x1), r(y1)];
+}
+
 /** Round to the precision the panel's numeric fields use, so a drawn crop
  * and a typed one that mean the same thing ARE the same request. */
 export function roundInsets(insets: CropInsets, places = 2): CropInsets {

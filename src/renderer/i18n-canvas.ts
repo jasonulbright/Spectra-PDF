@@ -514,6 +514,13 @@ export const CANVAS_STRINGS = {
   // Link authoring refusals.
   'canvas.link.pagesGone': 'Those pages are no longer in the document.',
   'canvas.link.nothingSelected': 'Nothing selected to link.',
+  'canvas.link.regionTitle': 'Edit this link',
+  'canvas.link.seedFailed':
+    '{{name}}: the document’s links could not be read — {{message}} Links you draw now still work; the existing ones are not shown on the page.',
+  'canvas.link.seedOrphaned_one':
+    '{{name}}: {{count}} link is not shown on the page — its page is no longer in this document.',
+  'canvas.link.seedOrphaned_other':
+    '{{name}}: {{count}} links are not shown on the page — their pages are no longer in this document.',
 
   // The on-canvas sign card.
   'canvas.sign.fieldTitle': 'Sign field "{{field}}"',

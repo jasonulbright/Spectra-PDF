@@ -9,14 +9,11 @@
  * because there is no DOM test environment: the arithmetic is where the
  * mistakes live, so the arithmetic is what gets pinned.
  *
- * The rotation half is `crop-draw.ts`'s, reused rather than restated —
- * `insetsFromBand` already answers "which page edges did this band trim, given
- * the page was displayed turned", and a rect against the page box is those
- * insets read from the other side. Two implementations of that quarter-turn
- * rule is exactly how a landscape scan gets its beads on the wrong axis.
+ * The band -> user-space conversion is `crop-draw.ts`'s `pageRectFromBand`,
+ * shared with link authoring rather than restated here — two implementations
+ * of the quarter-turn rule is how a landscape scan gets its geometry on the
+ * wrong axis.
  */
-
-import { insetsFromBand, type NormRect } from './crop-draw';
 
 /** A bead as the engine takes it: 1-based page, rect in PDF user space. */
 export interface Bead {
@@ -31,34 +28,6 @@ export interface Article {
   subject: string;
   keywords: string;
   beads: Bead[];
-}
-
-/**
- * The page-space rect a band covers, given the page's own view box
- * `[x0, y0, x1, y1]` and the turn it was displayed at. `/R` is in DEFAULT
- * user space, so the box's origin is added back — a page whose crop box does
- * not start at (0, 0) would otherwise put every bead one offset away.
- * Returns null for a band with no area: a click is not a box.
- */
-export function beadRectFromBand(
-  band: NormRect,
-  view: readonly [number, number, number, number],
-  rotation = 0,
-): [number, number, number, number] | null {
-  const [vx0, vy0, vx1, vy1] = view;
-  const pageW = vx1 - vx0;
-  const pageH = vy1 - vy0;
-  if (!(pageW > 0) || !(pageH > 0)) return null;
-  const turned = rotation === 90 || rotation === 270;
-  const insets = insetsFromBand(band, turned ? pageH : pageW, turned ? pageW : pageH, rotation);
-  if (!insets) return null;
-  const x0 = vx0 + insets.left;
-  const y0 = vy0 + insets.bottom;
-  const x1 = vx1 - insets.right;
-  const y1 = vy1 - insets.top;
-  if (!(x1 > x0) || !(y1 > y0)) return null;
-  const r = (v: number): number => Number(v.toFixed(2));
-  return [r(x0), r(y0), r(x1), r(y1)];
 }
 
 /** A fresh, empty article. Titles are the user's; the rest stays blank until

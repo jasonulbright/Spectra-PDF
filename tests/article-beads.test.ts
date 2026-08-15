@@ -2,8 +2,8 @@
 // test environment, so the arithmetic lives in a module and the module is what
 // gets pinned — the crop-draw discipline, one derivation over.
 import { describe, it, expect, beforeEach } from 'vitest';
+import { pageRectFromBand } from '../src/renderer/lib/crop-draw';
 import {
-  beadRectFromBand,
   consumeDrawnBead,
   emptyArticle,
   moveBead,
@@ -16,14 +16,14 @@ import { pagesParam } from '../src/renderer/lib/page-scope';
 
 const VIEW = [0, 0, 400, 600] as const;
 
-describe('beadRectFromBand', () => {
+describe('pageRectFromBand', () => {
   it('maps an unrotated band to page space with y flipped', () => {
     // Top-left quarter of the page: x 0..0.5, y 0..0.5 from the TOP.
-    expect(beadRectFromBand({ x: 0, y: 0, w: 0.5, h: 0.5 }, VIEW)).toEqual([0, 300, 200, 600]);
+    expect(pageRectFromBand({ x: 0, y: 0, w: 0.5, h: 0.5 }, VIEW)).toEqual([0, 300, 200, 600]);
   });
 
   it('keeps a centred band centred', () => {
-    expect(beadRectFromBand({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 }, VIEW)).toEqual([
+    expect(pageRectFromBand({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 }, VIEW)).toEqual([
       100, 150, 300, 450,
     ]);
   });
@@ -34,29 +34,29 @@ describe('beadRectFromBand', () => {
     // whole point of tracking the rotation at draw time.
     const band = { x: 0, y: 0, w: 0.5, h: 0.5 };
     // 0°: the page's own top-left.
-    expect(beadRectFromBand(band, VIEW, 0)).toEqual([0, 300, 200, 600]);
+    expect(pageRectFromBand(band, VIEW, 0)).toEqual([0, 300, 200, 600]);
     // 90° clockwise for display: the page's left edge shows along the top, so
     // the displayed top-left quarter is the page's BOTTOM-left.
-    expect(beadRectFromBand(band, VIEW, 90)).toEqual([0, 0, 200, 300]);
+    expect(pageRectFromBand(band, VIEW, 90)).toEqual([0, 0, 200, 300]);
     // 180°: bottom-right.
-    expect(beadRectFromBand(band, VIEW, 180)).toEqual([200, 0, 400, 300]);
+    expect(pageRectFromBand(band, VIEW, 180)).toEqual([200, 0, 400, 300]);
     // 270°: the page's right edge shows along the top — the top-right corner.
-    expect(beadRectFromBand(band, VIEW, 270)).toEqual([200, 300, 400, 600]);
+    expect(pageRectFromBand(band, VIEW, 270)).toEqual([200, 300, 400, 600]);
   });
 
   it('adds the view box origin back, so a shifted crop box is honoured', () => {
-    expect(beadRectFromBand({ x: 0, y: 0, w: 0.5, h: 0.5 }, [10, 20, 410, 620])).toEqual([
+    expect(pageRectFromBand({ x: 0, y: 0, w: 0.5, h: 0.5 }, [10, 20, 410, 620])).toEqual([
       10, 320, 210, 620,
     ]);
   });
 
   it('refuses a band with no area — a click is not a box', () => {
-    expect(beadRectFromBand({ x: 0.5, y: 0.5, w: 0, h: 0 }, VIEW)).toBeNull();
-    expect(beadRectFromBand({ x: 0.5, y: 0.5, w: 0.0005, h: 0.4 }, VIEW)).toBeNull();
+    expect(pageRectFromBand({ x: 0.5, y: 0.5, w: 0, h: 0 }, VIEW)).toBeNull();
+    expect(pageRectFromBand({ x: 0.5, y: 0.5, w: 0.0005, h: 0.4 }, VIEW)).toBeNull();
   });
 
   it('refuses a degenerate page box', () => {
-    expect(beadRectFromBand({ x: 0, y: 0, w: 1, h: 1 }, [0, 0, 0, 600])).toBeNull();
+    expect(pageRectFromBand({ x: 0, y: 0, w: 1, h: 1 }, [0, 0, 0, 600])).toBeNull();
   });
 });
 
