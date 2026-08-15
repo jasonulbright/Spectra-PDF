@@ -1570,7 +1570,8 @@ function AppContent(): React.ReactElement {
          * always renders in a bundled face, so a feature switches to Libertinus
          * Serif (Liberation has none); alt_index picks the salt alternate. */
         features?: string[];
-        /** Per-span styling over the text's character positions. */
+        /** Per-span styling over the text's character positions. `tcy`
+         * marks a tate-chu-yoko block: upright inside a column, one em. */
         spans?: {
           start: number;
           end: number;
@@ -1578,8 +1579,12 @@ function AppContent(): React.ReactElement {
           color?: [number, number, number];
           bold?: boolean;
           italic?: boolean;
+          tcy?: boolean;
         }[];
         alt_index?: number;
+        /** Writing mode — `vertical` derives its column direction from the
+         * text; horizontal is the engine default and never travels. */
+        writingMode?: 'horizontal' | 'vertical' | 'vertical-rl' | 'vertical-lr';
       },
     ): Promise<string | void> => {
       const f = state.files.get(path);
@@ -1601,6 +1606,9 @@ function AppContent(): React.ReactElement {
       if (opts?.features !== undefined && opts.features.length > 0) params.features = opts.features;
       if (opts?.alt_index !== undefined) params.alt_index = opts.alt_index;
       if (opts?.spans !== undefined && opts.spans.length > 0) params.spans = opts.spans;
+      if (opts?.writingMode !== undefined && opts.writingMode !== 'horizontal') {
+        params.writing_mode = opts.writingMode;
+      }
       await performOperation(path, 'add_text_box', params);
     },
     [state.files, performOperation, confirmEditOfSignedDoc],

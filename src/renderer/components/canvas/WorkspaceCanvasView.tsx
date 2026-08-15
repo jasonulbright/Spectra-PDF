@@ -352,6 +352,16 @@ interface WorkspaceCanvasViewProps {
       // picks the salt alternate.
       features?: string[];
       alt_index?: number;
+      spans?: {
+        start: number;
+        end: number;
+        size?: number;
+        color?: [number, number, number];
+        bold?: boolean;
+        italic?: boolean;
+        tcy?: boolean;
+      }[];
+      writingMode?: 'horizontal' | 'vertical' | 'vertical-rl' | 'vertical-lr';
     },
   ) => Promise<string | void>;
   // Embed a NEW image at a user-space rect. `source` is optional — the
@@ -1443,6 +1453,14 @@ export function WorkspaceCanvasView({
   const [atFits, setAtFits] = useState<boolean | null>(null);
   const [atColor, setAtColor] = useState('#000000');
   const [atFamily, setAtFamily] = useState<'sans' | 'serif' | 'mono'>('sans');
+  // Writing mode (sticky). TWO choices, deliberately: the COLUMN DIRECTION
+  // is a property of the script, decided engine-side by the same evidence
+  // the re-listing uses, so offering it as a third choice would offer one
+  // half that authors a document reading backwards and one half that repeats
+  // what the text already says. `atColumns` is the resolved answer coming
+  // back from the measure, so the derivation is shown rather than hidden.
+  const [atWriting, setAtWriting] = useState<'horizontal' | 'vertical'>('horizontal');
+  const [atColumns, setAtColumns] = useState<'rtl' | 'ltr' | null>(null);
   const [atError, setAtError] = useState<string | null>(null);
   const [creatingText, setCreatingText] = useState(false);
   const onSetAddTextRect = useCallback(
@@ -1729,7 +1747,8 @@ export function WorkspaceCanvasView({
       smallCaps?: boolean;
       alternates?: boolean;
       altIndex?: number;
-      /** Per-span styling over the text's character positions. */
+      /** Per-span styling over the text's character positions. `tcy` marks a
+       * tate-chu-yoko block — upright inside a column, one em wide. */
       spans?: {
         start: number;
         end: number;
@@ -1737,7 +1756,11 @@ export function WorkspaceCanvasView({
         color?: [number, number, number];
         bold?: boolean;
         italic?: boolean;
+        tcy?: boolean;
       }[];
+      /** Writing mode. `vertical` derives its column direction from the
+       * text; omitted (or `horizontal`) keeps the shipped path. */
+      writingMode?: 'horizontal' | 'vertical' | 'vertical-rl' | 'vertical-lr';
     }): Promise<void> => {
       if (creatingTextRef.current) return; // re-entry: the button is disabled while creating
       const placement = liveAddTextPlacement;
@@ -1801,6 +1824,11 @@ export function WorkspaceCanvasView({
             // Per-span styling (send-nothing when unstyled — the
             // spanless path stays byte-identical).
             ...(params.spans && params.spans.length > 0 ? { spans: params.spans } : {}),
+            // The send-nothing rule again: horizontal is the engine default
+            // and its output is pinned byte-identical to the no-param path.
+            ...(params.writingMode && params.writingMode !== 'horizontal'
+              ? { writingMode: params.writingMode }
+              : {}),
           },
         );
         // Signed-doc refusal — keep the card open (the user can cancel).
@@ -1827,6 +1855,7 @@ export function WorkspaceCanvasView({
     const placement = liveAddTextPlacement;
     if (!placement || !atText.trim()) {
       setAtFits(null);
+      setAtColumns(null);
       return;
     }
     let stale = false;
@@ -1855,6 +1884,7 @@ export function WorkspaceCanvasView({
             size: atSize,
             font_path: await app.getEditFontPath(),
             family: atFamily,
+            ...(atWriting !== 'horizontal' ? { writing_mode: atWriting } : {}),
             ...(atRotate ? { rotate: atRotate } : {}),
             ...(atBold ? { bold: true } : {}),
             ...(atItalic ? { italic: true } : {}),
@@ -1876,10 +1906,23 @@ export function WorkspaceCanvasView({
             // The fit indicator measures with the SAME spans the commit
             // sends (mixed sizes change line heights — the discipline).
             ...(atSpans.length > 0 ? { spans: atSpans } : {}),
-          })) as { fits?: boolean };
-          if (!stale) setAtFits(typeof res?.fits === 'boolean' ? res.fits : null);
+          })) as { fits?: boolean; writing_mode?: string };
+          if (!stale) {
+            setAtFits(typeof res?.fits === 'boolean' ? res.fits : null);
+            // The direction the engine's own evidence chose for this text.
+            setAtColumns(
+              res?.writing_mode === 'vertical-lr'
+                ? 'ltr'
+                : res?.writing_mode === 'vertical-rl'
+                  ? 'rtl'
+                  : null,
+            );
+          }
         } catch {
-          if (!stale) setAtFits(null);
+          if (!stale) {
+            setAtFits(null);
+            setAtColumns(null);
+          }
         }
       })();
     }, 250);
@@ -1900,6 +1943,7 @@ export function WorkspaceCanvasView({
     atAlternates,
     atAltIndex,
     atSpans,
+    atWriting,
     docs,
     state.files,
     engineCall,
@@ -1918,6 +1962,7 @@ export function WorkspaceCanvasView({
       smallCaps: atSmallCaps,
       alternates: atAlternates,
       altIndex: atAltIndex,
+      writingMode: atWriting,
       ...(atSpans.length > 0 ? { spans: atSpans } : {}),
     }).catch(() => undefined); // surfaced via atError; the card stays open
   }, [
@@ -1934,6 +1979,7 @@ export function WorkspaceCanvasView({
     atSmallCaps,
     atAlternates,
     atAltIndex,
+    atWriting,
   ]);
 
   // Bake pending values file by file through App's fill op. Reentrancy-ref'd
@@ -7421,13 +7467,66 @@ export function WorkspaceCanvasView({
             <select
               data-testid="add-text-family"
               value={atFamily}
+              disabled={atWriting !== 'horizontal'}
+              title={
+                atWriting !== 'horizontal'
+                  ? tChrome('canvas.addtext.verticalNoBundledFace')
+                  : undefined
+              }
               onChange={(e) => setAtFamily(e.target.value as 'sans' | 'serif' | 'mono')}
-              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
+              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs disabled:opacity-50"
             >
               <option value="sans">{tChrome('canvas.addtext.family.sans')}</option>
               <option value="serif">{tChrome('canvas.addtext.family.serif')}</option>
               <option value="mono">{tChrome('canvas.addtext.family.mono')}</option>
             </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className="text-xs text-neutral-400 w-16 shrink-0"
+              title={tChrome('canvas.addtext.writingModeTitle')}
+            >
+              {tChrome('canvas.addtext.writingMode')}
+            </span>
+            <select
+              data-testid="add-text-writing-mode"
+              value={atWriting}
+              title={tChrome('canvas.addtext.writingModeTitle')}
+              onChange={(e) => {
+                const next = e.target.value as 'horizontal' | 'vertical';
+                setAtWriting(next);
+                if (next !== 'horizontal') {
+                  // A vertical box already turns the reading direction, and
+                  // no orientation admits a turned column — so the rotation
+                  // goes with the mode rather than authoring a block the
+                  // editor could never reopen.
+                  setAtRotate(0);
+                  setAddTextPlacement((pl) => (pl ? { ...pl, rotate: 0 } : pl));
+                  setAtSmallCaps(false);
+                  setAtAlternates(false);
+                }
+              }}
+              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
+            >
+              <option value="horizontal">
+                {tChrome('canvas.addtext.writingMode.horizontal')}
+              </option>
+              <option value="vertical">
+                {tChrome('canvas.addtext.writingMode.vertical')}
+              </option>
+            </select>
+            {atWriting !== 'horizontal' && atColumns && (
+              <span
+                data-testid="add-text-columns"
+                className="text-[11px] text-neutral-500 shrink-0"
+              >
+                {tChrome(
+                  atColumns === 'ltr'
+                    ? 'canvas.addtext.columnsLtr'
+                    : 'canvas.addtext.columnsRtl',
+                )}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-neutral-400 w-16 shrink-0">
@@ -7452,7 +7551,12 @@ export function WorkspaceCanvasView({
             <button
               type="button"
               data-testid="add-text-rotate"
-              title={tChrome('canvas.addtext.rotateTitle')}
+              disabled={atWriting !== 'horizontal'}
+              title={tChrome(
+                atWriting !== 'horizontal'
+                  ? 'canvas.addtext.verticalNoRotate'
+                  : 'canvas.addtext.rotateTitle',
+              )}
               onClick={() =>
                 setAtRotate((r) => {
                   const next = (Math.floor(r / 90) * 90 + 90) % 360;
@@ -7461,7 +7565,7 @@ export function WorkspaceCanvasView({
                   return next;
                 })
               }
-              className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:border-emerald-500"
+              className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:border-emerald-500 disabled:opacity-50"
             >
               <span
                 className="inline-block"
@@ -7477,7 +7581,12 @@ export function WorkspaceCanvasView({
             <input
               type="number"
               data-testid="add-text-rotate-deg"
-              title={tChrome('canvas.addtext.rotateDegTitle')}
+              disabled={atWriting !== 'horizontal'}
+              title={tChrome(
+                atWriting !== 'horizontal'
+                  ? 'canvas.addtext.verticalNoRotate'
+                  : 'canvas.addtext.rotateDegTitle',
+              )}
               min={-360}
               max={720}
               step={1}
@@ -7539,9 +7648,14 @@ export function WorkspaceCanvasView({
               type="button"
               data-testid="add-text-smallcaps"
               aria-pressed={atSmallCaps}
-              title={tChrome('canvas.addtext.smallCapsTitle')}
+              disabled={atWriting !== 'horizontal'}
+              title={tChrome(
+                atWriting !== 'horizontal'
+                  ? 'canvas.addtext.verticalNoFeatures'
+                  : 'canvas.addtext.smallCapsTitle',
+              )}
               onClick={() => setAtSmallCaps((s) => !s)}
-              className={`px-2 py-1 text-xs border rounded ${
+              className={`px-2 py-1 text-xs border rounded disabled:opacity-50 ${
                 atSmallCaps
                   ? 'bg-emerald-700/40 border-emerald-500'
                   : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
@@ -7554,9 +7668,14 @@ export function WorkspaceCanvasView({
               type="button"
               data-testid="add-text-alternates"
               aria-pressed={atAlternates}
-              title={tChrome('canvas.addtext.alternatesTitle')}
+              disabled={atWriting !== 'horizontal'}
+              title={tChrome(
+                atWriting !== 'horizontal'
+                  ? 'canvas.addtext.verticalNoFeatures'
+                  : 'canvas.addtext.alternatesTitle',
+              )}
               onClick={() => setAtAlternates((a) => !a)}
-              className={`px-2 py-1 text-xs border rounded ${
+              className={`px-2 py-1 text-xs border rounded disabled:opacity-50 ${
                 atAlternates
                   ? 'bg-emerald-700/40 border-emerald-500'
                   : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
