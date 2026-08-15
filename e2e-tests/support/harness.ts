@@ -2427,6 +2427,8 @@ export interface PreflightCheckRow {
   addressKinds: string[];
   /** The rule the row was measured against, resolved. */
   params: Record<string, unknown>;
+  /** What this row's fix control offers right now, or null for nothing. */
+  fix: string | null;
 }
 
 export interface PreflightSnapshot {
@@ -2444,6 +2446,8 @@ export interface PreflightSnapshot {
   profiles: string[];
   expandedCategories: string[];
   shownCheck: string | null;
+  /** The checks "fix what this profile can" would repair. */
+  fixable: string[];
 }
 
 export async function preflightSnapshot(): Promise<PreflightSnapshot | null> {
@@ -2641,5 +2645,117 @@ export async function a11yFindingsOnPage(): Promise<
 export async function tagsSelectedPath(): Promise<number[] | null> {
   return await browser.execute(function () {
     return (window as any).__SPECTRA_TEST__.tagsSelectedPath();
+  });
+}
+
+/** Repair one preflight row — the same engine call its Fix control makes. */
+export async function preflightFix(checkId: string): Promise<boolean> {
+  return await browser.executeAsync<boolean, [string]>(
+    function (id, done) {
+      (window as any).__SPECTRA_TEST__
+        .preflightFix(id)
+        .then((ok: boolean) => done(ok as any))
+        .catch(() => done(false as any));
+    },
+    checkId,
+  );
+}
+
+/** "Fix what this profile can" — one act, one undo entry. */
+export async function preflightFixAll(): Promise<boolean> {
+  return await browser.executeAsync<boolean, []>(function (done) {
+    (window as any).__SPECTRA_TEST__
+      .preflightFixAll()
+      .then((ok: boolean) => done(ok as any))
+      .catch(() => done(false as any));
+  });
+}
+
+/** Type an authored fixup's value and apply it. */
+export async function preflightAuthoredFix(
+  checkId: string,
+  index: number | null,
+  value: string,
+): Promise<boolean> {
+  return await browser.executeAsync<boolean, [string, number | null, string]>(
+    function (id, at, text, done) {
+      (window as any).__SPECTRA_TEST__
+        .preflightAuthoredFix(id, at, text)
+        .then((ok: boolean) => done(ok as any))
+        .catch(() => done(false as any));
+    },
+    checkId,
+    index,
+    value,
+  );
+}
+
+// ── The droplet ────────────────────────────────────────────────────────────
+
+export interface SweepRowSnapshot {
+  rel: string;
+  status: string;
+  before?: { failed: number; passed: number };
+  after?: { failed: number; passed: number };
+  applied?: string[];
+  report?: string;
+  error?: string;
+}
+
+export interface FolderPreflightSnapshot {
+  phase: string;
+  fileCount: number | null;
+  report: {
+    mode: string;
+    total: number;
+    ok: number;
+    failed: number;
+    clean: number;
+    in_place: boolean;
+    log_path?: string;
+    results: SweepRowSnapshot[];
+  } | null;
+  reportsWritten: number;
+}
+
+export async function folderPreflightSetFolders(
+  source: string,
+  dest: string,
+): Promise<void> {
+  await browser.executeAsync<void, [string, string]>(
+    function (src, dst, done) {
+      (window as any).__SPECTRA_TEST__
+        .folderPreflightSetFolders(src, dst)
+        .then(() => done(undefined as any));
+    },
+    source,
+    dest,
+  );
+}
+
+export async function folderPreflightSetProfile(id: string): Promise<void> {
+  await browser.execute(function (value: string) {
+    (window as any).__SPECTRA_TEST__.folderPreflightSetProfile(value);
+  }, id);
+}
+
+export async function folderPreflightSetMode(mode: string): Promise<void> {
+  await browser.execute(function (value: string) {
+    (window as any).__SPECTRA_TEST__.folderPreflightSetMode(value);
+  }, mode);
+}
+
+export async function folderPreflightRun(): Promise<string | null> {
+  return await browser.executeAsync<string | null, []>(function (done) {
+    (window as any).__SPECTRA_TEST__
+      .folderPreflightRun()
+      .then(() => done(null as any))
+      .catch((err: unknown) => done(String(err) as any));
+  });
+}
+
+export async function folderPreflightSnapshot(): Promise<FolderPreflightSnapshot | null> {
+  return await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.folderPreflightSnapshot();
   });
 }

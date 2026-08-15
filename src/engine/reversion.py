@@ -6,6 +6,17 @@ import pikepdf
 from engine.pdf_save import save_pdf
 
 
+def _version_tuple(text: str) -> tuple:
+    """`"1.7"` as (1, 7), for comparing a target against what a file carries.
+    An unreadable header sorts lowest, so a target is never forced against a
+    number nobody could read."""
+    try:
+        parts = str(text).strip().split(".")
+        return tuple(int(part) for part in parts[:2])
+    except (TypeError, ValueError):
+        return ()
+
+
 def get_pdf_version(file: str) -> dict:
     """Read the current PDF version of a file.
 
@@ -47,7 +58,16 @@ def set_pdf_version(
         # "PDF 1.. → PDF 1.7" and in the CLI's JSON. The conversion itself was
         # always correct; only the number it told you about was wrong.
         original_version = pdf.pdf_version
-        save_pdf(pdf, output_path, min_version=version)
+        # `min_version` only ever RAISES the header: asking a 2.0 document for
+        # 1.7 left it at 2.0 and reported success. A version this op is told to
+        # set is set, so a target BELOW the current one is forced — which is
+        # what makes the preflight fixup for `pdf_version` able to clear its
+        # own check on a document whose producer wrote a newer header than the
+        # RIP will read.
+        if _version_tuple(version) < _version_tuple(original_version):
+            save_pdf(pdf, output_path, force_version=version)
+        else:
+            save_pdf(pdf, output_path, min_version=version)
 
     return {
         "output": str(output_path),

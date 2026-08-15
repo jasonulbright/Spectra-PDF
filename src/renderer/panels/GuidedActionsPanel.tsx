@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
-import { file, app, dialog, batch } from '../lib/tauri-bridge';
+import { file, app, dialog, batch, actionFile } from '../lib/tauri-bridge';
 import { getSettings } from '../lib/app-settings';
 import { ensureGsPath } from './SettingsPanel';
 import { NoFileOpen } from '../components/NoFileOpen';
@@ -275,11 +275,18 @@ export function GuidedActionsPanel(): React.ReactElement {
   // same construction as the persist path (an exported file can never carry
   // a password); import validates against the catalog BY NAME and mints a
   // fresh id, so imports never collide with or overwrite an existing action.
+  //
+  // BOTH directions go around the capability-scoped filesystem plugin, whose
+  // scope is the app's own temp tree: an action file's whole purpose is to
+  // live wherever the user keeps it, so its destination is always one they
+  // picked. The same shape as the preflight profile's, and for the same
+  // reason a spec drives it — a scoped write against a user-chosen path
+  // refuses only at run time, in the built binary.
   const executeExport = async (action: GuidedAction, path: string): Promise<void> => {
-    await file.writeBuffer(path, new TextEncoder().encode(actionFileJson(action)));
+    await actionFile.write(path, actionFileJson(action));
   };
   const executeImport = async (path: string): Promise<void> => {
-    const bytes = await file.readBuffer(path);
+    const bytes = await actionFile.read(path);
     const action = parseActionFile(new TextDecoder().decode(bytes));
     persist([...bridgeRef.current.actions, action]);
   };

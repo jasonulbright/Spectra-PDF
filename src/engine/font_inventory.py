@@ -129,10 +129,16 @@ def _substitute_face(font_obj, font_dir: str | None) -> str | None:
     return basename(resolved)
 
 
-def _collect_fonts(resources, page_number: int, seen_resources: set, out: dict,
-                   font_dir: str | None, depth: int) -> None:
-    """Walk one resource dictionary, recording its fonts and descending into
-    the nested resources of its Form XObjects and Type3 glyph procedures."""
+def _walk_fonts(resources, page_number: int, seen_resources: set, on_font,
+                depth: int) -> None:
+    """Walk one resource dictionary, handing every font dictionary it reaches
+    to `on_font(font_obj, page_number)` and descending into the nested
+    resources of its Form XObjects, patterns and Type3 glyph procedures.
+
+    The listing and the embedder share this traversal rather than each keeping
+    one: a font reachable by one and not the other would be a font the report
+    names and the fixup cannot repair.
+    """
     if resources is None or depth > _MAX_DEPTH:
         return
     if not isinstance(resources, pikepdf.Dictionary):
@@ -151,32 +157,41 @@ def _collect_fonts(resources, page_number: int, seen_resources: set, out: dict,
     if isinstance(fonts, pikepdf.Dictionary):
         for font_obj in fonts.values():
             if isinstance(font_obj, pikepdf.Dictionary):
-                _record(font_obj, page_number, out, font_dir)
+                on_font(font_obj, page_number)
                 char_procs = font_obj.get("/CharProcs")
                 if isinstance(char_procs, pikepdf.Dictionary):
                     for proc in char_procs.values():
-                        _collect_fonts(
-                            _stream_resources(proc), page_number, seen_resources, out,
-                            font_dir, depth + 1,
+                        _walk_fonts(
+                            _stream_resources(proc), page_number, seen_resources,
+                            on_font, depth + 1,
                         )
-                _collect_fonts(
-                    font_obj.get("/Resources"), page_number, seen_resources, out,
-                    font_dir, depth + 1,
+                _walk_fonts(
+                    font_obj.get("/Resources"), page_number, seen_resources,
+                    on_font, depth + 1,
                 )
 
     xobjects = resources.get("/XObject")
     if isinstance(xobjects, pikepdf.Dictionary):
         for xobj in xobjects.values():
-            _collect_fonts(
-                _stream_resources(xobj), page_number, seen_resources, out, font_dir, depth + 1
+            _walk_fonts(
+                _stream_resources(xobj), page_number, seen_resources, on_font, depth + 1
             )
 
     patterns = resources.get("/Pattern")
     if isinstance(patterns, pikepdf.Dictionary):
         for pattern in patterns.values():
-            _collect_fonts(
-                _stream_resources(pattern), page_number, seen_resources, out, font_dir, depth + 1
+            _walk_fonts(
+                _stream_resources(pattern), page_number, seen_resources, on_font, depth + 1
             )
+
+
+def _collect_fonts(resources, page_number: int, seen_resources: set, out: dict,
+                   font_dir: str | None, depth: int) -> None:
+    _walk_fonts(
+        resources, page_number, seen_resources,
+        lambda font_obj, page: _record(font_obj, page, out, font_dir),
+        depth,
+    )
 
 
 def _stream_resources(obj):
@@ -222,25 +237,7 @@ def list_document_fonts(file: str, font_dir: str | None = None) -> dict:
     """
     out: dict = {}
     with pikepdf.open(file) as pdf:
-        seen_resources: set = set()
-        for index, page in enumerate(pdf.pages):
-            # Inheritance-aware: /Resources may sit on an ancestor page-tree
-            # node, and pikepdf's Page.resources walks up for it.
-            try:
-                resources = page.resources
-            except (AttributeError, KeyError):
-                resources = page.obj.get("/Resources")
-            _collect_fonts(resources, index + 1, seen_resources, out, font_dir, 0)
-            annotations = page.obj.get("/Annots")
-            if annotations is not None:
-                _collect_annotation_fonts(
-                    annotations, index + 1, seen_resources, out, font_dir
-                )
-        acroform = pdf.Root.get("/AcroForm")
-        if isinstance(acroform, pikepdf.Dictionary):
-            # Page 0 = "used by the document, not by a page": a default
-            # appearance font can be referenced by a field on any page or none.
-            _collect_fonts(acroform.get("/DR"), 0, seen_resources, out, font_dir, 0)
+        walk_document_fonts(pdf, lambda font_obj, page: _record(font_obj, page, out, font_dir))
 
     fonts = sorted(
         out.values(), key=lambda f: (f["name"].lower(), f["type"], f["encoding"])
@@ -251,8 +248,8 @@ def list_document_fonts(file: str, font_dir: str | None = None) -> dict:
     return {"file": file, "fonts": fonts, "count": len(fonts)}
 
 
-def _collect_annotation_fonts(annotations, page_number: int, seen_resources: set,
-                              out: dict, font_dir: str | None) -> None:
+def _walk_annotation_fonts(annotations, page_number: int, seen_resources: set,
+                           on_font) -> None:
     """An annotation's appearance streams carry their own resources — a
     freetext note's font is only ever reachable this way."""
     try:
@@ -270,10 +267,34 @@ def _collect_annotation_fonts(annotations, page_number: int, seen_resources: set
                 # An /N whose value is a dictionary of appearance STATES (a
                 # checkbox's /Off and /Yes) rather than a single stream.
                 for nested in state.values():
-                    _collect_fonts(
-                        _stream_resources(nested), page_number, seen_resources, out, font_dir, 1
+                    _walk_fonts(
+                        _stream_resources(nested), page_number, seen_resources, on_font, 1
                     )
             else:
-                _collect_fonts(
-                    _stream_resources(state), page_number, seen_resources, out, font_dir, 1
+                _walk_fonts(
+                    _stream_resources(state), page_number, seen_resources, on_font, 1
                 )
+
+
+def walk_document_fonts(pdf, on_font) -> None:
+    """Every font dictionary an open document reaches, once per page it is on.
+
+    Page resources, nested forms, patterns, Type3 glyph procedures, annotation
+    appearance streams and ``/AcroForm /DR /Font`` — page 0 means "used by the
+    document, not by a page", which is where a default-appearance font lives.
+    """
+    seen_resources: set = set()
+    for index, page in enumerate(pdf.pages):
+        # Inheritance-aware: /Resources may sit on an ancestor page-tree node,
+        # and pikepdf's Page.resources walks up for it.
+        try:
+            resources = page.resources
+        except (AttributeError, KeyError):
+            resources = page.obj.get("/Resources")
+        _walk_fonts(resources, index + 1, seen_resources, on_font, 0)
+        annotations = page.obj.get("/Annots")
+        if annotations is not None:
+            _walk_annotation_fonts(annotations, index + 1, seen_resources, on_font)
+    acroform = pdf.Root.get("/AcroForm")
+    if isinstance(acroform, pikepdf.Dictionary):
+        _walk_fonts(acroform.get("/DR"), 0, seen_resources, on_font, 0)

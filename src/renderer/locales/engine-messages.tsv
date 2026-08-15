@@ -16,22 +16,23 @@ accessibility_fixes.automaticAccessibilityFixExists	pattern	accessibility_fixes	
 accessibility_fixes.thereNothingHereFix	exact	accessibility_fixes	There is nothing here for that fix to repair.
 acroform.containsXmlFormXfa	pattern	acroform	{{v0}} contains an XML form (XFA). Page operations would detach the form from its pages, so {{operation}} is not available for this document. Fill the form, or flatten it with another tool first.
 acroform.regeneratedFileSPage	exact	acroform	The regenerated file's page count differs from the original; cannot reattach its form fields.
+annotations.commentAnnotationSubtype	pattern	annotations	not a comment annotation subtype: {{v0}}
 attachments.attachmentNamed	pattern	attachments	no attachment named {{name}}
 attachments.attachmentNamedAlreadyExists	pattern	attachments	an attachment named {{attach_name}} already exists
 attachments.sourceFileFound	pattern	attachments,portfolio	source file not found: {{source}}
 autotag.documentAlreadyTaggedRefine	exact	autotag	This document is already tagged. Refine its tags in the Tags panel instead of re-tagging automatically.
 autotag.nothingTaggableFoundDocument	exact	autotag	Nothing taggable found — the document has no text blocks or images to build a structure from.
 batch_ocr.copiedCouldRemoveOriginal	pattern	batch_ocr	copied to {{target}} but could not remove the original {{src}}: {{exc}} -- the file now exists in BOTH places
-batch_ocr.destinationFolderRequiredUnless	exact	batch_ocr,guided_actions	A destination folder is required unless running in place.
+batch_ocr.destinationFolderRequiredUnless	exact	batch_ocr,guided_actions,preflight_sweep	A destination folder is required unless running in place.
 batch_ocr.destinationMustOutsideSource	exact	batch_ocr	The destination must be outside the source folder -- choose a separate folder for the searchable copies.
 batch_ocr.file	pattern	batch_ocr	not a file: {{src}}
 batch_ocr.folderMustOutsideDestination	pattern	batch_ocr	The {{label}} folder must be outside the destination folder.
 batch_ocr.folderMustOutsideSource	pattern	batch_ocr	The {{label}} folder must be outside the source folder.
 batch_ocr.moveAbortedShortCopy	pattern	batch_ocr	move aborted: short copy to {{target}} -- the original was left in place
-batch_ocr.placeModeCannotAlso	exact	batch_ocr,guided_actions	In-place mode cannot also move processed originals -- the processed file IS the original.
-batch_ocr.placeModeTakesDestination	exact	batch_ocr,guided_actions	In-place mode takes no destination -- the originals are replaced.
+batch_ocr.placeModeCannotAlso	exact	batch_ocr,guided_actions,preflight_sweep	In-place mode cannot also move processed originals -- the processed file IS the original.
+batch_ocr.placeModeTakesDestination	exact	batch_ocr,guided_actions,preflight_sweep	In-place mode takes no destination -- the originals are replaced.
 batch_ocr.sourceDestinationSameFile	exact	batch_ocr	source and destination are the same file
-batch_ocr.sourceFolderFound	pattern	batch_ocr,create_pdf_folders,guided_actions	Source folder not found: {{source}}
+batch_ocr.sourceFolderFound	pattern	batch_ocr,create_pdf_folders,guided_actions,preflight_sweep	Source folder not found: {{source}}
 budget.timeBudgetNeedsPositive	exact	budget	a time budget needs a positive floor
 check.fileFound	pattern	check,rebuild,recognize,recover,repair	File not found: {{file}}
 color_spaces.expectedNumberGotProcedure	exact	color_spaces	expected number, got procedure
@@ -133,6 +134,13 @@ flattener.pageMediaBox	exact	flattener	This page has no media box.
 flattener.pageNamesGraphicsState	pattern	flattener	Page {{page}} names a graphics state this engine cannot read, so whether it paints transparency is unknown.
 flattener.pagePlacesFormXobject	pattern	flattener	Page {{page}} places a form XObject this engine cannot read, so whether it paints transparency is unknown.
 flattener.pagePlacesFormXobject2	pattern	flattener	Page {{page}} places a form XObject whose /BBox cannot be measured, so the area it covers is unknown.
+font_embed.descendantFontMissing	pattern	font_embed	{{display}}: its descendant font is missing
+font_embed.embedMissingFontsUnknown	pattern	font_embed	embed_missing_fonts: unknown font source(s) {{v0}} (it reads: {{v1}}).
+font_embed.engineEmbedsGlyphIndexed	pattern	font_embed	{{display}}: this engine embeds a glyph-indexed CID font, and the document declares a {{v1}} font
+font_embed.installedFaceMatchesFallback	pattern	font_embed	{{display}}: no installed face matches it and no fallback fonts directory was given to substitute from
+font_embed.installedFaceMatchesFixup	pattern	font_embed	{{display}}: no installed face matches it, and this fixup embeds the face a document names or nothing at all
+font_embed.substituteFaceCouldRead	pattern	font_embed	{{display}}: the substitute face could not be read
+font_embed.typeFontCarriesGlyphs	pattern	font_embed	{{display}}: a Type 3 font carries its glyphs as drawings and has no program to embed
 font_fallback.bundledFallbackFontFound	pattern	font_fallback	bundled fallback font not found: {{font_path}}
 font_fallback.bundledMongolianFontExpress	pattern	font_fallback	no bundled Mongolian font can express {{text}}
 font_fallback.bundledRightLeftFont	pattern	font_fallback	no bundled right-to-left font can express {{text}}
@@ -191,8 +199,8 @@ guided_actions.mustLastStepWrites	pattern	guided_actions	{{op}} must be the last
 guided_actions.onePdfPerFolder	exact	guided_actions	A one-PDF-per-folder run cannot move processed originals -- its sources are whole folders, not single files.
 guided_actions.placeModeCannotEnd	exact	guided_actions	In-place mode cannot end with an export -- the exported document is a new file, not a replacement for its source.
 guided_actions.placeModeCannotStart	exact	guided_actions	In-place mode cannot start with a step that creates the document -- the converted document is a new file, not a replacement for its source.
-guided_actions.processedOriginalsFolderMust	exact	guided_actions	The processed-originals folder must be outside the destination folder.
-guided_actions.processedOriginalsFolderMust2	exact	guided_actions	The processed-originals folder must be outside the source folder.
+guided_actions.processedOriginalsFolderMust	exact	guided_actions,preflight_sweep	The processed-originals folder must be outside the destination folder.
+guided_actions.processedOriginalsFolderMust2	exact	guided_actions,preflight_sweep	The processed-originals folder must be outside the source folder.
 guided_actions.scanEnhancementMustCome	exact	guided_actions	scan enhancement must come before MRC compression — MRC replaces the page image with reconstructed layers, and enhancing those enhances a reconstruction
 guided_actions.scanEnhancementMustCome2	exact	guided_actions	scan enhancement must come before OCR — enhancement moves the ink, and an OCR layer written first would sit over where it used to be
 guided_actions.stepNameExportFormat	pattern	guided_actions	step {{v0}} ({{op}}): name the export format
@@ -345,6 +353,17 @@ portfolio.memberNamed	pattern	portfolio	no member named {{name}}
 portfolio.memberSourceFound	pattern	portfolio	member source not found: {{s}}
 portfolio.portfolioNeedsLeastOne	exact	portfolio	a portfolio needs at least one member file
 portfolio.portfolioOutputCannotOne	exact	portfolio	the portfolio output cannot be one of its own members
+preflight_fixups.aliasSpotNeedsInk	exact	preflight_fixups	alias_spot needs the ink to move and the ink it joins — an alias is a decision about which plate a colour prints on, and no machine may make it.
+preflight_fixups.downsampleImagesNeedsResolution	exact	preflight_fixups	downsample_images needs the resolution to downsample to.
+preflight_fixups.growBleedBox	pattern	preflight_fixups	grow_bleed_box: {{v0}}
+preflight_fixups.growBleedBoxNeeds	exact	preflight_fixups	grow_bleed_box needs the bleed margin to grow to.
+preflight_fixups.preflightFixupsNothingRepairs	pattern	preflight_fixups	preflight fixups: nothing repairs {{v0}}.
+preflight_fixups.preflightProfileCarriesFixups	pattern	preflight_fixups	The preflight profile '{{v0}}' carries no fixups, so there is nothing for it to repair.
+preflight_fixups.profileDoesCarryFixup	pattern	preflight_fixups	That profile does not carry a fixup for what was asked ({{v0}}). It carries: {{v1}}.
+preflight_fixups.setDocumentTitleNeeds	exact	preflight_fixups	set_document_title needs the title to write — a title a machine invented is the same failure wearing a different name.
+preflight_fixups.setTrappedNeedsTrapping	exact	preflight_fixups	set_trapped needs the trapping state to declare — whether a file is already trapped is a claim only a person may make.
+preflight_fixups.setTrimBox	pattern	preflight_fixups	set_trim_box: {{v0}}
+preflight_fixups.setTrimBoxThere	pattern	preflight_fixups	set_trim_box: there is no page box called {{from_box}}.
 preflight_profiles.giveEitherPreflightProfile	exact	preflight_profiles	Give either a preflight profile id or a profile file, not both.
 preflight_profiles.preflightProfileBasedMust	pattern	preflight_profiles	preflight profile: 'based_on' must be text, got {{based_on}}
 preflight_profiles.preflightProfileCannotBoth	pattern	preflight_profiles	preflight profile: '{{first}}' and '{{second}}' cannot both run — each undoes what the other did. Name one.
@@ -373,6 +392,10 @@ preflight_profiles.preflightProfileSeverityMust	pattern	preflight_profiles	prefl
 preflight_profiles.preflightProfileValidJson	pattern	preflight_profiles	The preflight profile is not valid JSON: {{exc}}
 preflight_profiles.preflightProfileWhichMust	pattern	preflight_profiles	preflight profile: {{check_id}}.{{name}} is {{value}}, which must be {{bound}}.
 preflight_profiles.therePreflightProfileCalled	pattern	preflight_profiles	There is no preflight profile called '{{pid}}' (this app ships: {{v1}}).
+preflight_sweep.checkWritesNothingThere	exact	preflight_sweep	A check writes nothing, so there is nothing for in-place mode to replace. Run it in fix mode, or give a destination for the reports.
+preflight_sweep.destinationMustOutsideSource	exact	preflight_sweep	The destination must be outside the source folder -- choose a separate folder for the reports.
+preflight_sweep.preflightProfileCarriesFixups	pattern	preflight_sweep	The preflight profile '{{v0}}' carries no fixups, so a fix run over this folder would repair nothing. Choose a profile that carries some, or run the sweep as a check.
+preflight_sweep.preflightSweepRunsMode	pattern	preflight_sweep	A preflight sweep runs in {{v0}} mode, not {{mode}}.
 prepress.couldExtractBundledProfile	pattern	prepress	Could not extract the bundled profile {{name}}: {{v1}}
 prepress.destinationIccProfileFound	pattern	prepress	Destination ICC profile not found: {{profile}}
 prepress.ghostscriptCmykConversionFailed	pattern	prepress	Ghostscript CMYK conversion failed: {{v0}}
