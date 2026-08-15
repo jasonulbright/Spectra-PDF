@@ -7,6 +7,7 @@ import type { PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { FieldCandidate } from '../../lib/form-candidates';
 import type { TableRegion, TableReviewHandlers } from '../../lib/table-review';
+import type { A11yFinding, A11yFindingHandlers } from '../../lib/a11y-findings';
 import type { AnnotationTransform } from '../../lib/annotation-manipulation';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import type { EditVectorObject } from '../../lib/edit-vectors';
@@ -46,6 +47,8 @@ interface DocLayerProps {
   fieldCandidatesByPage: ReadonlyMap<string, FieldCandidate[]>;
   tableRegionsByPage: ReadonlyMap<string, TableRegion[]>;
   tableReview?: TableReviewHandlers;
+  a11yFindingsByPage: ReadonlyMap<string, A11yFinding[]>;
+  a11yFindings?: A11yFindingHandlers;
   selectedCandidateId: string | null;
   onSelectCandidate: (candidateId: string) => void;
   onRemoveCandidate: (candidateId: string) => void;
@@ -254,6 +257,8 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               fieldCandidatesByPage={props.fieldCandidatesByPage}
               tableRegionsByPage={props.tableRegionsByPage}
               tableReview={props.tableReview}
+              a11yFindingsByPage={props.a11yFindingsByPage}
+              a11yFindings={props.a11yFindings}
               selectedCandidateId={props.selectedCandidateId}
               onSelectCandidate={props.onSelectCandidate}
               onRemoveCandidate={props.onRemoveCandidate}

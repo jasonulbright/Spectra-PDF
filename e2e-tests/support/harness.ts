@@ -2402,3 +2402,90 @@ export async function tableReviewExport(
     options ?? {},
   );
 }
+
+// ── The accessibility report ───────────────────────────────────────────────
+
+export interface A11yCheckRow {
+  id: string;
+  category: string;
+  status: string;
+  counted: number;
+  findings: number;
+  addressKinds: string[];
+}
+
+export interface A11ySnapshot {
+  summary: {
+    passed: number;
+    failed: number;
+    warnings: number;
+    needs_review: number;
+    not_applicable: number;
+    applicable: number;
+    total: number;
+  };
+  checks: A11yCheckRow[];
+  expandedCategories: string[];
+  shownCheck: string | null;
+}
+
+export async function a11ySnapshot(): Promise<A11ySnapshot | null> {
+  return await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.a11ySnapshot();
+  });
+}
+
+export async function a11yRecheck(): Promise<void> {
+  await browser.executeAsync<void, []>(function (done) {
+    (window as any).__SPECTRA_TEST__.a11yRecheck().then(() => done(undefined as any));
+  });
+}
+
+/** Click one finding row — the same jump the row performs. */
+export async function a11yJump(checkId: string, index: number): Promise<void> {
+  await browser.executeAsync<void, [string, number]>(
+    function (id, i, done) {
+      (window as any).__SPECTRA_TEST__.a11yJump(id, i).then(() => done(undefined as any));
+    },
+    checkId,
+    index,
+  );
+}
+
+/** Draw one check's page findings on the document. */
+export async function a11yShow(checkId: string): Promise<void> {
+  await browser.executeAsync<void, [string]>(
+    function (id, done) {
+      (window as any).__SPECTRA_TEST__.a11yShow(id).then(() => done(undefined as any));
+    },
+    checkId,
+  );
+}
+
+/** Write the report (bypasses the native save dialog; the extension picks the
+ *  emitter). Returns '__SPECTRA_E2E_ERROR__:…' on failure. */
+export async function a11yExport(destPath: string): Promise<string> {
+  return await browser.executeAsync<string, [string]>(
+    function (dest, done) {
+      (window as any).__SPECTRA_TEST__.a11yExport(dest)
+        .then((p: string) => done(p as any))
+        .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
+    },
+    destPath,
+  );
+}
+
+export async function a11yFindingsOnPage(): Promise<
+  { id: string; page: number; checkId: string; detailKey: string; preview: string }[]
+> {
+  return await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.a11yFindingsOnPage();
+  });
+}
+
+/** What the Tags panel has selected — the `struct` jump's landing. */
+export async function tagsSelectedPath(): Promise<number[] | null> {
+  return await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.tagsSelectedPath();
+  });
+}

@@ -646,6 +646,12 @@ describe('invokeCommand', () => {
         exportTo: async () => ({ output: '' }),
         subscribe: () => () => {},
       },
+      a11yFindings: {
+        publish: async () => ({ shown: 0, skipped: 0 }),
+        list: () => [],
+        clear: () => {},
+        focus: () => {},
+      },
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
@@ -694,6 +700,12 @@ describe('invokeCommand', () => {
         focus: () => {},
         exportTo: async () => ({ output: '' }),
         subscribe: () => () => {},
+      },
+      a11yFindings: {
+        publish: async () => ({ shown: 0, skipped: 0 }),
+        list: () => [],
+        clear: () => {},
+        focus: () => {},
       },
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
@@ -763,6 +775,12 @@ describe('invokeCommand', () => {
         exportTo: async () => ({ output: '' }),
         subscribe: () => () => {},
       },
+      a11yFindings: {
+        publish: async () => ({ shown: 0, skipped: 0 }),
+        list: () => [],
+        clear: () => {},
+        focus: () => {},
+      },
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
@@ -810,6 +828,12 @@ describe('invokeCommand', () => {
         focus: () => {},
         exportTo: async () => ({ output: '' }),
         subscribe: () => () => {},
+      },
+      a11yFindings: {
+        publish: async () => ({ shown: 0, skipped: 0 }),
+        list: () => [],
+        clear: () => {},
+        focus: () => {},
       },
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
@@ -1004,6 +1028,12 @@ describe('invokeCommand', () => {
         exportTo: async () => ({ output: '' }),
         subscribe: () => () => {},
       },
+      a11yFindings: {
+        publish: async () => ({ shown: 0, skipped: 0 }),
+        list: () => [],
+        clear: () => {},
+        focus: () => {},
+      },
       goToPage: () => false,
       find: { isOpen: () => false, open: vi.fn(), openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },
     });
@@ -1052,6 +1082,12 @@ describe('invokeCommand', () => {
         focus: () => {},
         exportTo: async () => ({ output: '' }),
         subscribe: () => () => {},
+      },
+      a11yFindings: {
+        publish: async () => ({ shown: 0, skipped: 0 }),
+        list: () => [],
+        clear: () => {},
+        focus: () => {},
       },
       goToPage: () => false,
       find: { isOpen: () => false, open, openWith: vi.fn(), close: vi.fn(), next: vi.fn(), prev: vi.fn() },

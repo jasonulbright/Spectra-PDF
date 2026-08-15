@@ -112,6 +112,18 @@ export const dialog = {
   /** Where a built form submission is written. Null if cancelled. */
   saveFormDataFile: (defaultName?: string) =>
     invoke<string | null>('save_form_data_file', { defaultName }),
+  /** Where a saved accessibility report goes — one picker, both formats. The
+   * extension the user lands on decides which emitter runs. Null if
+   * cancelled. */
+  saveReportFile: (defaultName?: string) =>
+    invoke<string | null>('save_report_file', { defaultName }),
+};
+
+/** Write a report to a path the save dialog returned. The Rust side refuses
+ * any name that is not a report's, so this cannot become a general write. */
+export const report = {
+  write: (path: string, contents: string) =>
+    invoke<string>('write_report_file', { path, contents }),
 };
 
 // ── Image clipboard ───────────────────────────────────────────────────────

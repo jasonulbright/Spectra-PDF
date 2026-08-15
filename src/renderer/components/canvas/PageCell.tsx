@@ -8,8 +8,11 @@ import type { RedactionMark } from '../../lib/redaction';
 import type { FieldCandidate } from '../../lib/form-candidates';
 import FieldCandidateOverlay from './FieldCandidateOverlay';
 import type { TableRegion, TableReviewHandlers } from '../../lib/table-review';
+import type { A11yFinding, A11yFindingHandlers } from '../../lib/a11y-findings';
+import { checkName } from '../../lib/accessibility-report';
 import { currentRotation } from '../../lib/table-review';
 import TableRegionOverlay from './TableRegionOverlay';
+import A11yFindingOverlay from './A11yFindingOverlay';
 import type { OcrWord } from '../../ocr/types';
 import type { PageReadAloud } from '../../lib/read-aloud';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
@@ -746,6 +749,11 @@ interface PageCellProps {
    * lines are user-space fractions and turn with the page at render. */
   tableRegions?: TableRegion[];
   tableReview?: TableReviewHandlers;
+  /** Accessibility findings on this page. Display-normalized at the
+   * orientation the report ran in; a rotation since then is applied at render
+   * exactly as a redaction mark's is. */
+  a11yFindings?: A11yFinding[];
+  a11yFindingHandlers?: A11yFindingHandlers;
   /** Edit-mode image placements, display-normalized at baked
    * orientation — pending rotation is applied at render like marks. */
   editImages?: EditImagePlacement[];
@@ -1163,6 +1171,8 @@ function PageCellImpl({
   onMoveCandidate,
   tableRegions,
   tableReview,
+  a11yFindings,
+  a11yFindingHandlers,
   editImages,
   editSelectedIndexes,
   editImageGroup,
@@ -3832,6 +3842,33 @@ function PageCellImpl({
               onMoveColumn={tableReview.onMoveColumn}
               onAddColumn={tableReview.onAddColumn}
               onRemoveColumn={tableReview.onRemoveColumn}
+            />
+          );
+        })}
+      {/* Accessibility findings are gated by NOTHING but their own presence.
+          They are published by an explicit action in the panel and replaced
+          wholesale by the next re-check, so there is no armed mode that could
+          be left live by a closed tool — the set itself is the state. */}
+      {a11yFindingHandlers &&
+        (a11yFindings ?? []).map((finding) => {
+          // Stored in the orientation the report ran at, so only the delta
+          // since then applies — the redaction-mark rule.
+          const r = rotateNormalizedRect(finding.rect, page.rotation - finding.rotationAtDraw);
+          return (
+            <A11yFindingOverlay
+              key={finding.id}
+              id={finding.id}
+              rect={r}
+              label={
+                finding.preview
+                  ? tChrome('panel.a11y.findingLabel', {
+                      check: checkName(finding.checkId),
+                      preview: finding.preview,
+                    })
+                  : checkName(finding.checkId)
+              }
+              selected={a11yFindingHandlers.selectedId === finding.id}
+              onSelect={a11yFindingHandlers.onSelect}
             />
           );
         })}

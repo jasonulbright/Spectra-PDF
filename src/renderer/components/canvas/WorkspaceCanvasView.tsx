@@ -56,6 +56,13 @@ import {
   type TableRegion,
   type TableReviewHandlers,
 } from '../../lib/table-review';
+import {
+  findingsByPage,
+  prunedFindings,
+  type A11yFinding,
+  type A11yFindingHandlers,
+  type PlaceableFinding,
+} from '../../lib/a11y-findings';
 import type { ExportDocumentResult } from '../../lib/export-targets';
 import type { PageRef } from '../../state/types';
 import { buildSignatureAppearance } from '../../lib/signature-placement';
@@ -392,6 +399,8 @@ const NO_CANDIDATES: FieldCandidate[] = [];
 const NO_CANDIDATES_BY_PAGE: ReadonlyMap<string, FieldCandidate[]> = new Map();
 const NO_TABLES: TableRegion[] = [];
 const NO_TABLES_BY_PAGE: ReadonlyMap<string, TableRegion[]> = new Map();
+const NO_A11Y_FINDINGS: A11yFinding[] = [];
+const NO_A11Y_FINDINGS_BY_PAGE: ReadonlyMap<string, A11yFinding[]> = new Map();
 const NO_ANNOTATIONS: readonly PageAnnotation[] = [];
 const NO_ANNOTATION_IDS: readonly string[] = [];
 
@@ -807,6 +816,11 @@ export function WorkspaceCanvasView({
   // all, it only decides what the spreadsheet export reads.
   const [tableRegions, setTableRegions] = useState<TableRegion[]>([]);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  // Accessibility findings shown on the page. The same lifetime again, and the
+  // furthest of the three from the document: nothing here is ever accepted —
+  // the box says where the checker looked.
+  const [a11yFindings, setA11yFindings] = useState<A11yFinding[]>([]);
+  const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
   const [confirmRedact, setConfirmRedact] = useState(false);
   const [redacting, setRedacting] = useState(false);
   const [redactError, setRedactError] = useState<string | null>(null);
@@ -2063,6 +2077,16 @@ export function WorkspaceCanvasView({
           };
         },
       },
+      a11yFindings: {
+        publish: async (path, findings) =>
+          a11yServiceRef.current?.publish(path, findings) ?? {
+            shown: 0,
+            skipped: findings.length,
+          },
+        list: () => [...liveA11yFindingsRef.current],
+        clear: () => a11yServiceRef.current?.clear(),
+        focus: (findingId) => a11yServiceRef.current?.focus(findingId),
+      },
     });
     return () => registerCanvasServices(null);
   }, [activeCanvasHandle]);
@@ -2595,6 +2619,36 @@ export function WorkspaceCanvasView({
     }
     return map;
   }, [liveTableRegions]);
+
+  // The same prune once more: a finding bound to a retired page id would draw
+  // a box on a page the document no longer has.
+  const liveA11yFindings = useMemo(() => {
+    if (a11yFindings.length === 0) return NO_A11Y_FINDINGS;
+    const live = new Set<string>();
+    for (const d of docs) for (const p of d.pages) live.add(p.id);
+    const kept = prunedFindings(a11yFindings, live);
+    return kept.length === a11yFindings.length ? a11yFindings : kept;
+  }, [a11yFindings, docs]);
+  const liveA11yFindingsRef = useRef<A11yFinding[]>(NO_A11Y_FINDINGS);
+  liveA11yFindingsRef.current = liveA11yFindings;
+  const a11yServiceRef = useRef<{
+    publish: (
+      path: string,
+      findings: readonly PlaceableFinding[],
+    ) => Promise<{ shown: number; skipped: number }>;
+    clear: () => void;
+    focus: (findingId: string) => void;
+  } | null>(null);
+
+  const a11yFindingsByPage = useMemo(() => {
+    if (liveA11yFindings.length === 0) return NO_A11Y_FINDINGS_BY_PAGE;
+    return findingsByPage(liveA11yFindings);
+  }, [liveA11yFindings]);
+
+  const a11yFindingHandlers = useMemo<A11yFindingHandlers>(
+    () => ({ selectedId: selectedFindingId, onSelect: setSelectedFindingId }),
+    [selectedFindingId],
+  );
 
   const tableReviewHandlers = useMemo<TableReviewHandlers>(
     () => ({
@@ -5526,6 +5580,68 @@ export function WorkspaceCanvasView({
     [engineCall, geometryForPage],
   );
 
+  // ── Accessibility findings ────────────────────────────────────────────
+  // The same seam a third time, with the write side removed entirely: the
+  // panel owns the report, the canvas owns the geometry, and no gesture here
+  // produces a document edit.
+  const publishA11yFindings = useCallback(
+    async (
+      path: string,
+      findings: readonly PlaceableFinding[],
+    ): Promise<{ shown: number; skipped: number }> => {
+      const doc = docsRef.current.find((d) => d.path === path);
+      if (!doc) return { shown: 0, skipped: findings.length };
+      const geometry = new Map<number, PageGeometry>();
+      for (const page of new Set(findings.map((f) => f.page))) {
+        const pageRef = doc.pages[page - 1];
+        if (!pageRef) continue;
+        geometry.set(page, await geometryForPage(pageRef));
+      }
+      const placed: A11yFinding[] = [];
+      let skipped = 0;
+      for (const finding of findings) {
+        const pageRef = doc.pages[finding.page - 1];
+        const geo = geometry.get(finding.page);
+        if (!pageRef || !geo) {
+          skipped += 1;
+          continue;
+        }
+        const delta = quarter(pageRef.rotation ?? 0);
+        placed.push({
+          id: crypto.randomUUID(),
+          path,
+          pageId: pageRef.id,
+          page: finding.page,
+          checkId: finding.checkId,
+          detailKey: finding.detailKey,
+          // The checker reasons in un-rotated user space; the projection is
+          // where the page's baked /Rotate and its pending delta apply.
+          rect: pdfRectToDisplay(finding.rect, geo.box, geo.bakedRotate + delta),
+          rotationAtDraw: delta,
+          preview: finding.preview,
+        });
+      }
+      setA11yFindings(placed);
+      setSelectedFindingId(null);
+      return { shown: placed.length, skipped };
+    },
+    [geometryForPage],
+  );
+
+  a11yServiceRef.current = {
+    publish: publishA11yFindings,
+    clear: () => {
+      setA11yFindings(NO_A11Y_FINDINGS);
+      setSelectedFindingId(null);
+    },
+    focus: (findingId) => {
+      const target = liveA11yFindingsRef.current.find((f) => f.id === findingId);
+      if (!target) return;
+      setSelectedFindingId(findingId);
+      jumpToPageRef.current(target.pageId);
+    },
+  };
+
   tableServiceRef.current = {
     publish: publishTables,
     update: (next) => setTableRegions([...next]),
@@ -6175,6 +6291,8 @@ export function WorkspaceCanvasView({
             fieldCandidatesByPage,
             tableRegionsByPage,
             tableReview: tableReviewHandlers,
+            a11yFindingsByPage,
+            a11yFindings: a11yFindingHandlers,
             selectedCandidateId,
             onSelectCandidate: setSelectedCandidateId,
             onRemoveCandidate,
@@ -6468,6 +6586,8 @@ export function WorkspaceCanvasView({
           fieldCandidatesByPage={fieldCandidatesByPage}
           tableRegionsByPage={tableRegionsByPage}
           tableReview={tableReviewHandlers}
+          a11yFindingsByPage={a11yFindingsByPage}
+          a11yFindings={a11yFindingHandlers}
           selectedCandidateId={selectedCandidateId}
           onSelectCandidate={setSelectedCandidateId}
           onRemoveCandidate={onRemoveCandidate}

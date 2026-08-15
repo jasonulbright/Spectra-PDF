@@ -4,6 +4,7 @@ import type { OpenDocument, PageAnnotation } from '../../state/types';
 import type { RedactionMark } from '../../lib/redaction';
 import type { FieldCandidate } from '../../lib/form-candidates';
 import type { TableRegion, TableReviewHandlers } from '../../lib/table-review';
+import type { A11yFinding, A11yFindingHandlers } from '../../lib/a11y-findings';
 import type { AnnotationTransform } from '../../lib/annotation-manipulation';
 import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-images';
 import type { EditVectorObject } from '../../lib/edit-vectors';
@@ -53,6 +54,8 @@ interface DocumentRowProps {
   fieldCandidatesByPage: ReadonlyMap<string, FieldCandidate[]>;
   tableRegionsByPage: ReadonlyMap<string, TableRegion[]>;
   tableReview?: TableReviewHandlers;
+  a11yFindingsByPage: ReadonlyMap<string, A11yFinding[]>;
+  a11yFindings?: A11yFindingHandlers;
   selectedCandidateId: string | null;
   onSelectCandidate: (candidateId: string) => void;
   onRemoveCandidate: (candidateId: string) => void;
@@ -244,6 +247,8 @@ function DocumentRowImpl({
   fieldCandidatesByPage,
   tableRegionsByPage,
   tableReview,
+  a11yFindingsByPage,
+  a11yFindings,
   selectedCandidateId,
   onSelectCandidate,
   onRemoveCandidate,
@@ -363,6 +368,8 @@ function DocumentRowImpl({
         fieldCandidates={fieldCandidatesByPage.get(page.id)}
         tableRegions={tableRegionsByPage.get(page.id)}
         tableReview={tableReview}
+        a11yFindings={a11yFindingsByPage.get(page.id)}
+        a11yFindingHandlers={a11yFindings}
         selectedCandidateId={selectedCandidateId}
         onSelectCandidate={onSelectCandidate}
         onRemoveCandidate={onRemoveCandidate}
