@@ -52,6 +52,17 @@
 - Each captured page becomes a bookmark named after the page's own title.
 - Only web and local addresses can be captured; anything else is refused by name.
 
+### Text you add can run down the page
+- Add Text has a direction: horizontal, or vertical for the scripts written in columns.
+- A vertical box reads down the height of the box you drew, and its columns fill across its width.
+- Which way the columns run comes from the text itself — right to left for Japanese and Chinese, left to right for Mongolian — so a column you write is a column the editor reads back the same way.
+- The card tells you which direction your text chose, as you type.
+- Vertical text is added in the bundled vertical typeface; the controls that cannot apply to a column say so instead of quietly doing nothing.
+- A vertical box already turns the reading direction, so it is not also rotated.
+- Text in a column can carry a horizontal block — a year, a page number — set upright and fitted to one column width, the way vertical Japanese sets numbers.
+- Everything you add this way is ordinary text afterwards: searchable, restyleable, and it reflows in the paragraph editor like any other.
+- Text with no spaces now wraps where the script allows it to, in both directions, instead of running past the box.
+
 ## 1.0.30
 
 *Released 2026-08-15*

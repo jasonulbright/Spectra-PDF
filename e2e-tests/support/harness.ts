@@ -1293,6 +1293,19 @@ export async function commitAddText(params: {
   smallCaps?: boolean;
   alternates?: boolean;
   altIndex?: number;
+  // T29 — the writing mode, and per-span styling (`tcy` marks a
+  // tate-chu-yoko block). CJK text reaches the card through
+  // `setReactInputValue`, never WebDriver keys.
+  writingMode?: 'horizontal' | 'vertical' | 'vertical-rl' | 'vertical-lr';
+  spans?: {
+    start: number;
+    end: number;
+    size?: number;
+    color?: [number, number, number];
+    bold?: boolean;
+    italic?: boolean;
+    tcy?: boolean;
+  }[];
 }): Promise<void> {
   const result = await browser.executeAsync<string | null, [typeof params]>(
     function (p, done) {
