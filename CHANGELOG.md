@@ -93,6 +93,26 @@
 - The preview lists the same objects and the same reasons before you press anything, and highlights them on the page.
 - **Output Preview says when a page may use inks it could not find**, and marks the plate list and the total-ink figures as covering only the plates it did find; a colour bar is refused outright instead of being printed one patch short, because a printed sheet cannot carry that caveat.
 
+### Print preflight against a profile you choose
+- **Print preflight is now 37 checks across seven categories, measured against a profile.** It was five, and a file with 360 % total ink, a 7 dpi photograph, five spot inks, an overprinting white headline, no trim box and a printing sticky note came back with a clean sweep.
+- **Nine profiles ship**: sheetfed offset, heatset web, newsprint, digital printing, large format, PDF/X-1a, PDF/X-3, PDF/X-4, and an office one for "will this print on the machine down the hall". Every number in them is a press figure, not a guess.
+- **The same document under two profiles gives two answers**, and that is the point: a check decides whether the document is clean or dirty, and the profile decides whether dirty is a failure or a note.
+- **Every check row states the rule it was measured against** — the ink limit, the minimum resolution, the hairline width — so a saved report is readable a year later by someone who does not have the profile.
+- **A fifth answer joins the four**: "does not apply". A document with no images has nothing to say about image resolution, and a check the profile switched off says so rather than counting as a pass. Neither is included in the passed tally.
+- **Total area coverage is measured, not estimated.** The figure is the true per-pixel maximum. Where a document is longer than the profile's stated page budget, the remaining pages are named as unmeasured rather than guessed at from the ones that were, and a missing measurement tool is reported by the check instead of sinking the report.
+- **Overprinting white is now found** — ink set to overprint that lays down nothing, so the headline disappears on press. Overprinting black, which is correct practice, is not reported; nor is an overprint over ink the reader could not resolve, which is reported for review instead.
+- New checks include the PDF version, the actual printing permission (rather than merely "is it encrypted"), the output intent and the PDF/X claim, the trapping declaration, embedded files, page size and page count, the trim and bleed boxes, spot ink names and count, device-independent colour, minimum and maximum image resolution, image compression and colour space, small type and small black type built from more than one ink, optional content, printing annotations, interactive form fields, the title, document JavaScript and the XMP packet.
+- The command line gains `preflight --profile` and `preflight-profiles`.
+
+### Reading the preflight report, and writing your own profile
+- **The report is a tree by category** — Document, Pages, Colour, Fonts, Images, Content, Metadata — each heading carrying how many of the checks that apply to this file it passes, so a long report is skimmable before it is read.
+- **A finding takes you to where it is**: to the page, to the annotation, or to the ink it names. A finding with no place on a page says so rather than doing nothing when clicked.
+- **Parts the reader could not get through are listed separately**, so a check that could not finish is never mistaken for a check that passed.
+- **The report exports as text or as a web page**, naming the document, the profile and when it was checked. It carries every finding, including the ones the panel summarised as a count of further items; the export states in its own footer that it is not a certificate of conformance.
+- **Any shipped profile can be made your own.** Duplicate it, change the numbers a check measures against, switch a check between a failure and a note, or turn it off entirely. Editing a shipped profile saves a copy instead of overwriting it, so the press figures it came with are always there to return to.
+- **A profile is a file you can hand to someone.** Export it, import one you were sent, and delete the ones you made. An import that is not a profile, is written to a schema this version does not read, or would replace a profile the app ships, is refused by name and says what to do about it.
+- Ink names and font names reach the report exactly as the document spells them, in every language.
+
 ## 1.0.29
 
 *Released 2026-08-10*

@@ -2416,6 +2416,114 @@ export interface A11yCheckRow {
   fix: string | null;
 }
 
+export interface PreflightCheckRow {
+  id: string;
+  category: string;
+  status: string;
+  /** What the PROFILE said dirty means for this row. */
+  severity: string;
+  counted: number;
+  findings: number;
+  addressKinds: string[];
+  /** The rule the row was measured against, resolved. */
+  params: Record<string, unknown>;
+}
+
+export interface PreflightSnapshot {
+  profile: string;
+  summary: {
+    passed: number;
+    failed: number;
+    warnings: number;
+    needs_review: number;
+    not_applicable: number;
+    applicable: number;
+    total: number;
+  };
+  checks: PreflightCheckRow[];
+  profiles: string[];
+  expandedCategories: string[];
+  shownCheck: string | null;
+}
+
+export async function preflightSnapshot(): Promise<PreflightSnapshot | null> {
+  return await browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.preflightSnapshot();
+  });
+}
+
+export async function preflightRecheck(): Promise<void> {
+  await browser.executeAsync<void, []>(function (done) {
+    (window as any).__SPECTRA_TEST__.preflightRecheck().then(() => done(undefined as any));
+  });
+}
+
+export async function preflightSelectProfile(id: string): Promise<void> {
+  await browser.executeAsync<void, [string]>(
+    function (profileId, done) {
+      (window as any).__SPECTRA_TEST__
+        .preflightSelectProfile(profileId)
+        .then(() => done(undefined as any));
+    },
+    id,
+  );
+}
+
+export async function preflightJump(checkId: string, index: number): Promise<void> {
+  await browser.executeAsync<void, [string, number]>(
+    function (id, i, done) {
+      (window as any).__SPECTRA_TEST__.preflightJump(id, i).then(() => done(undefined as any));
+    },
+    checkId,
+    index,
+  );
+}
+
+export async function preflightShow(checkId: string): Promise<void> {
+  await browser.executeAsync<void, [string]>(
+    function (id, done) {
+      (window as any).__SPECTRA_TEST__.preflightShow(id).then(() => done(undefined as any));
+    },
+    checkId,
+  );
+}
+
+export async function preflightExport(destPath: string): Promise<string> {
+  return await browser.executeAsync<string, [string]>(
+    function (dest, done) {
+      (window as any).__SPECTRA_TEST__
+        .preflightExport(dest)
+        .then((p: string) => done(p as any))
+        .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
+    },
+    destPath,
+  );
+}
+
+export async function preflightImportProfile(fromPath: string): Promise<string> {
+  return await browser.executeAsync<string, [string]>(
+    function (src, done) {
+      (window as any).__SPECTRA_TEST__
+        .preflightImportProfile(src)
+        .then((id: string) => done(id as any))
+        .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
+    },
+    fromPath,
+  );
+}
+
+export async function preflightExportProfile(destPath: string): Promise<string> {
+  return await browser.executeAsync<string, [string]>(
+    function (dest, done) {
+      (window as any).__SPECTRA_TEST__
+        .preflightExportProfile(dest)
+        .then((p: string) => done(p as any))
+        .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
+    },
+    destPath,
+  );
+}
+
 export interface A11ySnapshot {
   summary: {
     passed: number;

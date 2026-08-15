@@ -598,18 +598,422 @@ export const PANEL_STRINGS = {
   'panel.rebuild.rebuild': 'Rebuild',
   'panel.rebuild.done': 'Rebuilt: {{from}} KB -> {{to}} KB, {{pages}} pages.',
 
+  // ── Preflight ───────────────────────────────────────────────────────────
+  //
+  // The panel and both export emitters read the SAME keys, so a verdict can
+  // never be worded one way on screen and another in the saved file.
+  //
+  // A check NAME and its EXPLANATION are two keys, never a concatenation. A
+  // finding's sentence is keyed by the engine's `detail_key` and interpolates
+  // the measured values — nothing downstream ever matches on rendered text. A
+  // parameter's unit goes through the catalog with a placeholder, never
+  // concatenated onto its number. And a SHIPPED profile's name is a catalog
+  // key while a USER profile's name is authored content that is never
+  // translated, which is why the schema carries both fields.
   'panel.preflight.open': 'Open a PDF to run print preflight',
   'panel.preflight.analysing': 'Analysing…',
   'panel.preflight.rerun': 'Re-run',
   'panel.preflight.allPassed': 'Ready to print — all {{count}} checks passed.',
-  'panel.preflight.passed': '{{count}} passed',
-  'panel.preflight.toReview': '{{count}} to review',
-  'panel.preflight.failed': '{{count}} failed',
-  'panel.preflight.needsReview': '{{count}} could not be checked',
-  'panel.preflight.ofTotal': 'of {{count}}.',
   'panel.preflight.images_one': '{{count}} image',
   'panel.preflight.images_other': '{{count}} images',
   'panel.preflight.colour': ' · colour: {{families}}',
+  'panel.preflight.export': 'Export…',
+  'panel.preflight.exporting': 'Saving the report…',
+  'panel.preflight.exported': 'Report saved to {{path}}',
+  'panel.preflight.show': 'Show',
+  'panel.preflight.hide': 'Hide',
+  'panel.preflight.noCanvas': 'Open the document to show findings on its pages.',
+  'panel.preflight.nothingToShow': 'Nothing in this check has a place on a page.',
+  'panel.preflight.jumpTitle': 'Go to this item',
+  'panel.preflight.findingCount': '{{count}} of {{counted}}',
+  'panel.preflight.moreFindings':
+    '{{count}} more are not listed here — the exported report carries every one.',
+  'panel.preflight.summaryLine':
+    '{{passed}} passed · {{failed}} failed · {{warnings}} to improve · {{review}} to review · {{notApplicable}} not applicable — {{applicable}} of {{total}} checks apply',
+  'panel.preflight.categoryCount': '{{passed}} / {{applicable}}',
+  'panel.preflight.categoryNone': 'nothing to check',
+  'panel.preflight.ruleLine': 'Measured against: {{rule}}',
+  'panel.preflight.paramPair': '{{label}} {{value}}',
+  'panel.preflight.yes': 'yes',
+  'panel.preflight.no': 'no',
+  'panel.preflight.anyValue': 'any',
+  'panel.preflight.unit.pt': '{{value}} pt',
+  'panel.preflight.unit.dpi': '{{value}} dpi',
+  'panel.preflight.unit.pct': '{{value}} %',
+  'panel.preflight.reportTitle': 'Print preflight report',
+  'panel.preflight.reportDocument': 'Document: {{name}}',
+  'panel.preflight.reportProfile': 'Profile: {{name}}',
+  'panel.preflight.reportRunAt': 'Checked: {{when}}',
+  'panel.preflight.reportFooter':
+    'This report states which of 37 checks the document passes against the named profile. It is not a certificate of conformance.',
+  'panel.preflight.unreadableHeading': 'Parts that could not be read',
+
+  'panel.preflight.where.page': 'Page {{page}}',
+  'panel.preflight.where.annotation': 'Annotation on page {{page}}',
+  'panel.preflight.where.field': 'Field “{{name}}”',
+  'panel.preflight.where.ink': 'Ink “{{name}}”',
+  'panel.preflight.where.document': 'Document',
+
+  'panel.preflight.verdict.pass': 'Passed',
+  'panel.preflight.verdict.fail': 'Failed',
+  'panel.preflight.verdict.warn': 'Short of the recommendation',
+  'panel.preflight.verdict.needs_review': 'Needs review',
+  'panel.preflight.verdict.not_applicable': 'Not applicable',
+
+  'panel.preflight.category.document': 'Document',
+  'panel.preflight.category.pages': 'Pages',
+  'panel.preflight.category.colour': 'Colour',
+  'panel.preflight.category.fonts': 'Fonts',
+  'panel.preflight.category.images': 'Images',
+  'panel.preflight.category.content': 'Content',
+  'panel.preflight.category.metadata': 'Metadata',
+
+  'panel.preflight.check.pdf_version': 'PDF version is within range',
+  'panel.preflight.explain.pdf_version':
+    'A RIP that predates the file’s version may not read it at all.',
+  'panel.preflight.check.print_permitted': 'Printing is permitted',
+  'panel.preflight.explain.print_permitted':
+    'Permission bits can forbid printing, or forbid it at full resolution.',
+  'panel.preflight.check.structurally_sound': 'Document is structurally sound',
+  'panel.preflight.explain.structurally_sound':
+    'A damaged cross-reference table is a file a press may not open.',
+  'panel.preflight.check.output_intent': 'Output intent present',
+  'panel.preflight.explain.output_intent':
+    'The output intent names the printing condition the colour was prepared for.',
+  'panel.preflight.check.pdfx_claim': 'PDF/X version claim matches',
+  'panel.preflight.explain.pdfx_claim':
+    'A document claiming a standard is judged against that standard.',
+  'panel.preflight.check.trapped_declared': 'Trapping state is declared',
+  'panel.preflight.explain.trapped_declared':
+    'Whether the file is already trapped is a claim only a person may make.',
+  'panel.preflight.check.embedded_files': 'No embedded files',
+  'panel.preflight.explain.embedded_files':
+    'An attachment travels with the document and reaches the press with it.',
+  'panel.preflight.check.page_size_consistent': 'Page size is consistent',
+  'panel.preflight.explain.page_size_consistent':
+    'Pages of different sizes cannot be imposed as one signature.',
+  'panel.preflight.check.page_size_expected': 'Page size is the expected one',
+  'panel.preflight.explain.page_size_expected':
+    'The job’s own trim size is what the imposition was built around.',
+  'panel.preflight.check.trim_box': 'Trim box is defined',
+  'panel.preflight.explain.trim_box':
+    'The trim box is where the page is cut; without it the cut is a guess.',
+  'panel.preflight.check.bleed_sufficient': 'Bleed is sufficient',
+  'panel.preflight.explain.bleed_sufficient':
+    'Art must run past the trim, or a cutting tolerance shows white.',
+  'panel.preflight.check.page_count': 'Page count fits the job',
+  'panel.preflight.explain.page_count':
+    'A saddle-stitched job needs a page count its binding can fold.',
+  'panel.preflight.check.colour_family': 'No forbidden colour family',
+  'panel.preflight.explain.colour_family':
+    'RGB on a press is converted by the RIP, to a colour nobody chose.',
+  'panel.preflight.check.grayscale_only': 'Grayscale only',
+  'panel.preflight.explain.grayscale_only':
+    'A single-plate job must carry no colour a second plate would need.',
+  'panel.preflight.check.device_independent_colour': 'No device-independent colour',
+  'panel.preflight.explain.device_independent_colour':
+    'Some standards require every colour to be device colour.',
+  'panel.preflight.check.spot_ink_count': 'Spot ink count is within the limit',
+  'panel.preflight.explain.spot_ink_count':
+    'Each spot ink is another plate, another wash-up and another cost.',
+  'panel.preflight.check.spot_ink_names': 'Spot inks are on the approved list',
+  'panel.preflight.explain.spot_ink_names':
+    'An ink named off the list is an ink the press has not mixed.',
+  'panel.preflight.check.ink_coverage_max': 'Total area coverage is within the limit',
+  'panel.preflight.explain.ink_coverage_max':
+    'Too much ink on one spot does not dry; it sets off onto the next sheet.',
+  'panel.preflight.check.overprint': 'Overprint is deliberate',
+  'panel.preflight.explain.overprint':
+    'Ink set to overprint lays over what is under it instead of knocking it out.',
+  'panel.preflight.check.fonts_embedded': 'All fonts are embedded',
+  'panel.preflight.explain.fonts_embedded':
+    'A font the press does not have is a font the press substitutes.',
+  'panel.preflight.check.fonts_subset': 'Embedded fonts are subsets',
+  'panel.preflight.explain.fonts_subset':
+    'A full face embeds every glyph, including the ones nothing sets.',
+  'panel.preflight.check.type3_fonts': 'No Type 3 fonts',
+  'panel.preflight.explain.type3_fonts':
+    'A Type 3 glyph is a drawing, and it does not scale like an outline.',
+  'panel.preflight.check.min_type_size': 'Type is large enough to print',
+  'panel.preflight.explain.min_type_size':
+    'Below a certain size type fills in on press, and reversed type fills in sooner.',
+  'panel.preflight.check.small_text_k_only': 'Small black text is one ink',
+  'panel.preflight.explain.small_text_k_only':
+    'Black built from four inks needs registration small type will not hold.',
+  'panel.preflight.check.image_min_dpi_contone': 'Contone images are high enough resolution',
+  'panel.preflight.explain.image_min_dpi_contone':
+    'A photograph below the screen’s own resolution prints soft.',
+  'panel.preflight.check.image_min_dpi_bitonal': 'Bitonal images are high enough resolution',
+  'panel.preflight.explain.image_min_dpi_bitonal':
+    'Line art carries its edges in its pixels and needs far more of them.',
+  'panel.preflight.check.image_max_dpi': 'Images are not over-resolution',
+  'panel.preflight.explain.image_max_dpi':
+    'Pixels beyond what the screen resolves cost time and buy nothing.',
+  'panel.preflight.check.image_compression': 'Image compression is permitted',
+  'panel.preflight.explain.image_compression':
+    'Some standards forbid a codec a RIP of their era cannot decode.',
+  'panel.preflight.check.image_colour_space': 'Images are in a permitted colour space',
+  'panel.preflight.explain.image_colour_space':
+    'An image in the wrong space is converted by the RIP, not by anyone.',
+  'panel.preflight.check.live_transparency': 'No live transparency',
+  'panel.preflight.explain.live_transparency':
+    'A RIP that cannot composite transparency flattens it, unpredictably.',
+  'panel.preflight.check.hairlines_absent': 'No hairline strokes',
+  'panel.preflight.explain.hairlines_absent':
+    'A hairline renders on screen and breaks up on an imagesetter.',
+  'panel.preflight.check.optional_content': 'No optional content',
+  'panel.preflight.explain.optional_content':
+    'Which layers a RIP prints is a decision nobody made deliberately.',
+  'panel.preflight.check.printing_annotations': 'No printing annotations',
+  'panel.preflight.explain.printing_annotations':
+    'An annotation flagged to print reaches the plate with the page.',
+  'panel.preflight.check.interactive_form': 'No interactive form',
+  'panel.preflight.explain.interactive_form':
+    'A form field prints its appearance, and its value may not be in it.',
+  'panel.preflight.check.title_present': 'Document has a title',
+  'panel.preflight.explain.title_present':
+    'The title is how a job is identified once the file name is gone.',
+  'panel.preflight.check.document_javascript': 'No document JavaScript',
+  'panel.preflight.explain.document_javascript':
+    'Scripting in a print file does nothing but travel with it.',
+  'panel.preflight.check.xmp_present': 'XMP metadata present',
+  'panel.preflight.explain.xmp_present':
+    'The standards read their own claims out of the XMP packet.',
+
+  'panel.preflight.detail.version_above_max':
+    'PDF {{version}} is newer than the profile’s limit of {{max}}.',
+  'panel.preflight.detail.version_below_min':
+    'PDF {{version}} is older than the profile’s minimum of {{min}}.',
+  'panel.preflight.detail.print_denied': 'The permissions forbid printing.',
+  'panel.preflight.detail.print_highres_denied':
+    'The permissions allow only low-resolution printing.',
+  'panel.preflight.detail.structural_error': '{{message}}',
+  'panel.preflight.detail.output_intent_missing': 'The document declares no output intent.',
+  'panel.preflight.detail.output_intent_not_allowed':
+    'The output intent “{{identifier}}” is not one the profile allows ({{allowed}}).',
+  'panel.preflight.detail.output_intent_profile_missing':
+    'The output intent “{{identifier}}” embeds no colour profile.',
+  'panel.preflight.detail.pdfx_claim_missing':
+    'The document claims no PDF/X version; the profile expects {{expected}}.',
+  'panel.preflight.detail.pdfx_claim_mismatch':
+    'The document claims {{found}}; the profile expects {{expected}}.',
+  'panel.preflight.detail.trapped_undeclared':
+    'The document does not say whether it has been trapped.',
+  'panel.preflight.detail.trapped_not_accepted':
+    'The trapping state is {{value}}; the profile accepts {{accepted}}.',
+  'panel.preflight.detail.embedded_file': 'The file “{{name}}” travels with this document.',
+  'panel.preflight.detail.page_size_differs':
+    '{{width}} × {{height}} pt on {{count}} pages, against the first page’s {{first_width}} × {{first_height}} pt.',
+  'panel.preflight.detail.page_size_unexpected':
+    'Page {{page}} measures {{width}} × {{height}} pt; the job’s size is {{expected_width}} × {{expected_height}} pt.',
+  'panel.preflight.detail.trim_box_missing':
+    'Page {{page}} has no trim box, so where it is cut is a guess.',
+  'panel.preflight.detail.bleed_box_missing': 'Page {{page}} has no bleed box.',
+  'panel.preflight.detail.bleed_too_small':
+    'Page {{page}} bleeds {{bleed}} pt past the trim; the profile asks for {{required}} pt.',
+  'panel.preflight.detail.page_count_below':
+    'The document has {{pages}} pages; the profile asks for at least {{min}}.',
+  'panel.preflight.detail.page_count_above':
+    'The document has {{pages}} pages; the profile allows at most {{max}}.',
+  'panel.preflight.detail.page_count_not_multiple':
+    'The document has {{pages}} pages, which is not a multiple of {{multiple}}.',
+  'panel.preflight.detail.forbidden_colour_family':
+    '{{family}} is used on page {{page}} ({{category}}).',
+  'panel.preflight.detail.not_grayscale':
+    '{{family}} on page {{page}} needs a plate this job does not have.',
+  'panel.preflight.detail.device_independent_colour':
+    '{{family}} on page {{page}} is device-independent colour.',
+  'panel.preflight.detail.too_many_spots':
+    '{{count}} spot inks, against a limit of {{max}}.',
+  'panel.preflight.detail.spot_not_allowed':
+    'The ink “{{name}}” is not on the approved list.',
+  'panel.preflight.detail.tac_not_measured':
+    'Page {{page}} could not be measured: {{reason}}',
+  'panel.preflight.detail.tac_over_limit':
+    'Page {{page}} reaches {{max_tac}} % ink against a limit of {{limit}} %, over {{area}} % of the page.',
+  'panel.preflight.detail.tac_budget_exceeded':
+    '{{pages}} pages beyond the profile’s budget of {{budget}} were not measured.',
+  'panel.preflight.detail.overprint_zero_tint':
+    'Page {{page}}: a zero-tint {{channel}} is set to overprint, so it disappears.',
+  'panel.preflight.detail.overprint_unknown_ink':
+    'Page {{page}}: an overprinting {{channel}} uses ink this walk could not resolve.',
+  'panel.preflight.detail.overprint_present':
+    'Page {{page}}: a {{channel}} is set to overprint.',
+  'panel.preflight.detail.overprint_state_unpainted':
+    '{{count}} overprinting graphics states are declared, and no paint using one was reached.',
+  'panel.preflight.detail.font_not_embedded':
+    '“{{name}}” is not embedded (pages {{pages}}).',
+  'panel.preflight.detail.font_not_subset':
+    '“{{name}}” embeds the whole face, not a subset.',
+  'panel.preflight.detail.type3_font': '“{{name}}” is a Type 3 font.',
+  'panel.preflight.detail.type_too_small':
+    'Page {{page}}: {{size}} pt type, below the {{minimum}} pt minimum.',
+  'panel.preflight.detail.type_too_small_reversed':
+    'Page {{page}}: {{size}} pt reversed type, below the {{minimum}} pt minimum for reversed type.',
+  'panel.preflight.detail.type_backdrop_unknown':
+    'Page {{page}}: {{size}} pt type over a backdrop this walk could not resolve.',
+  'panel.preflight.detail.small_text_multi_ink':
+    'Page {{page}}: {{size}} pt black type built from {{inks}} inks, against a limit of {{max}}.',
+  'panel.preflight.detail.image_below_min_dpi':
+    'Page {{page}}, image {{index}}: {{dpi}} dpi, below the {{minimum}} dpi minimum.',
+  'panel.preflight.detail.image_bitonal_below_min_dpi':
+    'Page {{page}}, image {{index}}: {{dpi}} dpi of line art, below the {{minimum}} dpi minimum.',
+  'panel.preflight.detail.images_unmeasured':
+    '{{count}} image placements could not be measured, so this figure is a floor.',
+  'panel.preflight.detail.image_above_max_dpi':
+    'Page {{page}}, image {{index}}: {{dpi}} dpi, above the {{maximum}} dpi ceiling.',
+  'panel.preflight.detail.image_forbidden_filter':
+    'Page {{page}}, image {{index}} uses {{filter}}, which the profile forbids.',
+  'panel.preflight.detail.image_forbidden_colour_family':
+    'An image on page {{page}} is {{family}} ({{category}}).',
+  'panel.preflight.detail.live_transparency': 'Page {{page}} carries live transparency.',
+  'panel.preflight.detail.hairline_stroke':
+    'Page {{page}}: a stroke {{width}} pt wide on the device, below {{threshold}} pt.',
+  'panel.preflight.detail.hairline_border':
+    'Page {{page}}: an annotation border {{width}} pt wide, below {{threshold}} pt.',
+  'panel.preflight.detail.optional_content_layer':
+    'The layer “{{name}}” leaves what prints to the RIP.',
+  'panel.preflight.detail.printing_annotation':
+    'Page {{page}}: a {{subtype}} annotation is flagged to print.',
+  'panel.preflight.detail.form_field':
+    'The {{type}} field “{{name}}” prints its appearance, not necessarily its value.',
+  'panel.preflight.detail.title_missing': 'The document has no title.',
+  'panel.preflight.detail.document_javascript': 'JavaScript at {{name}}.',
+  'panel.preflight.detail.xmp_missing': 'The document carries no XMP metadata packet.',
+  'panel.preflight.detail.check_disabled': 'This profile switched the check off.',
+  'panel.preflight.detail.unreadable_branch':
+    'Part of the document could not be read, so this check cannot report a pass: {{reason}}',
+  'panel.preflight.detail.read_failed': 'This check’s own read did not complete: {{reason}}',
+
+  'panel.preflight.param.max_version': 'Highest PDF version',
+  'panel.preflight.param.min_version': 'Lowest PDF version',
+  'panel.preflight.param.required': 'Required',
+  'panel.preflight.param.allowed_identifiers': 'Allowed printing conditions',
+  'panel.preflight.param.require_embedded_profile': 'Embedded profile required',
+  'panel.preflight.param.expected': 'Expected claim',
+  'panel.preflight.param.require_declared': 'Declaration required',
+  'panel.preflight.param.accept': 'Accepted values',
+  'panel.preflight.param.allow': 'Allowed',
+  'panel.preflight.param.tolerance_pt': 'Tolerance',
+  'panel.preflight.param.width_pt': 'Width',
+  'panel.preflight.param.height_pt': 'Height',
+  'panel.preflight.param.allow_landscape': 'Landscape allowed',
+  'panel.preflight.param.min_bleed_pt': 'Minimum bleed',
+  'panel.preflight.param.min_pages': 'Fewest pages',
+  'panel.preflight.param.max_pages': 'Most pages',
+  'panel.preflight.param.multiple_of': 'Multiple of',
+  'panel.preflight.param.forbidden_families': 'Forbidden colour families',
+  'panel.preflight.param.require_grayscale': 'Grayscale required',
+  'panel.preflight.param.max_spots': 'Most spot inks',
+  'panel.preflight.param.allowed_names': 'Approved ink names',
+  'panel.preflight.param.allow_unlisted': 'Unlisted inks allowed',
+  'panel.preflight.param.max_tac_pct': 'Ink limit',
+  'panel.preflight.param.sample_dpi': 'Measurement resolution',
+  'panel.preflight.param.over_area_pct': 'Area allowed over the limit',
+  'panel.preflight.param.max_pages_measured': 'Pages measured',
+  'panel.preflight.param.flag_any': 'Report every overprint',
+  'panel.preflight.param.flag_white_text': 'Report overprinting white text',
+  'panel.preflight.param.flag_white_fill': 'Report overprinting white fills',
+  'panel.preflight.param.require_subset': 'Subsets required',
+  'panel.preflight.param.allow_type3': 'Type 3 fonts allowed',
+  'panel.preflight.param.min_size_pt': 'Smallest type',
+  'panel.preflight.param.min_size_pt_reversed': 'Smallest reversed type',
+  'panel.preflight.param.max_inks': 'Most inks',
+  'panel.preflight.param.applies_below_pt': 'Applies below',
+  'panel.preflight.param.min_dpi': 'Lowest resolution',
+  'panel.preflight.param.max_dpi': 'Highest resolution',
+  'panel.preflight.param.forbidden_filters': 'Forbidden compression',
+  'panel.preflight.param.threshold_pt': 'Hairline threshold',
+  'panel.preflight.param.include_annotations': 'Include annotation borders',
+  'panel.preflight.param.allow_optional_content': 'Optional content allowed',
+  'panel.preflight.param.forbidden_subtypes': 'Forbidden annotation types',
+  'panel.preflight.param.printing_only': 'Printing annotations only',
+  'panel.preflight.param.allow_forms': 'Forms allowed',
+  'panel.preflight.param.require_title': 'Title required',
+  'panel.preflight.param.allow_js': 'JavaScript allowed',
+  'panel.preflight.param.require_xmp': 'XMP required',
+
+  'panel.preflight.fixup.remove_javascript': 'Remove JavaScript',
+  'panel.preflight.fixup.remove_attachments': 'Remove embedded files',
+  'panel.preflight.fixup.remove_annotations': 'Remove annotations',
+  'panel.preflight.fixup.embed_missing_fonts': 'Embed missing fonts',
+  'panel.preflight.fixup.convert_to_cmyk': 'Convert to CMYK',
+  'panel.preflight.fixup.convert_to_grayscale': 'Convert to grayscale',
+  'panel.preflight.fixup.spots_to_process': 'Convert spot inks to process',
+  'panel.preflight.fixup.alias_spot': 'Alias a spot ink',
+  'panel.preflight.fixup.downsample_images': 'Downsample images',
+  'panel.preflight.fixup.fix_hairlines': 'Thicken hairlines',
+  'panel.preflight.fixup.flatten_transparency': 'Flatten transparency',
+  'panel.preflight.fixup.set_trim_box': 'Set the trim box',
+  'panel.preflight.fixup.grow_bleed_box': 'Grow the bleed box',
+  'panel.preflight.fixup.set_document_title': 'Set the document title',
+  'panel.preflight.fixup.set_trapped': 'Declare the trapping state',
+  'panel.preflight.fixup.write_xmp': 'Write XMP metadata',
+  'panel.preflight.fixup.set_pdf_version': 'Set the PDF version',
+  'panel.preflight.fixup.convert_to_pdfx': 'Convert to PDF/X',
+  'panel.preflight.fixup.convert_to_pdfa': 'Convert to PDF/A',
+  'panel.preflight.fixup.add_printer_marks': 'Add printer marks',
+
+  'panel.preflight.profileLabel': 'Profile',
+  'panel.preflight.editProfile': 'Edit…',
+  'panel.preflight.closeEditor': 'Back to the report',
+  'panel.preflight.editorHeading': 'Editing {{name}}',
+  'panel.preflight.derivedFrom': 'Derived from {{name}}',
+  'panel.preflight.shippedReadOnly':
+    'This profile ships with the app. Saving an edit creates a copy, so the shipped rule is always available to return to.',
+  'panel.preflight.profileNameLabel': 'Name',
+  'panel.preflight.saveProfile': 'Save as a copy',
+  'panel.preflight.saveEdits': 'Save',
+  'panel.preflight.duplicateProfile': 'Duplicate',
+  'panel.preflight.deleteProfile': 'Delete',
+  'panel.preflight.importProfile': 'Import…',
+  'panel.preflight.exportProfile': 'Export…',
+  'panel.preflight.copySuffix': '{{name}} (copy)',
+  'panel.preflight.profileSaved': 'Saved the profile “{{name}}”.',
+  'panel.preflight.profileRemoved': 'Removed the profile “{{name}}”.',
+  'panel.preflight.profileImported': 'Imported the profile “{{name}}”.',
+  'panel.preflight.profileExported': 'Wrote the profile to {{path}}.',
+  'panel.preflight.enabledLabel': 'Run this check',
+  'panel.preflight.severityLabel': 'When it finds something',
+  'panel.preflight.severity.fail': 'Fail',
+  'panel.preflight.severity.warn': 'Warn',
+  'panel.preflight.fixupsHeading': 'Fixes this profile carries',
+  'panel.preflight.import.notJson': 'That file is not JSON.',
+  'panel.preflight.import.notProfile': 'That file does not hold a preflight profile.',
+  'panel.preflight.import.wrongKind': 'That file holds a {{kind}}, not a preflight profile.',
+  'panel.preflight.import.noId': 'That profile has no id, so nothing can refer to it.',
+  'panel.preflight.import.wrongSchema':
+    'That profile is written to schema {{schema}}; this app reads schema {{expected}}.',
+  'panel.preflight.import.shippedId':
+    '“{{id}}” is a profile this app ships and cannot be replaced. Rename it before importing.',
+
+  'profile.preflight.sheetfed_offset': 'Sheetfed offset (CMYK)',
+  'profile.preflight.sheetfed_offset.desc':
+    'Commercial sheetfed work on coated stock: 300 % ink, 300 dpi photographs, CMYK only.',
+  'profile.preflight.web_offset_heatset': 'Web offset, heatset',
+  'profile.preflight.web_offset_heatset.desc':
+    'Heatset web work: the same ink limit at the lower resolutions a web press holds.',
+  'profile.preflight.newsprint': 'Newsprint',
+  'profile.preflight.newsprint.desc':
+    'Absorbent stock and heavy dot gain: 240 % ink, one spot, thicker hairlines.',
+  'profile.preflight.digital_printing': 'Digital printing',
+  'profile.preflight.digital_printing.desc':
+    'Toner and inkjet: 280 % ink, no spot plates, and live transparency is fine.',
+  'profile.preflight.large_format': 'Large format',
+  'profile.preflight.large_format.desc':
+    'Banners and signage read at a distance: 100 dpi photographs and a half-inch bleed.',
+  'profile.preflight.pdfx_1a': 'PDF/X-1a:2001',
+  'profile.preflight.pdfx_1a.desc':
+    'Device colour only, no transparency, an embedded output intent, PDF 1.3.',
+  'profile.preflight.pdfx_3': 'PDF/X-3:2002',
+  'profile.preflight.pdfx_3.desc':
+    'PDF/X-1a with device-independent colour permitted. Still PDF 1.3, still flattened.',
+  'profile.preflight.pdfx_4': 'PDF/X-4',
+  'profile.preflight.pdfx_4.desc':
+    'Live transparency and optional content permitted, at PDF 1.6.',
+  'profile.preflight.office_print': 'Office print',
+  'profile.preflight.office_print.desc':
+    'Will this print on the machine down the hall: fonts and readable resolution, nothing about plates.',
 
   'panel.outputPreview.open': 'Open a PDF to preview its separations',
   'panel.outputPreview.blurb':
