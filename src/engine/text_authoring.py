@@ -40,8 +40,34 @@ from engine.font_fallback import (
 )
 from engine.page_images import _save
 
+# The orientation model, imported rather than restated. Authoring transposes
+# INTO a writing frame and untransposes back out of it through exactly the
+# maps the paragraph reflow uses, so the two cannot drift: a box authored in
+# one frame is re-listed in the same one. `_column_direction_evidence` is the
+# lister's own answer to "which way do these columns run", which is why an
+# authored column can never come back reading the other way.
+from engine.text_paragraphs import (
+    COLUMNS_LTR,
+    COLUMNS_RTL,
+    HORIZONTAL,
+    TCY_BASELINE_EM,
+    VERTICAL_LR,
+    VERTICAL_RL,
+    _column_direction_evidence,
+    _ORIENTATIONS,
+    _t,
+    _t_inv,
+    breaks_between,
+)
+
 _LEADING_EM = 1.2
 _MAX_SIZE = 1638.0
+
+# The writing modes a caller may request. `vertical` derives its column
+# direction from the text; the two explicit spellings are honoured only when
+# the text agrees with them (see `_resolve_writing`).
+_WRITING_MODES = (HORIZONTAL, "vertical", VERTICAL_RL, VERTICAL_LR)
+_H_FRAME = _ORIENTATIONS[HORIZONTAL]
 
 # The OpenType features we can honestly apply (small caps + stylistic
 # alternates). "small_caps" expands to smcp+c2sc so mixed-case text becomes
@@ -95,6 +121,138 @@ def _explicit_face(family, style_key_name: str):
     return resolve_face(raw)
 
 
+def _resolve_writing(writing_mode, body: str) -> tuple:
+    """(frame, columns, vertical) for the requested writing mode.
+
+    The column DIRECTION is derived from the text by the same evidence the
+    re-listing uses, and an explicit request is honoured only when the text
+    agrees with it. Authoring `vertical-lr` CJK would otherwise produce a box
+    that lists back as `vertical-rl` — its columns read in the opposite order
+    to the one they were written in, with no error anywhere. Text carrying no
+    evidence at all (digits, punctuation) takes the request, or right-to-left
+    columns for a bare `vertical`, which is the shipped default."""
+    if not isinstance(writing_mode, str) or writing_mode not in _WRITING_MODES:
+        raise ValueError(
+            "writing_mode must be horizontal, vertical, vertical-rl or vertical-lr "
+            f"(got {writing_mode!r})"
+        )
+    if writing_mode == HORIZONTAL:
+        return _H_FRAME, None, False
+    evidence = _column_direction_evidence(body)
+    if writing_mode == "vertical":
+        columns = evidence or COLUMNS_RTL
+    else:
+        columns = COLUMNS_LTR if writing_mode == VERTICAL_LR else COLUMNS_RTL
+        if evidence is not None and evidence != columns:
+            if evidence == COLUMNS_LTR:
+                raise ValueError(
+                    "this text sets columns left to right — use vertical-lr"
+                )
+            raise ValueError(
+                "this text sets columns right to left — use vertical-rl"
+            )
+    name = VERTICAL_LR if columns == COLUMNS_LTR else VERTICAL_RL
+    return _ORIENTATIONS[name], columns, True
+
+
+def _frame_rect(frame, x0: float, y0: float, x1: float, y1: float) -> tuple:
+    """A rect's corners in the writing frame: (left, right, top, bottom).
+
+    Boundary 1. The horizontal frame is the identity, so every number is the
+    one the shipped layout computed."""
+    xs: list[float] = []
+    ys: list[float] = []
+    for x, y in ((x0, y0), (x1, y0), (x0, y1), (x1, y1)):
+        tx, ty = _t(frame, x, y)
+        xs.append(tx)
+        ys.append(ty)
+    return min(xs), max(xs), max(ys), min(ys)
+
+
+def _local_page_rect(vbox, rot, frame, left, right, top, bottom) -> tuple:
+    """The visible page box expressed in the ROTATION frame's local space.
+
+    The rotation frame is a rigid turn, so the page box's preimage is an
+    axis-aligned local rect for every quarter turn; a free angle takes the
+    inverse affine and the extent of the four mapped corners."""
+    if rot == 0:
+        return vbox[0], vbox[1], vbox[2], vbox[3]
+    if rot == 90:
+        return vbox[1] - bottom, right - vbox[2], vbox[3] - bottom, right - vbox[0]
+    if rot == 180:
+        return right - vbox[2], top - vbox[3], right - vbox[0], top - vbox[1]
+    if rot == 270:
+        return top - vbox[3], vbox[0] - left, top - vbox[1], vbox[2] - left
+    a_f, b_f, c_f, d_f, e_f, f_f = (float(v) for v in frame)
+    det = a_f * d_f - b_f * c_f
+    inv_a, inv_c = d_f / det, -c_f / det
+    inv_b, inv_d = -b_f / det, a_f / det
+    inv_e = (c_f * f_f - d_f * e_f) / det
+    inv_f = (b_f * e_f - a_f * f_f) / det
+    corners = (
+        (vbox[0], vbox[1]), (vbox[2], vbox[1]),
+        (vbox[0], vbox[3]), (vbox[2], vbox[3]),
+    )
+    xs = [x * inv_a + y * inv_c + inv_e for x, y in corners]
+    ys = [x * inv_b + y * inv_d + inv_f for x, y in corners]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _page_band(lay: "_BoxLayout", vbox, first_size: float) -> tuple:
+    """The visible-page band along the layout's STACKING axis — the interval
+    the shift-up rule keeps the block's baselines inside.
+
+    Text off the sheet is silently invisible, so a block whose last baseline
+    falls outside the page is shifted back, capped so the first never leaves
+    the other end. In a writing frame the stacking axis is y′, which is the
+    page's y for horizontal text and its x for a column; deriving the band
+    from the frame gives every mode the same rule with no new case."""
+    if vbox is None:
+        return 0.0, lay.l_top + first_size
+    lx0, ly0, lx1, ly1 = _local_page_rect(
+        vbox, lay.rot, lay.frame, lay.left, lay.right, lay.top, lay.bottom
+    )
+    ys = [
+        _t(lay.wframe, x, y)[1]
+        for x, y in ((lx0, ly0), (lx1, ly0), (lx0, ly1), (lx1, ly1))
+    ]
+    return min(ys), max(ys)
+
+
+def _vertical_face(font_path, family, style: str, body: str, columns: str) -> tuple:
+    """(face, upright) for a vertical box — the shipped vertical ladder.
+
+    `upright` says which of the two legal vertical representations this face
+    takes: an /Identity-V embed of the font's own vertical forms (the CJK
+    majority), or a HORIZONTAL shaped subset drawn under a quarter turn (the
+    Mongolian family, whose faces state no vertical advance worth embedding
+    as /W2). The bundled serif/sans/mono selectors have nothing honest to
+    resolve to for a column and are ignored — an absence the card states
+    rather than silently swallows."""
+    if columns == COLUMNS_LTR:
+        from engine.font_fallback import resolve_mongolian_font
+
+        return resolve_mongolian_font(str(font_path), body, style=style), False
+    explicit = _explicit_face(family, style)
+    if explicit is not None:
+        from engine.font_fallback import (
+            face_has_vertical_metrics,
+            face_shapes_vertically,
+        )
+
+        # Two independent absences, distinguishable in a bug report: the face
+        # makes no vertical statement at all, or it has the machinery and not
+        # that character's form.
+        if not face_has_vertical_metrics(explicit):
+            raise ValueError("that font has no vertical metrics — pick one that does")
+        if not face_shapes_vertically(explicit, body):
+            raise ValueError("that font has no vertical forms — pick one that does")
+        return explicit, True
+    from engine.font_fallback import resolve_vertical_font
+
+    return resolve_vertical_font(str(font_path), body, style=style), True
+
+
 def _fresh_font_name(fonts) -> str:
     taken = {str(k) for k in fonts.keys()} if fonts is not None else set()
     i = 0
@@ -105,26 +263,50 @@ def _fresh_font_name(fonts) -> str:
         i += 1
 
 
-def _wrap(words, width_1000, size: float, max_width: float) -> list[str]:
-    """Greedy fill at `max_width` (user units). A single over-wide word
+def _units(segment: str) -> list[tuple[str, str]]:
+    """One hard segment's wrap UNITS — `(text, joiner)`, where the joiner is
+    the space that precedes the unit when it follows another on a line.
+
+    Breaking only at spaces is wrong for a no-space script: a Japanese
+    sentence is one "word", so it never wraps and runs straight off the
+    page — true of horizontal authoring too, and fatal for a column, which
+    is nothing but wrapping. The break opportunities come from
+    `breaks_between`, the reflow's own kinsoku-aware rule, so a wrap the
+    author sees and a wrap the editor would make are the same wrap.
+
+    For space-separated text every unit is a whole word with a space joiner,
+    which is the shipped `" ".join(words)` exactly."""
+    out: list[tuple[str, str]] = []
+    for wi, word in enumerate(segment.split()):
+        start = 0
+        for i in range(1, len(word)):
+            if breaks_between(word[i - 1], word[i]):
+                out.append((word[start:i], " " if (wi and start == 0) else ""))
+                start = i
+        out.append((word[start:], " " if (wi and start == 0) else ""))
+    return out
+
+
+def _wrap(units, width_1000, size: float, max_width: float) -> list[str]:
+    """Greedy fill at `max_width` (user units). A single over-wide unit
     still gets its own line (never dropped).
 
     The candidate line is measured AS A WHOLE STRING rather than as a
-    sum of word widths plus spaces. With kerning on, a per-word sum would
+    sum of unit widths plus spaces. With kerning on, a per-unit sum would
     miss the pairs that straddle the spaces, so the wrap could disagree with
     what is actually drawn — and measurement agreeing with drawing is the
     property this shares with `measure_text_box`."""
     lines: list[str] = []
-    cur: list[str] = []
-    for word in words:
-        candidate = " ".join(cur + [word])
+    cur = ""
+    for text, join in units:
+        candidate = (cur + join + text) if cur else text
         if cur and width_1000(candidate) / 1000.0 * size > max_width:
-            lines.append(" ".join(cur))
-            cur = [word]
+            lines.append(cur)
+            cur = text
         else:
-            cur.append(word)
+            cur = candidate
     if cur:
-        lines.append(" ".join(cur))
+        lines.append(cur)
     return lines
 
 
@@ -471,29 +653,53 @@ class _BoxLayout(NamedTuple):
     # The frame already encodes it; `angle` exists so the shift-up band can
     # compute the page box's preimage under the free rotation.
     angle: float | None = None
+    # The WRITING frame — the signed axis permutation the layout ran in.
+    # Horizontal is the identity, which is why every horizontal number and
+    # every horizontal byte is the shipped one.
+    wframe: tuple = _H_FRAME
+    # Which way a column set advances (`rtl`/`ltr`), None for horizontal.
+    columns: str | None = None
+    vertical: bool = False
+    # Vertical only: an /Identity-V embed of the face's own vertical forms
+    # (True) against a horizontal shaped subset turned a quarter (False).
+    upright: bool = True
+    # The linear part every ordinary show writes into its Tm. The identity
+    # for horizontal text and for an upright column (the /Identity-V CMap
+    # does the advancing); a quarter turn when the glyphs are horizontal
+    # ones laid down a column.
+    glyph_lin: tuple = (1, 0, 0, 1)
+    # The column em a tate-chu-yoko block occupies, and is condensed across.
+    tcy_em: float = 0.0
 
 
 def _layout_box_spans(
     pdf, body, spans, sz, font_path, family, bold, italic, kern, features,
     alt_index, rot, l_left, l_right, l_top, l_w, l_h, frame,
     left, right, top, bottom, angle=None,
+    wframe=_H_FRAME, columns=None, vertical=False,
 ) -> "_BoxLayout":
     """The per-span layout — one resolved style per distinct combo,
     per-char widths, greedy wrap over mixed-width words, per-line leading
     from the largest size on the line (the paragraph engine's rule), and
     lines as (text, style_index) segments for the emitter."""
     # Per-character style index. Style 0 is the box's own arguments; each
-    # distinct (size, bold, italic, color) combo used by a span gets one
+    # distinct (size, bold, italic, color, tcy) combo used by a span gets one
     # resolved entry, so N spans sharing a look share fonts and subsets.
+    # `tcy` is part of the key because a tate-chu-yoko block draws in a
+    # HORIZONTAL face inside a column that is otherwise vertical.
     char_style = [0] * len(body)
-    combo_index: dict = {(round(sz, 3), bool(bold), bool(italic), None): 0}
-    combos: list[tuple] = [(round(sz, 3), bool(bold), bool(italic), None)]
+    base_combo = (round(sz, 3), bool(bold), bool(italic), None, False)
+    combo_index: dict = {base_combo: 0}
+    combos: list[tuple] = [base_combo]
     for span in spans:
         s_size = round(float(span.get("size", sz)), 3)
         s_bold = bool(span.get("bold", bold))
         s_italic = bool(span.get("italic", italic))
         s_color = tuple(span["color"]) if span.get("color") is not None else None
-        key = (s_size, s_bold, s_italic, s_color)
+        s_tcy = bool(span.get("tcy", False))
+        if s_tcy:
+            _validate_tcy_span(body, span, vertical)
+        key = (s_size, s_bold, s_italic, s_color, s_tcy)
         idx = combo_index.get(key)
         if idx is None:
             idx = len(combos)
@@ -501,6 +707,12 @@ def _layout_box_spans(
             combos.append(key)
         for pos in range(span["start"], span["end"]):
             char_style[pos] = idx
+    tcy_styles = {i for i, combo in enumerate(combos) if combo[4]}
+    # The block occupies ONE em of the column, and is condensed across one
+    # em of it — the typographic definition of the construct, and what keeps
+    # the surrounding column's pitch right. The column's em is the box's own
+    # size, not the block's.
+    tcy_em = sz
 
     feats = _normalize_features(features)
     # Right-to-left per-span styling. A style boundary INSIDE a
@@ -523,16 +735,35 @@ def _layout_box_spans(
                     "style whole words in this script"
                 )
 
-    def resolve_face(b: bool, i: bool):
+    upright = True
+    if vertical:
+        if feats:
+            raise ValueError("small caps and alternates do not apply to vertical text")
+        # Which vertical REPRESENTATION this box takes is a property of the
+        # text's script, not of a style, so it is answered once here and the
+        # per-style resolution below only picks the face.
+        upright = _vertical_face(
+            font_path, family, style_key(bold, italic), body, columns
+        )[1]
+
+    def resolve_face(b: bool, i: bool, tcy: bool):
         skey = style_key(b, i)
+        if vertical and not tcy:
+            # One vertical face serves the whole column (T4's recorded
+            # position — no vertical serif is vendored), so the style axes
+            # resolve through the vertical ladder rather than the bundled
+            # family map.
+            return _vertical_face(font_path, family, skey, body, columns)[0]
+        # A tate-chu-yoko block is HORIZONTAL text inside the column, so it
+        # resolves the ordinary way even in a vertical box.
         explicit = _explicit_face(family, skey)
-        if explicit is not None:
+        if explicit is not None and not (vertical and tcy):
             return explicit
         if feats:
             from engine.font_fallback import resolve_feature_font
 
             return resolve_feature_font(str(font_path), style=skey)
-        if family in ("serif", "mono", "sans"):
+        if family in ("serif", "mono", "sans") and not (vertical and tcy):
             return resolve_fallback_font(
                 str(font_path), synthetic_family_font(family), style=skey, text=body,
                 rtl_ok=rtl,
@@ -549,7 +780,7 @@ def _layout_box_spans(
         drawn_by_style.setdefault(char_style[pos], set()).add(ch)
 
     styles: list[dict] = []
-    for idx, (s_size, s_bold, s_italic, s_color) in enumerate(combos):
+    for idx, (s_size, s_bold, s_italic, s_color, s_tcy) in enumerate(combos):
         # Every style that draws anything also draws the JOIN SPACE — the
         # wrap synthesizes inter-word spaces styled by the preceding word,
         # whose own body positions may never have contained one
@@ -561,9 +792,25 @@ def _layout_box_spans(
         if not chars:
             styles.append({"size": s_size, "color": s_color, "font_dict": None,
                            "encode": None, "width_1000": None, "kern_pairs": {},
-                           "runs": {}, "glyph_encode": None, "glyph_width": None})
+                           "runs": {}, "glyph_encode": None, "glyph_width": None,
+                           "tcy": s_tcy})
             continue
-        face = resolve_face(s_bold, s_italic)
+        face = resolve_face(s_bold, s_italic, s_tcy)
+        if vertical and upright and not s_tcy:
+            # The column's own glyphs: the face's vertical forms under
+            # /Identity-V, whose widths ARE the /W2 advances the wrap
+            # measures the column's length with. Nothing shapes — vertical
+            # text forms no cross-character ligatures — so this style skips
+            # the shaping ladder entirely rather than embedding horizontal
+            # glyph ids under a vertical CMap.
+            from engine.font_fallback import build_vertical_font
+
+            font_dict, encode, width_1000 = build_vertical_font(pdf, face, chars)
+            styles.append({"size": s_size, "color": s_color, "font_dict": font_dict,
+                           "encode": encode, "width_1000": width_1000, "kern_pairs": {},
+                           "runs": {}, "glyph_encode": None, "glyph_width": None,
+                           "tcy": False})
+            continue
         glyph_for = None
         if feats:
             from fontTools.ttLib import TTFont as _TTFont
@@ -630,7 +877,15 @@ def _layout_box_spans(
         styles.append({"size": s_size, "color": s_color, "font_dict": font_dict,
                        "encode": encode, "width_1000": width_1000, "kern_pairs": pairs,
                        "runs": runs, "glyph_encode": glyph_encode,
-                       "glyph_width": glyph_width})
+                       "glyph_width": glyph_width, "tcy": s_tcy})
+
+    if tcy_styles and any(st.get("runs") for st in styles):
+        # A shaped run and an atomic block in one box is not a thing this
+        # design expresses: the reorder walks per code and would take the
+        # block apart. The construct is a column one anyway.
+        raise ValueError(
+            "a tate-chu-yoko block cannot share a box with a shaped script"
+        )
 
     def seg_split(a: int, b: int) -> list[tuple[str, int]]:
         """[a,b) of body → (text, style) segments grouped by style."""
@@ -651,7 +906,15 @@ def _layout_box_spans(
 
         A SHAPED word measures by the shaper's positioned advance,
         which is exactly what the emitted glyph widths plus their TJ
-        corrections sum to — the wrap and the drawing stay one number."""
+        corrections sum to — the wrap and the drawing stay one number.
+
+        A tate-chu-yoko block measures ONE COLUMN EM whatever it says: the
+        block is condensed to fit that em, and the layout width is the pitch
+        it consumes, never its natural advance. A two-digit year and a
+        four-digit one take the same space in the column, which is the
+        convention the construct exists to satisfy."""
+        if char_style[a] in tcy_styles:
+            return tcy_em
         w = 0.0
         for text, st in seg_split(a, b):
             s = styles[st]
@@ -675,33 +938,56 @@ def _layout_box_spans(
         # word ranges index char_style correctly. (\r\n normalization can
         # shift positions by the removed \r count — recompute via find.)
         start = body.find(hard, offset) if hard else offset
-        words = [(m.start() + start, m.end() + start) for m in _re.finditer(r"\S+", hard)]
+        # Wrap UNITS, not words: a break opportunity also falls at every
+        # CJK boundary (`breaks_between`, kinsoku included) and at a
+        # tate-chu-yoko span's edges, and a block is never split. `join`
+        # marks the units a real space precedes — a CJK break introduces
+        # none, so no space is invented in text that has none.
+        units: list[tuple[int, int, bool]] = []
+        for m in _re.finditer(r"\S+", hard):
+            wa, wb = m.start() + start, m.end() + start
+            seg = wa
+            for pos in range(wa + 1, wb):
+                if (
+                    (char_style[pos] in tcy_styles) != (char_style[pos - 1] in tcy_styles)
+                    or breaks_between(body[pos - 1], body[pos])
+                ):
+                    units.append((seg, pos, seg == wa))
+                    seg = pos
+            units.append((seg, wb, seg == wa))
         offset = (start if hard else offset) + len(hard) + 1
-        if not words:
+        if not units:
             styled_lines.append([])
             line_leadings.append(sz * _LEADING_EM)
             plain_lines.append("")
             continue
-        cur: list[tuple[int, int]] = []
+        cur: list[tuple[int, int, bool]] = []
         cur_w = 0.0
         space_w = lambda st: (styles[st]["width_1000"](" ") / 1000.0 * styles[st]["size"]  # noqa: E731
                               if styles[st]["width_1000"] is not None else 0.0)
 
+        def join_style(pos: int) -> int:
+            """The style a synthesized join space takes: the preceding
+            character's, except a tate-chu-yoko one — the space belongs to
+            the surrounding column, and drawing it as part of the block would
+            put it inside the atomic unit."""
+            st = char_style[pos]
+            return 0 if st in tcy_styles else st
+
         def flush():
             if not cur:
                 return
-            a, b = cur[0][0], cur[-1][1]
             segs: list[tuple[str, int]] = []
-            for wi, (wa, wb) in enumerate(cur):
-                if wi > 0:
+            for wi, (wa, wb, _j) in enumerate(cur):
+                if wi > 0 and cur[wi][2]:
                     # The joining space takes the PRECEDING word's last style
                     # (the paragraph engine's trailing-space rule).
-                    segs.append((" ", char_style[cur[wi - 1][1] - 1]))
+                    segs.append((" ", join_style(cur[wi - 1][1] - 1)))
                 segs.extend(seg_split(wa, wb))
             # Merge adjacent same-style segments for compact emission.
             merged: list[tuple[str, int]] = []
             for text, st in segs:
-                if merged and merged[-1][1] == st:
+                if merged and merged[-1][1] == st and st not in tcy_styles:
                     merged[-1] = (merged[-1][0] + text, st)
                 else:
                     merged.append((text, st))
@@ -711,16 +997,16 @@ def _layout_box_spans(
             )
             plain_lines.append("".join(t for t, _s in merged))
 
-        for wa, wb in words:
+        for wa, wb, join in units:
             w_width = range_width(wa, wb)
-            join_w = space_w(char_style[cur[-1][1] - 1]) if cur else 0.0
+            join_w = space_w(join_style(cur[-1][1] - 1)) if (cur and join) else 0.0
             if cur and cur_w + join_w + w_width > l_w:
                 flush()
-                cur = [(wa, wb)]
+                cur = [(wa, wb, False)]
                 cur_w = w_width
             else:
                 cur_w += join_w + w_width
-                cur.append((wa, wb))
+                cur.append((wa, wb, join))
         flush()
     while plain_lines and plain_lines[0] == "":
         plain_lines.pop(0)
@@ -747,6 +1033,9 @@ def _layout_box_spans(
             if (rtl or any(st.get("runs") for st in styles))
             else None
         ),
+        wframe=wframe, columns=columns, vertical=vertical, upright=upright,
+        glyph_lin=(1, 0, 0, 1) if (not vertical or upright) else (0, -1, 1, 0),
+        tcy_em=tcy_em,
     )
 
 
@@ -779,7 +1068,7 @@ def _validated_spans(spans, body_len: int) -> list[dict]:
             if len(c) != 3 or any(v < 0 or v > 1 for v in c):
                 raise ValueError("span color must be [r,g,b] in 0..1")
             span["color"] = c
-        for key in ("bold", "italic"):
+        for key in ("bold", "italic", "tcy"):
             if raw.get(key) is not None:
                 if not isinstance(raw[key], bool):
                     raise ValueError(f"span {key} must be true or false")
@@ -788,8 +1077,31 @@ def _validated_spans(spans, body_len: int) -> list[dict]:
     return out
 
 
+def _validate_tcy_span(body: str, span: dict, vertical: bool) -> None:
+    """What a tate-chu-yoko span must be to become an atomic block.
+
+    The same evidence the re-listing's absorption demands, asked at
+    creation: the construct is defined only INSIDE a column, its characters
+    must not JOIN (a shaped run inside an atomic unit inside a column is not
+    a thing this design expresses), and it holds no space — a block is one
+    unit to the line breaker and a space inside it is a break opportunity
+    the construct forbids."""
+    from engine.shaping import requires_shaping
+
+    if not vertical:
+        raise ValueError(
+            "tate-chu-yoko only applies inside a vertical column"
+        )
+    text = body[span["start"] : span["end"]]
+    if any(ch.isspace() for ch in text):
+        raise ValueError("a tate-chu-yoko block cannot contain spaces")
+    if requires_shaping(text):
+        raise ValueError("a tate-chu-yoko block cannot contain joining characters")
+
+
 def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern=True,
-                features=None, alt_index=0, spans=None) -> _BoxLayout:
+                features=None, alt_index=0, spans=None,
+                writing_mode=HORIZONTAL) -> _BoxLayout:
     """The ONE layout pass shared by `add_text_box` and `measure_text_box`
     — validation, box geometry (incl. the rotation transposition),
     face resolution (family + bold/italic style), subset-font build,
@@ -828,11 +1140,20 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     # itself rather than surfacing whatever the font machinery hits on the way.
     if not isinstance(kern, bool):
         raise ValueError(f"kern must be true or false (got {kern!r})")
+    wframe, columns, vertical = _resolve_writing(writing_mode, body)
     _ang = float(rotate) % 360.0
     if _ang in (0.0, 90.0, 180.0, 270.0):
         rot, angle = int(_ang), None  # the shipped step path, byte-identical
     else:
         rot, angle = None, _ang
+    # A turn and a writing mode compose geometrically and produce a block no
+    # orientation admits: composing the identity Tm with a quarter-turn cm
+    # sends a vertical member's advance off the transposed frame's +x' axis,
+    # so the re-listing refuses every combination and the column would author
+    # fine and then be permanently uneditable. A vertical writing mode IS a
+    # turned reading axis, which is what it exists for.
+    if vertical and rot != 0:
+        raise ValueError("a rotated box cannot also have a vertical writing mode")
     left, right = min(x0, x1), max(x0, x1)
     top, bottom = max(y0, y1), min(y0, y1)
     box_w = max(right - left, 1.0)
@@ -847,14 +1168,14 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     # (+x DOWN, +y RIGHT). rotate=0 keeps the shipped device-space path
     # byte-for-byte (no frame).
     if rot in (90, 270):
-        l_w, l_h = max(top - bottom, 1.0), right - left
+        l_w0, l_h0 = max(top - bottom, 1.0), right - left
     else:
-        l_w, l_h = box_w, top - bottom
+        l_w0, l_h0 = box_w, top - bottom
     if rot == 0:
-        l_left, l_right, l_top = left, right, top
+        local = (left, bottom, right, top)
         frame = None
     elif rot is not None:
-        l_left, l_right, l_top = 0.0, l_w, l_h
+        local = (0.0, 0.0, l_w0, l_h0)
         frame = {
             90: [0, 1, -1, 0, round(right, 4), round(bottom, 4)],
             180: [-1, 0, 0, -1, round(right, 4), round(top, 4)],
@@ -864,7 +1185,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
         # The layout fills the drawn box's own dimensions and the frame turns
         # that box about its center. Layout, wrap, and measure
         # stay local and angle-blind; only this frame differs.
-        l_left, l_right, l_top = 0.0, l_w, l_h
+        local = (0.0, 0.0, l_w0, l_h0)
         theta = math.radians(angle)
         cos_t, sin_t = math.cos(theta), math.sin(theta)
         cx, cy = (left + right) / 2.0, (bottom + top) / 2.0
@@ -873,9 +1194,18 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
             round(sin_t, 6),
             round(-sin_t, 6),
             round(cos_t, 6),
-            round(cx - (l_w / 2.0 * cos_t - l_h / 2.0 * sin_t), 4),
-            round(cy - (l_w / 2.0 * sin_t + l_h / 2.0 * cos_t), 4),
+            round(cx - (l_w0 / 2.0 * cos_t - l_h0 / 2.0 * sin_t), 4),
+            round(cy - (l_w0 / 2.0 * sin_t + l_h0 / 2.0 * cos_t), 4),
         ]
+
+    # BOUNDARY 1 — the drawn box enters the writing frame, and the layout
+    # below reads only the transposed numbers. `l_w` is the extent along the
+    # READING axis (a column's length), `l_h` the extent across it (how many
+    # columns fit). The horizontal frame is the identity, so both are the
+    # shipped quantities bit for bit.
+    l_left, l_right, l_top, l_bottom = _frame_rect(wframe, *local)
+    l_w = max(l_right - l_left, 1.0)
+    l_h = l_top - l_bottom
 
     sz = max(1.0, min(_MAX_SIZE, float(size) if size else 12.0))
     leading = sz * _LEADING_EM
@@ -887,7 +1217,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
             pdf, body, _validated_spans(spans, len(body)), sz, font_path, family,
             bold, italic, kern, features, alt_index,
             rot, l_left, l_right, l_top, l_w, l_h, frame,
-            left, right, top, bottom, angle,
+            left, right, top, bottom, angle, wframe, columns, vertical,
         )
 
     # Compose style into the same resolution ladder for both face slots.
@@ -900,19 +1230,30 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     # this is the only bundled face that can do it. No feature => the shipped
     # Liberation path, byte-identical.
     feats = _normalize_features(features)
-    explicit = _explicit_face(family, sk)
-    if explicit is not None:
-        face = explicit
-    elif feats:
-        from engine.font_fallback import resolve_feature_font
-
-        face = resolve_feature_font(str(font_path), style=sk)
-    elif family in ("serif", "mono", "sans"):
-        face = resolve_fallback_font(
-            str(font_path), synthetic_family_font(family), style=sk, text=body, rtl_ok=True
-        )
+    upright = True
+    if vertical:
+        # `build_vertical_font` takes no feature request at all, so a feature
+        # on a column would be a control that quietly did nothing.
+        if feats:
+            raise ValueError("small caps and alternates do not apply to vertical text")
+        face, upright = _vertical_face(font_path, family, sk, body, columns)
     else:
-        face = resolve_fallback_font(str(font_path), None, style=sk, text=body, rtl_ok=True)
+        explicit = _explicit_face(family, sk)
+        if explicit is not None:
+            face = explicit
+        elif feats:
+            from engine.font_fallback import resolve_feature_font
+
+            face = resolve_feature_font(str(font_path), style=sk)
+        elif family in ("serif", "mono", "sans"):
+            face = resolve_fallback_font(
+                str(font_path), synthetic_family_font(family), style=sk, text=body,
+                rtl_ok=True,
+            )
+        else:
+            face = resolve_fallback_font(
+                str(font_path), None, style=sk, text=body, rtl_ok=True
+            )
 
     # Chars actually DRAWN — control whitespace is structural (the line
     # breaks handled just below), never a glyph, so it stays out of the
@@ -933,7 +1274,22 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
         finally:
             _ff.close()
         glyph_for = {ch: nm for ch, nm in zip(unique, names) if nm is not None}
-    bd, font_dict, encode, width_1000 = _prepare_bidi(face, body, pdf, unique, glyph_for)
+    if vertical and upright:
+        # An upright column embeds the face's OWN vertical forms under
+        # /Identity-V, and `width_1000` reports the /W2 advance — which is
+        # the length the column runs, i.e. exactly the number the wrap
+        # measures against in the transposed frame. Nothing shapes: vertical
+        # text advances glyph by glyph and forms no cross-character
+        # ligatures, so there is no run for the bidi/shaping ladder to hold.
+        from engine.font_fallback import build_vertical_font
+
+        bd = None
+        font_dict, encode, width_1000 = build_vertical_font(pdf, face, unique)
+        kern = False
+    else:
+        bd, font_dict, encode, width_1000 = _prepare_bidi(
+            face, body, pdf, unique, glyph_for
+        )
     if bd is not None:
         # Measure through the SAME units the emission draws — shaped
         # words by the shaper's positioned advance, everything else by the
@@ -963,11 +1319,11 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     # line stays a blank line; leading/trailing blanks are trimmed.
     lines: list[str] = []
     for segment in body.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        seg_words = segment.split()
-        if not seg_words:
+        seg_units = _units(segment)
+        if not seg_units:
             lines.append("")
             continue
-        lines.extend(_wrap(seg_words, width_1000, sz, l_w))
+        lines.extend(_wrap(seg_units, width_1000, sz, l_w))
     while lines and lines[0] == "":
         lines.pop(0)
     while lines and lines[-1] == "":
@@ -979,7 +1335,52 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
         frame=frame, left=left, right=right, top=top, bottom=bottom,
         font_dict=font_dict, encode=encode, width_1000=width_1000,
         kern_pairs=pairs, bidi=bd,
+        wframe=wframe, columns=columns, vertical=vertical, upright=upright,
+        glyph_lin=(1, 0, 0, 1) if (not vertical or upright) else (0, -1, 1, 0),
+        tcy_em=sz,
     )
+
+
+def _emit_tcy(instrs, csi, piece, style, name, rgb, lay, cursor, baseline, seg_width):
+    """Place ONE tate-chu-yoko block, and return the (font, colour) state it
+    leaves behind.
+
+    The block is UPRIGHT inside a column that is not: its linear part is the
+    identity, so its advance runs along the column's block axis rather than
+    down it, which is what makes it a block instead of a column member. Two
+    numbers place it, both of them the ones `_absorb_tate_chu_yoko` reads
+    back: it consumes one column em of the reading axis with its baseline
+    `TCY_BASELINE_EM` into that em, and it is CENTRED across the column on
+    the width it actually draws. `Tz` condenses it to one em across — a
+    four-digit year and a two-digit one occupy the same column pitch — and
+    returns to 100 immediately, because horizontal scaling is text state and
+    would otherwise follow the column down the page."""
+    text = piece[1]
+    em = lay.tcy_em
+    natural = seg_width(text, piece[2])
+    h_scale = 1.0
+    if em > 0.0 and natural > em:
+        h_scale = em / natural
+        natural = em
+    # Which way the block advances in the frame: +y′ for right-to-left
+    # columns, −y′ for left-to-right ones. Centring reads the sign rather
+    # than assuming it.
+    gy = _t(lay.wframe, 1.0, 0.0)[1]
+    tx, ty = _t_inv(
+        lay.wframe,
+        cursor + TCY_BASELINE_EM * em,
+        baseline - gy * natural / 2.0,
+    )
+    if h_scale != 1.0:
+        instrs.append(csi([round(h_scale * 100.0, 4)], "Tz"))
+    instrs.append(csi([1, 0, 0, 1, round(tx, 4), round(ty, 4)], "Tm"))
+    instrs.append(csi([Name(name), style["size"]], "Tf"))
+    want_rgb = tuple(style["color"]) if style["color"] is not None else tuple(rgb)
+    instrs.append(csi(list(want_rgb), "rg"))
+    instrs.extend(_span_show(piece, style, csi, pikepdf.Array))
+    if h_scale != 1.0:
+        instrs.append(csi([100], "Tz"))
+    return (name, style["size"]), want_rgb
 
 
 def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, page) -> dict:
@@ -987,9 +1388,8 @@ def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, pag
     each line's OWN leading, per-segment Tf/rg (only on change), the same
     shift-up-to-visible rule, the same q/Q + rotation-frame envelope."""
     styles, styled_lines, leadings = lay.styles, lay.styled_lines, lay.line_leadings
-    rot, frame = lay.rot, lay.frame
+    frame = lay.frame
     l_left, l_right, l_top, l_w = lay.l_left, lay.l_right, lay.l_top, lay.l_w
-    left, right, top = lay.left, lay.right, lay.top
 
     def csi(operands, op):
         return _CSI(operands, Operator(op))
@@ -1036,33 +1436,7 @@ def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, pag
             vbox = [float(v) for v in p.mediabox]
         except Exception:
             vbox = None
-    if vbox is None:
-        page_lly = 0.0
-        page_ury = l_top + first_size
-    elif rot == 90:
-        page_lly, page_ury = right - vbox[2], right - vbox[0]
-    elif rot == 180:
-        page_lly, page_ury = top - vbox[3], top - vbox[1]
-    elif rot == 270:
-        page_lly, page_ury = vbox[0] - left, vbox[2] - left
-    elif rot is None:
-        # Free rotation: the band is the page box's PREIMAGE under the
-        # frame — invert the (pure rotation + translate) affine, map the
-        # four device corners, take the local y-extent.
-        a_f, b_f, c_f, d_f, e_f, f_f = (float(v) for v in frame)
-        det = a_f * d_f - b_f * c_f
-        inv_b, inv_d = -b_f / det, a_f / det
-        inv_f = (b_f * e_f - a_f * f_f) / det
-        ys = [
-            x_ * inv_b + y_ * inv_d + inv_f
-            for x_, y_ in (
-                (vbox[0], vbox[1]), (vbox[2], vbox[1]),
-                (vbox[0], vbox[3]), (vbox[2], vbox[3]),
-            )
-        ]
-        page_lly, page_ury = min(ys), max(ys)
-    else:
-        page_lly, page_ury = vbox[1], vbox[3]
+    page_lly, page_ury = _page_band(lay, vbox, first_size)
     if baselines and baselines[-1] < page_lly:
         shift = page_lly - baselines[-1]
         cap = page_ury - first_size
@@ -1089,13 +1463,31 @@ def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, pag
             lx = l_right - line_w
         else:
             lx = l_left
-        instrs.append(csi([1, 0, 0, 1, round(lx, 4), round(baselines[i], 4)], "Tm"))
         emit = pieces if pieces is not None else [("text", t, st) for t, st in segments]
+        # The pen walks the line itself, so an ordinary line emits ONE Tm and
+        # lets the shows advance it — the shipped bytes. A tate-chu-yoko
+        # block writes its OWN Tm (it is placed, not reached) and leaves the
+        # pen somewhere the next piece cannot use, so the piece after one
+        # re-anchors from the cursor the layout gives it.
+        cursor = lx
+        pen = False
         for piece in emit:
             st = piece[2]
             s = styles[st]
             if st not in names:
                 continue  # whitespace-only style with no drawn chars
+            if s.get("tcy"):
+                cur_font, cur_rgb = _emit_tcy(
+                    instrs, csi, piece, s, names[st], rgb, lay,
+                    cursor, baselines[i], seg_width,
+                )
+                cursor += lay.tcy_em
+                pen = False
+                continue
+            if not pen:
+                tx, ty = _t_inv(lay.wframe, cursor, baselines[i])
+                instrs.append(csi(list(lay.glyph_lin) + [round(tx, 4), round(ty, 4)], "Tm"))
+                pen = True
             want_font = (names[st], s["size"])
             if want_font != cur_font:
                 instrs.append(csi([Name(names[st]), s["size"]], "Tf"))
@@ -1105,6 +1497,7 @@ def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, pag
                 instrs.append(csi(list(want_rgb), "rg"))
                 cur_rgb = want_rgb
             instrs.extend(_span_show(piece, s, csi, pikepdf.Array))
+            cursor += piece_width(piece)
     instrs.append(csi([], "ET"))
     instrs.append(csi([], "Q"))
     if frame is not None:
@@ -1141,6 +1534,7 @@ def add_text_box(
     features: list | None = None,
     alt_index: int = 0,
     spans: list | None = None,
+    writing_mode: str = HORIZONTAL,
 ) -> dict:
     """Author a new text box on `page`.
 
@@ -1156,7 +1550,13 @@ def add_text_box(
     BOTTOM is shifted up to stay visible (never a success that renders off
     the sheet). The authored run is a normal Type0+ToUnicode object —
     editable and searchable afterward (rotated: on the run surface, the
-    standing rotated-text boundary)."""
+    standing rotated-text boundary).
+
+    `writing_mode` is `horizontal` (default), `vertical`, `vertical-rl` or
+    `vertical-lr`. A vertical box reads DOWN the drawn box's height and its
+    columns stack across its width; the direction comes from the text
+    (`vertical`) and an explicit spelling is honoured only where the text
+    agrees with it. A vertical box cannot also be rotated."""
     if color is None:
         rgb = (0.0, 0.0, 0.0)
     else:
@@ -1175,15 +1575,14 @@ def add_text_box(
         # the page-range check — the pre-refactor precedence (a doubly-invalid
         # call surfaces the input error, not the page error).
         lay = _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern,
-                          features, alt_index, spans)
+                          features, alt_index, spans, writing_mode)
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
 
-        body, lines, leading, sz, rot = lay.body, lay.lines, lay.leading, lay.sz, lay.rot
+        body, lines, leading, sz = lay.body, lay.lines, lay.leading, lay.sz
         l_left, l_right, l_top, l_w = lay.l_left, lay.l_right, lay.l_top, lay.l_w
-        left, right, top, bottom = lay.left, lay.right, lay.top, lay.bottom
         frame = lay.frame
         font_dict, encode, width_1000 = lay.font_dict, lay.encode, lay.width_1000
 
@@ -1225,6 +1624,9 @@ def add_text_box(
         # [lly, ury]; local "down" is wherever overflow marches off the sheet
         # (90: out the page's RIGHT edge, 180: the TOP, 270: the LEFT).
         # Overflow past the drawn box itself stays permitted, like rotate=0.
+        # Vertical: the same rule one axis over — the band comes from the
+        # writing frame, so a column that would run off the sheet moves back
+        # along the axis its columns stack in.
         try:
             vbox = [float(v) for v in p.cropbox]
         except Exception:
@@ -1232,35 +1634,11 @@ def add_text_box(
                 vbox = [float(v) for v in p.mediabox]
             except Exception:
                 vbox = None
-        if vbox is None:
-            page_lly, page_ury = 0.0, l_top + sz
-        elif rot == 90:
-            page_lly, page_ury = right - vbox[2], right - vbox[0]
-        elif rot == 180:
-            page_lly, page_ury = top - vbox[3], top - vbox[1]
-        elif rot == 270:
-            page_lly, page_ury = vbox[0] - left, vbox[2] - left
-        elif rot is None:
-            # Free rotation: the band is the page box's PREIMAGE under the
-            # frame — invert the (pure rotation + translate) affine, map the
-            # four device corners, take the local y-extent.
-            a_f, b_f, c_f, d_f, e_f, f_f = (float(v) for v in frame)
-            det = a_f * d_f - b_f * c_f
-            inv_b, inv_d = -b_f / det, a_f / det
-            inv_f = (b_f * e_f - a_f * f_f) / det
-            ys = [
-                x_ * inv_b + y_ * inv_d + inv_f
-                for x_, y_ in (
-                    (vbox[0], vbox[1]), (vbox[2], vbox[1]),
-                    (vbox[0], vbox[3]), (vbox[2], vbox[3]),
-                )
-            ]
-            page_lly, page_ury = min(ys), max(ys)
-        else:
-            page_lly, page_ury = vbox[1], vbox[3]
+        page_lly, page_ury = _page_band(lay, vbox, sz)
         last_baseline = y_top - (len(lines) - 1) * leading
         if last_baseline < page_lly:
             y_top = min(page_ury - sz, y_top + (page_lly - last_baseline))
+        g_a, g_b, g_c, g_d = lay.glyph_lin
         for i, line in enumerate(lines):
             if not line:
                 continue  # blank line: y still advances via `i`
@@ -1272,7 +1650,13 @@ def add_text_box(
             else:
                 lx = l_left
             ly = y_top - i * leading
-            instrs.append(csi([1, 0, 0, 1, round(lx, 4), round(ly, 4)], "Tm"))
+            # BOUNDARY 2 — the anchor leaves the writing frame here, and
+            # nothing else does. The linear part is the glyphs' own (identity
+            # for horizontal text and for an upright column; a quarter turn
+            # for horizontal glyphs laid down a column), so for a horizontal
+            # box these operands are the shipped ones.
+            tx, ty = _t_inv(lay.wframe, lx, ly)
+            instrs.append(csi([g_a, g_b, g_c, g_d, round(tx, 4), round(ty, 4)], "Tm"))
             if lay.bidi is not None:
                 # The line permutes into visual order HERE, after the
                 # wrap — line breaks are a logical-order decision, and rule
@@ -1332,24 +1716,26 @@ def measure_text_box(
     features: list | None = None,
     alt_index: int = 0,
     spans: list | None = None,
+    writing_mode: str = HORIZONTAL,
 ) -> dict:
     """Report how `text` would lay out in the box WITHOUT
     writing — the card's live fit indicator. Runs the exact `_layout_box`
     pass `add_text_box` runs (same wrap width, size clamp, family/style/
-    rotate transposition, and kerning), so `fits` can never disagree
-    with the commit.
+    rotate transposition, writing mode, and kerning), so `fits` can never
+    disagree with the commit.
 
     `text_height` = one leading per wrapped line (the block's extent down
     from the box top); `box_height` = the box dimension ACROSS the reading
-    direction (l_h — the drawn height at 0/180, the drawn width at 90/270).
-    `fits` is text_height <= box_height. Overflow is NOT an error — the box
-    is a guide, not a clip; the card warns, the commit still proceeds."""
+    direction (l_h — the drawn height at 0/180, the drawn width at 90/270,
+    and the drawn WIDTH for a column, whose lines are columns). `fits` is
+    text_height <= box_height. Overflow is NOT an error — the box is a
+    guide, not a clip; the card warns, the commit still proceeds."""
     pdf = pikepdf.open(file)
     try:
         # Same precedence as add_text_box: input-shape checks (inside
         # _layout_box) before the page range.
         lay = _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, kern,
-                          features, alt_index, spans)
+                          features, alt_index, spans, writing_mode)
         total = len(pdf.pages)
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
@@ -1368,6 +1754,15 @@ def measure_text_box(
             "text_height": text_height,
             "box_height": box_height,
             "fits": text_height <= box_height,
+            # The RESOLVED writing mode. A bare `vertical` request derives
+            # its column direction from the text, and the card has no way to
+            # know which way that went without asking the code that decided
+            # — asking here is what keeps one implementation of the evidence
+            # instead of a renderer copy that can disagree with the commit.
+            "writing_mode": (
+                HORIZONTAL if not lay.vertical
+                else (VERTICAL_LR if lay.columns == COLUMNS_LTR else VERTICAL_RL)
+            ),
         }
     finally:
         try:

@@ -1696,6 +1696,25 @@ def _cjk(ch: str) -> bool:
     )
 
 
+def breaks_between(prev: str, nxt: str) -> bool:
+    """Whether a line may break between two adjacent entries.
+
+    The rule a no-space script needs: break after any CJK character, unless
+    the next entry must not START a line (行頭禁則) or the previous must not
+    END one (行末禁則). Entries may be atomic multi-character ligatures, so
+    the CJK test reads the boundary-adjacent code points.
+
+    Shared by the reflow tokenizer and the authoring wrap — a column's wrap
+    and a paragraph's wrap answer the same question, and two answers to it
+    would put a break in a document that the re-listing then refuses to make
+    itself."""
+    return (
+        nxt not in NO_LINE_START
+        and prev[-1:] not in NO_LINE_END
+        and (_cjk(prev[-1]) or _cjk(nxt[0]))
+    )
+
+
 class _StyleRef:
     """One rendering style for a slice of new text: a member run's
     measured style, optionally re-fonted to a fallback subset.
@@ -2644,16 +2663,7 @@ def _tokenize(
                 current.gap_styles = []
             else:
                 close()  # a non-space after gap chars starts the next word
-        elif (
-            current.chars
-            and ch not in NO_LINE_START
-            # No break AFTER an opener either (the CJK-boundary break
-            # is the common Japanese case: 「日 must stay together).
-            and current.chars[-1][0][-1] not in NO_LINE_END
-            # Entries can be atomic multi-char ligatures — classify
-            # the break by the boundary-adjacent code points.
-            and (_cjk(current.chars[-1][0][-1]) or _cjk(ch[0]))
-        ):
+        elif current.chars and breaks_between(current.chars[-1][0], ch):
             close()  # break after (and before) CJK — no-space scripts wrap
         current.chars.append((ch, st))
         current.char_widths.append(w)
