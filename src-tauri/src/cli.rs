@@ -1866,6 +1866,11 @@ pub struct VerifySignaturesArgs {
     /// not read at all without it.
     #[arg(long)]
     pub system_trust: bool,
+    /// Also anchor on the bundled EU trusted-list certificates, per service
+    /// purpose. Off unless given; the bundle ships with the app and nothing is
+    /// downloaded.
+    #[arg(long)]
+    pub eutl_trust: bool,
 }
 
 #[derive(Args)]
@@ -1926,6 +1931,10 @@ pub struct SignArgs {
     /// store (used with --embed-revocation)
     #[arg(long)]
     pub system_trust: bool,
+    /// Also anchor revocation gathering on the bundled EU trusted-list
+    /// certificates (used with --embed-revocation)
+    #[arg(long)]
+    pub eutl_trust: bool,
     /// PKCS#11 provider module (.dll) — sign with a hardware token/HSM.
     /// Use with --token-label and --cert-label; --password is the PIN.
     #[arg(long, conflicts_with_all = ["pfx", "key", "cert"], requires_all = ["token_label", "cert_label"])]
@@ -4433,6 +4442,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             if args.system_trust {
                 params["system_trust"] = json!(true);
             }
+            if args.eutl_trust {
+                params["eutl_trust"] = json!(true);
+            }
             engine.call("verify_signatures", params)
         }
 
@@ -4543,6 +4555,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             }
             if args.system_trust {
                 params["system_trust"] = json!(true);
+            }
+            if args.eutl_trust {
+                params["eutl_trust"] = json!(true);
             }
             engine.call("sign_pdf", params)
         }
