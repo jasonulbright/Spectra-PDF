@@ -339,6 +339,22 @@ def _widget_on_state(widget) -> str | None:
     return None
 
 
+def _field_description(field: _Field) -> str:
+    """The field's ``/TU``. Read off the field's OWN dictionary: `/TU` is not
+    among the inheritable field attributes, so a parent's description does not
+    describe its children."""
+    try:
+        value = field.obj.get("/TU")
+    except (AttributeError, TypeError):
+        return ""
+    if value is None:
+        return ""
+    try:
+        return str(value).strip()
+    except (TypeError, ValueError):
+        return ""
+
+
 def _field_value(field: _Field, ftype: str):
     v = field.attr("/V")
     if ftype == "checkbox":
@@ -559,6 +575,11 @@ def read_form_fields(file: str) -> dict:
                 "value": _field_value(field, ftype),
                 "read_only": bool(field.flags & FF_READ_ONLY),
                 "required": bool(field.flags & FF_REQUIRED),
+                # /TU — what assistive technology announces at this field. The
+                # accessibility checker reads it from here, and the Forms panel
+                # authors it; empty means the field has none, which is the
+                # finding rather than an absence of information.
+                "description": _field_description(field),
                 # Per-widget page+rect (+hidden, +radio option) so the
                 # engine read can drive the on-canvas overlay
                 # and nested widgets list with geometry.

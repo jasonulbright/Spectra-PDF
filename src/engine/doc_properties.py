@@ -16,12 +16,14 @@ deleting the key produce the same document — the setter deletes, and a file
 that never had a ``/ViewerPreferences`` dict does not grow an empty one.
 """
 
+import re
 from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
 from .inplace import finish_staged, is_same_file, staging_target
+from engine.incremental import signature_policy, signed_edit_decision
 from engine.pdf_save import save_pdf
 
 # panel value → /PageLayout name. "default" is the absent key.
@@ -412,6 +414,309 @@ def set_initial_view(
             save_pdf(pdf, output_path)
 
     return {"output": str(output_path)}
+
+
+# ── accessibility: the document's language and each page's tab order ───────
+
+# RFC 5646 well-formedness, subtag by subtag. Validity against the IANA
+# registry is deliberately NOT checked: the registry is a moving list and a
+# tag this refuses is a tag a reader would have honoured.
+_PRIMARY = re.compile(r"^[A-Za-z]{2,8}$")
+_SCRIPT = re.compile(r"^[A-Za-z]{4}$")
+_REGION = re.compile(r"^([A-Za-z]{2}|[0-9]{3})$")
+_VARIANT = re.compile(r"^([A-Za-z0-9]{5,8}|[0-9][A-Za-z0-9]{3})$")
+_EXTLANG = re.compile(r"^[A-Za-z]{3}$")
+_SINGLETON = re.compile(r"^[A-Za-z0-9]$")
+_SUBTAG_CHARS = re.compile(r"^[A-Za-z0-9]+$")
+
+
+def validate_language_tag(tag: str) -> str:
+    """The tag, stripped, or a ValueError naming what is wrong with it.
+
+    A language tag names a pronunciation, so a malformed one is worse than an
+    absent one: a reader falls back to its own language for an absent /Lang and
+    mispronounces the whole document for a tag it half-understands.
+
+    Every message here is a LITERAL at its raise site — a refusal that
+    interpolated its own English explanation would re-emit that English inside
+    every translated sentence, which is the defect `printer.parse_page_spec`
+    already paid for once.
+    """
+    text = str(tag or "").strip()
+    if not text:
+        raise ValueError("Name the language, for example en-GB.")
+    parts = text.split("-")
+    for part in parts:
+        if not part:
+            raise ValueError(
+                f'"{text}" is not a well-formed language tag: it has an empty subtag '
+                "(two hyphens in a row, or a hyphen at an end)."
+            )
+        if not _SUBTAG_CHARS.match(part):
+            raise ValueError(
+                f'"{text}" is not a well-formed language tag: the subtag "{part}" '
+                "may contain only letters and digits."
+            )
+        # Every subtag a language tag can carry is at most eight characters,
+        # so one length test covers the primary, the variants and the
+        # private-use section alike.
+        if len(part) > 8:
+            raise ValueError(
+                f'"{text}" is not a well-formed language tag: the subtag "{part}" '
+                "is longer than eight characters."
+            )
+    head = parts[0]
+    if head.lower() == "x":
+        # A private-use tag stands alone: x- followed by its own subtags.
+        if len(parts) < 2:
+            raise ValueError(
+                f'"{text}" is not a well-formed language tag: "x-" needs at least one '
+                "private-use subtag after it."
+            )
+        return text
+    if not _PRIMARY.match(head):
+        raise ValueError(
+            f'"{text}" is not a well-formed language tag: the language subtag "{head}" '
+            "must be two to eight letters, as in en, de or haw."
+        )
+    rest = parts[1:]
+    at = 0
+    # Up to three extended-language subtags follow a two- or three-letter
+    # primary subtag (zh-cmn-Hans-CN). A three-letter alphabetic subtag in this
+    # position can be nothing else: a script is four letters, a region is two
+    # letters or three digits, and a variant is five or more.
+    if len(head) <= 3:
+        extlangs = 0
+        while at < len(rest) and extlangs < 3 and _EXTLANG.match(rest[at]):
+            at += 1
+            extlangs += 1
+    if at < len(rest) and _SCRIPT.match(rest[at]):
+        at += 1
+    if at < len(rest) and _REGION.match(rest[at]):
+        at += 1
+    while at < len(rest) and _VARIANT.match(rest[at]):
+        at += 1
+    while at < len(rest) and _SINGLETON.match(rest[at]) and rest[at].lower() != "x":
+        singleton = rest[at]
+        at += 1
+        seen = 0
+        while at < len(rest) and 2 <= len(rest[at]) <= 8:
+            at += 1
+            seen += 1
+        if seen == 0:
+            raise ValueError(
+                f'"{text}" is not a well-formed language tag: the extension '
+                f'"{singleton}" carries no subtag.'
+            )
+    if at < len(rest) and rest[at].lower() == "x":
+        at += 1
+        if at >= len(rest):
+            raise ValueError(
+                f'"{text}" is not a well-formed language tag: "x-" needs at least one '
+                "private-use subtag after it."
+            )
+        at = len(rest)
+    if at != len(rest):
+        raise ValueError(
+            f'"{text}" is not a well-formed language tag: the subtag "{rest[at]}" is not '
+            "in a position a language tag allows."
+        )
+    return text
+
+
+def _signed_structural_gate(file: str, allow_signed: bool) -> str:
+    """``proceed`` | ``refuse`` | ``warn`` for a structural edit of `file`.
+
+    The DECISION is shared; the SENTENCE is not. Each door raises its own
+    literal message naming its own action, because a refusal that interpolated
+    that action would insert an English phrase into every translated sentence
+    (`printer.parse_page_spec`, and the standing rule it produced).
+    """
+    decision = signed_edit_decision(signature_policy(file), "structural")
+    if decision["kind"] == "refuse":
+        return "refuse"
+    if decision["kind"] == "warn" and not allow_signed:
+        return "warn"
+    return "proceed"
+
+
+def set_document_language(
+    file: str, output: str, lang: str = "", allow_signed: bool = False
+) -> dict:
+    """Write the catalog's ``/Lang`` — the document's primary language.
+
+    Args:
+        file: Input PDF path.
+        output: Output PDF path (may equal `file`).
+        lang: A BCP 47 language tag (en, en-GB, zh-Hant-TW). Empty removes the
+            declaration.
+        allow_signed: The signed-document decision, already taken by the caller.
+    """
+    text = str(lang or "").strip()
+    if text:
+        text = validate_language_tag(text)
+    gate = _signed_structural_gate(file, allow_signed)
+    if gate == "refuse":
+        raise RuntimeError(
+            "this document is certified to allow no changes, so setting the document "
+            "language would produce a file that reports as illegally modified"
+        )
+    if gate == "warn":
+        raise RuntimeError(
+            "this document is signed and setting the document language invalidates its "
+            "signatures -- the run must state that signed documents are included before "
+            "it will touch one"
+        )
+
+    output_path = Path(output)
+    with pikepdf.open(file) as pdf:
+        if text:
+            pdf.Root[Name.Lang] = String(text)
+        elif "/Lang" in pdf.Root:
+            del pdf.Root["/Lang"]
+        if is_same_file(file, output):
+            staged = staging_target(output_path)
+            save_pdf(pdf, staged)
+            finish_staged(staged, output_path)
+        else:
+            save_pdf(pdf, output_path)
+    return {"output": str(output_path), "lang": text}
+
+
+def set_document_title(
+    file: str,
+    output: str,
+    title: str | None = None,
+    display: bool | None = None,
+    allow_signed: bool = False,
+) -> dict:
+    """Write the document's title AND whether a reader shows it, in one save.
+
+    The accessibility check they answer is ONE check — a document has a title
+    and shows it, or it does not — so the fix is one act and one undo step. The
+    title lands through the XMP writer, which is what keeps `dc:title` and the
+    document information dictionary saying the same thing; the flag is the
+    ordinary `/ViewerPreferences /DisplayDocTitle`, deleted when false so the
+    file carries only what departs from the default.
+
+    Args:
+        file: Input PDF path.
+        output: Output PDF path (may equal `file`).
+        title: The document title. None leaves it unchanged.
+        display: Whether the reader shows the title instead of the file name.
+            None leaves it unchanged.
+        allow_signed: The signed-document decision, already taken by the caller.
+    """
+    if title is None and display is None:
+        raise ValueError("no title and no display setting to write")
+    gate = _signed_structural_gate(file, allow_signed)
+    if gate == "refuse":
+        raise RuntimeError(
+            "this document is certified to allow no changes, so setting the document "
+            "title would produce a file that reports as illegally modified"
+        )
+    if gate == "warn":
+        raise RuntimeError(
+            "this document is signed and setting the document title invalidates its "
+            "signatures -- the run must state that signed documents are included before "
+            "it will touch one"
+        )
+
+    output_path = Path(output)
+    with pikepdf.open(file) as pdf:
+        if title is not None:
+            with pdf.open_metadata() as meta:
+                meta["dc:title"] = str(title)
+        if display is not None:
+            _apply_viewer_preferences(pdf, {"display_doc_title": bool(display)}, None)
+        if is_same_file(file, output):
+            staged = staging_target(output_path)
+            save_pdf(pdf, staged)
+            finish_staged(staged, output_path)
+        else:
+            save_pdf(pdf, output_path)
+    return {"output": str(output_path), "title": title, "display_doc_title": display}
+
+
+def set_page_tab_order(
+    file: str, output: str, pages=None, order: str = "S", allow_signed: bool = False
+) -> dict:
+    """Write each page's ``/Tabs`` — the order keyboard focus visits its
+    annotations.
+
+    Only pages that CARRY annotations are written. ``/Tabs`` on a page with
+    nothing to order is a key that says nothing, and a run that wrote it
+    everywhere would report a success it did not earn — so a document with no
+    annotations at all refuses instead.
+
+    Args:
+        file: Input PDF path.
+        output: Output PDF path (may equal `file`).
+        pages: 1-based page numbers to write, or None for every page carrying
+            annotations.
+        order: S (structure order), R (row order) or C (column order).
+        allow_signed: The signed-document decision, already taken by the caller.
+    """
+    value = str(order or "S").strip().lstrip("/").upper()
+    if value not in ("S", "R", "C"):
+        raise ValueError(f"tab order must be S, R or C, got {order!r}")
+    gate = _signed_structural_gate(file, allow_signed)
+    if gate == "refuse":
+        raise RuntimeError(
+            "this document is certified to allow no changes, so setting the tab order "
+            "would produce a file that reports as illegally modified"
+        )
+    if gate == "warn":
+        raise RuntimeError(
+            "this document is signed and setting the tab order invalidates its "
+            "signatures -- the run must state that signed documents are included before "
+            "it will touch one"
+        )
+
+    output_path = Path(output)
+    with pikepdf.open(file) as pdf:
+        total = len(pdf.pages)
+        wanted = None
+        if pages is not None:
+            wanted = set()
+            for raw in pages:
+                # `page_no` and the inline bound are the refusal table's own
+                # shape for this message — sixteen modules share one row, and
+                # renaming a local here renames its placeholders everywhere.
+                page_no = int(raw)
+                if not 1 <= page_no <= total:
+                    raise ValueError(f"page {page_no} is out of range (1-{len(pdf.pages)})")
+                wanted.add(page_no)
+        written = []
+        skipped = 0
+        for i, page in enumerate(pdf.pages):
+            number = i + 1
+            if wanted is not None and number not in wanted:
+                continue
+            annots = page.obj.get("/Annots")
+            has_annots = False
+            if annots is not None:
+                try:
+                    has_annots = len(annots) > 0
+                except (TypeError, ValueError):
+                    has_annots = False
+            if not has_annots:
+                skipped += 1
+                continue
+            page.obj[Name.Tabs] = Name("/" + value)
+            written.append(number)
+        if not written:
+            raise ValueError(
+                "No page here carries an annotation, so there is no tab order to "
+                "declare: /Tabs on a page with nothing to order says nothing."
+            )
+        if is_same_file(file, output):
+            staged = staging_target(output_path)
+            save_pdf(pdf, staged)
+            finish_staged(staged, output_path)
+        else:
+            save_pdf(pdf, output_path)
+    return {"output": str(output_path), "pages": written, "skipped": skipped, "order": value}
 
 
 # ── Advanced ───────────────────────────────────────────────────────────────

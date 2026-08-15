@@ -30,7 +30,7 @@ from engine.grayscale import grayscale
 from engine.prepress import convert_cmyk, convert_pdfx
 from engine.optimize import optimize
 from engine.pdfa import convert_pdfa
-from engine.encrypt import encrypt, decrypt
+from engine.encrypt import decrypt, encrypt, grant_accessibility_permission
 from engine.pubkey_crypt import decrypt_with_pfx, encrypt_with_certs
 from engine.extract_text import extract_text
 from engine.search_in_files import search_in_files
@@ -41,6 +41,7 @@ from engine.page_boxes import set_page_boxes
 from engine.page_labels import get_page_labels, set_page_labels
 from engine.layers import list_layers, set_layer_visibility
 from engine.accessibility import check_accessibility
+from engine.accessibility_fixes import apply_accessibility_fixes
 from engine.annotations import delete_all_annotations, list_annotations
 from engine.preflight import preflight
 from engine.separations import (
@@ -102,7 +103,10 @@ from engine.doc_properties import (
     get_advanced_properties,
     get_initial_view,
     set_advanced_properties,
+    set_document_language,
+    set_document_title,
     set_initial_view,
+    set_page_tab_order,
 )
 from engine.font_inventory import list_document_fonts
 from engine.reversion import get_pdf_version, set_pdf_version
@@ -122,7 +126,7 @@ from engine.space_audit import audit_space_usage
 from engine.watermark import watermark
 from engine.compare import compare_text, compare_visual
 from engine.form_detect import detect_form_fields
-from engine.form_authoring import set_field_actions, set_field_lock
+from engine.form_authoring import set_field_actions, set_field_description, set_field_lock
 from engine.form_prepare import create_detected_fields, prepare_form_fields
 from engine.forms import (
     export_form_data,
@@ -182,6 +186,7 @@ from engine.printer import print_pdf, print_preview, print_preview_cleanup
 from engine.incremental import signature_policy, transplant_incremental
 from engine.redact_marks import list_redact_annotations, save_redaction_marks
 from engine.signatures import verify_signatures, sign_pdf, generate_signer
+from engine.struct_fix import set_table_headers
 from engine.struct_tree import (
     add_struct_node,
     delete_struct_node,
@@ -209,6 +214,7 @@ def main() -> None:
     server.register("optimize", optimize)
     server.register("convert_pdfa", convert_pdfa)
     server.register("encrypt", encrypt)
+    server.register("grant_accessibility_permission", grant_accessibility_permission)
     server.register("decrypt", decrypt)
     server.register("encrypt_pubkey", encrypt_with_certs)
     server.register("decrypt_pubkey", decrypt_with_pfx)
@@ -235,6 +241,7 @@ def main() -> None:
     server.register("list_layers", list_layers)
     server.register("set_layer_visibility", set_layer_visibility)
     server.register("check_accessibility", check_accessibility)
+    server.register("apply_accessibility_fixes", apply_accessibility_fixes)
     server.register("list_annotations", list_annotations)
     server.register("delete_all_annotations", delete_all_annotations)
     server.register("preflight", preflight)
@@ -261,6 +268,7 @@ def main() -> None:
     server.register("export_postscript", export_postscript)
     server.register("get_struct_tree", get_struct_tree)
     server.register("set_struct_props", set_struct_props)
+    server.register("set_table_headers", set_table_headers)
     server.register("move_struct_node", move_struct_node)
     server.register("delete_struct_node", delete_struct_node)
     server.register("add_struct_node", add_struct_node)
@@ -281,6 +289,9 @@ def main() -> None:
     server.register("set_initial_view", set_initial_view)
     server.register("get_advanced_properties", get_advanced_properties)
     server.register("set_advanced_properties", set_advanced_properties)
+    server.register("set_document_language", set_document_language)
+    server.register("set_document_title", set_document_title)
+    server.register("set_page_tab_order", set_page_tab_order)
     server.register("list_document_fonts", list_document_fonts)
     server.register("get_page_count", get_page_count)
     server.register("get_page_info", get_page_info)
@@ -320,6 +331,7 @@ def main() -> None:
     server.register("prepare_form_fields", prepare_form_fields)
     server.register("set_field_lock", set_field_lock)
     server.register("set_field_actions", set_field_actions)
+    server.register("set_field_description", set_field_description)
     server.register("apply_ocr_layer", apply_ocr_layer)
     server.register("recognize", recognize)
     server.register("analyze_scan", analyze_scan)
