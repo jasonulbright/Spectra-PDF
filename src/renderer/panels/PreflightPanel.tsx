@@ -9,7 +9,9 @@ import { tChrome, tChromeCount } from '../i18n';
 interface Check {
   id: string;
   label: string;
-  status: 'pass' | 'warn' | 'fail';
+  /** `needs_review` is the check the walk could not complete. It is not a
+   *  pass and not a finding — it is the report saying so. */
+  status: 'pass' | 'warn' | 'fail' | 'needs_review';
   detail: string;
 }
 interface Report {
@@ -17,6 +19,7 @@ interface Report {
   passed: number;
   warnings: number;
   failed: number;
+  needs_review: number;
   total: number;
   images: number;
   color_families: string[];
@@ -26,6 +29,7 @@ const ICON: Record<Check['status'], { glyph: string; color: string }> = {
   pass: { glyph: '✓', color: '#2fbf71' },
   warn: { glyph: '!', color: '#fbbf24' },
   fail: { glyph: '✕', color: '#f87171' },
+  needs_review: { glyph: '?', color: '#93c5fd' },
 };
 
 export function PreflightPanel(): React.ReactElement {
@@ -83,7 +87,7 @@ export function PreflightPanel(): React.ReactElement {
 
       {report && (
         <div className="text-sm text-neutral-300" data-testid="preflight-summary">
-          {report.failed === 0 && report.warnings === 0 ? (
+          {report.failed === 0 && report.warnings === 0 && report.needs_review === 0 ? (
             <span className="text-green-400">{tChrome('panel.preflight.allPassed', { count: report.total })}</span>
           ) : (
             <>
@@ -93,6 +97,9 @@ export function PreflightPanel(): React.ReactElement {
               )}
               {report.failed > 0 && (
                 <>, <span className="text-red-400">{tChrome('panel.preflight.failed', { count: report.failed })}</span></>
+              )}
+              {report.needs_review > 0 && (
+                <>, <span className="text-blue-300">{tChrome('panel.preflight.needsReview', { count: report.needs_review })}</span></>
               )}
               {' '}{tChrome('panel.preflight.ofTotal', { count: report.total })}
             </>

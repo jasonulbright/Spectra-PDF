@@ -27,6 +27,8 @@ from engine.flattener import (
 )
 from transparency_builders import (
     blend_mode_pdf,
+    no_bbox_form_pdf,
+    over_depth_forms_pdf,
     opaque_only_pdf,
     pattern_under_alpha_pdf,
     soft_mask_pdf,
@@ -34,6 +36,10 @@ from transparency_builders import (
     text_and_alpha_square_pdf,
     transparency_group_form_pdf,
     two_alpha_squares_pdf,
+    unreadable_child_subtype_pdf,
+    unreadable_form_gstate_pdf,
+    unreadable_form_resources_pdf,
+    unreadable_page_gstate_pdf,
 )
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
@@ -356,7 +362,7 @@ def _flatten_at(source, output, region, dpi, gs_path):
     work = Path(tempfile.mkdtemp())
     with pikepdf.open(source) as pdf:
         page = pdf.pages[0]
-        objects = page_objects(pdf, page)
+        objects, _unknowns = page_objects(pdf, page)
         target = next(o for o in objects if o["transparent"])
         instructions = list(pikepdf.parse_content_stream(page))
         kept = flattener.drop_dead_frames([
@@ -383,7 +389,79 @@ def test_compute_regions_settles_rather_than_running_to_its_cap(tmp_dir):
     source = two_alpha_squares_pdf(os.path.join(tmp_dir, "two.pdf"))
     with pikepdf.open(source) as pdf:
         page = pdf.pages[0]
-        objects = page_objects(pdf, page)
+        objects, _unknowns = page_objects(pdf, page)
         plan = compute_regions(objects, [0.0, 0.0, 612.0, 792.0], 0.0, 150)
     assert plan["passes"] < 8
     assert len(plan["regions"]) == 2
+
+
+class TestUnjudgeableObjects:
+    """Every branch that used to answer "no transparency" when it meant "I
+    could not tell".
+
+    Each fixture places one object the walk cannot read. Before this class
+    existed, all six classified as opaque, produced no region, and flattened
+    to a SUCCESS report over content that may still composite. The claim
+    pinned here is the opposite one: the classification names the object, and
+    the flatten refuses by name rather than writing that file.
+    """
+
+    CASES = (
+        ("resources", unreadable_form_resources_pdf, "cannot read"),
+        ("gstate", unreadable_form_gstate_pdf, "graphics state"),
+        ("child", unreadable_child_subtype_pdf, "cannot read"),
+        ("bbox", no_bbox_form_pdf, "/BBox cannot be measured"),
+        ("depth", over_depth_forms_pdf, "nests form XObjects deeper than"),
+        ("page_gstate", unreadable_page_gstate_pdf, "graphics state"),
+    )
+
+    @pytest.mark.parametrize("name,build,fragment", CASES)
+    def test_the_classification_reports_it_rather_than_passing(
+        self, tmp_dir, name, build, fragment
+    ):
+        source = build(os.path.join(tmp_dir, f"{name}.pdf"))
+        report = list_transparency(source)
+        page = report["pages"][0]
+        assert page["unknown"], "an object that could not be judged must be named"
+        assert fragment in page["unknown"][0]
+        assert page["counts"]["unknown"] == 1
+        assert report["unknown_pages"] == [1]
+
+    @pytest.mark.parametrize("name,build,fragment", CASES)
+    def test_the_flatten_refuses_by_name(self, tmp_dir, name, build, fragment):
+        source = build(os.path.join(tmp_dir, f"{name}.pdf"))
+        output = os.path.join(tmp_dir, f"{name}-out.pdf")
+        with pytest.raises(ValueError, match="unknown|deeper than"):
+            flatten_transparency(source, output)
+        assert not os.path.exists(output), "a refusal writes nothing"
+
+    def test_the_refusal_and_the_report_say_the_same_thing(self, tmp_dir):
+        source = no_bbox_form_pdf(os.path.join(tmp_dir, "bbox.pdf"))
+        predicted = list_transparency(source)["pages"][0]["unknown"][0]
+        with pytest.raises(ValueError) as raised:
+            flatten_transparency(source, os.path.join(tmp_dir, "out.pdf"))
+        assert str(raised.value) == predicted
+
+    def test_an_unjudged_object_seeds_no_region(self, tmp_dir):
+        """It cannot be claimed transparent, so it cannot grow a plan the
+        flatten will refuse to carry out."""
+        source = unreadable_form_resources_pdf(os.path.join(tmp_dir, "r.pdf"))
+        page = list_transparency(source)["pages"][0]
+        assert page["regions"] == []
+        assert page["counts"]["transparent"] == 0
+
+    def test_a_no_bbox_form_is_still_listed(self, tmp_dir):
+        """The `Do` used to emit nothing at all: the object landed in no
+        region and was not weighed as preserved either."""
+        source = no_bbox_form_pdf(os.path.join(tmp_dir, "bbox.pdf"))
+        page = list_transparency(source)["pages"][0]
+        forms = [o for o in page["objects"] if o["kind"] == "form"]
+        assert len(forms) == 1
+        assert forms[0]["unknown"] is True
+
+    def test_a_readable_document_claims_nothing_unknown(self, tmp_dir):
+        source = text_and_alpha_square_pdf(os.path.join(tmp_dir, "clean.pdf"))
+        report = list_transparency(source)
+        assert report["unknown_pages"] == []
+        assert report["pages"][0]["counts"]["unknown"] == 0
+        assert all(o["unknown"] is False for o in report["pages"][0]["objects"])

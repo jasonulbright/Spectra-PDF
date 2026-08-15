@@ -8,6 +8,7 @@ import { StatusBar } from '../components/StatusBar';
 import { ensureGsPath } from './SettingsPanel';
 import { app } from '../lib/tauri-bridge';
 import { tChrome } from '../i18n';
+import { localizeEngineMessage } from '../lib/engine-messages';
 import {
   FLATTEN_CATEGORIES,
   FLATTEN_DPI_CHOICES,
@@ -16,6 +17,7 @@ import {
   regionCount,
   substitutedFaces,
   totals,
+  unknownReasons,
   unreadablePages,
   type FlattenCategory,
 } from '../lib/flattener';
@@ -27,6 +29,7 @@ const CATEGORY_KEY = {
   outlined_strokes: 'panel.flattener.categoryStrokes',
   outlined_text: 'panel.flattener.categoryText',
   expanded_patterns: 'panel.flattener.categoryPatterns',
+  unknown: 'panel.flattener.categoryUnknown',
 } as const satisfies Record<FlattenCategory, string>;
 
 export function FlattenerPanel(): React.ReactElement {
@@ -46,7 +49,11 @@ export function FlattenerPanel(): React.ReactElement {
   const counts = totals(report);
   const regions = regionCount(report);
   const unreadable = unreadablePages(report);
-  const refusals = outlineRefusals(outlineReport, outlines);
+  // The engine refuses in English and the boundary renders the catalog entry
+  // that means the same thing; a report-carried refusal localizes exactly as
+  // a thrown one does.
+  const refusals = outlineRefusals(outlineReport, outlines).map(localizeEngineMessage);
+  const unknown = unknownReasons(report).map(localizeEngineMessage);
   const substituted = substitutedFaces(outlineReport, outlines);
 
   const apply = useCallback(async () => {
@@ -214,7 +221,12 @@ export function FlattenerPanel(): React.ReactElement {
             {tChrome('panel.flattener.unreadable', { pages: unreadable.join(', ') })}
           </div>
         )}
-        {counts.transparent === 0 && report !== null && (
+        {unknown.length > 0 && (
+          <div className="text-xs text-amber-400" data-testid="flattener-unknown">
+            {tChrome('panel.flattener.unknownNote', { reasons: unknown.join(' ') })}
+          </div>
+        )}
+        {counts.transparent === 0 && unknown.length === 0 && report !== null && (
           <div className="text-xs text-neutral-500" data-testid="flattener-none">
             {tChrome('panel.flattener.none')}
           </div>
