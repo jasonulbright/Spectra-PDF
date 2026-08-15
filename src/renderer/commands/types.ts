@@ -166,6 +166,31 @@ export interface AppCommandHandlers {
     actions: import('../lib/form-candidates').FieldActions | null,
     data?: import('../lib/field-actions').AuthoredAction[],
   ): Promise<boolean>;
+  /** Author link regions on a file.
+   *
+   * Link authoring writes `/Link` annotations, so it is annotate-class: the
+   * incremental tier preserves it, and only a certification that forbids
+   * commenting has anything to say about it. Every link mutation — the canvas
+   * gesture, the panel's Create, a retarget, a restyle, a delete — comes
+   * through these four so the signed decision is taken in one place; each
+   * returns false when the warning was declined. */
+  addLinks(
+    path: string,
+    links: import('../lib/links').LinkSpec[],
+  ): Promise<boolean>;
+  retargetLink(
+    path: string,
+    page: number,
+    index: number,
+    target: Record<string, unknown>,
+  ): Promise<boolean>;
+  restyleLink(
+    path: string,
+    page: number,
+    index: number,
+    appearance: Record<string, unknown>,
+  ): Promise<boolean>;
+  removeLink(path: string, page: number, index: number): Promise<boolean>;
 }
 
 /**

@@ -238,11 +238,25 @@ ink_manager.nameLeastOneInk	exact	ink_manager	Name at least one ink to convert.
 ink_manager.processInksCannotAliased	exact	ink_manager	Process inks cannot be aliased to a spot colour.
 inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
+links.documentDestinationNamed	pattern	links	this document has no destination named {{name}}
+links.linkBorderStyleMust	exact	links	link border style must be solid, dashed or underline
+links.linkBorderWidthMust	exact	links	link border width must be a number
+links.linkBorderWidthMust2	exact	links	link border width must not be negative
+links.linkColourMustThree	exact	links	link colour must be three numbers from 0 to 1
+links.linkDashPatternMust	exact	links	link dash pattern must be numbers
+links.linkFileNeedsPath	exact	links	a link to a file needs a path
+links.linkFileNeedsWhole	exact	links	a link to a file needs a whole page number
+links.linkHighlightMustNone	exact	links	link highlight must be none, invert, outline or push
 links.linkIndexOutRange	pattern	links	link index {{index}} is out of range (page has {{v1}})
+links.linkPageNeedsPage	exact	links	a link to a page needs a page number
+links.linkViewMustNumber	pattern	links	link view {{key}} must be a number
 links.linksAdd	exact	links	no links to add
+links.namedDestinationLinkNeeds	exact	links	a named destination link needs a name
 links.pageOutRange	pattern	doc_properties,enhance_scan,form_detect,links,page_images,page_vectors,read_aloud,redact_marks,search_regions,slide_export,spelling,table_export,tag_content,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
 links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive width and height
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
+links.unknownLinkTarget	pattern	links	unknown link target {{v0}}
+links.unknownLinkViewMode	pattern	links	unknown link view mode {{mode}}
 links.urlMustEmpty	exact	links	url must not be empty
 links.webAddressesEmailAddresses	exact	links	No web addresses or email addresses were found in the text.
 mrc.everyScannedPageFailed	exact	mrc	every scanned page failed mask verification — no MRC output was written

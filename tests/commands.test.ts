@@ -91,6 +91,10 @@ const noopHandlers = (): AppCommandHandlers => ({
   sanitizeDocument: vi.fn(async () => true),
   setFieldLock: vi.fn(async () => true),
   setFieldActions: vi.fn(async () => true),
+  addLinks: vi.fn(async () => true),
+  retargetLink: vi.fn(async () => true),
+  restyleLink: vi.fn(async () => true),
+  removeLink: vi.fn(async () => true),
 });
 
 afterEach(() => {

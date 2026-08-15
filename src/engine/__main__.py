@@ -83,6 +83,10 @@ from engine.links import (
     delete_link,
     find_url_links,
     list_links,
+    list_named_destinations,
+    set_link_appearance,
+    set_link_rect,
+    set_link_target,
     set_link_url,
 )
 from engine.threads import list_threads, set_threads
@@ -286,6 +290,10 @@ def main() -> None:
     server.register("add_struct_node", add_struct_node)
     server.register("list_links", list_links)
     server.register("set_link_url", set_link_url)
+    server.register("set_link_target", set_link_target)
+    server.register("set_link_appearance", set_link_appearance)
+    server.register("set_link_rect", set_link_rect)
+    server.register("list_named_destinations", list_named_destinations)
     server.register("delete_link", delete_link)
     server.register("add_links", add_links)
     server.register("export_document", export_document)

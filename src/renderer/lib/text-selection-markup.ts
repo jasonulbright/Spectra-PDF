@@ -14,6 +14,7 @@ import { rotateNormalizedPoints, type PageGeometry } from './redaction';
 import { displayRectToPdf } from './pdfx-build';
 import { workspacePageNumber } from './workspace-commit';
 import type { OpenDocument, PageAnnotation, TextMarkupType } from '../state/types';
+import type { LinkSpec } from './links';
 
 /** The parts of a DOMRect this module needs (so tests can pass plain objects). */
 export interface RectLike {
@@ -214,12 +215,6 @@ export function buildTextMarkupAnnotations({
 // space instead of into the page tier. ONE LINK PER LINE BOX: a single Rect
 // spanning a wrapped phrase would make the empty margin between lines
 // clickable, which is not what the gesture asked for.
-
-export interface LinkSpec {
-  page: number; // 1-based position within the file's committed order
-  rect: [number, number, number, number];
-  url: string;
-}
 
 export interface LinkFilePayload {
   path: string;

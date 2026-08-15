@@ -105,7 +105,7 @@ const CANVAS_TOOLS = [
   'select', 'hand', 'highlight', 'freetext', 'ink', 'stamp', 'redact', 'signature', 'forms',
   'formfields', 'edit', 'addtext', 'addimage', 'measuredist', 'measureperim', 'measurearea',
   'measurecal', 'shape', 'callout', 'note', 'inkerase', 'zoommarquee', 'cropdraw', 'count',
-  'outputpreview', 'flattenpreview', 'tablereview', 'beaddraw', 'snapshot',
+  'outputpreview', 'flattenpreview', 'tablereview', 'beaddraw', 'snapshot', 'linkdraw',
 ] as const;
 
 export const TOOL_TITLES: Record<CanvasTool, string> = {
@@ -121,6 +121,7 @@ export const TOOL_TITLES: Record<CanvasTool, string> = {
   tablereview: 'Table Review',
   beaddraw: 'Draw Article Box',
   snapshot: 'Snapshot',
+  linkdraw: 'Draw Link',
 };
 
 // CANVAS_TOOLS must be a literal tuple (COMMAND_IDS builds `tools.${t}` from
@@ -346,7 +347,8 @@ export const SECONDARY_TOOLBAR_ACTIONS: Record<ToolId, readonly CommandId[]> = {
   layers: [],
   accessibility: [],
   printproduction: [],
-  links: [],
+  // Links owns the `linkdraw` mode, so its strip needs a way out.
+  links: ['tools.close'],
   export: [],
 };
 

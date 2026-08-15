@@ -350,7 +350,12 @@ export type CanvasTool =
   // from the zoom the reader happens to sit at. The document is never
   // touched; the band leaves a transient card offering to save the same
   // raster as a file.
-  | 'snapshot';
+  | 'snapshot'
+  // Link draw: band the region a link covers, anywhere on the page — over a
+  // figure, a table, a heading, not only over words a selection can reach.
+  // The band is a REQUEST: the Links panel receives the rect in page space
+  // and owns Create, so a mis-drag costs a redraw rather than an undo.
+  | 'linkdraw';
 
 // The tab-strip model: Home | Tools | one tab per open
 // document. A doc tab focuses that file and shows the document pane —
