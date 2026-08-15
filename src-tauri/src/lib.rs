@@ -1,4 +1,5 @@
 pub mod cli;
+mod clipboard_read;
 mod commands;
 pub mod create_pdf_sources;
 mod print_to_pdf;
@@ -6,6 +7,7 @@ mod scheduler;
 mod send_to;
 mod snapshot;
 mod watchers;
+mod web_capture;
 mod engine;
 mod printers;
 pub mod scanner;
@@ -210,6 +212,8 @@ pub fn run() {
             commands::hide_to_tray,
             snapshot::copy_image_to_clipboard,
             snapshot::save_snapshot_png,
+            clipboard_read::read_clipboard_source,
+            web_capture::capture_web_page,
         ])
         .setup(move |app| {
             // The main window is built here rather than in tauri.conf.json:

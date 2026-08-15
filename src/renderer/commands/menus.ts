@@ -120,6 +120,8 @@ export const MENUS: MenuDef[] = [
       recentSubmenu,
       sep,
       cmd('file.createPdf', 'menuitem-file-create-pdf'),
+      cmd('file.createFromClipboard', 'menuitem-file-create-from-clipboard'),
+      cmd('file.createFromWebPage', 'menuitem-file-create-from-web-page'),
       cmd('file.createFromScanner', 'menuitem-file-create-from-scanner'),
       sep,
       cmd('file.save', 'menuitem-file-save'),
