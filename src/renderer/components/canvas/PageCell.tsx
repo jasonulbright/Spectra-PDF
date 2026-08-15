@@ -59,6 +59,7 @@ import {
   type SpanSize,
 } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
+import type { LinkRegion } from '../../lib/links';
 import type { SnapshotPlacement } from '../../lib/snapshot-capture';
 import { shownValue } from '../../lib/form-overlay';
 import type { OverlayWidget } from '../../lib/form-overlay';
@@ -940,6 +941,22 @@ interface PageCellProps {
     rect: { x: number; y: number; w: number; h: number },
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
+  // A link band — the region a link will cover. Same contract again, and
+  // REQUIRED for the same reason. Nothing commits: the Links panel receives
+  // the rect and owns Create.
+  onSetLinkRect: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  // The file's existing links, projected onto THIS page, shown while the
+  // Links tool is open. A link's rectangle is invisible by design in a
+  // finished document; painting every one during ordinary reading would show
+  // the author's scaffolding to the reader.
+  linkRegions?: readonly LinkRegion[];
+  onPickLink?: (region: LinkRegion) => void;
+  selectedLink?: { page: number; index: number } | null;
   // Add-Image band release: converts + hands off to App's picker+embed.
   onAddImageRect: (
     docId: string,
@@ -1227,6 +1244,10 @@ function PageCellImpl({
   onSetCropRect,
   onSetBeadRect,
   onSetSnapshotRect,
+  onSetLinkRect,
+  linkRegions,
+  onPickLink,
+  selectedLink,
   snapshotPlacement,
   onClearSnapshotPlacement,
   onSaveSnapshot,
@@ -2918,6 +2939,10 @@ function PageCellImpl({
           // The band is the region to CAPTURE. The document is not touched:
           // the region is re-rendered and lands on the clipboard.
           onSetSnapshotRect(docId, page.id, latest, page.rotation);
+        } else if (tool === 'linkdraw') {
+          // The band is the region the LINK covers. Nothing commits here —
+          // the Links panel receives the rect and the user targets it.
+          onSetLinkRect(docId, page.id, latest, page.rotation);
         } else if (tool === 'addtext') {
           // Add-text placement — single, drawing again replaces it.
           onSetAddTextRect(docId, page.id, latest, page.rotation);
@@ -4366,6 +4391,39 @@ function PageCellImpl({
           );
         })()
       )}
+      {linkRegions?.map((region) => (
+        // The region arrives already projected into the frame shown now
+        // (the seed re-reads the composed rotation), so it is placed as-is.
+        <button
+          key={`${region.page}:${region.index}`}
+          type="button"
+          data-testid="link-region"
+          data-link-page={region.page}
+          data-link-index={region.index}
+          data-link-kind={region.kind}
+          className={
+            'page-link-region' +
+            (selectedLink?.page === region.page && selectedLink?.index === region.index
+              ? ' page-link-region-selected'
+              : '')
+          }
+          title={tChrome('canvas.link.regionTitle')}
+          aria-label={tChrome('canvas.link.regionTitle')}
+          style={{
+            left: `${region.rect.x * 100}%`,
+            top: `${region.rect.y * 100}%`,
+            width: `${region.rect.w * 100}%`,
+            height: `${region.rect.h * 100}%`,
+          }}
+          // The band listens on pointerdown; a press that is picking an
+          // existing link must not also start drawing a new one over it.
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onPickLink?.(region);
+          }}
+        />
+      ))}
       {snapshotPlacement && (
         (() => {
           const r = projectMarkRect(snapshotPlacement, page.rotation);
@@ -4434,7 +4492,9 @@ function PageCellImpl({
                           ? ' band-beaddraw'
                           : tool === 'snapshot'
                             ? ' band-snapshot'
-                            : '')
+                            : tool === 'linkdraw'
+                              ? ' band-linkdraw'
+                              : '')
           }
           style={{
             left: `${band.x * 100}%`,

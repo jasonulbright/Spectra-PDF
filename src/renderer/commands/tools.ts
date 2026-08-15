@@ -276,8 +276,12 @@ export const TOOL_DEFS: readonly ToolDef[] = [
   {
     id: 'links',
     title: 'Links',
-    description: 'Review, retarget, or delete the document’s link regions.',
+    description: 'Draw link regions, target them at a page, a file or an address, and style their borders.',
     ops: ['links'],
+    // Opening the tool arms the draw mode, so the link cursor is live the
+    // moment Links is picked — the crop tool's shape. The band is where the
+    // link GOES; the panel is where it is targeted and styled.
+    canvasTools: ['linkdraw'],
   },
   {
     id: 'export',

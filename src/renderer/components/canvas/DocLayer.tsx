@@ -13,6 +13,7 @@ import type { EditImagePlacement, EditImageTransformCtx } from '../../lib/edit-i
 import type { EditVectorObject } from '../../lib/edit-vectors';
 import type { EditTextListing, ParagraphEditOpts } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
+import type { LinkRegion } from '../../lib/links';
 import type { SnapshotPlacement } from '../../lib/snapshot-capture';
 import type { OcrWord } from '../../ocr/types';
 import type { PageReadAloud } from '../../lib/read-aloud';
@@ -162,6 +163,20 @@ interface DocLayerProps {
     rect: { x: number; y: number; w: number; h: number },
     rotationAtDraw: 0 | 90 | 180 | 270,
   ) => void;
+  /** A link band; the rect reaches the Links panel, which owns Create.
+   * REQUIRED for the crop band's reason — an optional callback silently
+   * unwires a tool in whichever render path forgets to pass it. */
+  onSetLinkRect: (
+    docId: string,
+    pageId: string,
+    rect: { x: number; y: number; w: number; h: number },
+    rotationAtDraw: 0 | 90 | 180 | 270,
+  ) => void;
+  /** The file's existing links, projected onto the canvas, and the pick that
+   * opens one in the panel. Shown while the Links tool is open only. */
+  linkRegions: readonly LinkRegion[];
+  onPickLink: (region: LinkRegion) => void;
+  selectedLink: { page: number; index: number } | null;
   /** The captured snapshot's card, and its two actions. */
   snapshotPlacement: SnapshotPlacement | null;
   onClearSnapshotPlacement: () => void;
@@ -316,6 +331,10 @@ function DocLayerImpl(props: DocLayerProps): React.JSX.Element {
               onSetCropRect={props.onSetCropRect}
               onSetBeadRect={props.onSetBeadRect}
               onSetSnapshotRect={props.onSetSnapshotRect}
+              onSetLinkRect={props.onSetLinkRect}
+              linkRegions={props.linkRegions}
+              onPickLink={props.onPickLink}
+              selectedLink={props.selectedLink}
               snapshotPlacement={props.snapshotPlacement}
               onClearSnapshotPlacement={props.onClearSnapshotPlacement}
               onSaveSnapshot={props.onSaveSnapshot}
