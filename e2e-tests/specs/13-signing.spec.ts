@@ -240,4 +240,69 @@ describe('signing applies a verifiable signature via the panel + engine', () => 
     await $('[data-testid="trust-system-store"]').click();
     await $('[data-testid="trust-caveat"]').waitForDisplayed({ timeout: 20000 });
   });
+
+  it('carries the trusted-list opt-in from the panel through to the engine', async () => {
+    // Same shape as the case above and for the same reason: this proves the
+    // toggle's WIRING and the bundle's provenance reaching the panel, never a
+    // trust outcome — the self-signed test signer chains to nothing in any
+    // trusted list. Anchoring against the bundle is proven in the engine suite.
+    const { execFileSync } = await import('node:child_process');
+    const binary = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
+    const off = JSON.parse(
+      execFileSync(binary, ['verify-signatures', output], { encoding: 'utf-8' }),
+    ) as { eutl_trust: { requested: boolean; available: boolean } };
+    expect(off.eutl_trust.requested).toBe(false);
+    expect(off.eutl_trust.available).toBe(false);
+
+    const on = JSON.parse(
+      execFileSync(binary, ['verify-signatures', output, '--eutl-trust'], {
+        encoding: 'utf-8',
+      }),
+    ) as {
+      eutl_trust: {
+        requested: boolean;
+        available: boolean;
+        anchor_count: number;
+        fetched: string | null;
+        list_count: number | null;
+      };
+      signatures: { trusted: boolean; trust_source: string | null }[];
+      summary: { trust_verified: boolean };
+    };
+    expect(on.eutl_trust.requested).toBe(true);
+    expect(on.eutl_trust.available).toBe(true);
+    expect(on.eutl_trust.anchor_count).toBeGreaterThan(0);
+    // The bundle states its own age; a feed that cannot is one that gets read
+    // as current.
+    expect(on.eutl_trust.fetched).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(on.eutl_trust.list_count).toBeGreaterThan(0);
+    expect(on.signatures[0].trusted).toBe(false);
+    expect(on.signatures[0].trust_source).toBe(null);
+    expect(on.summary.trust_verified).toBe(false);
+
+    await openByPaths([output]);
+    await setView('operations');
+    await setActiveOp('signatures');
+    await $('[data-testid="signatures-summary"]').waitForDisplayed({ timeout: 20000 });
+    await $('[data-testid="trust-caveat"]').waitForDisplayed({ timeout: 10000 });
+
+    await $('[data-testid="trust-eutl"]').click();
+    const box = $('[data-testid="trust-status"]');
+    await box.waitForDisplayed({ timeout: 20000 });
+    expect(await box.getAttribute('data-trust')).toBe('failed');
+    // The provenance line only appears once a verification has reported it.
+    const provenance = $('[data-testid="trust-eutl-provenance"]');
+    await provenance.waitForDisplayed({ timeout: 20000 });
+    expect(await provenance.getText()).not.toBe('');
+
+    // The preference survives a re-mount of the panel.
+    await setActiveOp('rotate');
+    await setActiveOp('signatures');
+    await $('[data-testid="trust-status"]').waitForDisplayed({ timeout: 20000 });
+    expect(await $('[data-testid="trust-eutl"]').isSelected()).toBe(true);
+
+    // Leave the app in its default posture for whatever runs next.
+    await $('[data-testid="trust-eutl"]').click();
+    await $('[data-testid="trust-caveat"]').waitForDisplayed({ timeout: 20000 });
+  });
 });

@@ -36,8 +36,10 @@ signer cert and asserting ``trusted`` stays False.
 The OS store IS reachable, but only as an explicit opt-in (``system_trust``),
 never as a fallback: it goes through ``engine.os_trust``, which respects the
 store's per-purpose (EKU) restrictions and is not read at all while the option
-is off. Which anchor set a chain reached is reported per signature as
-``trust_source``.
+is off. The bundled EU trusted-list certificates (``engine.eutl``) are a third
+source on the same terms — opt-in per source (``eutl_trust``), off by default,
+never read while off, and offline: the bundle ships, nothing fetches it. Which
+anchor set a chain reached is reported per signature as ``trust_source``.
 
 Uses pyHanko (MIT) — the ByteRange / CMS / incremental-update handling is
 exactly the security-critical plumbing not to hand-roll.
@@ -62,7 +64,7 @@ from pyhanko.sign.general import SigningError
 from pyhanko.sign.timestamps import HTTPTimeStamper
 from pyhanko.sign.validation import validate_pdf_signature
 
-from engine import os_trust
+from engine import eutl, os_trust
 from engine.acroform import form_field_forest
 from engine.docmdp import LEVEL_BY_VALUE, VALUE_BY_LEVEL, certification_of_file
 from engine.docmdp_policy import DIFF_POLICY, LockedFieldModification
@@ -127,34 +129,57 @@ def _fingerprints(certs: list) -> set:
 class _TrustSources:
     """The anchors in force for one verification, and which set each came from.
 
+    Three sources, each opt-in and off by default: the user's own anchors, the
+    platform certificate store, and the bundled EU trusted-list certificates.
+
     Two contexts, not one: a signature validation builds a signer chain and a
-    timestamp chain, and the OS store records a DIFFERENT purpose set for each.
+    timestamp chain, and both optional sources record a DIFFERENT anchor set for
+    each — the store as EKU restrictions, the trusted lists as service types.
     ``validate_pdf_signature`` already takes the two contexts separately.
 
-    With ``system_trust`` off nothing here reads the OS store, and the contexts
-    collapse to the single user-anchored (or empty) context of the original
-    explicit-trust posture.
+    With both options off, nothing here reads the store or the bundle and the
+    contexts collapse to the single user-anchored (or empty) context of the
+    original explicit-trust posture.
     """
 
-    def __init__(self, trust_roots: list | None, system_trust: bool):
+    def __init__(self, trust_roots: list | None, system_trust: bool,
+                 eutl_trust: bool = False):
         user = _load_trust_roots(trust_roots or [])
         self.user_prints = _fingerprints(user)
         self.system_prints: set = set()
+        self.eutl_prints: set = set()
         self.system_requested = bool(system_trust)
         self.system_available = os_trust.available() if system_trust else False
-        if not system_trust:
+        self.system_anchor_count = 0
+        self.eutl_requested = bool(eutl_trust)
+        self.eutl_available = eutl.available() if eutl_trust else False
+        self.eutl_provenance = eutl.provenance() if eutl_trust else {}
+        if not system_trust and not eutl_trust:
             ctx = _trust_context(trust_roots) if trust_roots else None
             self.signer_context = ctx
             self.timestamp_context = ctx
-            self.system_anchor_count = 0
             return
-        signer_anchors = os_trust.anchors(os_trust.SIGNER_PURPOSES)
-        timestamp_anchors = os_trust.anchors(os_trust.TIMESTAMP_PURPOSES)
-        intermediates = os_trust.intermediates()
-        # The union, not the signer set: a report of how many anchors the store
-        # contributed to this verification at all.
-        self.system_prints = _fingerprints(signer_anchors) | _fingerprints(timestamp_anchors)
-        self.system_anchor_count = len(self.system_prints)
+
+        signer_anchors: list = []
+        timestamp_anchors: list = []
+        intermediates: list = []
+        if system_trust:
+            store_signers = os_trust.anchors(os_trust.SIGNER_PURPOSES)
+            store_timestampers = os_trust.anchors(os_trust.TIMESTAMP_PURPOSES)
+            intermediates = os_trust.intermediates()
+            # The union, not the signer set: a report of how many anchors the
+            # store contributed to this verification at all.
+            self.system_prints = _fingerprints(store_signers) | _fingerprints(store_timestampers)
+            self.system_anchor_count = len(self.system_prints)
+            signer_anchors += store_signers
+            timestamp_anchors += store_timestampers
+        if eutl_trust:
+            list_signers = eutl.anchors(eutl.SIGNER)
+            list_timestampers = eutl.anchors(eutl.TIMESTAMP)
+            self.eutl_prints = _fingerprints(list_signers) | _fingerprints(list_timestampers)
+            signer_anchors += list_signers
+            timestamp_anchors += list_timestampers
+
         self.signer_context = ValidationContext(
             trust_roots=[*user, *signer_anchors],
             other_certs=intermediates,
@@ -172,13 +197,16 @@ class _TrustSources:
     def anchored(self) -> bool:
         """Whether any anchor at all is in force — the precondition for a
         trusted verdict being meaningful."""
-        return bool(self.user_prints) or bool(self.system_prints)
+        return bool(self.user_prints) or bool(self.system_prints) or bool(self.eutl_prints)
 
     def source_of(self, status) -> str | None:
         """Which anchor set the validated path terminated at.
 
-        The user's own set is checked first: a certificate present in both was
-        chosen explicitly, and that is what the result should say.
+        Ordered by how specific the statement is, so a certificate carried by
+        more than one source is reported as the narrowest thing that vouches for
+        it: the user chose THIS certificate; a trusted list says this authority
+        is a granted qualified one; the platform store says only that the
+        machine carries the root.
         """
         path = getattr(status, "validation_path", None)
         if path is None:
@@ -189,6 +217,8 @@ class _TrustSources:
             return None
         if anchor.sha256 in self.user_prints:
             return "user"
+        if anchor.sha256 in self.eutl_prints:
+            return "eutl"
         if anchor.sha256 in self.system_prints:
             return "system"
         return None
@@ -198,6 +228,16 @@ class _TrustSources:
             "requested": self.system_requested,
             "available": self.system_available,
             "anchor_count": self.system_anchor_count,
+        }
+
+    def eutl_report(self) -> dict:
+        """What the bundled trusted lists contributed, plus the provenance a
+        surface needs to say how old the bundle is."""
+        return {
+            "requested": self.eutl_requested,
+            "available": self.eutl_available,
+            "anchor_count": len(self.eutl_prints),
+            **self.eutl_provenance,
         }
 
 
@@ -401,7 +441,8 @@ def _verify_one(embedded, sources: "_TrustSources | None" = None,
 
 
 def verify_signatures(
-    file: str, trust_roots: list | None = None, system_trust: bool = False
+    file: str, trust_roots: list | None = None, system_trust: bool = False,
+    eutl_trust: bool = False,
 ) -> dict:
     """Verify every embedded signature in a PDF (read-only).
 
@@ -409,13 +450,16 @@ def verify_signatures(
         file: PDF path.
         trust_roots: optional CA certificate files (PEM/DER) the USER trusts.
             When given, ``trusted`` is validated against exactly these anchors;
-            without them, and without ``system_trust``, it stays
+            without them, and without either optional source, it stays
             deterministically False — the explicit-trust posture.
         system_trust: also anchor on the operating system's certificate store,
             per purpose (``engine.os_trust``). OFF by default and read only
             when True, so the default costs no store enumeration.
+        eutl_trust: also anchor on the bundled EU trusted-list certificates
+            (``engine.eutl``). OFF by default and read only when True. The
+            bundle ships; nothing is fetched here.
     """
-    sources = _TrustSources(trust_roots, system_trust)
+    sources = _TrustSources(trust_roots, system_trust, eutl_trust)
     # /Perms /DocMDP is a CATALOG property, so the certification is
     # document-level; the per-signature level below says which signature wrote
     # it. Read first: every signature's policy verdict is relative to it.
@@ -484,6 +528,10 @@ def verify_signatures(
         # true is a platform with no readable store — reported as such rather
         # than as an empty store, which would read as a failed chain.
         "system_trust": sources.report(),
+        # What the bundled trusted lists contributed, on the same terms, plus
+        # the bundle's fetch date: a trust feed that cannot say how old it is
+        # invites being read as current.
+        "eutl_trust": sources.eutl_report(),
         "certification": {
             "certified": bool(certification["certified"]),
             "level": certification["level"],
@@ -954,6 +1002,7 @@ def sign_pdf(
     lta: bool = False,
     trust_roots: list | None = None,
     system_trust: bool = False,
+    eutl_trust: bool = False,
     pkcs11_module: str | None = None,
     pkcs11_token: str | None = None,
     pkcs11_pin: str = "",
@@ -1013,6 +1062,8 @@ def sign_pdf(
             while revocation material is gathered for the DSS.
         system_trust: also anchor that gathering on the operating system's
             certificate store. Off by default, read only when True.
+        eutl_trust: also anchor that gathering on the bundled EU trusted-list
+            certificates. Off by default, read only when True.
         certify: Apply an AUTHOR (certification) signature, which records in
             the catalog what may change in the document afterwards. At most one
             per document, and it must be the document's first signature.
@@ -1101,11 +1152,13 @@ def sign_pdf(
         if embed_revocation:
             # Validating the signer's own chain is a precondition for gathering
             # the revinfo that goes into the DSS. Anchors: the user's roots,
-            # plus the OS store when opted in, or — for a self-signed signer —
-            # its own certificate.
+            # plus each opted-in source, or — for a self-signed signer — its own
+            # certificate.
             anchors = _load_trust_roots(trust_roots or [])
             if system_trust:
                 anchors = [*anchors, *os_trust.anchors(os_trust.SIGNER_PURPOSES)]
+            if eutl_trust:
+                anchors = [*anchors, *eutl.anchors(eutl.SIGNER)]
             if not anchors:
                 anchors = [signer.signing_cert, *signer.cert_registry]
             meta_kwargs["embed_validation_info"] = True
