@@ -13,6 +13,8 @@ import { mergeUntouched } from '../lib/late-read';
 import { TEST_HARNESS_ENABLED, registerAccessibility } from '../testHarness';
 import { LOCALE_NATIVE_NAMES, SHIPPED_LOCALES, tChrome } from '../i18n';
 import {
+  CONTENT_ROLES,
+  artifactCalls,
   authoredCall,
   draftKey,
   fixFor,
@@ -47,7 +49,7 @@ import {
 //
 // Two gestures, two outcomes, and they never trade places: clicking a finding
 // JUMPS to the surface that owns it, and a fix control REPAIRS without moving.
-// Nineteen of the checks have no fix here at all; a jump is what they get,
+// Fifteen of the checks have no fix here at all; a jump is what they get,
 // because inventing a repair the app cannot perform is worse than naming the
 // place a person can.
 //
@@ -145,14 +147,33 @@ function AuthoredEditor({
           ))}
         </select>
       )}
-      <input
-        id={`${testId}-input`}
-        data-testid={`${testId}-input`}
-        className="min-w-0 flex-1 bg-neutral-900 border border-neutral-700 rounded px-1 py-0.5 text-xs text-neutral-200"
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-      />
+      {authored.input === 'role' ? (
+        // Two answers, and no free text: content a reader should hear, or page
+        // furniture it should not. A third value would be a tag name nobody
+        // asked this row for.
+        <select
+          id={`${testId}-input`}
+          data-testid={`${testId}-input`}
+          className="min-w-0 flex-1 bg-neutral-900 border border-neutral-700 rounded px-1 py-0.5 text-xs text-neutral-200"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          {CONTENT_ROLES.map((role) => (
+            <option key={role} value={role}>
+              {tChrome(`panel.a11y.role.${role}` as Parameters<typeof tChrome>[0])}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          id={`${testId}-input`}
+          data-testid={`${testId}-input`}
+          className="min-w-0 flex-1 bg-neutral-900 border border-neutral-700 rounded px-1 py-0.5 text-xs text-neutral-200"
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
       <button
         data-testid={`${testId}-apply`}
         disabled={busy || !value.trim()}
@@ -274,8 +295,12 @@ export function AccessibilityPanel(): React.ReactElement {
       for (const check of category.checks) {
         const offer = fixFor(check);
         if (offer?.kind !== 'authored' || !offer.authored) continue;
-        if (offer.authored.scope === 'check') seed[draftKey(check.id, null)] = '';
-        else check.findings.forEach((_f, i) => (seed[draftKey(check.id, i)] = ''));
+        // A role editor has no empty state — it is a choice between two, and
+        // the safe one is the one that puts the content INTO the reading
+        // order. Declaring something decoration is the deliberate answer.
+        const empty = offer.authored.input === 'role' ? CONTENT_ROLES[0] : '';
+        if (offer.authored.scope === 'check') seed[draftKey(check.id, null)] = empty;
+        else check.findings.forEach((_f, i) => (seed[draftKey(check.id, i)] = empty));
       }
     }
     return seed;
@@ -295,10 +320,10 @@ export function AccessibilityPanel(): React.ReactElement {
   /** Repair every finding of one check as ONE undoable act. The engine owns
    * what that means (`engine/accessibility_fixes.py`); this only asks. */
   const applyAutoFix = useCallback(
-    async (check: Check) => {
-      if (!activeFile) return;
+    async (check: Check): Promise<boolean> => {
+      if (!activeFile) return false;
       if (!(await confirmSignedEdit(activeFile.path, activeFile.workingPath, 'structural'))) {
-        return;
+        return false;
       }
       setBusy(true);
       setStatus(tChrome('panel.a11y.fixing'));
@@ -309,10 +334,49 @@ export function AccessibilityPanel(): React.ReactElement {
         });
         // The buffer changed, so the report re-runs and the row flips itself.
         setStatus(tChrome('panel.a11y.fixed'));
+        return true;
       } catch (e: unknown) {
         setStatus(
           tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }),
         );
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeFile, confirmSignedEdit, performOperation],
+  );
+
+  /** Declare every run this check named page furniture, a page at a time.
+   *
+   * Running heads and folios are the common case behind untagged content, and
+   * a reader who has recognized them as a set should not have to say so once
+   * per line. Marked-content ids are page-scoped, so each page is its own
+   * call and its own undoable step. */
+  const declareRestDecoration = useCallback(
+    async (check: Check): Promise<boolean> => {
+      if (!activeFile) return false;
+      const calls = artifactCalls(check, true);
+      if (calls.length === 0) {
+        setStatus(tChrome('panel.a11y.nothingToShow'));
+        return false;
+      }
+      if (!(await confirmSignedEdit(activeFile.path, activeFile.workingPath, 'structural'))) {
+        return false;
+      }
+      setBusy(true);
+      setStatus(tChrome('panel.a11y.fixing'));
+      try {
+        for (const call of calls) {
+          await performOperation(activeFile.path, call.method, call.params);
+        }
+        setStatus(tChrome('panel.a11y.fixed'));
+        return true;
+      } catch (e: unknown) {
+        setStatus(
+          tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }),
+        );
+        return false;
       } finally {
         setBusy(false);
       }
@@ -496,7 +560,16 @@ export function AccessibilityPanel(): React.ReactElement {
         if (fixFor(check)?.kind !== 'auto') {
           throw new Error(`a11yFix: ${checkId} has no automatic fix right now`);
         }
-        await applyAutoFix(check);
+        // A refusal reaches the panel as a status line; a harness that saw
+        // only "the call returned" could not tell a fix from a refusal.
+        if (!(await applyAutoFix(check))) throw new Error(`a11yFix: ${checkId} did not run`);
+      },
+      artifactRest: async (checkId) => {
+        const check = categories.flatMap((c) => c.checks).find((c) => c.id === checkId);
+        if (!check) throw new Error(`no check ${checkId}`);
+        if (!(await declareRestDecoration(check))) {
+          throw new Error(`a11yArtifactRest: ${checkId} did not run`);
+        }
       },
       authoredFix: async (checkId, index, value) => {
         const check = categories.flatMap((c) => c.checks).find((c) => c.id === checkId);
@@ -533,6 +606,7 @@ export function AccessibilityPanel(): React.ReactElement {
     activeFile,
     editDraft,
     performOperation,
+    declareRestDecoration,
   ]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.a11y.open')} />;
@@ -677,6 +751,17 @@ export function AccessibilityPanel(): React.ReactElement {
                             <div className="text-xs text-neutral-400">
                               {checkExplanation(check.id)}
                             </div>
+                            {check.id === 'tagged_content' && check.findings.length > 0 && (
+                              <button
+                                data-testid="a11y-artifact-rest"
+                                disabled={busy}
+                                title={tChrome('panel.a11y.artifactRestTitle')}
+                                onClick={() => void declareRestDecoration(check)}
+                                className="mt-1 px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+                              >
+                                {tChrome('panel.a11y.artifactRest')}
+                              </button>
+                            )}
                             {authored?.scope === 'check' && (
                               <AuthoredEditor
                                 testId={`a11y-authored-${check.id}`}

@@ -229,7 +229,7 @@ inspect.pageOutRange	pattern	inspect	Page {{page}} out of range (1-{{v1}})
 layers.layerIndexOutRange	pattern	layers	layer index {{index}} is out of range (0-{{v1}})
 links.linkIndexOutRange	pattern	links	link index {{index}} is out of range (page has {{v1}})
 links.linksAdd	exact	links	no links to add
-links.pageOutRange	pattern	doc_properties,enhance_scan,form_detect,links,page_images,page_vectors,read_aloud,redact_marks,search_regions,slide_export,spelling,table_export,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
+links.pageOutRange	pattern	doc_properties,enhance_scan,form_detect,links,page_images,page_vectors,read_aloud,redact_marks,search_regions,slide_export,spelling,table_export,tag_content,text_authoring,text_export,text_paragraphs,text_runs	page {{page_no}} is out of range (1-{{v1}})
 links.rectMustPositiveWidth	exact	links,redact_marks	rect must have a positive width and height
 links.rectMustXY	exact	links,page_images,redact_marks,text_authoring	rect must be [x0, y0, x1, y1]
 links.urlMustEmpty	exact	links	url must not be empty
@@ -529,6 +529,20 @@ table_export.tablePageColumnBoundary	pattern	table_export	the table on page {{pa
 table_export.tablePageCoversText	pattern	table_export	the table on page {{page_no}} covers no text
 table_export.tablePageEmptyArea	pattern	table_export	the table on page {{page_no}} has an empty area
 table_export.unknownSheetGroupingChoose	pattern	table_export	unknown sheet grouping {{sheet_per}} (choose table or page)
+tag_content.annotationCannotDeclaredArtifact	exact	tag_content	An annotation cannot be declared an artifact: the statement belongs to page content, and an annotation is an object.
+tag_content.annotationPageAlreadyStructure	pattern	tag_content	annotation {{index}} on page {{page_no}} is already in the structure tree.
+tag_content.annotationPageAnnotations	pattern	tag_content	annotation {{index}} is not on page {{page_no}} (it has {{v2}} annotations)
+tag_content.annotationPageReadable	pattern	tag_content	annotation {{index}} on page {{page_no}} is not readable.
+tag_content.documentCertifiedAllowChanges	exact	tag_content	this document is certified to allow no changes, so tagging page content would produce a file that reports as illegally modified
+tag_content.documentSignedTaggingPage	exact	tag_content	this document is signed and tagging page content invalidates its signatures -- the run must state that signed documents are included before it will touch one
+tag_content.documentUntaggedThereStructure	exact	tag_content	This document is untagged, so there is no structure tree to bind content into. Tag it first.
+tag_content.eachTargetNamesRun	exact	tag_content	Each target names a "run" or an "annot".
+tag_content.nameLeastOneRun	exact	tag_content	Name at least one run or annotation to tag.
+tag_content.pageSTextCould	exact	tag_content	this page's text could not be addressed reliably, so nothing was tagged
+tag_content.structureTypeBindContent	pattern	tag_content	"{{wanted}}" is not a structure type this can bind content to; use one of the standard types, or Artifact to declare the content decoration.
+tag_content.textRunAlreadyInside	pattern	tag_content	text run {{index}} is already inside a tag; retagging bound content is the Tags panel's edit.
+tag_content.textRunDrawnInside	pattern	tag_content	text run {{index}} is drawn inside form XObject {{form}}, whose marked content is numbered in its own stream and cannot take a page-scoped tag.
+tag_content.textRunPageRuns	pattern	tag_content	text run {{index}} is not on page {{page_no}} (it has {{v2}} runs)
 takeoff.outputFolderDoesExist	pattern	takeoff	Output folder does not exist: {{v0}}
 text_authoring.boldMustTrueFalse	pattern	text_authoring	bold must be true or false (got {{bold}})
 text_authoring.directionalFormattingCharactersCannot	exact	text_authoring	directional formatting characters cannot be laid out in a text box

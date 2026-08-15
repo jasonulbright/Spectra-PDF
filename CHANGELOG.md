@@ -67,6 +67,23 @@
 - The report says which of the 32 checks a document passes. It does not claim conformance, because two of the checks cannot be settled by a machine.
 - Every word of the report — names, explanations, findings and the saved file itself — is in your own language, in all 28 of them.
 
+### Repairing what the accessibility check finds
+- **Seventeen of the checks can now be repaired from the report itself.** A row that can be fixed carries the control that fixes it; the other fifteen take you to the panel that owns the edit, because a fix this app cannot actually perform is worse than a signpost to the place a person can.
+- **Twelve of them need nothing from you**, because the document decides the answer: allowing assistive technology to read an otherwise restricted file, tagging an untagged one, showing a title the document already has, deriving bookmarks from its headings, declaring the tab order on pages that carry fields or links, closing a skipped heading level, promoting a table's first row to header cells with a column scope, clearing a description that sits inside another one or that hides an annotation's own words, and putting untagged annotations, form fields and multimedia into the structure tree.
+- **Five take one value only you can supply** — the document's language, its title, a field's description, a figure's alternate text, a table's summary — typed on the finding itself, with the page still in view.
+- The language is picked from the 28 languages this app speaks, by their own names, or typed as any language tag; a malformed tag is refused with what is wrong with it, and nothing is written.
+- **Nothing is ever invented for you.** A field's own internal name is offered as a starting suggestion and never written as its description; a figure never gains placeholder alternate text; a language is never guessed. A check that needs a value it does not have stays a finding.
+- **Every fix is one undoable step, and the report re-checks itself the moment it lands** — so a row you have repaired turns green in front of you, and Undo turns it back.
+- Repairing a signed document asks first, in the same words every other edit of a signed document uses, and a document certified to allow no changes is refused rather than quietly altered.
+- Command line: `accessibility --category <area>` runs one area, and the new `accessibility-fix` applies the repairs that need no authored value. The ones that need a value have no headless form on purpose — a command line cannot describe a picture it cannot see, and a placeholder description is worse than none.
+
+### Text and annotations that no tag covers
+- **Untagged text on a page can now be bound into the document's structure without leaving the report.** You choose what it is — a paragraph a reader should hear, or page furniture it should not — and nothing chooses for you.
+- Running heads and page numbers are the usual reason a page has untagged text, so one action declares all of a page's remaining untagged text decoration at once.
+- A newly tagged paragraph is placed where it is drawn, not at the end of the document, so the reading order stays the order of the page.
+- Untagged annotations, form fields and multimedia are bound in both directions — the structure points at the annotation and the annotation points back — so a document that reads correctly also maps back correctly.
+- Text drawn inside a reused graphic is refused by name rather than mis-tagged, because such text is numbered inside that graphic and not on the page.
+
 ## 1.0.29
 
 *Released 2026-08-10*
