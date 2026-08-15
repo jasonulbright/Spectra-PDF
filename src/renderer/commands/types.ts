@@ -349,6 +349,32 @@ export interface CanvasServices {
     ): Promise<import('../lib/export-targets').ExportDocumentResult>;
     subscribe(listener: () => void): () => void;
   };
+  /**
+   * Accessibility findings shown on the page — the third use of the same seam.
+   *
+   * The checker addresses a page finding by the file's own page number and a
+   * rectangle in un-rotated user space; turning that into a place on screen is
+   * page geometry, which lives here alone.
+   *
+   * NOTHING here writes to the document, and there is no accept side at all:
+   * a finding is a claim, and the edit that answers it is an ordinary op run
+   * from the panel.
+   */
+  a11yFindings: {
+    /** Replace the finding set with one check's findings. */
+    publish(
+      path: string,
+      findings: readonly import('../lib/a11y-findings').PlaceableFinding[],
+    ): Promise<{ shown: number; skipped: number }>;
+    /** The live set, pruned to pages that still exist. */
+    list(): import('../lib/a11y-findings').A11yFinding[];
+    clear(): void;
+    /** Bring a finding's page into view and select its overlay. */
+    focus(findingId: string): void;
+    // No `subscribe` and no `update`: the two seams above let the panel and the
+    // page edit ONE set from either end, and this one has nothing to edit — the
+    // panel publishes, the page draws, and a re-check replaces the whole set.
+  };
 }
 
 export interface CommandContext {

@@ -57,6 +57,16 @@
 - A page whose contents cannot be read is named in the report, and every check that needed it says so. It is never counted as clean.
 - Automatic tagging picks the body text size by how much text is set in it rather than by how many blocks there are, so a page whose title, body and page number are all different sizes no longer turns its body copy into a heading. A page number or running head smaller than the body text and sitting in the page margin is now marked as decoration rather than tagged as a paragraph.
 
+### Reading the accessibility check, and saving it
+- The check is now a grouped list rather than a flat one: seven areas, each showing how many of its checks passed out of the ones that applied. The areas with something to answer for are open when the report appears.
+- Opening a check shows what it is for in one line, and lists every item it found — with the text of the item, so a false alarm is recognizable at a glance.
+- **Clicking a finding takes you to it.** A tagged element opens the Tags panel with that tag selected. A place on a page draws a box on the page and scrolls to it. A field, a link or an annotation opens the panel that edits it.
+- **Show** draws every one of a check's page findings at once, so a page's untagged text can be looked over as a set. They come off again with the same button, and they clear themselves whenever the document changes.
+- **Export…** saves the report as a web page or as a plain text file. Both carry the same verdicts, the same counts and the same findings, and each row carries the check's short name beside its wording so two people reading in two languages can talk about the same row.
+- The saved web page is self-contained — it opens on a machine that has never seen this app, with nothing to download.
+- The report says which of the 32 checks a document passes. It does not claim conformance, because two of the checks cannot be settled by a machine.
+- Every word of the report — names, explanations, findings and the saved file itself — is in your own language, in all 28 of them.
+
 ## 1.0.29
 
 *Released 2026-08-10*
