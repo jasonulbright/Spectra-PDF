@@ -6,24 +6,38 @@ import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 
+type Verdict = 'pass' | 'fail' | 'warn' | 'needs_review' | 'not_applicable';
+
 interface Check {
   id: string;
   label: string;
-  status: 'pass' | 'warn' | 'fail';
+  status: Verdict;
   detail: string;
 }
-interface Report {
-  checks: Check[];
+interface Summary {
   passed: number;
   failed: number;
   warnings: number;
+  needs_review: number;
+  not_applicable: number;
+  applicable: number;
   total: number;
 }
+interface Report {
+  checks: Check[];
+  summary: Summary;
+}
 
-const ICON: Record<Check['status'], { glyph: string; color: string }> = {
+// A needs-review row shows neither a tick nor a cross: it has not been
+// decided, and borrowing either glyph is the claim the checker refuses to
+// make. A not-applicable row is muted — it is excluded from the pass tally,
+// so showing it as a pass would earn a score the document did not.
+const ICON: Record<Verdict, { glyph: string; color: string }> = {
   pass: { glyph: '✓', color: '#2fbf71' },
   warn: { glyph: '!', color: '#fbbf24' },
   fail: { glyph: '✕', color: '#f87171' },
+  needs_review: { glyph: '?', color: '#a78bfa' },
+  not_applicable: { glyph: '–', color: '#6b7280' },
 };
 
 export function AccessibilityPanel(): React.ReactElement {
@@ -81,18 +95,25 @@ export function AccessibilityPanel(): React.ReactElement {
 
       {report && (
         <div className="text-sm text-neutral-300" data-testid="a11y-summary">
-          {report.failed === 0 && report.warnings === 0 ? (
-            <span className="text-green-400">{tChrome('panel.a11y.allPassed', { count: report.total })}</span>
+          {/* "All passed" is claimed only when nothing is outstanding AND
+              nothing was skipped: a document whose table checks did not apply
+              has not passed 32 of 32, and saying so is the exact wrongness
+              this checker exists to end. */}
+          {report.summary.failed === 0 &&
+          report.summary.warnings === 0 &&
+          report.summary.needs_review === 0 &&
+          report.summary.not_applicable === 0 ? (
+            <span className="text-green-400">{tChrome('panel.a11y.allPassed', { count: report.summary.total })}</span>
           ) : (
             <>
-              <span className="text-green-400">{tChrome('panel.a11y.passed', { count: report.passed })}</span>
-              {report.warnings > 0 && (
-                <>, <span className="text-amber-400">{tChrome('panel.a11y.toReview', { count: report.warnings })}</span></>
+              <span className="text-green-400">{tChrome('panel.a11y.passed', { count: report.summary.passed })}</span>
+              {report.summary.warnings + report.summary.needs_review > 0 && (
+                <>, <span className="text-amber-400">{tChrome('panel.a11y.toReview', { count: report.summary.warnings + report.summary.needs_review })}</span></>
               )}
-              {report.failed > 0 && (
-                <>, <span className="text-red-400">{tChrome('panel.a11y.failed', { count: report.failed })}</span></>
+              {report.summary.failed > 0 && (
+                <>, <span className="text-red-400">{tChrome('panel.a11y.failed', { count: report.summary.failed })}</span></>
               )}
-              {' '}{tChrome('panel.a11y.ofTotal', { count: report.total })}
+              {' '}{tChrome('panel.a11y.ofTotal', { count: report.summary.applicable })}
             </>
           )}
         </div>

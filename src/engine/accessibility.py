@@ -1453,6 +1453,166 @@ def _check_heading_nesting(check, tree, mcid_tables):
     _verdict(check, len(headings), findings)
 
 
+# ── the English surface ───────────────────────────────────────────────────
+
+# Every check's name and its one-line explanation, in English.
+#
+# Refusals stay English at the engine and are mapped at the bridge; a check
+# NAME is the same kind of thing, so it lives here and a UI with a catalog of
+# its own renders the catalog entry keyed by the check id instead. A caller
+# with no catalog — the command line, and any reader of the flat `checks`
+# array — gets a readable report rather than a list of identifiers.
+_ENGLISH = {
+    "permissions": (
+        "Assistive technology may read the document",
+        "Encryption permissions must allow text extraction for accessibility.",
+    ),
+    "image_only": (
+        "Pages are not image-only",
+        "A scanned page with no recognized text has nothing to read aloud.",
+    ),
+    "tagged": (
+        "Document is tagged",
+        "Structure tags let assistive technology read content in a defined order.",
+    ),
+    "reading_order": (
+        "Reading order follows the page",
+        "Tag order is what is read; where it disagrees with the layout, a person decides.",
+    ),
+    "lang": (
+        "Document language is set",
+        "A declared language is what picks the right pronunciation.",
+    ),
+    "title": (
+        "Document has a title, and shows it",
+        "The title names the document in the window bar instead of the file name.",
+    ),
+    "bookmarks": (
+        "Long document has bookmarks",
+        "Bookmarks are how a long document is navigated without reading it through.",
+    ),
+    "contrast": (
+        "Text has sufficient colour contrast",
+        "Text must stand out from what is painted under it, at the published ratio.",
+    ),
+    "tagged_content": (
+        "All page content is tagged",
+        "Text covered by no tag and not declared decoration is never read.",
+    ),
+    "tagged_annotations": (
+        "Annotations are tagged",
+        "An annotation outside the structure tree has no place in the reading order.",
+    ),
+    "tab_order": (
+        "Pages with annotations declare a tab order",
+        "Without a structure tab order, keyboard focus follows the order of the file.",
+    ),
+    "character_encoding": (
+        "Characters map to readable text",
+        "A font whose bytes map to no character cannot be read aloud or searched.",
+    ),
+    "tagged_multimedia": (
+        "Multimedia is tagged",
+        "Sound and video annotations need a place in the structure like any content.",
+    ),
+    "screen_flicker": (
+        "Nothing flashes the screen",
+        "Page actions and scripts can flash the screen; each site needs a look.",
+    ),
+    "scripts": (
+        "Scripts are accessible",
+        "A script that changes the page must not leave assistive technology behind.",
+    ),
+    "timed_responses": (
+        "Nothing is on a timer",
+        "A response the reader has to give before a clock runs out needs a way out.",
+    ),
+    "navigation_links": (
+        "Navigation links are distinguishable",
+        "Links reading alike but going elsewhere cannot be told apart out of context.",
+    ),
+    "tagged_form_fields": (
+        "Form fields are tagged",
+        "A field outside the structure tree is not reached in the reading order.",
+    ),
+    "field_descriptions": (
+        "Form fields have descriptions",
+        "A field with no description is announced by its internal name, or not at all.",
+    ),
+    "figures_alt": (
+        "Figures have alternate text",
+        "A figure with no description conveys nothing to a reader who cannot see it.",
+    ),
+    "nested_alt": (
+        "No alternate text inside alternate text",
+        "A description inside another description is never read.",
+    ),
+    "alt_no_content": (
+        "Alternate text is attached to content",
+        "A description on an element that tags nothing describes nothing.",
+    ),
+    "alt_hides_annotation": (
+        "Alternate text does not hide an annotation",
+        "A description on a tag wrapping an annotation replaces the annotation's own.",
+    ),
+    "other_elements_alt": (
+        "Links, forms and formulas are described",
+        "These elements need a description of their own or one on the object they name.",
+    ),
+    "table_rows": (
+        "Rows are inside a table",
+        "A row outside a table is not read as part of one.",
+    ),
+    "table_cells": (
+        "Cells are inside a row",
+        "A cell outside a row has no position in the table.",
+    ),
+    "table_headers": (
+        "Tables have header cells",
+        "Header cells and their scope are what associate a value with what it means.",
+    ),
+    "table_regularity": (
+        "Table rows have the same width",
+        "Rows of different widths cannot be navigated cell by cell.",
+    ),
+    "table_summary": (
+        "Tables have a summary",
+        "A summary states what a complex table shows before it is read cell by cell.",
+    ),
+    "list_items": (
+        "List items are inside a list",
+        "An item outside a list is not announced as part of one.",
+    ),
+    "list_labels": (
+        "Labels and bodies are inside a list item",
+        "A label or body outside its item loses the item it belongs to.",
+    ),
+    "heading_nesting": (
+        "Heading levels are not skipped",
+        "Headings are how a document is skimmed; a skipped level breaks the outline.",
+    ),
+}
+
+_STATUS_ENGLISH = {
+    PASS: "Passed",
+    FAIL: "Failed",
+    WARN: "Short of the recommendation",
+    REVIEW: "Needs review",
+    NA: "Not applicable — the document has nothing this check applies to",
+}
+
+
+def _with_english(row: dict) -> dict:
+    label, explanation = _ENGLISH[row["id"]]
+    detail = f"{_STATUS_ENGLISH[row['status']]}. {explanation}"
+    findings = len(row["findings"])
+    if findings:
+        detail += f" {findings} of {row['counted']} checked."
+    row["label"] = label
+    row["detail"] = detail
+    return row
+
+
 # ── assembly ──────────────────────────────────────────────────────────────
 
 
@@ -1559,11 +1719,9 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
         "categories": by_category,
         "summary": summary,
         "unreadable": unreadable,
-        # The flat list, for a reader that has no notion of a category. The
-        # categorized tree above is the same 32 rows, in the same order.
-        "checks": [c.to_json() for c in ordered],
-        "passed": summary["passed"],
-        "failed": summary["failed"],
-        "warnings": summary["warnings"],
-        "total": summary["total"],
+        # The flat list, for a reader that has no notion of a category — the
+        # same 32 rows in the same order, each carrying the English name and
+        # sentence a caller with no catalog of its own renders (the CLI, and
+        # the panel until it reads `categories`).
+        "checks": [_with_english(c.to_json()) for c in ordered],
     }
