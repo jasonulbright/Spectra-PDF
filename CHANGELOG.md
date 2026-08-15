@@ -25,6 +25,16 @@
 - A border a document carries that this app does not write is named rather than quietly relabelled.
 - Creating links from the web addresses in the text still works exactly as it did.
 
+### Signatures a European authority vouches for
+- Signature checking gains a third trust source: the certificate authorities the EU trusted lists publish.
+- It is off until you turn it on, like every other trust source, and it changes nothing until you do.
+- The list ships inside the app. Nothing is downloaded, then or ever, and checking a signature still works with no network at all.
+- The panel says when the list was bundled and how much of Europe it covers, so you can judge how current it is.
+- A signature the lists vouch for says so by name, rather than only saying it is trusted.
+- Only authorities the lists record as currently granted count; a withdrawn one anchors nothing.
+- Authorities for timestamps and authorities for signatures are kept apart, so each vouches only for what it is entitled to.
+- The command line gains the same option for checking and for signing.
+
 ## 1.0.30
 
 *Released 2026-08-15*

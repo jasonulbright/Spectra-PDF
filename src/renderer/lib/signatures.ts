@@ -12,9 +12,9 @@ export interface SignatureEntry {
   intact: boolean;
   trusted: boolean;
   /** Which anchor set the validated chain terminated at. Null whenever
-   * `trusted` is false, and on a trusted chain whose anchor matched neither
-   * set — reported rather than guessed. */
-  trust_source?: 'user' | 'system' | null;
+   * `trusted` is false, and on a trusted chain whose anchor matched no
+   * configured set — reported rather than guessed. */
+  trust_source?: 'user' | 'system' | 'eutl' | null;
   coverage: string;
   covers_whole_document: boolean;
   modified_after_signing: boolean;
@@ -94,6 +94,16 @@ export interface VerifyResult {
     requested: boolean;
     available: boolean;
     anchor_count: number;
+  };
+  /** What the bundled EU trusted-list certificates contributed, and how old the
+   * bundle is. `fetched` is null only when the bundle carries no manifest. */
+  eutl_trust?: {
+    requested: boolean;
+    available: boolean;
+    anchor_count: number;
+    fetched?: string | null;
+    sequence?: number | null;
+    list_count?: number | null;
   };
   summary: {
     all_valid: boolean;
