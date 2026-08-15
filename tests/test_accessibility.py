@@ -249,11 +249,15 @@ class TestCorpusGate:
 class TestShippedShapeStillReadable:
     """The flat `checks` array, for a reader with no notion of a category."""
 
-    def test_the_flat_summary_still_adds_up(self, tmp_dir):
+    def test_the_flat_list_is_the_categorized_one(self, tmp_dir):
         res = check_accessibility(_build(tmp_dir, "baseline"))
-        assert res["total"] == 32
-        assert res["passed"] == res["summary"]["passed"]
-        assert res["failed"] == res["summary"]["failed"]
+        flat = [(c["id"], c["status"]) for c in res["checks"]]
+        nested = [
+            (c["id"], c["status"])
+            for cat in res["categories"]
+            for c in cat["checks"]
+        ]
+        assert flat == nested
 
 
 class TestCategoryFilter:
@@ -268,3 +272,29 @@ class TestCategoryFilter:
         src = _build(tmp_dir, "baseline")
         with pytest.raises(ValueError, match="unknown accessibility category"):
             check_accessibility(src, category="nonsense")
+
+
+class TestEnglishSurface:
+    """The flat rows carry an English name and sentence, so a caller with no
+    catalog of its own reads a report rather than a list of identifiers."""
+
+    def test_every_check_carries_a_name_and_a_sentence(self, tmp_dir):
+        res = check_accessibility(_build(tmp_dir, "figure_no_alt"))
+        for check in res["checks"]:
+            assert check["label"], check["id"]
+            assert check["detail"], check["id"]
+
+    def test_the_sentence_states_the_verdict_and_the_count(self, tmp_dir):
+        res = check_accessibility(_build(tmp_dir, "figure_no_alt"))
+        row = _check(res, "figures_alt")
+        assert row["detail"].startswith("Failed.")
+        assert "1 of 1 checked." in row["detail"]
+
+    def test_a_not_applicable_row_says_so(self, tmp_dir):
+        res = check_accessibility(_build(tmp_dir, "baseline"))
+        assert "Not applicable" in _check(res, "table_rows")["detail"]
+
+    def test_the_english_table_covers_the_inventory_exactly(self):
+        from engine.accessibility import _ENGLISH
+
+        assert sorted(_ENGLISH) == sorted(cid for cid, _ in CHECK_INVENTORY)
