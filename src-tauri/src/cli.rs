@@ -155,6 +155,10 @@ pub enum CliCommand {
     Preflight(PreflightArgs),
     /// List the shipped preflight profiles and the check inventory (JSON)
     PreflightProfiles,
+    /// Apply a preflight profile's fixups, in the engine's canonical order
+    PreflightFix(PreflightFixArgs),
+    /// Run a preflight profile over a folder — check it, or fix a mirrored copy
+    PreflightSweep(PreflightSweepArgs),
     /// List every markup comment in the document (JSON)
     CommentsList(AccessibilityArgs),
     /// Delete all markup comments (keeps links and form fields)
@@ -1094,6 +1098,58 @@ pub struct PreflightArgs {
     /// rules is no rule
     #[arg(long)]
     pub profile_path: Option<PathBuf>,
+}
+
+#[derive(Args)]
+pub struct PreflightFixArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// A shipped profile id (see `preflight-profiles`). Defaults to the
+    /// sheetfed offset profile
+    #[arg(long)]
+    pub profile: Option<String>,
+    /// A profile JSON file. Give either this or --profile, never both
+    #[arg(long)]
+    pub profile_path: Option<PathBuf>,
+    /// A check id (or a fixup id) to repair; repeatable. Omit for every
+    /// fixup the profile carries. The ORDER is the engine's either way
+    #[arg(long = "fix")]
+    pub fixes: Vec<String>,
+}
+
+#[derive(Args)]
+pub struct PreflightSweepArgs {
+    /// Source folder (searched recursively for PDFs; never modified unless
+    /// --in-place)
+    pub source: PathBuf,
+    /// Destination folder — reports, and in fix mode the fixed copies, mirror
+    /// the source tree here
+    #[arg(short, long, required_unless_present = "in_place", conflicts_with = "in_place")]
+    pub dest: Option<PathBuf>,
+    /// Repair each mirrored copy with the profile's fixups and re-check it.
+    /// Without it the sweep only measures
+    #[arg(long)]
+    pub fix: bool,
+    /// DESTRUCTIVE: replace each original with its fixed version (fix mode
+    /// only; staged beside it, verified, then swapped)
+    #[arg(long, requires = "fix")]
+    pub in_place: bool,
+    /// A shipped profile id (see `preflight-profiles`)
+    #[arg(long)]
+    pub profile: Option<String>,
+    /// A profile JSON file. Give either this or --profile, never both
+    #[arg(long)]
+    pub profile_path: Option<PathBuf>,
+    /// OPT-IN: move each processed original into this folder (the watched-
+    /// folder In -> Out -> Done shape; fix mode, mirror only)
+    #[arg(long, conflicts_with = "in_place", requires = "fix")]
+    pub moved: Option<PathBuf>,
+    /// Where the run log is written (default: no log from the CLI)
+    #[arg(long)]
+    pub log_dir: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -3985,6 +4041,49 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         ),
 
         CliCommand::PreflightProfiles => engine.call("list_preflight_profiles", json!({})),
+
+        CliCommand::PreflightFix(args) => engine.call(
+            "apply_preflight_fixups",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "profile": args.profile,
+                "profile_path": args.profile_path.as_ref()
+                    .map(|p| abs(p).to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                "checks": if args.fixes.is_empty() { None } else { Some(args.fixes.clone()) },
+                "gs_path": resolve_gs().to_string_lossy(),
+                "font_dir": resolve_fonts().to_string_lossy(),
+                "tesseract_path": resolve_tesseract().to_string_lossy(),
+            }),
+        ),
+
+        CliCommand::PreflightSweep(args) => {
+            let mut params = json!({
+                "source": abs(&args.source).to_string_lossy(),
+                "dest": args.dest.as_ref()
+                    .map(|p| abs(p).to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                "mode": if args.fix { "fix" } else { "check" },
+                "profile": args.profile,
+                "profile_path": args.profile_path.as_ref()
+                    .map(|p| abs(p).to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                "gs_path": resolve_gs().to_string_lossy(),
+                "font_dir": resolve_fonts().to_string_lossy(),
+                "tesseract_path": resolve_tesseract().to_string_lossy(),
+                "write_log": args.log_dir.is_some(),
+                "progress": true,
+                "in_place": args.in_place,
+                "move_processed_root": args.moved.as_ref()
+                    .map(|p| abs(p).to_string_lossy().to_string())
+                    .unwrap_or_default(),
+            });
+            if let Some(dir) = &args.log_dir {
+                params["log_dir"] = json!(abs(dir).to_string_lossy());
+            }
+            engine.call("run_preflight_sweep", params)
+        }
 
         CliCommand::CommentsList(args) => engine.call(
             "list_annotations",

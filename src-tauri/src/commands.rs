@@ -690,6 +690,26 @@ pub async fn write_profile_file(path: String, contents: String) -> Result<String
     Ok(path)
 }
 
+/// Write a guided action to a path the save dialog returned. Same reason
+/// `write_profile_file` exists — the capability-scoped filesystem plugin
+/// reaches only the app's own temp tree, and an action is exported precisely
+/// so it can be handed to someone or fed to the command line.
+///
+/// Its own command rather than the profile one widened: each arbitrary-path
+/// write names the single artifact it may create, so a caller holding one
+/// cannot be steered into writing the other's.
+#[tauri::command]
+pub async fn write_action_file(path: String, contents: String) -> Result<String, String> {
+    let ext_ok = std::path::Path::new(&path)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"));
+    if !ext_ok {
+        return Err(format!("not an action file name: {path}"));
+    }
+    fs::write(&path, contents).map_err(|e| format!("Failed to write the action: {}", e))?;
+    Ok(path)
+}
+
 /// Pick a form-DATA file to import (`/ImportData`). FDF and XFDF carry field
 /// values; the reader chooses by what the file contains, so the filter is a
 /// convenience rather than the decision.
@@ -1375,18 +1395,19 @@ fn batch_log_dir(app: &AppHandle, configured: Option<&str>) -> Result<std::path:
 /// True only for names this app itself writes. Deliberately strict: the prune
 /// below DELETES what this matches, and the standing rule after a session wiped
 /// archived installers with a glob is that a delete names exactly what it takes.
-/// Five exact prefixes: batch-OCR runs, guided-action folder runs (the
+/// Seven exact prefixes: batch-OCR runs, guided-action folder runs (the
 /// engine writes `action-run-*.log` into the same folder), disk-scope
-/// Search & Redact sweeps, folder form-preparation sweeps and folder-scope
-/// export sweeps. Retention must sweep all of them or the logs it does not
-/// match accumulate forever.
+/// Search & Redact sweeps, folder form-preparation sweeps, folder-scope
+/// export sweeps, one-PDF-per-folder builds and preflight sweeps. Retention
+/// must sweep all of them or the logs it does not match accumulate forever.
 fn is_batch_log_name(name: &str) -> bool {
     (name.starts_with("batch-ocr-")
         || name.starts_with("action-run-")
         || name.starts_with("search-redact-")
         || name.starts_with("form-prep-")
         || name.starts_with("folder-export-")
-        || name.starts_with("create-pdf-folders-"))
+        || name.starts_with("create-pdf-folders-")
+        || name.starts_with("preflight-run-"))
         && name.ends_with(".log")
         && !name.contains('/')
         && !name.contains('\\')
@@ -1663,6 +1684,7 @@ mod tests {
             "form-prep-2026-01-02_030405.log",
             "folder-export-2026-01-02_030405.log",
             "create-pdf-folders-2026-01-02_030405.log",
+            "preflight-run-2026-01-02_030405.log",
         ] {
             assert!(is_batch_log_name(name), "{name} should be swept");
             // The predicate also gates the WRITE, so a name it rejects is a

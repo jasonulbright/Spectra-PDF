@@ -796,6 +796,49 @@ export const DIALOG_STRINGS = {
   'dialog.formPrep.again': 'Run another',
   'dialog.formPrep.openPanel': 'Prepare a folder of forms…',
 
+  'dialog.preflightSweep.title': 'Preflight a Folder',
+  'dialog.preflightSweep.blurb':
+    'Measure every PDF in a folder against one print profile. A check writes nothing to the folder it reads.',
+  'dialog.preflightSweep.pickSource': 'Choose the folder to preflight',
+  'dialog.preflightSweep.destLabel': 'Where the reports go',
+  'dialog.preflightSweep.profile': 'Profile',
+  'dialog.preflightSweep.mode': 'What this run does',
+  'dialog.preflightSweep.modeCheck': 'Check only',
+  'dialog.preflightSweep.modeFix': 'Check and fix',
+  'dialog.preflightSweep.modeCheckNote':
+    'One report per document. Nothing in the source folder is written to.',
+  'dialog.preflightSweep.modeFixNote':
+    'Each document is copied, repaired with the fixups this profile carries, then checked again. The report states both results.',
+  'dialog.preflightSweep.inPlace': 'Replace the originals with their repaired versions',
+  'dialog.preflightSweep.inPlaceWarning':
+    'Each original is replaced by its repaired version. There is no copy to go back to.',
+  'dialog.preflightSweep.movedNote':
+    'Optional. A processed original leaves the source folder, so the next run does not read it again.',
+  'dialog.preflightSweep.writeLog': 'Write a run log',
+  'dialog.preflightSweep.presetName': 'Save these settings as',
+  'dialog.preflightSweep.preset.empty': 'Give the saved settings a name.',
+  'dialog.preflightSweep.preset.tooLong': 'That name is too long.',
+  'dialog.preflightSweep.preset.duplicate': 'Settings are already saved under that name.',
+  'dialog.preflightSweep.preset.full': 'There is no room for another saved setting.',
+  'dialog.preflightSweep.problem.noSource': 'Choose the folder to preflight.',
+  'dialog.preflightSweep.problem.noDest': 'Choose where the reports go.',
+  'dialog.preflightSweep.problem.noProfile': 'Choose the profile to measure against.',
+  'dialog.preflightSweep.problem.checkInPlace':
+    'A check writes nothing, so there is nothing for it to replace.',
+  'dialog.preflightSweep.problem.noFixups':
+    'This profile carries no fixups, so a fix run would repair nothing.',
+  'dialog.preflightSweep.run': 'Preflight the folder',
+  'dialog.preflightSweep.progressRunning': 'Measuring every document…',
+  'dialog.preflightSweep.progressReports': 'Writing report {{index}} of {{count}} — {{rel}}',
+  'dialog.preflightSweep.sumClean': '{{count}} ready to print',
+  'dialog.preflightSweep.sumDirty': '{{count}} with findings',
+  'dialog.preflightSweep.sumFailed': '{{count}} could not be read',
+  'dialog.preflightSweep.rowFailed': '{{rel}} — {{reason}}',
+  'dialog.preflightSweep.rowChecked': '{{rel}} — {{failed}} failed, {{review}} to review',
+  'dialog.preflightSweep.rowFixed': ' — repaired: {{fixups}}',
+  'dialog.preflightSweep.reportErrors':
+    '{{count}} localized reports could not be written. Every JSON report was.',
+  'dialog.preflightSweep.again': 'Preflight another folder',
   'dialog.folderExport.title': 'Export a Folder',
   'dialog.folderExport.pickSource': 'Choose the folder to export',
   'dialog.folderExport.blurb':

@@ -112,6 +112,7 @@ import { BatchOcrDialog } from './components/BatchOcrDialog';
 import { DiskRedactDialog } from './components/DiskRedactDialog';
 import { FolderFormPrepDialog } from './components/FolderFormPrepDialog';
 import { FolderExportDialog } from './components/FolderExportDialog';
+import { FolderPreflightDialog } from './components/FolderPreflightDialog';
 import { FolderCreatePdfDialog } from './components/FolderCreatePdfDialog';
 import { ScanDialog } from './components/ScanDialog';
 import { ScheduledRunsDialog } from './components/ScheduledRunsDialog';
@@ -250,6 +251,7 @@ function AppContent(): React.ReactElement {
   const [showDiskRedact, setShowDiskRedact] = useState(false);
   const [showFormPrepFolder, setShowFormPrepFolder] = useState(false);
   const [showFolderExport, setShowFolderExport] = useState(false);
+  const [showFolderPreflight, setShowFolderPreflight] = useState(false);
   const [showFolderCreatePdf, setShowFolderCreatePdf] = useState(false);
   const [showSchedules, setShowSchedules] = useState(false);
   const [showWatchers, setShowWatchers] = useState(false);
@@ -2144,6 +2146,7 @@ function AppContent(): React.ReactElement {
     openFormPrepFolder: () => setShowFormPrepFolder(true),
     openFolderExport: () => setShowFolderExport(true),
     openFolderCreatePdf: () => setShowFolderCreatePdf(true),
+    openFolderPreflight: () => setShowFolderPreflight(true),
     openScheduledRuns: () => setShowSchedules(true),
     openWatchedFolders: () => setShowWatchers(true),
     openCreatePdf: () => {
@@ -2204,6 +2207,7 @@ function AppContent(): React.ReactElement {
       openFormPrepFolder: () => h.current.openFormPrepFolder(),
       openFolderExport: () => h.current.openFolderExport(),
       openFolderCreatePdf: () => h.current.openFolderCreatePdf(),
+      openFolderPreflight: () => h.current.openFolderPreflight(),
       openScheduledRuns: () => h.current.openScheduledRuns(),
       openWatchedFolders: () => h.current.openWatchedFolders(),
       openCreatePdf: () => h.current.openCreatePdf(),
@@ -2645,6 +2649,9 @@ function AppContent(): React.ReactElement {
         />
       )}
       {showFolderExport && <FolderExportDialog onClose={() => setShowFolderExport(false)} />}
+      {showFolderPreflight && (
+        <FolderPreflightDialog onClose={() => setShowFolderPreflight(false)} />
+      )}
       {showFolderCreatePdf && (
         <FolderCreatePdfDialog onClose={() => setShowFolderCreatePdf(false)} />
       )}

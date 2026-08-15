@@ -123,6 +123,13 @@
         "tag_if_untagged"
       ]
     },
+    "preflight": {
+      "params": [
+        "checks",
+        "profile",
+        "profile_path"
+      ]
+    },
     "prepare_forms": {
       "params": [
         "allow_signed",

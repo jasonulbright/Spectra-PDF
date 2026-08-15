@@ -55,6 +55,7 @@ from engine.headers import add_header_footer
 from engine.metadata import strip_metadata
 from engine.optimize import optimize
 from engine.pdfa import convert_pdfa
+from engine.preflight_fixups import apply_fixups
 from engine.sanitize import sanitize_pdf
 from engine.derived_nav import outline_from_structure
 from engine.form_prepare import prepare_form_fields
@@ -214,6 +215,20 @@ _STEPS: dict = {
         prepare_form_fields,
         frozenset({"pages", "scan", "lang", "max_candidates", "kinds", "allow_signed"}),
         frozenset({"gs_path", "tesseract_path", "font_dir"}),
+    ),
+    # A print profile inside a longer authored action ("convert every Office
+    # file that lands here, then bring it up to the house press rule, then
+    # stamp it"). It calls the SAME `apply_fixups` door the panel button, the
+    # command line and the droplet call, so what repairing a finding means is
+    # not answered a second time inside this dispatch table.
+    #
+    # Fix only, deliberately: every step here TRANSFORMS the document it is
+    # handed, and a check produces a report an action has nowhere to put. The
+    # droplet is where a check over a folder lives.
+    "preflight": (
+        apply_fixups,
+        frozenset({"profile", "profile_path", "checks"}),
+        frozenset({"gs_path", "font_dir", "tesseract_path"}),
     ),
     "encrypt": (encrypt, frozenset({"user_password", "owner_password", "permissions"}), frozenset()),
     # The one step that PRODUCES the document instead of
