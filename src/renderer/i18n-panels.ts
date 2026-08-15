@@ -605,6 +605,7 @@ export const PANEL_STRINGS = {
   'panel.preflight.passed': '{{count}} passed',
   'panel.preflight.toReview': '{{count}} to review',
   'panel.preflight.failed': '{{count}} failed',
+  'panel.preflight.needsReview': '{{count}} could not be checked',
   'panel.preflight.ofTotal': 'of {{count}}.',
   'panel.preflight.images_one': '{{count}} image',
   'panel.preflight.images_other': '{{count}} images',
@@ -804,6 +805,7 @@ export const PANEL_STRINGS = {
   'panel.flattener.categoryStrokes': 'Strokes inside a region: {{count}}',
   'panel.flattener.categoryText': 'Text inside a region: {{count}}',
   'panel.flattener.categoryPatterns': 'Patterns inside a region: {{count}}',
+  'panel.flattener.categoryUnknown': 'Objects that could not be analysed: {{count}}',
   'panel.flattener.outlineText': 'Convert all text to outlines',
   'panel.flattener.outlineTextNote':
     'Converted text can no longer be selected, searched or extracted.',
@@ -816,6 +818,8 @@ export const PANEL_STRINGS = {
     'Text whose font this document does not embed takes its outlines from: {{faces}}',
   'panel.flattener.outlineRefusals': 'Cannot convert: {{reasons}}',
   'panel.flattener.unreadable': 'Page(s) {{pages}} could not be read.',
+  'panel.flattener.unknownNote':
+    'This document cannot be flattened: {{reasons}}',
   'panel.flattener.none': 'This document has no live transparency.',
   'panel.flattener.scope':
     'A larger balance merges regions, which removes seams and rasterizes more of the page; a smaller one keeps more text and vectors live and produces more regions.',

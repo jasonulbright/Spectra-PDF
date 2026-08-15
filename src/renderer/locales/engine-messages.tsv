@@ -130,6 +130,9 @@ fieldmdp.signatureFieldCannotLock	pattern	fieldmdp	Signature field "{{own_name}}
 flattener.flatteningRegionDpiWould	pattern	flattener	Flattening region {{region_number}} at {{dpi}} dpi would need {{width}}x{{height}} pixels.
 flattener.ghostscriptRegionRasterizationFailed	pattern	flattener	Ghostscript region rasterization failed: {{detail}}
 flattener.pageMediaBox	exact	flattener	This page has no media box.
+flattener.pageNamesGraphicsState	pattern	flattener	Page {{page}} names a graphics state this engine cannot read, so whether it paints transparency is unknown.
+flattener.pagePlacesFormXobject	pattern	flattener	Page {{page}} places a form XObject this engine cannot read, so whether it paints transparency is unknown.
+flattener.pagePlacesFormXobject2	pattern	flattener	Page {{page}} places a form XObject whose /BBox cannot be measured, so the area it covers is unknown.
 font_fallback.bundledFallbackFontFound	pattern	font_fallback	bundled fallback font not found: {{font_path}}
 font_fallback.bundledMongolianFontExpress	pattern	font_fallback	no bundled Mongolian font can express {{text}}
 font_fallback.bundledRightLeftFont	pattern	font_fallback	no bundled right-to-left font can express {{text}}
@@ -278,7 +281,7 @@ outline.outlineActionPayloadNested	exact	outline	outline action payload nested t
 outline.outlineDeeperThanLevels	pattern	outline	outline deeper than {{MAX_DEPTH}} levels
 outlines.pageDrawsTextThrough	pattern	outlines	Page {{page}} draws text through the font resource {{name}}, which the page does not define.
 outlines.pageDrawsZeroWidth	pattern	outlines	Page {{page}} draws a zero-width line, which has no fixed width to outline.
-outlines.pageNestsFormXobjects	pattern	outlines	Page {{page}} nests form XObjects deeper than {{cap}} levels.
+outlines.pageNestsFormXobjects	pattern	flattener,outlines	Page {{page}} nests form XObjects deeper than {{cap}} levels.
 page_boxes.boxMustOneGot	pattern	page_boxes	box must be one of {{v0}}, got {{box}}
 page_images.cropRectDegenerateNothing	exact	page_images	crop rect is degenerate (nothing would remain visible)
 page_images.cropRectMustLie	exact	page_images	crop rect must lie within the image (unit coordinates 0..1)

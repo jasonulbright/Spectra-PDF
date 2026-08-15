@@ -84,6 +84,14 @@
 - Untagged annotations, form fields and multimedia are bound in both directions — the structure points at the annotation and the annotation points back — so a document that reads correctly also maps back correctly.
 - Text drawn inside a reused graphic is refused by name rather than mis-tagged, because such text is numbered inside that graphic and not on the page.
 
+### Print checks that say what they could not read
+- **Print preflight gains a fourth answer: "could not be checked."** A check that could not read part of the document no longer reports a pass it did not earn. It names what it could not read, and the summary counts it separately from what passed.
+- A finding is still a finding: RGB colour found is reported as found, and a font that is not embedded still fails, whatever else on the page was unreadable.
+- A page whose strokes cannot be measured no longer reports "no hairline strokes".
+- The transparency flattener now says when it cannot judge an object rather than treating it as opaque. A form whose contents cannot be read, one that declares no bounds, one nested past the depth the analysis reaches, and a graphics state that will not read are each named on the page they are on.
+- Such a document is refused by name instead of being written: a flatten that reported success while live transparency survived it is the one result this tool must never produce.
+- The preview lists the same objects and the same reasons before you press anything, and highlights them on the page.
+
 ## 1.0.29
 
 *Released 2026-08-10*

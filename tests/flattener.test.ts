@@ -13,6 +13,7 @@ import {
   regionCount,
   substitutedFaces,
   totals,
+  unknownReasons,
   unreadablePages,
   type FlattenCategory,
   type FlattenPageReport,
@@ -30,19 +31,23 @@ function page(overrides: Partial<FlattenPageReport> = {}): FlattenPageReport {
     whole_page: false,
     counts: {
       transparent: 0, affected: 0, rasterized: 0,
-      outlined_strokes: 0, outlined_text: 0, expanded_patterns: 0,
+      outlined_strokes: 0, outlined_text: 0, expanded_patterns: 0, unknown: 0,
     },
+    unknown: [],
     ...overrides,
   };
 }
 
 function report(pages: FlattenPageReport[]): FlattenReport {
-  return { pages, balance: 0.5, dpi: 150, transparent_pages: [] };
+  return {
+    pages, balance: 0.5, dpi: 150, transparent_pages: [],
+    unknown_pages: pages.filter((p) => p.unknown.length > 0).map((p) => p.page),
+  };
 }
 
 const ALL = new Set<FlattenCategory>([
   'transparent', 'affected', 'rasterized',
-  'outlined_strokes', 'outlined_text', 'expanded_patterns',
+  'outlined_strokes', 'outlined_text', 'expanded_patterns', 'unknown',
 ]);
 
 describe('flattener controls', () => {
@@ -115,7 +120,7 @@ describe('flattener highlights', () => {
     const rects = highlightRects(page({
       objects: [{
         index: 0, kind: 'text', rect: [0, 0, 100, 100],
-        transparent: false, pattern: false, clipped: false,
+        transparent: false, pattern: false, clipped: false, unknown: false,
         categories: ['rasterized', 'outlined_text'],
       }],
     }), ALL);
@@ -128,7 +133,7 @@ describe('flattener highlights', () => {
     const rects = highlightRects(page({
       objects: [{
         index: 0, kind: 'fill', rect: [0, 0, 100, 100],
-        transparent: false, pattern: false, clipped: false,
+        transparent: false, pattern: false, clipped: false, unknown: false,
         categories: ['rasterized'],
       }],
     }), shown);
@@ -139,7 +144,7 @@ describe('flattener highlights', () => {
     const rects = highlightRects(page({
       objects: [{
         index: 0, kind: 'fill', rect: [0, 0, 100, 100],
-        transparent: true, pattern: false, clipped: true,
+        transparent: true, pattern: false, clipped: true, unknown: false,
         categories: ['transparent'],
       }],
     }), ALL);
@@ -221,5 +226,50 @@ describe('substitutedFaces', () => {
 
   it('is silent when only strokes convert — a stroke has no font', () => {
     expect(substitutedFaces(substituted, { text: false, strokes: true })).toEqual([]);
+  });
+});
+
+describe('objects the walk could not judge', () => {
+  const blocked = (reason: string) => report([page({ page: 3, unknown: [reason] })]);
+
+  it('states the reason the engine will refuse with, before Apply is pressed', () => {
+    expect(unknownReasons(blocked('Page 3 places a form XObject …')))
+      .toEqual(['Page 3 places a form XObject …']);
+    expect(unknownReasons(null)).toEqual([]);
+  });
+
+  it('reports one reason once however many pages carry it', () => {
+    const reasons = unknownReasons(report([
+      page({ page: 1, unknown: ['same reason'] }),
+      page({ page: 2, unknown: ['same reason', 'another'] }),
+    ]));
+    expect(reasons).toEqual(['same reason', 'another']);
+  });
+
+  it('closes Apply — the engine refuses such a document outright', () => {
+    expect(canApply(blocked('unjudgeable'), NO_OUTLINES)).toBe(false);
+    // Even with regions elsewhere, and even with a conversion armed: the
+    // refusal is per document, so no combination reaches a written file.
+    const withRegions = report([
+      page({ page: 1, regions: [[0, 0, 10, 10]] }),
+      page({ page: 2, unknown: ['unjudgeable'] }),
+    ]);
+    expect(canApply(withRegions, NO_OUTLINES)).toBe(false);
+    expect(canApply(withRegions, { text: true, strokes: false })).toBe(false);
+  });
+
+  it('leaves Apply open for a document it could read', () => {
+    expect(canApply(report([page({ regions: [[0, 0, 10, 10]] })]), NO_OUTLINES)).toBe(true);
+  });
+
+  it('highlights an unjudged object as its own category', () => {
+    const rects = highlightRects(page({
+      objects: [{
+        index: 0, kind: 'form', rect: [0, 0, 200, 400],
+        transparent: false, pattern: false, clipped: false, unknown: true,
+        categories: ['unknown'],
+      }],
+    }), ALL);
+    expect(rects.map((r) => r.category)).toEqual(['unknown']);
   });
 });

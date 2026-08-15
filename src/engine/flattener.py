@@ -77,7 +77,23 @@ CATEGORIES = (
     "outlined_strokes",
     "outlined_text",
     "expanded_patterns",
+    "unknown",
 )
+
+# The three answers the object walk can give about transparency. UNKNOWN is
+# not NO: an object whose analysis will not read may composite, and calling it
+# opaque leaves live transparency in a document the flatten reported success
+# on. The flatten refuses on UNKNOWN and the classification reports it.
+YES = "yes"
+NO = "no"
+UNKNOWN = "unknown"
+
+# Why an answer is UNKNOWN. The code travels; `_refuse_unknown` is the one
+# place it becomes a sentence.
+_UNKNOWN_READ = "read"
+_UNKNOWN_DEPTH = "depth"
+_UNKNOWN_BBOX = "bbox"
+_UNKNOWN_GSTATE = "gstate"
 
 # Resolutions the flattener offers. 150 is the working default; the arithmetic
 # is resolution-independent, so a higher number buys sharper raster edges at a
@@ -169,32 +185,46 @@ class _AlphaState:
         self.stroke_alpha = 1.0
         self.blend = "/Normal"
         self.smask = False
+        #: Set when an `/ExtGState` this state was asked to apply would not
+        #: read. It stacks with the rest, so a `Q` restores a state that was
+        #: readable and everything drawn after it is judgeable again.
+        self.unknown = False
         self._stack: list = []
 
     def push(self) -> None:
-        self._stack.append((self.fill_alpha, self.stroke_alpha, self.blend, self.smask))
+        self._stack.append(
+            (self.fill_alpha, self.stroke_alpha, self.blend, self.smask, self.unknown)
+        )
 
     def pop(self) -> None:
         if self._stack:
-            self.fill_alpha, self.stroke_alpha, self.blend, self.smask = self._stack.pop()
+            (self.fill_alpha, self.stroke_alpha, self.blend, self.smask,
+             self.unknown) = self._stack.pop()
 
-    def apply(self, ext_gstate) -> None:
+    def apply(self, ext_gstate) -> str:
+        """Apply one `/ExtGState`. Empty when every entry read, a reason code
+        when one did not — an entry that will not read leaves the alpha an
+        object composites through unknown, and an unknown alpha is not an
+        opaque one."""
         if ext_gstate is None:
-            return
+            return ""
         for key, attr in (("/ca", "fill_alpha"), ("/CA", "stroke_alpha")):
             try:
                 value = ext_gstate.get(key)
             except Exception:
-                value = None
+                self.unknown = True
+                return _UNKNOWN_GSTATE
             if value is not None:
                 try:
                     setattr(self, attr, float(value))
                 except (TypeError, ValueError):
-                    pass
+                    self.unknown = True
+                    return _UNKNOWN_GSTATE
         try:
             blend = ext_gstate.get("/BM")
         except Exception:
-            blend = None
+            self.unknown = True
+            return _UNKNOWN_GSTATE
         if blend is not None:
             if isinstance(blend, pikepdf.Array) and len(blend) > 0:
                 blend = blend[0]
@@ -202,9 +232,11 @@ class _AlphaState:
         try:
             smask = ext_gstate.get("/SMask")
         except Exception:
-            smask = None
+            self.unknown = True
+            return _UNKNOWN_GSTATE
         if smask is not None:
             self.smask = str(smask) != "/None"
+        return ""
 
     def transparent_for(self, kind: str) -> bool:
         if self.smask or self.blend not in _OPAQUE_BLENDS:
@@ -217,108 +249,221 @@ class _AlphaState:
 
 
 def _ext_gstate(resources, name: str):
-    if resources is None:
-        return None
+    """`(state, reason)` for one `gs` name.
+
+    A name the page never defined resolves to None with no reason: nothing
+    composites through a state that is not there. A table or an entry that
+    will not read carries a reason instead — the state it would have set is
+    unknown, and an unknown state is not an opaque one.
+    """
+    if resources is None or not name.startswith("/"):
+        return None, ""
     try:
         table = resources.get("/ExtGState")
-        if table is None:
-            return None
-        return table.get(pikepdf.Name(name)) if name.startswith("/") else None
     except Exception:
-        return None
+        return None, _UNKNOWN_GSTATE
+    if table is None:
+        return None, ""
+    try:
+        return table.get(pikepdf.Name(name)), ""
+    except Exception:
+        return None, _UNKNOWN_GSTATE
 
 
-def _form_is_group(xobj) -> bool:
+def _form_is_group(xobj) -> str:
+    """YES, NO or UNKNOWN — whether the form declares a transparency group."""
     try:
         group = xobj.get("/Group")
-        return group is not None and str(group.get("/S")) == "/Transparency"
     except Exception:
-        return False
+        return UNKNOWN
+    if group is None:
+        return NO
+    try:
+        return YES if str(group.get("/S")) == "/Transparency" else NO
+    except Exception:
+        return UNKNOWN
 
 
-def _image_is_masked(xobj) -> bool:
+def _image_is_masked(xobj) -> str:
+    """YES, NO or UNKNOWN — whether the image carries a mask of either kind."""
+    if xobj is None:
+        return UNKNOWN
     try:
         if xobj.get("/SMask") is not None:
-            return True
-        mask = xobj.get("/Mask")
-        return mask is not None
+            return YES
+        return YES if xobj.get("/Mask") is not None else NO
     except Exception:
-        return False
+        return UNKNOWN
 
 
-def _placement_rect(xobj, ctm):
-    """The device box an XObject paints into: the unit square for an image,
-    the form's own `/BBox` through its `/Matrix` for a form."""
+def _placement(xobj, ctm):
+    """`(rect, subtype, reason)` for one placed XObject.
+
+    `rect` is the device box the object paints into: the unit square for an
+    image, the form's own `/BBox` through its `/Matrix` for a form. It is None
+    with an EMPTY reason when the object paints nothing a region could hold (a
+    `/PS` XObject), and None with a REASON when the placement cannot be
+    measured. The two are not the same: an object in no region is neither
+    flattened nor weighed as preserved, so a placement that could not be read
+    has to say so rather than vanish.
+    """
     if xobj is None:
-        return list(bbox_of_rect_under_matrix(ctm, 1.0, 1.0))
+        return None, "", _UNKNOWN_READ
     try:
         subtype = str(xobj.get("/Subtype", ""))
     except Exception:
-        return None
+        return None, "", _UNKNOWN_READ
     if subtype == "/Image":
-        return list(bbox_of_rect_under_matrix(ctm, 1.0, 1.0))
+        return list(bbox_of_rect_under_matrix(ctm, 1.0, 1.0)), subtype, ""
     if subtype != "/Form":
-        return None
-    bbox = xobj.get("/BBox")
+        return None, subtype, ""
+    try:
+        bbox = xobj.get("/BBox")
+    except Exception:
+        return None, subtype, _UNKNOWN_READ
     if bbox is None:
-        return None
+        return None, subtype, _UNKNOWN_BBOX
     try:
         values = [float(v) for v in bbox]
     except (TypeError, ValueError):
-        return None
-    matrix = mat_mult(_as_matrix(xobj.get("/Matrix")) or IDENTITY, ctm)
+        return None, subtype, _UNKNOWN_BBOX
+    if len(values) != 4:
+        return None, subtype, _UNKNOWN_BBOX
+    try:
+        matrix = mat_mult(_as_matrix(xobj.get("/Matrix")) or IDENTITY, ctm)
+    except Exception:
+        return None, subtype, _UNKNOWN_READ
     return list(bbox_of_corners_under_matrix(
         matrix,
         min(values[0], values[2]), min(values[1], values[3]),
         max(values[0], values[2]), max(values[1], values[3]),
-    ))
+    )), subtype, ""
 
 
-def _form_has_transparency(xobj, depth: int = 0) -> bool:
-    """A form is transparency-bearing when it declares a transparency group,
-    or when anything reachable inside it does. A group nested two forms down
+def _form_transparency(xobj, depth: int = 0) -> tuple[str, str]:
+    """`(YES|NO|UNKNOWN, reason)` — whether a form paints transparency.
+
+    A form is transparency-bearing when it declares a transparency group, or
+    when anything reachable inside it does. A group nested two forms down
     still composites the page, so the outer `Do` is what has to be absorbed —
     the region flattener removes whole page-level objects, never their
-    interiors."""
-    if xobj is None or depth > MAX_FORM_DEPTH:
-        return False
-    if _form_is_group(xobj):
-        return True
+    interiors.
+
+    Every place the walk cannot reach the whole interior answers UNKNOWN: the
+    depth cap, a resource table that will not read, an `/ExtGState` entry that
+    will not apply, a child whose subtype will not read. Each of those means
+    "I could not tell", and reporting it as NO is what leaves live
+    transparency behind a flatten that reported success.
+    """
+    if xobj is None or not isinstance(xobj, (pikepdf.Dictionary, pikepdf.Stream)):
+        return UNKNOWN, _UNKNOWN_READ
+    if depth > MAX_FORM_DEPTH:
+        return UNKNOWN, _UNKNOWN_DEPTH
+    group = _form_is_group(xobj)
+    if group == YES:
+        return YES, ""
+    if group == UNKNOWN:
+        return UNKNOWN, _UNKNOWN_READ
     try:
         resources = xobj.get("/Resources")
     except Exception:
-        return False
+        return UNKNOWN, _UNKNOWN_READ
     if resources is None:
-        return False
+        return NO, ""
+    if not isinstance(resources, (pikepdf.Dictionary, pikepdf.Stream)):
+        return UNKNOWN, _UNKNOWN_READ
     try:
         table = resources.get("/ExtGState")
     except Exception:
-        table = None
+        return UNKNOWN, _UNKNOWN_GSTATE
     if table is not None:
-        for key in list(table.keys()):
-            state = _AlphaState()
+        try:
+            names = list(table.keys())
+        except Exception:
+            return UNKNOWN, _UNKNOWN_GSTATE
+        for key in names:
             try:
-                state.apply(table[key])
+                entry = table[key]
             except Exception:
-                continue
+                return UNKNOWN, _UNKNOWN_GSTATE
+            state = _AlphaState()
+            reason = state.apply(entry)
+            if reason:
+                return UNKNOWN, reason
             if state.transparent_for("fill") or state.transparent_for("stroke"):
-                return True
+                return YES, ""
     try:
         xobjects = resources.get("/XObject")
     except Exception:
-        xobjects = None
+        return UNKNOWN, _UNKNOWN_READ
     if xobjects is not None:
-        for key in list(xobjects.keys()):
+        try:
+            names = list(xobjects.keys())
+        except Exception:
+            return UNKNOWN, _UNKNOWN_READ
+        for key in names:
             try:
                 child = xobjects[key]
                 subtype = str(child.get("/Subtype", ""))
             except Exception:
-                continue
-            if subtype == "/Image" and _image_is_masked(child):
-                return True
-            if subtype == "/Form" and _form_has_transparency(child, depth + 1):
-                return True
-    return False
+                return UNKNOWN, _UNKNOWN_READ
+            if subtype == "/Image":
+                masked = _image_is_masked(child)
+                if masked == YES:
+                    return YES, ""
+                if masked == UNKNOWN:
+                    return UNKNOWN, _UNKNOWN_READ
+            elif subtype == "/Form":
+                state_of_child, reason = _form_transparency(child, depth + 1)
+                if state_of_child == YES:
+                    return YES, ""
+                if state_of_child == UNKNOWN:
+                    return UNKNOWN, reason
+    return NO, ""
+
+
+def _refuse_unknown(page: int, reason: str) -> None:
+    """Refuse the flatten by name for a page the walk could not judge.
+
+    The parameter is named for the placeholder it becomes: the refusal sweep
+    reads this source, and an expression inside an f-string becomes an
+    anonymous placeholder no translation can make sense of. The depth message
+    is worded exactly as `outlines.py` words its own cap refusal, so one claim
+    carries one table row and one translation.
+    """
+    if reason == _UNKNOWN_DEPTH:
+        cap = MAX_FORM_DEPTH
+        raise ValueError(
+            f"Page {page} nests form XObjects deeper than {cap} levels."
+        )
+    if reason == _UNKNOWN_BBOX:
+        raise ValueError(
+            f"Page {page} places a form XObject whose /BBox cannot be "
+            "measured, so the area it covers is unknown."
+        )
+    if reason == _UNKNOWN_GSTATE:
+        raise ValueError(
+            f"Page {page} names a graphics state this engine cannot read, so "
+            "whether it paints transparency is unknown."
+        )
+    raise ValueError(
+        f"Page {page} places a form XObject this engine cannot read, so "
+        "whether it paints transparency is unknown."
+    )
+
+
+def _unknown_message(page: int, reason: str) -> str:
+    """The sentence the refusal carries, for the report that must not raise.
+
+    Asking the refusal itself keeps one wording: a classification that
+    described an unjudgeable object differently from the refusal it predicts
+    would be two claims about one document.
+    """
+    try:
+        _refuse_unknown(page, reason)
+    except ValueError as exc:
+        return str(exc)
+    return ""
 
 
 def _text_rect(state, cap, raw_width: float) -> list[float]:
@@ -330,13 +475,18 @@ def _text_rect(state, cap, raw_width: float) -> list[float]:
     ))
 
 
-def page_objects(pdf, page) -> list[dict]:
-    """Every object the PAGE stream paints, in encounter (paint) order.
+def page_objects(pdf, page) -> tuple[list[dict], list[str]]:
+    """`(objects, unknown reasons)` for everything the PAGE stream paints.
 
     One entry per painted path, per BT…ET text block, per placed XObject or
-    inline image, and per shading. Each carries its device `rect`, the exact
-    page-level instruction indices that draw it (`drop_idxs`), whether it
-    participates in transparency, and whether it paints through a pattern.
+    inline image, and per shading, in encounter (paint) order. Each carries
+    its device `rect`, the exact page-level instruction indices that draw it
+    (`drop_idxs`), whether it participates in transparency, whether it paints
+    through a pattern, and whether the walk could judge it at all.
+
+    The second half is the page's UNKNOWN reasons, deduplicated in encounter
+    order. A page that carries one cannot be flattened honestly: the flatten
+    refuses by name and the classification reports the same sentence.
 
     The unit is deliberately PAGE-level: a form's interior is not addressed,
     because a region flatten removes whole objects and a half-removed form
@@ -351,6 +501,7 @@ def page_objects(pdf, page) -> list[dict]:
     box = _page_box(page)
 
     out: list[dict] = []
+    unknowns: list[str] = []
     construct: list[int] = []
     points: list[tuple[float, float]] = []
     has_clip = False
@@ -361,7 +512,12 @@ def page_objects(pdf, page) -> list[dict]:
     text_open: int | None = None
     text_rect: list[float] | None = None
 
-    def emit(kind: str, rect, drop_idxs, transparent: bool, pattern: bool) -> None:
+    def note(reason: str) -> None:
+        if reason and reason not in unknowns:
+            unknowns.append(reason)
+
+    def emit(kind: str, rect, drop_idxs, transparent: bool, pattern: bool,
+             unknown: bool = False) -> None:
         if rect is None:
             rect = list(box)
         out.append({
@@ -372,6 +528,7 @@ def page_objects(pdf, page) -> list[dict]:
             "transparent": bool(transparent),
             "pattern": bool(pattern),
             "clipped": bool(clips.clips_away(tuple(rect))),
+            "unknown": bool(unknown or alpha.unknown),
         })
 
     for idx, instruction in enumerate(instructions):
@@ -396,7 +553,12 @@ def page_objects(pdf, page) -> list[dict]:
             # stream and every later fill claims to expand a pattern.
             fill_is_pattern = False
         if operator == "gs" and operands:
-            alpha.apply(_ext_gstate(resources, str(operands[0])))
+            ext_gstate, reason = _ext_gstate(resources, str(operands[0]))
+            if reason:
+                alpha.unknown = True
+                note(reason)
+            else:
+                note(alpha.apply(ext_gstate))
             continue
         # BT/ET are text-state operators the state machine consumes, so the
         # block's extent is recorded BEFORE it is fed — a check after `feed`
@@ -457,22 +619,28 @@ def page_objects(pdf, page) -> list[dict]:
         if operator == "Do" and operands:
             name = str(operands[0])
             xobj = _lookup_xobject(name, resources, resources)
-            rect = _placement_rect(xobj, state.ctm)
-            if rect is not None:
-                try:
-                    subtype = str(xobj.get("/Subtype", "")) if xobj is not None else ""
-                except Exception:
-                    subtype = ""
+            rect, subtype, reason = _placement(xobj, state.ctm)
+            if reason:
+                note(reason)
+                # The rect defaults to the whole page box: an object whose
+                # placement could not be measured is somewhere on this page,
+                # and saying nothing is the failure this branch exists to end.
+                emit("form" if subtype == "/Form" else "image", rect, [idx],
+                     alpha.transparent_for("fill"), False, unknown=True)
+            elif rect is not None:
                 if subtype == "/Form":
-                    transparent = (
-                        alpha.transparent_for("fill") or _form_has_transparency(xobj)
-                    )
-                    emit("form", rect, [idx], transparent, False)
+                    inner, inner_reason = _form_transparency(xobj)
+                    note(inner_reason)
+                    emit("form", rect, [idx],
+                         alpha.transparent_for("fill") or inner == YES, False,
+                         unknown=inner == UNKNOWN)
                 else:
-                    transparent = (
-                        alpha.transparent_for("fill") or _image_is_masked(xobj)
-                    )
-                    emit("image", rect, [idx], transparent, False)
+                    masked = _image_is_masked(xobj)
+                    if masked == UNKNOWN:
+                        note(_UNKNOWN_READ)
+                    emit("image", rect, [idx],
+                         alpha.transparent_for("fill") or masked == YES, False,
+                         unknown=masked == UNKNOWN)
             construct, points, has_clip = [], [], False
             continue
         if operator == "INLINE IMAGE":
@@ -486,7 +654,7 @@ def page_objects(pdf, page) -> list[dict]:
             construct, points, has_clip = [], [], False
             continue
         construct, points, has_clip = [], [], False
-    return out
+    return out, unknowns
 
 
 def _path_points(operator: str, operands: list, ctm) -> list[tuple[float, float]]:
@@ -551,8 +719,12 @@ def compute_regions(objects: list[dict], page_box, balance: float, dpi: int) -> 
     diagonal = math.hypot(page_box[2] - page_box[0], page_box[3] - page_box[1])
     gap = merge_gap(balance, diagonal)
 
+    # An object the walk could not judge is neither a seed nor a member: it
+    # cannot be claimed transparent, and letting it grow a region would draw a
+    # plan the flatten refuses to carry out.
     seeds = [dict(rect=list(o["rect"]), members=set())
-             for o in objects if o["transparent"] and not o["clipped"]]
+             for o in objects
+             if o["transparent"] and not o["clipped"] and not o.get("unknown")]
     if not seeds:
         return {"regions": [], "members": [], "whole_page": False, "passes": 0}
 
@@ -562,6 +734,8 @@ def compute_regions(objects: list[dict], page_box, balance: float, dpi: int) -> 
         for region in seeds:
             for obj in objects:
                 if obj["index"] in region["members"] or obj["clipped"]:
+                    continue
+                if obj.get("unknown"):
                     continue
                 if _intersects(region["rect"], obj["rect"], gap):
                     region["members"].add(obj["index"])
@@ -596,7 +770,8 @@ def compute_regions(objects: list[dict], page_box, balance: float, dpi: int) -> 
     # "The whole page" is every object participating, not a region that
     # happens to reach the page edges: a margin nothing paints into is not
     # content the flatten spared.
-    live = {o["index"] for o in objects if not o["clipped"]}
+    live = {o["index"] for o in objects
+            if not o["clipped"] and not o.get("unknown")}
     absorbed: set[int] = set()
     for region in seeds:
         absorbed |= region["members"]
@@ -619,6 +794,8 @@ def _categorize(objects: list[dict], members: list[list[int]]) -> None:
     in_region = {index for group in members for index in group}
     for obj in objects:
         categories: list[str] = []
+        if obj.get("unknown"):
+            categories.append("unknown")
         if obj["transparent"]:
             categories.append("transparent")
         rasterized = obj["index"] in in_region
@@ -642,7 +819,7 @@ def _affected(obj: dict, objects: list[dict]) -> bool:
     for other in objects:
         if other["index"] <= obj["index"] or not other["transparent"]:
             continue
-        if other["clipped"]:
+        if other["clipped"] or other.get("unknown"):
             continue
         if _intersects(obj["rect"], other["rect"]):
             return True
@@ -694,6 +871,10 @@ def list_transparency(
     The classification is the report the panel highlights from, and it is
     produced WITHOUT writing anything: a user decides what to rasterize by
     seeing what would be rasterized, not by reading the result afterwards.
+
+    A page carries `unknown`: the refusal sentences a flatten of it would
+    raise, one per distinct reason. The panel states them before the apply,
+    so the refusal is never the first the user hears of it.
     """
     validate_pdf(file)
     dpi = max(1, int(dpi))
@@ -702,7 +883,7 @@ def list_transparency(
         for number in _page_numbers(pdf, pages):
             page = pdf.pages[number - 1]
             try:
-                objects = page_objects(pdf, page)
+                objects, unknowns = page_objects(pdf, page)
                 box = _page_box(page)
             except ValueError:
                 raise
@@ -710,6 +891,7 @@ def list_transparency(
                 report.append({
                     "page": number, "error": str(exc), "objects": [], "regions": [],
                     "counts": {name: 0 for name in CATEGORIES}, "whole_page": False,
+                    "unknown": [],
                 })
                 continue
             plan = compute_regions(objects, box, balance, dpi)
@@ -724,12 +906,14 @@ def list_transparency(
                 "region_pixels": [_pixel_extent(r, dpi) for r in plan["regions"]],
                 "whole_page": plan["whole_page"],
                 "counts": _counts(objects),
+                "unknown": [_unknown_message(number, reason) for reason in unknowns],
             })
     return {
         "pages": report,
         "balance": max(0.0, min(1.0, float(balance))),
         "dpi": dpi,
         "transparent_pages": [p["page"] for p in report if p["counts"]["transparent"]],
+        "unknown_pages": [p["page"] for p in report if p["unknown"]],
     }
 
 
@@ -920,6 +1104,10 @@ def flatten_transparency(
     The two outline conversions run AFTER the region rebuild, on what is still
     live: content a region absorbed is already gone, so nothing is outlined
     only to be covered by a raster.
+
+    A page carrying an object the walk could not judge REFUSES by name and
+    writes nothing. The alternative is a success report over surviving
+    transparency, which is the one outcome this door must never produce.
     """
     validate_pdf(file)
     dpi = max(1, int(dpi))
@@ -933,11 +1121,13 @@ def flatten_transparency(
                 page = pdf.pages[number - 1]
                 box = _page_box(page)
                 try:
-                    objects = page_objects(pdf, page)
+                    objects, unknowns = page_objects(pdf, page)
                 except Exception as exc:
                     report.append({"page": number, "regions": 0, "removed": 0,
                                    "error": str(exc)})
                     continue
+                if unknowns:
+                    _refuse_unknown(number, unknowns[0])
                 plan = compute_regions(objects, box, balance, dpi)
                 regions = plan["regions"]
                 if not regions:
