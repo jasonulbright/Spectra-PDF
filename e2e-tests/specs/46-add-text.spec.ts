@@ -11,6 +11,8 @@ import {
   placeAddText,
   commitAddText,
   setReactInputValue,
+  setContentEditableValue,
+  openParagraphEditor,
 } from '../support/harness.js';
 
 // Add Text round-trip against the real binary: arm the Edit
@@ -38,15 +40,17 @@ async function editTextRuns(
   );
 }
 
-async function editParagraphs(
-  pageId: string,
-): Promise<
-  { index: number; text: string; lineCount: number; alignment: string; orientation: string }[]
-> {
-  return await browser.execute<
-    { index: number; text: string; lineCount: number; alignment: string; orientation: string }[],
-    [string]
-  >(function (p) {
+interface ListedParagraph {
+  index: number;
+  text: string;
+  lineCount: number;
+  alignment: string;
+  orientation: string;
+  vertical: boolean;
+}
+
+async function editParagraphs(pageId: string): Promise<ListedParagraph[]> {
+  return await browser.execute<ListedParagraph[], [string]>(function (p) {
     return (window as any).__SPECTRA_TEST__.editParagraphs(p);
   }, pageId);
 }
@@ -54,15 +58,27 @@ async function editParagraphs(
 // The authored paragraph, once the post-commit re-index lists it.
 async function authoredParagraph(
   needle: string,
-): Promise<{ pageId: string; text: string; lineCount: number; orientation: string } | null> {
+): Promise<
+  | {
+      pageId: string;
+      index: number;
+      text: string;
+      lineCount: number;
+      orientation: string;
+      vertical: boolean;
+    }
+  | null
+> {
   for (const pageId of await editTextPageIds()) {
     const para = (await editParagraphs(pageId)).find((p) => p.text.includes(needle));
     if (para) {
       return {
         pageId,
+        index: para.index,
         text: para.text,
         lineCount: para.lineCount,
         orientation: para.orientation,
+        vertical: para.vertical,
       };
     }
   }
@@ -275,5 +291,113 @@ describe('add text', () => {
     );
 
     expect(await invokeAppCommand('edit.undo')).toBe(true);
+  });
+
+  // T29 — vertical AUTHORING. The embed side (Identity-V, /W2) and the edit
+  // side (the orientation model, vertical reflow) both shipped before
+  // creation existed, so a user could restyle and reflow a column and never
+  // make one. These two cases are the wire for the half that was missing.
+  it('authors a VERTICAL column through the card and reflows it', async function () {
+    this.timeout(180_000);
+    await waitForHarness();
+    await invokeAppCommand('tools.addtext');
+    // Tall and narrow: under a vertical mode the box's HEIGHT is how far a
+    // column runs and its WIDTH is how many columns fit.
+    await placeAddText({ x: 0.72, y: 0.5, w: 0.14, h: 0.4 });
+    await $('[data-testid="add-text-form"]').waitForDisplayed({ timeout: 10_000 });
+
+    // CJK reaches the card through the React-aware setter — WebDriver key
+    // injection is unreliable for these scripts on Windows (spec 54).
+    const phrase = '日本語の縦書きです。これは段落。';
+    await setReactInputValue('[data-testid="add-text-input"]', phrase);
+    await $('[data-testid="add-text-writing-mode"]').selectByAttribute('value', 'vertical');
+
+    // The card reports the direction the ENGINE's own evidence chose — the
+    // renderer never classifies the script itself, which is what keeps one
+    // implementation of that decision.
+    await $('[data-testid="add-text-columns"]').waitForDisplayed({ timeout: 20_000 });
+
+    // Rotation and the OpenType features go away with the mode: no
+    // orientation admits a turned column, and a vertical embed carries no
+    // feature request at all.
+    expect(await $('[data-testid="add-text-rotate"]').isEnabled()).toBe(false);
+    expect(await $('[data-testid="add-text-smallcaps"]').isEnabled()).toBe(false);
+    expect(await $('[data-testid="add-text-family"]').isEnabled()).toBe(false);
+
+    await $('[data-testid="add-text-create"]').click();
+    await browser.waitUntil(
+      async () => !(await $('[data-testid="add-text-form"]').isDisplayed().catch(() => false)),
+      { timeout: 30_000, timeoutMsg: 'the card never closed after authoring the column' },
+    );
+
+    expect(await invokeAppCommand('tools.edit')).toBe(true);
+    await browser.waitUntil(async () => (await authoredParagraph('日本語')) !== null, {
+      timeout: 30_000,
+      timeoutMsg: 'the authored column never listed as a paragraph',
+    });
+    const column = await authoredParagraph('日本語');
+    // Authored as a column, listed as a column: the orientation the creation
+    // wrote is the one the re-listing reads.
+    expect(column?.orientation).toBe('vertical-rl');
+    expect(column?.vertical).toBe(true);
+
+    // …and it reflows through the shipped vertical machinery, which is the
+    // whole point of authoring into the same model rather than beside it.
+    await openParagraphEditor(column!.pageId, column!.index);
+    await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
+    await setContentEditableValue('[data-testid="edit-para-input"]', '縦書きを書き換えた。');
+    await browser.keys(['Enter']);
+    await browser.waitUntil(async () => (await authoredParagraph('書き換えた')) !== null, {
+      timeout: 30_000,
+      timeoutMsg: 'the retyped column never re-listed',
+    });
+    expect((await authoredParagraph('書き換えた'))?.orientation).toBe('vertical-rl');
+
+    // Undo peels the reflow, then the authoring.
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(async () => (await authoredParagraph('書き換えた')) === null, {
+      timeout: 30_000,
+      timeoutMsg: 'undo did not take back the reflow',
+    });
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(async () => (await authoredParagraph('日本語')) === null, {
+      timeout: 30_000,
+      timeoutMsg: 'undo did not remove the authored column',
+    });
+  });
+
+  it('authors a column carrying a tate-chu-yoko year, read back inside it', async function () {
+    this.timeout(120_000);
+    await waitForHarness();
+    await invokeAppCommand('tools.addtext');
+    await placeAddText({ x: 0.5, y: 0.5, w: 0.12, h: 0.4 });
+    await $('[data-testid="add-text-form"]').waitForDisplayed({ timeout: 10_000 });
+
+    const phrase = '平成2026年の記録';
+    // The block is one atomic unit of one column em, drawn upright and
+    // condensed across the column — the same shape the reflow's absorption
+    // reads back, which is what this asserts by listing ONE paragraph
+    // carrying the year in reading position.
+    await commitAddText({
+      text: phrase,
+      size: 14,
+      writingMode: 'vertical',
+      spans: [{ start: 2, end: 6, tcy: true }],
+    });
+
+    expect(await invokeAppCommand('tools.edit')).toBe(true);
+    await browser.waitUntil(async () => (await authoredParagraph(phrase)) !== null, {
+      timeout: 30_000,
+      timeoutMsg: 'the authored tate-chu-yoko column never listed',
+    });
+    const para = await authoredParagraph(phrase);
+    expect(para?.text).toBe(phrase);
+    expect(para?.orientation).toBe('vertical-rl');
+
+    expect(await invokeAppCommand('edit.undo')).toBe(true);
+    await browser.waitUntil(async () => (await authoredParagraph(phrase)) === null, {
+      timeout: 30_000,
+      timeoutMsg: 'undo did not remove the authored tate-chu-yoko column',
+    });
   });
 });
