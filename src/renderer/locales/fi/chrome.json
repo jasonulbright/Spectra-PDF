@@ -1596,6 +1596,7 @@
   "dock.close": "Sulje työkaluruutu",
   "dock.paneLabel": "Työkaluruutu",
   "dock.resize": "Vedä muuttaaksesi kokoa",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "tuntematon saavutettavuusluokka: ”{{category}}” (odotettiin jokin arvoista: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} sisältää XML-lomakkeen (XFA). Sivutoiminnot irrottaisivat lomakkeen sen sivuista, joten {{operation}} ei ole käytettävissä tälle asiakirjalle. Täytä lomake tai yksitasoista se ensin toisella ohjelmalla.",
   "engine.acroform.regeneratedFileSPage": "Uudelleen rakennetun tiedoston sivumäärä poikkeaa alkuperäisestä; sen lomakekenttiä ei voi liittää uudelleen.",
   "engine.attachments.attachmentNamed": "ei liitettä nimeltä {{name}}",

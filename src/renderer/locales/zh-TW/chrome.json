@@ -1545,6 +1545,7 @@
   "dock.close": "關閉工具窗格",
   "dock.paneLabel": "工具窗格",
   "dock.resize": "拖曳以調整大小",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "不明的協助工具類別：「{{category}}」（應為 {{v1}} 其中之一）",
   "engine.acroform.containsXmlFormXfa": "{{v0}} 含有 XML 表單（XFA）。頁面作業會使表單與其頁面分離，因此本文件無法使用 {{operation}}。請先填寫表單，或用其他工具將它平面化。",
   "engine.acroform.regeneratedFileSPage": "重建後檔案的頁數與原始檔不同；無法重新附加它的表單欄位。",
   "engine.attachments.attachmentNamed": "沒有名為 {{name}} 的附件",

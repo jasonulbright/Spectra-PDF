@@ -1647,6 +1647,7 @@
   "dock.close": "Fermer le volet des outils",
   "dock.paneLabel": "Volet des outils",
   "dock.resize": "Faites glisser pour redimensionner",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "catégorie d'accessibilité inconnue : « {{category}} » (attendue parmi : {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} contient un formulaire XML (XFA). Les opérations de page détacheraient le formulaire de ses pages : {{operation}} n’est donc pas disponible pour ce document. Remplissez le formulaire, ou aplatissez-le d’abord avec un autre outil.",
   "engine.acroform.regeneratedFileSPage": "Le nombre de pages du fichier régénéré diffère de celui de l’original ; impossible de rattacher ses champs de formulaire.",
   "engine.attachments.attachmentNamed": "aucune pièce jointe nommée {{name}}",

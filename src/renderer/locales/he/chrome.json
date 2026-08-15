@@ -1647,6 +1647,7 @@
   "dock.close": "סגור את חלונית הכלים",
   "dock.paneLabel": "חלונית הכלים",
   "dock.resize": "גרור לשינוי הגודל",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "קטגוריית נגישות לא מוכרת: „{{category}}” — הערכים האפשריים הם {{v1}}",
   "engine.acroform.containsXmlFormXfa": "הקובץ {{v0}} מכיל טופס XML מסוג XFA. פעולות על עמודים ינתקו את הטופס מהעמודים שלו, ולכן הפעולה {{operation}} אינה זמינה עבור מסמך זה. מלא את הטופס, או שטח אותו תחילה בעזרת כלי אחר.",
   "engine.acroform.regeneratedFileSPage": "מספר העמודים בקובץ שנוצר מחדש שונה ממספרם במקור; לא ניתן לחבר מחדש את שדות הטופס שלו.",
   "engine.attachments.attachmentNamed": "אין קובץ מצורף בשם {{name}}",

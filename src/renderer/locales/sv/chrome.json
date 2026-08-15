@@ -1596,6 +1596,7 @@
   "dock.close": "Stäng verktygspanelen",
   "dock.paneLabel": "Verktygspanel",
   "dock.resize": "Dra för att ändra storlek",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "okänd tillgänglighetskategori: ”{{category}}” (förväntade en av: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} innehåller ett XML-formulär (XFA). Sidåtgärder skulle koppla loss formuläret från dess sidor, så {{operation}} är inte tillgängligt för det här dokumentet. Fyll i formuläret, eller förenkla det med ett annat program först.",
   "engine.acroform.regeneratedFileSPage": "Den ombyggda filens sidantal skiljer sig från originalets; det går inte att koppla dess formulärfält igen.",
   "engine.attachments.attachmentNamed": "ingen bilaga med namnet {{name}}",

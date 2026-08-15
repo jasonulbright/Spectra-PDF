@@ -1596,6 +1596,7 @@
   "dock.close": "Lukk verktøyruten",
   "dock.paneLabel": "Verktøyrute",
   "dock.resize": "Dra for å endre størrelsen",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "ukjent tilgjengelighetskategori: «{{category}}» (forventet en av: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} inneholder et XML-skjema (XFA). Sidehandlinger ville løsrevet skjemaet fra sidene, så {{operation}} er ikke tilgjengelig for dette dokumentet. Fyll ut skjemaet, eller flat det ut med et annet program først.",
   "engine.acroform.regeneratedFileSPage": "Sidetallet i den ombygde filen avviker fra originalens; skjemafeltene kan ikke knyttes til på nytt.",
   "engine.attachments.attachmentNamed": "ingen vedlegg med navnet {{name}}",

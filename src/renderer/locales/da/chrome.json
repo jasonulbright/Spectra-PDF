@@ -1596,6 +1596,7 @@
   "dock.close": "Luk værktøjsruden",
   "dock.paneLabel": "Værktøjsrude",
   "dock.resize": "Træk for at ændre størrelsen",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "ukendt tilgængelighedskategori: “{{category}}” (forventede en af: {{v1}})",
   "engine.acroform.containsXmlFormXfa": "{{v0}} indeholder en XML-formular (XFA). Sidehandlinger ville løsrive formularen fra dens sider, så {{operation}} er ikke tilgængelig for dette dokument. Udfyld formularen, eller udjævn den først med et andet program.",
   "engine.acroform.regeneratedFileSPage": "Den genopbyggede fils sidetal afviger fra originalens; dens formularfelter kan ikke tilknyttes igen.",
   "engine.attachments.attachmentNamed": "ingen vedhæftet fil med navnet {{name}}",

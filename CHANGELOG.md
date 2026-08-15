@@ -44,6 +44,19 @@
 - The forms panel now lists every script the document carries that this app declines to run: which field, which moment it would have run at, and the script itself, readable in place.
 - The standing position is stated where the list is: the standard formatting, checking and calculation calls are declarative and carry no code, so those run; anything else stays in the document exactly as it was and is reported rather than executed.
 
+### The accessibility check now looks at the page, not just the file
+- The check grew from six questions about the document as a whole to **32 across seven areas** — Document, Page Content, Forms, Alternate Text, Tables, Lists and Headings. A document whose every figure is undescribed and whose every table has no header row used to pass; it no longer does.
+- New in Alternate Text: figures with no description, a description nested inside another one, a description attached to nothing, and a description that hides an annotation's own words.
+- New for tables: rows outside a table, cells outside a row, a table with no header cells, a header cell with no scope, rows of uneven width, and a missing summary.
+- New for lists and headings: items outside a list, labels outside an item, and a heading level skipped over.
+- New for page content: text that no tag covers and that is not declared decoration, untagged annotations, untagged form fields, a page with annotations and no tab order, a font whose characters map to nothing readable, untagged multimedia, and form fields with no description.
+- **Colour contrast is measured.** Every drawn line of text is checked against what is actually painted under it, at the published contrast ratio, with the easier threshold for large and bold text. Where the backdrop is a photograph, a gradient or an irregular shape, the check says it cannot tell instead of guessing.
+- **A check with nothing to check now says so.** A document with no tables reports its table checks as not applicable, and those are left out of the passed count rather than inflating it. The summary states how many checks actually applied.
+- **A check that cannot be certain says "needs review" instead of failing.** Reading order, scripts, timed responses, repetitive links and unmeasurable contrast come with the list of things to look at rather than a verdict nobody can stand behind.
+- Every failure now names WHERE it is — a tag, a place on a page, or an annotation or field — so the finding can be found.
+- A page whose contents cannot be read is named in the report, and every check that needed it says so. It is never counted as clean.
+- Automatic tagging picks the body text size by how much text is set in it rather than by how many blocks there are, so a page whose title, body and page number are all different sizes no longer turns its body copy into a heading. A page number or running head smaller than the body text and sitting in the page margin is now marked as decoration rather than tagged as a paragraph.
+
 ## 1.0.29
 
 *Released 2026-08-10*

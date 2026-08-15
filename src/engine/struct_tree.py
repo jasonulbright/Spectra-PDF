@@ -31,11 +31,11 @@ Untagged documents (no /StructTreeRoot) list as tagged=False and every
 mutation refuses cleanly — creating a tree from nothing is autotagging's job
 (a separate capability), not a tree editor's.
 
-NOTE (known gap): the renderer's page-tier commit rebuilds documents
-via pdf-lib into a fresh catalog, which does not carry /StructTreeRoot — page
-moves/deletes on a tagged file drop its tags today, tags edited here survive
-every ENGINE path (pikepdf edits the tree in place). Same family as the
-AcroForm carry; its own future arc.
+The renderer's page-tier commit rebuilds documents via pdf-lib into a fresh
+catalog and CARRIES the tree across that rebuild (`lib/struct-carry.ts`): the
+tree, the ParentTree, /A attribute payloads, OBJR targets and annotation
+/StructParent values all survive a page move or delete. Tags edited here
+survive every engine path too — pikepdf edits the tree in place.
 """
 
 import shutil

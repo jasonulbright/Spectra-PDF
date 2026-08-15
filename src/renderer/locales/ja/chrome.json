@@ -1545,6 +1545,7 @@
   "dock.close": "ツールパネルを閉じる",
   "dock.paneLabel": "ツールパネル",
   "dock.resize": "ドラッグしてサイズを変更",
+  "engine.accessibility.unknownAccessibilityCategoryExpected": "不明なアクセシビリティ カテゴリです：「{{category}}」（{{v1}} のいずれかを期待）",
   "engine.acroform.containsXmlFormXfa": "{{v0}} には XML フォーム（XFA）が含まれています。ページ操作を行うとフォームがページから切り離されるため、この文書では {{operation}} を利用できません。フォームに入力するか、先に別のツールで統合してください。",
   "engine.acroform.regeneratedFileSPage": "再生成したファイルのページ数が元と異なります。フォームフィールドを付け直せません。",
   "engine.attachments.attachmentNamed": "{{name}} という名前の添付ファイルはありません",
