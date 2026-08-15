@@ -58,13 +58,12 @@ describe('the engine and the panel agree about which fixes exist', () => {
 
   it('every check the engine can fix automatically has a door in its table', () => {
     const engine = pythonTuple('AUTOMATIC_CHECKS');
-    for (const id of engine) {
-      expect(ENGINE).toContain(`"${id}": _fix_`.replace('_fix_', '_'));
-    }
-    // The door table itself is keyed by the same ids.
-    const doors = [...ENGINE.matchAll(/^ {4}"([a-z_]+)": (?:_fix_[a-z_]+|_clear_alt)/gm)].map(
-      (m) => m[1],
-    );
+    // The door table is keyed by the same ids, in both directions: an
+    // automatic check with no door refuses everything the panel offers, and a
+    // door with no check is a repair nothing can reach.
+    const doors = [
+      ...ENGINE.matchAll(/^ {4}"([a-z_]+)": (?:_fix_[a-z_]+|_clear_alt|_tag_annotations)/gm),
+    ].map((m) => m[1]);
     expect(doors.sort()).toEqual([...engine].sort());
   });
 

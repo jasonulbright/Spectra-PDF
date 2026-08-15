@@ -13,11 +13,14 @@ text, a table summary, a language, a field description — is an AUTHORED fix an
 lives on its own door, called per finding, because inventing that value is
 worse than leaving the finding standing.
 
-Fixes are applied in a fixed order and every one of them is path-stable: none
-reshapes the tree, so the addresses the single report run produced still name
-what they named. `autotag` is the exception and needs none — it only applies to
-an untagged document, where every structure check reported `not_applicable` and
-has no address to go stale.
+The ORDER is load-bearing, and the reason is addressing. Every fix that takes a
+structure PATH runs while the tree still has the shape the single report run
+read, so the addresses it produced still name what they named. The three
+annotation doors run LAST because binding an annotation inserts an element, and
+an insertion is the one thing that shifts a sibling path. `autotag` is the other
+exception and needs no ordering care: it only applies to an untagged document,
+where every structure check reported `not_applicable` and has no address to go
+stale.
 
 A door that refuses does not stop the run: its refusal is recorded against its
 check and the rest still land. A run where NOTHING landed and something refused
@@ -36,6 +39,7 @@ from engine.doc_properties import set_document_title, set_page_tab_order
 from engine.encrypt import grant_accessibility_permission
 from engine.struct_fix import set_table_headers
 from engine.struct_tree import set_struct_props
+from engine.tag_content import tag_page_content
 
 # The checks whose fix needs no authored value, in application order.
 #
@@ -52,6 +56,11 @@ AUTOMATIC_CHECKS = (
     "table_headers",
     "nested_alt",
     "alt_hides_annotation",
+    # Binding an annotation into the tree needs no value from anyone: the
+    # element's role follows from the annotation's own subtype.
+    "tagged_annotations",
+    "tagged_multimedia",
+    "tagged_form_fields",
 )
 
 # The checks that carry an AUTHORED fix — one value the user supplies, per
@@ -59,6 +68,9 @@ AUTOMATIC_CHECKS = (
 # rather than keeping a second list of its own.
 AUTHORED_CHECKS = (
     "lang",
+    # Untagged page content takes one authored value that no machine can
+    # supply: whether the run is content or decoration.
+    "tagged_content",
     "title",
     "field_descriptions",
     "figures_alt",
@@ -154,6 +166,53 @@ def _fix_table_headers(source: str, output: str, report: dict, allow_signed: boo
     return applied
 
 
+# The structure type an annotation is bound under, by its subtype. A link is a
+# Link, a form field is a Form, and everything else is an Annot — the three
+# roles ISO 32000 table 337 names for exactly this.
+_ANNOT_ROLES = {"Link": "Link", "Widget": "Form"}
+
+
+def _tag_annotations(check_id: str, default_role: str = "Annot"):
+    """Bind every annotation this check named into the tree.
+
+    One call per (page, role): `tag_page_content` writes the `/OBJR` and the
+    annotation's `/StructParent` together, so a page's links and its widgets
+    are two calls and never one that guesses a single role for both.
+
+    `default_role` is what the check itself knows. A widget is a `Form`
+    wherever it is found, which is why the form-field check carries the role
+    rather than re-deriving it from a subtype its findings never needed.
+    """
+
+    def run(source: str, output: str, report: dict, allow_signed: bool) -> int:
+        groups: dict = {}
+        for finding in _findings(report, check_id):
+            address = finding["address"]
+            page = address.get("page")
+            index = address.get("annotation")
+            if page is None or index is None:
+                continue
+            subtype = str(finding.get("values", {}).get("subtype", ""))
+            role = _ANNOT_ROLES.get(subtype, default_role)
+            groups.setdefault((int(page), role), []).append(int(index))
+        applied = 0
+        current = source
+        for (page, role), indexes in sorted(groups.items()):
+            tag_page_content(
+                current,
+                output,
+                page,
+                [{"annot": i} for i in sorted(indexes)],
+                role=role,
+                allow_signed=allow_signed,
+            )
+            current = output
+            applied += len(indexes)
+        return applied
+
+    return run
+
+
 def _clear_alt(check_id: str):
     def run(source: str, output: str, report: dict, allow_signed: bool) -> int:
         applied = 0
@@ -177,6 +236,9 @@ _DOORS = {
     "table_headers": _fix_table_headers,
     "nested_alt": _clear_alt("nested_alt"),
     "alt_hides_annotation": _clear_alt("alt_hides_annotation"),
+    "tagged_annotations": _tag_annotations("tagged_annotations"),
+    "tagged_multimedia": _tag_annotations("tagged_multimedia"),
+    "tagged_form_fields": _tag_annotations("tagged_form_fields", "Form"),
 }
 
 

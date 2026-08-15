@@ -400,6 +400,7 @@ export interface AccessibilityHandlers {
   exportTo: (destPath: string) => Promise<string>;
   fix: (checkId: string) => Promise<void>;
   authoredFix: (checkId: string, index: number | null, value: string) => Promise<void>;
+  artifactRest: (checkId: string) => Promise<void>;
 }
 
 let accessibility: AccessibilityHandlers | null = null;
@@ -1504,6 +1505,8 @@ export interface TestHarness {
   /** Type one authored value and Apply it. `index` is null for a check-scope
    * editor (the language and the title), a finding position otherwise. */
   a11yAuthoredFix: (checkId: string, index: number | null, value: string) => Promise<void>;
+  /** Declare every run one check named page furniture, a page at a time. */
+  a11yArtifactRest: (checkId: string) => Promise<void>;
   /** The findings drawn on the pages right now. */
   a11yFindingsOnPage: () => {
     id: string;
@@ -2685,6 +2688,19 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         await accessibility.authoredFix(checkId, index, value);
       } catch (err) {
         captureError('a11yAuthoredFix', err);
+        throw err;
+      }
+    },
+    a11yArtifactRest: async (checkId) => {
+      if (!accessibility) {
+        const msg = 'a11yArtifactRest: the accessibility panel is not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      try {
+        await accessibility.artifactRest(checkId);
+      } catch (err) {
+        captureError('a11yArtifactRest', err);
         throw err;
       }
     },

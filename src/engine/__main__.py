@@ -187,6 +187,7 @@ from engine.incremental import signature_policy, transplant_incremental
 from engine.redact_marks import list_redact_annotations, save_redaction_marks
 from engine.signatures import verify_signatures, sign_pdf, generate_signer
 from engine.struct_fix import set_table_headers
+from engine.tag_content import tag_page_content
 from engine.struct_tree import (
     add_struct_node,
     delete_struct_node,
@@ -269,6 +270,7 @@ def main() -> None:
     server.register("get_struct_tree", get_struct_tree)
     server.register("set_struct_props", set_struct_props)
     server.register("set_table_headers", set_table_headers)
+    server.register("tag_page_content", tag_page_content)
     server.register("move_struct_node", move_struct_node)
     server.register("delete_struct_node", delete_struct_node)
     server.register("add_struct_node", add_struct_node)
