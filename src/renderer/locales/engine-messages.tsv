@@ -142,7 +142,7 @@ enhance_scan.speckSizeMustInches	pattern	enhance_scan	the speck size must be 0.0
 fieldmdp.signatureFieldCannotLock	pattern	fieldmdp	Signature field "{{own_name}}" cannot lock itself. A field lock names the form fields that may no longer change, not the field being signed.
 flattener.flatteningRegionDpiWould	pattern	flattener	Flattening region {{region_number}} at {{dpi}} dpi would need {{width}}x{{height}} pixels.
 flattener.ghostscriptRegionRasterizationFailed	pattern	flattener	Ghostscript region rasterization failed: {{detail}}
-flattener.pageMediaBox	exact	flattener	This page has no media box.
+flattener.pageMediaBox	exact	flattener,object_inspector	This page has no media box.
 flattener.pageNamesGraphicsState	pattern	flattener	Page {{page}} names a graphics state this engine cannot read, so whether it paints transparency is unknown.
 flattener.pagePlacesFormXobject	pattern	flattener	Page {{page}} places a form XObject this engine cannot read, so whether it paints transparency is unknown.
 flattener.pagePlacesFormXobject2	pattern	flattener	Page {{page}} places a form XObject whose /BBox cannot be measured, so the area it covers is unknown.
@@ -297,6 +297,10 @@ mrc_codecs.maskVerificationFailedEmbedded	pattern	mrc_codecs	mask verification f
 mrc_codecs.oneMaskProfilePer	pattern	mrc_codecs	one mask profile per mask is required, got {{v0}} for {{v1}} mask(s)
 mrc_codecs.unknownJbigMode	pattern	mrc_codecs	unknown JBIG2 mode: {{mode}}
 mrc_codecs.unknownMaskCodecExpected	pattern	mrc_codecs	unknown mask codec: {{codec}} (expected one of {{v1}})
+object_inspector.objectUnderPointCannot	exact	object_inspector	The object under that point cannot be isolated on its own.
+object_inspector.objectUnderPointCould	pattern	object_inspector	The object under that point could not be isolated for measurement: {{detail}}
+object_inspector.pageSContentWill	pattern	object_inspector	This page's content will not read, so nothing on it can be identified: {{exc}}
+object_inspector.pointPage	exact	object_inspector	That point is not on this page.
 ocr_layer.ocrWordsApply	exact	ocr_layer	No OCR words to apply.
 office_export.conversionWroteFileCarries	pattern	office_export	the conversion wrote a {{key}} file that carries no document content
 office_export.exportTakesOption	pattern	office_export	the {{key}} export takes no {{name}} option
@@ -507,7 +511,7 @@ search_regions.maxHitsMustPositive	exact	search_regions	max_hits must be a posit
 search_regions.pagesMustListPage	exact	enhance_scan,form_detect,search_regions,slide_export,table_export,text_export	pages must be a list of page numbers or "all"
 separations.ghostscriptFoldedSpotColours	pattern	separations	Ghostscript folded {{n}} spot colours into process; raise the spot limit or reduce the document's spots.
 separations.ghostscriptSeparationRenderFailed	pattern	separations	Ghostscript separation render failed: {{v0}}
-separations.pageDocument	pattern	flattener,outlines,separations	Page {{number}} is not in this document.
+separations.pageDocument	pattern	flattener,object_inspector,outlines,separations	Page {{number}} is not in this document.
 separations.pageUsesColourSpace	pattern	separations	Page {{page}} uses a colour space this engine cannot read, so the inks on it cannot all be established: {{detail}}
 separations.pageUsesSpotColours	pattern	separations	This page uses {{n}} spot colours; separation preview supports {{limit}}.
 separations.separationOutputDidMatch	exact	separations	Separation output did not match the document's inks — the preview cannot be trusted.
@@ -761,4 +765,7 @@ watermark.watermarkScaleMustGreater	pattern	watermark	watermark scale must be gr
 watermark.watermarkScaleMustNumber	pattern	watermark	watermark scale must be a number, got {{scale}}
 watermark.watermarkTextContainsCharacters	exact	watermark	watermark text contains characters outside Latin-1 and no fallback font is available
 watermark.watermarkTileGapMust	pattern	watermark	watermark tile gap must not be negative, got {{tile_gap}}
+xfdf.annotationRepliedPageName	pattern	xfdf	the annotation replied to on page {{v0}} has no name, so XFDF cannot reference it
+xfdf.replyRelationshipAnnotationPage	pattern	xfdf	the reply relationship of an annotation on page {{v0}} cannot be read
+xfdf.replyRelationshipXfdfCarry	pattern	xfdf	not a reply relationship XFDF can carry: {{reply_type}}
 xfdf.xfdfFileAnnotsSection	exact	xfdf	the XFDF file has no <annots> section

@@ -247,6 +247,282 @@ def test_import_in_place(tmp_path):
         assert len(result.pages[0].obj["/Annots"]) == 7
 
 
+def _thread_and_group(path: str) -> None:
+    """One page carrying BOTH structures against one target: a reply
+    (`/RT /R`) and a group member (`/RT /Group`) that both point at the same
+    parent. The interchange has to bring back two distinct relationships, not
+    two copies of one."""
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(400, 400))
+    parent = _annot(
+        pdf, "/Text", [10, 10, 30, 30],
+        Contents=pikepdf.String("the parent"), T=pikepdf.String("Ada"),
+        NM=pikepdf.String("p-1"),
+    )
+    reply = _annot(
+        pdf, "/Text", [40, 10, 60, 30],
+        Contents=pikepdf.String("a reply"), T=pikepdf.String("Grace"),
+        NM=pikepdf.String("r-1"),
+    )
+    reply["/IRT"] = parent
+    reply["/RT"] = pikepdf.Name("/R")
+    member = _annot(
+        pdf, "/Square", [100, 100, 200, 200],
+        Contents=pikepdf.String("a group member"), T=pikepdf.String("Ada"),
+        NM=pikepdf.String("g-1"),
+    )
+    member["/IRT"] = parent
+    member["/RT"] = pikepdf.Name("/Group")
+    pdf.save(path)
+    pdf.close()
+
+
+def _bare(path: str, pages: int = 1, size=(400, 400)) -> None:
+    pdf = pikepdf.new()
+    for _ in range(pages):
+        pdf.add_blank_page(page_size=size)
+    pdf.save(path)
+    pdf.close()
+
+
+def test_group_and_reply_survive_the_round_trip_as_two_structures(tmp_path):
+    src = str(tmp_path / "threaded.pdf")
+    xfdf = str(tmp_path / "threaded.xfdf")
+    _thread_and_group(src)
+
+    report = export_xfdf(src, xfdf)
+    assert report["relationships"] == {"R": 1, "Group": 1}
+    els = {e.get("name"): e for e in _elements(xfdf)}
+    assert els["r-1"].get("inreplyto") == "p-1"
+    assert els["r-1"].get("replyType") == "R"
+    assert els["g-1"].get("inreplyto") == "p-1"
+    assert els["g-1"].get("replyType") == "Group"
+    assert els["p-1"].get("inreplyto") is None
+    assert els["p-1"].get("replyType") is None
+
+    bare = str(tmp_path / "bare.pdf")
+    _bare(bare)
+    out = str(tmp_path / "back.pdf")
+    back = import_xfdf(bare, xfdf, out)
+    assert back["added"] == 3
+    assert back["relationships"] == {"R": 1, "Group": 1}
+    assert "unresolved_replies" not in back
+
+    with pikepdf.open(out) as result:
+        by_nm = {str(a.get("/NM")): a for a in result.pages[0].obj["/Annots"]}
+        assert str(by_nm["r-1"]["/IRT"]["/NM"]) == "p-1"
+        assert str(by_nm["g-1"]["/IRT"]["/NM"]) == "p-1"
+        assert str(by_nm["r-1"]["/RT"]) == "/R"
+        assert str(by_nm["g-1"]["/RT"]) == "/Group"
+        assert str(by_nm["r-1"]["/RT"]) != str(by_nm["g-1"]["/RT"])
+        assert by_nm["p-1"].get("/IRT") is None
+        assert by_nm["p-1"].get("/RT") is None
+
+    # Closed, not merely non-throwing: exporting the rebuilt document
+    # reproduces the same three (name, target, relationship) triples.
+    again = str(tmp_path / "again.xfdf")
+    export_xfdf(out, again)
+    triples = {
+        (e.get("name"), e.get("inreplyto"), e.get("replyType"))
+        for e in _elements(again)
+    }
+    assert triples == {
+        ("p-1", None, None),
+        ("r-1", "p-1", "R"),
+        ("g-1", "p-1", "Group"),
+    }
+
+
+def test_import_makes_the_default_relationship_explicit(tmp_path):
+    """An XFDF with no replyType means the format's default. The imported file
+    says so, so the next reader never has to supply it."""
+    bare = str(tmp_path / "bare.pdf")
+    _bare(bare)
+    xfdf = tmp_path / "plain.xfdf"
+    xfdf.write_text(
+        '<?xml version="1.0"?><xfdf xmlns="http://ns.adobe.com/xfdf/"><annots>'
+        '<text page="0" rect="1,1,20,20" name="a"/>'
+        '<text page="0" rect="30,1,50,20" name="b" inreplyto="a"/>'
+        "</annots></xfdf>",
+        encoding="utf-8",
+    )
+    out = str(tmp_path / "out.pdf")
+    report = import_xfdf(bare, str(xfdf), out)
+    assert report["relationships"] == {"R": 1}
+    with pikepdf.open(out) as result:
+        by_nm = {str(a.get("/NM")): a for a in result.pages[0].obj["/Annots"]}
+        assert str(by_nm["b"]["/RT"]) == "/R"
+
+
+def test_relationship_outside_the_defined_pair_is_transcribed_both_ways(tmp_path):
+    src = str(tmp_path / "odd.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(400, 400))
+    parent = _annot(pdf, "/Text", [10, 10, 30, 30], NM=pikepdf.String("p"))
+    child = _annot(pdf, "/Text", [40, 10, 60, 30], NM=pikepdf.String("c"))
+    child["/IRT"] = parent
+    child["/RT"] = pikepdf.Name("/Custom")
+    pdf.save(src)
+    pdf.close()
+
+    xfdf = str(tmp_path / "odd.xfdf")
+    report = export_xfdf(src, xfdf)
+    assert report["relationships"] == {"Custom": 1}
+    els = {e.get("name"): e for e in _elements(xfdf)}
+    assert els["c"].get("replyType") == "Custom"
+
+    bare = str(tmp_path / "bare.pdf")
+    _bare(bare)
+    out = str(tmp_path / "back.pdf")
+    import_xfdf(bare, xfdf, out)
+    with pikepdf.open(out) as result:
+        by_nm = {str(a.get("/NM")): a for a in result.pages[0].obj["/Annots"]}
+        assert str(by_nm["c"]["/RT"]) == "/Custom"
+
+
+def test_reply_type_without_a_target_is_dropped_and_counted(tmp_path):
+    src = str(tmp_path / "dangling.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(400, 400))
+    lone = _annot(pdf, "/Text", [10, 10, 30, 30], NM=pikepdf.String("lone"))
+    lone["/RT"] = pikepdf.Name("/Group")
+    pdf.save(src)
+    pdf.close()
+
+    xfdf = str(tmp_path / "dangling.xfdf")
+    report = export_xfdf(src, xfdf)
+    assert report["dangling_reply_type"] == 1
+    assert report["relationships"] == {}
+    assert _elements(xfdf)[0].get("replyType") is None
+
+    bare = str(tmp_path / "bare.pdf")
+    _bare(bare)
+    stray = tmp_path / "stray.xfdf"
+    stray.write_text(
+        '<?xml version="1.0"?><xfdf xmlns="http://ns.adobe.com/xfdf/"><annots>'
+        '<text page="0" rect="1,1,20,20" name="a" replyType="Group"/>'
+        "</annots></xfdf>",
+        encoding="utf-8",
+    )
+    out = str(tmp_path / "out.pdf")
+    back = import_xfdf(bare, str(stray), out)
+    assert back["dangling_reply_type"] == 1
+    with pikepdf.open(out) as result:
+        assert result.pages[0].obj["/Annots"][0].get("/RT") is None
+
+
+def test_export_refuses_when_the_target_has_no_name(tmp_path):
+    src = str(tmp_path / "unnamed.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(400, 400))
+    parent = _annot(pdf, "/Text", [10, 10, 30, 30])
+    child = _annot(pdf, "/Text", [40, 10, 60, 30], NM=pikepdf.String("c"))
+    child["/IRT"] = parent
+    child["/RT"] = pikepdf.Name("/Group")
+    pdf.save(src)
+    pdf.close()
+    with pytest.raises(ValueError, match="has no name"):
+        export_xfdf(src, str(tmp_path / "unnamed.xfdf"))
+
+
+def test_export_refuses_an_unreadable_relationship(tmp_path):
+    src = str(tmp_path / "broken.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(400, 400))
+    parent = _annot(pdf, "/Text", [10, 10, 30, 30], NM=pikepdf.String("p"))
+    child = _annot(pdf, "/Text", [40, 10, 60, 30], NM=pikepdf.String("c"))
+    child["/IRT"] = parent
+    child["/RT"] = pikepdf.String("Group")  # a string, where the format says name
+    pdf.save(src)
+    pdf.close()
+    with pytest.raises(ValueError, match="cannot be read"):
+        export_xfdf(src, str(tmp_path / "broken.xfdf"))
+
+
+def test_import_refuses_a_reply_type_it_cannot_carry(tmp_path):
+    bare = str(tmp_path / "bare.pdf")
+    _bare(bare)
+    xfdf = tmp_path / "bad.xfdf"
+    xfdf.write_text(
+        '<?xml version="1.0"?><xfdf xmlns="http://ns.adobe.com/xfdf/"><annots>'
+        '<text page="0" rect="1,1,20,20" name="a"/>'
+        '<text page="0" rect="30,1,50,20" name="b" inreplyto="a" replyType="a b"/>'
+        "</annots></xfdf>",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="not a reply relationship"):
+        import_xfdf(bare, str(xfdf), str(tmp_path / "out.pdf"))
+
+
+def test_import_accepts_the_lowercase_spelling_producers_write(tmp_path):
+    bare = str(tmp_path / "bare.pdf")
+    _bare(bare)
+    xfdf = tmp_path / "lower.xfdf"
+    xfdf.write_text(
+        '<?xml version="1.0"?><xfdf xmlns="http://ns.adobe.com/xfdf/"><annots>'
+        '<square page="0" rect="1,1,20,20" name="a"/>'
+        '<circle page="0" rect="30,1,50,20" name="b" inreplyto="a" replyType="group"/>'
+        "</annots></xfdf>",
+        encoding="utf-8",
+    )
+    out = str(tmp_path / "out.pdf")
+    report = import_xfdf(bare, str(xfdf), out)
+    assert report["relationships"] == {"Group": 1}
+    with pikepdf.open(out) as result:
+        by_nm = {str(a.get("/NM")): a for a in result.pages[0].obj["/Annots"]}
+        assert str(by_nm["b"]["/RT"]) == "/Group"
+
+
+def test_a_name_ambiguous_across_pages_does_not_bind(tmp_path):
+    """/NM is unique only within a page and an /IRT pair is required to be on
+    one page, so a name that names two annotations resolves to neither rather
+    than to whichever the walk reached first."""
+    bare = str(tmp_path / "bare.pdf")
+    _bare(bare, pages=3)
+    xfdf = tmp_path / "collide.xfdf"
+    xfdf.write_text(
+        '<?xml version="1.0"?><xfdf xmlns="http://ns.adobe.com/xfdf/"><annots>'
+        '<text page="0" rect="1,1,20,20" name="dup"/>'
+        '<text page="1" rect="1,1,20,20" name="dup"/>'
+        '<text page="2" rect="30,1,50,20" name="reply" inreplyto="dup"/>'
+        "</annots></xfdf>",
+        encoding="utf-8",
+    )
+    out = str(tmp_path / "out.pdf")
+    report = import_xfdf(bare, str(xfdf), out)
+    assert report["added"] == 3
+    assert report["unresolved_replies"] == 1
+    assert report["relationships"] == {}
+    with pikepdf.open(out) as result:
+        reply = next(
+            a for a in result.pages[2].obj["/Annots"] if str(a.get("/NM")) == "reply"
+        )
+        assert reply.get("/IRT") is None
+        assert reply.get("/RT") is None
+
+
+def test_a_reply_binds_to_its_own_page_when_the_name_repeats(tmp_path):
+    bare = str(tmp_path / "bare.pdf")
+    _bare(bare, pages=2)
+    xfdf = tmp_path / "scoped.xfdf"
+    xfdf.write_text(
+        '<?xml version="1.0"?><xfdf xmlns="http://ns.adobe.com/xfdf/"><annots>'
+        '<text page="0" rect="1,1,20,20" name="dup"><contents>page one</contents></text>'
+        '<text page="1" rect="1,1,20,20" name="dup"><contents>page two</contents></text>'
+        '<text page="1" rect="30,1,50,20" name="reply" inreplyto="dup" replyType="Group"/>'
+        "</annots></xfdf>",
+        encoding="utf-8",
+    )
+    out = str(tmp_path / "out.pdf")
+    report = import_xfdf(bare, str(xfdf), out)
+    assert report["relationships"] == {"Group": 1}
+    with pikepdf.open(out) as result:
+        reply = next(
+            a for a in result.pages[1].obj["/Annots"] if str(a.get("/NM")) == "reply"
+        )
+        assert str(reply["/IRT"]["/Contents"]) == "page two"
+
+
 def test_export_empty_document(tmp_path):
     bare = str(tmp_path / "bare.pdf")
     pdf = pikepdf.new()

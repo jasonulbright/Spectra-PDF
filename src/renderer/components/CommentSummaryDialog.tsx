@@ -29,6 +29,11 @@ import type {
 //
 // The sort and the filter are the SAME parameters the panel's list is already
 // showing, passed straight through — the dialog never re-derives an order.
+//
+// A finished run hands its whole result to `onDone` and this dialog is
+// unmounted in the same turn, so it can render nothing about the outcome: an
+// exclusion report written here is a report no reader ever sees. What the
+// summary left out is reported by the surface the reader lands on.
 
 const GUTTERS = [144, 180, 216, 252, 288];
 
@@ -44,7 +49,7 @@ export function CommentSummaryDialog({
   model: CommentModel;
   options: SummaryOptions;
   onOptionsChange: (next: SummaryOptions) => void;
-  onDone: (output: string) => void;
+  onDone: (result: SummaryResult) => void;
   onClose: () => void;
 }): React.JSX.Element {
   // Re-render on language change; strings resolve via tChrome.
@@ -52,7 +57,6 @@ export function CommentSummaryDialog({
   const { call } = useEngine();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<SummaryResult | null>(null);
   // Reentrancy ref taken before the first await (the CreatePdf/convert rule).
   const runningRef = useRef(false);
 
@@ -65,7 +69,6 @@ export function CommentSummaryDialog({
       runningRef.current = true;
       setBusy(true);
       setError(null);
-      setResult(null);
       try {
         const params = summaryParams(
           file.workingPath,
@@ -76,8 +79,7 @@ export function CommentSummaryDialog({
           await app.getEditFontPath(),
         );
         const r = (await call('summarize_comments', params)) as unknown as SummaryResult;
-        setResult(r);
-        onDone(r.output);
+        onDone(r);
         return r;
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -277,53 +279,6 @@ export function CommentSummaryDialog({
             <p className="text-sm text-red-400" data-testid="comment-summary-error" aria-live="polite">
               {error}
             </p>
-          )}
-          {result && (
-            <div className="text-sm break-all" data-testid="comment-summary-done" aria-live="polite">
-              <p>
-                {tChrome('panel.comments.summaryDone', {
-                  sheets: tNumber(result.sheets),
-                  written: tNumber(result.written),
-                  output: result.output,
-                })}
-              </p>
-              <p className="text-xs text-neutral-400">
-                {tChrome('panel.comments.summaryReconcile', {
-                  found: tNumber(result.found),
-                  written: tNumber(result.written),
-                  filtered: tNumber(result.excluded.filtered),
-                  unmodelled: tNumber(result.excluded.unmodelled),
-                })}
-              </p>
-              {result.excluded.no_position > 0 && (
-                <p className="text-xs text-amber-300">
-                  {tChrome('panel.comments.summaryNoPosition', {
-                    count: tNumber(result.excluded.no_position),
-                  })}
-                </p>
-              )}
-              {result.excluded.body_refused > 0 && (
-                <p className="text-xs text-amber-300">
-                  {tChrome('panel.comments.summaryBodyRefused', {
-                    count: tNumber(result.excluded.body_refused),
-                  })}
-                </p>
-              )}
-              {result.no_box_pages.length > 0 && (
-                <p className="text-xs text-amber-300">
-                  {tChrome('panel.comments.summaryNoBox', {
-                    pages: result.no_box_pages.map((p) => tNumber(p)).join(', '),
-                  })}
-                </p>
-              )}
-              {result.unreadable.length > 0 && (
-                <p className="text-xs text-amber-300">
-                  {tChrome('panel.comments.summaryUnreadable', {
-                    pages: result.unreadable.map((u) => tNumber(u.page)).join(', '),
-                  })}
-                </p>
-              )}
-            </div>
           )}
 
           <div className="flex justify-end gap-2 pt-1">

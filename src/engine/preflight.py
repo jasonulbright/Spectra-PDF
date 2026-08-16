@@ -41,6 +41,7 @@ from __future__ import annotations
 import pikepdf
 from pikepdf import Name  # noqa: F401  (re-exported for callers of the walk)
 
+from engine.font_embedding import font_embedded
 from engine.preflight_profiles import (
     CATEGORIES,
     CHECK_INVENTORY,
@@ -312,54 +313,6 @@ def walk_page_resources(
             except Exception as exc:
                 unreadable(ALL_FACTS, f"an annotation appearance will not read: {exc}")
                 continue
-
-
-def _font_embedded(font):
-    """True, False, or None when the font will not read.
-
-    None is neither answer. Reporting an unreadable font as embedded is a
-    passing check the walk did not earn; reporting it as NOT embedded is a
-    false failure on a document that may be conforming. Both are wrong, so
-    the caller is handed the third state and reports it.
-    """
-    try:
-        subtype = str(font.get("/Subtype"))
-    except Exception:
-        return None
-    if subtype == "/Type0":
-        try:
-            desc = font.get("/DescendantFonts")
-        except Exception:
-            return None
-        if desc is None:
-            return False
-        try:
-            for df in desc:
-                fd = df.get("/FontDescriptor")
-                if fd is not None and _has_fontfile(fd):
-                    return True
-        except Exception:
-            return None
-        return False
-    if subtype == "/Type3":
-        return True  # glyphs are drawn inline — always "embedded"
-    try:
-        fd = font.get("/FontDescriptor")
-    except Exception:
-        return None
-    if fd is None:
-        return False
-    try:
-        return _has_fontfile(fd)
-    except Exception:
-        return None
-
-
-def _has_fontfile(fd) -> bool:
-    for k in ("/FontFile", "/FontFile2", "/FontFile3"):
-        if fd.get(k) is not None:
-            return True
-    return False
 
 
 def _font_name(font) -> str:
@@ -1542,7 +1495,7 @@ def _gather(file: str, profile: dict, gs_path: str, font_dir) -> dict:
             current = number
 
             def on_font(font, category, _n=current):
-                embedded = _font_embedded(font)
+                embedded = font_embedded(font)
                 name = _font_name(font)
                 font_names.add(name)
                 # A Type 3 glyph inside an appearance stream is the

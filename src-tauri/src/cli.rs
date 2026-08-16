@@ -847,7 +847,8 @@ pub struct WatermarkArgs {
     /// Output PDF file
     #[arg(short, long)]
     pub output: PathBuf,
-    /// Watermark text (Latin-1 best-effort — non-Latin glyphs render as '?').
+    /// Watermark text; text outside Latin-1 embeds a Unicode face, and is
+    /// refused by name when no bundled face covers it — never mapped to '?'.
     /// Exactly one of --text, --image and --pdf-source is the source
     #[arg(short, long)]
     pub text: Option<String>,

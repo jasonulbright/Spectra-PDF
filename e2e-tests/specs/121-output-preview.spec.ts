@@ -23,6 +23,7 @@ import {
   setActiveOp,
   closeAllFiles,
   invokeAppCommand,
+  getFirstAnnotation,
   setReactSelectValue,
   fireReactSelectChange,
   answerIccPicker,
@@ -254,6 +255,109 @@ async function proofSettled(
     { timeout, timeoutMsg: message },
   );
   return captured;
+}
+
+/** The spot fixture's `/Separation` patch at full tint, as a fraction of the
+ *  page: `10 200 160 50 re` on a 400 pt square, sampled at its middle. */
+const SPOT_PATCH = { u: (10 + 160 / 2) / 400, v: 1 - (200 + 50 / 2) / 400 };
+/** Its cyan patch, `10 340 80 50 re`. */
+const CYAN_PATCH = { u: (10 + 80 / 2) / 400, v: 1 - (340 + 50 / 2) / 400 };
+
+interface Readout {
+  present: boolean;
+  nothing: boolean;
+  kind: string;
+  space: string;
+  colorant: string;
+  components: string;
+  resolution: string;
+  total: number | null;
+  spotInk: number | null;
+}
+
+const NO_READOUT: Readout = {
+  present: false, nothing: false, kind: '', space: '', colorant: '',
+  components: '', resolution: '', total: null, spotInk: null,
+};
+
+/** What the panel's inspector section currently prints. */
+async function readout(): Promise<Readout> {
+  return browser.execute(function () {
+    const find = (id: string): Element | null =>
+      document.querySelector('[data-testid="' + id + '"]');
+    const text = (id: string): string => (find(id)?.textContent || '').trim();
+    const pct = (id: string): number | null => {
+      const match = /([\d.]+)\s*%/.exec(text(id));
+      return match ? parseFloat(match[1]) : null;
+    };
+    return {
+      present: find('output-preview-inspect-top') !== null,
+      nothing: find('output-preview-inspect-nothing') !== null,
+      kind: text('output-preview-inspect-kind'),
+      space: text('output-preview-inspect-space'),
+      colorant: text('output-preview-inspect-colorant'),
+      components: text('output-preview-inspect-components'),
+      resolution: text('output-preview-inspect-resolution'),
+      total: pct('output-preview-inspect-ink-total'),
+      spotInk: pct('output-preview-inspect-ink-pantone-185-c'),
+    };
+  });
+}
+
+/** Where the first page cell sits on screen. */
+async function pageBox(): Promise<{ x: number; y: number; w: number; h: number }> {
+  return browser.execute(function () {
+    const el = document.querySelector('[data-page-id]');
+    if (!el) return { x: 0, y: 0, w: 0, h: 0 };
+    const r = el.getBoundingClientRect();
+    return { x: r.left, y: r.top, w: r.width, h: r.height };
+  });
+}
+
+/** A real press and release on the page, at a fraction of the cell. The
+ *  gesture goes through the canvas' own handlers rather than a test handle:
+ *  what is under test is the routing, and a handle would bypass it. */
+async function clickPageAt(u: number, v: number): Promise<void> {
+  const box = await pageBox();
+  await browser
+    .action('pointer')
+    .move({
+      x: Math.round(box.x + box.w * u),
+      y: Math.round(box.y + box.h * v),
+      duration: 0,
+    })
+    .down()
+    .pause(30)
+    .up()
+    .perform();
+}
+
+/** A drag across the page — the gesture that must pan and never mark. */
+async function dragAcrossPage(): Promise<void> {
+  const box = await pageBox();
+  await browser
+    .action('pointer')
+    .move({ x: Math.round(box.x + box.w * 0.3), y: Math.round(box.y + box.h * 0.6), duration: 0 })
+    .down()
+    .move({ x: Math.round(box.x + box.w * 0.7), y: Math.round(box.y + box.h * 0.7), duration: 120 })
+    .up()
+    .perform();
+}
+
+async function waitForReadout(
+  accept: (r: Readout) => boolean,
+  message: string,
+  timeout = 90_000,
+): Promise<Readout> {
+  let held: Readout = NO_READOUT;
+  await browser.waitUntil(
+    async () => {
+      held = await readout();
+      return accept(held);
+    },
+    { timeout, timeoutMsg: message, interval: 300 },
+  );
+  return held;
 }
 
 async function openOutputPreview(): Promise<void> {
@@ -818,6 +922,108 @@ describe('output preview', () => {
       expect(opened.refused).toBe(false);
       expect(opened.paperWhite?.disabled).toBe(false);
       expect(opened.blackInk?.disabled).toBe(false);
+    });
+  });
+
+  describe('the point inspector', () => {
+    before(async () => {
+      await closeAllFiles();
+      await openByPaths([SPOT]);
+      await openOutputPreview();
+      await $('[data-testid="output-preview-arm"]').click();
+      // The readout goes live the moment the engine answers while the canvas
+      // re-blits on a debounce, so "a raster is present" is not "this state's
+      // raster is present" — the click has to land on the settled composite.
+      await waitForSettledComposite('the composite never settled for a click');
+    });
+
+    it('says nothing has been asked until the page is clicked', async () => {
+      const idle = await readout();
+      expect(idle.present).toBe(false);
+      expect(await $('[data-testid="output-preview-inspect-hint"]').isExisting()).toBe(true);
+    });
+
+    it('names the object under the point, in the space the document declares', async () => {
+      await clickPageAt(SPOT_PATCH.u, SPOT_PATCH.v);
+      const spot = await waitForReadout(
+        (r) => r.present,
+        'clicking the spot patch never produced a readout',
+      );
+      // The colorant name is document content and is shown verbatim; the
+      // space is what the file DECLARES, not what a renderer made of it.
+      expect(spot.space).toContain('Separation');
+      expect(spot.colorant).toContain('PANTONE 185 C');
+      expect(spot.kind).not.toBe('');
+      // A filled path is not a raster, and that is an answer rather than a
+      // blank row or a zero.
+      expect(spot.resolution).not.toBe('');
+    });
+
+    it('reads the ink off the plates at that pixel', async () => {
+      const spot = await waitForReadout(
+        (r) => r.total !== null,
+        'the ink row never printed',
+      );
+      // The patch is the spot at full tint: its own plate carries it whole
+      // and nothing else on the sheet does.
+      expect(spot.spotInk).toBeGreaterThan(95);
+      expect(spot.total).toBeGreaterThan(95);
+    });
+
+    it('reports a process patch in its own device space', async () => {
+      await clickPageAt(CYAN_PATCH.u, CYAN_PATCH.v);
+      const cyan = await waitForReadout(
+        (r) => r.present && r.space.indexOf('DeviceCMYK') >= 0,
+        'clicking the cyan patch never named a device space',
+      );
+      expect(cyan.components).toMatch(/1/);
+      expect(cyan.total).toBeGreaterThan(95);
+    });
+
+    it('says nothing is painted over blank medium, and still prints the ink', async () => {
+      await clickPageAt(PAPER_SAMPLE.x, PAPER_SAMPLE.y);
+      const paper = await waitForReadout(
+        (r) => r.nothing,
+        'clicking blank medium never reported an empty point',
+      );
+      // An answer, not an empty panel: the ink row is exact over paper.
+      expect(paper.present).toBe(false);
+      expect(paper.total).toBe(0);
+    });
+
+    it('drops the readout when the plates it was measured against are retired', async () => {
+      await $('[data-testid="output-preview-overprint"]').click();
+      await browser.waitUntil(async () => !(await readout()).present && !(await readout()).nothing, {
+        timeout: 60_000,
+        timeoutMsg: 'a re-raster left the previous point’s answer on screen',
+      });
+      await $('[data-testid="output-preview-overprint"]').click();
+      await waitForSettledComposite('the composite never settled after the overprint flip');
+    });
+
+    it('a drag under the mode still pans and marks nothing', async () => {
+      // The other side of the exclusion the canvas comment guards: this mode
+      // claims a CLICK and never a drag, so the band stays unreachable and no
+      // annotation can be committed by moving the pointer over the page.
+      const before = await getFirstAnnotation(1_000);
+      expect(before).toBeNull();
+      await dragAcrossPage();
+      await browser.pause(500);
+      expect(await getFirstAnnotation(1_000)).toBeNull();
+      // A drag is not a query either — the click a completed pan still fires
+      // must not be read as one.
+      expect((await readout()).present).toBe(false);
+    });
+
+    it('leaving the mode drops the readout', async () => {
+      await $('[data-testid="output-preview-arm"]').click();
+      await browser.waitUntil(
+        async () => {
+          const gone = await readout();
+          return !gone.present && !gone.nothing;
+        },
+        { timeout: 30_000, timeoutMsg: 'disarming left a point readout on screen' },
+      );
     });
   });
 });

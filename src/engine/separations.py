@@ -136,6 +136,17 @@ def refuse_unknown_colorants(page: int, detail: str) -> None:
     )
 
 
+def refuse_missing_plates() -> None:
+    """State that a page's plate set is gone, as a refusal.
+
+    The cache is bounded and evicts by age, so a long session across many
+    documents can retire a set under a live panel. Every reader of a plate
+    set fails on the same missing directory, and the one place the sentence
+    exists is here so they cannot make two claims about one cache.
+    """
+    raise ValueError("The separation plates for this page are no longer available.")
+
+
 def unknown_colorant_message(page: int, detail: str) -> str:
     """The sentence the refusal carries, for the report that must not raise.
 
@@ -976,7 +987,7 @@ def composite_separations(
 
     plate_dir = Path(dir)
     if not plate_dir.is_dir():
-        raise ValueError("The separation plates for this page are no longer available.")
+        refuse_missing_plates()
 
     available: dict[str, Path] = {}
     for path in plate_dir.glob("s1(*).tif"):
