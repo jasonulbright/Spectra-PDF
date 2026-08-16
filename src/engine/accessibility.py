@@ -18,9 +18,17 @@ sells. Colour contrast over an unresolvable backdrop, a reading order that
 merely disagrees with geometry, a script that might flash the screen — each is
 reported with its inventory so a human reviews a list rather than a document.
 
-A page whose content stream will not parse lands in ``unreadable`` and every
-check that needed it degrades to ``needs_review`` for that page: "could not
-read" is never reported as "nothing found".
+**A read that did not complete is a third state, not a clean one.** A page
+whose content stream will not parse lands in ``unreadable``; an annotation
+list, a field tree, a script site or a branch of the structure tree that will
+not read is named on the checks that consumed it. Every such check degrades to
+``needs_review``: "could not read" is never reported as "nothing found", and
+an empty inventory that came out of a failed read is never reported as
+``not_applicable``.
+
+Every walk here is bounded — the field tree by ``_FIELD_TREE_DEPTH``, the
+structure tree by ``struct_tree._MAX_DEPTH`` and its cycle guard — and a bound
+that was reached is reported rather than presented as the end of the document.
 
 Addresses come in three kinds, each matching a jump the app already performs:
 ``struct`` (a structure-tree path in `get_struct_tree`'s numbering),
@@ -123,6 +131,42 @@ _F_NOVIEW = 1 << 5
 # script BODY, which is why the inventory carries the bodies.
 _TIMER_CALLS = ("app.setTimeOut", "app.setInterval")
 
+# How deep the field-name walk descends before it stops and says so.
+_FIELD_TREE_DEPTH = 32
+
+# Which checks each bounded or fallible read feeds. A read that did not
+# complete degrades every check that consumed it to `needs_review`: the answer
+# is not "nothing found", it is "not looked at".
+_ANNOTATION_CHECKS = (
+    "tagged_annotations", "tab_order", "tagged_multimedia", "navigation_links",
+    "tagged_form_fields", "alt_hides_annotation", "other_elements_alt",
+)
+_FIELD_CHECKS = (
+    "field_descriptions", "tagged_form_fields", "alt_hides_annotation",
+    "other_elements_alt",
+)
+_SCRIPT_CHECKS = ("screen_flicker", "scripts", "timed_responses")
+
+# Every check whose answer is read out of the structure tree.
+_STRUCTURE_CHECKS = (
+    "reading_order", "tagged_annotations", "tagged_multimedia",
+    "tagged_form_fields", "figures_alt", "nested_alt", "alt_no_content",
+    "alt_hides_annotation", "other_elements_alt", "table_rows", "table_cells",
+    "table_headers", "table_regularity", "table_summary", "list_items",
+    "list_labels", "heading_nesting",
+)
+
+# The three whose FINDINGS are themselves claims about what the tree does not
+# contain — an annotation reached by no `/OBJR` the walk saw. An incomplete
+# walk cannot support those either way, so their `fail` degrades too.
+_TREE_ABSENCE_CHECKS = ("tagged_annotations", "tagged_multimedia", "tagged_form_fields")
+
+# The checks that read the pages, and cannot answer for one that will not parse.
+_PAGE_CHECKS = (
+    "image_only", "contrast", "tagged_content", "character_encoding",
+    "navigation_links", "reading_order",
+)
+
 
 
 class _Check:
@@ -193,6 +237,21 @@ def _verdict(check: _Check, counted: int, findings: list, *, none_state=NA,
     check.status = dirty if findings else clean
 
 
+def _also_review(check: _Check, findings: list, *, states=(PASS, NA)) -> None:
+    """Carry what this check could not read into its verdict.
+
+    A clean claim over a read that did not complete is the one thing a
+    conformance report must never make, so a check in one of `states` becomes
+    `needs_review` and the findings naming the gap ride with the ones it did
+    reach. A `fail` stands: it names something the reader DID see.
+    """
+    if not findings:
+        return
+    check.findings = check.findings + findings
+    if check.status in states:
+        check.status = REVIEW
+
+
 # ── per-page reading ──────────────────────────────────────────────────────
 
 
@@ -244,20 +303,34 @@ class _Pages:
         return bool(self.unreadable)
 
 
-def _annotations(pdf) -> list:
-    """Every annotation, addressed. Each entry: page, index, subtype, rect,
-    flags, contents, and the raw object."""
+def _annotations(pdf) -> tuple:
+    """Every annotation, addressed, and the pages whose list would not read.
+
+    Each entry: page, index, subtype, rect, flags, contents, and the raw
+    object. A page whose `/Annots` cannot be listed contributes no entries, so
+    it is NAMED — a check that mistook it for a page with no annotations would
+    report `not_applicable` for a page it never saw.
+    """
     out = []
+    unread: list = []
     for i, page in enumerate(pdf.pages):
         annots = page.obj.get("/Annots")
         if annots is None:
             continue
         try:
             items = list(annots)
-        except Exception:
+        except Exception as exc:
+            unread.append({"page": i + 1, "reason": str(exc)})
             continue
         for j, annot in enumerate(items):
+            if annot is None:
+                # A null entry references no object (ISO 32000-2 §7.3.9):
+                # nothing to read, rather than something left unread.
+                continue
             if not isinstance(annot, pikepdf.Dictionary):
+                unread.append(
+                    {"page": i + 1, "reason": f"annotation {j} is not a dictionary"}
+                )
                 continue
             try:
                 subtype = str(annot.get("/Subtype") or "")
@@ -291,28 +364,41 @@ def _annotations(pdf) -> list:
                     "obj": annot,
                 }
             )
-    return out
+    return out, unread
 
 
 def _visible(annot: dict) -> bool:
     return not (annot["flags"] & (_F_HIDDEN | _F_NOVIEW))
 
 
-def _fields(pdf) -> list:
-    """Terminal form fields with their fully-qualified names, /TU descriptions
-    and widget objgens. Walked off the raw /AcroForm so an XFA document is
-    read without pdf-lib's XFA-deleting side effect."""
+def _fields(pdf) -> tuple:
+    """Terminal form fields, and what of the field tree would not read.
+
+    Each entry carries the fully-qualified name, the `/TU` description and the
+    widget objgens. Walked off the raw /AcroForm so an XFA document is read
+    without pdf-lib's XFA-deleting side effect.
+
+    The walk is bounded by `_FIELD_TREE_DEPTH`; a branch it stops on and a
+    branch it cannot list are both named in the second return, because a
+    PARTIAL inventory read as a complete one reports "every field has a
+    description" over fields it never reached.
+    """
     acro = pdf.Root.get("/AcroForm")
     if acro is None:
-        return []
+        return [], []
     roots = acro.get("/Fields")
     if roots is None:
-        return []
+        return [], []
     out: list = []
+    unread: list = []
     seen: set = set()
 
     def walk(node, prefix, depth):
-        if depth > 32 or not isinstance(node, pikepdf.Dictionary):
+        if depth > _FIELD_TREE_DEPTH:
+            unread.append({"reason": f"field tree deeper than {_FIELD_TREE_DEPTH} levels"})
+            return
+        if not isinstance(node, pikepdf.Dictionary):
+            unread.append({"reason": "a field entry is not a dictionary"})
             return
         try:
             og = node.objgen
@@ -332,8 +418,9 @@ def _fields(pdf) -> list:
         if kids is not None:
             try:
                 children = [k for k in kids if isinstance(k, pikepdf.Dictionary)]
-            except Exception:
+            except Exception as exc:
                 children = []
+                unread.append({"reason": str(exc)})
         # A kid with its own /T is a field; a kid without one is this field's
         # widget. That distinction is what makes a radio group one field.
         child_fields = [k for k in children if k.get("/T") is not None]
@@ -370,20 +457,27 @@ def _fields(pdf) -> list:
     try:
         for root in roots:
             walk(root, "", 0)
-    except Exception:
-        return out
-    return out
+    except Exception as exc:
+        unread.append({"reason": str(exc)})
+    return out, unread
 
 
-def _script_sites(pdf) -> list:
-    """Every place this document carries JavaScript or a page action.
+def _script_sites(pdf) -> tuple:
+    """Every place this document carries JavaScript or a page action, and what
+    of that inventory would not read.
 
     Four kinds, where a catalog-name-tree read alone reports one: the name
     tree, /OpenAction, page /AA, and field or annotation /AA. Each site
     carries its body so the panel can show the script rather than a paraphrase
     of it.
+
+    A name tree that will not enumerate yields NO sites and a body that will
+    not decode yields an EMPTY one — the first reads as "this document has no
+    scripts" and the second as "no script here schedules work on a clock".
+    Both are named in the second return instead.
     """
     sites: list = []
+    unread: list = []
 
     def body_of(action) -> str:
         if not isinstance(action, pikepdf.Dictionary):
@@ -395,7 +489,8 @@ def _script_sites(pdf) -> list:
             if isinstance(js, pikepdf.Stream):
                 return bytes(js.read_bytes()).decode("utf-8", "replace")
             return str(js)
-        except Exception:
+        except Exception as exc:
+            unread.append({"reason": str(exc)})
             return ""
 
     def is_js(action) -> bool:
@@ -418,8 +513,8 @@ def _script_sites(pdf) -> list:
                             "address": _object_address(),
                         }
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                unread.append({"reason": str(exc)})
 
     opener = pdf.Root.get("/OpenAction")
     if is_js(opener):
@@ -460,7 +555,8 @@ def _script_sites(pdf) -> list:
             continue
         try:
             items = list(annots)
-        except Exception:
+        except Exception as exc:
+            unread.append({"page": i + 1, "reason": str(exc)})
             continue
         for j, annot in enumerate(items):
             if not isinstance(annot, pikepdf.Dictionary):
@@ -487,7 +583,7 @@ def _script_sites(pdf) -> list:
                                 "address": _object_address(page=i + 1, annotation=j),
                             }
                         )
-    return sites
+    return sites, unread
 
 
 def _link_target(annot) -> str:
@@ -587,11 +683,17 @@ def _node_preview(node, mcid_tables: dict) -> tuple:
 
 
 def _check_permissions(check, pdf):
+    check.counted = 1
     try:
         allowed = bool(pdf.allow.accessibility)
     except Exception:
-        allowed = True
-    check.counted = 1
+        # Permissions that will not read are not permissions that allow: a
+        # document whose encryption dictionary cannot be interpreted has an
+        # unknown answer, and reporting the permissive one as measured is how
+        # a blocked document reads as clean.
+        check.status = REVIEW
+        check.findings = [_finding(_object_address(), "permissions_unreadable")]
+        return
     check.status = PASS if allowed else FAIL
     if not allowed:
         check.findings = [_finding(_object_address(), "permission_blocks_extraction")]
@@ -753,13 +855,30 @@ def _check_title(check, pdf):
     check.status = PASS
 
 
+def _has_outline_items(pdf) -> bool:
+    """Does the outline hierarchy hold at least one item?
+
+    The presence of `/Outlines` is not the presence of bookmarks: the root of
+    an empty hierarchy is a legal dictionary with no `/First` (ISO 32000-2
+    §12.3.3), and a document carrying one navigates exactly as badly as a
+    document carrying none.
+    """
+    outlines = pdf.Root.get("/Outlines")
+    if outlines is None:
+        return False
+    try:
+        return outlines.get("/First") is not None
+    except Exception:
+        return False
+
+
 def _check_bookmarks(check, pdf, tree):
     total = len(pdf.pages)
     if total < LONG_DOCUMENT_PAGES:
         check.status = NA
         return
     check.counted = 1
-    if pdf.Root.get("/Outlines") is not None:
+    if _has_outline_items(pdf):
         check.status = PASS
         return
     check.status = WARN
@@ -1327,6 +1446,7 @@ def _check_table_regularity(check, tree, mcid_tables):
         check.status = NA
         return
     findings = []
+    unmodellable = []
     for entry in found:
         table, rows = entry["table"], entry["rows"]
         if len(rows) < 2:
@@ -1361,6 +1481,14 @@ def _check_table_regularity(check, tree, mcid_tables):
                     width += 1
             widths.append(width)
         if not modellable or len(widths) < 2:
+            # A table the arithmetic cannot model is not a regular table; it is
+            # a table with no measurement, and silence here reads as one that
+            # measured clean.
+            preview, rect = _node_preview(table, mcid_tables)
+            unmodellable.append(
+                _finding(_struct_address(table), "table_not_modellable",
+                         preview=preview[:80], rect=rect)
+            )
             continue
         if len(set(widths)) == 1:
             continue
@@ -1371,6 +1499,7 @@ def _check_table_regularity(check, tree, mcid_tables):
                      values={"widths": sorted(set(widths))})
         )
     _verdict(check, len(found), findings)
+    _also_review(check, unmodellable)
 
 
 def _check_table_summary(check, tree, mcid_tables):
@@ -1649,9 +1778,9 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
     with pikepdf.open(file) as pdf:
         pages = _Pages(pdf)
         tree = audit_tree(pdf)
-        annots = _annotations(pdf)
-        fields = _fields(pdf)
-        sites = _script_sites(pdf)
+        annots, annots_unread = _annotations(pdf)
+        fields, fields_unread = _fields(pdf)
+        sites, sites_unread = _script_sites(pdf)
         mcid_tables = {p: _mcid_text(runs) for p, runs in pages.runs.items()}
 
         run = {
@@ -1694,20 +1823,59 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
             run[cid](check)
 
         unreadable = list(pages.unreadable)
+        truncated = list(tree.get("truncated") or [])
 
-    # Fail-closed: a page nobody could read cannot support a clean claim from
-    # any check that reads pages.
-    if unreadable:
-        for cid in ("image_only", "contrast", "tagged_content", "character_encoding",
-                    "navigation_links", "reading_order"):
-            check = checks[cid]
-            if check.status in (PASS, NA):
-                check.status = REVIEW
-                check.findings = check.findings + [
-                    _finding(_object_address(page=u["page"]), "page_unreadable",
-                             values={"page": u["page"]})
-                    for u in unreadable
-                ]
+    # Fail-closed, five reads: a page, an annotation list, a field tree, a
+    # script site or a branch of the structure tree that would not read cannot
+    # support a clean claim from any check that consumed it.
+    for cid in _PAGE_CHECKS:
+        _also_review(
+            checks[cid],
+            [
+                _finding(_object_address(page=u["page"]), "page_unreadable",
+                         values={"page": u["page"]})
+                for u in unreadable
+            ],
+        )
+    for cid in _ANNOTATION_CHECKS:
+        _also_review(
+            checks[cid],
+            [
+                _finding(_object_address(page=u["page"]), "annotations_unreadable",
+                         values={"page": u["page"]})
+                for u in annots_unread
+            ],
+        )
+    for cid in _FIELD_CHECKS:
+        _also_review(
+            checks[cid],
+            [_finding(_object_address(), "fields_unreadable") for _ in fields_unread],
+        )
+    for cid in _SCRIPT_CHECKS:
+        _also_review(
+            checks[cid],
+            [
+                _finding(
+                    _object_address(page=u["page"]) if u.get("page") else _object_address(),
+                    "scripts_unreadable",
+                )
+                for u in sites_unread
+            ],
+        )
+    tree_gaps = [
+        _finding(
+            {"kind": "struct", "path": list(t["path"]), "page": t["page"]},
+            "structure_truncated",
+            values={"reason": t["reason"]},
+        )
+        for t in truncated
+    ]
+    for cid in _STRUCTURE_CHECKS:
+        _also_review(
+            checks[cid],
+            tree_gaps,
+            states=(PASS, NA, FAIL) if cid in _TREE_ABSENCE_CHECKS else (PASS, NA),
+        )
 
     ordered = [checks[cid] for cid, _ in CHECK_INVENTORY]
     by_category = []

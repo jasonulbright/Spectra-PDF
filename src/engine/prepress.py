@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pikepdf
 
-from . import budget
+from . import budget, standards_report
 from .acroform import reattach_forms_file
 from .trapping import DEFAULT_TRAPPED, TRAPPED_VALUES
 from .validate import validate_pdf
@@ -255,6 +255,15 @@ def convert_pdfx(
     interactive form fields transplanted back — a PDF/X master is a print
     exchange file, and conformance limits interactive content (the same
     rationale recorded on the PDF/A converter).
+
+    **The /GTS_PDFXVersion key is written by the preamble above, not earned by
+    the conversion, so its presence proves nothing on its own.** Ghostscript
+    retreats to ordinary PDF output when it meets content it cannot make
+    conformant, and that retreat neither removes the key nor changes the exit
+    status — it is stated once, on stderr. So the run is pinned to the policy
+    that removes the offending content instead of abandoning the standard, a
+    retreat announced anyway is a refusal, and ``altered`` reports what
+    reaching conformance cost (see engine/standards_report.py).
     """
     validate_pdf(file)
     version = int(version)
@@ -274,6 +283,8 @@ def convert_pdfx(
         extracted = _extract_rom_profile(gs_path, profile, output_path.parent)
         profile = str(extracted)
 
+    source_facts = standards_report.census(input_path)
+
     def_fd, def_path = tempfile.mkstemp(suffix=".ps", dir=str(output_path.parent))
     try:
         with open(def_fd, "w", encoding="ascii") as f:
@@ -290,9 +301,12 @@ def convert_pdfx(
             # that without an explicit permit (live test catch).
             *([f"--permit-file-read={profile}"] if profile else []),
             "-dNOPAUSE",
-            "-dQUIET",
             "-dBATCH",
             "-dSAFER",
+            # Without this the default policy keeps the offending content and
+            # drops the standard, leaving the preamble's version key as the
+            # only surviving claim.
+            "-dPDFACompatibilityPolicy=1",
             f"-sOutputFile={str(output_path).replace('%', '%%')}",
             def_path,
             str(input_path),
@@ -307,6 +321,19 @@ def convert_pdfx(
         Path(def_path).unlink(missing_ok=True)
         if extracted is not None:
             extracted.unlink(missing_ok=True)
+
+    report = standards_report.build(
+        source_facts, output_path, result.stdout, result.stderr
+    )
+    if standards_report.abandoned(report):
+        said = "; ".join(
+            entry["message"]
+            for row in report["altered"]
+            if row["kind"] == "conformance_abandoned"
+            for entry in row["detail"]
+        )
+        output_path.unlink(missing_ok=True)
+        raise RuntimeError(f"PDF/X conversion abandoned the standard: {said}")
 
     # The claim is checkable — check it (never ship a silent non-conformance).
     with pikepdf.open(output_path) as pdf:
@@ -323,4 +350,5 @@ def convert_pdfx(
         "embedded_profile": bool(profile),
         "original_size": input_path.stat().st_size,
         "output_size": output_path.stat().st_size,
+        **report,
     }

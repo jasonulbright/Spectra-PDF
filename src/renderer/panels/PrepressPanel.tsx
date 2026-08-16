@@ -3,12 +3,14 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
+import { StandardsAlterations } from '../components/StandardsAlterations';
 import { ensureGsPath } from './SettingsPanel';
 import { dialog } from '../lib/tauri-bridge';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import type { PanelKey } from '../i18n-panels';
 import { suffixedOutputName } from '../lib/output-names';
+import type { StandardsReport } from '../lib/standards-report';
 
 // ICC-managed CMYK conversion for prepress (Ghostscript). Like
 // grayscale/pdfa it writes a new file (the "Optimize" tool group's pattern);
@@ -48,6 +50,7 @@ export function PrepressPanel(): React.ReactElement {
   const { call, saveFile } = useEngine();
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [report, setReport] = useState<StandardsReport | null>(null);
   const [renderIntent, setRenderIntent] = useState('relative');
   const [profile, setProfile] = useState<ProfileChoice>({ kind: 'default' });
   const [pdfxVersion, setPdfxVersion] = useState(3);
@@ -65,6 +68,9 @@ export function PrepressPanel(): React.ReactElement {
     if (!output) return;
     setBusy(true);
     setStatus(tChrome('panel.prepress.convertingCmyk'));
+    // A CMYK conversion reports no alterations, so a PDF/X report left on
+    // screen would describe a file this action did not write.
+    setReport(null);
     try {
       const r = await call('convert_cmyk', {
         file: activeFile.workingPath,
@@ -89,6 +95,7 @@ export function PrepressPanel(): React.ReactElement {
     if (!output) return;
     setBusy(true);
     setStatus(tChrome('panel.prepress.creatingPdfx'));
+    setReport(null);
     try {
       const r = await call('convert_pdfx', {
         file: activeFile.workingPath,
@@ -107,6 +114,7 @@ export function PrepressPanel(): React.ReactElement {
             : tChrome('panel.prepress.pdfxNames', { identifier }),
         }),
       );
+      setReport(r);
     } catch (e: unknown) {
       setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
@@ -216,6 +224,7 @@ export function PrepressPanel(): React.ReactElement {
         </button>
       </div>
       <StatusBar message={status} busy={busy} />
+      <StandardsAlterations report={report} />
     </div>
   );
 }
