@@ -52,6 +52,14 @@ def _dest_profile_flag(dest_profile: str) -> list[str]:
     return [f"-sOutputICCProfile={p}"]
 
 
+def _permit_profile_read(dest_profile: str) -> list[str]:
+    """--permit-file-read for a destination profile that is a real file."""
+    p = str(dest_profile).strip()
+    if not p or not Path(p).is_file():
+        return []
+    return [f"--permit-file-read={p}"]
+
+
 def convert_cmyk(
     file: str,
     output: str,
@@ -93,6 +101,10 @@ def convert_cmyk(
         # colour-managed conversion.
         f"-dRenderIntent={intent}",
         *_dest_profile_flag(dest_profile),
+        # -dSAFER blocks the profile READ, so a destination profile given as a
+        # path fails without an explicit permit — every path a file picker can
+        # produce. A bare ROM-filesystem name is not a file and needs none.
+        *_permit_profile_read(dest_profile),
         "-dNOPAUSE",
         "-dQUIET",
         "-dBATCH",

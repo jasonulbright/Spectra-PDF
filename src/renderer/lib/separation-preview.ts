@@ -30,6 +30,10 @@ export interface Ink {
 export interface InkInventory {
   inks: Ink[];
   unknown: string[];
+  /** Every colour family the document carries, resource spaces and inline
+   *  device operators alike. It decides whether a profile change is a
+   *  re-raster or only a re-composite. */
+  color_families: string[];
 }
 
 /** One rasterized plate of a page. */
@@ -38,6 +42,45 @@ export interface Plate {
   kind: InkKind;
   display_rgb: number[];
   file: string;
+}
+
+/** Where a soft proof's press profile comes from. */
+export type SimulationSource = 'none' | 'document' | 'file' | 'bundled';
+
+/** What the panel asks the engine to proof through. */
+export interface SimulationRequest {
+  source: SimulationSource;
+  /** A picked `.icc` path, for `file`. Read by the ENGINE, never by the
+   *  webview: the picked path is outside the runtime fs scope, and a design
+   *  that read the profile bytes here would need that scope widened. */
+  profile: string;
+  paper_white: boolean;
+  black_ink: boolean;
+}
+
+/**
+ * What the engine says it actually USED.
+ *
+ * The panel renders its select and both switches from this and never from
+ * its own request, so a request the engine refused cannot look honoured.
+ * `refusal` carries the engine's own sentence when the proof could not be
+ * produced; `source` is then `none` and the image is the ordinary composite.
+ */
+export interface SimulationRecord {
+  source: SimulationSource;
+  name: string;
+  intent: 'relative' | 'absolute' | '';
+  black_point_compensation: boolean;
+  refusal: string;
+  /** Source spaces assumed for a spot whose alternate carries no ICC
+   *  description of its own. Empty when nothing had to be assumed. */
+  assumed: string[];
+}
+
+/** Which press profiles a document can be proofed against. */
+export interface SimulationProfiles {
+  document: { present: boolean; embedded: boolean; identifier: string; name: string };
+  bundled: { present: boolean; name: string };
 }
 
 /** What one separation render produced. */
@@ -63,6 +106,7 @@ export interface CompositeResult {
   over_pixels: number;
   total_pixels: number;
   over_fraction: number;
+  simulation: SimulationRecord | null;
 }
 
 /** Total ink a press job is normally held to, in percent. */
@@ -97,6 +141,11 @@ export interface InkRequest {
   name: string;
   display_rgb: number[];
   density: number;
+  /** The ink this plate is DRAWN as. Under the multiply model the display
+   *  colour carries that identity on its own; under a press profile it also
+   *  decides which channel of the CMYK buffer the coverage lands in, and a
+   *  colour cannot answer that. */
+  shown_as: string;
 }
 
 /**
@@ -209,6 +258,7 @@ export function compositeRequest(
       name: plate.name,
       display_rgb: target.display_rgb,
       density: clampDensity(densities.get(target.name) ?? DEFAULT_INK_DENSITY),
+      shown_as: target.name,
     });
   }
   return out;
@@ -233,7 +283,7 @@ export function clampLimit(value: number): number {
  * arithmetic; it is here so the model can be proven against it.
  */
 export function compositePixel(
-  inks: readonly InkRequest[],
+  inks: readonly Pick<InkRequest, 'display_rgb' | 'density'>[],
   coverage: readonly number[],
 ): [number, number, number] {
   const rgb: [number, number, number] = [1, 1, 1];
@@ -285,8 +335,9 @@ export function plateCacheKey(
   pageId: string,
   dpi: number,
   overprint: boolean,
+  profile = '',
 ): string {
-  return JSON.stringify([fileId, pageId, dpi, overprint]);
+  return JSON.stringify([fileId, pageId, dpi, overprint, profile]);
 }
 
 /**
@@ -332,10 +383,20 @@ export function alarmTripped(result: Pick<CompositeResult, 'over_pixels'>): bool
  * empty would restore exactly the silent gap this reports.
  */
 export function readInventory(payload: unknown): InkInventory {
-  const raw = (payload ?? {}) as { inks?: unknown; unknown?: unknown };
+  const raw = (payload ?? {}) as {
+    inks?: unknown;
+    unknown?: unknown;
+    color_families?: unknown;
+  };
   return {
     inks: Array.isArray(raw.inks) ? (raw.inks as Ink[]) : [],
     unknown: Array.isArray(raw.unknown) ? raw.unknown.map((r) => String(r)) : [],
+    // A payload that named no families is read as "could not tell", and the
+    // staging test then answers yes: a profile change re-rasters rather than
+    // proofing plates that may have come from another press.
+    color_families: Array.isArray(raw.color_families)
+      ? raw.color_families.map((f) => String(f))
+      : [''],
   };
 }
 
@@ -349,4 +410,140 @@ export function readInventory(payload: unknown): InkInventory {
  */
 export function inventoryIsComplete(inventory: Pick<InkInventory, 'unknown'>): boolean {
   return inventory.unknown.length === 0;
+}
+
+// ── the soft proof ─────────────────────────────────────────────────────────
+
+/**
+ * Colour families a page can carry and still separate to the document's own
+ * ink numbers on every press. Anything else reached the plates through
+ * Ghostscript's compiled-in default CMYK, which is not the press being
+ * proofed, so the page has to be colour-managed before it is separated.
+ */
+const DEVICE_CMYK_FAMILIES = new Set(['DeviceCMYK', 'Separation', 'DeviceN']);
+
+/** Does a profile change re-raster this document, or only re-composite it? */
+export function stagingApplies(families: readonly string[]): boolean {
+  return families.some((family) => !DEVICE_CMYK_FAMILIES.has(family));
+}
+
+/**
+ * The plate cache's profile component.
+ *
+ * Empty unless the staging applies: a profile change is a re-raster only for
+ * a page whose plates the profile can move, and splitting the cache on a
+ * choice that changes nothing would re-run the separation device on every
+ * ink toggle that followed a profile change.
+ */
+export function plateProfileComponent(
+  request: SimulationRequest,
+  families: readonly string[],
+): string {
+  if (request.source === 'none' || !stagingApplies(families)) return '';
+  return JSON.stringify([request.source, request.profile]);
+}
+
+/**
+ * Which profile source the panel opens on.
+ *
+ * The document's own output intent first, then a profile the user picked,
+ * then the bundled press, then none. The bundled press is OFFERED and never
+ * assumed: proofing against a press neither the user chose nor the document
+ * declared is a claim about nobody's press, so an ordinary document with no
+ * intent opens unproofed.
+ */
+export function resolveSimulationSource(available: {
+  document: boolean;
+  picked: boolean;
+  bundled: boolean;
+}): SimulationSource {
+  if (available.document) return 'document';
+  if (available.picked) return 'file';
+  if (available.bundled) return 'bundled';
+  return 'none';
+}
+
+/** Is there anything for the two switches to act on? */
+export function simulationIsLive(source: SimulationSource): boolean {
+  return source !== 'none';
+}
+
+/**
+ * Does simulating paper white force simulating black ink?
+ *
+ * Always, and the reason is arithmetic rather than convention: absolute
+ * colorimetric already carries both endpoints of the medium, so black-point
+ * compensation changes nothing under it. Leaving the control live would ship
+ * a switch that visibly does nothing.
+ */
+export function blackInkIsForced(paperWhite: boolean): boolean {
+  return paperWhite;
+}
+
+/** The black-ink value the engine is asked for. The user's own choice is
+ *  REMEMBERED rather than overwritten, so turning paper white off restores
+ *  it. */
+export function effectiveBlackInk(paperWhite: boolean, blackInk: boolean): boolean {
+  return paperWhite ? true : blackInk;
+}
+
+/** What the panel sends. Both switches are inert under `none`. */
+export function simulationRequest(
+  source: SimulationSource,
+  profile: string,
+  paperWhite: boolean,
+  blackInk: boolean,
+): SimulationRequest {
+  const live = simulationIsLive(source);
+  return {
+    source,
+    profile: source === 'file' ? profile : '',
+    paper_white: live && paperWhite,
+    black_ink: live && effectiveBlackInk(paperWhite, blackInk),
+  };
+}
+
+/**
+ * The engine's simulation record as the panel reads it.
+ *
+ * A payload missing the field is read as "could not tell", never as "off" —
+ * the `readInventory` discipline. A soft proof that quietly showed sRGB when
+ * the transform never ran is the silent degradation this row exists to
+ * prevent, so the absence of an answer must not be readable as a clean one.
+ */
+export function readSimulation(payload: unknown): SimulationRecord | null {
+  const raw = (payload ?? {}) as { simulation?: unknown };
+  const record = raw.simulation;
+  if (record === null || typeof record !== 'object') return null;
+  const value = record as Partial<SimulationRecord>;
+  const source = value.source;
+  const intent = value.intent;
+  return {
+    source:
+      source === 'document' || source === 'file' || source === 'bundled' ? source : 'none',
+    name: typeof value.name === 'string' ? value.name : '',
+    intent: intent === 'relative' || intent === 'absolute' ? intent : '',
+    black_point_compensation: value.black_point_compensation === true,
+    refusal: typeof value.refusal === 'string' ? value.refusal : '',
+    assumed: Array.isArray(value.assumed) ? value.assumed.map((a) => String(a)) : [],
+  };
+}
+
+/** The profiles the engine offered, read the same way. */
+export function readSimulationProfiles(payload: unknown): SimulationProfiles {
+  const raw = (payload ?? {}) as { document?: unknown; bundled?: unknown };
+  const document = (raw.document ?? {}) as Record<string, unknown>;
+  const bundled = (raw.bundled ?? {}) as Record<string, unknown>;
+  return {
+    document: {
+      present: document.present === true,
+      embedded: document.embedded === true,
+      identifier: typeof document.identifier === 'string' ? document.identifier : '',
+      name: typeof document.name === 'string' ? document.name : '',
+    },
+    bundled: {
+      present: bundled.present === true,
+      name: typeof bundled.name === 'string' ? bundled.name : '',
+    },
+  };
 }
