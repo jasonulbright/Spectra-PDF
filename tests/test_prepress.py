@@ -1,6 +1,7 @@
 """ICC-managed CMYK conversion for prepress (Ghostscript)."""
 
 import os
+from pathlib import Path
 
 import pikepdf
 import pytest
@@ -90,6 +91,32 @@ class TestConvertCmyk:
             c = bytes(res.pages[0].Contents.read_bytes())
             # The spot survives as a Separation `scn` paint, not flattened to `k`.
             assert b"scn" in c, "the Separation spot colour was flattened away"
+
+
+    def test_a_destination_profile_given_as_a_path_converts(self, tmp_dir, gs_path):
+        # -dSAFER blocks the profile READ, so a profile given as a path needs
+        # an explicit permit — and a path is every profile a file picker can
+        # produce. The profile is written OUTSIDE the input's directory, which
+        # is where a picked one lives.
+        from engine.prepress import _extract_rom_profile
+
+        elsewhere = Path(tmp_dir) / "profiles"
+        elsewhere.mkdir()
+        profile = _extract_rom_profile(gs_path, "default_cmyk.icc", elsewhere)
+        assert profile.read_bytes()[36:40] == b"acsp"
+
+        src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
+        out = os.path.join(tmp_dir, "picked.pdf")
+        result = convert_cmyk(src, out, dest_profile=str(profile), gs_path=gs_path)
+        assert os.path.getsize(result["output"]) > 0
+        content = _content(out)
+        assert b" rg" not in content
+
+        # The bare ROM name goes down the same door and is asserted beside it
+        # so the two cannot drift apart again.
+        bare = os.path.join(tmp_dir, "bare.pdf")
+        convert_cmyk(src, bare, dest_profile="default_cmyk.icc", gs_path=gs_path)
+        assert os.path.getsize(bare) > 0
 
     def test_bad_render_intent_refused(self, tmp_dir):
         # Validated BEFORE Ghostscript is invoked, so no gs needed.

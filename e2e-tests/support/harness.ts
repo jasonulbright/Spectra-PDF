@@ -175,6 +175,26 @@ export async function watermarkSetPdfSource(path: string, page = 1): Promise<voi
   );
 }
 
+/** Answer the next native `.icc` pick with this path, or with `null` for a
+ * cancelled dialog. The pick is still started by the control that opens it, so
+ * the source transition, the request and the engine call are all real. */
+export async function answerIccPicker(path: string | null): Promise<void> {
+  await browser.execute(
+    function (p) {
+      (window as any).__SPECTRA_TEST__.answerIccPicker(p);
+    },
+    path,
+  );
+}
+
+/** Has the armed answer been taken by a pick yet? A control whose handler
+ * changes nothing leaves no other trace that the dialog was reached. */
+export async function iccPickerPending(): Promise<boolean> {
+  return browser.execute(function () {
+    return Boolean((window as any).__SPECTRA_TEST__.iccPickerPending());
+  });
+}
+
 export async function compressRun(
   out: string,
   opts?: {
@@ -1071,6 +1091,38 @@ export async function setReactSelectValue(selector: string, value: string): Prom
       interval: 150,
       timeoutMsg: `setReactSelectValue: ${selector} never held ${JSON.stringify(value)}`,
     },
+  );
+}
+
+/**
+ * Fire a controlled `<select>`'s change handler ONCE, without requiring the
+ * control to hold the new value.
+ *
+ * React restores a controlled select to its own state before the event
+ * returns, so an option whose handler deliberately leaves that state alone —
+ * one that opens a dialog the user then cancels — can never make the value
+ * stick, and `setReactSelectValue` would loop until it timed out. What the
+ * handler did has to be read from what the handler reached, not from the
+ * control.
+ */
+export async function fireReactSelectChange(selector: string, value: string): Promise<void> {
+  await $(selector).waitForDisplayed({ timeout: 10_000 });
+  await browser.execute(
+    function (sel, v) {
+      const el = document.querySelector(sel) as HTMLSelectElement | null;
+      if (!el) return;
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        'value',
+      )!.set!;
+      const tracker = (el as unknown as { _valueTracker?: { setValue(v: string): void } })
+        ._valueTracker;
+      if (tracker) tracker.setValue(''); // no option is empty, so this forces a tracked change
+      setter.call(el, v);
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    },
+    selector,
+    value,
   );
 }
 

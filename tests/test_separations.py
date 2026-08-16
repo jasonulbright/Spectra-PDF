@@ -9,20 +9,26 @@ import os
 
 import pytest
 
+import pikepdf
+
 from engine.separations import (
     MAX_SPOTS_CEILING,
     composite_separations,
     ink_kind,
     ink_statistics,
     list_inks,
+    list_simulation_profiles,
     plate_name_escape,
     render_separations,
 )
 from separation_builders import (
     cmyk_spot_pdf,
+    device_rgb_pdf,
     inks_everywhere_pdf,
     many_spots_pdf,
+    nested_separation_spot_pdf,
     overprint_pdf,
+    rgb_alternate_spot_pdf,
     tac_ladder_pdf,
     unreadable_colorspace_table_pdf,
 )
@@ -344,3 +350,523 @@ class TestComposite:
     def test_a_missing_plate_directory_refuses(self, tmp_path):
         with pytest.raises(ValueError, match="no longer available"):
             composite_separations(str(tmp_path / "gone"), [])
+
+
+# ── the soft proof ─────────────────────────────────────────────────────────
+
+
+def _patch_plates(directory, patches):
+    """A plate set carrying known CMYK patches and nothing else.
+
+    Written straight to disk rather than rendered: what an oracle pins has to
+    be a value the page was BUILT to carry, and rastering a page would put
+    Ghostscript's own conversion between the number and the assertion.
+    """
+    for index, ink in enumerate(("Cyan", "Magenta", "Yellow", "Black")):
+        row = np.array(
+            [[255 - round(patch[index] * 255) for patch in patches]], dtype=np.uint8
+        )
+        Image.fromarray(row, mode="L").save(os.path.join(directory, f"s1({ink}).tif"))
+
+
+#: paper, C, M, Y, K, all four at 100 %, 50 % of C+M+Y, a 300 % rich black.
+ORACLE_PATCHES = (
+    (0.0, 0.0, 0.0, 0.0),
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 1.0, 0.0, 0.0),
+    (0.0, 0.0, 1.0, 0.0),
+    (0.0, 0.0, 0.0, 1.0),
+    (1.0, 1.0, 1.0, 1.0),
+    (128 / 255, 128 / 255, 128 / 255, 0.0),
+    (0.6, 0.4, 0.4, 1.0),
+)
+
+#: sRGB per patch, keyed by (rendering intent, black-point compensation).
+#: Deterministic for a pinned profile and a pinned LittleCMS, which is what
+#: makes them assertable rather than approximate.
+ORACLE_SRGB = {
+    ("relative", False): [
+        (255, 255, 255), (0, 176, 240), (237, 39, 144), (255, 242, 21),
+        (55, 53, 53), (32, 31, 31), (146, 133, 129), (36, 38, 40),
+    ],
+    ("relative", True): [
+        (255, 255, 255), (0, 174, 239), (236, 0, 140), (255, 242, 0),
+        (35, 31, 32), (0, 0, 0), (143, 128, 124), (0, 0, 0),
+    ],
+    ("absolute", False): [
+        (225, 223, 216), (0, 153, 203), (207, 33, 121), (230, 212, 0),
+        (47, 45, 44), (27, 25, 24), (128, 115, 108), (30, 32, 32),
+    ],
+}
+
+
+def _proof_row(directory, tmp_path, gs_path, paper_white, black_ink, tag):
+    result = composite_separations(
+        directory,
+        output=str(tmp_path / f"proof-{tag}.png"),
+        simulation={"source": "bundled", "paper_white": paper_white,
+                    "black_ink": black_ink},
+        gs_path=gs_path,
+    )
+    with Image.open(result["png"]) as im:
+        row = [tuple(int(v) for v in px) for px in np.asarray(im.convert("RGB"))[0]]
+    return result["simulation"], row
+
+
+@pytest.mark.usefixtures("gs_path")
+class TestSoftProofOracle:
+    """A soft proof is a rendering claim, so "it looks right" is not evidence."""
+
+    def test_every_patch_matches_the_pinned_value_per_intent(self, tmp_path, gs_path):
+        plates = tmp_path / "plates"
+        plates.mkdir()
+        _patch_plates(str(plates), ORACLE_PATCHES)
+        for (intent, bpc), expected in ORACLE_SRGB.items():
+            record, row = _proof_row(
+                str(plates), tmp_path, gs_path,
+                paper_white=intent == "absolute", black_ink=not bpc,
+                tag=f"{intent}-{int(bpc)}")
+            assert record["intent"] == intent
+            assert record["black_point_compensation"] is bpc
+            assert row == expected
+
+    def test_compensation_is_a_no_op_under_absolute(self, tmp_path, gs_path):
+        # The UI forces the black-ink switch on under paper white, and this is
+        # why: the intent already carries both endpoints of the medium, so
+        # leaving the switch live would ship a control that visibly does
+        # nothing. A LittleCMS that broke this would break the rule silently.
+        plates = tmp_path / "plates"
+        plates.mkdir()
+        _patch_plates(str(plates), ORACLE_PATCHES)
+        plain, without = _proof_row(str(plates), tmp_path, gs_path, True, True, "abs-a")
+        asked, with_bpc = _proof_row(str(plates), tmp_path, gs_path, True, False, "abs-b")
+        assert without == with_bpc
+        # The request is normalized rather than passed through, and the record
+        # reports what was used.
+        assert plain["black_point_compensation"] is False
+        assert asked["black_point_compensation"] is False
+
+    def test_compensation_is_not_a_no_op_under_relative(self, tmp_path, gs_path):
+        plates = tmp_path / "plates"
+        plates.mkdir()
+        _patch_plates(str(plates), ORACLE_PATCHES)
+        _plain_record, plain = _proof_row(str(plates), tmp_path, gs_path, False, True, "rel-a")
+        _bpc_record, bpc = _proof_row(str(plates), tmp_path, gs_path, False, False, "rel-b")
+        assert plain != bpc
+
+    def test_the_proof_disagrees_with_the_multiply_model_on_overprints(
+        self, tmp_path, gs_path
+    ):
+        plates = tmp_path / "plates"
+        plates.mkdir()
+        _patch_plates(str(plates), ORACLE_PATCHES)
+        plain = composite_separations(str(plates), output=str(tmp_path / "plain.png"))
+        with Image.open(plain["png"]) as im:
+            row = [tuple(int(v) for v in px) for px in np.asarray(im.convert("RGB"))[0]]
+        # Solid process inks agree to a few counts; the OVERPRINTS do not, and
+        # an overprint is what a prepress operator opens the panel for.
+        _record, proofed = _proof_row(str(plates), tmp_path, gs_path, False, True, "cmp")
+        assert row[5] == (0, 0, 0)
+        assert proofed[5] == (32, 31, 31)
+
+
+@pytest.mark.usefixtures("gs_path")
+class TestSoftProofCrossEngine:
+    """The one check that does not grade its own work.
+
+    The patch oracle is LittleCMS asserting about LittleCMS. This renders the
+    same patches through a different ICC implementation of the same profile —
+    Ghostscript's own colour engine, through its proof profile knob — and
+    requires agreement. The properties that disqualify that path in the
+    product (it is a whole separate raster, and it is slow) cost nothing in a
+    test.
+    """
+
+    @staticmethod
+    def _lab(rgb):
+        value = np.asarray(rgb, dtype=np.float64) / 255.0
+        value = np.where(value > 0.04045, ((value + 0.055) / 1.055) ** 2.4, value / 12.92)
+        matrix = np.array([[0.4124, 0.3576, 0.1805],
+                           [0.2126, 0.7152, 0.0722],
+                           [0.0193, 0.1192, 0.9505]])
+        xyz = value @ matrix.T / np.array([0.95047, 1.0, 1.08883])
+        f = np.where(xyz > 0.008856, np.cbrt(xyz), 7.787 * xyz + 16 / 116)
+        return np.array([116 * f[1] - 16, 500 * (f[0] - f[1]), 200 * (f[1] - f[2])])
+
+    @classmethod
+    def _delta_e(cls, first, second):
+        return float(np.sqrt(((cls._lab(first) - cls._lab(second)) ** 2).sum()))
+
+    def _render_both(self, tmp_path, gs_path, intent, gs_intent):
+        import subprocess
+
+        from engine import soft_proof
+
+        patches = [(0.0, 0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0), (0.0, 1.0, 0.0, 0.0),
+                   (0.0, 0.0, 1.0, 0.0), (0.0, 0.0, 0.0, 1.0), (1.0, 1.0, 1.0, 1.0)]
+        doc = tmp_path / "patches.pdf"
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(len(patches) * 40, 40))
+        page.Resources = pikepdf.Dictionary()
+        page.Contents = pdf.make_stream(b"\n".join(
+            f"{c} {m} {y} {k} k {i * 40} 0 40 40 re f".encode()
+            for i, (c, m, y, k) in enumerate(patches)
+        ))
+        pdf.save(doc)
+        pdf.close()
+
+        plates = render_separations(str(doc), page=1, dpi=72, gs_path=gs_path)
+        proofed = composite_separations(
+            plates["dir"], output=str(tmp_path / f"mine-{intent}.png"),
+            # Ghostscript's proof path compensates the black point, and its
+            # values match this side's compensated ones rather than its
+            # uncompensated ones. Compensation is left on here so the two
+            # engines are asked the same question.
+            simulation={"source": "bundled", "paper_white": intent == "absolute",
+                        "black_ink": False},
+            gs_path=gs_path)
+        with Image.open(proofed["png"]) as im:
+            mine = np.asarray(im.convert("RGB"))
+
+        profile = soft_proof.rom_profile(gs_path, soft_proof.BUNDLED_PROFILE_NAME)
+        out = tmp_path / f"gs-{intent}.png"
+        run = subprocess.run(
+            [gs_path, "-dNOPAUSE", "-dBATCH", "-dSAFER", "-q", "-sDEVICE=png16m",
+             "-r72", "-dFirstPage=1", "-dLastPage=1", f"-sProofProfile={profile}",
+             f"--permit-file-read={profile}", f"-dRenderIntent={gs_intent}",
+             "-o", str(out), str(doc)],
+            capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+        assert run.returncode == 0, run.stderr or run.stdout
+        with Image.open(out) as im:
+            theirs = np.asarray(im.convert("RGB"))
+        centres = [(mine.shape[0] // 2, i * 40 + 20) for i in range(len(patches))]
+        return [(mine[y, x], theirs[y, x]) for y, x in centres]
+
+    def test_relative_agrees_with_ghostscripts_own_engine(self, tmp_path, gs_path):
+        for mine, theirs in self._render_both(tmp_path, gs_path, "relative", 1):
+            assert self._delta_e(mine, theirs) <= 1.0
+
+    def test_absolute_agrees_on_every_ink_and_diverges_only_on_bare_paper(
+        self, tmp_path, gs_path
+    ):
+        # Ghostscript paints an unpainted page its device white and does not
+        # proof it, so the two engines cannot agree there — and that
+        # difference is the whole point of simulating paper white. Every patch
+        # carrying ink still has to agree, which is what makes the divergence
+        # a rendering-model boundary rather than a colour disagreement.
+        rows = self._render_both(tmp_path, gs_path, "absolute", 3)
+        paper_mine, paper_theirs = rows[0]
+        assert tuple(int(v) for v in paper_mine) == (225, 223, 216)
+        assert tuple(int(v) for v in paper_theirs) == (255, 255, 255)
+        for mine, theirs in rows[1:]:
+            assert self._delta_e(mine, theirs) <= 1.0
+
+
+@pytest.mark.usefixtures("gs_path")
+class TestSoftProofComposition:
+    def test_no_profile_leaves_the_composite_byte_identical(self, tmp_path, gs_path):
+        # The gate that lets a change to the composite's arithmetic land:
+        # every existing assertion about the multiply model keeps its meaning
+        # by construction.
+        src = cmyk_spot_pdf(tmp_path / "spot.pdf")
+        result = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        plain = composite_separations(
+            result["dir"], result["plates"], output=str(tmp_path / "plain.png"))
+        asked = composite_separations(
+            result["dir"], result["plates"], output=str(tmp_path / "asked.png"),
+            simulation={"source": "none", "paper_white": True, "black_ink": True},
+            gs_path=gs_path)
+        with open(plain["png"], "rb") as a, open(asked["png"], "rb") as b:
+            assert a.read() == b.read()
+        assert plain["simulation"]["source"] == "none"
+        assert plain["simulation"]["refusal"] == ""
+
+    def test_the_total_ink_figures_are_the_same_with_and_without_a_proof(
+        self, tmp_path, gs_path
+    ):
+        # No display transform changes how much ink is on the sheet.
+        src = tac_ladder_pdf(tmp_path / "tac.pdf")
+        result = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        plain = composite_separations(
+            result["dir"], result["plates"], output=str(tmp_path / "plain.png"))
+        proofed = composite_separations(
+            result["dir"], result["plates"], output=str(tmp_path / "proof.png"),
+            simulation={"source": "bundled"}, gs_path=gs_path)
+        assert proofed["max_tac"] == plain["max_tac"]
+        assert proofed["over_pixels"] == plain["over_pixels"]
+
+    def test_a_hidden_plate_contributes_nothing_to_the_buffer(self, tmp_path, gs_path):
+        src = tac_ladder_pdf(tmp_path / "tac.pdf")
+        result = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        every = composite_separations(
+            result["dir"], result["plates"], output=str(tmp_path / "all.png"),
+            simulation={"source": "bundled"}, gs_path=gs_path)
+        without = composite_separations(
+            result["dir"], [p for p in result["plates"] if p["name"] != "Black"],
+            output=str(tmp_path / "nok.png"),
+            simulation={"source": "bundled"}, gs_path=gs_path)
+        assert every["simulation"]["source"] == "bundled"
+        assert without["simulation"]["source"] == "bundled"
+        with Image.open(every["png"]) as a, Image.open(without["png"]) as b:
+            assert np.abs(
+                np.asarray(a.convert("RGB")).astype(np.int16)
+                - np.asarray(b.convert("RGB")).astype(np.int16)
+            ).max() > 0
+
+    def test_a_spot_proofs_through_its_own_declared_alternate(self, tmp_path, gs_path):
+        # `display_rgb` is the ink SWATCH — an identity colour for the list —
+        # and it must not become the proof's answer, or the swatch and the
+        # page would have to change colour together when the press changed.
+        src = cmyk_spot_pdf(tmp_path / "spot.pdf")
+        result = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        spot = [p for p in result["plates"] if p["name"] == "PANTONE 185 C"]
+        proofed = composite_separations(
+            result["dir"], spot + [p for p in result["plates"] if p["kind"] == "process"],
+            output=str(tmp_path / "spot-proof.png"),
+            simulation={"source": "bundled"}, gs_path=gs_path)
+        assert proofed["simulation"]["refusal"] == ""
+        assert proofed["simulation"]["source"] == "bundled"
+        with Image.open(proofed["png"]) as im:
+            arr = np.asarray(im.convert("RGB"))
+        height, width = arr.shape[:2]
+        # The full-tint spot band sits between y=200 and y=250 on a 400 pt page.
+        sample = arr[int(height * (1 - 225 / 400))][int(width * 0.2)]
+        assert tuple(int(v) for v in sample) != tuple(spot[0]["display_rgb"])
+
+    def test_a_spot_shown_as_another_ink_lands_in_that_inks_channel(
+        self, tmp_path, gs_path
+    ):
+        src = cmyk_spot_pdf(tmp_path / "spot.pdf")
+        result = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        cyan = next(p for p in result["plates"] if p["name"] == "Cyan")
+
+        def request(shown_as):
+            return [{"name": "PANTONE 185 C", "display_rgb": cyan["display_rgb"],
+                     "density": 1.0, "shown_as": shown_as},
+                    {"name": "Cyan", "display_rgb": cyan["display_rgb"], "density": 1.0}]
+
+        as_cyan = composite_separations(
+            result["dir"], request("Cyan"), output=str(tmp_path / "as-cyan.png"),
+            simulation={"source": "bundled"}, gs_path=gs_path)
+        as_itself = composite_separations(
+            result["dir"], request("PANTONE 185 C"), output=str(tmp_path / "as-self.png"),
+            simulation={"source": "bundled"}, gs_path=gs_path)
+        assert as_cyan["simulation"]["refusal"] == ""
+        with Image.open(as_cyan["png"]) as a, Image.open(as_itself["png"]) as b:
+            assert np.abs(
+                np.asarray(a.convert("RGB")).astype(np.int16)
+                - np.asarray(b.convert("RGB")).astype(np.int16)
+            ).max() > 0
+
+    def test_a_device_alternate_names_the_source_space_it_assumed(
+        self, tmp_path, gs_path
+    ):
+        src = rgb_alternate_spot_pdf(tmp_path / "rgbspot.pdf")
+        result = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        proofed = composite_separations(
+            result["dir"], result["plates"], output=str(tmp_path / "rgbspot.png"),
+            simulation={"source": "bundled"}, gs_path=gs_path)
+        assert proofed["simulation"]["refusal"] == ""
+        assert proofed["simulation"]["assumed"] == ["sRGB"]
+
+
+@pytest.mark.usefixtures("gs_path")
+class TestSoftProofRefusals:
+    """Each of these makes the feature say no by name rather than render
+    something wrong, and each is REPORTED: the composite still produces the
+    multiply image, with the reason and a `none` source beside it."""
+
+    def _plates(self, tmp_path, gs_path):
+        src = tac_ladder_pdf(tmp_path / "tac.pdf")
+        return render_separations(src, page=1, dpi=36, gs_path=gs_path)
+
+    def test_a_file_that_is_not_a_profile_refuses(self, tmp_path, gs_path):
+        bogus = tmp_path / "bogus.icc"
+        bogus.write_bytes(b"this is not a colour profile" * 8)
+        result = composite_separations(
+            self._plates(tmp_path, gs_path)["dir"], output=str(tmp_path / "a.png"),
+            simulation={"source": "file", "profile": str(bogus)}, gs_path=gs_path)
+        assert result["simulation"]["source"] == "none"
+        assert "not a colour profile this engine can read" in result["simulation"]["refusal"]
+        assert os.path.isfile(result["png"])
+
+    def test_a_display_profile_refuses_by_name(self, tmp_path, gs_path):
+        from engine import soft_proof
+
+        rgb = soft_proof.rom_profile(gs_path, "default_rgb.icc")
+        result = composite_separations(
+            self._plates(tmp_path, gs_path)["dir"], output=str(tmp_path / "b.png"),
+            simulation={"source": "file", "profile": str(rgb)}, gs_path=gs_path)
+        assert result["simulation"]["source"] == "none"
+        assert result["simulation"]["refusal"] == (
+            "that profile describes a RGB device, not a printing press"
+        )
+
+    def test_an_intent_that_embeds_no_profile_refuses(self, tmp_path, gs_path):
+        from engine.prepress import convert_pdfx
+
+        src = tac_ladder_pdf(tmp_path / "tac.pdf")
+        named = str(tmp_path / "named.pdf")
+        convert_pdfx(src, named, version=3, gs_path=gs_path)
+        plates = render_separations(named, page=1, dpi=36, gs_path=gs_path)
+        result = composite_separations(
+            plates["dir"], output=str(tmp_path / "c.png"),
+            simulation={"source": "document"}, gs_path=gs_path)
+        assert result["simulation"]["source"] == "none"
+        assert "embeds no profile" in result["simulation"]["refusal"]
+        assert "CGATS TR001" in result["simulation"]["refusal"]
+
+    def test_a_spot_whose_alternate_is_a_spot_refuses_by_name(self, tmp_path, gs_path):
+        # The separation device declines to plate this colorant too — it folds
+        # into the inner one — so the sentence is reached through the table
+        # rather than through a composite. What it guards is a described plate
+        # the proof has no space for, which would otherwise be drawn through
+        # the multiply model beside managed inks.
+        from engine import soft_proof
+
+        src = nested_separation_spot_pdf(tmp_path / "nested.pdf")
+        alternates = soft_proof.page_alternates(src, 1)
+        assert alternates["Nested Spot"]["family"] == "Separation"
+        profile = soft_proof.rom_profile(gs_path, soft_proof.BUNDLED_PROFILE_NAME)
+        tables, assumed, refusal = soft_proof.spot_tables(
+            ["Nested Spot"], alternates, str(profile), gs_path)
+        assert tables == {}
+        assert assumed == []
+        assert refusal == (
+            "the colorant Nested Spot converts to Separation, which is not a "
+            "space this proof can describe"
+        )
+
+    def test_a_spot_the_alternates_cannot_describe_refuses_rather_than_falling_back(
+        self, tmp_path, gs_path
+    ):
+        src = cmyk_spot_pdf(tmp_path / "spot.pdf")
+        plates = render_separations(src, page=1, dpi=36, gs_path=gs_path)
+        # The document moved out from under the plate set, so its tint
+        # transforms can no longer be read. Drawing the spot through the
+        # multiply model beside managed process inks would put two colour
+        # models in one image with nothing saying so.
+        for leftover in ("source.json", "alternates.json"):
+            path = os.path.join(plates["dir"], leftover)
+            if os.path.isfile(path):
+                os.unlink(path)
+        result = composite_separations(
+            plates["dir"], plates["plates"], output=str(tmp_path / "d2.png"),
+            simulation={"source": "bundled"}, gs_path=gs_path)
+        assert result["simulation"]["source"] == "none"
+        assert "is not a space this proof can describe" in result["simulation"]["refusal"]
+
+    def test_a_spot_only_view_has_nothing_for_the_press_to_describe(
+        self, tmp_path, gs_path
+    ):
+        src = cmyk_spot_pdf(tmp_path / "spot.pdf")
+        plates = render_separations(src, page=1, dpi=36, gs_path=gs_path)
+        spots = [p for p in plates["plates"] if p["kind"] == "spot"]
+        result = composite_separations(
+            plates["dir"], spots, output=str(tmp_path / "e.png"),
+            simulation={"source": "bundled"}, gs_path=gs_path)
+        assert result["simulation"]["source"] == "none"
+        assert result["simulation"]["refusal"] == (
+            "no process plate is showing, so there is nothing for the press "
+            "profile to describe"
+        )
+
+
+@pytest.mark.usefixtures("gs_path")
+class TestStagedSeparation:
+    def test_a_page_of_device_cmyk_and_spots_needs_no_staging(self, tmp_path):
+        from engine import soft_proof
+
+        src = cmyk_spot_pdf(tmp_path / "spot.pdf")
+        families = list_inks(src)["color_families"]
+        assert set(families) == {"DeviceCMYK", "DeviceN", "Separation"}
+        assert soft_proof.staging_applies(families) is False
+
+    def test_an_inline_device_colour_is_reported_though_it_names_no_resource(
+        self, tmp_path
+    ):
+        from engine import soft_proof
+
+        src = device_rgb_pdf(tmp_path / "rgb.pdf")
+        families = list_inks(src)["color_families"]
+        assert families == ["DeviceRGB"]
+        assert soft_proof.staging_applies(families) is True
+
+    def test_the_profile_splits_the_plate_cache_only_where_staging_applies(
+        self, tmp_path, gs_path
+    ):
+        rgb = device_rgb_pdf(tmp_path / "rgb.pdf")
+        cmyk = tac_ladder_pdf(tmp_path / "tac.pdf")
+        for src, splits in ((rgb, True), (cmyk, False)):
+            plain = render_separations(src, page=1, dpi=36, gs_path=gs_path)
+            proofed = render_separations(
+                src, page=1, dpi=36, gs_path=gs_path,
+                simulation={"source": "bundled"})
+            assert (plain["dir"] != proofed["dir"]) is splits
+
+    def test_the_staged_plates_reproduce_the_page(self, tmp_path, gs_path):
+        # The bundled press profile IS the one Ghostscript separates through
+        # by default, so staging the page through it must return the same ink
+        # amounts: the assertion is that the extra conversion carries the page
+        # rather than disturbing it.
+        src = device_rgb_pdf(tmp_path / "rgb.pdf")
+        plain = render_separations(src, page=1, dpi=36, gs_path=gs_path)
+        staged = render_separations(
+            src, page=1, dpi=36, gs_path=gs_path, simulation={"source": "bundled"})
+        for name in ("Cyan", "Magenta", "Yellow", "Black"):
+            assert np.abs(_plate(plain, name) - _plate(staged, name)).max() <= 2 / 255
+
+
+@pytest.mark.usefixtures("gs_path")
+class TestSimulationProfilesOffered:
+    def test_a_document_with_no_intent_offers_only_the_bundled_press(
+        self, tmp_path, gs_path
+    ):
+        src = tac_ladder_pdf(tmp_path / "tac.pdf")
+        offered = list_simulation_profiles(src, gs_path)
+        assert offered["document"]["present"] is False
+        assert offered["document"]["embedded"] is False
+        assert offered["bundled"]["present"] is True
+        assert offered["bundled"]["name"] == "Artifex CMYK SWOP Profile"
+
+    def test_an_embedded_intent_is_offered_by_its_own_description(
+        self, tmp_path, gs_path
+    ):
+        from engine.prepress import convert_pdfx
+
+        src = tac_ladder_pdf(tmp_path / "tac.pdf")
+        out = str(tmp_path / "pdfx.pdf")
+        convert_pdfx(src, out, version=3, dest_profile="default_cmyk.icc",
+                     gs_path=gs_path)
+        offered = list_simulation_profiles(out, gs_path)
+        assert offered["document"]["present"] is True
+        assert offered["document"]["embedded"] is True
+        assert offered["document"]["name"] == "Artifex CMYK SWOP Profile"
+
+    def test_an_identifier_only_intent_is_present_but_not_embeddable(
+        self, tmp_path, gs_path
+    ):
+        from engine.prepress import convert_pdfx
+
+        src = tac_ladder_pdf(tmp_path / "tac.pdf")
+        out = str(tmp_path / "named.pdf")
+        convert_pdfx(src, out, version=3, gs_path=gs_path)
+        offered = list_simulation_profiles(out, gs_path)
+        assert offered["document"]["present"] is True
+        assert offered["document"]["embedded"] is False
+        assert offered["document"]["identifier"] == "CGATS TR001"
+
+    def test_the_documents_own_profile_proofs_the_page(self, tmp_path, gs_path):
+        from engine.prepress import convert_pdfx
+
+        src = tac_ladder_pdf(tmp_path / "tac.pdf")
+        out = str(tmp_path / "pdfx.pdf")
+        convert_pdfx(src, out, version=3, dest_profile="default_cmyk.icc",
+                     gs_path=gs_path)
+        plates = render_separations(out, page=1, dpi=36, gs_path=gs_path)
+        result = composite_separations(
+            plates["dir"], output=str(tmp_path / "doc.png"),
+            simulation={"source": "document"}, gs_path=gs_path)
+        assert result["simulation"]["source"] == "document"
+        assert result["simulation"]["name"] == "Artifex CMYK SWOP Profile"
+        assert result["simulation"]["refusal"] == ""

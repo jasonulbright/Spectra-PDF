@@ -53,6 +53,7 @@ from engine.preflight_sweep import run_preflight_sweep
 from engine.separations import (
     composite_separations,
     list_inks,
+    list_simulation_profiles,
     render_separations,
 )
 from engine.ink_manager import (
@@ -263,6 +264,7 @@ def main() -> None:
     server.register("list_inks", list_inks)
     server.register("render_separations", render_separations)
     server.register("composite_separations", composite_separations)
+    server.register("list_simulation_profiles", list_simulation_profiles)
     server.register("alias_ink", alias_ink)
     server.register("compare_ink_transforms", compare_tint_transforms)
     server.register("spot_to_process", spot_to_process)
