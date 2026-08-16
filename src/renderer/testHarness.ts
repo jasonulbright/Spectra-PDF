@@ -10,6 +10,7 @@
  * scriptable remote control over the public IPC surface.
  */
 import { app, dialog, file, engine, scanner as scannerBridge } from './lib/tauri-bridge';
+import { windowLabel } from './lib/window-label';
 import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
 import {
   invokeCommand as invokeRegisteredCommand,
@@ -1393,6 +1394,24 @@ export interface TestHarness {
   ) => Promise<TestStateSnapshot>;
   /** Wait for the Python engine sidecar to respond to a ping. */
   waitForEngine: (timeoutMs?: number) => Promise<void>;
+  /** This window's label — 'main' for the one the app opened by itself. */
+  windowLabel: () => string;
+  /** Close THIS window through the same command the × handler ends on, so a
+   * spec exercises the real "quit only on the last window" decision. */
+  closeThisWindow: () => Promise<void>;
+  /**
+   * One JSON-RPC request with an EXPLICIT id, resolved with its own result.
+   *
+   * Two windows deliberately send the SAME id: the renderer correlates a
+   * response by id alone against a map that exists once per window, so a
+   * broadcast reply satisfies whichever window happens to be waiting on that
+   * number and one window silently reports the other's answer.
+   */
+  engineRequestWithId: (
+    method: string,
+    params: Record<string, unknown>,
+    id: number,
+  ) => Promise<unknown>;
   /** Pop the most recent error captured by the harness, if any. */
   consumeLastError: () => string | null;
   /**
@@ -2225,6 +2244,33 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     );
   };
 
+  const requestWithId = async (
+    method: string,
+    params: Record<string, unknown>,
+    id: number,
+  ): Promise<unknown> => {
+    let settle: (value: unknown) => void = () => {};
+    let fail: (err: Error) => void = () => {};
+    const waiter = new Promise<unknown>((resolveFn, rejectFn) => {
+      settle = resolveFn;
+      fail = rejectFn;
+    });
+    const unlisten = await engine.onResponse((response: unknown) => {
+      const res = response as { id?: number; result?: unknown; error?: { message: string } };
+      if (res.id !== id) return;
+      if (res.error) fail(new Error(res.error.message));
+      else settle(res.result);
+    });
+    const timer = setTimeout(() => fail(new Error(`engineRequestWithId: no response for ${id}`)), 30_000);
+    try {
+      await engine.request({ jsonrpc: '2.0', method, params, id });
+      return await waiter;
+    } finally {
+      clearTimeout(timer);
+      unlisten();
+    }
+  };
+
   const harness: TestHarness = {
     openByPaths: async (paths) => {
       try {
@@ -2236,6 +2282,9 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
     },
     waitForEngine,
+    windowLabel: () => windowLabel(),
+    closeThisWindow: async () => { await app.closeWindow(false); },
+    engineRequestWithId: requestWithId,
     saveActiveAs: async (destPath) => {
       const snap = deps.getStateSnapshot();
       if (!snap.activeFile) {

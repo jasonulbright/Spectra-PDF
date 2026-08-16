@@ -15,7 +15,11 @@ import {
   type ToolDockState,
 } from '../state/types';
 import { NAV_PANEL_IDS } from '../commands/navpanels';
+import { readScoped, writeScoped } from './window-label';
 
+// Per WINDOW, not per app: pane widths describe the window they are in, and a
+// second window mirroring its own layout back over a shared key resizes the
+// first one's panes from under it.
 const KEY = 'workbench-ui';
 // The AVAILABLE-panel list is the validator — a hand-copied list here would
 // silently bounce a newly-added panel back to the fallback on every boot
@@ -64,7 +68,7 @@ function coerceToolDock(raw: unknown, fallback: ToolDockState): ToolDockState {
 export function readWorkbenchUi(defaults: WorkbenchUi): WorkbenchUi {
   let raw: unknown;
   try {
-    raw = JSON.parse(localStorage.getItem(KEY) || '{}');
+    raw = JSON.parse(readScoped(KEY) || '{}');
   } catch {
     return defaults;
   }
@@ -77,9 +81,5 @@ export function readWorkbenchUi(defaults: WorkbenchUi): WorkbenchUi {
 }
 
 export function writeWorkbenchUi(value: WorkbenchUi): void {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(value));
-  } catch {
-    // storage full / unavailable — chrome state is best-effort
-  }
+  writeScoped(KEY, JSON.stringify(value));
 }

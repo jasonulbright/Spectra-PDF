@@ -130,7 +130,8 @@ import { UpdateBar } from './components/UpdateBar';
 import { NavPane } from './components/navpane/NavPane';
 import { ToolDock } from './components/ToolDock';
 import { type Operation } from './commands/operations';
-import { withRecent } from './lib/recent-files';
+import { persistRecent, sameRecent, withRecent } from './lib/recent-files';
+import { claimPaths, releasePaths, soleOwner, type ClaimRefusal } from './lib/window-claims';
 import { writeWorkbenchUi } from './lib/workbench-ui';
 import { installTestHarness, TEST_HARNESS_ENABLED } from './testHarness';
 import type { TestStateSnapshot } from './testHarness';
@@ -301,6 +302,7 @@ function AppContent(): React.ReactElement {
     message: string;
     kind?: 'unsaved' | 'proceed' | 'notice';
     title?: string;
+    affirmLabel?: string;
     resolve: (result: ConfirmResult) => void;
   } | null>(null);
 
@@ -370,6 +372,23 @@ function AppContent(): React.ReactElement {
     });
   }, []);
 
+  /** A refusal that has somewhere to send the user: the affirmative button
+   * carries the action's own name rather than a generic Continue. */
+  const showActionConfirm = useCallback(
+    (title: string, message: string, affirmLabel: string): Promise<boolean> => {
+      return new Promise((resolve) => {
+        setConfirmState({
+          message,
+          kind: 'proceed',
+          title,
+          affirmLabel,
+          resolve: (r) => resolve(r === 'save'),
+        });
+      });
+    },
+    [],
+  );
+
   const editWarnedPathsRef = useRef<Set<string>>(new Set());
   // What a document's own signatures allow to be changed. The policy is read
   // every time — a file unsigned at the last check may have been signed
@@ -428,9 +447,15 @@ function AppContent(): React.ReactElement {
 
   // Mirror the recent-files list (ui slice) to localStorage — the single
   // persistence point; every mutation just dispatches UI_SET_RECENT_FILES.
+  // The key is shared by every window, so the write folds in whatever another
+  // window recorded since this one last wrote, and the result is adopted back
+  // into state rather than left to drift from what is stored.
   useEffect(() => {
-    localStorage.setItem('spectra-recent', JSON.stringify(recentFiles));
-  }, [recentFiles]);
+    const merged = persistRecent(recentFiles);
+    if (!sameRecent(merged, recentFiles)) {
+      dispatch({ type: 'UI_SET_RECENT_FILES', files: merged });
+    }
+  }, [recentFiles, dispatch]);
 
   // Mirror the toolbar overrides (I.6 customization) the same way.
   useEffect(() => {
@@ -639,6 +664,31 @@ function AppContent(): React.ReactElement {
   // times — including losing encryption support entirely, so a panel's Open
   // button could not open a password-protected PDF at all. One implementation,
   // one flag.
+  // Tell the user which window holds what they asked for, and offer to go
+  // there. A refusal that names one window is a routing decision rather than a
+  // wall; a batch spanning several windows has nowhere single to send them, so
+  // it states the fact and stops.
+  const reportClaimRefusal = useCallback(
+    async (refused: ClaimRefusal[], kind: 'window' | 'import'): Promise<void> => {
+      const names = refused
+        .map((r) => r.path.split(/[\\/]/).pop() ?? r.path)
+        .join(', ');
+      const title = tChrome('app.window.claimTitle');
+      const body = tChrome(
+        kind === 'import' ? 'app.window.importElsewhere' : 'app.window.openElsewhere',
+        { names },
+      );
+      const owner = soleOwner(refused);
+      if (!owner) {
+        await showNotice(title, body);
+        return;
+      }
+      const go = await showActionConfirm(title, body, tChrome('app.window.focusOther'));
+      if (go) await app.focusWindow(owner);
+    },
+    [showNotice, showActionConfirm],
+  );
+
   const openByPaths = useCallback(async (paths: string[], opts?: { focus?: boolean }) => {
     let recent = stateRef.current.ui.recentFiles;
     let lastOpened: string | null = null;
@@ -647,6 +697,8 @@ function AppContent(): React.ReactElement {
     // tab must not undo a layout the user chose while it was open.
     let freshlyOpened: { path: string; workingPath: string } | null = null;
     let changed = false;
+    // Claimed but not yet accounted for — released in the finally.
+    let unopened = new Set<string>();
     try {
       // THE PATH-IDENTITY GATE. File identity is the raw path string
       // app-wide (`state.files` keys, tabs, recents, activeFileId,
@@ -672,7 +724,17 @@ function AppContent(): React.ReactElement {
       // open twice, leaking the first working copy (`create_working_copy` mints
       // a fresh temp dir per call and nothing purges them) and prompting twice
       // for an encrypted file's password.
-      for (const filePath of [...new Set(canonical)]) {
+      // THE OWNERSHIP GATE. A path is live in at most one window, and the
+      // claim is taken before any bytes are read: `create_working_copy` mints
+      // a fresh temp directory per call, so a second window opening the same
+      // file gets an independent edit session on a private copy, and the two
+      // are reconciled by whichever bare `save_as` copy lands last. The claim
+      // sits here rather than at commit time because by commit time both
+      // sessions exist and one of them has to be thrown away.
+      const { granted, refused } = await claimPaths([...new Set(canonical)], 'write');
+      if (refused.length > 0) void reportClaimRefusal(refused, 'window');
+      unopened = new Set(granted);
+      for (const filePath of granted) {
         // Already open as a real DOCUMENT → just re-activate it. A byte-only
         // import source doesn't count: it has an entry in `files` but no tab,
         // nothing ever upgrades the flag, and `focusTab` rejects a doc tab for
@@ -693,6 +755,7 @@ function AppContent(): React.ReactElement {
           lastOpened = filePath;                  // must not pollute Recent (regression)
           freshlyOpened = null;
           changed = true;
+          unopened.delete(filePath);
           continue;
         }
         if (existing?.importOnly) {
@@ -714,19 +777,24 @@ function AppContent(): React.ReactElement {
         lastOpened = filePath;
         freshlyOpened = { path: filePath, workingPath: prepared.workingPath };
         changed = true;
+        unopened.delete(filePath);
       }
     } finally {
       // Flush whatever succeeded even if a later file threw (a malformed PDF
       // mid-batch would otherwise strand the opened tabs unfocused + unrecorded).
       if (changed) dispatch({ type: 'UI_SET_RECENT_FILES', files: recent });
       if (lastOpened && opts?.focus !== false) dispatch({ type: 'UI_FOCUS_TAB', tab: { doc: lastOpened } });
+      // A claim outlives only what it protects: a cancelled password prompt or
+      // a file that threw mid-batch must not leave this window holding a path
+      // it never opened.
+      if (unopened.size > 0) void releasePaths([...unopened]);
     }
     // Outside the finally: an initial view is a courtesy on top of a
     // completed open, never a reason for the open itself to report a failure.
     if (freshlyOpened && lastOpened === freshlyOpened.path && opts?.focus !== false) {
       await applyInitialView(freshlyOpened.path, freshlyOpened.workingPath);
     }
-  }, [dispatch, prepareFileBytes, applyInitialView]);
+  }, [dispatch, prepareFileBytes, applyInitialView, reportClaimRefusal]);
 
   // Import one or more files' pages INTO an existing document at an index (the
   // add-page ghost and per-position drops). Each file is registered
@@ -742,7 +810,16 @@ function AppContent(): React.ReactElement {
       // for this whole call — without the Set both passes take the
       // "unregistered" branch and IMPORT_PAGES splices duplicate PageRef
       // ids into the document (regression).
-      const filePaths = [...new Set(await app.canonicalizePaths(rawPaths))];
+      // A READ claim, and it is exclusive against a write claim: an import
+      // source's pending pages resolve by (source, positional index) at commit
+      // time, so a window rewriting that file turns those indices into
+      // different content — a silent wrong page, across a boundary where no
+      // flush can fix it. Two readers coexist; nobody rewrites through a read
+      // claim.
+      const canonicalImports = [...new Set(await app.canonicalizePaths(rawPaths))];
+      const claimed = await claimPaths(canonicalImports, 'read');
+      if (claimed.refused.length > 0) void reportClaimRefusal(claimed.refused, 'import');
+      const filePaths = claimed.granted;
       const toRegister: {
         path: string;
         workingPath: string;
@@ -751,6 +828,9 @@ function AppContent(): React.ReactElement {
         buffer: PdfBuffer;
       }[] = [];
       const allPages: PageRef[] = [];
+      // Paths this window already held before the import: releasing one would
+      // drop the WRITE claim on a document that is still open here.
+      const unused = new Set(filePaths.filter((p) => !state.files.has(p)));
       for (const filePath of filePaths) {
         const existing = state.files.get(filePath);
         let src: { workingPath: string; name: string; buffer: PdfBuffer; pageCount: number };
@@ -779,12 +859,17 @@ function AppContent(): React.ReactElement {
           importOnly: true,
         });
         for (const d of docs) allPages.push(...d.pages);
+        unused.delete(filePath);
       }
-      if (allPages.length === 0) return;
+      if (allPages.length === 0) {
+        if (unused.size > 0) void releasePaths([...unused]);
+        return;
+      }
       for (const reg of toRegister) dispatch({ type: 'REGISTER_IMPORT_SOURCE', ...reg });
       dispatch({ type: 'IMPORT_PAGES', toDocId, toIndex, pages: allPages });
+      if (unused.size > 0) void releasePaths([...unused]);
     },
-    [state.files, dispatch, prepareFileBytes],
+    [state.files, dispatch, prepareFileBytes, reportClaimRefusal],
   );
 
   // The canvas publishes its drop resolver here.
@@ -2023,10 +2108,24 @@ function AppContent(): React.ReactElement {
     if (!activeFile) return;
     const dest = await saveFile(activeFile.name);
     if (!dest) return;
-    if (!(await commitOrAbort())) return;
-    await file.saveAs(activeFile.workingPath, dest);
-    dispatch({ type: 'MARK_SAVED', path: activeFile.path });
-  }, [activeFile, saveFile, dispatch, commitOrAbort]);
+    // The destination is a bare byte copy over whatever is there. Writing over
+    // a file another window has open replaces the bytes under a live document
+    // that has no idea, so the destination is claimed like any other path and
+    // released again — Save As does not take ownership of what it wrote.
+    const { granted, refused } = await claimPaths([dest], 'write');
+    if (refused.length > 0) {
+      await reportClaimRefusal(refused, 'window');
+      return;
+    }
+    try {
+      if (!(await commitOrAbort())) return;
+      await file.saveAs(activeFile.workingPath, dest);
+      dispatch({ type: 'MARK_SAVED', path: activeFile.path });
+    } finally {
+      const held = stateRef.current.files;
+      void releasePaths(granted.filter((p) => !held.has(p)));
+    }
+  }, [activeFile, saveFile, dispatch, commitOrAbort, reportClaimRefusal]);
 
   // File ▸ Send To ▸ Email is a local OS integration. Flush pending page edits
   // and stage a copy of the current working state under the
@@ -2081,6 +2180,7 @@ function AppContent(): React.ReactElement {
       }
     }
     dispatch({ type: 'CLOSE_FILE', path: filePath });
+    void releasePaths([filePath]);
   }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort]);
 
   // Close all open files with unsaved changes prompt
@@ -2101,6 +2201,7 @@ function AppContent(): React.ReactElement {
     for (const f of allOpen) {
       dispatch({ type: 'CLOSE_FILE', path: f.path });
     }
+    void releasePaths(allOpen.map((f) => f.path));
   }, [state.files, dispatch, showConfirm, isFileDirty, commitOrAbort]);
 
   // Exit the app (File ▸ Exit / Ctrl+Q) — always quits when clean; the
@@ -2116,8 +2217,32 @@ function AppContent(): React.ReactElement {
         for (const f of dirtyFiles) await file.saveAs(f.workingPath, f.path);
       }
     }
+    // Every other window runs its own close flow and closes itself; whichever
+    // window closes last exits the process. A window that cancels keeps both
+    // itself and the app, which is what a cancel means.
+    await app.requestQuit();
     await app.confirmClose();
   }, [state.files, isFileDirty, showConfirm, commitOrAbort]);
+
+  // Move the active document to a new window. Pop-out MOVES: the document
+  // leaves this workspace, so two live copies of one file never exist and
+  // every "whose" question keeps its structural answer.
+  //
+  // Pending page edits are committed first — that is the shipped meaning of
+  // leaving a view — and the bytes travel through the FILE, which is where
+  // they already live. The message carries a path and nothing else: page and
+  // document ids are minted against a per-window generation counter, so the
+  // same id string names a different physical page in the other window.
+  const handleMoveToNewWindow = useCallback(async () => {
+    const current = stateRef.current;
+    const target = current.activeFileId ? current.files.get(current.activeFileId) : null;
+    if (!target || target.importOnly) return;
+    if (!(await commitOrAbort())) return;
+    const label = await app.openNewWindow();
+    dispatch({ type: 'CLOSE_FILE', path: target.path });
+    await releasePaths([target.path]);
+    await app.openInWindow(label, [target.path]);
+  }, [dispatch, commitOrAbort]);
 
   // --- Command layer ----------------------------------------------------
   // Reading mode's Escape exit (I.6). An interceptor, not a keymap entry —
@@ -2206,6 +2331,8 @@ function AppContent(): React.ReactElement {
     checkForUpdates: () => setUpdateCheckSignal((n) => n + 1),
     exit: handleExit,
     minimizeToTray: async () => { await app.hideToTray(); },
+    newWindow: async () => { await app.openNewWindow(); },
+    moveToNewWindow: handleMoveToNewWindow,
     sanitizeDocument: handleSanitizeDocument,
     setFieldLock: handleSetFieldLock,
     setFieldActions: handleSetFieldActions,
@@ -2260,6 +2387,8 @@ function AppContent(): React.ReactElement {
       checkForUpdates: () => h.current.checkForUpdates(),
       exit: () => h.current.exit(),
       minimizeToTray: () => h.current.minimizeToTray(),
+      newWindow: () => h.current.newWindow(),
+      moveToNewWindow: () => h.current.moveToNewWindow(),
       sanitizeDocument: (path, request) => h.current.sanitizeDocument(path, request),
       setFieldLock: (path, field, lock) => h.current.setFieldLock(path, field, lock),
       setFieldActions: (path, field, actions, data) =>
@@ -2300,12 +2429,12 @@ function AppContent(): React.ReactElement {
       const dirtyFiles = Array.from(filesRef.current.values()).filter(
         (f) => f.dirty || pageDirtyRef.current.includes(f.path),
       );
+      // Rust decides between hiding and closing, because only it knows whether
+      // this is the last workspace window: tray residency is an app-level
+      // state, so a second window's × closes that window rather than hiding
+      // the app behind the first window's unsaved work.
       if (dirtyFiles.length === 0) {
-        if (minimizeToTray) {
-          await app.hideToTray();
-        } else {
-          await app.confirmClose();
-        }
+        await app.closeWindow(minimizeToTray);
         return;
       }
       const names = dirtyFiles.map((f) => f.name).join(', ');
@@ -2323,11 +2452,7 @@ function AppContent(): React.ReactElement {
           await file.saveAs(f.workingPath, f.path);
         }
       }
-      if (minimizeToTray) {
-        await app.hideToTray();
-      } else {
-        await app.confirmClose();
-      }
+      await app.closeWindow(minimizeToTray);
     });
     return () => { unlisten.then((fn) => fn()); };
   }, [showConfirm]);
@@ -2364,11 +2489,21 @@ function AppContent(): React.ReactElement {
   // Handle files opened via file association, context menu, or second instance.
   // openByPaths focuses the opened doc's tab (strips + merge-up ARE the merge
   // flow, 2o — a shell "merge" open lands there like any multi-open).
+  // The payload is DRAINED from Rust rather than carried on the event: a
+  // window created for a pop-out has no listener mounted when its open is
+  // routed, and a queue that only this window can drain can neither lose the
+  // open nor apply it twice.
   useEffect(() => {
-    const unlisten = app.onOpenFile(async (data: { files: string[]; merge: boolean }) => {
-      await openByPaths(data.files);
-    });
-    return () => { unlisten.then((fn) => fn()); };
+    let cancelled = false;
+    const drain = async (): Promise<void> => {
+      for (const pending of await app.takePendingOpens()) {
+        if (cancelled) return;
+        await openByPaths(pending.files);
+      }
+    };
+    void drain();
+    const unlisten = app.onOpenFile(() => { void drain(); });
+    return () => { cancelled = true; unlisten.then((fn) => fn()); };
   }, [openByPaths]);
 
   // Test harness — only compiled in when VITE_E2E=1 was set at build time.
@@ -2527,7 +2662,9 @@ function AppContent(): React.ReactElement {
         dispatch({ type: 'REMOVE_ANNOTATION', docId, pageId, annotationId }),
       commitPendingEdits: () => commitRef.current(),
       closeAllFiles: () => {
-        for (const f of filesRef.current.values()) dispatch({ type: 'CLOSE_FILE', path: f.path });
+        const paths = [...filesRef.current.values()].map((f) => f.path);
+        for (const path of paths) dispatch({ type: 'CLOSE_FILE', path });
+        void releasePaths(paths);
       },
       importPagesIntoDoc: (filePath, toDocId, toIndex) =>
         importFilesIntoDoc([filePath], toDocId, toIndex),
@@ -2777,6 +2914,7 @@ function AppContent(): React.ReactElement {
         message={confirmState?.message ?? ''}
         kind={confirmState?.kind}
         title={confirmState?.title}
+        affirmLabel={confirmState?.affirmLabel}
         onResult={handleConfirmResult}
       />
       <PasswordDialog

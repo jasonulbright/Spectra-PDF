@@ -1,7 +1,7 @@
 use crate::engine::{self, EngineState};
 use std::fs;
 use std::path::Path;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 use uuid::Uuid;
 
@@ -1330,14 +1330,17 @@ fn accent_from_registry() -> Option<String> {
 
 // ── Window backdrop ──────────────────────────────────────────────────────
 
-/// Which backdrop setup applied to the main window ("mica" or "none").
+/// Which backdrop setup applied to the CALLING window ("mica" or "none").
 /// The renderer stamps this on <html data-backdrop> before first paint and
-/// keys translucent shell styling on it.
+/// keys translucent shell styling on it. Per window: an apply can succeed for
+/// one window and fail for another, and the answer must be about the window
+/// that is asking.
 #[tauri::command]
 pub async fn get_window_backdrop(
-    state: tauri::State<'_, crate::BackdropState>,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, crate::app_windows::BackdropState>,
 ) -> Result<String, String> {
-    Ok(state.0.to_string())
+    Ok(state.get(window.label()).to_string())
 }
 
 // ── Operation log ────────────────────────────────────────────────────────
@@ -1522,43 +1525,103 @@ pub async fn start_engine(app: AppHandle) -> Result<(), String> {
     engine::start(&app).await
 }
 
+/// Hand a JSON-RPC request to the sidecar on behalf of the calling window.
+///
+/// The id is rewritten before the write so the response can be addressed back
+/// to the window that asked; a write that never lands releases the routing so
+/// the table cannot grow entries no response will ever retire.
 #[tauri::command]
 pub async fn send_to_engine(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     request: serde_json::Value,
 ) -> Result<(), String> {
+    let mut request = request;
+    let outer = engine::route_request(&app, window.label(), &mut request);
+    let unroute = |app: &AppHandle| {
+        if let Some(outer) = outer {
+            engine::unroute_request(app, outer);
+        }
+    };
     let state = app.state::<EngineState>();
     let mut guard = state.child.lock().await;
     if let Some(ref mut child) = *guard {
-        let msg = serde_json::to_string(&request)
-            .map_err(|e| format!("Serialize error: {}", e))?;
-        child
-            .write((msg + "\n").as_bytes())
-            .map_err(|e| format!("Failed to write to engine: {}", e))?;
+        let msg = match serde_json::to_string(&request) {
+            Ok(msg) => msg,
+            Err(e) => {
+                unroute(&app);
+                return Err(format!("Serialize error: {}", e));
+            }
+        };
+        if let Err(e) = child.write((msg + "\n").as_bytes()) {
+            unroute(&app);
+            return Err(format!("Failed to write to engine: {}", e));
+        }
+        drop(guard);
+        engine::publish_activity(&app);
         Ok(())
     } else {
+        unroute(&app);
         Err("Engine not running".to_string())
     }
 }
 
 // ── Window lifecycle ──────────────────────────────────────────────────────
 
+/// Close the calling window, quitting only when it was the last workspace
+/// window.
+///
+/// The count is taken here rather than inferred by a renderer: a renderer
+/// knows its own state and nothing about the other window's unsaved work, and
+/// destroying a fixed label would discard whichever window did not ask.
 #[tauri::command]
-pub async fn confirm_close(app: AppHandle) -> Result<(), String> {
-    // Set the quitting flag so ExitRequested handler allows exit
-    crate::QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.destroy();
+pub async fn close_window(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    minimize_to_tray: bool,
+) -> Result<(), String> {
+    let others = crate::app_windows::app_window_labels(&app)
+        .into_iter()
+        .filter(|l| l != window.label())
+        .count();
+    if others == 0 && minimize_to_tray {
+        let _ = window.hide();
+        return Ok(());
     }
-    app.exit(0);
+    if others == 0 {
+        // Set the quitting flag so ExitRequested handler allows exit
+        crate::QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = window.destroy();
+        app.exit(0);
+        return Ok(());
+    }
+    let _ = window.destroy();
+    crate::engine::publish_activity(&app);
     Ok(())
 }
 
 #[tauri::command]
-pub async fn hide_to_tray(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.hide();
+pub async fn confirm_close(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    close_window(app, window, false).await
+}
+
+/// Ask every OTHER workspace window to run its own close flow. Each answers by
+/// closing itself, and whichever closes last exits the process — so a window
+/// that cancels keeps both itself and the app alive.
+#[tauri::command]
+pub async fn request_quit(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    for label in crate::app_windows::app_window_labels(&app) {
+        if label == window.label() {
+            continue;
+        }
+        let _ = app.emit_to(label.as_str(), "app:beforeClose", ());
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn hide_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
+    let _ = window.hide();
     Ok(())
 }
 

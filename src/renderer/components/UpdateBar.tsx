@@ -3,6 +3,7 @@ import { app } from '../lib/tauri-bridge';
 import { check } from '@tauri-apps/plugin-updater';
 import { useTranslation } from 'react-i18next';
 import { loadSettings } from '../lib/app-settings';
+import { isPrimaryWindow } from '../lib/window-label';
 import { tChrome } from '../i18n';
 
 // Updates are notify-only. This bar tells the user a newer release exists and hands
@@ -33,7 +34,13 @@ export function UpdateBar({ checkSignal = 0 }: UpdateBarProps): React.ReactEleme
 
   // Launch check: opt-outable (Settings) and overridable machine-wide by the
   // enterprise DisableAutoUpdate policy, which wins over the preference.
+  //
+  // Only the window the app opened by itself checks. A window opened FROM
+  // another window is not a launch, and a second check five seconds later
+  // producing a second bar is noise on a notify-only posture. Help ▸ Check for
+  // Updates stays per window and is unaffected.
   useEffect(() => {
+    if (!isPrimaryWindow()) return;
     if (!loadSettings().checkUpdatesOnLaunch) return;
     let cancelled = false;
     void app.checkAutoUpdateDisabled().then((disabled) => {
