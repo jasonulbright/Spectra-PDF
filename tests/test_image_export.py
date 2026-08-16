@@ -106,3 +106,50 @@ def test_refusals(tmp_dir, gs_path):
         export_images(src, os.path.join(tmp_dir, "o.png"), "png", pages="9", gs_path=gs_path)
     with pytest.raises(ValueError, match="is a directory"):
         export_images(src, tmp_dir, "png", gs_path=gs_path)
+
+
+def _cropped_pdf(path: str) -> None:
+    """A letter page showing only a 300x200 window at (100, 500)."""
+    from pikepdf import Array, Dictionary, Name
+
+    p = pikepdf.new()
+    page = p.add_blank_page(page_size=(612, 792))
+    page.Resources = Dictionary()
+    page.obj[Name("/CropBox")] = Array([100, 500, 400, 700])
+    page.Contents = p.make_stream(b"0 0 0 rg 150 600 100 50 re f")
+    p.save(path)
+    p.close()
+
+
+def _png_size(path: str) -> tuple:
+    """Width/height from the PNG IHDR."""
+    with open(path, "rb") as f:
+        header = f.read(24)
+    assert header[:8] == b"\x89PNG\r\n\x1a\n"
+    return (
+        int.from_bytes(header[16:20], "big"),
+        int.from_bytes(header[20:24], "big"),
+    )
+
+
+def test_a_cropped_page_exports_the_page_the_viewer_shows(tmp_dir, gs_path):
+    # The CropBox is what a reader sees, so it is what an exported image has to
+    # depict. At 72 dpi one point is one pixel, so the right answer is the
+    # window's own 300 x 200 -- the MediaBox answer is 612 x 792, a different
+    # number in both axes and one that carries the hidden margin as well.
+    src = os.path.join(tmp_dir, "cropped.pdf")
+    _cropped_pdf(src)
+    out = os.path.join(tmp_dir, "page.png")
+    r = export_images(src, out, "png", dpi=72, gs_path=gs_path)
+    assert r["pages_rendered"] == 1
+    assert _png_size(r["outputs"][0]) == (300, 200)
+
+
+def test_an_uncropped_page_is_unaffected(tmp_dir, gs_path):
+    # No CropBox means the MediaBox IS the frame, so framing on the crop box
+    # changes nothing -- the fix must not move the ordinary page.
+    src = os.path.join(tmp_dir, "plain.pdf")
+    _pdf(src, pages=1)
+    out = os.path.join(tmp_dir, "plain.png")
+    r = export_images(src, out, "png", dpi=72, gs_path=gs_path)
+    assert _png_size(r["outputs"][0]) == (200, 200)
