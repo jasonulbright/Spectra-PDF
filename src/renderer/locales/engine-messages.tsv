@@ -377,7 +377,9 @@ page_vectors.vectorObjectBboxDegenerate	exact	page_vectors	vector object bbox is
 page_vectors.vectorObjectSTransform	exact	page_vectors	vector object's transform matrix is degenerate and cannot be transformed
 page_vectors.vectorObjectSpansUnbalanced	exact	page_vectors	vector object spans unbalanced q/Q graphics-state frames and cannot be edited as one unit
 pdf_fonts.fontCannotEncode	pattern	pdf_fonts,text_paragraphs	font cannot encode {{ch}}
+pdfa.ghostscriptPdfConversionDid	pattern	pdfa	Ghostscript PDF/A conversion did not produce {{requested}}: the output declares {{declared}}.
 pdfa.ghostscriptPdfConversionFailed	pattern	pdfa	Ghostscript PDF/A conversion failed: {{v0}}
+pdfa.outputDeclaresPdfConformance	pattern	pdfa	The output declares no PDF/A conformance at all, so {{requested}} was not produced.
 portfolio.documentAlreadyPortfolio	exact	portfolio	this document is already a portfolio
 portfolio.memberNamed	pattern	portfolio	no member named {{name}}
 portfolio.memberSourceFound	pattern	portfolio	member source not found: {{s}}
@@ -430,6 +432,7 @@ prepress.couldExtractBundledProfile	pattern	prepress	Could not extract the bundl
 prepress.destinationIccProfileFound	pattern	prepress	Destination ICC profile not found: {{profile}}
 prepress.ghostscriptCmykConversionFailed	pattern	prepress	Ghostscript CMYK conversion failed: {{v0}}
 prepress.ghostscriptPdfXConversion	pattern	prepress	Ghostscript PDF/X conversion failed: {{v0}}
+prepress.pdfXConversionAbandoned	pattern	prepress	PDF/X conversion abandoned the standard: {{said}}
 prepress.pdfXOutputCarries	exact	prepress	PDF/X output carries no /OutputIntents — conversion failed.
 prepress.renderIntentMustPerceptual	exact	prepress	render_intent must be perceptual, relative, saturation, or absolute.
 prepress.trappedMustOne	pattern	prepress,trapping	Trapped must be one of {{allowed}}.

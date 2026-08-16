@@ -10,8 +10,9 @@ import json
 import os
 import pathlib
 
+import pikepdf
 import pytest
-from pikepdf import Name
+from pikepdf import Array, Dictionary, Name, String
 
 from engine.accessibility import (
     CATEGORIES,
@@ -201,6 +202,192 @@ class TestFailClosed:
         assert res["unreadable"][0]["page"] == 2
         # "Could not read" is never reported as "nothing found".
         assert _statuses(res)["tagged_content"] == "needs_review"
+
+
+class TestReadsThatDidNotComplete:
+    """A read that did not complete is `needs_review`, never a clean claim.
+
+    Each fixture below breaks ONE of the checker's own reads and pins that the
+    checks fed by it say so. Every one of them reported `not_applicable` or
+    `pass` before — an empty inventory that came out of a failed read, rendered
+    as a document with nothing to check.
+    """
+
+    def _statuses_of(self, tmp_dir, name, build) -> dict:
+        src = os.path.join(tmp_dir, f"{name}.pdf")
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        B._one_tagged_paragraph(pdf, page)
+        B.make_conformant(pdf, page)
+        build(pdf, page)
+        return _statuses(check_accessibility(B.save(pdf, src)))
+
+    def test_permissions_that_will_not_read_are_not_permissions_that_allow(self):
+        from engine.accessibility import REVIEW, _Check, _check_permissions
+
+        class _Unreadable:
+            @property
+            def allow(self):
+                raise RuntimeError("this encryption dictionary cannot be interpreted")
+
+        check = _Check("permissions", "document")
+        _check_permissions(check, _Unreadable())
+        assert check.status == REVIEW
+        assert [f["detail_key"] for f in check.findings] == ["permissions_unreadable"]
+
+    def test_an_annots_entry_that_is_not_an_annotation_downgrades_its_checks(self, tmp_dir):
+        def build(pdf, page):
+            page.obj[Name.Annots] = Array([String("not an annotation")])
+
+        statuses = self._statuses_of(tmp_dir, "bad_annot_entry", build)
+        for cid in ("tagged_annotations", "tab_order", "tagged_multimedia",
+                    "navigation_links", "tagged_form_fields"):
+            assert statuses[cid] == "needs_review", cid
+
+    def test_a_null_annots_entry_is_nothing_rather_than_something_unread(self, tmp_dir):
+        """The conforming twin: a null entry references no object, so a page
+        carrying one has no annotations rather than an unreadable list."""
+
+        def build(pdf, page):
+            page.obj[Name.Annots] = Array([pikepdf.Object.parse(b"null")])
+
+        statuses = self._statuses_of(tmp_dir, "null_annot_entry", build)
+        for cid in ("tagged_annotations", "tab_order", "navigation_links"):
+            assert statuses[cid] == NA, cid
+
+    def test_a_javascript_entry_that_is_not_a_name_tree_downgrades_its_checks(self, tmp_dir):
+        def build(pdf, page):
+            pdf.Root[Name.Names] = Dictionary(JavaScript=pikepdf.Object.parse(b"7"))
+
+        statuses = self._statuses_of(tmp_dir, "bad_js_tree", build)
+        for cid in ("scripts", "screen_flicker", "timed_responses"):
+            assert statuses[cid] == "needs_review", cid
+
+    def test_a_script_body_that_will_not_decode_is_not_a_script_without_a_timer(self, tmp_dir):
+        def build(pdf, page):
+            stream = pdf.make_stream(b"app.setTimeOut('tick', 100)")
+            stream.stream_dict[Name.Filter] = Name.FlateDecode
+            pdf.Root[Name.OpenAction] = Dictionary(S=Name.JavaScript, JS=stream)
+
+        statuses = self._statuses_of(tmp_dir, "bad_js_body", build)
+        assert statuses["timed_responses"] == "needs_review"
+
+    def test_a_field_tree_that_will_not_enumerate_downgrades_its_checks(self, tmp_dir):
+        def build(pdf, page):
+            pdf.Root[Name.AcroForm] = Dictionary(
+                Fields=pdf.make_indirect(pikepdf.Object.parse(b"7"))
+            )
+
+        statuses = self._statuses_of(tmp_dir, "bad_field_tree", build)
+        assert statuses["field_descriptions"] == "needs_review"
+        assert statuses["tagged_form_fields"] == "needs_review"
+
+    def test_a_table_the_span_arithmetic_cannot_model_is_reviewed_not_passed(self, tmp_dir):
+        src = os.path.join(tmp_dir, "unmodellable_table.pdf")
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        B.draw(pdf, page, "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (body) Tj ET EMC")
+        root = B.struct_root(pdf)
+        doc = B.elem(pdf, "Document", root)
+        table = B.elem(pdf, "Table", doc)
+        header = B.elem(pdf, "TR", table, kids=[
+            B.elem(pdf, "TH", table, page=page, Scope=Name.Column),
+            B.elem(pdf, "TH", table, page=page, Scope=Name.Column),
+        ])
+        # A row holding no cells at all: the column arithmetic has nothing to
+        # place, so the table's width is not a measurement.
+        table[Name.K] = Array([header, B.elem(pdf, "TR", table)])
+        para = B.elem(pdf, "P", doc, page=page, mcid=0)
+        doc[Name.K] = Array([para, table])
+        root[Name.K] = doc
+        B.parent_tree(pdf, root, page, [para])
+        B.make_conformant(pdf, page)
+        res = check_accessibility(B.save(pdf, src))
+        row = _check(res, "table_regularity")
+        assert row["status"] == "needs_review", json.dumps(row, indent=2)
+        assert [f["detail_key"] for f in row["findings"]] == ["table_not_modellable"]
+
+    def test_an_outline_with_no_items_is_not_a_document_with_bookmarks(self, tmp_dir):
+        src = os.path.join(tmp_dir, "empty_outline.pdf")
+        pdf = B.new_pdf(pages=12)
+        page = pdf.pages[0]
+        B._one_tagged_paragraph(pdf, page)
+        B.make_conformant(pdf, page)
+        pdf.Root[Name.Outlines] = pdf.make_indirect(
+            Dictionary(Type=Name.Outlines, Count=0)
+        )
+        res = check_accessibility(B.save(pdf, src))
+        assert _statuses(res)["bookmarks"] == "warn"
+
+
+class TestBoundedWalksSayTheyAreBounded:
+    """A walk that stopped short is not a document that ended there."""
+
+    def _deep_tree(self, path, depth):
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        B.draw(
+            pdf, page,
+            "/Figure <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (a figure) Tj ET EMC",
+        )
+        root = B.struct_root(pdf)
+        doc = B.elem(pdf, "Document", root)
+        node = doc
+        for _ in range(depth):
+            kid = B.elem(pdf, "Div", node)
+            node[Name.K] = Array([kid])
+            node = kid
+        # A figure with no /Alt, placed below the walk's depth cap.
+        figure = B.elem(pdf, "Figure", node, page=page, mcid=0)
+        node[Name.K] = Array([figure])
+        root[Name.K] = doc
+        B.parent_tree(pdf, root, page, [figure])
+        B.make_conformant(pdf, page)
+        return B.save(pdf, path)
+
+    def test_the_audit_names_the_element_whose_children_it_did_not_reach(self, tmp_dir):
+        import pikepdf as _pikepdf
+
+        from engine.struct_audit import audit_tree
+
+        src = self._deep_tree(os.path.join(tmp_dir, "deep.pdf"), 70)
+        with _pikepdf.open(src) as pdf:
+            tree = audit_tree(pdf)
+        assert tree["truncated"], "a walk that stopped short must name where"
+        assert tree["truncated"][0]["reason"] == "depth"
+
+    def test_a_tree_walked_to_its_end_reports_no_truncation(self, tmp_dir):
+        import pikepdf as _pikepdf
+
+        from engine.struct_audit import audit_tree
+
+        src = self._deep_tree(os.path.join(tmp_dir, "shallow.pdf"), 3)
+        with _pikepdf.open(src) as pdf:
+            tree = audit_tree(pdf)
+        assert tree["truncated"] == []
+
+    def test_a_truncated_tree_never_reports_a_structure_check_as_clean(self, tmp_dir):
+        src = self._deep_tree(os.path.join(tmp_dir, "deep_report.pdf"), 70)
+        res = check_accessibility(src)
+        statuses = _statuses(res)
+        # The figure with no /Alt is below the cap: the check that owns it
+        # cannot see it, and `not_applicable` would claim the document has no
+        # figures at all.
+        for cid in ("figures_alt", "heading_nesting", "table_rows",
+                    "alt_no_content", "list_items", "reading_order"):
+            assert statuses[cid] == "needs_review", cid
+        assert any(
+            f["detail_key"] == "structure_truncated"
+            for f in _check(res, "figures_alt")["findings"]
+        )
+
+    def test_the_shallow_twin_is_clean(self, tmp_dir):
+        """The false-failure guard: an ordinary tree must not be reviewed."""
+        src = self._deep_tree(os.path.join(tmp_dir, "shallow_report.pdf"), 3)
+        statuses = _statuses(check_accessibility(src))
+        assert statuses["figures_alt"] == "fail"
+        for cid in ("table_rows", "list_items", "alt_no_content"):
+            assert statuses[cid] == NA, cid
 
 
 class TestCorpusGate:
