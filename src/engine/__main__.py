@@ -57,6 +57,7 @@ from engine.separations import (
     list_simulation_profiles,
     render_separations,
 )
+from engine.object_inspector import inspect_point
 from engine.ink_manager import (
     alias_ink,
     compare_tint_transforms,
@@ -268,6 +269,7 @@ def main() -> None:
     server.register("render_separations", render_separations)
     server.register("composite_separations", composite_separations)
     server.register("list_simulation_profiles", list_simulation_profiles)
+    server.register("inspect_point", inspect_point)
     server.register("alias_ink", alias_ink)
     server.register("compare_ink_transforms", compare_tint_transforms)
     server.register("spot_to_process", spot_to_process)

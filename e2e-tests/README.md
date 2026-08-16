@@ -55,6 +55,44 @@ npm test
 WebdriverIO spawns `tauri-driver` on port 4444, launches the binary, and
 runs every `specs/*.spec.ts` file.
 
+## The run's WARN/ERROR inventory
+
+A green suite still prints red rows: WebdriverIO logs a driver-level failure at
+WARN and again at ERROR even when its own middleware retries the command and
+the spec goes on to pass. Colour is stripped on redirect, which is how every
+battery is captured, so those rows survive in the log unnoticed.
+
+Every run therefore ends with an inventory, printed by `wdio.conf.ts`'s
+`onComplete` hook and grouped three ways:
+
+- **UNEXPLAINED** — rows matching no registry entry, with their counts and the
+  specs they occurred under. These are the ones to fix.
+- **KNOWN** — rows registered in `log-registry.ts`, counted, not expanded.
+- **STALE** — registry entries that matched nothing in this run. Reported as
+  loudly as UNEXPLAINED: an entry that stops matching is standing permission
+  for a row nobody produces, and it keeps suppressing its pattern after the
+  spec that justified it changes meaning.
+
+The inventory is a report. It never changes the exit code, which stays
+WebdriverIO's verdict alone, and anything the scanner throws is swallowed.
+
+A registry entry names the pattern, the spec that provokes it, and why the row
+is correct behaviour. An entry grants permission for one message under one
+spec — `scan-run-log.ts` requires both to agree wherever the log carries
+attribution.
+
+Fixing an UNEXPLAINED `element not interactable` means fixing the wait, not
+lengthening a timeout: fold the verdict into the predicate that also proves the
+control is clickable, and re-query the element inside it. `waitForExist`
+followed by a click is check-then-act — existence is not interactability.
+
+The run's own output is also saved to `logs/last-run.log` (gitignored), and any
+saved log can be re-scanned without re-running the suite:
+
+```powershell
+npm run scan:log -- ..\battery-v1031.local.log
+```
+
 ## What's covered
 
 > The suite is **132 specs** (`specs/*.spec.ts`, all run by the config). The

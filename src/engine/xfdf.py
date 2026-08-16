@@ -7,6 +7,21 @@ ink gestures — and the REVIEW THREAD: /IRT reply chains and /State
 //StateModel (Accepted/Rejected/Completed/…) ride on `inreplyto`/`state`/
 `statemodel`, so a round trip preserves who replied what to whom.
 
+/IRT names a TARGET; /RT names the RELATIONSHIP, and they are separate
+attributes here because they are separate facts. A reply and a group member
+both point at one annotation and mean different things — a group moves, cuts
+and copies as a unit — so an interchange that carried only `inreplyto` turned
+every group into a reply thread. `replyType` carries the relationship, always,
+including the default: a consuming tool then needs no knowledge of the default
+to read this file correctly.
+
+Relationship names outside the defined pair are TRANSCRIBED rather than
+classified in both directions. An interchange's job is fidelity, and
+transcribing asserts nothing the document does not hold. What cannot be
+transcribed — a relationship that will not read, a target with no name to
+reference — refuses BY NAME on both halves; the two sides of one interchange
+behave the same way when they cannot tell.
+
 Imported annotations carry no appearance streams. Viewers, including ours via
 pdf.js, synthesize defaults or regenerate them on load. That is
 the format's own convention, not a shortcut.
@@ -21,9 +36,18 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 import pikepdf
+from engine.annotations import (
+    relationship_name,
+    reply_relationship,
+    usable_relationship_name,
+)
 from engine.pdf_save import save_pdf
 
 XFDF_NS = "http://ns.adobe.com/xfdf/"
+
+#: XML attribute values are written inside double quotes, which `escape` does
+#: not cover by default.
+_QUOT = {chr(34): "&quot;"}
 
 # PDF subtype ↔ XFDF element name.
 _SUBTYPE_TO_ELEMENT = {
@@ -112,6 +136,8 @@ def export_xfdf(file: str, output: str) -> dict:
     """Write every recognized markup annotation to an XFDF file."""
     count = 0
     by_type: dict[str, int] = {}
+    relationships: dict[str, int] = {}
+    dangling = 0
     parts: list[str] = []
     with pikepdf.open(file) as pdf:
         for page_index, page in enumerate(pdf.pages):
@@ -157,15 +183,35 @@ def export_xfdf(file: str, output: str) -> dict:
                     names = _flags_names(int(a.get("/F")))
                     if names:
                         attrs.append(f'flags="{names}"')
-                # Review thread: reply target + status.
-                irt = a.get("/IRT")
-                if irt is not None:
+                # Review thread: reply target, the relationship, and status.
+                relationship = reply_relationship(a)
+                spelling = relationship_name(relationship.kind, relationship.name)
+                if not relationship.readable or (
+                    relationship.target is not None and spelling is None
+                ):
+                    raise ValueError(
+                        "the reply relationship of an annotation on page "
+                        f"{page_index + 1} cannot be read"
+                    )
+                if relationship.target is not None:
                     try:
-                        irt_name = _str(irt.get("/NM"))
-                        if irt_name:
-                            attrs.append(f'inreplyto="{escape(irt_name, {chr(34): "&quot;"})}"')
+                        irt_name = _str(relationship.target.get("/NM"))
                     except Exception:
-                        pass
+                        irt_name = None
+                    if not irt_name:
+                        # XFDF references by name and there is none. Dropping
+                        # the attribute loses the relationship silently;
+                        # inventing a name would put an identifier into the
+                        # interchange that a re-import would make real.
+                        raise ValueError(
+                            f"the annotation replied to on page {page_index + 1} "
+                            "has no name, so XFDF cannot reference it"
+                        )
+                    attrs.append(f'inreplyto="{escape(irt_name, _QUOT)}"')
+                    attrs.append(f'replyType="{escape(spelling, _QUOT)}"')
+                    relationships[spelling] = relationships.get(spelling, 0) + 1
+                elif relationship.name is not None:
+                    dangling += 1
                 for key, attr in (("/State", "state"), ("/StateModel", "statemodel")):
                     v = _str(a.get(key))
                     if v:
@@ -252,7 +298,17 @@ def export_xfdf(file: str, output: str) -> dict:
     )
     with open(output, "w", encoding="utf-8") as f:
         f.write(xml)
-    return {"output": output, "count": count, "by_type": by_type}
+    out = {
+        "output": output,
+        "count": count,
+        "by_type": by_type,
+        "relationships": relationships,
+    }
+    if dangling:
+        # A /RT with no /IRT names no relationship, so nothing is written for
+        # it. The count says a key was read and deliberately not carried.
+        out["dangling_reply_type"] = dangling
+    return out
 
 
 def _parse_pairs(text: str) -> list[float]:
@@ -284,8 +340,10 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
 
     added = 0
     skipped: list[dict] = []
-    by_name: dict[str, pikepdf.Object] = {}
-    pending_irt: list[tuple[pikepdf.Object, str]] = []
+    relationships: dict[str, int] = {}
+    dangling = 0
+    unresolved = 0
+    pending_irt: list[tuple[pikepdf.Object, int, str, str]] = []
 
     with pikepdf.open(file) as pdf:
         page_count = len(pdf.pages)
@@ -427,38 +485,70 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
             if page.obj.get("/Annots") is None:
                 page.obj["/Annots"] = pdf.make_indirect(pikepdf.Array())
             page.obj["/Annots"].append(obj)
-            nm = el.get("name")
-            if nm:
-                by_name[nm] = obj
-            irt = el.get("inreplyto")
-            if irt:
-                pending_irt.append((obj, irt))
             added += 1
 
-        # Second pass: resolve reply targets by /NM — the review thread.
-        unresolved = 0
-        for obj, target in pending_irt:
-            ref = by_name.get(target)
-            if ref is None:
-                # The target may already exist IN the document (replying to a
-                # native annotation): find it by /NM.
-                for page in pdf.pages:
-                    annots = page.obj.get("/Annots")
-                    if annots is None:
-                        continue
-                    for existing in annots:
-                        try:
-                            if _str(existing.get("/NM")) == target:
-                                ref = existing
-                                break
-                        except Exception:
-                            continue
-                    if ref is not None:
-                        break
-            if ref is not None:
-                obj["/IRT"] = ref
-            else:
+            irt = el.get("inreplyto")
+            reply_type = el.get("replyType")
+            if not irt:
+                if reply_type:
+                    dangling += 1
+                continue
+            spelling = "R"
+            if reply_type:
+                spelling = usable_relationship_name(reply_type)
+                if spelling is None:
+                    raise ValueError(
+                        f"not a reply relationship XFDF can carry: {reply_type}"
+                    )
+            if el.get("name") == irt:
+                # An annotation naming itself is not a relationship, and the
+                # readers that walk /IRT would have to cut the loop anyway.
                 unresolved += 1
+                continue
+            pending_irt.append((obj, page_index, irt, spelling))
+
+        # Second pass: resolve reply targets by /NM. /NM is unique only within
+        # a PAGE and an /IRT pair is required to be on one page, so the name is
+        # a page-scoped identifier: a document-wide first-match scan can bind a
+        # reply to a same-named annotation on another page and never say so.
+        # A name that is ambiguous on its page resolves to nothing rather than
+        # to a coin flip; a name unique across the whole document still binds,
+        # so a cross-page thread from a producer that ignores the page rule
+        # survives where its intent is unmistakable.
+        by_page_name: dict[tuple[int, str], pikepdf.Object] = {}
+        page_counts: dict[tuple[int, str], int] = {}
+        name_counts: dict[str, int] = {}
+        name_first: dict[str, pikepdf.Object] = {}
+        for index, page in enumerate(pdf.pages):
+            annots = page.obj.get("/Annots")
+            if annots is None:
+                continue
+            for existing in annots:
+                try:
+                    nm = _str(existing.get("/NM"))
+                except Exception:
+                    continue
+                if not nm:
+                    continue
+                by_page_name.setdefault((index, nm), existing)
+                page_counts[(index, nm)] = page_counts.get((index, nm), 0) + 1
+                name_counts[nm] = name_counts.get(nm, 0) + 1
+                name_first.setdefault(nm, existing)
+
+        for obj, page_index, target, spelling in pending_irt:
+            key = (page_index, target)
+            ref = by_page_name.get(key) if page_counts.get(key, 0) == 1 else None
+            if ref is None and name_counts.get(target, 0) == 1:
+                ref = name_first.get(target)
+            if ref is None:
+                unresolved += 1
+                continue
+            # /RT is written only where /IRT was: the format requires the
+            # target beside the relationship, so an unresolved reply must not
+            # be left holding a relationship that points at nothing.
+            obj["/IRT"] = ref
+            obj["/RT"] = pikepdf.Name("/" + spelling)
+            relationships[spelling] = relationships.get(spelling, 0) + 1
         # In-place safe: pikepdf can't save over its own open input — stage
         # beside it and swap (the attachments/_save pattern; the CLI's
         # in-place bug class). A signed input's landed bytes become an
@@ -479,9 +569,16 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
         else:
             save_pdf(pdf, output)
             preserved = finalize_preserving_signatures(str(in_path), str(out_path))
-    out: dict = {"output": output, "added": added, "skipped": skipped}
+    out: dict = {
+        "output": output,
+        "added": added,
+        "skipped": skipped,
+        "relationships": relationships,
+    }
     if unresolved:
         out["unresolved_replies"] = unresolved
+    if dangling:
+        out["dangling_reply_type"] = dangling
     if preserved.get("preserved"):
         out["signatures_preserved"] = True
     return out

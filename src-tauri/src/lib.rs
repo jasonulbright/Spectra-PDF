@@ -321,23 +321,29 @@ pub fn run() {
             let app = window.app_handle();
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
-                    let is_app = app_windows::is_app_window(window.label());
+                    // A window that hosts no renderer cannot answer a close, so
+                    // it keeps the default one: it never prompts about unsaved
+                    // documents, never counts toward the last-window quit
+                    // decision, and never holds the close open. The page
+                    // capture reads its own window's close as a cancel and
+                    // destroys the window itself.
+                    if !app_windows::is_app_window(window.label()) {
+                        web_capture::window_close_requested(window.label());
+                        return;
+                    }
                     // Under end-to-end control the LAST workspace window keeps
-                    // the default close so a driver session exits cleanly, and
-                    // the page-capture window keeps it unconditionally. Every
-                    // other close runs the product's own path, which is the
-                    // only place the two-window quit hazard is reachable.
-                    if e2e && (!is_app || app_windows::app_window_count(app) <= 1) {
+                    // the default close so a driver session exits cleanly.
+                    // Every other close runs the product's own path, which is
+                    // the only place the two-window quit hazard is reachable.
+                    if e2e && app_windows::app_window_count(app) <= 1 {
                         return;
                     }
                     // Prevent the default close — let the renderer decide
                     api.prevent_close();
-                    if is_app {
-                        // Addressed, not broadcast: the other window's renderer
-                        // would run the same unsaved-changes flow and close a
-                        // window nobody asked to close.
-                        let _ = app.emit_to(window.label(), "app:beforeClose", ());
-                    }
+                    // Addressed, not broadcast: the other window's renderer
+                    // would run the same unsaved-changes flow and close a
+                    // window nobody asked to close.
+                    let _ = app.emit_to(window.label(), "app:beforeClose", ());
                 }
                 tauri::WindowEvent::Focused(true) => {
                     app_windows::on_window_focused(app, window.label());

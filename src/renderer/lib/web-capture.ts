@@ -65,6 +65,12 @@ export interface CaptureResult {
   pages: CapturedPage[];
   visited: number;
   truncated: boolean;
+  /**
+   * The capture window was closed before the run finished. A structured field
+   * rather than an error string, so the caller decides what to say without
+   * matching on message text.
+   */
+  cancelled: boolean;
   failures: string[];
 }
 

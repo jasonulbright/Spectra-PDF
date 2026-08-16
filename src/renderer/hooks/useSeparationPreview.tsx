@@ -22,6 +22,8 @@ import {
   previewDpi,
   aliasIsAllowed,
   moveInSequence,
+  inspectPointToPdf,
+  readInspection,
   readInventory,
   readSimulation,
   readSimulationProfiles,
@@ -31,12 +33,14 @@ import {
   type CompositeResult,
   type Ink,
   type InkAliases,
+  type Inspection,
   type Plate,
   type PlateSet,
   type SimulationProfiles,
   type SimulationRecord,
   type SimulationSource,
 } from '../lib/separation-preview';
+import { getDocumentProxy } from '../lib/pdfDocCache';
 
 /**
  * The separation preview's live state.
@@ -109,6 +113,31 @@ export interface SeparationPreviewValue {
    *  an applied ink edit is a document change. */
   invalidate: () => void;
   rasterFor: (docId: string, pageId: string) => Blob | null;
+  /** What the last clicked point resolved to, or null when nothing has been
+   *  asked yet. Null is also what an answer the panel could not read comes
+   *  back as — never an empty object list, which is a measurement. */
+  inspection: Inspection | null;
+  inspectBusy: boolean;
+  inspectError: string;
+  /** Ask what is under one display-normalized point of a page. `viewRotation`
+   *  is the canvas's own view-only turn; the page's baked rotation and its
+   *  view box are resolved here, so the caller never converts coordinates. */
+  inspectAt: (
+    docId: string,
+    pageId: string,
+    u: number,
+    v: number,
+    viewRotation: number,
+  ) => void;
+  clearInspection: () => void;
+}
+
+/** What one page's last raster left behind for a point query. */
+interface InspectTarget {
+  sourcePath: string;
+  pageNumber: number;
+  dir: string;
+  plates: Plate[];
 }
 
 const PreviewContext = createContext<SeparationPreviewValue | null>(null);
@@ -174,14 +203,34 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
   const [generation, setGeneration] = useState(0);
   const [rasters, setRasters] = useState<readonly RasterEntry[]>([]);
 
+  const [inspection, setInspection] = useState<Inspection | null>(null);
+  const [inspectBusy, setInspectBusy] = useState(false);
+  const [inspectError, setInspectError] = useState('');
+
   const plateCache = useRef(new Map<string, CacheEntry<PlateSet>>());
   const rasterRef = useRef(new Map<string, RasterEntry>());
+  // The plate set each page last rastered to, so a click reads the same
+  // plates the composite under the pointer was drawn from.
+  const inspectRef = useRef(new Map<string, InspectTarget>());
+  // The click a request was issued for. A later click supersedes an earlier
+  // one: the answers can arrive out of order, and the readout must be the
+  // point the user is looking at rather than whichever engine call finished
+  // last.
+  const inspectSeq = useRef(0);
 
   const publish = useCallback(() => setRasters([...rasterRef.current.values()]), []);
 
   const releaseAll = useCallback(() => {
     rasterRef.current.clear();
+    inspectRef.current.clear();
     setRasters([]);
+  }, []);
+
+  const clearInspection = useCallback(() => {
+    inspectSeq.current += 1;
+    setInspection(null);
+    setInspectError('');
+    setInspectBusy(false);
   }, []);
 
   const invalidate = useCallback(() => {
@@ -207,6 +256,9 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
   }, [documents]);
   for (const key of prunePlateCache(plateCache.current, livePageIds)) {
     rasterRef.current.delete(key);
+  }
+  for (const pageId of [...inspectRef.current.keys()]) {
+    if (!livePageIds.has(pageId)) inspectRef.current.delete(pageId);
   }
 
   // The pages to raster: the one being read and its neighbours, each resolved
@@ -392,6 +444,12 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
             setPlates(set.plates);
             setCoverage(set.coverage ?? {});
           }
+          inspectRef.current.set(target.pageId, {
+            sourcePath: target.sourcePath,
+            pageNumber: target.pageNumber,
+            dir: set.dir,
+            plates: set.plates,
+          });
           // Compositing reads the cached plates, and the document's own tint
           // transforms only through what the raster already cached beside
           // them. It stays off the gated path deliberately: gating it would
@@ -450,8 +508,66 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
       releaseAll();
       setStats(null);
       setSimulation(null);
+      clearInspection();
     }
-  }, [armed, releaseAll]);
+  }, [armed, releaseAll, clearInspection]);
+
+  // A re-raster retires the plate set the readout was measured against, so
+  // the answer goes with it rather than standing beside a picture it no
+  // longer describes.
+  useEffect(() => {
+    clearInspection();
+  }, [wantedKey, overprint, generation, simulationSource, simulationProfilePath,
+    paperWhite, blackInk, clearInspection]);
+
+  const inspectAt = useCallback(
+    (docId: string, pageId: string, u: number, v: number, viewRotation: number) => {
+      const target = inspectRef.current.get(pageId);
+      if (!target) return;
+      const doc = documents.find((d) => d.id === docId);
+      const pageRef = doc?.pages.find((p) => p.id === pageId);
+      if (!pageRef) return;
+      const source = state.files.get(pageRef.sourceDocId);
+      if (!source?.buffer) return;
+      const buffer = source.buffer;
+      const ticket = (inspectSeq.current += 1);
+      setInspectBusy(true);
+      setInspectError('');
+      void (async () => {
+        try {
+          const proxy = await getDocumentProxy(pageRef.sourceDocId, buffer);
+          const p = await proxy.getPage(pageRef.sourcePageIndex + 1);
+          const [vx0, vy0, vx1, vy1] = p.view;
+          const [x, y] = inspectPointToPdf(
+            u,
+            v,
+            viewRotation,
+            { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 },
+            (p.rotate + pageRef.rotation) % 360,
+          );
+          const gsPath = await ensureGsPath();
+          const res = await call('inspect_point', {
+            file: target.sourcePath,
+            page: target.pageNumber,
+            x,
+            y,
+            plates: target.plates,
+            plates_dir: target.dir,
+            gs_path: gsPath,
+          });
+          if (inspectSeq.current !== ticket) return;
+          setInspection(readInspection(res));
+        } catch (e: unknown) {
+          if (inspectSeq.current !== ticket) return;
+          setInspection(null);
+          setInspectError(e instanceof Error ? e.message : String(e));
+        } finally {
+          if (inspectSeq.current === ticket) setInspectBusy(false);
+        }
+      })();
+    },
+    [call, documents, state.files],
+  );
 
   useEffect(() => releaseAll, [releaseAll]);
 
@@ -478,13 +594,15 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
       setLimitPct, alarm, setAlarm, overprint, setOverprint, simulationProfiles,
       simulationSource, setSimulationSource, pickSimulationProfile, simulationProfilePath,
       paperWhite, setPaperWhite, blackInk, setBlackInk, simulation, stats, busy, error,
-      invalidate, rasterFor,
+      invalidate, rasterFor, inspection, inspectBusy, inspectError, inspectAt,
+      clearInspection,
     }),
     [armed, setArmed, inks, inkUnknown, plates, coverage, hidden, toggleInk, showAllInks,
       hideAllInks, densities, setDensity, aliases, setAlias, sequence, moveInk, limitPct,
       setLimitPct, alarm, overprint, simulationProfiles, simulationSource,
       pickSimulationProfile, simulationProfilePath, paperWhite, blackInk, simulation,
-      stats, busy, error, invalidate, rasterFor],
+      stats, busy, error, invalidate, rasterFor, inspection, inspectBusy, inspectError,
+      inspectAt, clearInspection],
   );
 
   return <PreviewContext.Provider value={value}>{children}</PreviewContext.Provider>;
@@ -503,4 +621,11 @@ export function useSeparationPreview(): SeparationPreviewValue {
 export function useSeparationRaster(docId: string, pageId: string): Blob | null {
   const value = useContext(PreviewContext);
   return value ? value.rasterFor(docId, pageId) : null;
+}
+
+/** The point query, for the canvas, or null where the provider does not wrap
+ *  the surface. */
+export function useSeparationInspector(): SeparationPreviewValue['inspectAt'] | null {
+  const value = useContext(PreviewContext);
+  return value ? value.inspectAt : null;
 }

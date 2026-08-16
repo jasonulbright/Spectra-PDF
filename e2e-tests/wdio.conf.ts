@@ -31,14 +31,59 @@
  */
 import { spawn, spawnSync, ChildProcessWithoutNullStreams } from 'node:child_process';
 import { resolve, basename } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { scanText } from './scan-run-log.js';
 
 const REPO_ROOT = resolve(__dirname, '..');
 const APP_BINARY = resolve(REPO_ROOT, 'src-tauri', 'target', 'debug', 'spectrapdf.exe');
 const NATIVE_DRIVER = resolve(__dirname, 'msedgedriver.exe');
 const TAURI_DRIVER_PORT = 4444;
+const RUN_LOG_DIR = resolve(__dirname, 'logs');
+const RUN_LOG = resolve(RUN_LOG_DIR, 'last-run.log');
 
 let tauriDriver: ChildProcessWithoutNullStreams | null = null;
+
+// The driver-level WARN/ERROR rows are emitted inside the worker processes and
+// reach the launcher only as forwarded output, so no launcher-side logger hook
+// can see them; teeing those streams is the only point at which a run can
+// collect its own rows. Both streams are needed: the logger's rows arrive on
+// stderr while the spec/runner lines that attribute them arrive on stdout.
+// Held in memory as well as written to disk so `onComplete` scans what it
+// already has rather than racing a file flush.
+type StreamWrite = typeof process.stdout.write;
+let capturedOutput = '';
+const restorers: (() => void)[] = [];
+
+function captureStream(stream: NodeJS.WriteStream): void {
+  const original: StreamWrite = stream.write.bind(stream) as StreamWrite;
+  const tee = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
+    capturedOutput += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf-8');
+    return (original as unknown as (...args: unknown[]) => boolean)(chunk, ...rest);
+  }) as StreamWrite;
+  stream.write = tee;
+  restorers.push(() => {
+    stream.write = original;
+  });
+}
+
+function captureOutput(): void {
+  if (restorers.length > 0) return;
+  captureStream(process.stdout);
+  captureStream(process.stderr);
+}
+
+/** Print the run's WARN/ERROR inventory. A report only: nothing here changes
+ * the exit code, which stays WebdriverIO's verdict. */
+function reportRunLog(): void {
+  for (const restore of restorers.splice(0)) restore();
+  try {
+    mkdirSync(RUN_LOG_DIR, { recursive: true });
+    writeFileSync(RUN_LOG, capturedOutput);
+    process.stdout.write(`\n${scanText(capturedOutput, RUN_LOG)}\n`);
+  } catch (err) {
+    process.stdout.write(`\ne2e log inventory unavailable: ${String(err)}\n`);
+  }
+}
 
 function reapTestProcesses(): void {
   // Force-kill the driver/app/engine process tree by image name so each
@@ -78,6 +123,7 @@ export const config: WebdriverIO.Config = {
     tsNodeOpts: { transpileOnly: true, project: './tsconfig.json' },
   },
   onPrepare: () => {
+    captureOutput();
     if (!existsSync(APP_BINARY)) {
       throw new Error(
         `App binary not found at ${APP_BINARY}. Run \`npm run build:app\` first.`,
@@ -135,6 +181,7 @@ export const config: WebdriverIO.Config = {
     }),
   onComplete: () => {
     reapTestProcesses();
+    reportRunLog();
   },
 };
 

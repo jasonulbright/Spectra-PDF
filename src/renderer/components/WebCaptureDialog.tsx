@@ -52,7 +52,8 @@ export function WebCaptureDialog({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // The same ref discipline Create PDF earned: the reentrancy window opens
-  // before any state update lands, and a capture has no cancel.
+  // before any state update lands. A capture is cancelled by closing the
+  // browser window it runs in, never from here.
   const capturingRef = useRef(false);
 
   const host = useMemo(() => previewHost(url), [url]);
@@ -84,6 +85,14 @@ export function WebCaptureDialog({
         const result = (await track('web_capture', { file: built.url }, () =>
           app.captureWebPage(built),
         )) as CaptureResult;
+        // Closing the capture window stops the run. What it reached is
+        // discarded rather than handed up: half a site added to the Create PDF
+        // list under the name of a capture the user stopped is a partial
+        // result wearing a finished one's clothes.
+        if (result.cancelled) {
+          setNotice(tChrome('dialog.webCapture.cancelled'));
+          return null;
+        }
         if (result.truncated) {
           setNotice(tChromeCount('dialog.webCapture.truncated', result.pages.length));
         }

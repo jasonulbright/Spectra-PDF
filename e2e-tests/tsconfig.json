@@ -9,5 +9,11 @@
     "resolveJsonModule": true,
     "types": ["node", "@wdio/globals/types", "@wdio/mocha-framework"]
   },
-  "include": ["wdio.conf.ts", "specs/**/*.ts", "support/**/*.ts"]
+  "include": [
+    "wdio.conf.ts",
+    "log-registry.ts",
+    "scan-run-log.ts",
+    "specs/**/*.ts",
+    "support/**/*.ts"
+  ]
 }

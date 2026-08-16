@@ -32,9 +32,20 @@ import {
   stagingApplies,
   totalInk,
   visiblePlates,
+  INSPECT_TRAVEL_LIMIT,
+  inspectInkIsAFloor,
+  inspectIsAvailable,
+  inspectPointToPdf,
+  isInspectClick,
+  pointerTravel,
+  readInspection,
+  resolutionState,
   type CacheEntry,
+  type InspectedObject,
   type Plate,
 } from '../src/renderer/lib/separation-preview';
+import { displayPointToPdf, pdfPointToDisplay } from '../src/renderer/lib/pdfx-build';
+import { rotateNormalizedPoint } from '../src/renderer/lib/redaction';
 
 const CYAN: Plate = { name: 'Cyan', kind: 'process', display_rgb: [0, 174, 239], file: 'c.tif' };
 const BLACK: Plate = { name: 'Black', kind: 'process', display_rgb: [35, 31, 32], file: 'k.tif' };
@@ -485,5 +496,218 @@ describe('what the engine is asked to composite under a profile', () => {
       [SPOT], new Set(), new Map(), new Map([['PANTONE 185 C', 'Warm Red']]),
     );
     expect(request[0].shown_as).toBe('PANTONE 185 C');
+  });
+});
+
+// ── the point inspector ────────────────────────────────────────────────────
+
+const INSPECTOR_PAYLOAD = {
+  page: 1,
+  point: [60, 320],
+  candidates: 2,
+  ambiguous: false,
+  objects: [
+    {
+      index: 2,
+      kind: 'fill',
+      nested: false,
+      form: '',
+      unknown: false,
+      colour: {
+        family: 'DeviceRGB', resource: '', colorants: [], alternate: '',
+        base: '', hival: null, n: null, pattern_type: null,
+        components: [1, 0, 0], rgb: [1, 0, 0], unknown: false,
+      },
+      resolution: null,
+    },
+    {
+      index: 0,
+      kind: 'image',
+      nested: true,
+      form: '/Fm1',
+      unknown: false,
+      colour: {
+        family: 'DeviceCMYK', resource: '', colorants: [], alternate: '',
+        base: '', hival: null, n: null, pattern_type: null,
+        components: [0.2, 0.4, 0.9, 0], rgb: null, unknown: false,
+      },
+      resolution: { width: 8, height: 8, dpi: 6, dpi_x: 6, dpi_y: 6, bpc: 8 },
+    },
+  ],
+  ink: {
+    plates: [
+      { name: 'Cyan', kind: 'process', pct: 20 },
+      { name: 'PANTONE 185 C', kind: 'spot', pct: 0 },
+    ],
+    total: 20,
+  },
+  unknown: [],
+};
+
+describe('telling a point query from a gesture that moved the page', () => {
+  it('takes a single click that barely moved', () => {
+    expect(isInspectClick(1, pointerTravel({ x: 100, y: 100 }, { x: 101, y: 101 })))
+      .toBe(true);
+  });
+
+  it('rejects the click a completed drag still fires', () => {
+    // The webview delivers a click after a pan, so the event alone cannot
+    // tell a query from a gesture and the travel is what does.
+    const travel = pointerTravel({ x: 100, y: 100 }, { x: 240, y: 130 });
+    expect(travel).toBeGreaterThan(INSPECT_TRAVEL_LIMIT);
+    expect(isInspectClick(1, travel)).toBe(false);
+  });
+
+  it('rejects a double click', () => {
+    expect(isInspectClick(2, 0)).toBe(false);
+  });
+
+  it('treats a click with no recorded press as a gesture', () => {
+    expect(isInspectClick(1, pointerTravel(null, { x: 0, y: 0 }))).toBe(false);
+  });
+
+  it('waits for a composite before a click means anything', () => {
+    expect(inspectIsAvailable(false, true)).toBe(true);
+    expect(inspectIsAvailable(true, true)).toBe(false);
+    expect(inspectIsAvailable(false, false)).toBe(false);
+  });
+});
+
+describe('a clicked point in PDF user space', () => {
+  const BOX = { x: 0, y: 0, width: 400, height: 400 };
+  const CROPPED = { x: 100, y: 500, width: 300, height: 200 };
+
+  it('un-projects an upright page', () => {
+    expect(inspectPointToPdf(0.25, 0.25, 0, BOX, 0)).toEqual([100, 300]);
+  });
+
+  it('carries the crop origin, so a cropped page is not offset', () => {
+    expect(inspectPointToPdf(0, 0, 0, CROPPED, 0)).toEqual([100, 700]);
+    expect(inspectPointToPdf(1, 1, 0, CROPPED, 0)).toEqual([400, 500]);
+  });
+
+  it('round-trips through the projection at every rotation', () => {
+    for (const rotation of [0, 90, 180, 270]) {
+      const [x, y] = inspectPointToPdf(0.3, 0.7, 0, CROPPED, rotation);
+      const [u, v] = pdfPointToDisplay(x, y, CROPPED, rotation);
+      expect(u).toBeCloseTo(0.3, 10);
+      expect(v).toBeCloseTo(0.7, 10);
+    }
+  });
+
+  it('takes the view rotation off before the page’s own', () => {
+    // A view-only turn moves the projection and not the page, so the same
+    // physical spot resolves to one user-space point either way. Without it
+    // the readout is right on an upright page and wrong on every turned one.
+    expect(inspectPointToPdf(0.25, 0.25, 90, BOX, 0))
+      .toEqual(inspectPointToPdf(0.25, 0.75, 0, BOX, 0));
+  });
+
+  it('agrees with the shared quarter-turn helper', () => {
+    const spun = rotateNormalizedPoint(0.2, 0.6, 270);
+    expect(inspectPointToPdf(0.2, 0.6, 90, BOX, 0))
+      .toEqual(displayPointToPdf(spun.x, spun.y, BOX, 0));
+  });
+});
+
+describe('reading the engine’s point answer', () => {
+  it('reads a payload with no record as “could not tell”', () => {
+    // Never as "nothing is here": the two look identical in an empty readout
+    // and only one of them is a measurement.
+    expect(readInspection(undefined)).toBeNull();
+    expect(readInspection({})).toBeNull();
+    expect(readInspection({ objects: [] })).toBeNull();
+  });
+
+  it('reads an empty object list as a measurement, with its ink', () => {
+    const read = readInspection({
+      objects: [], candidates: 1, ambiguous: false, point: [30, 30],
+      ink: { plates: [{ name: 'Cyan', kind: 'process', pct: 0 }], total: 0 },
+      unknown: [],
+    });
+    expect(read).not.toBeNull();
+    expect(read?.objects).toEqual([]);
+    // The box claimed a hit the page does not paint — the case a box-only
+    // implementation gets wrong.
+    expect(read?.candidates).toBe(1);
+    expect(read?.ink.total).toBe(0);
+  });
+
+  it('keeps the stack topmost first with what is under it', () => {
+    const read = readInspection(INSPECTOR_PAYLOAD);
+    expect(read?.objects.map((o) => o.kind)).toEqual(['fill', 'image']);
+    expect(read?.objects[0].colour.components).toEqual([1, 0, 0]);
+    expect(read?.objects[1].resolution?.dpi).toBe(6);
+    expect(read?.objects[1].form).toBe('/Fm1');
+  });
+
+  it('keeps the document’s own identifiers verbatim', () => {
+    const read = readInspection({
+      ...INSPECTOR_PAYLOAD,
+      objects: [{
+        index: 0, kind: 'fill', nested: false, form: '', unknown: false,
+        colour: {
+          family: 'Separation', resource: 'Cs1',
+          colorants: ['PANTONE 185 C'], alternate: 'DeviceCMYK', base: '',
+          hival: null, n: null, pattern_type: null, components: [1],
+          rgb: [1, 0.25, 0.1], unknown: false,
+        },
+        resolution: null,
+      }],
+    });
+    expect(read?.objects[0].colour.colorants).toEqual(['PANTONE 185 C']);
+    expect(read?.objects[0].colour.resource).toBe('Cs1');
+  });
+
+  it('falls back to a known kind rather than rendering an unknown one', () => {
+    const read = readInspection({
+      ...INSPECTOR_PAYLOAD,
+      objects: [{ ...INSPECTOR_PAYLOAD.objects[0], kind: 'something-else' }],
+    });
+    expect(read?.objects[0].kind).toBe('fill');
+  });
+
+  it('reads the ambiguity flag a shared isolation unit sets', () => {
+    expect(readInspection({ ...INSPECTOR_PAYLOAD, ambiguous: true })?.ambiguous)
+      .toBe(true);
+  });
+});
+
+describe('what the resolution row can say', () => {
+  const object = (over: Partial<InspectedObject>): InspectedObject => ({
+    index: 0, kind: 'fill', nested: false, form: '', unknown: false,
+    colour: {
+      family: '', resource: '', colorants: [], alternate: '', base: '',
+      hival: null, n: null, patternType: null, components: [], rgb: null,
+      unknown: false,
+    },
+    resolution: null,
+    ...over,
+  });
+
+  it('says a vector is not a raster rather than reporting zero', () => {
+    expect(resolutionState(object({ kind: 'stroke' }))).toBe('notRaster');
+    expect(resolutionState(object({ kind: 'text' }))).toBe('notRaster');
+    expect(resolutionState(object({ kind: 'shading' }))).toBe('notRaster');
+  });
+
+  it('carries the unmeasured third state for a degenerate placement', () => {
+    expect(resolutionState(object({ kind: 'image' }))).toBe('unmeasured');
+  });
+
+  it('reports a measurement when there is one', () => {
+    expect(resolutionState(object({
+      kind: 'image',
+      resolution: { width: 8, height: 8, dpi: 6, dpiX: 6, dpiY: 6, bpc: 8 },
+    }))).toBe('measured');
+  });
+});
+
+describe('the ink row’s caveat', () => {
+  it('fires on exactly an incomplete inventory, and only with an answer', () => {
+    const read = readInspection(INSPECTOR_PAYLOAD);
+    expect(inspectInkIsAFloor(read, true)).toBe(false);
+    expect(inspectInkIsAFloor(read, false)).toBe(true);
+    expect(inspectInkIsAFloor(null, false)).toBe(false);
   });
 });
