@@ -1,5 +1,82 @@
 # Changelog
 
+## 1.1.0
+
+*Released 2026-08-16*
+
+### Seeing a page the way a press will print it
+
+- Output Preview can now render a page through a named press profile.
+- The profile comes from the document's own output intent when it declares one.
+- You can choose a bundled press profile, or point at your own ICC file.
+- Simulate Paper White shows the tint of the paper instead of screen white.
+- Simulate Black Ink shows how dark that press can actually print black.
+- Turning on paper white turns on black ink, because the setting alone changes nothing.
+- Every control reads back what the engine used, so a refused request cannot look applied.
+- A profile the preview cannot use is named, and the page stays unproofed.
+- Plate toggles, ink density and the ink limit alarm all keep working under a proof.
+
+### Asking a page what is under the cursor
+
+- Click any point in Output Preview to see what is printed there.
+- The readout names the object, its colour space and its ink values.
+- Ink values come from the plates, so overlapping objects report what actually prints.
+- A placed image also reports its effective resolution at the size it appears.
+- Several objects stacked at one point are listed, topmost first.
+- A point over bare paper says so, with its ink reading intact.
+
+### A summary of a document's comments
+
+- Comments can now be written out as a document you can read and circulate.
+- Choose comments on their own, or the pages with their comments beside them.
+- The comment column can sit beside the page, beneath it, or on its own sheets.
+- Lines can join each comment to the place on the page it marks.
+- Comments can be filtered by author, type, state, page range or text.
+- Comments can be sorted, and the panel and the document always agree on the order.
+- Reply threads are kept together, and a reply whose parent is gone is still listed.
+- Every summary ends with a count of what was included and what was left out.
+
+### More than one window
+
+- The app can now open a second window, for a second screen.
+- A document can be moved to a new window, taking its tabs with it.
+- A document open in one window is refused in another, by name.
+- The refusal offers to bring the window already holding that document to the front.
+- Each window keeps its own tabs, its own undo history and its own view.
+- Closing a window closes only that window's documents, never the whole app.
+- The status bar says when another window is using the engine.
+
+### Comments that survive a round trip
+
+- Exported comments now record whether they are a reply or a group.
+- A grouped comment no longer comes back as a reply to something else.
+- A reply is matched to its parent on the same page first, as the format intends.
+- A comment the interchange format cannot carry is reported instead of silently dropped.
+- One unreadable comment now costs that comment, not the whole export.
+- The panel says when an export carried fewer comments than the document holds.
+
+### Fixes
+
+- Output Preview measured the wrong area of a cropped page, and now measures the visible one.
+- Ink coverage figures and the ink limit alarm were measured over that same wrong area.
+- Choosing your own ICC profile for a colour conversion failed for every file chosen.
+- OCR placed its text layer at the wrong origin and size on a cropped page.
+- Scanned pages could have text recognised from an area the page does not show.
+- Visual comparison highlighted changes in the wrong place on a cropped page.
+- Slide export and image export both exported the wrong area of a cropped page.
+- PDF/A conversion removed content to meet the standard without saying what it removed.
+- PDF/A and PDF/X conversion now list exactly what changed to meet the standard.
+- A PDF/X conversion could claim a standard the converter had already abandoned.
+- A conversion that cannot produce the standard you asked for now refuses and writes nothing.
+- Accessibility checks reported passes for documents whose structure could not be read.
+- Twenty-one accessibility checks now say when they could not see the whole document.
+- A document whose permissions cannot be read is no longer reported as allowing screen readers.
+- The document checker counted fonts it could not read as embedded, and stopped at a hundred.
+- Closing the web capture window mid-capture did nothing, and now cancels the capture.
+- A web capture no longer holds up work in another window while it runs.
+- Text drawn with a joining script over several lines no longer refuses to typeset.
+- An outline with no bookmarks in it is no longer reported as having bookmarks.
+
 ## 1.0.31
 
 *Released 2026-08-15*
