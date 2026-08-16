@@ -13,6 +13,14 @@ normalized to fractions of the rendered page (x, y, w, h in 0..1, y measured
 from the top). Consumers retain responsibility for display-to-PDF conversion.
 Doing the PDF-space conversion here instead would have been a second geometry
 idiom for the same job; `lib/pdfx-build.displayRectToPdf` stays the one recipe.
+
+That recipe denormalizes against the CROP-INTERSECTED page box —
+`lib/pdfx-build.displayRectToPdf` against pdf.js's `page.view`,
+`batch_ocr._to_pdf_rects` and `form_detect` against `/CropBox`. The raster is
+therefore framed on the CropBox too. Framing it on the MediaBox instead scales
+and translates every recognised box by the ratio between the two boxes, so the
+invisible text layer written back into the document sits away from the glyphs
+it transcribes and no reader's text selection lands on the words.
 """
 
 import csv
@@ -55,6 +63,13 @@ def _render_page_png(file: str, page: int, gs_path: str, out_png: Path) -> None:
     Same device/idiom as image_export.py. -dFirstPage/-dLastPage bound the work
     to the single page being recognised, so a 900-page scan costs one page's
     render per call rather than re-rendering the document.
+
+    -dUseCropBox frames the raster the way every consumer of these coordinates
+    denormalizes them (see the module docstring). The device clips page content
+    to the CropBox with or without the flag, so the flag changes the frame and
+    never what is recognised, and on a page with no CropBox it changes nothing.
+    Both the flag and the page box apply /Rotate, so the two agree with no
+    further normalization.
     """
     gs = Path(gs_path) if gs_path else Path()
     if not gs.is_file():
@@ -70,6 +85,7 @@ def _render_page_png(file: str, page: int, gs_path: str, out_png: Path) -> None:
         "-dSAFER",
         "-sDEVICE=png16m",
         f"-r{OCR_DPI}",
+        "-dUseCropBox",
         f"-dFirstPage={page}",
         f"-dLastPage={page}",
         f"-sOutputFile={out_png}",

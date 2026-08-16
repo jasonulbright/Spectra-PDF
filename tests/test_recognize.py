@@ -172,6 +172,166 @@ class TestAgainstTheVendoredStack:
             recognize(str(SCANNED), 999, "eng", str(TESSERACT), str(GS))
 
 
+#: The cropped fixture, in points. The MediaBox is letter; the CropBox is a
+#: 300x200 window at (100, 500). One word is drawn inside that window, at a
+#: baseline the round trip has to recover. A raster framed on the MediaBox
+#: instead scales every recognised box by 300/612 across and 200/792 down and
+#: lands it at the wrong corner, so each number below comes out different.
+CROP_MEDIA = (612.0, 792.0)
+CROP_BOX = (100.0, 500.0, 400.0, 700.0)
+CROP_WORD = "INSIDE"
+CROP_WORD_SIZE = 36.0
+CROP_WORD_ORIGIN = (150.0, 600.0)
+
+
+def _cropped_word_pdf(path, rotate: int = 0, cropped: bool = True) -> str:
+    """One word inside a window on a larger MediaBox."""
+    import pikepdf
+    from pikepdf import Array, Dictionary, Name
+
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=CROP_MEDIA)
+    if cropped:
+        page.obj[Name("/CropBox")] = Array(list(CROP_BOX))
+    if rotate:
+        page.obj[Name("/Rotate")] = int(rotate)
+    font = pdf.make_indirect(Dictionary(
+        Type=Name.Font, Subtype=Name.Type1,
+        BaseFont=Name.Helvetica, Encoding=Name.WinAnsiEncoding))
+    page.Resources = Dictionary(Font=Dictionary(F1=font))
+    x, y = CROP_WORD_ORIGIN
+    page.Contents = pdf.make_stream(
+        f"BT /F1 {CROP_WORD_SIZE:g} Tf 1 0 0 1 {x:g} {y:g} Tm"
+        f" ({CROP_WORD}) Tj ET".encode("ascii"))
+    pdf.save(str(path))
+    pdf.close()
+    return str(path)
+
+
+def _recognized_span(src: str) -> tuple:
+    """Where the recognised ink lands in PDF user space, through the shipped
+    mapping the GUI and the batch arm both mirror.
+
+    The union over every word rather than one named word: a page turned upside
+    down is read as a different STRING (the recogniser is not asked to detect
+    orientation), while the region the glyphs occupy is the same region. The
+    frame question is about that region.
+    """
+    from engine.batch_ocr import _to_pdf_rects
+
+    words = recognize(src, 1, "eng", str(TESSERACT), str(GS))["words"]
+    rects = _to_pdf_rects(src, 0, words)
+    assert rects, "nothing recognised"
+    return (
+        min(r["rect"][0] for r in rects),
+        min(r["rect"][1] for r in rects),
+        max(r["rect"][2] for r in rects),
+        max(r["rect"][3] for r in rects),
+    )
+
+
+class TestTheRectMapping:
+    """`batch_ocr._to_pdf_rects` maps a recognised box back into user space.
+
+    It is the engine's half of a recipe the renderer
+    (`lib/pdfx-build.displayRectToPdf`) and the form detector
+    (`form_detect._display_rect_to_pdf`) also implement, and all three must
+    answer the same. Needs no binaries: the mapping is arithmetic over the
+    page box, and only the page box has to exist.
+    """
+
+    def test_every_quarter_turn_stays_inside_the_page_box(self, tmp_path):
+        from engine.batch_ocr import _to_pdf_rects
+
+        word = {"text": "w", "x": 0.2, "y": 0.3, "w": 0.25, "h": 0.1}
+        for angle in (0, 90, 180, 270):
+            src = _cropped_word_pdf(tmp_path / f"box{angle}.pdf", rotate=angle)
+            (x0, y0, x1, y1) = _to_pdf_rects(src, 0, [word])[0]["rect"]
+            # A normalised box lies inside the page by construction, so its
+            # image does too. Swapping the box's width for its height under one
+            # rotation sends it outside — /Rotate 270 on this 300x200 window
+            # landed at y 710..760, above the box's own top edge of 700, which
+            # is an invisible text layer written off the page.
+            assert CROP_BOX[0] <= x0 < x1 <= CROP_BOX[2], angle
+            assert CROP_BOX[1] <= y0 < y1 <= CROP_BOX[3], angle
+
+    def test_it_agrees_with_the_form_detector(self, tmp_path):
+        from engine.batch_ocr import _to_pdf_rects
+        from engine.form_detect import _display_rect_to_pdf
+
+        word = {"text": "w", "x": 0.2, "y": 0.3, "w": 0.25, "h": 0.1}
+        for angle in (0, 90, 180, 270):
+            src = _cropped_word_pdf(tmp_path / f"box{angle}.pdf", rotate=angle)
+            assert _to_pdf_rects(src, 0, [word])[0]["rect"] == pytest.approx(
+                _display_rect_to_pdf(
+                    (word["x"], word["y"], word["w"], word["h"]),
+                    CROP_BOX, angle)), angle
+
+    def test_the_whole_display_area_maps_onto_the_whole_page_box(self, tmp_path):
+        from engine.batch_ocr import _to_pdf_rects
+
+        # Whatever the rotation, a full-page box has nowhere to go but the box.
+        whole = {"text": "w", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0}
+        for angle in (0, 90, 180, 270):
+            src = _cropped_word_pdf(tmp_path / f"full{angle}.pdf", rotate=angle)
+            assert _to_pdf_rects(src, 0, [whole])[0]["rect"] == pytest.approx(
+                list(CROP_BOX)), angle
+
+
+@needs_ocr_stack
+class TestTheRasterFrame:
+    """The OCR raster carries the frame the recognised boxes are mapped back
+    through, which is the CROP-INTERSECTED page box.
+
+    Every consumer denormalizes against that box -- the GUI through pdf.js's
+    `page.view`, `batch_ocr._to_pdf_rects` and `form_detect` through
+    `/CropBox`. A raster framed on the MediaBox therefore does not merely
+    read extra content: it writes the invisible text layer at a scaled,
+    translated position, so the searchable text a reader selects lands
+    nowhere near the glyphs it transcribes.
+
+    The right answer is fixed by what the fixture draws. A page box never
+    moves content in user space, so the same word on the same page with the
+    CropBox removed must come back at the same user-space rect -- and a
+    /Rotate on top of the CropBox must not move it either.
+    """
+
+    def test_the_word_comes_back_where_it_was_drawn(self, tmp_path):
+        src = _cropped_word_pdf(tmp_path / "crop.pdf")
+        assert recognize(src, 1, "eng", str(TESSERACT), str(GS))["text"].upper() \
+            == CROP_WORD
+        x0, y0, x1, y1 = _recognized_span(src)
+        # The text matrix puts the word's origin at (150, 600) and the glyphs
+        # are capitals, so the box starts at the baseline and rises by the cap
+        # height -- 0.717 em of 36 pt, about 26 pt. Under a MediaBox raster the
+        # same box arrives 26 pt tall times 200/792, under 7 pt, at y0 651.
+        assert x0 == pytest.approx(CROP_WORD_ORIGIN[0], abs=6.0)
+        assert y0 == pytest.approx(CROP_WORD_ORIGIN[1], abs=3.0)
+        assert 20.0 <= y1 - y0 <= 32.0
+        # Six capitals of Helvetica at 36 pt run past 100 pt; the MediaBox
+        # raster shrinks the same span by 300/612 to about 56 pt.
+        assert x1 - x0 >= 100.0
+
+    def test_the_crop_box_does_not_move_the_answer(self, tmp_path):
+        cropped = _recognized_span(_cropped_word_pdf(tmp_path / "crop.pdf"))
+        whole = _recognized_span(
+            _cropped_word_pdf(tmp_path / "whole.pdf", cropped=False))
+        # One raster pixel at 300 dpi is 0.24 pt, and the two rasters quantize
+        # the same glyph edges differently; nothing else may differ. A MediaBox
+        # raster puts the cropped page's word at x 175, y 651 against the whole
+        # page's x 154, y 599.
+        assert cropped == pytest.approx(whole, abs=1.0)
+
+    def test_rotate_does_not_move_the_answer_either(self, tmp_path):
+        upright = _recognized_span(_cropped_word_pdf(tmp_path / "crop.pdf"))
+        for angle in (90, 180, 270):
+            turned = _recognized_span(
+                _cropped_word_pdf(tmp_path / f"rot{angle}.pdf", rotate=angle))
+            # The device turns the frame and `_to_pdf_rects` turns it back.
+            # Disagreement between the two is a text layer written sideways.
+            assert turned == pytest.approx(upright, abs=2.0), angle
+
+
 class TestOcrFile:
     """The single-file arm: composed from the SAME
     helpers as batch_ocr, so these pin the composition, not new logic."""
