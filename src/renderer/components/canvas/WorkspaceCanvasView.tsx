@@ -918,7 +918,7 @@ export function WorkspaceCanvasView({
       // in the Spelling panel must change what the editor underlines, and a
       // cache keyed on the path alone would keep marking in the old language
       // until the document was replaced.
-      const key = `${getSettings().spellLanguage} ${workingPath}`;
+      const key = `${getSettings().spellLanguage}\0${workingPath}`;
       const cached = spellLangRef.current.get(key);
       if (cached) return cached;
       const listing = (await engineCall('list_dictionaries', {
