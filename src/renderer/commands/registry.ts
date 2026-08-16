@@ -209,6 +209,8 @@ export const COMMAND_IDS = [
   'window.prevTab',
   'window.split',
   'window.spreadsheetSplit',
+  'window.newWindow',
+  'window.moveToNewWindow',
   'window.minimizeToTray',
   'help.about',
   'help.licenses',
@@ -939,6 +941,19 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) =>
       inCanvas(ctx) && ctx.state.ui.docViewMode === 'document' && hasActiveFile(ctx.state),
     run: ({ dispatch }) => dispatch({ type: 'UI_TOGGLE_SPREADSHEET_SPLIT' }),
+  },
+  'window.newWindow': {
+    title: 'New Window',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.newWindow(),
+  },
+  // A second window is a second WORKSPACE, so the pop-out MOVES the document:
+  // two live copies of one file would be two independent edit sessions on two
+  // private working copies, reconciled by whichever save lands last.
+  'window.moveToNewWindow': {
+    title: 'Move to New Window',
+    when: (ctx) => ctx.app !== null && showableDoc(ctx.state) !== null,
+    run: (ctx) => ctx.app!.moveToNewWindow(),
   },
   'window.minimizeToTray': {
     title: 'Minimize to Tray',

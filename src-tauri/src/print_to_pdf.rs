@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 pub const PRINTER_NAME: &str = "Spectra PDF";
 pub const PORT_NAME: &str = "SpectraPDF_9100";
@@ -228,13 +228,8 @@ fn handle_job(app: &AppHandle, bytes: Vec<u8>) {
         state.last_job_error.lock().unwrap().clear();
     }
     // The normal open funnel — exactly what a second instance's argv does.
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
-        let canonical = crate::commands::canonical_path(&pdf_path.to_string_lossy());
-        let payload = serde_json::json!({ "files": [canonical], "merge": false });
-        let _ = window.emit("app:openFile", payload);
-    }
+    let canonical = crate::commands::canonical_path(&pdf_path.to_string_lossy());
+    crate::app_windows::route_open(app, vec![canonical], false);
 }
 
 /// Start the loopback listener — the app-setup hook. Never panics: a taken

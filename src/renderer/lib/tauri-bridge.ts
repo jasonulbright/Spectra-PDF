@@ -30,10 +30,37 @@ export const engine = {
   /** Send a JSON-RPC request to the engine. */
   request: (req: object) => invoke('send_to_engine', { request: req }),
 
-  /** Listen for JSON-RPC responses from the engine. */
+  /** Listen for JSON-RPC responses from the engine. Rust addresses each one
+   * to the window that sent the request, so a response can never satisfy
+   * another window's pending entry for the same id. */
   onResponse: (callback: (response: unknown) => void) => {
     return listen<unknown>('engine:response', (event) => callback(event.payload));
   },
+
+  /** How many engine requests the OTHER windows have in flight. One sidecar
+   * serves them all, strictly serially, so this window's next operation waits
+   * behind them. */
+  onOtherWindows: (callback: (count: number) => void) => {
+    return listen<number>('engine:otherWindows', (event) => callback(event.payload));
+  },
+};
+
+// ── Window ownership ──────────────────────────────────────────────────────
+
+export interface ClaimResult {
+  granted: boolean;
+  owner: string;
+}
+
+/** Paths and output folders this window holds. The arbiter is Rust managed
+ * state — one process, one table — and every claim is released when the
+ * window is destroyed, so a hung renderer cannot wedge a path. */
+export const claims = {
+  claim: (path: string, mode: 'write' | 'read') =>
+    invoke<ClaimResult>('claim_document', { path, mode }),
+  release: (path: string) => invoke<void>('release_document', { path }),
+  claimOutputRoot: (path: string) => invoke<ClaimResult>('claim_output_root', { path }),
+  releaseOutputRoot: (path: string) => invoke<void>('release_output_root', { path }),
 };
 
 // ── File dialogs ──────────────────────────────────────────────────────────
@@ -535,23 +562,51 @@ export const app = {
   setStartMinimized: (enabled: boolean) =>
     invoke('set_start_minimized', { enabled }),
 
-  /** Actually close the window and quit the app. */
+  /** Close THIS window, quitting only when it was the last one. The count is
+   * taken in Rust: a renderer knows nothing about another window's unsaved
+   * work, and destroying a fixed label discards whichever window did not ask. */
   confirmClose: () => invoke('confirm_close'),
 
-  /** Hide the window to system tray instead of closing. */
+  /** The window × : close, or hide to tray when this is the only window left.
+   * Tray residency is an app-level state, so a second window's × closes that
+   * window rather than hiding the app. */
+  closeWindow: (minimizeToTray: boolean) => invoke('close_window', { minimizeToTray }),
+
+  /** Ask every other window to run its own close flow. Each answers by closing
+   * itself and the last one out exits, so a window that cancels keeps the app. */
+  requestQuit: () => invoke('request_quit'),
+
+  /** Hide this window to the system tray instead of closing. */
   hideToTray: () => invoke('hide_to_tray'),
+
+  /** Open an empty second workspace; resolves to its label. */
+  openNewWindow: () => invoke<string>('open_new_window'),
+
+  /** Hand paths to another window. Only PATHS cross a window boundary: page
+   * and document ids are minted against a per-window generation counter, so
+   * the same id string means a different physical page in each window. */
+  openInWindow: (label: string, files: string[], merge = false) =>
+    invoke<void>('open_in_window', { label, files, merge }),
+
+  /** Raise a window by label (the "it is open over there" refusal's action). */
+  focusWindow: (label: string) => invoke<void>('focus_app_window', { label }),
 
   /** Listen for close-requested event (Rust intercepted the window close). */
   onBeforeClose: (callback: () => void) => {
     return listen('app:beforeClose', () => callback());
   },
 
-  /** Listen for file open requests (CLI args, second instance, context menu). */
-  onOpenFile: (callback: (data: { files: string[]; merge: boolean }) => void) => {
-    return listen<{ files: string[]; merge: boolean }>('app:openFile', (event) =>
-      callback(event.payload)
-    );
+  /** Listen for the open signal (CLI args, second instance, context menu,
+   * virtual printer, pop-out). The payload is drained with `takePendingOpens`
+   * rather than carried on the event: a window created FOR an open has no
+   * listener yet when the event fires. */
+  onOpenFile: (callback: () => void) => {
+    return listen('app:openFile', () => callback());
   },
+
+  /** Take (and clear) the opens queued for this window. */
+  takePendingOpens: () =>
+    invoke<{ files: string[]; merge: boolean }[]>('take_pending_opens'),
 
   /** Listen for tray actions (Quick Merge). */
   onTrayAction: (callback: (action: string) => void) => {

@@ -18,7 +18,11 @@ import {
   DEFAULT_COUNT_SYMBOL,
   type CountGroup,
 } from './count-marks';
+import { readScoped, writeScoped } from './window-label';
 
+// Per WINDOW: the armed group is what the next click in THIS window places,
+// and the value is cached in a module store a second window would mirror back
+// whole over the first one's.
 const KEY = 'takeoff-ui';
 
 export interface TakeoffSettings {
@@ -52,7 +56,7 @@ export function readTakeoffSettings(
 ): TakeoffSettings {
   let raw: unknown;
   try {
-    raw = JSON.parse(localStorage.getItem(KEY) || '{}');
+    raw = JSON.parse(readScoped(KEY) || '{}');
   } catch {
     return { groups: [...defaults.groups], armed: defaults.armed };
   }
@@ -75,11 +79,7 @@ export function readTakeoffSettings(
 }
 
 export function writeTakeoffSettings(value: TakeoffSettings): void {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(value));
-  } catch {
-    // storage full / unavailable — a remembered list is best-effort
-  }
+  writeScoped(KEY, JSON.stringify(value));
 }
 
 let current: TakeoffSettings | null = null;

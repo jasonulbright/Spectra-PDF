@@ -10,6 +10,13 @@
 // catalog item appears at its own default, and an id that stops existing
 // simply stops matching (validated away on the next save).
 
+// Per WINDOW: the overrides are hydrated once into the ui slice and mirrored
+// back WHOLE on every change, so a shared key makes the last window to touch
+// its toolbar overwrite the other's. A window with no value of its own reads
+// the primary window's, so a second window opens with the toolbar the user
+// customized rather than the catalog defaults.
+import { isPrimaryWindow, readScoped, removeScoped, writeScoped } from './window-label';
+
 const KEY = 'spectra-toolbar';
 
 export interface ToolbarOverrides {
@@ -43,20 +50,16 @@ export function parseToolbarOverrides(raw: string | null): ToolbarOverrides {
 }
 
 export function readToolbarOverrides(): ToolbarOverrides {
-  try {
-    return parseToolbarOverrides(localStorage.getItem(KEY));
-  } catch {
-    return NO_OVERRIDES;
-  }
+  return parseToolbarOverrides(readScoped(KEY));
 }
 
 export function persistToolbarOverrides(overrides: ToolbarOverrides): void {
-  try {
-    if (overrides.shown.length === 0 && overrides.hidden.length === 0) localStorage.removeItem(KEY);
-    else localStorage.setItem(KEY, JSON.stringify(overrides));
-  } catch {
-    // storage unavailable — the session keeps its in-memory layout
-  }
+  const empty = overrides.shown.length === 0 && overrides.hidden.length === 0;
+  // A non-primary window records an EMPTY set rather than removing its key: an
+  // absent key falls back to the primary window's overrides, which would
+  // silently restore the layout the user just reset.
+  if (empty && isPrimaryWindow()) removeScoped(KEY);
+  else writeScoped(KEY, JSON.stringify(overrides));
 }
 
 export function isToolbarItemVisible(

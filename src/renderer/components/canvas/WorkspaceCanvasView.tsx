@@ -212,6 +212,7 @@ import {
 } from '../../lib/annotation-manipulation';
 import { PropertiesBar } from './PropertiesBar';
 import { CanvasStatusBar } from './CanvasStatusBar';
+import { useOtherWindowWork } from '../../hooks/useOtherWindowWork';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber, currentLanguage } from '../../i18n';
 
@@ -4800,6 +4801,10 @@ export function WorkspaceCanvasView({
   // persisted preference is not workspace state. One owner, three readers
   // (menu command, status bar, canvas).
   const snapSettings = useSyncExternalStore(subscribeSnapSettings, getSnapSettings, getSnapSettings);
+  // One engine, shared serially across windows: a run started in another
+  // window is why this window's next operation waits, and the status bar says
+  // so rather than letting the wait look like a hang.
+  const otherWindowWork = useOtherWindowWork();
 
   // --- Count & takeoff: the group list the strip offers ---------------------
   // The DOCUMENT's own groups (derived from its marks) merged with the
@@ -6929,6 +6934,7 @@ export function WorkspaceCanvasView({
       {(!state.ui.readingMode || dirty || pendingFormCount > 0 || liveMarks.length > 0) && (
         <CanvasStatusBar
           docViewMode={docViewMode}
+          otherWindowWork={otherWindowWork}
           snap={snapSettings}
           snapScaleUnit={measureScale.toUnit}
           onSnapChange={setSnapSettings}
