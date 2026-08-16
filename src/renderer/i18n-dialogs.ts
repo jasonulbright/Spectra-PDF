@@ -365,9 +365,11 @@ export const DIALOG_STRINGS = {
   'dialog.webCapture.willContact_other':
     'Will open a browser window and load up to {{count}} pages from {{host}}.',
   'dialog.webCapture.posture':
-    'The capture window is a browser. It loads what the address serves, including scripts, fonts and third-party requests, exactly as any browser would — and you watch it do so. Capture runs only when you start it, never in the background, and the window closes when the capture finishes. A capture of more than one page follows links on the same site only.',
+    'The capture window is a browser. It loads what the address serves, including scripts, fonts and third-party requests, exactly as any browser would — and you watch it do so. Capture runs only when you start it, never in the background, and closing the window stops it. A capture of more than one page follows links on the same site only.',
   'dialog.webCapture.capture': 'Capture',
   'dialog.webCapture.capturing': 'Capturing…',
+  'dialog.webCapture.cancelled':
+    'Capture cancelled — the capture window was closed. Nothing was added.',
   'dialog.webCapture.truncated_one':
     'Reached the page limit after {{count}} page — there were more links to follow.',
   'dialog.webCapture.truncated_other':

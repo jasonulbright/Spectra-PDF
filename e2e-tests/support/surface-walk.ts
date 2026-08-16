@@ -73,6 +73,33 @@ export async function stampTheme(theme: WalkTheme): Promise<void> {
 
 export type SurfaceVisitor = (theme: WalkTheme, surface: string) => Promise<void>;
 
+/**
+ * Click a control of the fixed chrome once it is actually clickable.
+ *
+ * `waitForExist` proves only that the node is in the DOM. A control the walk
+ * re-reaches on a later pass is already mounted from the pass before while its
+ * surface is still laying out, so the click lands `element not interactable` —
+ * which the driver middleware hides behind a waitForClickable + retry, leaving
+ * a WARN and an ERROR row in a passing run. Waiting on clickability is that
+ * retry, made the precondition.
+ *
+ * `isClickable` does not scroll, so this is for controls that are always in the
+ * viewport; a control inside a scrollable list is waited on for display and
+ * left to `click`'s own scroll.
+ */
+async function clickWhenClickable(
+  selector: string,
+  what: string,
+  theme: WalkTheme,
+): Promise<void> {
+  const el = await $(selector);
+  await el.waitForClickable({
+    timeout: 10_000,
+    timeoutMsg: `${what} never became clickable (${theme})`,
+  });
+  await el.click();
+}
+
 /** Walk every surface under one theme, calling the visitor at each stop:
  * home, the open document, every tool and op panel, every nav panel, the
  * find bar, the Read Out Loud transport, an open menu, the Properties dialog,
@@ -100,36 +127,28 @@ export async function walkSurfaces(theme: WalkTheme, visit: SurfaceVisitor): Pro
   // at panels never opens them, and a surface outside the walk is a surface
   // outside both gates — a popover carries its own opaque fill, so what it
   // does under a theme is not implied by the panel beside it.
-  const snapCaret = await $('[data-testid="snap-options-toggle"]');
-  await snapCaret.waitForExist({
-    timeout: 10_000,
-    timeoutMsg: `the snap options caret is not on the status bar (${theme})`,
-  });
-  await snapCaret.click();
+  const SNAP_CARET = '[data-testid="snap-options-toggle"]';
+  await clickWhenClickable(SNAP_CARET, 'the snap options caret', theme);
   await $('[data-testid="snap-options-popover"]').waitForDisplayed({
     timeout: 10_000,
     timeoutMsg: `the snap options popover did not open (${theme})`,
   });
   await visit(theme, 'popover:snap-options');
-  await snapCaret.click();
+  await clickWhenClickable(SNAP_CARET, 'the snap options caret', theme);
   await browser.pause(200);
 
   expect(await invokeAppCommand('tools.open.comment')).toBe(true);
   await browser.pause(250);
   expect(await invokeAppCommand('tools.stamp')).toBe(true);
   await browser.pause(250);
-  const symbolsToggle = await $('[data-testid="stamp-symbols-toggle"]');
-  await symbolsToggle.waitForExist({
-    timeout: 10_000,
-    timeoutMsg: `the stamp tool's symbols toggle is missing (${theme})`,
-  });
-  await symbolsToggle.click();
+  const SYMBOLS_TOGGLE = '[data-testid="stamp-symbols-toggle"]';
+  await clickWhenClickable(SYMBOLS_TOGGLE, "the stamp tool's symbols toggle", theme);
   await $('.symbol-palette-popover').waitForDisplayed({
     timeout: 10_000,
     timeoutMsg: `the symbol palette popover did not open (${theme})`,
   });
   await visit(theme, 'popover:symbol-palette');
-  await symbolsToggle.click();
+  await clickWhenClickable(SYMBOLS_TOGGLE, "the stamp tool's symbols toggle", theme);
   await browser.pause(200);
   expect(await invokeAppCommand('tools.close')).toBe(true);
   await browser.pause(200);
@@ -202,7 +221,7 @@ export async function walkSurfaces(theme: WalkTheme, visit: SurfaceVisitor): Pro
   await browser.pause(200);
 
   // An OPEN menu — the menubar's popups never render otherwise.
-  await $('[data-testid="menu-file"]').click();
+  await clickWhenClickable('[data-testid="menu-file"]', 'the File menu trigger', theme);
   await browser.pause(250);
   await visit(theme, 'menu:file');
   await browser.keys(['Escape']);
@@ -229,10 +248,15 @@ export async function walkSurfaces(theme: WalkTheme, visit: SurfaceVisitor): Pro
   );
   expect(cats.length).toBeGreaterThan(0);
   for (const cat of cats) {
-    await $(`[data-testid="prefs-cat-${cat}"]`).click();
+    const entry = await $(`[data-testid="prefs-cat-${cat}"]`);
+    await entry.waitForDisplayed({
+      timeout: 10_000,
+      timeoutMsg: `the ${cat} Preferences category never appeared (${theme})`,
+    });
+    await entry.click();
     await browser.pause(200);
     await visit(theme, `prefs:${cat}`);
   }
-  await $('[data-testid="prefs-close"]').click();
+  await clickWhenClickable('[data-testid="prefs-close"]', 'the Preferences close button', theme);
   await browser.pause(200);
 }

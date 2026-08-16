@@ -1,10 +1,13 @@
 // The separation preview's pure model: what the engine's plates mean, which
-// of them are showing, what the ink arithmetic produces, and how the plate
-// cache is keyed and pruned.
+// of them are showing, what the ink arithmetic produces, how the plate
+// cache is keyed and pruned, and what one clicked point resolves to.
 //
 // The panel and the canvas are thin shells over this. There is no DOM test
 // environment, so every decision that can be wrong lives here where it is
 // testable — the components only render what these functions decide.
+
+import { displayPointToPdf } from './pdfx-build';
+import { rotateNormalizedPoint } from './redaction';
 
 export type InkKind = 'process' | 'spot' | 'all' | 'none';
 
@@ -527,6 +530,254 @@ export function readSimulation(payload: unknown): SimulationRecord | null {
     refusal: typeof value.refusal === 'string' ? value.refusal : '',
     assumed: Array.isArray(value.assumed) ? value.assumed.map((a) => String(a)) : [],
   };
+}
+
+// ── the point inspector ────────────────────────────────────────────────────
+
+/** What one drawn object is. `vector` is a placed drawing rather than a path
+ *  the page constructs, and `form` is the container a nested object sits in. */
+export type InspectedKind =
+  | 'fill'
+  | 'stroke'
+  | 'fillstroke'
+  | 'text'
+  | 'image'
+  | 'vector'
+  | 'shading'
+  | 'form';
+
+const INSPECTED_KINDS: readonly InspectedKind[] = [
+  'fill', 'stroke', 'fillstroke', 'text', 'image', 'vector', 'shading', 'form',
+];
+
+/**
+ * A colour space as the DOCUMENT declares it, never as a renderer resolves it.
+ *
+ * `family`, `colorants`, `alternate`, `base` and `resource` are the document's
+ * own identifiers and are shown verbatim — translating `/Cs1` would name a
+ * resource the file does not have, and translating a colorant would name an
+ * ink no press knows. `rgb` is a swatch that rides alongside; it is not an
+ * answer to "what colour space is this" and is null wherever no honest one
+ * exists.
+ */
+export interface InspectedColour {
+  family: string;
+  resource: string;
+  colorants: string[];
+  alternate: string;
+  base: string;
+  hival: number | null;
+  n: number | null;
+  patternType: number | null;
+  components: number[];
+  rgb: number[] | null;
+  unknown: boolean;
+}
+
+/** One raster placement's measured resolution. */
+export interface InspectedResolution {
+  width: number;
+  height: number;
+  dpi: number;
+  dpiX: number;
+  dpiY: number;
+  bpc: number;
+}
+
+export interface InspectedObject {
+  index: number;
+  kind: InspectedKind;
+  nested: boolean;
+  /** The page-level form the object sits inside, or empty. */
+  form: string;
+  unknown: boolean;
+  colour: InspectedColour;
+  resolution: InspectedResolution | null;
+}
+
+/** Ink on the sheet at one pixel — every plate in the set, not the shown
+ *  subset. */
+export interface InspectedInk {
+  plates: Array<{ name: string; kind: string; pct: number }>;
+  total: number;
+}
+
+export interface Inspection {
+  point: [number, number];
+  /** Topmost first in paint order. Empty is the answer "nothing paints here",
+   *  which a box-only hit test cannot give. */
+  objects: InspectedObject[];
+  /** How many objects' boxes contained the point. Larger than `objects` means
+   *  a box claimed a hit the page does not paint. */
+  candidates: number;
+  /** Set when one isolated unit holds more than one object at the point, so
+   *  the stack is ordered by geometry rather than by the raster. */
+  ambiguous: boolean;
+  ink: InspectedInk;
+  /** What the walk could not read on this page. */
+  unknown: string[];
+}
+
+/**
+ * Client travel, in pixels, that still counts as a click rather than a drag.
+ *
+ * A drag that panned the board still produces a `click` in this webview, so
+ * the event alone cannot tell the two apart and the distance travelled since
+ * the `pointerdown` is what does.
+ */
+export const INSPECT_TRAVEL_LIMIT = 4;
+
+export function pointerTravel(
+  from: { x: number; y: number } | null,
+  to: { x: number; y: number },
+): number {
+  if (!from) return Number.POSITIVE_INFINITY;
+  return Math.hypot(to.x - from.x, to.y - from.y);
+}
+
+/** Is this a point query, or the tail of a gesture that moved the page? */
+export function isInspectClick(detail: number, travel: number): boolean {
+  return detail === 1 && travel <= INSPECT_TRAVEL_LIMIT;
+}
+
+/** Is there a frame for a click to land in? The readout maps into the plate
+ *  set, which does not exist while the page is still rastering. */
+export function inspectIsAvailable(busy: boolean, hasComposite: boolean): boolean {
+  return !busy && hasComposite;
+}
+
+/**
+ * A clicked display point in PDF user space.
+ *
+ * Two un-projections, in order. `viewRotation` is a view-only turn the canvas
+ * applies over the page's own, so it comes off first — an inspector that
+ * skipped it would read the right pixel on an upright page and the wrong one
+ * on every turned one. What is left is the page's own displayed frame, which
+ * `displayPointToPdf` inverts against the page's view box and its composed
+ * rotation. User space itself never moves under a rotation; only the
+ * projection does.
+ */
+export function inspectPointToPdf(
+  u: number,
+  v: number,
+  viewRotation: number,
+  box: { x: number; y: number; width: number; height: number },
+  rotation: number,
+): [number, number] {
+  const inverse = ((360 - viewRotation) % 360 + 360) % 360;
+  const stored = inverse === 0 ? { x: u, y: v } : rotateNormalizedPoint(u, v, inverse);
+  return displayPointToPdf(stored.x, stored.y, box, rotation);
+}
+
+function inspectedColour(raw: Record<string, unknown>): InspectedColour {
+  const numbers = (value: unknown): number[] =>
+    Array.isArray(value) ? value.map((v) => Number(v)).filter((v) => Number.isFinite(v)) : [];
+  const rgb = Array.isArray(raw.rgb) ? numbers(raw.rgb) : null;
+  return {
+    family: typeof raw.family === 'string' ? raw.family : '',
+    resource: typeof raw.resource === 'string' ? raw.resource : '',
+    colorants: Array.isArray(raw.colorants) ? raw.colorants.map((c) => String(c)) : [],
+    alternate: typeof raw.alternate === 'string' ? raw.alternate : '',
+    base: typeof raw.base === 'string' ? raw.base : '',
+    hival: typeof raw.hival === 'number' ? raw.hival : null,
+    n: typeof raw.n === 'number' ? raw.n : null,
+    patternType: typeof raw.pattern_type === 'number' ? raw.pattern_type : null,
+    components: numbers(raw.components),
+    rgb: rgb && rgb.length === 3 ? rgb : null,
+    unknown: raw.unknown === true,
+  };
+}
+
+function inspectedResolution(raw: unknown): InspectedResolution | null {
+  if (raw === null || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+  const read = (key: string): number => Number(value[key]);
+  if (!Number.isFinite(read('dpi'))) return null;
+  return {
+    width: read('width'),
+    height: read('height'),
+    dpi: read('dpi'),
+    dpiX: read('dpi_x'),
+    dpiY: read('dpi_y'),
+    bpc: read('bpc'),
+  };
+}
+
+/**
+ * The engine's point answer as the panel reads it.
+ *
+ * A payload with no object list is read as "could not tell" — null — and
+ * never as "nothing is here": the two look identical in an empty readout and
+ * only one of them is a measurement. An EMPTY list is the measurement, and it
+ * still carries an exact ink row.
+ */
+export function readInspection(payload: unknown): Inspection | null {
+  if (payload === null || typeof payload !== 'object') return null;
+  const raw = payload as Record<string, unknown>;
+  if (!Array.isArray(raw.objects)) return null;
+  const ink = raw.ink;
+  if (ink === null || typeof ink !== 'object') return null;
+  const inkRaw = ink as Record<string, unknown>;
+  if (!Array.isArray(inkRaw.plates)) return null;
+  const point = Array.isArray(raw.point) ? raw.point.map((v) => Number(v)) : [0, 0];
+  return {
+    point: [point[0] ?? 0, point[1] ?? 0],
+    objects: raw.objects.map((entry) => {
+      const object = (entry ?? {}) as Record<string, unknown>;
+      const kind = INSPECTED_KINDS.find((k) => k === object.kind) ?? 'fill';
+      return {
+        index: Number(object.index) || 0,
+        kind,
+        nested: object.nested === true,
+        form: typeof object.form === 'string' ? object.form : '',
+        unknown: object.unknown === true,
+        colour: inspectedColour((object.colour ?? {}) as Record<string, unknown>),
+        resolution: inspectedResolution(object.resolution ?? null),
+      };
+    }),
+    candidates: Number(raw.candidates) || 0,
+    ambiguous: raw.ambiguous === true,
+    ink: {
+      plates: inkRaw.plates.map((entry) => {
+        const plate = (entry ?? {}) as Record<string, unknown>;
+        return {
+          name: typeof plate.name === 'string' ? plate.name : '',
+          kind: typeof plate.kind === 'string' ? plate.kind : '',
+          pct: Number(plate.pct) || 0,
+        };
+      }),
+      total: Number(inkRaw.total) || 0,
+    },
+    unknown: Array.isArray(raw.unknown) ? raw.unknown.map((r) => String(r)) : [],
+  };
+}
+
+/** What the resolution row can say about one object. */
+export type ResolutionState = 'measured' | 'unmeasured' | 'notRaster';
+
+/**
+ * A vector, a text run and a shading have no resolution — that is not zero
+ * dpi and not a blank row. A raster whose pixel dimensions or placed size are
+ * degenerate is UNMEASURED, which is the same third state the document-wide
+ * summary already counts.
+ */
+export function resolutionState(object: InspectedObject): ResolutionState {
+  if (object.kind !== 'image') return 'notRaster';
+  return object.resolution === null ? 'unmeasured' : 'measured';
+}
+
+/**
+ * Does the ink row carry the incomplete-inventory caveat?
+ *
+ * A colorant the engine could not reach is on no plate, so the row is a floor
+ * rather than the sheet's total — the same gate the panel's other four
+ * caveats read.
+ */
+export function inspectInkIsAFloor(
+  inspection: Inspection | null,
+  inventoryComplete: boolean,
+): boolean {
+  return inspection !== null && !inventoryComplete;
 }
 
 /** The profiles the engine offered, read the same way. */

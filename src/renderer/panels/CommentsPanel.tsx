@@ -18,6 +18,7 @@ import {
   engineFilter,
   matchWorkspaceRow,
   orderedComments,
+  summaryExclusions,
   typeLabel,
 } from '../lib/comment-summary';
 import type {
@@ -25,6 +26,7 @@ import type {
   CommentModel,
   MatchableRow,
   SummaryOptions,
+  SummaryResult,
 } from '../lib/comment-summary';
 
 // THE comments surface. One.
@@ -104,6 +106,7 @@ export function CommentsPanel(): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const [options, setOptions] = useState<SummaryOptions>(DEFAULT_SUMMARY_OPTIONS);
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const [report, setReport] = useState<SummaryResult | null>(null);
 
   const buffer = activeFile?.buffer ?? null;
   const workingPath = activeFile?.workingPath ?? null;
@@ -272,10 +275,20 @@ export function CommentsPanel(): React.ReactElement {
 
   // The produced file opens like any other document — through App's one open
   // funnel, never a second implementation of "open some files".
-  const summaryDone = useCallback(async (output: string) => {
+  //
+  // The report outlives the dialog and the document switch on purpose. The
+  // dialog is gone by the time the summary exists and the active document is
+  // then the summary itself, so this panel is the only surface still standing
+  // where what the run left out can be read.
+  const summaryDone = useCallback(async (result: SummaryResult) => {
     setSummaryOpen(false);
+    setReport(result);
     setStatus(tChrome('panel.comments.summaryOpening'));
-    await getCommandContext()?.app?.openPath(output);
+    try {
+      await getCommandContext()?.app?.openPath(result.output);
+    } finally {
+      setStatus('');
+    }
   }, []);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.comments.open')} />;
@@ -283,6 +296,7 @@ export function CommentsPanel(): React.ReactElement {
   const fileCount = model?.found ?? 0;
   const types = Object.entries(model?.by_type ?? {});
   const total = Math.max(fileCount, listed.length + pending.length);
+  const excluded = report ? summaryExclusions(report) : null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -486,6 +500,11 @@ export function CommentsPanel(): React.ReactElement {
                       {tChrome('panel.comments.rowGrouped')}
                     </div>
                   )}
+                  {comment.reply_type === 'unknown' && (
+                    <div className="text-xs text-neutral-500">
+                      {tChrome('panel.comments.rowUnknownRelationship')}
+                    </div>
+                  )}
                   {comment.orphan && (
                     <div className="text-xs text-amber-300" data-testid="comment-orphan">
                       {tChrome('panel.comments.rowOrphan')}
@@ -574,7 +593,10 @@ export function CommentsPanel(): React.ReactElement {
               </button>
               <button
                 data-testid="comments-summary-open"
-                onClick={() => setSummaryOpen(true)}
+                onClick={() => {
+                  setReport(null);
+                  setSummaryOpen(true);
+                }}
                 disabled={busy || !model || model.count === 0}
                 title={tChrome('panel.comments.summaryHint')}
                 className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
@@ -604,13 +626,70 @@ export function CommentsPanel(): React.ReactElement {
         </>
       )}
       {status && <div className="text-xs text-neutral-400">{status}</div>}
+      {report && (
+        <div
+          className="flex flex-col gap-0.5 text-sm break-all"
+          data-testid="comment-summary-done"
+          aria-live="polite"
+        >
+          <p>
+            {tChrome('panel.comments.summaryDone', {
+              sheets: tNumber(report.sheets),
+              written: tNumber(report.written),
+              output: report.output,
+            })}
+          </p>
+          {excluded && (
+            <div className="flex flex-col gap-0.5" data-testid="comment-summary-excluded">
+              {excluded.accounting && (
+                <p className="text-xs text-neutral-400">
+                  {tChrome('panel.comments.summaryReconcile', {
+                    found: tNumber(report.found),
+                    written: tNumber(report.written),
+                    filtered: tNumber(report.excluded.filtered),
+                    unmodelled: tNumber(report.excluded.unmodelled),
+                  })}
+                </p>
+              )}
+              {excluded.noPosition > 0 && (
+                <p className="text-xs text-amber-300">
+                  {tChrome('panel.comments.summaryNoPosition', {
+                    count: tNumber(excluded.noPosition),
+                  })}
+                </p>
+              )}
+              {excluded.bodyRefused > 0 && (
+                <p className="text-xs text-amber-300">
+                  {tChrome('panel.comments.summaryBodyRefused', {
+                    count: tNumber(excluded.bodyRefused),
+                  })}
+                </p>
+              )}
+              {excluded.noBoxPages.length > 0 && (
+                <p className="text-xs text-amber-300">
+                  {tChrome('panel.comments.summaryNoBox', {
+                    pages: excluded.noBoxPages.map((p) => tNumber(p)).join(', '),
+                  })}
+                </p>
+              )}
+              {excluded.unreadablePages.length > 0 && (
+                <p className="text-xs text-amber-300">
+                  {tChrome('panel.comments.summaryUnreadable', {
+                    pages: excluded.unreadablePages.map((p) => tNumber(p)).join(', '),
+                  })}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       {summaryOpen && model && (
         <CommentSummaryDialog
           file={{ workingPath: activeFile.workingPath, name: activeFile.name }}
           model={model}
           options={options}
           onOptionsChange={setOptions}
-          onDone={(output) => void summaryDone(output)}
+          onDone={(result) => void summaryDone(result)}
           onClose={() => setSummaryOpen(false)}
         />
       )}

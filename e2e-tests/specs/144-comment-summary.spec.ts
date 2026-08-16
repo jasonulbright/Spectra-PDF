@@ -43,6 +43,7 @@ const BODY_ZULU = 'zulumark reviewer body';
 const BODY_ALPHA = 'alphasquare reviewer body';
 const BODY_CHARLIE = 'charliestrike reviewer body';
 const BODY_DELTA = 'deltanote reviewer body';
+const BODY_ECHO = 'echonote reviewer body';
 const PENDING_NOTE = 'uncommitted canvas remark';
 
 const AUTHOR_ZOE = 'Zoe Mbeki';
@@ -139,6 +140,33 @@ async function makeReviewedPdf(path: string): Promise<void> {
 
   doc.addPage([612, 792]);
 
+  writeFileSync(path, await doc.save());
+}
+
+/**
+ * A document whose summary excludes nothing: one modelled comment, on a page
+ * with a readable box, and no annotation outside the markup set.
+ *
+ * It exists to prove the silent half of the report. A run that accounted for
+ * every comment has nothing to warn about, and a warning shown anyway trains
+ * the reader to skip the one that matters.
+ */
+async function makeCleanReviewedPdf(path: string): Promise<void> {
+  const doc = await PDFDocument.create();
+  const ctx = doc.context;
+  const page = doc.addPage([612, 792]);
+  const ref = ctx.register(
+    ctx.obj({
+      Type: 'Annot',
+      Subtype: 'Text',
+      Rect: [80, 700, 100, 720],
+      F: 4,
+      Contents: PDFString.of(BODY_ECHO),
+      T: PDFString.of(AUTHOR_ZOE),
+      M: PDFString.of('D:20260814120000Z'),
+    }),
+  );
+  page.node.set(PDFName.of('Annots'), ctx.obj([ref]));
   writeFileSync(path, await doc.save());
 }
 
@@ -520,6 +548,59 @@ describe('comment summary', () => {
       engineRows(review(source).comments.map((c) => c.id)),
       'clearing the filter did not restore the list',
     );
+  });
+
+  it('the reader is told what the summary left out, and only then', async function () {
+    this.timeout(240_000);
+    // The dialog is unmounted by a successful run, so the account of what was
+    // excluded has to survive it — and the document that opens next is the
+    // summary, which is why the report is asserted after the switch.
+    await showComments();
+    await setSort('page');
+    const { report } = await runSummary({ mode: 'comments_only' });
+    expect(report.found).toBe(5);
+    expect(report.written).toBe(4);
+
+    const done = await $('[data-testid="comment-summary-done"]');
+    await done.waitForDisplayed({
+      timeout: 20_000,
+      timeoutMsg: 'a finished summary reported nothing at all',
+    });
+    const excluded = await $('[data-testid="comment-summary-excluded"]');
+    await excluded.waitForDisplayed({
+      timeout: 20_000,
+      timeoutMsg: 'a summary that left a comment out did not say so',
+    });
+    // The counts the engine reported, in the reader's own numerals, are the
+    // counts on screen — not a re-derivation.
+    const text = await excluded.getText();
+    for (const count of [report.found, report.written, report.excluded.unmodelled]) {
+      expect(text).toContain(String(count));
+    }
+
+    // A run with nothing to report says nothing beyond where the file went.
+    const clean = resolve(tmp, 'clean-review.pdf');
+    await makeCleanReviewedPdf(clean);
+    await openByPaths([clean]);
+    await browser.waitUntil(
+      async () => (await getState()).activeFile?.path.endsWith('clean-review.pdf') === true,
+      { timeout: 20_000, timeoutMsg: 'the clean document never became active' },
+    );
+    const cleanPath = (await getState()).activeFile!.path;
+    await focusTab({ doc: cleanPath });
+    await setView('operations');
+    await setActiveOp('comments');
+    await $('[data-testid="comments-summary"]').waitForDisplayed({ timeout: 20_000 });
+
+    await $('[data-testid="comments-summary-open"]').click();
+    await $('[data-testid="comment-summary-dialog"]').waitForDisplayed({ timeout: 15_000 });
+    await setReactSelectValue('[data-testid="comment-summary-mode"]', 'comments_only');
+    const cleanReport = await commentSummaryRun(nextOutput());
+    expect(cleanReport).not.toBe(null);
+    expect(cleanReport!.found).toBe(1);
+    expect(cleanReport!.written).toBe(1);
+    await $('[data-testid="comment-summary-done"]').waitForDisplayed({ timeout: 20_000 });
+    expect(await $('[data-testid="comment-summary-excluded"]').isExisting()).toBe(false);
   });
 
   it('an uncommitted canvas comment stays in the panel and out of the file', async function () {

@@ -329,6 +329,8 @@ export const PANEL_STRINGS = {
   'panel.comments.rowSubject': 'Subject: {{subject}}',
   'panel.comments.rowState': 'Status: {{state}}',
   'panel.comments.rowGrouped': 'Grouped with another comment',
+  'panel.comments.rowUnknownRelationship':
+    'Related to another comment in a way this document does not define',
   'panel.comments.rowOrphan': 'Replies to a comment that is not in this document',
   'panel.comments.rowCycle': 'This reply chain refers to itself',
   'panel.comments.rowReadOnly': 'This comment is in the file but cannot be edited here.',
@@ -393,6 +395,8 @@ export const PANEL_STRINGS = {
   'panel.comments.doc.state': 'Status: {{state}} ({{model}})',
   'panel.comments.doc.stateNoModel': 'Status: {{state}}',
   'panel.comments.doc.groupMember': 'Grouped with the entry by {{author}}',
+  'panel.comments.doc.relationshipUnknown':
+    'Related to another comment in a way this document does not define',
   'panel.comments.doc.replyOrphan': 'In reply to a comment that is not in this document',
   'panel.comments.doc.replyCycle': 'This reply chain refers to itself',
   'panel.comments.doc.noPosition': 'This comment has no readable position on its page.',
@@ -1258,6 +1262,51 @@ export const PANEL_STRINGS = {
   'panel.outputPreview.simulationCaveat':
     'An ink that could not be read is missing from this proof, so it shows the page short one colour.',
   'panel.outputPreview.simulationOff': 'Not proofed: {{reason}}',
+  'panel.outputPreview.inspect': 'Point inspector',
+  'panel.outputPreview.inspectHint':
+    'Click the page to read what is painted at that point, in what colour space, and at what resolution.',
+  'panel.outputPreview.inspectBusy': 'Reading that point…',
+  'panel.outputPreview.inspectNothing': 'Nothing is painted at that point.',
+  'panel.outputPreview.inspectFailed': 'That point could not be read: {{reason}}',
+  'panel.outputPreview.inspectSpace': 'Colour space: {{space}}',
+  'panel.outputPreview.inspectResource': 'Named in the document as {{name}}',
+  'panel.outputPreview.inspectComponents': 'Values: {{values}}',
+  'panel.outputPreview.inspectColorant': 'Colorant: {{names}}',
+  'panel.outputPreview.inspectAlternate': 'Alternate space: {{space}}',
+  'panel.outputPreview.inspectBase': 'Base space: {{space}}',
+  'panel.outputPreview.inspectComponentCount': 'Components: {{count}}',
+  'panel.outputPreview.inspectPatternType':
+    'Pattern type {{type}} — a pattern paints no single colour.',
+  'panel.outputPreview.inspectDepth': 'Bit depth: {{bpc}}',
+  'panel.outputPreview.inspectResolution': 'Effective resolution: {{dpi}} dpi',
+  'panel.outputPreview.inspectResolutionAxes':
+    '{{x}} dpi across, {{y}} dpi down, {{width}} by {{height}} pixels',
+  'panel.outputPreview.inspectResolutionNone': 'Not a raster, so it has no resolution.',
+  'panel.outputPreview.inspectResolutionUnmeasured':
+    'This placement’s resolution could not be measured.',
+  'panel.outputPreview.inspectUnder': 'Under it',
+  'panel.outputPreview.inspectAmbiguous':
+    'More than one object inside this form covers the point, so the order below is the drawing order rather than a measurement.',
+  'panel.outputPreview.inspectInsideForm': 'Inside form {{name}}',
+  'panel.outputPreview.inspectUnknownObject':
+    'Something is painted here that could not be identified.',
+  'panel.outputPreview.inspectUnknownPage':
+    'Part of this page could not be read, so an object here may be missing from the list: {{reasons}}',
+  'panel.outputPreview.inspectInk': 'Ink at this pixel',
+  'panel.outputPreview.inspectInkValue': '{{name}} {{pct}}%',
+  'panel.outputPreview.inspectInkTotal': 'Total ink: {{pct}}%',
+  'panel.outputPreview.inspectInkNote':
+    'Every plate on this page is counted, including any switched off above.',
+  'panel.outputPreview.inspectInkCaveat':
+    'An ink that could not be read is on no plate, so this total is a floor.',
+  'panel.outputPreview.inspectKindFill': 'Filled path',
+  'panel.outputPreview.inspectKindStroke': 'Stroked path',
+  'panel.outputPreview.inspectKindFillstroke': 'Filled and stroked path',
+  'panel.outputPreview.inspectKindText': 'Text',
+  'panel.outputPreview.inspectKindImage': 'Image',
+  'panel.outputPreview.inspectKindVector': 'Vector drawing',
+  'panel.outputPreview.inspectKindShading': 'Shading',
+  'panel.outputPreview.inspectKindForm': 'Form',
 
   'panel.inkManager.open': 'Open a PDF to manage its inks',
   'panel.inkManager.blurb':

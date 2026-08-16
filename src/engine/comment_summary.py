@@ -61,7 +61,15 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Dictionary, Name
 
-from engine.annotations import _MARKUP, _rect, _str
+from engine.annotations import (
+    GROUP,
+    REPLY,
+    UNKNOWN,
+    _MARKUP,
+    _rect,
+    _str,
+    reply_relationship,
+)
 from engine.create_pdf import PAGE_SIZES
 from engine.pdf_save import save_pdf
 from engine.print_layout import expand_page_spec, place_in_cell
@@ -77,11 +85,6 @@ SORTS = ("page", "author", "date", "type")
 MODES = ("comments_only", "document_and_comments")
 PLACEMENTS = ("auto", "beside", "beneath", "separate")
 FILTER_KEYS = ("authors", "subtypes", "states", "pages", "has_body")
-
-#: Reply relationship. /RT defaults to R when absent, so an /IRT with no /RT is
-#: a reply; only an explicit Group is a grouping.
-REPLY = "reply"
-GROUP = "group"
 
 DEFAULT_GUTTER = 216.0
 _PAD = 18.0
@@ -111,6 +114,7 @@ DEFAULT_LABELS: dict[str, str] = {
     "state": "Status: {{state}} ({{model}})",
     "stateNoModel": "Status: {{state}}",
     "groupMember": "Grouped with the entry by {{author}}",
+    "relationshipUnknown": "Related to another comment in a way this document does not define",
     "replyOrphan": "In reply to a comment that is not in this document",
     "replyCycle": "This reply chain refers to itself",
     "noPosition": "This comment has no readable position on its page.",
@@ -400,15 +404,13 @@ def _read(pdf) -> tuple[list[dict], dict, list[dict], int]:
             if subtype not in _MARKUP:
                 unmodelled += 1
                 continue
-            reply_key = None
-            reply_type = None
-            try:
-                target = annot.get("/IRT")
-            except Exception:
-                target = None
-            if target is not None:
-                reply_key = _annot_key(target)
-                reply_type = GROUP if _str(annot, "/RT") == "/Group" else REPLY
+            relationship = reply_relationship(annot)
+            reply_key = (
+                _annot_key(relationship.target)
+                if relationship.target is not None
+                else None
+            )
+            reply_type = relationship.kind
             comment = {
                 "id": f"c{len(comments) + 1}",
                 "page": number,
@@ -519,11 +521,13 @@ def build_model(pdf, sort: str = "page", filter: dict | None = None) -> dict:
     _link_threads(kept, {k: c for k, c in by_key.items() if id(c) in survivors})
 
     by_id = {c["id"]: c for c in kept}
-    # A group member is its own top-level entry naming its leader, never
-    # nested under it: R and Group are different relationships, and rendering a
-    # grouped shape as a reply to a note is a wrong document, not a missing
-    # feature.
-    roots = [c for c in kept if c["reply_to"] is None or c["reply_type"] == GROUP]
+    # Anything that is not a REPLY is its own top-level entry naming its
+    # target, never nested under it: R and Group are different relationships,
+    # and rendering a grouped shape as a reply to a note is a wrong document,
+    # not a missing feature. A relationship the format does not define nests
+    # nowhere either — nesting it would assert the one relationship the
+    # document declined to name.
+    roots = [c for c in kept if c["reply_to"] is None or c["reply_type"] != REPLY]
     roots.sort(key=lambda c: _sort_key(sort, c))
 
     ordered: list[dict] = []
@@ -702,6 +706,8 @@ def _entry_lines(comment: dict, badge, labels: dict, types: dict, digits: _Digit
         lines.append(_fill(labels["groupMember"], {
             "author": leader["author"] or labels["unknownAuthor"],
         }))
+    if comment["reply_type"] == UNKNOWN:
+        lines.append(labels["relationshipUnknown"])
     if comment["orphan"]:
         lines.append(labels["replyOrphan"])
     if comment["cycle"]:
@@ -986,7 +992,7 @@ def summarize_comments(
         # badge of its own: it is part of its parent's entry.
         badges: dict[str, int] = {}
         for comment in comments:
-            if comment["reply_to"] is None or comment["reply_type"] == GROUP:
+            if comment["reply_to"] is None or comment["reply_type"] != REPLY:
                 badges[comment["id"]] = len(badges) + 1
 
         no_position = sum(1 for c in comments if c["rect"] is None)
