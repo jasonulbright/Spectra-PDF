@@ -200,3 +200,148 @@ class TestCheck:
         encrypt(file=tmp_pdf, output=enc, user_password="test123")
         result = check(file=enc)
         assert result["info"]["encrypted"] is True
+
+
+# ── The font-embedding verdict ──────────────────────────────────────────
+
+
+def _font_page(pdf, font_obj, name="/F1"):
+    page = pdf.add_blank_page(page_size=(200, 200))
+    page.obj["/Resources"] = pikepdf.Dictionary(
+        Font=pikepdf.Dictionary(**{name.lstrip("/"): font_obj})
+    )
+    return page
+
+
+def _cid_font(pdf, embedded: bool):
+    """A Type0 font whose DESCENDANT carries the descriptor — the shape whose
+    top-level dict has no /FontDescriptor at all."""
+    descriptor = pikepdf.Dictionary(
+        Type=pikepdf.Name.FontDescriptor,
+        FontName=pikepdf.Name("/Composite"),
+        Flags=4,
+    )
+    if embedded:
+        program = pdf.make_stream(b"\x00\x01\x00\x00")
+        descriptor["/FontFile2"] = pdf.make_indirect(program)
+    descendant = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name.Font,
+        Subtype=pikepdf.Name.CIDFontType2,
+        BaseFont=pikepdf.Name("/Composite"),
+        FontDescriptor=pdf.make_indirect(descriptor),
+        CIDSystemInfo=pikepdf.Dictionary(
+            Registry="Adobe", Ordering="Identity", Supplement=0
+        ),
+    ))
+    return pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name.Font,
+        Subtype=pikepdf.Name.Type0,
+        BaseFont=pikepdf.Name("/Composite"),
+        Encoding=pikepdf.Name("/Identity-H"),
+        DescendantFonts=pikepdf.Array([descendant]),
+    ))
+
+
+class TestCheckFontEmbedding:
+    """A checker may not report an embedding pass it has not earned.
+
+    The three failures pinned here were all live: a composite font counted as
+    embedded because its descriptor is one level down, an unreadable font tree
+    swallowed to a clean report, and a fixed scan cap presented as a total.
+    """
+
+    def test_a_non_embedded_composite_font_is_not_reported_embedded(self, tmp_dir):
+        path = os.path.join(tmp_dir, "cid-bare.pdf")
+        pdf = pikepdf.new()
+        _font_page(pdf, _cid_font(pdf, embedded=False))
+        pdf.save(path)
+        pdf.close()
+
+        result = check(file=path)
+        assert result["info"]["fonts_checked"] == 1
+        assert result["info"]["fonts_embedded"] == 0
+        assert result["info"]["fonts_not_embedded"] == 1
+        assert any(
+            i["category"] == "fonts" and "not embedded" in i["message"]
+            for i in result["issues"]
+        )
+
+    def test_an_embedded_composite_font_is_reported_embedded(self, tmp_dir):
+        path = os.path.join(tmp_dir, "cid-embedded.pdf")
+        pdf = pikepdf.new()
+        _font_page(pdf, _cid_font(pdf, embedded=True))
+        pdf.save(path)
+        pdf.close()
+
+        result = check(file=path)
+        assert result["info"]["fonts_embedded"] == 1
+        assert result["info"]["fonts_not_embedded"] == 0
+        assert result["info"]["fonts_unreadable"] == 0
+        assert not [i for i in result["issues"] if i["category"] == "fonts"]
+
+    def test_a_font_with_no_descriptor_is_not_embedded(self, tmp_dir):
+        """A standard face the document does not carry is a face the reader
+        must already have. "No descriptor" is not evidence of a program."""
+        path = os.path.join(tmp_dir, "standard.pdf")
+        pdf = pikepdf.new()
+        _font_page(pdf, pdf.make_indirect(pikepdf.Dictionary(
+            Type=pikepdf.Name.Font,
+            Subtype=pikepdf.Name.Type1,
+            BaseFont=pikepdf.Name("/Helvetica"),
+        )))
+        pdf.save(path)
+        pdf.close()
+
+        result = check(file=path)
+        assert result["info"]["fonts_embedded"] == 0
+        assert result["info"]["fonts_not_embedded"] == 1
+        assert any("Helvetica" in i["message"] for i in result["issues"])
+
+    def test_a_font_that_will_not_read_is_neither_answer(self, tmp_dir):
+        path = os.path.join(tmp_dir, "unreadable.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        # An array where a font dictionary belongs: it answers no key, so
+        # whether a program travels with it cannot be established.
+        page.obj["/Resources"] = pikepdf.Dictionary(
+            Font=pikepdf.Dictionary(F1=pikepdf.Array([1, 2, 3]))
+        )
+        pdf.save(path)
+        pdf.close()
+
+        result = check(file=path)
+        assert result["info"]["fonts_embedded"] == 0
+        assert result["info"]["fonts_unreadable"] == 1
+        assert any(
+            i["category"] == "fonts" and "could not be read" in i["message"]
+            for i in result["issues"]
+        )
+
+    def test_more_than_a_hundred_fonts_are_all_counted(self, tmp_dir):
+        path = os.path.join(tmp_dir, "many-fonts.pdf")
+        pdf = pikepdf.new()
+        for i in range(120):
+            _font_page(pdf, pdf.make_indirect(pikepdf.Dictionary(
+                Type=pikepdf.Name.Font,
+                Subtype=pikepdf.Name.Type1,
+                BaseFont=pikepdf.Name(f"/Face{i:03d}"),
+            )))
+        pdf.save(path)
+        pdf.close()
+
+        result = check(file=path)
+        assert result["info"]["fonts_checked"] == 120
+        assert result["info"]["fonts_not_embedded"] == 120
+
+    def test_one_font_on_forty_pages_is_one_font(self, tmp_dir):
+        path = os.path.join(tmp_dir, "shared-font.pdf")
+        pdf = pikepdf.new()
+        shared = _cid_font(pdf, embedded=True)
+        for _ in range(40):
+            _font_page(pdf, shared)
+        pdf.save(path)
+        pdf.close()
+
+        result = check(file=path)
+        assert result["info"]["fonts_checked"] == 1
+        assert result["info"]["fonts_embedded"] == 1

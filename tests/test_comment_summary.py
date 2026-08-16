@@ -218,6 +218,53 @@ class TestListComments:
         assert by_body[GROUPED]["reply_type"] == "group"
         assert by_body[GROUPED]["id"] not in by_body[PARENT]["children"]
 
+    def test_relationship_outside_the_defined_pair_never_reads_as_a_reply(
+        self, tmp_dir
+    ):
+        src = os.path.join(tmp_dir, "unknown-rt.pdf")
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(612, 792))
+        parent = _annot(pdf, 0, "/Text", [10, 10, 30, 30], Contents=String("p"))
+        child = _annot(pdf, 0, "/Text", [40, 10, 60, 30], Contents=String("c"))
+        child["/IRT"] = parent
+        child["/RT"] = Name("/Custom")
+        pdf.save(src)
+        pdf.close()
+        model = list_comments(src)
+        by_body = {c["contents"]: c for c in model["comments"]}
+        assert by_body["c"]["reply_type"] == "unknown"
+        assert by_body["c"]["reply_to"] == by_body["p"]["id"]
+        assert by_body["c"]["id"] not in by_body["p"]["children"]
+
+    def test_a_relationship_outside_the_pair_is_named_in_the_summary(self, tmp_dir):
+        src = os.path.join(tmp_dir, "unknown-rt-summary.pdf")
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(612, 792))
+        parent = _annot(pdf, 0, "/Text", [10, 10, 30, 30], Contents=String("p"))
+        child = _annot(pdf, 0, "/Text", [40, 10, 60, 30], Contents=String("c"))
+        child["/IRT"] = parent
+        child["/RT"] = Name("/Custom")
+        pdf.save(src)
+        pdf.close()
+        result = _summary(
+            src, tmp_dir, "unknown-rt-out.pdf",
+            labels={"relationshipUnknown": "ZZrelationshipUnknownZZ"},
+        )
+        text = _text(result["output"])
+        assert text.count("ZZrelationshipUnknownZZ") == 1
+
+    def test_reply_type_without_a_target_names_no_relationship(self, tmp_dir):
+        src = os.path.join(tmp_dir, "dangling-rt.pdf")
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(612, 792))
+        lone = _annot(pdf, 0, "/Text", [10, 10, 30, 30], Contents=String("lone"))
+        lone["/RT"] = Name("/Group")
+        pdf.save(src)
+        pdf.close()
+        model = list_comments(src)
+        assert model["comments"][0]["reply_type"] is None
+        assert model["comments"][0]["reply_to"] is None
+
     def test_orphan_is_promoted_and_reported(self, fixture_pdf):
         model = list_comments(fixture_pdf)
         by_body = {c["contents"]: c for c in model["comments"]}
@@ -355,6 +402,55 @@ class TestExactlyOnce:
         text = _text(result["output"])
         for body in BODIES:
             assert _appearances(text, body, tmp_dir) == 1, body
+
+    def test_a_body_the_appearance_draws_is_written_once_and_imaged_once(
+            self, tmp_dir):
+        """Exactly-once is a property of the comment LIST, not of the flattened
+        text of the produced document.
+
+        An appearance stream may draw the comment's own body — a callout, a
+        typewriter note, a stamp. That drawing is part of what the page looks
+        like, so a mode that places a rendering of the page carries the text a
+        second time, at the position it occupies on the page. Suppressing it
+        would make the page image disagree with the page it claims to be.
+        `comments_only` places no image and so carries it once, which is what
+        proves the second occurrence is the image rather than a second entry.
+        """
+        path = os.path.join(tmp_dir, "with-appearance.pdf")
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(612, 792))
+        helvetica = pdf.make_indirect(Dictionary(
+            Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/Helvetica"),
+            Encoding=Name("/WinAnsiEncoding"),
+        ))
+        drawn = "the appearance draws this body"
+        plain = "this comment has no appearance"
+        appearance = pdf.make_stream(
+            f"q BT /F1 11 Tf 6 24 Td ({drawn}) Tj ET Q".encode("latin-1"))
+        appearance.Type = Name("/XObject")
+        appearance.Subtype = Name("/Form")
+        appearance.BBox = Array([0, 0, 300, 60])
+        appearance.Resources = Dictionary(Font=Dictionary(F1=helvetica))
+        _annot(pdf, 0, "/Square", [100, 600, 400, 660], Contents=String(drawn),
+               T=String("Reviewer"), F=4,
+               AP=Dictionary(N=pdf.make_indirect(appearance)))
+        _annot(pdf, 0, "/Square", [100, 300, 400, 360], Contents=String(plain),
+               T=String("Reviewer"), F=4)
+        pdf.save(path)
+        pdf.close()
+
+        listed = _summary(path, tmp_dir, "ap-list.pdf", mode="comments_only")
+        text = _text(listed["output"])
+        assert listed["written"] == 2 and listed["reconciles"]
+        assert _appearances(text, drawn, tmp_dir) == 1
+        assert _appearances(text, plain, tmp_dir) == 1
+
+        imaged = _summary(path, tmp_dir, "ap-image.pdf",
+                          mode="document_and_comments")
+        text = _text(imaged["output"])
+        assert imaged["written"] == 2 and imaged["reconciles"]
+        assert _appearances(text, drawn, tmp_dir) == 2
+        assert _appearances(text, plain, tmp_dir) == 1
 
     def test_author_date_and_page_reference_ride_along(self, fixture_pdf, tmp_dir):
         result = _summary(fixture_pdf, tmp_dir)

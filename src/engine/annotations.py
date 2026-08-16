@@ -11,9 +11,11 @@ re-indexes afterward, so it never fights the inline annotation lifecycle.
 Form fields (/Widget) and links (/Link) are not comments and are kept.
 """
 
+import re
 import shutil
 import tempfile
 from pathlib import Path
+from typing import NamedTuple
 
 import pikepdf
 from pikepdf import Array, Name
@@ -45,6 +47,104 @@ def _str(annot, key):
         return str(v) if v is not None else ""
     except Exception:
         return ""
+
+
+# ---------------------------------------------------------------------------
+# The relationship an /IRT names
+# ---------------------------------------------------------------------------
+
+#: The two relationships the format defines, and the third state.
+#:
+#: /R and /Group are not spellings of one idea: a group moves, cuts and copies
+#: as a single unit while a reply displays as a threaded comment, so naming one
+#: where the document holds the other is a wrong artifact rather than a
+#: differently worded one. UNKNOWN is what a reader answers when the document
+#: names a relationship outside the pair or will not yield one at all; it is
+#: never folded into REPLY, because REPLY is also what an absent /RT means and
+#: the two callers could not then be told apart.
+REPLY = "reply"
+GROUP = "group"
+UNKNOWN = "unknown"
+
+_RELATIONSHIP = {"/R": REPLY, "/Group": GROUP}
+
+#: A /RT spelling that survives the trip back into a PDF name. Anything else
+#: cannot be transcribed and the write refuses on it.
+_NAME_TOKEN = re.compile(r"[A-Za-z0-9_.\-]+")
+
+
+class Relationship(NamedTuple):
+    """What one annotation's /IRT and /RT say, without deciding for the caller.
+
+    `kind` is None only when there is no target at all — /RT is meaningful
+    only beside an /IRT, so a lone /RT names no relationship and is reported
+    through `name` instead. `name` is the raw /RT spelling without its slash,
+    so a caller that TRANSCRIBES carries what the document holds while a caller
+    that CLASSIFIES sees UNKNOWN; those are different jobs and this type serves
+    both without either guessing. `readable` is False when a key would not
+    read, which is the state a write must refuse on rather than resolve.
+    """
+
+    target: object | None
+    kind: str | None
+    name: str | None
+    readable: bool
+
+
+def reply_relationship(annot) -> Relationship:
+    """The /IRT target and the /RT relationship for one annotation.
+
+    An /IRT with no /RT is a reply: the format supplies that default, so it is
+    an answer rather than an absence.
+    """
+    try:
+        target = annot.get("/IRT")
+    except Exception:
+        return Relationship(None, UNKNOWN, None, False)
+    try:
+        raw = annot.get("/RT")
+    except Exception:
+        return Relationship(target, UNKNOWN, None, False)
+    if target is None:
+        name = None
+        if raw is not None:
+            spelling = str(raw)
+            if spelling.startswith("/"):
+                name = spelling[1:]
+        return Relationship(None, None, name, True)
+    if raw is None:
+        return Relationship(target, REPLY, None, True)
+    if not isinstance(raw, pikepdf.Name):
+        return Relationship(target, UNKNOWN, None, False)
+    spelling = str(raw)
+    kind = _RELATIONSHIP.get(spelling, UNKNOWN)
+    return Relationship(target, kind, spelling[1:], True)
+
+
+def relationship_name(kind: str | None, name: str | None) -> str | None:
+    """The /RT spelling to write for a relationship, or None when there is
+    none to write. A REPLY with no recorded spelling writes the default's own
+    name, so a file this product authors never leaves the next reader to
+    supply it."""
+    if name is not None:
+        return name
+    if kind == REPLY:
+        return "R"
+    return None
+
+
+def usable_relationship_name(value: str) -> str | None:
+    """A `replyType` from an interchange file as a PDF name, or None when it
+    cannot be one. The two defined relationships match without regard to case
+    — producers write them lowercase — and everything else is carried through
+    exactly as written."""
+    text = (value or "").strip().lstrip("/")
+    if not text or _NAME_TOKEN.fullmatch(text) is None:
+        return None
+    for spelling in _RELATIONSHIP:
+        if text.casefold() == spelling[1:].casefold():
+            return spelling[1:]
+    return text
 
 
 def list_annotations(file: str) -> dict:

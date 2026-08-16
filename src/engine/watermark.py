@@ -792,7 +792,9 @@ def watermark(
     Args:
         file: Input PDF path.
         output: Output PDF path (may equal ``file`` for in-place).
-        text: Watermark text. Latin-1 best-effort (WinAnsi Helvetica).
+        text: Watermark text. Latin-1 draws with WinAnsi Helvetica; anything
+            outside it embeds a subsetted Unicode face from ``font_dir``, and
+            is refused by name when no bundled face covers it.
         opacity: Fill/stroke alpha, 0 < opacity <= 1.
         angle: Degrees counter-clockwise in the page's DISPLAYED orientation
             (45 = classic diagonal).

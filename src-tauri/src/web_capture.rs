@@ -18,14 +18,25 @@
 //!     capture of one site cannot walk onto another;
 //!   * one window, navigated in turn — never a fan-out of hidden webviews;
 //!   * one capture at a time, and the window is destroyed on every exit path;
-//!   * a page budget bounds the run absolutely, and a truncated run SAYS so.
+//!   * closing the window cancels the run, and a cancelled run SAYS so rather
+//!     than reporting what it managed to reach as a finished capture;
+//!   * a page budget bounds the run absolutely, and a truncated run SAYS so;
+//!   * the window's thread is borrowed only long enough to START each browser
+//!     call and is released before the wait, so a capture never withholds
+//!     another window's events for the length of a crawl.
 
+use std::cell::Cell;
+use std::ffi::c_void;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+use windows::Win32::UI::WindowsAndMessaging::WM_CLOSE;
 // The WebView2 bindings are generated against windows-core 0.61; an interface
 // cast and a PCWSTR argument only typecheck against THAT crate's traits, not
 // the 0.62 the rest of this binary uses.
@@ -43,7 +54,10 @@ use webview2_com::{
 
 /// The window a capture runs in. One label, so a second capture cannot open a
 /// second window behind the first.
-const CAPTURE_LABEL: &str = "web-capture";
+pub const CAPTURE_LABEL: &str = "web-capture";
+
+/// Identifies this module's window subclass on the capture window.
+const CLOSE_WATCH_ID: usize = 1;
 
 /// How long one navigation may take before the capture refuses. Generous: a
 /// cold DNS lookup plus a heavy page is seconds, and a refusal here costs the
@@ -53,16 +67,86 @@ const NAVIGATION_TIMEOUT: Duration = Duration::from_secs(90);
 const PRINT_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long the link harvest may take.
 const SCRIPT_TIMEOUT: Duration = Duration::from_secs(20);
+/// How long a step that only reads the browser may take. It does no work of
+/// its own, so this bounds the dispatch to the window's thread and nothing
+/// else.
+const DISPATCH_TIMEOUT: Duration = Duration::from_secs(20);
 /// Settling time after `NavigationCompleted` before printing — late webfonts
 /// and lazy images land in this window, and printing at the instant of
 /// navigation-complete captures a page mid-layout.
 const SETTLE: Duration = Duration::from_millis(1200);
+/// How often a wait looks up to check for a cancel.
+const WAIT_SLICE: Duration = Duration::from_millis(25);
 
 /// The absolute ceiling on a crawl, whatever the caller asks for.
 pub const MAX_PAGES_CEILING: u32 = 100;
 pub const MAX_DEPTH_CEILING: u32 = 3;
 
+const RUNTIME_TOO_OLD: &str = "This machine's web runtime is too old to render a page to PDF";
+
 static CAPTURING: AtomicBool = AtomicBool::new(false);
+static CANCELLED: AtomicBool = AtomicBool::new(false);
+
+fn cancelled() -> bool {
+    CANCELLED.load(Ordering::SeqCst)
+}
+
+fn request_cancel() {
+    CANCELLED.store(true, Ordering::SeqCst);
+}
+
+fn clear_cancel() {
+    CANCELLED.store(false, Ordering::SeqCst);
+}
+
+/// A close the app's window-event path observed, by window label.
+///
+/// The capture window is not a workspace window: its close is a cancel, and
+/// the capture destroys the window itself on the way out.
+pub fn window_close_requested(label: &str) {
+    if label == CAPTURE_LABEL {
+        request_cancel();
+    }
+}
+
+/// The capture window's close.
+///
+/// Swallowed while a capture is in flight: the window belongs to the capture,
+/// which destroys it on the way out, so the default close must not race that
+/// with a teardown of its own. With no capture in flight it chains through and
+/// the window closes the ordinary way.
+unsafe extern "system" fn on_capture_window_message(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    _data: usize,
+) -> LRESULT {
+    if message == WM_CLOSE && CAPTURING.load(Ordering::SeqCst) {
+        request_cancel();
+        return LRESULT(0);
+    }
+    unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+}
+
+/// Make the capture window's close cancel the capture.
+///
+/// A failed install is not fatal: the close then falls to the app's
+/// window-event path, which does not prevent it, so the window still closes.
+fn watch_close(hwnd: usize) {
+    if hwnd == 0 {
+        return;
+    }
+    unsafe {
+        let _ = SetWindowSubclass(
+            HWND(hwnd as *mut c_void),
+            Some(on_capture_window_message),
+            CLOSE_WATCH_ID,
+            0,
+        );
+    }
+}
 
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -107,6 +191,10 @@ pub struct CaptureResult {
     pub visited: usize,
     /// The frontier still had URLs when the budget ran out.
     pub truncated: bool,
+    /// The capture window was closed before the run finished. Structured
+    /// rather than an error string: a cancelled run is not a failure, and the
+    /// caller decides what to say about it without matching on message text.
+    pub cancelled: bool,
     /// Per-URL failures. A capture that lost a page SAYS which one.
     pub failures: Vec<String>,
 }
@@ -179,6 +267,20 @@ fn clamp(options: &CaptureOptions) -> (u32, u32) {
     (depth, budget)
 }
 
+/// How many distinct URLs a crawl may hold in mind at once. Bounded off the
+/// page budget so a link-dense site cannot grow the frontier without limit.
+fn frontier_cap(budget: u32) -> u32 {
+    budget * 4 + 16
+}
+
+/// Whether a harvested link joins the frontier.
+fn admits(link: &str, scheme: &str, host: &str, seen: &[String], budget: u32) -> bool {
+    if seen.len() as u32 >= frontier_cap(budget) {
+        return false;
+    }
+    same_origin(link, scheme, host) && !seen.iter().any(|s| s == link)
+}
+
 fn scratch_path(index: usize) -> Result<std::path::PathBuf, String> {
     let dir = std::env::temp_dir().join("spectrapdf").join("web-capture");
     std::fs::create_dir_all(&dir)
@@ -190,19 +292,127 @@ fn scratch_path(index: usize) -> Result<std::path::PathBuf, String> {
     Ok(dir.join(format!("capture-{stamp}-{index:03}.pdf")))
 }
 
-/// Everything the capture does with the live WebView2, kept in one place so
-/// the COM types never leak into the crawl loop.
-struct Capture {
-    webview: ICoreWebView2_7,
-    settings: ICoreWebView2PrintSettings,
+/// Why a capture step did not succeed. Cancellation is separated from failure
+/// because it produces no per-URL message: the window was closed, and a list
+/// of the steps that broke while it was being torn down names nothing that
+/// went wrong.
+enum StepError {
+    Cancelled,
+    Failed(String),
 }
 
-impl Capture {
-    /// Navigate, and wait for the navigation to complete.
-    fn navigate(&self, url: &str) -> Result<(), String> {
-        let (tx, rx) = mpsc::channel::<Result<(), String>>();
-        let mut token = Default::default();
-        let handler = NavigationCompletedEventHandler::create(Box::new(move |_, args| {
+/// The live browser interfaces, for the length of one step.
+///
+/// COM pointers into the window's single-threaded apartment: not `Send`, so
+/// they cannot be carried across dispatches and are taken fresh on the
+/// window's own thread each time. Nothing here outlives the dispatch that
+/// acquired it, which is what makes destroying the window safe at any moment
+/// the window's thread is not inside a step.
+struct Browser {
+    webview: ICoreWebView2_7,
+    environment: ICoreWebView2Environment6,
+}
+
+impl Browser {
+    fn acquire(platform: &tauri::webview::PlatformWebview) -> Result<Self, String> {
+        let controller = platform.controller();
+        let core = unsafe { controller.CoreWebView2() }
+            .map_err(|e| format!("The capture window has no browser: {e}"))?;
+        // The interface PrintToPdf lives on. No version is pinned (the
+        // standing rule); the cast is attempted and its failure is a NAMED
+        // refusal, never a silent blank capture.
+        let webview: ICoreWebView2_7 = core.cast().map_err(|_| RUNTIME_TOO_OLD.to_string())?;
+        let environment: ICoreWebView2Environment6 = platform
+            .environment()
+            .cast()
+            .map_err(|_| RUNTIME_TOO_OLD.to_string())?;
+        Ok(Self {
+            webview,
+            environment,
+        })
+    }
+}
+
+/// Start one browser call on the window's own thread, and wait for it HERE.
+///
+/// This split is the whole discipline. Every WebView2 callback is delivered on
+/// the message queue of the thread that made the call, so that thread has to
+/// be back inside its event loop when the callback arrives — a wait there is
+/// the deadlock. `start` therefore only ISSUES the call and returns, releasing
+/// the thread, and the completion is awaited on the caller's thread, which
+/// owns no message queue anyone is waiting on.
+///
+/// It is also what keeps a capture from freezing the rest of the app: the
+/// window's thread is held for the length of one call rather than the length
+/// of a crawl, so events bound for other windows are never withheld.
+fn run_step<T, F>(
+    window: &WebviewWindow,
+    timeout: Duration,
+    timed_out: &str,
+    start: F,
+) -> Result<T, StepError>
+where
+    T: Send + 'static,
+    F: FnOnce(&Browser, mpsc::Sender<Result<T, String>>) -> Result<(), String> + Send + 'static,
+{
+    let (tx, rx) = mpsc::channel::<Result<T, String>>();
+    let refused = tx.clone();
+    window
+        .with_webview(move |platform| {
+            if let Err(err) = Browser::acquire(&platform).and_then(|browser| start(&browser, tx)) {
+                let _ = refused.send(Err(err));
+            }
+        })
+        .map_err(|e| StepError::Failed(format!("Could not reach the capture window: {e}")))?;
+    wait_step(&rx, timeout, timed_out)
+}
+
+/// Wait for a step's completion off the window's thread.
+///
+/// A disconnect is not a timeout: it means every sender was dropped, which
+/// happens when the dispatch is discarded or the browser tears its handlers
+/// down — in both cases the window is gone.
+fn wait_step<T>(
+    rx: &mpsc::Receiver<Result<T, String>>,
+    timeout: Duration,
+    timed_out: &str,
+) -> Result<T, StepError> {
+    let expiry = Instant::now() + timeout;
+    loop {
+        match rx.recv_timeout(WAIT_SLICE) {
+            Ok(Ok(value)) => return Ok(value),
+            Ok(Err(err)) => return Err(StepError::Failed(err)),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(if cancelled() {
+                    StepError::Cancelled
+                } else {
+                    StepError::Failed("the capture window closed".to_string())
+                })
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        if cancelled() {
+            return Err(StepError::Cancelled);
+        }
+        if Instant::now() >= expiry {
+            return Err(StepError::Failed(timed_out.to_string()));
+        }
+    }
+}
+
+/// Navigate, and wait for the navigation to complete.
+fn navigate(window: &WebviewWindow, url: &str) -> Result<(), StepError> {
+    let target = url.to_string();
+    let timed_out = format!("{url} did not finish loading in time");
+    run_step(window, NAVIGATION_TIMEOUT, &timed_out, move |browser, tx| {
+        // Navigation-complete is an EVENT, not a completion: left registered
+        // it would fire again for every later page in the crawl, so the
+        // handler removes its own registration. The token is set before the
+        // handler can run — nothing pumps this thread's queue between the
+        // registration and the assignment.
+        let token = Rc::new(Cell::new(0i64));
+        let owned = token.clone();
+        let handler = NavigationCompletedEventHandler::create(Box::new(move |source, args| {
             let outcome = match args {
                 Some(args) => {
                     let mut ok = BOOL::from(false);
@@ -218,112 +428,151 @@ impl Capture {
                 None => Err("the page could not be loaded".to_string()),
             };
             let _ = tx.send(outcome);
+            if let Some(source) = source {
+                let _ = unsafe { source.remove_NavigationCompleted(owned.get()) };
+            }
             Ok(())
         }));
-        unsafe { self.webview.add_NavigationCompleted(&handler, &mut token) }
-            .map_err(|e| format!("Could not watch the capture window: {e}"))?;
-        let result = (|| {
-            let target = HSTRING::from(url);
-            unsafe { self.webview.Navigate(PCWSTR(target.as_ptr())) }
-                .map_err(|e| format!("Could not open {url}: {e}"))?;
-            pump_until(&rx, NAVIGATION_TIMEOUT)
-                .unwrap_or_else(|| Err(format!("{url} did not finish loading in time")))
-        })();
-        let _ = unsafe { self.webview.remove_NavigationCompleted(token) };
-        result
-    }
-
-    fn title(&self) -> String {
-        let mut raw = PWSTR::null();
-        if unsafe { self.webview.DocumentTitle(&mut raw) }.is_err() {
-            return String::new();
-        }
-        take_pwstr(raw)
-    }
-
-    fn print_to(&self, path: &std::path::Path) -> Result<(), String> {
-        let (tx, rx) = mpsc::channel::<Result<(), String>>();
-        let handler = PrintToPdfCompletedHandler::create(Box::new(move |hr, ok| {
-            let outcome = if hr.is_ok() && ok {
-                Ok(())
-            } else {
-                Err("the page could not be rendered to PDF".to_string())
-            };
-            let _ = tx.send(outcome);
-            Ok(())
-        }));
-        let target = HSTRING::from(path.to_string_lossy().as_ref());
+        let mut registered = 0i64;
         unsafe {
-            self.webview
-                .PrintToPdf(PCWSTR(target.as_ptr()), &self.settings, &handler)
+            browser
+                .webview
+                .add_NavigationCompleted(&handler, &mut registered)
         }
-        .map_err(|e| format!("Could not render the page to PDF: {e}"))?;
-        pump_until(&rx, PRINT_TIMEOUT)
-            .unwrap_or_else(|| Err("the page did not finish rendering in time".to_string()))?;
-        if !path.is_file() {
-            return Err("the capture produced no PDF".to_string());
-        }
+        .map_err(|e| format!("Could not watch the capture window: {e}"))?;
+        token.set(registered);
+        let wide = HSTRING::from(target.as_str());
+        unsafe { browser.webview.Navigate(PCWSTR(wide.as_ptr())) }
+            .map_err(|e| format!("Could not open {target}: {e}"))?;
         Ok(())
-    }
-
-    /// Same-document links, in document order, de-duplicated by the script so
-    /// the frontier does not carry a hundred copies of a nav bar.
-    fn links(&self) -> Vec<String> {
-        let (tx, rx) = mpsc::channel::<String>();
-        let handler = ExecuteScriptCompletedHandler::create(Box::new(move |_, json| {
-            let _ = tx.send(json.to_string());
-            Ok(())
-        }));
-        let script: HSTRING = HSTRING::from(
-            "(function(){var s=new Set(),o=[];\
-             for (const a of document.querySelectorAll('a[href]')) {\
-               let h; try { h = new URL(a.href, document.baseURI).href; } catch (e) { continue; }\
-               h = h.split('#')[0];\
-               if (!h || s.has(h)) continue; s.add(h); o.push(h);\
-               if (o.length >= 400) break;\
-             } return JSON.stringify(o);})()",
-        );
-        if unsafe { self.webview.ExecuteScript(PCWSTR(script.as_ptr()), &handler) }.is_err() {
-            return Vec::new();
-        }
-        let Some(raw) = pump_until(&rx, SCRIPT_TIMEOUT) else {
-            return Vec::new();
-        };
-        // ExecuteScript returns the result as JSON, so a string result
-        // arrives JSON-encoded twice.
-        let once: String = match serde_json::from_str(&raw) {
-            Ok(s) => s,
-            Err(_) => return Vec::new(),
-        };
-        serde_json::from_str::<Vec<String>>(&once).unwrap_or_default()
-    }
+    })
 }
 
-/// Run the Windows message loop until `rx` produces or the deadline passes.
-///
-/// A blocking `recv` would deadlock: every WebView2 callback is delivered on
-/// this same thread's message queue, so the thread that waits must also pump.
-fn pump_until<T>(rx: &mpsc::Receiver<T>, timeout: Duration) -> Option<T> {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
-    };
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        if let Ok(value) = rx.try_recv() {
-            return Some(value);
-        }
-        if std::time::Instant::now() >= deadline {
-            return None;
-        }
-        let mut msg = MSG::default();
-        unsafe {
-            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
-                let _ = TranslateMessage(&msg);
-                DispatchMessageW(&msg);
+/// Render the settled page into `path`.
+fn print_page(
+    window: &WebviewWindow,
+    path: &std::path::Path,
+    options: &CaptureOptions,
+) -> Result<(), StepError> {
+    let target = path.to_path_buf();
+    let opts = options.clone();
+    run_step(
+        window,
+        PRINT_TIMEOUT,
+        "the page did not finish rendering in time",
+        move |browser, tx| {
+            let settings = build_settings(&browser.environment, &opts)?;
+            // The print is asynchronous and the settings must outlive this
+            // call, so a reference rides in the completion handler and is
+            // released with it.
+            let kept = settings.clone();
+            let handler = PrintToPdfCompletedHandler::create(Box::new(move |hr, ok| {
+                drop(kept);
+                let outcome = if hr.is_ok() && ok {
+                    Ok(())
+                } else {
+                    Err("the page could not be rendered to PDF".to_string())
+                };
+                let _ = tx.send(outcome);
+                Ok(())
+            }));
+            let wide = HSTRING::from(target.to_string_lossy().as_ref());
+            unsafe {
+                browser
+                    .webview
+                    .PrintToPdf(PCWSTR(wide.as_ptr()), &settings, &handler)
             }
-        }
-        std::thread::sleep(Duration::from_millis(8));
+            .map_err(|e| format!("Could not render the page to PDF: {e}"))?;
+            Ok(())
+        },
+    )?;
+    if !path.is_file() {
+        return Err(StepError::Failed("the capture produced no PDF".to_string()));
     }
+    Ok(())
+}
+
+/// Same-document links, in document order, de-duplicated by the script so the
+/// frontier does not carry a hundred copies of a nav bar.
+fn harvest_links(window: &WebviewWindow) -> Vec<String> {
+    let outcome = run_step(
+        window,
+        SCRIPT_TIMEOUT,
+        "the page's links did not arrive in time",
+        move |browser, tx| {
+            let handler = ExecuteScriptCompletedHandler::create(Box::new(move |_, json| {
+                let _ = tx.send(Ok(json.to_string()));
+                Ok(())
+            }));
+            let script: HSTRING = HSTRING::from(
+                "(function(){var s=new Set(),o=[];\
+                 for (const a of document.querySelectorAll('a[href]')) {\
+                   let h; try { h = new URL(a.href, document.baseURI).href; } catch (e) { continue; }\
+                   h = h.split('#')[0];\
+                   if (!h || s.has(h)) continue; s.add(h); o.push(h);\
+                   if (o.length >= 400) break;\
+                 } return JSON.stringify(o);})()",
+            );
+            unsafe { browser.webview.ExecuteScript(PCWSTR(script.as_ptr()), &handler) }
+                .map_err(|e| format!("Could not read the page's links: {e}"))?;
+            Ok(())
+        },
+    );
+    let Ok(raw) = outcome else {
+        return Vec::new();
+    };
+    // ExecuteScript returns the result as JSON, so a string result arrives
+    // JSON-encoded twice.
+    let once: String = match serde_json::from_str(&raw) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    serde_json::from_str::<Vec<String>>(&once).unwrap_or_default()
+}
+
+fn page_title(window: &WebviewWindow) -> String {
+    run_step(
+        window,
+        DISPATCH_TIMEOUT,
+        "the page title did not arrive in time",
+        |browser, tx| {
+            let mut raw = PWSTR::null();
+            let title = if unsafe { browser.webview.DocumentTitle(&mut raw) }.is_ok() {
+                take_pwstr(raw)
+            } else {
+                String::new()
+            };
+            let _ = tx.send(Ok(title));
+            Ok(())
+        },
+    )
+    .unwrap_or_default()
+}
+
+/// Abandon whatever the window is still loading.
+///
+/// Issued without waiting: this runs only once the capture is already
+/// cancelled, so a wait would return on the flag and prove nothing. Ordering
+/// carries it instead — this and the destroy are both messages to the window's
+/// thread and are delivered in the order they were sent.
+fn abandon_navigation(window: &WebviewWindow) {
+    let _ = window.with_webview(|platform| {
+        if let Ok(browser) = Browser::acquire(&platform) {
+            let _ = unsafe { browser.webview.Stop() };
+        }
+    });
+}
+
+/// Let the page settle before printing. False when the capture was cancelled.
+fn settle_pause() -> bool {
+    let expiry = Instant::now() + SETTLE;
+    while Instant::now() < expiry {
+        if cancelled() {
+            return false;
+        }
+        std::thread::sleep(WAIT_SLICE);
+    }
+    !cancelled()
 }
 
 fn build_settings(
@@ -372,8 +621,14 @@ pub async fn capture_web_page(
     if CAPTURING.swap(true, Ordering::SeqCst) {
         return Err("A capture is already running".to_string());
     }
+    // A close seen while no capture was running must not cancel this one.
+    clear_cancel();
     let result = run_capture(&app, options, start, scheme, host, depth, budget).await;
     CAPTURING.store(false, Ordering::SeqCst);
+    // Every exit path — success, refusal, cancellation, a cancel that raced
+    // completion. No interface into this window's browser outlives the
+    // dispatch that took it, and a destroy is processed on the same thread as
+    // those dispatches, so the two can never interleave.
     if let Some(window) = app.get_webview_window(CAPTURE_LABEL) {
         let _ = window.destroy();
     }
@@ -416,44 +671,40 @@ async fn run_capture(
     .build()
     .map_err(|e| format!("Could not open the capture window: {e}"))?;
 
-    let (tx, rx) = std::sync::mpsc::channel::<Result<CaptureResult, String>>();
-    let sender = tx.clone();
-    let opts = options.clone();
-    window
-        .with_webview(move |platform| {
-            let outcome = (|| -> Result<CaptureResult, String> {
-                let controller = platform.controller();
-                let environment = platform.environment();
-                let core = unsafe { controller.CoreWebView2() }
-                    .map_err(|e| format!("The capture window has no browser: {e}"))?;
-                // The interface PrintToPdf lives on. No version is pinned
-                // (the standing rule); the cast is attempted and its failure
-                // is a NAMED refusal, never a silent blank capture.
-                let webview: ICoreWebView2_7 = core.cast().map_err(|_| {
-                    "This machine's web runtime is too old to render a page to PDF".to_string()
-                })?;
-                let environment6: ICoreWebView2Environment6 = environment.cast().map_err(|_| {
-                    "This machine's web runtime is too old to render a page to PDF".to_string()
-                })?;
-                let settings = build_settings(&environment6, &opts)?;
-                let capture = Capture { webview, settings };
-                Ok(crawl(&capture, &start, &scheme, &host, depth, budget))
-            })();
-            let _ = sender.send(outcome);
-        })
-        .map_err(|e| format!("Could not reach the capture window: {e}"))?;
+    // The subclass goes on from the window's own thread, and ahead of every
+    // step: both are messages to that thread, delivered in the order sent.
+    let hwnd = window.hwnd().map(|h| h.0 as usize).unwrap_or(0);
+    let _ = window.with_webview(move |_| watch_close(hwnd));
 
-    // `with_webview` runs the closure on the main thread; this command is
-    // async and runs off it, so a blocking receive here is correct and does
-    // not starve the callbacks the closure pumps for itself.
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        rx.recv_timeout(NAVIGATION_TIMEOUT + PRINT_TIMEOUT + Duration::from_secs(30))
+    let worker = window.clone();
+    let opts = options.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || -> Result<CaptureResult, String> {
+        // Reach the browser once before the crawl, so a runtime that cannot
+        // render to PDF refuses BY NAME here rather than as a page that
+        // failed to print.
+        match run_step(
+            &worker,
+            DISPATCH_TIMEOUT,
+            "The capture window did not answer in time",
+            |_, tx| {
+                let _ = tx.send(Ok(()));
+                Ok(())
+            },
+        ) {
+            Ok(()) => {}
+            Err(StepError::Cancelled) => return Ok(cancelled_result()),
+            Err(StepError::Failed(err)) => return Err(err),
+        }
+        Ok(crawl(&worker, &opts, &start, &scheme, &host, depth, budget))
     })
     .await
-    .map_err(|e| format!("The capture did not run: {e}"))?
-    .map_err(|_| "The capture did not start in time".to_string())??;
+    .map_err(|e| format!("The capture did not run: {e}"))?;
 
-    if result.pages.is_empty() {
+    let result = outcome?;
+    // A cancelled run reports itself rather than refusing: the refusal below
+    // names a capture that was tried and produced nothing, which is a
+    // different thing from one that was stopped.
+    if result.pages.is_empty() && !result.cancelled {
         let detail = result
             .failures
             .first()
@@ -464,9 +715,38 @@ async fn run_capture(
     Ok(result)
 }
 
+/// A cancellation no crawl answered: the window was closed before the crawl
+/// reached it, so there is nothing to report but the cancellation itself.
+fn cancelled_result() -> CaptureResult {
+    finish(true, 0, 0, Vec::new(), 0, Vec::new())
+}
+
+/// Assemble the run's verdict. Apart from the loop so the relationship between
+/// stopping, truncation and failure is stated in one place: a cancelled run
+/// did not reach the page limit, and saying it did reports the wrong reason
+/// for a short capture.
+fn finish(
+    stopped: bool,
+    cursor: usize,
+    frontier: usize,
+    pages: Vec<CapturedPage>,
+    visited: usize,
+    failures: Vec<String>,
+) -> CaptureResult {
+    CaptureResult {
+        truncated: !stopped && cursor < frontier,
+        cancelled: stopped,
+        pages,
+        visited,
+        failures,
+    }
+}
+
 /// Breadth-first over the same origin, one window navigated in turn.
+#[allow(clippy::too_many_arguments)]
 fn crawl(
-    capture: &Capture,
+    window: &WebviewWindow,
+    options: &CaptureOptions,
     start: &str,
     scheme: &str,
     host: &str,
@@ -479,22 +759,35 @@ fn crawl(
     let mut failures: Vec<String> = Vec::new();
     let mut visited = 0usize;
     let mut cursor = 0usize;
+    let mut stopped = false;
 
     while cursor < frontier.len() {
         if pages.len() as u32 >= budget {
+            break;
+        }
+        if cancelled() {
+            stopped = true;
             break;
         }
         let (url, level) = frontier[cursor].clone();
         cursor += 1;
         visited += 1;
 
-        if let Err(err) = capture.navigate(&url) {
-            failures.push(format!("{url}: {err}"));
-            continue;
+        match navigate(window, &url) {
+            Ok(()) => {}
+            Err(StepError::Cancelled) => {
+                stopped = true;
+                break;
+            }
+            Err(StepError::Failed(err)) => {
+                failures.push(format!("{url}: {err}"));
+                continue;
+            }
         }
-        // Late webfonts and lazy images land here; printing at the instant of
-        // navigation-complete captures a page mid-layout.
-        std::thread::sleep(SETTLE);
+        if !settle_pause() {
+            stopped = true;
+            break;
+        }
 
         let path = match scratch_path(pages.len()) {
             Ok(p) => p,
@@ -503,11 +796,18 @@ fn crawl(
                 continue;
             }
         };
-        if let Err(err) = capture.print_to(&path) {
-            failures.push(format!("{url}: {err}"));
-            continue;
+        match print_page(window, &path, options) {
+            Ok(()) => {}
+            Err(StepError::Cancelled) => {
+                stopped = true;
+                break;
+            }
+            Err(StepError::Failed(err)) => {
+                failures.push(format!("{url}: {err}"));
+                continue;
+            }
         }
-        let title = capture.title();
+        let title = page_title(window);
         pages.push(CapturedPage {
             url: url.clone(),
             title: if title.trim().is_empty() { url.clone() } else { title },
@@ -515,11 +815,8 @@ fn crawl(
         });
 
         if level < depth {
-            for link in capture.links() {
-                if seen.len() as u32 >= budget * 4 + 16 {
-                    break;
-                }
-                if !same_origin(&link, scheme, host) || seen.iter().any(|s| s == &link) {
+            for link in harvest_links(window) {
+                if !admits(&link, scheme, host, &seen, budget) {
                     continue;
                 }
                 seen.push(link.clone());
@@ -528,18 +825,18 @@ fn crawl(
         }
     }
 
-    CaptureResult {
-        truncated: cursor < frontier.len(),
-        pages,
-        visited,
-        failures,
+    if stopped {
+        abandon_navigation(window);
     }
+
+    finish(stopped, cursor, frontier.len(), pages, visited, failures)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp, same_origin, validate_url, CaptureOptions, MAX_DEPTH_CEILING,
-                MAX_PAGES_CEILING};
+    use super::{admits, cancelled, cancelled_result, clamp, clear_cancel, finish, frontier_cap,
+                same_origin, validate_url, window_close_requested, CaptureOptions, CapturedPage,
+                CAPTURE_LABEL, MAX_DEPTH_CEILING, MAX_PAGES_CEILING};
 
     fn options(depth: u32, max_pages: u32) -> CaptureOptions {
         CaptureOptions {
@@ -601,5 +898,70 @@ mod tests {
     fn an_address_with_no_page_refuses() {
         assert!(validate_url("").is_err());
         assert!(validate_url("https://").is_err());
+    }
+
+    #[test]
+    fn the_frontier_admits_only_unseen_same_origin_links() {
+        let seen = vec!["https://example.test/a".to_string()];
+        assert!(admits("https://example.test/b", "https", "example.test", &seen, 10));
+        // Already queued.
+        assert!(!admits("https://example.test/a", "https", "example.test", &seen, 10));
+        // Another site, and a downgraded transport.
+        assert!(!admits("https://other.test/b", "https", "example.test", &seen, 10));
+        assert!(!admits("http://example.test/b", "https", "example.test", &seen, 10));
+        // A full frontier admits nothing, however legal the link.
+        let full: Vec<String> = (0..frontier_cap(10)).map(|i| format!("u{i}")).collect();
+        assert!(!admits("https://example.test/b", "https", "example.test", &full, 10));
+    }
+
+    #[test]
+    fn only_the_capture_windows_close_cancels_a_capture() {
+        // One test rather than several: the flag is process-wide, so a second
+        // test asserting on it would race this one.
+        clear_cancel();
+        window_close_requested("main");
+        window_close_requested("doc-1");
+        assert!(!cancelled(), "a workspace close must not cancel a capture");
+
+        window_close_requested(CAPTURE_LABEL);
+        assert!(cancelled(), "the capture window's close is the cancel");
+
+        clear_cancel();
+        assert!(!cancelled(), "a new capture starts uncancelled");
+    }
+
+    #[test]
+    fn a_cancelled_capture_is_neither_truncated_nor_a_failure() {
+        let result = cancelled_result();
+        assert!(result.cancelled);
+        // Truncation names a run that hit the page limit, and a failure list
+        // names pages that could not be captured. A cancel is neither.
+        assert!(!result.truncated);
+        assert!(result.failures.is_empty());
+        assert!(result.pages.is_empty());
+        assert_eq!(result.visited, 0);
+    }
+
+    #[test]
+    fn a_stopped_run_is_never_reported_as_truncated() {
+        let page = |url: &str| CapturedPage {
+            url: url.to_string(),
+            title: url.to_string(),
+            path: String::new(),
+        };
+        // Frontier left over and NOT stopped: that is truncation.
+        let hit_limit = finish(false, 2, 9, vec![page("a"), page("b")], 2, Vec::new());
+        assert!(hit_limit.truncated);
+        assert!(!hit_limit.cancelled);
+
+        // The same leftover frontier, stopped: cancelled, never truncated.
+        let stopped = finish(true, 2, 9, vec![page("a"), page("b")], 2, Vec::new());
+        assert!(stopped.cancelled);
+        assert!(!stopped.truncated);
+
+        // Nothing left over and not stopped: a complete run.
+        let complete = finish(false, 3, 3, vec![page("a")], 3, Vec::new());
+        assert!(!complete.truncated);
+        assert!(!complete.cancelled);
     }
 }

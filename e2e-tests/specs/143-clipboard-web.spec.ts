@@ -177,6 +177,126 @@ function emptyClipboard(): void {
   powershell(`Add-Type -AssemblyName System.Windows.Forms;[Windows.Forms.Clipboard]::Clear();`);
 }
 
+/** Run a PowerShell snippet and hand back what it wrote to stdout. */
+function powershellOut(script: string): string {
+  return execFileSync(
+    'powershell',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+    { stdio: 'pipe', timeout: 60_000 },
+  )
+    .toString()
+    .trim();
+}
+
+const USER32 = `
+Add-Type -Namespace E2E -Name W -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr p);
+[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder s, int n);
+[DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
+public delegate bool EnumProc(IntPtr h, IntPtr p);
+'@;
+$found = [System.Collections.ArrayList]::new();
+$cb = [E2E.W+EnumProc]{ param($h,$p)
+  $sb = New-Object System.Text.StringBuilder 512;
+  [void][E2E.W]::GetWindowTextW($h, $sb, 512);
+  if ($sb.ToString().StartsWith('Capturing')) { [void]$found.Add($h) }
+  return $true };
+[void][E2E.W]::EnumWindows($cb, [IntPtr]::Zero);
+`;
+
+/** How many top-level windows the capture titles its own. */
+function captureWindowCount(): number {
+  return Number(powershellOut(`${USER32} $found.Count`));
+}
+
+/**
+ * Close the capture window the way a user does — a real `WM_CLOSE` at the
+ * window, not a WebDriver close.
+ *
+ * `WM_CLOSE` is what the title-bar button and Alt+F4 both produce, and it is
+ * what the capture's own window subclass intercepts. A driver close enters
+ * further up, through the app's window-event path, and would leave the
+ * subclass — the thing that makes a close a cancel — untested.
+ */
+function closeCaptureWindow(): boolean {
+  const posted = powershellOut(
+    `${USER32} foreach ($h in $found) { [void][E2E.W]::PostMessageW($h, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) }; $found.Count`,
+  );
+  return Number(posted) > 0;
+}
+
+function sleepSync(ms: number): void {
+  execFileSync('powershell', ['-NoProfile', '-Command', `Start-Sleep -Milliseconds ${ms}`], {
+    stdio: 'pipe',
+  });
+}
+
+/** Wait until the driver reports exactly `count` window handles. */
+async function waitForHandles(count: number): Promise<string[]> {
+  let handles: string[] = [];
+  await browser.waitUntil(
+    async () => {
+      handles = await browser.getWindowHandles();
+      return handles.length === count;
+    },
+    { timeout: 30_000, interval: 250, timeoutMsg: `never saw ${count} window handles` },
+  );
+  return handles;
+}
+
+/**
+ * Serve an index that links to pages which answer slowly, so a crawl is long
+ * enough to be observed and interrupted while it runs.
+ */
+async function slowSite(delayMs: number): Promise<{ server: Server; port: number }> {
+  let port = 0;
+  const server: Server = createServer((req, res) => {
+    const path = (req.url ?? '/').split('?')[0];
+    const body =
+      path === '/'
+        ? '<!DOCTYPE html><html><head><title>Slow Index</title></head><body>' +
+          ['a', 'b', 'c', 'd', 'e', 'f']
+            .map((name) => `<a href="/${name}">${name}</a>`)
+            .join('') +
+          '</body></html>'
+        : `<!DOCTYPE html><html><head><title>Slow ${path}</title></head><body>${path}</body></html>`;
+    setTimeout(
+      () => {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(body);
+      },
+      path === '/' ? 0 : delayMs,
+    );
+  });
+  await new Promise<void>((done) => {
+    server.listen(0, '127.0.0.1', () => {
+      port = (server.address() as { port: number }).port;
+      done();
+    });
+  });
+  return { server, port };
+}
+
+/** Start a capture and DO NOT wait for it: the page keeps the promise. */
+async function startCaptureDetached(request: Record<string, unknown>): Promise<void> {
+  await browser.execute(function (req) {
+    (window as any).__captureOutcome = 'pending';
+    (window as any).__SPECTRA_TEST__.webCaptureRun(req)
+      .then((r: unknown) => {
+        (window as any).__captureOutcome = r === null ? 'cancelled' : 'captured';
+      })
+      .catch(() => {
+        (window as any).__captureOutcome = 'error';
+      });
+  }, request);
+}
+
+async function captureOutcome(): Promise<string> {
+  return browser.execute(function () {
+    return (window as any).__captureOutcome ?? 'absent';
+  });
+}
+
 async function makePdfFixture(path: string): Promise<void> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -413,5 +533,155 @@ describe('create PDF from the clipboard and from a web page', () => {
     const assembled = await readPdf(out);
     expect(assembled.text).toContain(TOKEN);
     expect(assembled.outline).toEqual(['Captured Fixture']);
+  });
+
+  it('closing the capture window cancels the crawl and takes the window with it', async () => {
+    // The previous case handed its capture up, which closes this dialog.
+    if (await $('[data-testid="create-pdf-close"]').isExisting()) {
+      await $('[data-testid="create-pdf-close"]').click();
+    }
+    expect(await invokeAppCommand('file.createFromWebPage')).toBe(true);
+    await $('[data-testid="web-capture-dialog"]').waitForDisplayed({ timeout: 15_000 });
+
+    // A crawl slow enough to be interrupted: the index answers at once, every
+    // linked page stalls, so the close lands while a navigation is in flight.
+    const { server: slow, port } = await slowSite(4000);
+
+    try {
+      expect(captureWindowCount()).toBe(0);
+
+      // Started, NOT awaited: the close has to land while the crawl is running.
+      const running = webCaptureRun({
+        url: `http://127.0.0.1:${port}/`,
+        depth: 1,
+        maxPages: 6,
+      });
+
+      let closed = false;
+      for (let attempt = 0; attempt < 60 && !closed; attempt += 1) {
+        sleepSync(500);
+        closed = closeCaptureWindow();
+      }
+      expect(closed, 'the capture window never appeared').toBe(true);
+
+      // Cancelled, not hung, and not a partial run handed up as a finished
+      // one: the dialog reports the cancellation and adds nothing.
+      const result = await running;
+      expect(result).toBeNull();
+
+      const notice = await $('[data-testid="web-capture-notice"]');
+      await notice.waitForDisplayed({ timeout: 10_000 });
+      expect((await notice.getText()).length).toBeGreaterThan(0);
+      expect(await $('[data-testid="web-capture-error"]').isExisting()).toBe(false);
+
+      // Destroyed on the cancellation path, like every other exit path.
+      await browser.waitUntil(async () => captureWindowCount() === 0, {
+        timeout: 15_000,
+        timeoutMsg: 'the capture window outlived the capture it was cancelled with',
+      });
+
+      // The app is still there: the capture window's close is not a workspace
+      // window's close, so nothing quit and nothing was prompted about.
+      expect(await $('[data-testid="web-capture-dialog"]').isDisplayed()).toBe(true);
+      expect((await browser.getWindowHandles()).length).toBeGreaterThan(0);
+
+      // And a second capture still starts — the cancel did not leave the
+      // one-at-a-time guard latched.
+      const page = resolve(tmp, 'after-cancel.html');
+      writeFileSync(
+        page,
+        '<!DOCTYPE html><html><head><meta charset="utf-8"><title>After Cancel</title>' +
+          `</head><body><h1>${TOKEN}</h1></body></html>`,
+        'utf8',
+      );
+      const second = await webCaptureRun({
+        url: pathToFileURL(page).href,
+        depth: 0,
+        maxPages: 1,
+      });
+      expect(second).not.toBeNull();
+      expect(second!.pages.length).toBe(1);
+    } finally {
+      slow.close();
+    }
+  });
+
+  it('a capture in one window does not withhold the other window\'s engine replies', async () => {
+    // The capture borrows the window's own thread for each browser call and
+    // waits for it elsewhere. Held for a whole crawl instead, that thread
+    // stops delivering events app-wide — and engine replies are delivered as
+    // events, so a second workspace would sit on a spinner for the length of
+    // the crawl while its request had already been answered.
+    const before = await browser.getWindowHandles();
+    const mainHandle = before[0];
+    expect(await invokeAppCommand('window.newWindow')).toBe(true);
+    const withSecond = await waitForHandles(before.length + 1);
+    const secondHandle = withSecond.find((h) => !before.includes(h))!;
+
+    // Warm the engine in the second window BEFORE the capture starts, so what
+    // is timed below is one round trip and not a sidecar launch.
+    await browser.switchToWindow(secondHandle);
+    await waitForHarness(30_000);
+    await browser.executeAsync<null, []>(function (done) {
+      (window as any).__SPECTRA_TEST__.waitForEngine(30000)
+        .then(() => done(null))
+        .catch(() => done(null));
+    });
+    await browser.switchToWindow(mainHandle);
+
+    const { server: slow, port } = await slowSite(4000);
+    try {
+      if (await $('[data-testid="create-pdf-close"]').isExisting()) {
+        await $('[data-testid="create-pdf-close"]').click();
+      }
+      expect(await invokeAppCommand('file.createFromWebPage')).toBe(true);
+      await $('[data-testid="web-capture-dialog"]').waitForDisplayed({ timeout: 15_000 });
+
+      await startCaptureDetached({ url: `http://127.0.0.1:${port}/`, depth: 1, maxPages: 6 });
+      // Live, not merely requested.
+      await browser.waitUntil(async () => captureWindowCount() > 0, {
+        timeout: 30_000,
+        timeoutMsg: 'the capture window never appeared',
+      });
+
+      await browser.switchToWindow(secondHandle);
+      const started = Date.now();
+      const failure = await browser.executeAsync<string | null, []>(function (done) {
+        (window as any).__SPECTRA_TEST__.engineRequestWithId('ping', {}, 987654)
+          .then(() => done(null))
+          .catch((err: unknown) => done(String(err)));
+      });
+      const elapsed = Date.now() - started;
+      expect(failure).toBeNull();
+      // The crawl still has pages to fetch, each stalling 4s. A reply that had
+      // been withheld could not come back inside a second.
+      expect(elapsed).toBeLessThan(3000);
+
+      // ...and prove the crawl really was still running when it answered,
+      // rather than the reply having simply outlived a capture that ended.
+      await browser.switchToWindow(mainHandle);
+      expect(await captureOutcome()).toBe('pending');
+      expect(captureWindowCount()).toBeGreaterThan(0);
+
+      expect(closeCaptureWindow()).toBe(true);
+      await browser.waitUntil(async () => (await captureOutcome()) === 'cancelled', {
+        timeout: 30_000,
+        timeoutMsg: 'the capture never reported its cancellation',
+      });
+      await browser.waitUntil(async () => captureWindowCount() === 0, {
+        timeout: 15_000,
+        timeoutMsg: 'the capture window outlived the capture it was cancelled with',
+      });
+    } finally {
+      slow.close();
+      // Leave one window behind so the session's final close is the ordinary
+      // last-window teardown.
+      await browser.switchToWindow(secondHandle);
+      await browser.execute(() => {
+        void (window as any).__SPECTRA_TEST__.closeThisWindow();
+      });
+      await browser.switchToWindow(mainHandle);
+      await waitForHandles(1);
+    }
   });
 });

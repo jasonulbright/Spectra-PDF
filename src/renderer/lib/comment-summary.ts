@@ -67,7 +67,7 @@ export interface EngineComment {
   state_model: string;
   name: string;
   reply_to: string | null;
-  reply_type: 'reply' | 'group' | null;
+  reply_type: 'reply' | 'group' | 'unknown' | null;
   children: string[];
   orphan: boolean;
   cycle: boolean;
@@ -268,6 +268,7 @@ const LABEL_KEYS: readonly (readonly [string, Parameters<typeof tChrome>[0]])[] 
   ['state', 'panel.comments.doc.state'],
   ['stateNoModel', 'panel.comments.doc.stateNoModel'],
   ['groupMember', 'panel.comments.doc.groupMember'],
+  ['relationshipUnknown', 'panel.comments.doc.relationshipUnknown'],
   ['replyOrphan', 'panel.comments.doc.replyOrphan'],
   ['replyCycle', 'panel.comments.doc.replyCycle'],
   ['noPosition', 'panel.comments.doc.noPosition'],
@@ -368,6 +369,44 @@ export interface SummaryResult {
   no_box_pages: number[];
   reconciles: boolean;
   marks: { badge: number; page: number; comment: string; sheet: number }[];
+}
+
+/**
+ * What a finished summary owes the reader beyond the file name.
+ *
+ * `null` is "the run accounted for every comment": a summary that left
+ * nothing out says nothing further. Anything else names what the produced
+ * document does not carry, because a reader who is not told believes the
+ * summary is complete.
+ *
+ * `accounting` is the found/written/filtered/not-modelled line. It is owed
+ * whenever the written count is not the found count OR the four numbers do
+ * not balance — a run whose own reconciliation fails has to show its
+ * arithmetic even when the written count happens to match.
+ */
+export interface SummaryExclusions {
+  accounting: boolean;
+  noPosition: number;
+  bodyRefused: number;
+  noBoxPages: readonly number[];
+  unreadablePages: readonly number[];
+}
+
+export function summaryExclusions(result: SummaryResult): SummaryExclusions | null {
+  const exclusions: SummaryExclusions = {
+    accounting: result.found !== result.written || !result.reconciles,
+    noPosition: result.excluded.no_position,
+    bodyRefused: result.excluded.body_refused,
+    noBoxPages: result.no_box_pages,
+    unreadablePages: result.unreadable.map((u) => u.page),
+  };
+  const silent =
+    !exclusions.accounting &&
+    exclusions.noPosition === 0 &&
+    exclusions.bodyRefused === 0 &&
+    exclusions.noBoxPages.length === 0 &&
+    exclusions.unreadablePages.length === 0;
+  return silent ? null : exclusions;
 }
 
 /**

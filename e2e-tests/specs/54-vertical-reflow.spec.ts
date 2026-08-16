@@ -158,11 +158,30 @@ describe('vertical paragraph reflow', () => {
     expect(before[0].vertical).toBe(true);
     await editParagraphOpen(pageId, before[0].index);
     await $('[data-testid="edit-para-input"]').waitForDisplayed({ timeout: 10_000 });
-    const boldBtn = await $('[data-testid="edit-para-bold"]');
-    expect(await boldBtn.isEnabled()).toBe(true);
-    await boldBtn.click();
+    // The editor's controls answer `isEnabled` while the panel is still
+    // laying out, so reading enablement and then clicking is check-then-act:
+    // the click lands `element not interactable` and survives only on the
+    // driver middleware's retry. The verdict is captured inside the predicate
+    // that also proves the control is clickable, and the element is re-queried
+    // there so a re-render cannot leave a stale handle looping.
+    const BOLD = '[data-testid="edit-para-bold"]';
+    let boldEnabled = false;
     await browser.waitUntil(
-      async () => (await boldBtn.getAttribute('aria-pressed')) === 'true',
+      async () => {
+        const btn = await $(BOLD);
+        boldEnabled = await btn.isEnabled().catch(() => false);
+        return boldEnabled && (await btn.isClickable().catch(() => false));
+      },
+      {
+        timeout: 10_000,
+        interval: 150,
+        timeoutMsg: 'the bold toggle never became an enabled, clickable control',
+      },
+    );
+    expect(boldEnabled).toBe(true);
+    await $(BOLD).click();
+    await browser.waitUntil(
+      async () => (await $(BOLD).getAttribute('aria-pressed')) === 'true',
       { timeout: 10_000, timeoutMsg: 'the bold toggle never engaged' },
     );
     // Re-set the SAME text through the harness helper rather than clicking

@@ -30,12 +30,14 @@ import {
   matchWorkspaceRow,
   orderedComments,
   renderedDates,
+  summaryExclusions,
   summaryFileName,
   summaryLabels,
   summaryParams,
   typeLabel,
   type CommentModel,
   type EngineComment,
+  type SummaryResult,
 } from '../src/renderer/lib/comment-summary';
 
 const ENGINE = readFileSync(
@@ -439,5 +441,97 @@ describe('in another language', () => {
     expect(labels.entryMeta).toContain('{{date}}');
     expect(labels.entryMeta).toContain('{{page}}');
     expect(labels.entryMeta).toContain('{{type}}');
+  });
+});
+
+// ── what a finished run still owes the reader ─────────────────────────────
+//
+// The dialog is gone the moment the summary exists, so this decision is what
+// stands between a summary that quietly left comments out and a reader who
+// knows it did. It is a pure function for exactly that reason: there is no
+// DOM here, and a guard that only exists inside a component is a guard no
+// test can reach.
+
+describe('summaryExclusions', () => {
+  const clean: SummaryResult = {
+    output: 'C:/out/summary.pdf',
+    sheets: 4,
+    found: 8,
+    written: 8,
+    excluded: { filtered: 0, unmodelled: 0, no_position: 0, body_refused: 0 },
+    unreadable: [],
+    no_box_pages: [],
+    reconciles: true,
+    marks: [],
+  };
+
+  it('says nothing when the run accounted for every comment', () => {
+    expect(summaryExclusions(clean)).toBeNull();
+  });
+
+  it('owes the accounting when fewer were written than found', () => {
+    const result = summaryExclusions({
+      ...clean,
+      written: 5,
+      excluded: { ...clean.excluded, filtered: 2, unmodelled: 1 },
+    });
+    expect(result?.accounting).toBe(true);
+  });
+
+  it('shows the arithmetic when the numbers do not balance', () => {
+    // Written matches found and the four numbers still do not add up: the
+    // count alone would read as a complete run.
+    const result = summaryExclusions({
+      ...clean,
+      excluded: { ...clean.excluded, filtered: 1 },
+      reconciles: false,
+    });
+    expect(result?.accounting).toBe(true);
+  });
+
+  it('reports a comment written without a badge', () => {
+    const result = summaryExclusions({
+      ...clean,
+      excluded: { ...clean.excluded, no_position: 2 },
+    });
+    expect(result?.noPosition).toBe(2);
+    expect(result?.accounting).toBe(false);
+  });
+
+  it('reports a comment written without its text', () => {
+    const result = summaryExclusions({
+      ...clean,
+      excluded: { ...clean.excluded, body_refused: 1 },
+    });
+    expect(result?.bodyRefused).toBe(1);
+  });
+
+  it('reports a page listed without its image', () => {
+    expect(summaryExclusions({ ...clean, no_box_pages: [3, 7] })?.noBoxPages)
+      .toEqual([3, 7]);
+  });
+
+  it('reports a page whose comment list could not be read', () => {
+    expect(
+      summaryExclusions({ ...clean, unreadable: [{ page: 2 }, { page: 9 }] })
+        ?.unreadablePages,
+    ).toEqual([2, 9]);
+  });
+
+  it('carries every warning of a run that went wrong in several ways at once', () => {
+    const result = summaryExclusions({
+      ...clean,
+      written: 6,
+      excluded: { filtered: 1, unmodelled: 1, no_position: 3, body_refused: 2 },
+      unreadable: [{ page: 4 }],
+      no_box_pages: [5],
+    });
+    expect(result).toEqual({
+      accounting: true,
+      noPosition: 3,
+      bodyRefused: 2,
+      noBoxPages: [5],
+      unreadablePages: [4],
+    });
   });
 });

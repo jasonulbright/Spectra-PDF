@@ -15,13 +15,43 @@ import {
   blackInkIsForced,
   coverageRows,
   inkRows,
+  inspectInkIsAFloor,
+  inspectIsAvailable,
   inventoryIsComplete,
   orderInks,
+  resolutionState,
   simulationIsLive,
   type Ink,
   type InkRow,
+  type InspectedKind,
+  type InspectedObject,
   type SimulationSource,
 } from '../lib/separation-preview';
+
+/** The kind labels, one per object class the walk emits. */
+const KIND_KEYS: Record<InspectedKind, Parameters<typeof tChrome>[0]> = {
+  fill: 'panel.outputPreview.inspectKindFill',
+  stroke: 'panel.outputPreview.inspectKindStroke',
+  fillstroke: 'panel.outputPreview.inspectKindFillstroke',
+  text: 'panel.outputPreview.inspectKindText',
+  image: 'panel.outputPreview.inspectKindImage',
+  vector: 'panel.outputPreview.inspectKindVector',
+  shading: 'panel.outputPreview.inspectKindShading',
+  form: 'panel.outputPreview.inspectKindForm',
+};
+
+/** A component value is a number and is formatted, never translated. The
+ *  document's own identifiers — a colorant, a colour-space resource name —
+ *  ride placeholders verbatim for the same reason in reverse. */
+function componentText(values: readonly number[]): string {
+  return values.map((v) => (Number.isInteger(v) ? v.toFixed(0) : v.toFixed(4))).join('  ');
+}
+
+function objectSwatch(rgb: number[] | null): string | undefined {
+  if (!rgb || rgb.length !== 3) return undefined;
+  const byte = (c: number): number => Math.max(0, Math.min(255, Math.round(c * 255)));
+  return `rgb(${byte(rgb[0])}, ${byte(rgb[1])}, ${byte(rgb[2])})`;
+}
 
 /** A stable test handle for an ink row. The ink NAME is document content and
  *  is shown verbatim; this is only a selector. */
@@ -42,7 +72,7 @@ export function OutputPreviewPanel(): React.ReactElement {
     hideAllInks, densities, setDensity, aliases, sequence, limitPct, setLimitPct, alarm,
     setAlarm, overprint, setOverprint, simulationProfiles, simulationSource,
     setSimulationSource, pickSimulationProfile, setPaperWhite, setBlackInk, simulation,
-    stats, busy, error,
+    stats, busy, error, inspection, inspectBusy, inspectError,
   } = useSeparationPreview();
 
   if (!activeFile) {
@@ -131,6 +161,116 @@ export function OutputPreviewPanel(): React.ReactElement {
             onChange={(e) => setDensity(plate.name, Number(e.target.value))}
           />
         </label>
+      </div>
+    );
+  };
+
+  const inspectedObject = (object: InspectedObject, top: boolean): React.ReactElement => {
+    const colour = object.colour;
+    const state = resolutionState(object);
+    const swatch = objectSwatch(colour.rgb);
+    return (
+      <div
+        key={`${object.index}`}
+        data-testid={top ? 'output-preview-inspect-top' : `output-preview-inspect-under-${object.index}`}
+        className="flex flex-col gap-0.5 px-2 py-1.5 bg-neutral-800/60 border border-neutral-800 rounded"
+      >
+        <div className="flex items-center gap-2">
+          {swatch !== undefined && (
+            <span
+              aria-hidden
+              className="w-4 h-4 rounded-sm border border-neutral-600 shrink-0"
+              style={{ background: swatch }}
+            />
+          )}
+          <span className="text-sm text-neutral-200" data-testid={top ? 'output-preview-inspect-kind' : undefined}>
+            {tChrome(KIND_KEYS[object.kind])}
+          </span>
+        </div>
+        {object.unknown && (
+          <div className="text-xs text-amber-400" data-testid="output-preview-inspect-unknown-object">
+            {tChrome('panel.outputPreview.inspectUnknownObject')}
+          </div>
+        )}
+        {colour.family !== '' && (
+          <div className="text-xs text-neutral-400" data-testid={top ? 'output-preview-inspect-space' : undefined}>
+            {tChrome('panel.outputPreview.inspectSpace', { space: colour.family })}
+          </div>
+        )}
+        {colour.resource !== '' && (
+          <div className="text-xs text-neutral-500">
+            {tChrome('panel.outputPreview.inspectResource', { name: colour.resource })}
+          </div>
+        )}
+        {colour.colorants.length > 0 && (
+          <div className="text-xs text-neutral-400" data-testid={top ? 'output-preview-inspect-colorant' : undefined}>
+            {tChrome('panel.outputPreview.inspectColorant', {
+              names: colour.colorants.join(', '),
+            })}
+          </div>
+        )}
+        {colour.components.length > 0 && (
+          <div
+            className="text-xs text-neutral-400 tabular-nums"
+            data-testid={top ? 'output-preview-inspect-components' : undefined}
+          >
+            {tChrome('panel.outputPreview.inspectComponents', {
+              values: componentText(colour.components),
+            })}
+          </div>
+        )}
+        {colour.base !== '' && (
+          <div className="text-xs text-neutral-500">
+            {tChrome('panel.outputPreview.inspectBase', { space: colour.base })}
+          </div>
+        )}
+        {colour.alternate !== '' && (
+          <div className="text-xs text-neutral-500">
+            {tChrome('panel.outputPreview.inspectAlternate', { space: colour.alternate })}
+          </div>
+        )}
+        {colour.n !== null && (
+          <div className="text-xs text-neutral-500">
+            {tChrome('panel.outputPreview.inspectComponentCount', { count: colour.n })}
+          </div>
+        )}
+        {colour.patternType !== null && (
+          <div className="text-xs text-neutral-500">
+            {tChrome('panel.outputPreview.inspectPatternType', { type: colour.patternType })}
+          </div>
+        )}
+        {object.resolution !== null && object.resolution.bpc > 0 && (
+          <div className="text-xs text-neutral-500">
+            {tChrome('panel.outputPreview.inspectDepth', { bpc: object.resolution.bpc })}
+          </div>
+        )}
+        <div
+          className="text-xs text-neutral-400"
+          data-testid={top ? 'output-preview-inspect-resolution' : undefined}
+        >
+          {state === 'measured' && object.resolution !== null
+            ? tChrome('panel.outputPreview.inspectResolution', {
+                dpi: object.resolution.dpi,
+              })
+            : state === 'unmeasured'
+              ? tChrome('panel.outputPreview.inspectResolutionUnmeasured')
+              : tChrome('panel.outputPreview.inspectResolutionNone')}
+        </div>
+        {state === 'measured' && object.resolution !== null && (
+          <div className="text-xs text-neutral-500 tabular-nums">
+            {tChrome('panel.outputPreview.inspectResolutionAxes', {
+              x: object.resolution.dpiX,
+              y: object.resolution.dpiY,
+              width: object.resolution.width,
+              height: object.resolution.height,
+            })}
+          </div>
+        )}
+        {object.nested && object.form !== '' && (
+          <div className="text-xs text-neutral-500">
+            {tChrome('panel.outputPreview.inspectInsideForm', { name: object.form })}
+          </div>
+        )}
       </div>
     );
   };
@@ -282,6 +422,114 @@ export function OutputPreviewPanel(): React.ReactElement {
             onChange={(e) => setLimitPct(Number(e.target.value))}
           />
         </div>
+      </div>
+
+      {/* The answer to "what is THIS", so it sits above the page-wide figures
+          rather than below them. */}
+      <div className="flex flex-col gap-2" data-testid="output-preview-inspect">
+        <div className="text-xs uppercase tracking-wide text-neutral-500">
+          {tChrome('panel.outputPreview.inspect')}
+        </div>
+        {inspectBusy && (
+          <div className="text-xs text-neutral-500" data-testid="output-preview-inspect-busy">
+            {tChrome('panel.outputPreview.inspectBusy')}
+          </div>
+        )}
+        {inspectError !== '' && (
+          <div className="text-xs text-amber-400" data-testid="output-preview-inspect-error">
+            {tChrome('panel.outputPreview.inspectFailed', {
+              reason: localizeEngineMessage(inspectError),
+            })}
+          </div>
+        )}
+        {inspection === null && !inspectBusy && inspectError === '' && (
+          <div className="text-xs text-neutral-500" data-testid="output-preview-inspect-hint">
+            {tChrome('panel.outputPreview.inspectHint')}
+          </div>
+        )}
+        {/* A readout describes the composite it was measured against, so it
+            is withheld while the page is re-rastering rather than left
+            standing beside a picture it no longer describes. */}
+        {inspection !== null && inspectIsAvailable(busy, stats !== null) && (
+          <div className="flex flex-col gap-1">
+            {/* The ink is the PIXEL's. It is stated once, ABOVE the stack and
+                inside no object: where inks overprint the sheet carries more
+                than any one object laid down, so attributing it to the top
+                object would be a claim about the wrong thing. */}
+            <div className="text-xs uppercase tracking-wide text-neutral-500">
+              {tChrome('panel.outputPreview.inspectInk')}
+            </div>
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5" data-testid="output-preview-inspect-ink">
+              {inspection.ink.plates.map((plate) => (
+                <span
+                  key={plate.name}
+                  className="text-xs text-neutral-300 tabular-nums"
+                  data-testid={`output-preview-inspect-ink-${inkSlug(plate.name)}`}
+                >
+                  {tChrome('panel.outputPreview.inspectInkValue', {
+                    name: plate.name,
+                    pct: plate.pct.toFixed(1),
+                  })}
+                </span>
+              ))}
+            </div>
+            <div
+              className="text-xs text-neutral-300 tabular-nums"
+              data-testid="output-preview-inspect-ink-total"
+            >
+              {tChrome('panel.outputPreview.inspectInkTotal', {
+                pct: inspection.ink.total.toFixed(1),
+              })}
+            </div>
+            <div className="text-xs text-neutral-500">
+              {tChrome('panel.outputPreview.inspectInkNote')}
+            </div>
+            {inspectInkIsAFloor(inspection, complete) && (
+              <div
+                className="text-xs text-amber-400"
+                data-testid="output-preview-inspect-caveat"
+              >
+                {tChrome('panel.outputPreview.inspectInkCaveat')}
+              </div>
+            )}
+            {inspection.objects.length === 0 ? (
+              <div
+                className="text-xs text-neutral-400 mt-1"
+                data-testid="output-preview-inspect-nothing"
+              >
+                {tChrome('panel.outputPreview.inspectNothing')}
+              </div>
+            ) : (
+              <>
+                {inspection.ambiguous && (
+                  <div
+                    className="text-xs text-amber-400 mt-1"
+                    data-testid="output-preview-inspect-ambiguous"
+                  >
+                    {tChrome('panel.outputPreview.inspectAmbiguous')}
+                  </div>
+                )}
+                {inspectedObject(inspection.objects[0], true)}
+                {inspection.objects.length > 1 && (
+                  <div className="text-xs uppercase tracking-wide text-neutral-500 mt-1">
+                    {tChrome('panel.outputPreview.inspectUnder')}
+                  </div>
+                )}
+                {inspection.objects.slice(1).map((object) => inspectedObject(object, false))}
+              </>
+            )}
+            {inspection.unknown.length > 0 && (
+              <div
+                className="text-xs text-amber-400"
+                data-testid="output-preview-inspect-unknown-page"
+              >
+                {tChrome('panel.outputPreview.inspectUnknownPage', {
+                  reasons: inspection.unknown.map(localizeEngineMessage).join(' '),
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {stats && (

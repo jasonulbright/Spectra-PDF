@@ -66,7 +66,8 @@ import type { OverlayWidget } from '../../lib/form-overlay';
 import { ACTION_KIND_LABEL, type ActionTrigger } from '../../lib/field-actions';
 import type { FormFieldValue } from '../../lib/forms';
 import { PageView } from './PageView';
-import { useSeparationRaster } from '../../hooks/useSeparationPreview';
+import { useSeparationInspector, useSeparationRaster } from '../../hooks/useSeparationPreview';
+import { isInspectClick, pointerTravel } from '../../lib/separation-preview';
 import { useFlattenerRegions } from '../../hooks/useFlattenerPreview';
 import FlattenRegionOverlay from './FlattenRegionOverlay';
 import { PageTextLayer } from './PageTextLayer';
@@ -1296,6 +1297,12 @@ function PageCellImpl({
   // Null unless Output Preview is armed AND this page has been rastered
   // through the separation device.
   const separation = useSeparationRaster(docId, page.id);
+  // The point query behind the separation composite. It hangs off the mode
+  // that already exists and adds none of its own.
+  const inspectPoint = useSeparationInspector();
+  // Where the pointer went down, so a drag that panned the board — which
+  // still produces a click in this webview — is not read as a point query.
+  const inspectDown = useRef<{ x: number; y: number } | null>(null);
   // Empty unless the flattener preview is armed and this page belongs to the
   // file it classified.
   const flattenMarks = useFlattenerRegions(docId, page.id);
@@ -2685,6 +2692,11 @@ function PageCellImpl({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLElement>): void => {
     if (!annotateMode) {
+      // The point query's origin, recorded BEFORE the board is handed the
+      // gesture and without altering it: the forward below is unchanged, so
+      // panning, page pickup and the band exclusion all stay exactly as they
+      // are.
+      if (tool === 'outputpreview') inspectDown.current = { x: e.clientX, y: e.clientY };
       // Ctrl-drag in Select mode is the annotation marquee; plain drags stay
       // text selection / page interaction untouched.
       if (tool === 'select' && (e.ctrlKey || e.metaKey) && e.button === 0) {
@@ -3059,6 +3071,17 @@ function PageCellImpl({
       }
       onClick={(e) => {
         e.stopPropagation();
+        // The point query. It runs only over a cell that HAS a separation
+        // composite, because the readout's ink is measured on that page's
+        // plates and there are none until the raster lands. Snapping is off:
+        // snapping a query to a drawn vertex answers about a neighbour.
+        if (tool === 'outputpreview' && separation && inspectPoint) {
+          const travel = pointerTravel(inspectDown.current, { x: e.clientX, y: e.clientY });
+          if (isInspectClick(e.detail, travel)) {
+            const point = pagePoint(e.currentTarget, e.clientX, e.clientY, { snap: false });
+            inspectPoint(docId, page.id, point.x, point.y, viewRotation);
+          }
+        }
         // A click that reached the cell (not an annotation — those stop
         // propagation in select mode) clears the annotation selection.
         // Ctrl-clicks keep it: an additive gesture over empty page must not
