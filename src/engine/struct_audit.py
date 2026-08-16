@@ -184,13 +184,19 @@ def audit_tree(pdf) -> dict:
 
     Returns {"tagged", "nodes" (flat, tree order), "roots", "role_map",
     "annots" (objgen → address), "tagged_mcids" (page → set), "tagged_annots"
-    (set of objgen)}.
+    (set of objgen), "truncated" (the elements whose children the walk did not
+    reach)}.
+
+    The walk is BOUNDED — by `_MAX_DEPTH` and by the visited-set cycle guard —
+    so `nodes` is not always the whole tree. `truncated` names every element
+    whose children were left unwalked, which is what stops a caller reading a
+    partial walk as a complete answer.
     """
     st = pdf.Root.get("/StructTreeRoot")
     if st is None:
         return {
             "tagged": False, "nodes": [], "roots": [], "role_map": {},
-            "tagged_mcids": {}, "tagged_annots": set(),
+            "tagged_mcids": {}, "tagged_annots": set(), "truncated": [],
         }
 
     role_map = _role_map(st)
@@ -200,6 +206,7 @@ def audit_tree(pdf) -> dict:
     roots: list = []
     tagged_mcids: dict = {}
     tagged_annots: set = set()
+    truncated: list = []
     visited: set = set()
 
     def content_of(elem, node: Node, own_page):
@@ -294,6 +301,14 @@ def audit_tree(pdf) -> dict:
                          depth + 1, recurse=fresh)
                 )
                 child_idx += 1
+        elif any(_is_elem(kid) for kid in _kids(elem)):
+            truncated.append(
+                {
+                    "path": [int(v) for v in path],
+                    "page": own_page,
+                    "reason": "depth" if depth >= _MAX_DEPTH else "shared",
+                }
+            )
         return node
 
     idx = 0
@@ -318,6 +333,7 @@ def audit_tree(pdf) -> dict:
         "role_map": role_map,
         "tagged_mcids": tagged_mcids,
         "tagged_annots": tagged_annots,
+        "truncated": truncated,
     }
 
 
