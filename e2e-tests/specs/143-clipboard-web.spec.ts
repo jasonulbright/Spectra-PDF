@@ -225,12 +225,6 @@ function closeCaptureWindow(): boolean {
   return Number(posted) > 0;
 }
 
-function sleepSync(ms: number): void {
-  execFileSync('powershell', ['-NoProfile', '-Command', `Start-Sleep -Milliseconds ${ms}`], {
-    stdio: 'pipe',
-  });
-}
-
 /** Wait until the driver reports exactly `count` window handles. */
 async function waitForHandles(count: number): Promise<string[]> {
   let handles: string[] = [];
@@ -557,12 +551,15 @@ describe('create PDF from the clipboard and from a web page', () => {
         maxPages: 6,
       });
 
-      let closed = false;
-      for (let attempt = 0; attempt < 60 && !closed; attempt += 1) {
-        sleepSync(500);
-        closed = closeCaptureWindow();
-      }
-      expect(closed, 'the capture window never appeared').toBe(true);
+      // The close is posted to a window that has to EXIST to receive it, and
+      // the crawl creates it asynchronously — so the post is retried until one
+      // takes it, and a run where none ever did fails here rather than going
+      // on to read a cancellation that nothing asked for.
+      await browser.waitUntil(async () => closeCaptureWindow(), {
+        timeout: 30_000,
+        interval: 500,
+        timeoutMsg: 'the capture window never appeared',
+      });
 
       // Cancelled, not hung, and not a partial run handed up as a finished
       // one: the dialog reports the cancellation and adds nothing.
