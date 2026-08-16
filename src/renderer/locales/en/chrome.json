@@ -3106,6 +3106,7 @@
   "panel.comments.exportBtn": "Export XFDF…",
   "panel.comments.exported_one": "Exported {{count}} comment to XFDF",
   "panel.comments.exported_other": "Exported {{count}} comments to XFDF",
+  "panel.comments.exportedIncomplete": "Exported {{exported}} of {{found}} comments to XFDF",
   "panel.comments.exporting": "Exporting XFDF…",
   "panel.comments.exportTitle": "Export every comment to an XFDF interchange file",
   "panel.comments.filterAny": "Any",

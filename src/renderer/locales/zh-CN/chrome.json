@@ -3040,6 +3040,7 @@
   "panel.comments.exportBtn": "导出 XFDF…",
   "panel.comments.exportTitle": "把每一条注释导出到 XFDF 交换文件",
   "panel.comments.exported_other": "已把 {{count}} 条注释导出为 XFDF",
+  "panel.comments.exportedIncomplete": "已把 {{found}} 条注释中的 {{exported}} 条导出为 XFDF",
   "panel.comments.exporting": "正在导出 XFDF…",
   "panel.comments.filterAny": "任意",
   "panel.comments.filterAuthor": "作者",

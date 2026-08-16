@@ -3375,6 +3375,7 @@
   "panel.comments.exported_other": "تم تصدير {{count}} تعليق إلى XFDF",
   "panel.comments.exported_two": "تم تصدير {{count}} تعليقين إلى XFDF",
   "panel.comments.exported_zero": "تم تصدير {{count}} تعليقات إلى XFDF",
+  "panel.comments.exportedIncomplete": "تم تصدير {{exported}} من أصل {{found}} تعليق إلى XFDF",
   "panel.comments.exporting": "جارٍ تصدير XFDF…",
   "panel.comments.filterAny": "أي",
   "panel.comments.filterAuthor": "الكاتب",

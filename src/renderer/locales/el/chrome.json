@@ -3107,6 +3107,7 @@
   "panel.comments.exportTitle": "Εξαγωγή κάθε σχολίου σε αρχείο ανταλλαγής XFDF",
   "panel.comments.exported_one": "Εξήχθη {{count}} σχόλιο σε XFDF",
   "panel.comments.exported_other": "Εξήχθησαν {{count}} σχόλια σε XFDF",
+  "panel.comments.exportedIncomplete": "Εξήχθησαν {{exported}} από {{found}} σχόλια σε XFDF",
   "panel.comments.exporting": "Εξαγωγή XFDF…",
   "panel.comments.filterAny": "Οποιοδήποτε",
   "panel.comments.filterAuthor": "Συντάκτης",

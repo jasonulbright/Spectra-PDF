@@ -25,6 +25,19 @@ behave the same way when they cannot tell.
 Imported annotations carry no appearance streams. Viewers, including ours via
 pdf.js, synthesize defaults or regenerate them on load. That is
 the format's own convention, not a shortcut.
+
+Both halves report what they leave behind, in one shape. A comment the export
+cannot carry is a `skipped` record naming the page, the subtype and the reason;
+a comment carried without one of its decorations is a `partial` record naming
+the attribute. `found` counts the comments read and `count` the elements
+written, so a caller can tell a whole export from a partial one without parsing
+the file back. A malformed part of one annotation costs that annotation and
+nothing else: an export that raises leaves the user no file at all, which is
+the largest possible loss for the smallest possible fault.
+
+What counts as a comment is `engine.annotations`'s markup set, so the panel's
+listing and this export cannot disagree about the population. Widgets, links and
+popups are not comments and are not reported as losses.
 """
 
 from __future__ import annotations
@@ -37,6 +50,7 @@ from xml.sax.saxutils import escape
 
 import pikepdf
 from engine.annotations import (
+    _MARKUP,
     relationship_name,
     reply_relationship,
     usable_relationship_name,
@@ -132,43 +146,166 @@ def _str(v) -> str | None:
         return None
 
 
+#: Reasons a comment does not reach the file, and the two ways one attribute of
+#: a carried comment does not. Engine text stays English; the bridge maps a
+#: refusal by its bytes, and these ride in the report as data rather than as a
+#: message.
+_NO_SUBTYPE = "the annotation subtype cannot be read"
+_NO_ELEMENT = "XFDF has no element for this subtype"
+_NO_RECT = "the annotation has no rect"
+_BAD_RECT = "the annotation rect cannot be read"
+_BAD_ANNOTS = "the page annotation list cannot be read"
+_UNREADABLE = "the value cannot be read"
+_INEXPRESSIBLE = "the value has no XFDF spelling"
+
+#: Absent, unreadable, or a list of numbers — the three answers a geometry read
+#: can give. Absent and unreadable are different facts: a document that never
+#: held the key round-trips faithfully with the key still missing, while one
+#: whose key will not read has geometry this export cannot stand behind.
+_ABSENT = "absent"
+_UNREADABLE_STATE = "unreadable"
+_OK = "ok"
+
+
+def _read(annot, key) -> tuple[object | None, bool]:
+    """(value, readable) for one key; an absent key reads as None."""
+    try:
+        return annot.get(key), True
+    except Exception:
+        return None, False
+
+
+def _number(v) -> float | None:
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+
+def _numbers(seq) -> list[float] | None:
+    try:
+        return [float(v) for v in seq]
+    except Exception:
+        return None
+
+
+def _read_numbers(annot, key) -> tuple[str, list[float] | None]:
+    raw, ok = _read(annot, key)
+    if not ok:
+        return _UNREADABLE_STATE, None
+    if raw is None:
+        return _ABSENT, None
+    nums = _numbers(raw)
+    return (_OK, nums) if nums is not None else (_UNREADABLE_STATE, None)
+
+
 def export_xfdf(file: str, output: str) -> dict:
-    """Write every recognized markup annotation to an XFDF file."""
+    """Write every markup annotation XFDF has an element for, and report the
+    comments and the attributes left behind."""
     count = 0
+    found = 0
     by_type: dict[str, int] = {}
     relationships: dict[str, int] = {}
     dangling = 0
+    skipped: list[dict] = []
+    partial: list[dict] = []
     parts: list[str] = []
     with pikepdf.open(file) as pdf:
         for page_index, page in enumerate(pdf.pages):
-            annots = page.obj.get("/Annots")
+            annots, readable = _read(page.obj, "/Annots")
+            if not readable:
+                skipped.append({"page": page_index, "reason": _BAD_ANNOTS})
+                continue
             if annots is None:
                 continue
-            for a in annots:
+            try:
+                listed = list(annots)
+            except Exception:
+                skipped.append({"page": page_index, "reason": _BAD_ANNOTS})
+                continue
+            for a in listed:
                 try:
                     subtype = str(a.get("/Subtype"))
                 except Exception:
+                    found += 1
+                    skipped.append({"page": page_index, "reason": _NO_SUBTYPE})
                     continue
+                # Widgets, links and popups are not comments, so leaving them
+                # out is not a loss and reporting them as one would bury the
+                # losses that are.
+                if subtype not in _MARKUP:
+                    continue
+                found += 1
+                record: dict = {"page": page_index, "subtype": subtype.lstrip("/")}
+                nm_raw, nm_readable = _read(a, "/NM")
+                nm = _str(nm_raw) if nm_readable else None
+                if nm:
+                    record["name"] = nm
+
+                # Held per annotation: one that is skipped further down is
+                # absent from the file, and reporting its thinned attributes
+                # too would describe an element nobody receives.
+                thinned: list[dict] = []
+
+                def note(attribute: str, reason: str = _UNREADABLE) -> None:
+                    thinned.append({**record, "attribute": attribute, "reason": reason})
+
                 element = _SUBTYPE_TO_ELEMENT.get(subtype)
                 if element is None:
+                    skipped.append({**record, "reason": _NO_ELEMENT})
+                    continue
+                record["element"] = element
+                rect_state, rect = _read_numbers(a, "/Rect")
+                if rect_state == _ABSENT:
+                    # Rect is required of every annotation (ISO 32000-2, 12.5.2,
+                    # Table 166) and is what places an XFDF element on its page;
+                    # an element with no rect is one our own import refuses.
+                    skipped.append({**record, "reason": _NO_RECT})
+                    continue
+                if rect_state != _OK or len(rect) != 4:
+                    skipped.append({**record, "reason": _BAD_RECT})
                     continue
                 attrs: list[str] = [f'page="{page_index}"']
-                rect = a.get("/Rect")
-                if rect is not None:
-                    attrs.append(
-                        'rect="' + ",".join(_fmt(float(v)) for v in rect) + '"'
-                    )
-                color = _color_hex(a.get("/C")) if a.get("/C") is not None else None
-                if color:
-                    attrs.append(f'color="{color}"')
-                ic = _color_hex(a.get("/IC")) if a.get("/IC") is not None else None
-                if ic:
-                    attrs.append(f'interior-color="{ic}"')
-                bs = a.get("/BS")
-                if bs is not None and bs.get("/W") is not None:
-                    attrs.append(f'width="{_fmt(float(bs.get("/W")))}"')
-                if a.get("/CA") is not None:
-                    attrs.append(f'opacity="{_fmt(float(a.get("/CA")))}"')
+                attrs.append('rect="' + ",".join(_fmt(v) for v in rect) + '"')
+                # A skip decided after this point still has to leave the report
+                # untouched, so the thread counters land at the commit below.
+                pending_relationship: str | None = None
+                pending_dangling = False
+                geometry_failed: str | None = None
+                for key, attr in (("/C", "color"), ("/IC", "interior-color")):
+                    raw, readable = _read(a, key)
+                    if not readable:
+                        note(attr)
+                        continue
+                    if raw is None:
+                        continue
+                    spelled = _color_hex(raw)
+                    if spelled:
+                        attrs.append(f'{attr}="{spelled}"')
+                    else:
+                        note(attr, _INEXPRESSIBLE)
+                bs, readable = _read(a, "/BS")
+                if not readable:
+                    note("width")
+                elif bs is not None:
+                    raw, readable = _read(bs, "/W")
+                    if not readable:
+                        note("width")
+                    elif raw is not None:
+                        width = _number(raw)
+                        if width is None:
+                            note("width")
+                        else:
+                            attrs.append(f'width="{_fmt(width)}"')
+                raw, readable = _read(a, "/CA")
+                if not readable:
+                    note("opacity")
+                elif raw is not None:
+                    opacity = _number(raw)
+                    if opacity is None:
+                        note("opacity")
+                    else:
+                        attrs.append(f'opacity="{_fmt(opacity)}"')
                 for key, attr in (
                     ("/T", "title"),
                     ("/Subj", "subject"),
@@ -176,11 +313,26 @@ def export_xfdf(file: str, output: str) -> dict:
                     ("/CreationDate", "creationdate"),
                     ("/NM", "name"),
                 ):
-                    v = _str(a.get(key))
-                    if v:
+                    raw, readable = _read(a, key)
+                    if not readable:
+                        note(attr)
+                        continue
+                    if raw is None:
+                        continue
+                    v = _str(raw)
+                    if v is None:
+                        note(attr)
+                    elif v:
                         attrs.append(f'{attr}="{escape(v, {chr(34): "&quot;"})}"')
-                if a.get("/F") is not None:
-                    names = _flags_names(int(a.get("/F")))
+                raw, readable = _read(a, "/F")
+                if not readable:
+                    note("flags")
+                elif raw is not None:
+                    try:
+                        names = _flags_names(int(raw))
+                    except Exception:
+                        names = None
+                        note("flags")
                     if names:
                         attrs.append(f'flags="{names}"')
                 # Review thread: reply target, the relationship, and status.
@@ -209,52 +361,107 @@ def export_xfdf(file: str, output: str) -> dict:
                         )
                     attrs.append(f'inreplyto="{escape(irt_name, _QUOT)}"')
                     attrs.append(f'replyType="{escape(spelling, _QUOT)}"')
-                    relationships[spelling] = relationships.get(spelling, 0) + 1
+                    pending_relationship = spelling
                 elif relationship.name is not None:
-                    dangling += 1
+                    pending_dangling = True
                 for key, attr in (("/State", "state"), ("/StateModel", "statemodel")):
-                    v = _str(a.get(key))
-                    if v:
+                    raw, readable = _read(a, key)
+                    if not readable:
+                        note(attr)
+                        continue
+                    if raw is None:
+                        continue
+                    v = _str(raw)
+                    if v is None:
+                        note(attr)
+                    elif v:
                         attrs.append(f'{attr}="{escape(v, {chr(34): "&quot;"})}"')
-                if subtype == "/Text" and a.get("/Name") is not None:
-                    attrs.append(f'icon="{str(a.get("/Name")).lstrip("/")}"')
-                # Geometry per subtype.
+                if subtype == "/Text":
+                    raw, readable = _read(a, "/Name")
+                    if not readable:
+                        note("icon")
+                    elif raw is not None:
+                        icon = _str(raw)
+                        if icon is None:
+                            note("icon")
+                        else:
+                            attrs.append(f'icon="{icon.lstrip("/")}"')
+                # Geometry per subtype. Geometry IS the annotation: a shape
+                # whose points will not read exports as an empty box that a
+                # re-import turns into an invisible annotation, so the
+                # annotation is skipped instead of thinned.
                 children: list[str] = []
                 if subtype == "/Line":
-                    line = a.get("/L")
-                    if line is not None and len(line) == 4:
-                        pts = [float(v) for v in line]
+                    state, pts = _read_numbers(a, "/L")
+                    if state == _UNREADABLE_STATE:
+                        geometry_failed = "/L"
+                    elif state == _OK and len(pts) == 4:
                         attrs.append(f'start="{_fmt(pts[0])},{_fmt(pts[1])}"')
                         attrs.append(f'end="{_fmt(pts[2])},{_fmt(pts[3])}"')
-                    le = a.get("/LE")
-                    if le is not None and len(le) == 2:
-                        attrs.append(f'head="{str(le[0]).lstrip("/")}"')
-                        attrs.append(f'tail="{str(le[1]).lstrip("/")}"')
+                    elif state == _OK:
+                        note("start", _INEXPRESSIBLE)
+                    le, readable = _read(a, "/LE")
+                    if not readable:
+                        note("head")
+                    elif le is not None:
+                        try:
+                            ends = [_str(v) for v in le]
+                        except Exception:
+                            ends = None
+                        if ends is None or len(ends) != 2 or None in ends:
+                            note("head", _INEXPRESSIBLE)
+                        else:
+                            attrs.append(f'head="{ends[0].lstrip("/")}"')
+                            attrs.append(f'tail="{ends[1].lstrip("/")}"')
                 if subtype in ("/Polygon", "/PolyLine"):
-                    verts = a.get("/Vertices")
-                    if verts is not None:
-                        nums = [float(v) for v in verts]
+                    state, nums = _read_numbers(a, "/Vertices")
+                    if state == _UNREADABLE_STATE:
+                        geometry_failed = "/Vertices"
+                    elif state == _OK:
                         pairs = ";".join(
                             f"{_fmt(nums[i])},{_fmt(nums[i + 1])}" for i in range(0, len(nums) - 1, 2)
                         )
                         children.append(f"<vertices>{pairs}</vertices>")
-                    be = a.get("/BE")
-                    if be is not None and str(be.get("/S")) == "/C":
-                        attrs.append('style="cloudy"')
-                        if be.get("/I") is not None:
-                            attrs.append(f'intensity="{_fmt(float(be.get("/I")))}"')
+                    be, readable = _read(a, "/BE")
+                    if not readable:
+                        note("style")
+                    elif be is not None:
+                        shape, readable = _read(be, "/S")
+                        if not readable:
+                            note("style")
+                        elif str(shape) == "/C":
+                            attrs.append('style="cloudy"')
+                            raw, readable = _read(be, "/I")
+                            if not readable:
+                                note("intensity")
+                            elif raw is not None:
+                                intensity = _number(raw)
+                                if intensity is None:
+                                    note("intensity")
+                                else:
+                                    attrs.append(f'intensity="{_fmt(intensity)}"')
                 if subtype in ("/Highlight", "/Underline", "/StrikeOut", "/Squiggly"):
-                    qp = a.get("/QuadPoints")
-                    if qp is not None:
-                        attrs.append(
-                            'coords="' + ",".join(_fmt(float(v)) for v in qp) + '"'
-                        )
+                    state, qp = _read_numbers(a, "/QuadPoints")
+                    if state == _UNREADABLE_STATE:
+                        geometry_failed = "/QuadPoints"
+                    elif state == _OK:
+                        attrs.append('coords="' + ",".join(_fmt(v) for v in qp) + '"')
                 if subtype == "/Ink":
-                    ink = a.get("/InkList")
-                    if ink is not None:
+                    ink, readable = _read(a, "/InkList")
+                    if not readable:
+                        geometry_failed = "/InkList"
+                    elif ink is not None:
                         gestures = []
-                        for stroke in ink:
-                            nums = [float(v) for v in stroke]
+                        try:
+                            strokes = list(ink)
+                        except Exception:
+                            strokes = None
+                            geometry_failed = "/InkList"
+                        for stroke in strokes or ():
+                            nums = _numbers(stroke)
+                            if nums is None:
+                                geometry_failed = "/InkList"
+                                break
                             gestures.append(
                                 "<gesture>"
                                 + ";".join(
@@ -263,24 +470,39 @@ def export_xfdf(file: str, output: str) -> dict:
                                 )
                                 + "</gesture>"
                             )
-                        children.append("<inklist>" + "".join(gestures) + "</inklist>")
+                        if geometry_failed is None:
+                            children.append("<inklist>" + "".join(gestures) + "</inklist>")
                 if subtype == "/FreeText":
-                    it = a.get("/IT")
-                    if it is not None:
-                        attrs.append(f'IT="{str(it).lstrip("/")}"')
-                    cl = a.get("/CL")
-                    if cl is not None:
-                        attrs.append(
-                            'callout-line="' + ",".join(_fmt(float(v)) for v in cl) + '"'
-                        )
-                    rd = a.get("/RD")
-                    if rd is not None:
-                        attrs.append(
-                            'fringe="' + ",".join(_fmt(float(v)) for v in rd) + '"'
-                        )
-                contents = _str(a.get("/Contents"))
-                if contents:
-                    children.append(f"<contents>{escape(contents)}</contents>")
+                    it, readable = _read(a, "/IT")
+                    if not readable:
+                        note("IT")
+                    elif it is not None:
+                        intent = _str(it)
+                        if intent is None:
+                            note("IT")
+                        else:
+                            attrs.append(f'IT="{intent.lstrip("/")}"')
+                    for key, attr in (("/CL", "callout-line"), ("/RD", "fringe")):
+                        state, nums = _read_numbers(a, key)
+                        if state == _UNREADABLE_STATE:
+                            note(attr)
+                        elif state == _OK:
+                            attrs.append(f'{attr}="' + ",".join(_fmt(v) for v in nums) + '"')
+                raw, readable = _read(a, "/Contents")
+                if not readable:
+                    note("contents")
+                elif raw is not None:
+                    contents = _str(raw)
+                    if contents is None:
+                        note("contents")
+                    elif contents:
+                        children.append(f"<contents>{escape(contents)}</contents>")
+                if geometry_failed is not None:
+                    skipped.append(
+                        {**record, "reason": f"the {geometry_failed} geometry cannot be read"}
+                    )
+                    continue
+                partial.extend(thinned)
                 body = "".join(children)
                 parts.append(
                     f"<{element} {' '.join(attrs)}>{body}</{element}>"
@@ -288,8 +510,13 @@ def export_xfdf(file: str, output: str) -> dict:
                     else f"<{element} {' '.join(attrs)}/>"
                 )
                 count += 1
-                key = element
-                by_type[key] = by_type.get(key, 0) + 1
+                by_type[element] = by_type.get(element, 0) + 1
+                if pending_relationship is not None:
+                    relationships[pending_relationship] = (
+                        relationships.get(pending_relationship, 0) + 1
+                    )
+                if pending_dangling:
+                    dangling += 1
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         f'<xfdf xmlns="{XFDF_NS}" xml:space="preserve">\n<annots>\n'
@@ -300,9 +527,16 @@ def export_xfdf(file: str, output: str) -> dict:
         f.write(xml)
     out = {
         "output": output,
+        # `count` is what the file holds, `found` is what the document offered,
+        # and every comment between the two carries a `skipped` record. A page
+        # whose annotation list will not read is reported without either — its
+        # comments were never seen, so they cannot be counted as found.
         "count": count,
+        "found": found,
         "by_type": by_type,
         "relationships": relationships,
+        "skipped": skipped,
+        "partial": partial,
     }
     if dangling:
         # A /RT with no /IRT names no relationship, so nothing is written for
