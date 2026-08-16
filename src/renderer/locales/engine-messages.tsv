@@ -36,6 +36,18 @@ batch_ocr.sourceFolderFound	pattern	batch_ocr,create_pdf_folders,guided_actions,
 budget.timeBudgetNeedsPositive	exact	budget	a time budget needs a positive floor
 check.fileFound	pattern	check,rebuild,recognize,recover,repair	File not found: {{file}}
 color_spaces.expectedNumberGotProcedure	exact	color_spaces	expected number, got procedure
+comment_summary.commentColumnDoesFit	pattern	comment_summary	the comment column does not fit the sheet: {{gutter}}
+comment_summary.commentColumnPlacement	pattern	comment_summary	not a comment column placement: {{placement}}
+comment_summary.commentColumnWidthNumber	exact	comment_summary	the comment column width is a number of points
+comment_summary.commentFilter	pattern	comment_summary	not a comment filter: {{names}}
+comment_summary.commentFilterSetNamed	exact	comment_summary	a comment filter is a set of named conditions
+comment_summary.commentSubtypeSummaryFilter	pattern	comment_summary	not a comment subtype the summary can filter on: {{subtypes}}
+comment_summary.commentSummaryMode	pattern	comment_summary	not a comment summary mode: {{mode}}
+comment_summary.documentCommentsSummarize	exact	comment_summary	this document has no comments to summarize
+comment_summary.pageRangeSummaryRead	pattern	comment_summary	not a page range the summary can read: {{pages}}
+comment_summary.paperSizeSummaryUse	pattern	comment_summary	not a paper size this summary can use: {{paper}}
+comment_summary.summarySheetSizeWidth	exact	comment_summary	a summary sheet size is a width and a height in points
+comment_summary.waySortComments	pattern	comment_summary	not a way to sort comments: {{sort}}
 compare.binaryPpmP	pattern	compare	Not a binary PPM (P6): {{v0}}
 compare.dpiMustBetween	exact	compare	dpi must be between 36 and 300.
 compare.ghostscriptRenderFailed	pattern	compare	Ghostscript render failed for {{v0}}: {{v1}}

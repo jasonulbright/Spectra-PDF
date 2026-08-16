@@ -161,6 +161,11 @@ pub enum CliCommand {
     PreflightSweep(PreflightSweepArgs),
     /// List every markup comment in the document (JSON)
     CommentsList(AccessibilityArgs),
+    /// List every comment with its whole review model — dates, subject,
+    /// state and reply thread — ordered and narrowed (JSON)
+    CommentsReview(CommentsReviewArgs),
+    /// Write a comment summary PDF — page images, entries and connector lines
+    CommentsSummary(CommentsSummaryArgs),
     /// Delete all markup comments (keeps links and form fields)
     CommentsDeleteAll(CommentsDeleteArgs),
     /// List link regions (JSON)
@@ -1188,6 +1193,74 @@ pub struct CommentsDeleteArgs {
     /// Output PDF file
     #[arg(short, long)]
     pub output: PathBuf,
+}
+
+#[derive(Args)]
+pub struct CommentsReviewArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Order: page (default), author, date or type. Ties always break to
+    /// document order, so the ordering is total
+    #[arg(long, default_value = "page")]
+    pub sort: String,
+    /// Keep only these authors (repeatable)
+    #[arg(long = "author")]
+    pub authors: Vec<String>,
+    /// Keep only these comment subtypes, e.g. Highlight (repeatable)
+    #[arg(long = "type")]
+    pub subtypes: Vec<String>,
+    /// Keep only these review states, e.g. Accepted (repeatable)
+    #[arg(long = "state")]
+    pub states: Vec<String>,
+    /// Keep only comments on these pages, e.g. 1,3,5-9
+    #[arg(long)]
+    pub pages: Option<String>,
+    /// Keep only comments that carry text
+    #[arg(long)]
+    pub with_body: bool,
+}
+
+#[derive(Args)]
+pub struct CommentsSummaryArgs {
+    /// Input PDF file
+    pub input: PathBuf,
+    /// Output PDF file — the summary document
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// comments_only or document_and_comments (default)
+    #[arg(long, default_value = "document_and_comments")]
+    pub mode: String,
+    /// Where the comment column goes: auto (default), beside, beneath or
+    /// separate
+    #[arg(long, default_value = "auto")]
+    pub placement: String,
+    /// Draw no lines from a comment's position to its entry
+    #[arg(long)]
+    pub no_connectors: bool,
+    /// Comment column width (or height, beneath) in points
+    #[arg(long, default_value = "216")]
+    pub gutter: f64,
+    /// Sheet size: letter (default), legal, tabloid, a3, a4 or a5
+    #[arg(long, default_value = "letter")]
+    pub paper: String,
+    /// Order: page (default), author, date or type
+    #[arg(long, default_value = "page")]
+    pub sort: String,
+    /// Keep only these authors (repeatable)
+    #[arg(long = "author")]
+    pub authors: Vec<String>,
+    /// Keep only these comment subtypes (repeatable)
+    #[arg(long = "type")]
+    pub subtypes: Vec<String>,
+    /// Keep only these review states (repeatable)
+    #[arg(long = "state")]
+    pub states: Vec<String>,
+    /// Keep only comments on these pages, e.g. 1,3,5-9
+    #[arg(long)]
+    pub pages: Option<String>,
+    /// Keep only comments that carry text
+    #[arg(long)]
+    pub with_body: bool,
 }
 
 #[derive(Args)]
@@ -2466,6 +2539,38 @@ fn resolve_tesseract() -> PathBuf {
 /// then refused, never crashed.
 fn resolve_fonts() -> PathBuf {
     exe_dir().join("fonts")
+}
+
+/// The comment filter both comment commands take, as the engine's own shape.
+///
+/// A condition the caller did not give is ABSENT, never empty: the engine
+/// refuses an unknown key and reads an empty list as "no condition", so
+/// sending every key with an empty value would narrow nothing while claiming
+/// to have been asked to.
+fn comment_filter(
+    authors: &[String],
+    subtypes: &[String],
+    states: &[String],
+    pages: &Option<String>,
+    with_body: bool,
+) -> serde_json::Value {
+    let mut filter = serde_json::Map::new();
+    if !authors.is_empty() {
+        filter.insert("authors".into(), json!(authors));
+    }
+    if !subtypes.is_empty() {
+        filter.insert("subtypes".into(), json!(subtypes));
+    }
+    if !states.is_empty() {
+        filter.insert("states".into(), json!(states));
+    }
+    if let Some(spec) = pages {
+        filter.insert("pages".into(), json!(spec));
+    }
+    if with_body {
+        filter.insert("has_body".into(), json!(true));
+    }
+    serde_json::Value::Object(filter)
 }
 
 /// A `--pages` value as 1-based page numbers. An empty list is refused: the
@@ -4097,6 +4202,40 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         CliCommand::CommentsList(args) => engine.call(
             "list_annotations",
             json!({ "file": abs(&args.input).to_string_lossy() }),
+        ),
+
+        CliCommand::CommentsReview(args) => engine.call(
+            "list_comments",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "sort": args.sort,
+                "filter": comment_filter(
+                    &args.authors, &args.subtypes, &args.states, &args.pages,
+                    args.with_body,
+                ),
+            }),
+        ),
+
+        // The furniture stays the engine's English here: a command line has no
+        // UI language to resolve it from, and inventing one would put a second
+        // answer in the product for what a summary's headings say.
+        CliCommand::CommentsSummary(args) => engine.call(
+            "summarize_comments",
+            json!({
+                "file": abs(&args.input).to_string_lossy(),
+                "output": abs(&args.output).to_string_lossy(),
+                "mode": args.mode,
+                "placement": args.placement,
+                "connectors": !args.no_connectors,
+                "gutter": args.gutter,
+                "paper": args.paper,
+                "sort": args.sort,
+                "filter": comment_filter(
+                    &args.authors, &args.subtypes, &args.states, &args.pages,
+                    args.with_body,
+                ),
+                "font_path": resolve_fonts().to_string_lossy(),
+            }),
         ),
 
         CliCommand::LinkList(args) => engine.call(

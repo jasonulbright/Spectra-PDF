@@ -39,6 +39,15 @@ def tmp_dir(tmp_path):
 
 
 class TestListAnnotations:
+    def test_returns_exactly_five_fields(self, tmp_dir):
+        """The overview's shape is depended on elsewhere — the panel's count and
+        the spelling checker's annotation walk both read it — so the richer
+        review model is a SEPARATE op rather than a widening of this one."""
+        src = os.path.join(tmp_dir, "shape.pdf")
+        _pdf(src, [("/Highlight", "important", "Ada")])
+        entry = list_annotations(src)["annotations"][0]
+        assert set(entry) == {"page", "subtype", "rect", "contents", "author"}
+
     def test_lists_markup_with_type_and_content(self, tmp_dir):
         src = os.path.join(tmp_dir, "s.pdf")
         _pdf(src, [
