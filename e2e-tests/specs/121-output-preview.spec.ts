@@ -314,18 +314,85 @@ async function pageBox(): Promise<{ x: number; y: number; w: number; h: number }
   });
 }
 
+/**
+ * The viewport point a fraction of the page cell sits at, scrolled into reach
+ * and measured from the read that proved it had stopped moving.
+ *
+ * A page taller than the reading column puts its lower part below the fold,
+ * and a pointer action refuses a move outside the viewport outright — so the
+ * column is scrolled until the point is inside it. The coordinate comes from
+ * the same read that hit-tested it, never from a second one: the column is
+ * virtualized and repositions its rows, so a coordinate measured before that
+ * lands names a place the page has since left.
+ */
+async function reachablePointOnPage(u: number, v: number): Promise<{ x: number; y: number }> {
+  let held = { x: 0, y: 0 };
+  let previous: string | null = null;
+  await browser.waitUntil(
+    async () => {
+      const now = await browser.execute(
+        function (fu: number, fv: number) {
+          const cell = document.querySelector('[data-page-id]') as HTMLElement | null;
+          const column = document.querySelector(
+            '[data-testid="document-view"]',
+          ) as HTMLElement | null;
+          if (!cell || !column) return { x: 0, y: 0, key: '', onPage: false };
+          const point = (): { x: number; y: number } => {
+            const r = cell.getBoundingClientRect();
+            return { x: r.left + r.width * fu, y: r.top + r.height * fv };
+          };
+          // `clientHeight`, not the bounding box: the column carries a
+          // horizontal scrollbar, and the strip it occupies is inside the box
+          // but not over the page.
+          const margin = 8;
+          const top = column.getBoundingClientRect().top + margin;
+          const bottom = column.getBoundingClientRect().top + column.clientHeight - margin;
+          const wanted = point();
+          if (wanted.y > bottom) column.scrollTop += wanted.y - bottom;
+          else if (wanted.y < top) column.scrollTop -= top - wanted.y;
+          const now = point();
+          const x = Math.round(now.x);
+          const y = Math.round(now.y);
+          const cellBox = cell.getBoundingClientRect();
+          return {
+            x,
+            y,
+            key: `${cellBox.left},${cellBox.top},${cellBox.width},${cellBox.height}`,
+            // Reachable AND over the page: a coordinate the pointer can be
+            // moved to is not yet a coordinate the page's own handler sees.
+            onPage:
+              x >= 0 &&
+              y >= 0 &&
+              x < window.innerWidth &&
+              y < window.innerHeight &&
+              cell.contains(document.elementFromPoint(x, y)),
+          };
+        },
+        u,
+        v,
+      );
+      const settled = previous === now.key;
+      previous = now.key;
+      held = { x: now.x, y: now.y };
+      return settled && now.onPage;
+    },
+    {
+      timeout: 30_000,
+      interval: 200,
+      timeoutMsg: `the page never brought the point at (${u}, ${v}) into reach`,
+    },
+  );
+  return held;
+}
+
 /** A real press and release on the page, at a fraction of the cell. The
  *  gesture goes through the canvas' own handlers rather than a test handle:
  *  what is under test is the routing, and a handle would bypass it. */
 async function clickPageAt(u: number, v: number): Promise<void> {
-  const box = await pageBox();
+  const at = await reachablePointOnPage(u, v);
   await browser
     .action('pointer')
-    .move({
-      x: Math.round(box.x + box.w * u),
-      y: Math.round(box.y + box.h * v),
-      duration: 0,
-    })
+    .move({ x: at.x, y: at.y, duration: 0 })
     .down()
     .pause(30)
     .up()
