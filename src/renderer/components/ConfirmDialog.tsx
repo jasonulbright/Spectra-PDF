@@ -17,9 +17,12 @@ interface ConfirmDialogProps {
   kind?: 'unsaved' | 'proceed' | 'notice';
   /** Title override; defaults per kind. */
   title?: string;
+  /** 'proceed' only: the affirmative button's own wording, for a refusal that
+   * has a specific action to offer rather than a generic Continue. */
+  affirmLabel?: string;
 }
 
-export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title }: ConfirmDialogProps): React.ReactElement {
+export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title, affirmLabel }: ConfirmDialogProps): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   return (
@@ -80,7 +83,8 @@ export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title
               // not commit it, so focus starts on Cancel (regression).
               autoFocus={kind !== 'proceed'}
             >
-              {tChrome(kind === 'proceed' ? 'dialog.confirm.continue' : 'dialog.common.save')}
+              {affirmLabel ??
+                tChrome(kind === 'proceed' ? 'dialog.confirm.continue' : 'dialog.common.save')}
             </button>
           </div>
           )}

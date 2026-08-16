@@ -14,6 +14,7 @@ import {
   type BatchReport,
 } from '../lib/batch-ocr';
 import { createBatchIo } from '../lib/batch-ocr-io';
+import { claimOutputRoot } from '../lib/output-root-claim';
 import { formatBatchLog, batchLogFileName } from '../lib/batch-log';
 import { getSettings } from '../lib/app-settings';
 import {
@@ -423,6 +424,13 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
 
   const start = async (): Promise<void> => {
     if (!canStart || !source || !dest || !entries) return;
+    // Two windows sweeping into one output tree overwrite each other file by
+    // file, and neither the commit gate nor the per-file lock spans windows.
+    const root = await claimOutputRoot(dest);
+    if (!root.granted) {
+      setError(root.message);
+      return;
+    }
     setPhase('running');
     setError(null);
     setProgress(null);
@@ -508,6 +516,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
       setPhase('setup');
     } finally {
       cancelOcrRef.current = null;
+      await root.release();
     }
   };
 

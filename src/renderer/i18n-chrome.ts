@@ -28,6 +28,11 @@ export const CHROME_STRINGS = {
   'chrome.status.clearFormsTitle': 'Discard all pending form values',
   'chrome.status.clearMarksTitle': 'Clear all pending redaction marks',
   'chrome.status.applyChanges': 'Apply changes',
+  // One engine serves every window, strictly serially, so a run started in
+  // another window is why this one's next operation waits.
+  'chrome.status.otherWindowBusy': 'Another window is working',
+  'chrome.status.otherWindowBusyTitle':
+    'One processing engine is shared between windows — this window’s next operation runs when the other finishes',
   'chrome.status.comments': 'Comments',
   'chrome.status.commentsTitle': 'Show annotation notes',
   'chrome.status.currentPage': 'Current page',

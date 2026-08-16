@@ -129,6 +129,12 @@ export interface AppCommandHandlers {
   exit(): Promise<void>;
   /** Hide the window to the system tray (Window ▸ Minimize to Tray). */
   minimizeToTray(): Promise<void>;
+  /** Open an empty second workspace (Window ▸ New Window). */
+  newWindow(): Promise<void>;
+  /** Move the active document to a new window (Window ▸ Move to New Window).
+   * The document LEAVES this workspace: pending page edits commit first, the
+   * claim is released, and only the path crosses. */
+  moveToNewWindow(): Promise<void>;
   /** Remove the checked categories of hidden information from a document.
    *
    * The pass is a full rewrite by construction — collapsing prior revisions is

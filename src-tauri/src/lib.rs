@@ -11,6 +11,7 @@ mod web_capture;
 mod engine;
 mod printers;
 pub mod scanner;
+pub mod app_windows;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
@@ -22,11 +23,6 @@ use tauri::{
 /// When true, the app is exiting for real — don't prevent exit.
 pub static QUITTING: AtomicBool = AtomicBool::new(false);
 
-/// Which window backdrop setup actually applied ("mica" or "none"). The
-/// renderer keys translucent styling on this and keeps today's solid look
-/// otherwise.
-pub struct BackdropState(pub &'static str);
-
 /// Mica exists from Windows 11 (build 22000; window-vibrancy uses the
 /// documented backdrop API from 22523 and a fallback attribute below it).
 /// Windows 10 has no equivalent worth shipping — its acrylic path lags
@@ -37,7 +33,7 @@ fn backdrop_supported(build: u32) -> bool {
 
 /// Is "Transparency effects" on? (Settings ▸ Personalization ▸ Colours.)
 /// Absent value means the Windows default, which is ON.
-fn transparency_effects_enabled() -> bool {
+pub(crate) fn transparency_effects_enabled() -> bool {
     winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
         .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
         .and_then(|k| k.get_value::<u32, _>("EnableTransparency"))
@@ -45,7 +41,7 @@ fn transparency_effects_enabled() -> bool {
         .unwrap_or(true)
 }
 
-fn is_remote_session() -> bool {
+pub(crate) fn is_remote_session() -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_REMOTESESSION};
     unsafe { GetSystemMetrics(SM_REMOTESESSION) != 0 }
 }
@@ -60,7 +56,7 @@ fn is_remote_session() -> bool {
 /// the opaque fallback is the correct presentation there.
 ///
 /// Pure so it can be pinned; the three environment reads stay outside it.
-fn wants_backdrop(build: u32, remote: bool, transparency_on: bool) -> bool {
+pub(crate) fn wants_backdrop(build: u32, remote: bool, transparency_on: bool) -> bool {
     backdrop_supported(build) && !remote && transparency_on
 }
 
@@ -68,7 +64,7 @@ fn wants_backdrop(build: u32, remote: bool, transparency_on: bool) -> bool {
 /// single-instance hijacking and tray-persistence are disabled so each WDIO
 /// session gets a clean launch and exit. Enabled via the SPECTRAPDF_E2E
 /// environment variable.
-fn is_e2e_mode() -> bool {
+pub(crate) fn is_e2e_mode() -> bool {
     std::env::var("SPECTRAPDF_E2E").is_ok()
 }
 
@@ -78,6 +74,10 @@ pub fn run() {
 
     let mut builder = tauri::Builder::default()
         .manage(engine::EngineState::new())
+        .manage(engine::EngineRouter::new())
+        .manage(app_windows::BackdropState::new())
+        .manage(app_windows::WindowRegistry::new())
+        .manage(app_windows::ClaimState::new())
         .manage(scanner::ScannerSessions::new())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -108,15 +108,11 @@ pub fn run() {
                     .map(|a| commands::canonical_path(a))
                     .collect();
                 let merge = argv.iter().any(|a| a == "--merge");
-
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                    if !files.is_empty() {
-                        let payload = serde_json::json!({ "files": files, "merge": merge });
-                        let _ = window.emit("app:openFile", payload);
-                    }
-                }
+                // One target window, chosen by ownership then focus: broadcast
+                // here mints an independent working copy of the same file per
+                // window, and the loser's whole edit session vanishes on
+                // whichever save lands last.
+                app_windows::route_open(app, files, merge);
             }),
         );
     }
@@ -209,55 +205,28 @@ pub fn run() {
             commands::set_startup_enabled,
             commands::set_start_minimized,
             commands::confirm_close,
+            commands::close_window,
+            commands::request_quit,
             commands::hide_to_tray,
+            app_windows::open_new_window,
+            app_windows::claim_document,
+            app_windows::release_document,
+            app_windows::claim_output_root,
+            app_windows::release_output_root,
+            app_windows::focus_app_window,
+            app_windows::open_in_window,
+            app_windows::take_pending_opens,
             snapshot::copy_image_to_clipboard,
             snapshot::save_snapshot_png,
             clipboard_read::read_clipboard_source,
             web_capture::capture_web_page,
         ])
         .setup(move |app| {
-            // The main window is built here rather than in tauri.conf.json:
-            // `transparent` is a creation-time property (tao's DWM
-            // blur-behind region + wry's WebView2 background color) and is
-            // only wanted where a backdrop can compose. Tauri's own
-            // windowEffects/set_effects path discards the vibrancy Result,
-            // so Mica is applied directly and the outcome recorded for the
-            // renderer to key translucent styling on.
-            // Both halves are required: the OS must HAVE Mica, and DWM must be
-            // going to draw it. Checking only the first is what let a
-            // transparency-effects-off machine get chrome styled for a
-            // backdrop that was never composed.
-            // E2E-only lever: the battery's fallback spec launches with
+            // The battery's fallback spec launches with
             // SPECTRAPDF_E2E_FORCE_OPAQUE=1 so the opaque presentation runs
             // live on a machine where Mica would compose (spec 94; the RDP/
             // transparency-off case is otherwise unreachable on a dev box).
-            // Gated on e2e mode so it is not a shipped configuration channel.
-            let force_opaque =
-                e2e && std::env::var("SPECTRAPDF_E2E_FORCE_OPAQUE").is_ok();
-            let wants_backdrop = wants_backdrop(
-                windows_version::OsVersion::current().build,
-                is_remote_session(),
-                transparency_effects_enabled(),
-            ) && !force_opaque;
-            let window =
-                tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
-                    .title("Spectra PDF")
-                    .inner_size(1200.0, 800.0)
-                    .min_inner_size(800.0, 600.0)
-                    .center()
-                    .visible(false)
-                    .transparent(wants_backdrop)
-                    .build()?;
-            let backdrop = if wants_backdrop && window_vibrancy::apply_mica(&window, None).is_ok()
-            {
-                "mica"
-            } else {
-                // A transparent window whose HTML paints opaque renders
-                // identically to an opaque one, so a failed apply on a
-                // supported build still degrades cleanly.
-                "none"
-            };
-            app.manage(BackdropState(backdrop));
+            app_windows::build_app_window(&app.handle().clone(), app_windows::MAIN_LABEL, e2e, false)?;
 
             // Watched folders: resume every enabled watcher. Deliberately
             // BEFORE the e2e early-return — the watchers are part of the
@@ -292,18 +261,13 @@ pub fn run() {
                 .menu(&menu)
                 .tooltip("Spectra PDF")
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
+                    // Every workspace window comes back: the tray hides them
+                    // all, so restoring only one strands the rest.
+                    "show" => app_windows::show_all_app_windows(app),
                     "merge" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            let _ = window.emit("app:trayAction", "merge");
-                        }
+                        let target = app_windows::route_target(app);
+                        app_windows::focus_label(app, &target);
+                        let _ = app.emit_to(target.as_str(), "app:trayAction", "merge");
                     }
                     "quit" => {
                         QUITTING.store(true, Ordering::SeqCst);
@@ -317,11 +281,7 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        app_windows::show_all_app_windows(tray.app_handle());
                     }
                 })
                 .build(app)?;
@@ -349,29 +309,43 @@ pub fn run() {
             let merge = args.iter().any(|a| a == "--merge");
 
             if !files.is_empty() {
-                let app_handle = app.handle().clone();
-                let payload = serde_json::json!({ "files": files, "merge": merge });
-                // Emit after window is ready
-                tauri::async_runtime::spawn(async move {
-                    // Small delay to let renderer initialize
-                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                    if let Some(window) = app_handle.get_webview_window("main") {
-                        let _ = window.emit("app:openFile", payload);
-                    }
-                });
+                // Queued immediately and drained by whichever window asks: the
+                // payload waits in the registry rather than riding an event a
+                // renderer that has not mounted yet cannot receive.
+                app_windows::route_open(&app.handle().clone(), files, merge);
             }
 
             Ok(())
         })
         .on_window_event(move |window, event| {
-            if e2e {
-                return; // Let default close behaviour apply — no unsaved-changes prompt.
-            }
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Prevent the default close — let the renderer decide
-                api.prevent_close();
-                // Tell the renderer to check for unsaved changes
-                let _ = window.emit("app:beforeClose", ());
+            let app = window.app_handle();
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    let is_app = app_windows::is_app_window(window.label());
+                    // Under end-to-end control the LAST workspace window keeps
+                    // the default close so a driver session exits cleanly, and
+                    // the page-capture window keeps it unconditionally. Every
+                    // other close runs the product's own path, which is the
+                    // only place the two-window quit hazard is reachable.
+                    if e2e && (!is_app || app_windows::app_window_count(app) <= 1) {
+                        return;
+                    }
+                    // Prevent the default close — let the renderer decide
+                    api.prevent_close();
+                    if is_app {
+                        // Addressed, not broadcast: the other window's renderer
+                        // would run the same unsaved-changes flow and close a
+                        // window nobody asked to close.
+                        let _ = app.emit_to(window.label(), "app:beforeClose", ());
+                    }
+                }
+                tauri::WindowEvent::Focused(true) => {
+                    app_windows::on_window_focused(app, window.label());
+                }
+                tauri::WindowEvent::Destroyed => {
+                    app_windows::on_window_destroyed(app, window.label());
+                }
+                _ => {}
             }
         });
 

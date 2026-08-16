@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::process::CommandChild;
@@ -15,6 +17,139 @@ impl EngineState {
             child: Arc::new(Mutex::new(None)),
         }
     }
+}
+
+/// Which window each in-flight engine request belongs to.
+///
+/// One sidecar serves every window, and a renderer correlates a response by
+/// its id alone against a map that is module-scoped — so every renderer starts
+/// numbering at 1 and one window's response satisfies another window's pending
+/// entry for the same number. The request id is rewritten to a process-global
+/// number on the way out and restored on the way back, which makes the
+/// correlation unforgeable rather than conventional: a renderer that does not
+/// namespace its ids is not a participant that got it wrong, it simply cannot
+/// see another window's traffic.
+pub struct EngineRouter {
+    next_outer: AtomicU64,
+    by_outer: std::sync::Mutex<HashMap<u64, Route>>,
+}
+
+struct Route {
+    label: String,
+    inner: serde_json::Value,
+}
+
+impl EngineRouter {
+    pub fn new() -> Self {
+        Self {
+            next_outer: AtomicU64::new(1),
+            by_outer: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn register(&self, label: &str, inner: serde_json::Value) -> u64 {
+        let outer = self.next_outer.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut map) = self.by_outer.lock() {
+            map.insert(
+                outer,
+                Route {
+                    label: label.to_string(),
+                    inner,
+                },
+            );
+        }
+        outer
+    }
+
+    fn take(&self, outer: u64) -> Option<Route> {
+        self.by_outer.lock().ok()?.remove(&outer)
+    }
+
+    /// Drop a destroyed window's outstanding requests. Their responses then
+    /// land on no route and are discarded, which is the correct fate for a
+    /// call whose caller is gone.
+    pub fn drop_label(&self, label: &str) {
+        if let Ok(mut map) = self.by_outer.lock() {
+            map.retain(|_, route| route.label != label);
+        }
+    }
+
+    /// How many requests each window has in flight.
+    pub fn outstanding(&self) -> HashMap<String, usize> {
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        if let Ok(map) = self.by_outer.lock() {
+            for route in map.values() {
+                *counts.entry(route.label.clone()).or_insert(0) += 1;
+            }
+        }
+        counts
+    }
+}
+
+impl Default for EngineRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Tell each window how much engine work the OTHER windows have in flight.
+///
+/// The sidecar is strictly serial, so a long run started in one window stalls
+/// every other window's next operation. Each window's own queue can only show
+/// its own work, so without this the wait renders as a hang. The count is a
+/// number, never the other window's document.
+pub fn publish_activity(app: &AppHandle) {
+    let labels = crate::app_windows::app_window_labels(app);
+    if labels.len() < 2 {
+        // One window can only ever be waiting on itself, and its own operation
+        // queue already says so.
+        for label in &labels {
+            let _ = app.emit_to(label.as_str(), "engine:otherWindows", 0usize);
+        }
+        return;
+    }
+    let counts = app.state::<EngineRouter>().outstanding();
+    let total: usize = counts.values().sum();
+    for label in labels {
+        let mine = counts.get(&label).copied().unwrap_or(0);
+        let _ = app.emit_to(label.as_str(), "engine:otherWindows", total - mine);
+    }
+}
+
+/// Rewrite an outbound request's id to a process-global number and remember
+/// who asked. Returns the outer id when one was allocated.
+pub fn route_request(app: &AppHandle, label: &str, request: &mut serde_json::Value) -> Option<u64> {
+    let obj = request.as_object_mut()?;
+    let inner = obj.get("id").cloned()?;
+    if inner.is_null() {
+        return None;
+    }
+    let outer = app.state::<EngineRouter>().register(label, inner);
+    obj.insert("id".to_string(), serde_json::Value::from(outer));
+    Some(outer)
+}
+
+/// Undo a routing when the request never reached the sidecar.
+pub fn unroute_request(app: &AppHandle, outer: u64) {
+    app.state::<EngineRouter>().take(outer);
+}
+
+/// Restore a response's original id and deliver it to the window that asked.
+fn route_response(app: &AppHandle, mut json: serde_json::Value) {
+    let Some(outer) = json.get("id").and_then(|v| v.as_u64()) else {
+        // Nothing correlates an id-less line to one window, and the engine only
+        // emits them as process-wide notices.
+        let _ = app.emit("engine:response", json);
+        return;
+    };
+    let Some(route) = app.state::<EngineRouter>().take(outer) else {
+        return;
+    };
+    if let Some(obj) = json.as_object_mut() {
+        obj.insert("id".to_string(), route.inner);
+    }
+    let _ = app.emit_to(route.label.as_str(), "engine:response", json);
+    publish_activity(app);
 }
 
 /// Resolves the path to the Python engine startup script.
@@ -172,9 +307,7 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
                     let trimmed = line_str.trim();
                     if !trimmed.is_empty() {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                            if let Some(window) = app_handle.get_webview_window("main") {
-                                let _ = window.emit("engine:response", json);
-                            }
+                            route_response(&app_handle, json);
                         }
                     }
                 }

@@ -1,0 +1,709 @@
+//! Window identity, per-window backdrop, document ownership and inbound-open
+//! routing.
+//!
+//! Two facts shape everything here. `Emitter::emit` addresses every target in
+//! the process, so a payload meant for one renderer reaches all of them unless
+//! it goes out through `emit_to`. And a second renderer is a second module
+//! scope: every JavaScript-side singleton (id counters, lock maps, generation
+//! counters) exists once per window, so a guarantee that has to hold app-wide
+//! lives in managed state on this side of the boundary.
+
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
+
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager};
+
+pub const MAIN_LABEL: &str = "main";
+const DOC_LABEL_PREFIX: &str = "doc-";
+
+/// A workspace window, as opposed to the transient page-capture window: only
+/// these host a renderer that answers close, open and claim messages.
+pub fn is_app_window(label: &str) -> bool {
+    label == MAIN_LABEL || label.starts_with(DOC_LABEL_PREFIX)
+}
+
+/// Every live workspace window's label, sorted so callers get a stable order.
+pub fn app_window_labels(app: &AppHandle) -> Vec<String> {
+    let mut labels: Vec<String> = app
+        .webview_windows()
+        .into_keys()
+        .filter(|l| is_app_window(l))
+        .collect();
+    labels.sort();
+    labels
+}
+
+pub fn app_window_count(app: &AppHandle) -> usize {
+    app.webview_windows()
+        .keys()
+        .filter(|l| is_app_window(l))
+        .count()
+}
+
+// ── Backdrop, per label ───────────────────────────────────────────────────
+
+/// Which backdrop each window was created with ("mica" or "none").
+///
+/// Per label rather than per app: `apply_mica` can succeed for one window and
+/// fail for another, and a window told the other one's verdict styles
+/// translucent chrome over a material DWM never painted. An unknown label
+/// reads "none", which is the opaque presentation the fallback is designed
+/// around.
+pub struct BackdropState(Mutex<HashMap<String, &'static str>>);
+
+impl BackdropState {
+    pub fn new() -> Self {
+        Self(Mutex::new(HashMap::new()))
+    }
+
+    pub fn record(&self, label: &str, backdrop: &'static str) {
+        if let Ok(mut map) = self.0.lock() {
+            map.insert(label.to_string(), backdrop);
+        }
+    }
+
+    pub fn get(&self, label: &str) -> &'static str {
+        self.0
+            .lock()
+            .ok()
+            .and_then(|m| m.get(label).copied())
+            .unwrap_or("none")
+    }
+
+    pub fn forget(&self, label: &str) {
+        if let Ok(mut map) = self.0.lock() {
+            map.remove(label);
+        }
+    }
+}
+
+impl Default for BackdropState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── Document ownership ────────────────────────────────────────────────────
+
+/// How a window holds a path. A write claim is exclusive against everything;
+/// two read claims coexist because an import source is never rewritten
+/// through the claim that names it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClaimMode {
+    Write,
+    Read,
+}
+
+#[derive(Clone, Debug)]
+struct Claim {
+    label: String,
+    mode: ClaimMode,
+}
+
+/// The outcome of a claim attempt. Structured rather than an error string:
+/// the caller needs the blocking window's label to offer to focus it, and
+/// control flow never matches on message text.
+#[derive(Clone, Debug, Serialize)]
+pub struct ClaimOutcome {
+    pub granted: bool,
+    pub owner: String,
+}
+
+impl ClaimOutcome {
+    fn granted() -> Self {
+        Self {
+            granted: true,
+            owner: String::new(),
+        }
+    }
+
+    fn refused(owner: &str) -> Self {
+        Self {
+            granted: false,
+            owner: owner.to_string(),
+        }
+    }
+}
+
+/// Does one output root contain the other, or name it?
+///
+/// Both sides arrive canonicalized, so equality is identity and the only
+/// remaining relation is containment. The separator test is what keeps
+/// `C:\out2` from reading as a child of `C:\out`.
+fn roots_conflict(a: &str, b: &str) -> bool {
+    let trim = |s: &str| s.trim_end_matches(['\\', '/']).to_string();
+    let a = trim(a);
+    let b = trim(b);
+    if a == b {
+        return true;
+    }
+    let contains = |outer: &str, inner: &str| {
+        inner.len() > outer.len()
+            && inner.starts_with(outer)
+            && matches!(inner.as_bytes()[outer.len()], b'\\' | b'/')
+    };
+    contains(&a, &b) || contains(&b, &a)
+}
+
+/// Which paths and output folders each window holds.
+///
+/// This is the one piece of authoritative state that moves to this side of
+/// the boundary. A renderer-side map cannot express it: a second renderer is
+/// a fresh module scope with an empty map, and a hung or crashed renderer
+/// would wedge a path for the rest of the session — release is driven from
+/// the window's own destruction instead.
+pub struct ClaimState {
+    by_path: Mutex<HashMap<String, Vec<Claim>>>,
+    roots: Mutex<Vec<(String, String)>>,
+}
+
+impl ClaimState {
+    pub fn new() -> Self {
+        Self {
+            by_path: Mutex::new(HashMap::new()),
+            roots: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn claim(&self, path: &str, label: &str, mode: ClaimMode) -> ClaimOutcome {
+        let Ok(mut map) = self.by_path.lock() else {
+            return ClaimOutcome::granted();
+        };
+        // Read before `entry`: an `or_default` on the refusal path would leave
+        // an empty holder list behind for a path nobody holds.
+        if let Some(holders) = map.get(path) {
+            let blocker = holders.iter().find(|c| {
+                c.label != label && (mode == ClaimMode::Write || c.mode == ClaimMode::Write)
+            });
+            if let Some(blocker) = blocker {
+                return ClaimOutcome::refused(&blocker.label);
+            }
+        }
+        let holders = map.entry(path.to_string()).or_default();
+        match holders.iter_mut().find(|c| c.label == label) {
+            // Re-claiming is idempotent per window: the open funnel runs for a
+            // file this window already holds, and a read claim upgrades to a
+            // write claim when the same window opens what it imported from.
+            Some(held) => {
+                if mode == ClaimMode::Write {
+                    held.mode = ClaimMode::Write;
+                }
+            }
+            None => holders.push(Claim {
+                label: label.to_string(),
+                mode,
+            }),
+        }
+        ClaimOutcome::granted()
+    }
+
+    pub fn release(&self, path: &str, label: &str) {
+        if let Ok(mut map) = self.by_path.lock() {
+            if let Some(holders) = map.get_mut(path) {
+                holders.retain(|c| c.label != label);
+                if holders.is_empty() {
+                    map.remove(path);
+                }
+            }
+        }
+    }
+
+    /// Which window a path belongs to. A write holder answers first — it is
+    /// the window an inbound open must be routed to.
+    pub fn owner(&self, path: &str) -> Option<String> {
+        let map = self.by_path.lock().ok()?;
+        let holders = map.get(path)?;
+        holders
+            .iter()
+            .find(|c| c.mode == ClaimMode::Write)
+            .or_else(|| holders.first())
+            .map(|c| c.label.clone())
+    }
+
+    pub fn claim_root(&self, root: &str, label: &str) -> ClaimOutcome {
+        let Ok(mut roots) = self.roots.lock() else {
+            return ClaimOutcome::granted();
+        };
+        if let Some((_, owner)) = roots
+            .iter()
+            .find(|(r, l)| l != label && roots_conflict(r, root))
+        {
+            return ClaimOutcome::refused(owner);
+        }
+        if !roots.iter().any(|(r, l)| r == root && l == label) {
+            roots.push((root.to_string(), label.to_string()));
+        }
+        ClaimOutcome::granted()
+    }
+
+    pub fn release_root(&self, root: &str, label: &str) {
+        if let Ok(mut roots) = self.roots.lock() {
+            roots.retain(|(r, l)| !(r == root && l == label));
+        }
+    }
+
+    /// Drop everything a window held. Driven by the window's destruction so a
+    /// renderer that never got to release cannot wedge a path.
+    pub fn release_label(&self, label: &str) {
+        if let Ok(mut map) = self.by_path.lock() {
+            map.retain(|_, holders| {
+                holders.retain(|c| c.label != label);
+                !holders.is_empty()
+            });
+        }
+        if let Ok(mut roots) = self.roots.lock() {
+            roots.retain(|(_, l)| l != label);
+        }
+    }
+}
+
+impl Default for ClaimState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── Registry: labels, focus, queued opens ─────────────────────────────────
+
+/// One inbound open, held until the window it was routed to asks for it.
+///
+/// Queued rather than carried on the event, because a window created for this
+/// open has no listener yet when the event fires. The event is a signal; the
+/// payload is drained here, so an open can be neither lost nor applied twice.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PendingOpen {
+    pub files: Vec<String>,
+    pub merge: bool,
+}
+
+pub struct WindowRegistry {
+    next_doc: AtomicU32,
+    last_focused: Mutex<String>,
+    pending: Mutex<HashMap<String, Vec<PendingOpen>>>,
+}
+
+impl WindowRegistry {
+    pub fn new() -> Self {
+        Self {
+            next_doc: AtomicU32::new(1),
+            last_focused: Mutex::new(MAIN_LABEL.to_string()),
+            pending: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn next_doc_label(&self) -> String {
+        format!("{}{}", DOC_LABEL_PREFIX, self.next_doc.fetch_add(1, Ordering::SeqCst))
+    }
+
+    pub fn set_focused(&self, label: &str) {
+        if let Ok(mut current) = self.last_focused.lock() {
+            *current = label.to_string();
+        }
+    }
+
+    fn focused(&self) -> String {
+        self.last_focused
+            .lock()
+            .map(|l| l.clone())
+            .unwrap_or_else(|_| MAIN_LABEL.to_string())
+    }
+
+    pub fn push_pending(&self, label: &str, open: PendingOpen) {
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.entry(label.to_string()).or_default().push(open);
+        }
+    }
+
+    pub fn take_pending(&self, label: &str) -> Vec<PendingOpen> {
+        self.pending
+            .lock()
+            .ok()
+            .and_then(|mut p| p.remove(label))
+            .unwrap_or_default()
+    }
+
+    pub fn forget(&self, label: &str) {
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.remove(label);
+        }
+    }
+}
+
+impl Default for WindowRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The window an unowned inbound open lands in: the last one focused while it
+/// still exists, otherwise any live workspace window.
+pub fn route_target(app: &AppHandle) -> String {
+    let live = app_window_labels(app);
+    let focused = app.state::<WindowRegistry>().focused();
+    if live.iter().any(|l| *l == focused) {
+        return focused;
+    }
+    live.into_iter().next().unwrap_or_else(|| MAIN_LABEL.to_string())
+}
+
+/// Bring every workspace window back from the tray, raising the routing
+/// target last so it ends up in front.
+pub fn show_all_app_windows(app: &AppHandle) {
+    let target = route_target(app);
+    for label in app_window_labels(app) {
+        if label == target {
+            continue;
+        }
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.show();
+        }
+    }
+    focus_label(app, &target);
+}
+
+pub fn focus_label(app: &AppHandle, label: &str) {
+    if let Some(window) = app.get_webview_window(label) {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// Hand `files` to the window that owns them, or to the routing target, and
+/// raise it.
+///
+/// One open must produce one working copy: `create_working_copy` mints a fresh
+/// temp directory per call, so a broadcast turns a single double-click into as
+/// many independent edit sessions as there are windows, reconciled by whichever
+/// save lands last.
+pub fn route_open(app: &AppHandle, files: Vec<String>, merge: bool) {
+    let target = route_target(app);
+    if files.is_empty() {
+        focus_label(app, &target);
+        return;
+    }
+    let live = app_window_labels(app);
+    let claims = app.state::<ClaimState>();
+    let mut groups: Vec<(String, Vec<String>)> = Vec::new();
+    for path in files {
+        let owner = claims
+            .owner(&path)
+            .filter(|l| live.iter().any(|live| live == l))
+            .unwrap_or_else(|| target.clone());
+        match groups.iter_mut().find(|(label, _)| *label == owner) {
+            Some((_, group)) => group.push(path),
+            None => groups.push((owner, vec![path])),
+        }
+    }
+    for (label, group) in &groups {
+        deliver_open(app, label, group.clone(), merge);
+    }
+    focus_label(app, &groups[0].0);
+}
+
+/// Queue an open for a label and signal the renderer to drain it.
+pub fn deliver_open(app: &AppHandle, label: &str, files: Vec<String>, merge: bool) {
+    app.state::<WindowRegistry>()
+        .push_pending(label, PendingOpen { files, merge });
+    let _ = app.emit_to(label, "app:openFile", ());
+}
+
+// ── Creation ──────────────────────────────────────────────────────────────
+
+/// Build a workspace window and record which backdrop it actually got.
+///
+/// Windows are built here rather than declared in `tauri.conf.json` because
+/// `transparent` is a creation-time property (tao's DWM blur-behind region
+/// plus wry's WebView2 background colour) and is only wanted where a backdrop
+/// can compose. Tauri's own windowEffects path discards the vibrancy Result,
+/// so Mica is applied directly and the outcome recorded for the renderer to
+/// key translucent styling on.
+///
+/// Both halves of the gate are required: the OS must have Mica, and DWM must
+/// be going to draw it. Checking only the first is what lets a
+/// transparency-effects-off machine get chrome styled for a backdrop that was
+/// never composed.
+///
+/// `SPECTRAPDF_E2E_FORCE_OPAQUE` is read only under end-to-end control, so it
+/// is not a shipped configuration channel: it makes the opaque presentation
+/// reachable on a machine where Mica would compose.
+pub fn build_app_window(
+    app: &AppHandle,
+    label: &str,
+    e2e: bool,
+    visible: bool,
+) -> tauri::Result<tauri::WebviewWindow> {
+    let force_opaque = e2e && std::env::var("SPECTRAPDF_E2E_FORCE_OPAQUE").is_ok();
+    let wants_backdrop = crate::wants_backdrop(
+        windows_version::OsVersion::current().build,
+        crate::is_remote_session(),
+        crate::transparency_effects_enabled(),
+    ) && !force_opaque;
+    let window = tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::default())
+        .title("Spectra PDF")
+        .inner_size(1200.0, 800.0)
+        .min_inner_size(800.0, 600.0)
+        .center()
+        .visible(visible)
+        .transparent(wants_backdrop)
+        .build()?;
+    let backdrop = if wants_backdrop && window_vibrancy::apply_mica(&window, None).is_ok() {
+        "mica"
+    } else {
+        // A transparent window whose HTML paints opaque renders identically to
+        // an opaque one, so a failed apply on a supported build still degrades
+        // cleanly.
+        "none"
+    };
+    app.state::<BackdropState>().record(label, backdrop);
+    Ok(window)
+}
+
+// ── Lifecycle hooks ───────────────────────────────────────────────────────
+
+pub fn on_window_focused(app: &AppHandle, label: &str) {
+    if is_app_window(label) {
+        app.state::<WindowRegistry>().set_focused(label);
+    }
+}
+
+pub fn on_window_destroyed(app: &AppHandle, label: &str) {
+    if !is_app_window(label) {
+        return;
+    }
+    app.state::<ClaimState>().release_label(label);
+    app.state::<BackdropState>().forget(label);
+    app.state::<WindowRegistry>().forget(label);
+    app.state::<crate::engine::EngineRouter>().drop_label(label);
+    crate::engine::publish_activity(app);
+}
+
+// ── Commands ──────────────────────────────────────────────────────────────
+
+/// Open an empty second workspace. Async because building a webview window
+/// from a synchronous command deadlocks the WebView2 message loop.
+#[tauri::command]
+pub async fn open_new_window(app: AppHandle) -> Result<String, String> {
+    let label = app.state::<WindowRegistry>().next_doc_label();
+    let window = build_app_window(&app, &label, crate::is_e2e_mode(), true)
+        .map_err(|e| format!("Failed to open a window: {}", e))?;
+    let _ = window.set_focus();
+    crate::engine::publish_activity(&app);
+    Ok(label)
+}
+
+#[tauri::command]
+pub async fn claim_document(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    path: String,
+    mode: ClaimMode,
+) -> Result<ClaimOutcome, String> {
+    let path = crate::commands::canonical_path(&path);
+    Ok(app.state::<ClaimState>().claim(&path, window.label(), mode))
+}
+
+#[tauri::command]
+pub async fn release_document(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    path: String,
+) -> Result<(), String> {
+    let path = crate::commands::canonical_path(&path);
+    app.state::<ClaimState>().release(&path, window.label());
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn claim_output_root(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    path: String,
+) -> Result<ClaimOutcome, String> {
+    let path = crate::commands::canonical_path(&path);
+    Ok(app.state::<ClaimState>().claim_root(&path, window.label()))
+}
+
+#[tauri::command]
+pub async fn release_output_root(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    path: String,
+) -> Result<(), String> {
+    let path = crate::commands::canonical_path(&path);
+    app.state::<ClaimState>().release_root(&path, window.label());
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn focus_app_window(app: AppHandle, label: String) -> Result<(), String> {
+    focus_label(&app, &label);
+    Ok(())
+}
+
+/// Hand paths to another window (the pop-out). Only a path crosses: page and
+/// document ids are minted against a per-renderer generation counter, so the
+/// same id string means a different physical page in each window.
+#[tauri::command]
+pub async fn open_in_window(
+    app: AppHandle,
+    label: String,
+    files: Vec<String>,
+    merge: bool,
+) -> Result<(), String> {
+    if !is_app_window(&label) {
+        return Err(format!("Not a workspace window: {}", label));
+    }
+    let files: Vec<String> = files
+        .iter()
+        .map(|f| crate::commands::canonical_path(f))
+        .collect();
+    deliver_open(&app, &label, files, merge);
+    focus_label(&app, &label);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn take_pending_opens(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Vec<PendingOpen>, String> {
+    Ok(app.state::<WindowRegistry>().take_pending(window.label()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_workspace_labels_answer_window_messages() {
+        assert!(is_app_window("main"));
+        assert!(is_app_window("doc-1"));
+        assert!(is_app_window("doc-17"));
+        assert!(!is_app_window("web-capture"));
+        assert!(!is_app_window("document"));
+    }
+
+    #[test]
+    fn a_write_claim_is_exclusive_and_names_its_holder() {
+        let state = ClaimState::new();
+        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+
+        let refused = state.claim("C:\\a.pdf", "doc-1", ClaimMode::Write);
+        assert!(!refused.granted);
+        assert_eq!(refused.owner, "main");
+
+        // A read of a path held for writing is refused too: the reader's
+        // pending pages address positions the writer is about to change.
+        let refused_read = state.claim("C:\\a.pdf", "doc-1", ClaimMode::Read);
+        assert!(!refused_read.granted);
+        assert_eq!(refused_read.owner, "main");
+
+        // Re-claiming from the holder is the same claim, not a conflict.
+        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+        assert_eq!(state.owner("C:\\a.pdf").as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn read_claims_coexist_and_still_block_a_write() {
+        let state = ClaimState::new();
+        assert!(state.claim("C:\\src.pdf", "main", ClaimMode::Read).granted);
+        assert!(state.claim("C:\\src.pdf", "doc-1", ClaimMode::Read).granted);
+
+        let refused = state.claim("C:\\src.pdf", "doc-2", ClaimMode::Write);
+        assert!(!refused.granted);
+
+        // A reader upgrading to a write is refused while another reader holds
+        // the path — the upgrade is not privileged by already being a holder.
+        let upgrade = state.claim("C:\\src.pdf", "main", ClaimMode::Write);
+        assert!(!upgrade.granted);
+        assert_eq!(upgrade.owner, "doc-1");
+
+        state.release("C:\\src.pdf", "doc-1");
+        assert!(state.claim("C:\\src.pdf", "main", ClaimMode::Write).granted);
+    }
+
+    #[test]
+    fn destroying_a_window_drops_everything_it_held() {
+        let state = ClaimState::new();
+        assert!(state.claim("C:\\a.pdf", "doc-1", ClaimMode::Write).granted);
+        assert!(state.claim_root("C:\\out", "doc-1").granted);
+
+        state.release_label("doc-1");
+
+        assert_eq!(state.owner("C:\\a.pdf"), None);
+        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+        assert!(state.claim_root("C:\\out", "main").granted);
+    }
+
+    #[test]
+    fn releasing_a_path_this_window_never_held_is_a_no_op() {
+        let state = ClaimState::new();
+        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+        state.release("C:\\a.pdf", "doc-1");
+        assert_eq!(state.owner("C:\\a.pdf").as_deref(), Some("main"));
+        state.release("C:\\never-claimed.pdf", "doc-1");
+        assert_eq!(state.owner("C:\\never-claimed.pdf"), None);
+    }
+
+    #[test]
+    fn output_roots_conflict_by_containment_not_by_prefix() {
+        assert!(roots_conflict("C:\\out", "C:\\out"));
+        assert!(roots_conflict("C:\\out", "C:\\out\\sub"));
+        assert!(roots_conflict("C:\\out\\sub", "C:\\out"));
+        assert!(roots_conflict("C:\\out\\", "C:\\out"));
+        assert!(!roots_conflict("C:\\out", "C:\\out2"));
+        assert!(!roots_conflict("C:\\out", "C:\\other"));
+
+        let state = ClaimState::new();
+        assert!(state.claim_root("C:\\out", "main").granted);
+        let refused = state.claim_root("C:\\out\\sub", "doc-1");
+        assert!(!refused.granted);
+        assert_eq!(refused.owner, "main");
+        assert!(state.claim_root("C:\\out2", "doc-1").granted);
+    }
+
+    #[test]
+    fn doc_labels_are_minted_once_each() {
+        let registry = WindowRegistry::new();
+        assert_eq!(registry.next_doc_label(), "doc-1");
+        assert_eq!(registry.next_doc_label(), "doc-2");
+        assert!(is_app_window(&registry.next_doc_label()));
+    }
+
+    #[test]
+    fn queued_opens_drain_once() {
+        let registry = WindowRegistry::new();
+        registry.push_pending(
+            "doc-1",
+            PendingOpen {
+                files: vec!["C:\\a.pdf".into()],
+                merge: false,
+            },
+        );
+        registry.push_pending(
+            "doc-1",
+            PendingOpen {
+                files: vec!["C:\\b.pdf".into()],
+                merge: true,
+            },
+        );
+        let drained = registry.take_pending("doc-1");
+        assert_eq!(drained.len(), 2);
+        assert!(drained[1].merge);
+        assert!(registry.take_pending("doc-1").is_empty());
+    }
+
+    #[test]
+    fn an_unknown_label_reads_the_opaque_backdrop() {
+        let state = BackdropState::new();
+        assert_eq!(state.get("doc-9"), "none");
+        state.record("doc-9", "mica");
+        assert_eq!(state.get("doc-9"), "mica");
+        assert_eq!(state.get("main"), "none");
+        state.forget("doc-9");
+        assert_eq!(state.get("doc-9"), "none");
+    }
+}

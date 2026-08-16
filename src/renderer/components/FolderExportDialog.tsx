@@ -23,6 +23,7 @@ import {
   type FolderExportReport,
 } from '../lib/folder-export';
 import { createFolderExportIo } from '../lib/folder-export-io';
+import { claimOutputRoot } from '../lib/output-root-claim';
 import { folderExportLogFileName, formatFolderExportLog } from '../lib/folder-export-log';
 
 // Tools ▸ Export a Folder…: the folder scope of File ▸ Export.
@@ -176,6 +177,13 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
 
   const run = useCallback(async (): Promise<void> => {
     if (!entries || entries.length === 0 || source === null || dest === null) return;
+    // Two windows sweeping into one output tree overwrite each other file by
+    // file, and neither the commit gate nor the per-file lock spans windows.
+    const root = await claimOutputRoot(dest);
+    if (!root.granted) {
+      setError(root.message);
+      return;
+    }
     setPhase('running');
     setError(null);
     setProgress(null);
@@ -219,6 +227,7 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
       }),
     );
     setPhase(fatal ? 'setup' : 'done');
+    await root.release();
   }, [
     entries, source, dest, skippedDirs, format, values, optionLabel,
     callRaw, setError, resetLog, writeSweepLog,

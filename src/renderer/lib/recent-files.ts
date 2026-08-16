@@ -49,8 +49,57 @@ export function parseRecent(raw: string | null): RecentEntry[] {
   }
 }
 
+function readStored(): RecentEntry[] {
+  try {
+    return parseRecent(localStorage.getItem(KEY));
+  } catch {
+    return [];
+  }
+}
+
+/** What this window last put on the key. Entries on the key that are NOT in
+ * it arrived from another window; entries in it that this window has since
+ * dropped were removed here and must not come back. */
+let lastWritten: RecentEntry[] | null = null;
+
 export function readRecent(): RecentEntry[] {
-  return parseRecent(localStorage.getItem(KEY));
+  const list = readStored();
+  lastWritten = list;
+  return list;
+}
+
+/**
+ * Persist `next`, folding in whatever another window has added since this one
+ * last wrote, and return what was actually stored.
+ *
+ * The key is shared by every window, and the list is hydrated once at boot and
+ * mirrored back WHOLE — so a plain write erases every open the other window
+ * recorded in between. Read-modify-write against this window's own last write
+ * is what separates "another window added this" from "this window removed it",
+ * which a blind union cannot tell apart and which is what makes Clear Recent
+ * work at all.
+ */
+export function persistRecent(next: RecentEntry[]): RecentEntry[] {
+  const stored = readStored();
+  const known = new Set((lastWritten ?? stored).map((e) => e.path));
+  const foreign = stored.filter((e) => !known.has(e.path));
+  const merged = mergeRecent(next, foreign);
+  try {
+    localStorage.setItem(KEY, JSON.stringify(merged));
+  } catch {
+    // storage full / unavailable — the list is best-effort
+  }
+  lastWritten = merged;
+  return merged;
+}
+
+/** Whether two lists carry the same entries in the same order — the guard on
+ * adopting a merge result back into state. */
+export function sameRecent(a: readonly RecentEntry[], b: readonly RecentEntry[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((e, i) => e.path === b[i].path && e.openedAt === b[i].openedAt)
+  );
 }
 
 /** Move `path` to the front of `current` with a fresh timestamp, capped —
@@ -64,6 +113,32 @@ export function withRecent(
     { path, openedAt },
     ...current.filter((e) => e.path !== path),
   ].slice(0, MAX);
+}
+
+/**
+ * Fold two lists into one, newest open per path, most recent first.
+ *
+ * Recents are app-wide by meaning and the key is shared by every window, so a
+ * window that hydrated its list at boot and mirrors it back whole would erase
+ * every open another window recorded since. An entry with no recorded time
+ * sorts last and loses to any timed entry for the same path — it is an honest
+ * "unknown", not a zero.
+ */
+export function mergeRecent(a: RecentEntry[], b: RecentEntry[]): RecentEntry[] {
+  const best = new Map<string, RecentEntry>();
+  for (const entry of [...a, ...b]) {
+    const held = best.get(entry.path);
+    if (!held) {
+      best.set(entry.path, entry);
+      continue;
+    }
+    const heldAt = held.openedAt;
+    const at = entry.openedAt;
+    if (heldAt === null || (at !== null && at > heldAt)) best.set(entry.path, entry);
+  }
+  return [...best.values()]
+    .sort((x, y) => (y.openedAt ?? -1) - (x.openedAt ?? -1))
+    .slice(0, MAX);
 }
 
 /** The opened-when column's label. Relative where it reads naturally

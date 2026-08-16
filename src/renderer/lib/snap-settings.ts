@@ -20,7 +20,11 @@ import {
 } from './snap';
 import { MEASURE_UNITS, type MeasureUnit } from './measure';
 import { DEFAULT_GRID, GRID_SPACING_MAX, GRID_SPACING_MIN, type GridConfig } from './rulers';
+import { readScoped, writeScoped } from './window-label';
 
+// Per WINDOW: rulers, guides and the grid are what this window's canvas draws,
+// and the value is cached in a module store that a second window would mirror
+// back whole over the first one's.
 const KEY = 'snap-ui';
 
 /** Radius bounds, in CSS pixels. Below ~2 px nothing is reachable; above
@@ -106,7 +110,7 @@ export function readSnapSettings(
 ): SnapSettings {
   let raw: unknown;
   try {
-    raw = JSON.parse(localStorage.getItem(KEY) || '{}');
+    raw = JSON.parse(readScoped(KEY) || '{}');
   } catch {
     return defaults;
   }
@@ -131,11 +135,7 @@ export function readSnapSettings(
 }
 
 export function writeSnapSettings(value: SnapSettings): void {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(value));
-  } catch {
-    // storage full / unavailable — a preference is best-effort
-  }
+  writeScoped(KEY, JSON.stringify(value));
 }
 
 // ── The live store ───────────────────────────────────────────────────────
