@@ -48,7 +48,7 @@ from engine.watermark import watermark
 from engine.compare import compare_text, compare_visual
 import engine.compare as compare_mod
 from engine.signatures import verify_signatures, sign_pdf
-from pikepdf import Name, Dictionary
+from pikepdf import Array, Name, Dictionary
 
 
 # ── Merge ─────────────────────────────────────────────────────────────────
@@ -2470,6 +2470,63 @@ class TestCompareVisual:
         # Regions still localized on the differing pages.
         p2 = next(p for p in r["pages"] if p["page"] == 2)
         assert p2["regions"] and abs(min(reg["x"] for reg in p2["regions"]) - 50) <= 2
+
+    def test_regions_are_framed_on_the_crop_box(self, tmp_dir, gs_path):
+        # The panel scales a region by the pdf.js viewport's width, and that
+        # viewport is the CROP-INTERSECTED box. A MediaBox raster of a cropped
+        # page therefore paints the highlight at the CropBox's offset away from
+        # the change, and measures diff_ratio over an area the page never
+        # displays.
+        #
+        # The fixture: a letter MediaBox with a 300x200 CropBox at (100, 500),
+        # and a 100x50 bar at user-space (150, 600) that moves 10 pt right. The
+        # changed pixels span user-space x 150..260, y 600..650. In the crop
+        # frame that is x 150-100 = 50, y measured down from the box's top edge
+        # 700-650 = 50, by 110 wide and 50 tall. Framed on the MediaBox the
+        # same band reads x 150, y 792-650 = 142 on a 612x792 page.
+        a = os.path.join(tmp_dir, "cropa.pdf")
+        b = os.path.join(tmp_dir, "cropb.pdf")
+        for path, left in ((a, 150), (b, 160)):
+            doc = pikepdf.new()
+            page = doc.add_blank_page(page_size=(612, 792))
+            page.obj[Name("/CropBox")] = Array([100, 500, 400, 700])
+            page.Contents = doc.make_stream(
+                b"0 0 0 rg %d 600 100 50 re f" % left)
+            doc.save(path)
+            doc.close()
+        r = compare_visual(a, b, gs_path=gs_path)
+        p1 = r["pages"][0]
+        assert p1["identical"] is False
+        assert (p1["width_pts"], p1["height_pts"]) == (300.0, 200.0)
+        assert p1["regions"] == [{"x": 50.0, "y": 50.0, "w": 110.0, "h": 50.0}]
+        # The two bars OVERLAP over x 160..250, and black on black is not a
+        # changed pixel. What differs is the 10 pt sliver each bar has that the
+        # other does not, at 1 px per pt and 50 pt tall.
+        assert p1["diff_pixels"] == 2 * 10 * 50
+        # The ratio's denominator is the cropped area, not the letter sheet:
+        # over the MediaBox the same 1000 px would read 0.2 % instead of 1.7 %.
+        assert p1["total_pixels"] == 300 * 200
+
+    def test_a_re_crop_is_itself_a_visual_difference(self, tmp_dir, gs_path):
+        # Framing on the CropBox makes the frame part of what is compared, so a
+        # document that was cropped between the two revisions must not read
+        # identical just because its ink never moved.
+        a = os.path.join(tmp_dir, "whole.pdf")
+        b = os.path.join(tmp_dir, "cropped.pdf")
+        for path, crop in ((a, None), (b, [100, 500, 400, 700])):
+            doc = pikepdf.new()
+            page = doc.add_blank_page(page_size=(612, 792))
+            if crop:
+                page.obj[Name("/CropBox")] = Array(crop)
+            page.Contents = doc.make_stream(b"0 0 0 rg 150 600 100 50 re f")
+            doc.save(path)
+            doc.close()
+        r = compare_visual(a, b, gs_path=gs_path)
+        p1 = r["pages"][0]
+        assert p1["identical"] is False
+        # _diff_pair pads to the union of the two frames, so the compare space
+        # is the larger (uncropped) page rather than either input alone.
+        assert (p1["width_pts"], p1["height_pts"]) == (612.0, 792.0)
 
 
 # ── Verify signatures ───────────────────────────────────────────────────────
