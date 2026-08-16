@@ -300,6 +300,123 @@ export const PANEL_STRINGS = {
   'panel.comments.kind.callout': 'Callout',
   'panel.comments.kind.count': 'Count mark',
   'panel.comments.kind.countlegend': 'Takeoff legend',
+  'panel.comments.kind.line': 'Line',
+  'panel.comments.kind.square': 'Square',
+  'panel.comments.kind.circle': 'Circle',
+  'panel.comments.kind.polygon': 'Polygon',
+  'panel.comments.kind.polyline': 'Polyline',
+  'panel.comments.kind.caret': 'Caret',
+  'panel.comments.kind.fileattachment': 'Attachment',
+  'panel.comments.kind.sound': 'Sound',
+  'panel.comments.kind.redact': 'Redaction mark',
+
+  // The list's own controls. The order and the narrowing are the ENGINE's
+  // answer; these name the choice, they never describe a second one.
+  'panel.comments.sort': 'Order',
+  'panel.comments.sort.page': 'Page',
+  'panel.comments.sort.author': 'Author',
+  'panel.comments.sort.date': 'Date',
+  'panel.comments.sort.type': 'Type',
+  'panel.comments.filterAuthor': 'Author',
+  'panel.comments.filterType': 'Type',
+  'panel.comments.filterState': 'Status',
+  'panel.comments.filterPages': 'Pages',
+  'panel.comments.filterPagesPlaceholder': '1,3,5-9',
+  'panel.comments.filterWithText': 'With text only',
+  'panel.comments.filterAny': 'Any',
+  'panel.comments.filteredAway': 'Hidden by this filter: {{count}}',
+  'panel.comments.rowLine': '{{label}} · Page {{page}} · {{author}} · {{date}}',
+  'panel.comments.rowSubject': 'Subject: {{subject}}',
+  'panel.comments.rowState': 'Status: {{state}}',
+  'panel.comments.rowGrouped': 'Grouped with another comment',
+  'panel.comments.rowOrphan': 'Replies to a comment that is not in this document',
+  'panel.comments.rowCycle': 'This reply chain refers to itself',
+  'panel.comments.rowReadOnly': 'This comment is in the file but cannot be edited here.',
+  'panel.comments.rowPending': 'Not written to the file yet',
+  'panel.comments.dateMissing': 'no date recorded',
+  'panel.comments.dateWithOffset': '{{date}} (UTC{{offset}})',
+  'panel.comments.dateNoOffset': '{{date}} (time zone not recorded)',
+
+  // The summary dialog.
+  'panel.comments.summaryBtn': 'Summary…',
+  'panel.comments.summaryHint':
+    'Create a printable PDF of every comment, with the pages they sit on',
+  'panel.comments.summaryTitle': 'Comment summary',
+  'panel.comments.summaryAria': 'Comment summary options',
+  'panel.comments.summaryCreate': 'Create',
+  'panel.comments.summarizing': 'Creating…',
+  'panel.comments.summaryOpening': 'Opening the summary…',
+  'panel.comments.summaryScope': 'Comments to be written: {{count}}. Types: {{types}}',
+  'panel.comments.summaryDone':
+    'Saved to {{output}} — sheets: {{sheets}}, comments: {{written}}',
+  'panel.comments.summaryReconcile':
+    '{{found}} in the document = {{written}} written + {{filtered}} filtered + {{unmodelled}} not modelled',
+  'panel.comments.summaryNoPosition':
+    'Written without a badge, because their position could not be read: {{count}}',
+  'panel.comments.summaryBodyRefused':
+    'Written without their text, because it would not lay out: {{count}}',
+  'panel.comments.summaryNoBox': 'Pages listed without an image: {{pages}}',
+  'panel.comments.summaryUnreadable': 'Pages whose comment list could not be read: {{pages}}',
+  'panel.comments.mode': 'Contents',
+  'panel.comments.mode.commentsOnly': 'Comments only',
+  'panel.comments.mode.documentAndComments': 'Document and comments',
+  'panel.comments.placement': 'Comments go',
+  'panel.comments.placement.auto': 'Wherever the page is largest',
+  'panel.comments.placement.beside': 'Beside the page',
+  'panel.comments.placement.beneath': 'Beneath the page',
+  'panel.comments.placement.separate': 'On their own sheets',
+  'panel.comments.connectors': 'Draw a line from each comment to its entry',
+  'panel.comments.gutter': 'Comment column',
+  'panel.comments.gutterOption': '{{points}} pt',
+  'panel.comments.paper': 'Paper',
+  'panel.comments.paper.letter': 'Letter',
+  'panel.comments.paper.legal': 'Legal',
+  'panel.comments.paper.tabloid': 'Tabloid',
+  'panel.comments.paper.a3': 'A3',
+  'panel.comments.paper.a4': 'A4',
+  'panel.comments.paper.a5': 'A5',
+
+  // The furniture WRITTEN INTO the summary document. Resolved here and handed
+  // to the engine, which never translates: a summary is a document about a
+  // document, read by a reviewer, so its headings are in the reader's
+  // language while every body, author name and subject stays verbatim.
+  'panel.comments.doc.title': 'Comment summary',
+  'panel.comments.doc.document': 'Document: {{name}}',
+  'panel.comments.doc.pageHeading': 'Page {{page}}',
+  'panel.comments.doc.pageContinued': 'Page {{page}} (continued)',
+  'panel.comments.doc.entryHeader': '{{badge}}. {{author}}',
+  'panel.comments.doc.entryMeta': '{{date}} · page {{page}} · {{type}}',
+  'panel.comments.doc.replyHeader': 'Reply — {{author}}',
+  'panel.comments.doc.replyMeta': 'Replied {{date}}',
+  'panel.comments.doc.continued': '{{author}} (continued)',
+  'panel.comments.doc.subject': 'Subject: {{subject}}',
+  'panel.comments.doc.state': 'Status: {{state}} ({{model}})',
+  'panel.comments.doc.stateNoModel': 'Status: {{state}}',
+  'panel.comments.doc.groupMember': 'Grouped with the entry by {{author}}',
+  'panel.comments.doc.replyOrphan': 'In reply to a comment that is not in this document',
+  'panel.comments.doc.replyCycle': 'This reply chain refers to itself',
+  'panel.comments.doc.noPosition': 'This comment has no readable position on its page.',
+  'panel.comments.doc.noBody': '(no text)',
+  'panel.comments.doc.unknownAuthor': 'Unknown author',
+  'panel.comments.doc.bodyRefused':
+    "This comment's text could not be laid out and is not shown here.",
+  'panel.comments.doc.reconcileHeading': 'Reconciliation',
+  'panel.comments.doc.reconcileFound': 'Comments in the document: {{count}}',
+  'panel.comments.doc.reconcileWritten': 'Comments in this summary: {{count}}',
+  'panel.comments.doc.reconcileFiltered': 'Removed by the filter: {{count}}',
+  'panel.comments.doc.reconcileUnmodelled':
+    'Annotation types this product does not model: {{count}}',
+  'panel.comments.doc.reconcileNoPosition':
+    'Written without a badge (no readable position): {{count}}',
+  'panel.comments.doc.reconcileBodyRefused':
+    'Written without their text (it would not lay out): {{count}}',
+  'panel.comments.doc.reconcileUnreadable':
+    'Pages whose annotation list could not be read: {{pages}}',
+  'panel.comments.doc.reconcileNoBox':
+    'Pages with no media or crop box, listed without an image: {{pages}}',
+  'panel.comments.doc.reconcileBalanced':
+    'Every comment in the document is accounted for above.',
+  'panel.comments.doc.sortedBy': 'Sorted by: {{sort}}',
 
   'panel.tags.open': 'Open a PDF to edit its structure tags',
   'panel.tags.untagged':

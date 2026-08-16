@@ -172,6 +172,12 @@ const INTERNAL_METHODS = new Set([
   // Listing markup annotations for the Comments overview — a read;
   // delete_all_annotations (mutation) stays gated.
   'list_annotations',
+  // The whole review model behind the Comments list and the summary dialog's
+  // filter choices — a read on the same terms, and one the panel re-requests
+  // on every sort or filter change, so gating it would flush the user's
+  // pending page edits for changing a select (the list_annotations hazard).
+  // summarize_comments WRITES a file and stays gated.
+  'list_comments',
   // Preflight is pure print-production analysis — no mutation.
   'preflight',
   // Listing link regions to seed the Links panel — a read; set_link_url /

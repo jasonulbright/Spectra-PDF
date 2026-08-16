@@ -848,6 +848,21 @@ export function registerExportImages(handlers: ExportImagesHandlers | null): voi
 }
 
 /**
+ * Comment summary: the save dialog is native — e2e injects the destination and
+ * runs the REAL gated summary path the Create button runs, with the same
+ * catalog-resolved furniture and the same engine call.
+ */
+export interface CommentSummaryHandlers {
+  run: (out: string) => Promise<unknown>;
+}
+
+let commentSummary: CommentSummaryHandlers | null = null;
+
+export function registerCommentSummary(handlers: CommentSummaryHandlers | null): void {
+  commentSummary = handlers;
+}
+
+/**
  * Portfolio panel bridges: the member pickers and save dialogs are
  * NATIVE and undrivable — e2e injects the paths and runs the REAL panel
  * flows (create routes callRaw+openPath; add/update/save run the gated
@@ -1887,6 +1902,9 @@ export interface TestHarness {
     out: string,
     opts?: { format?: string; dpi?: number; pages?: string; gray?: boolean },
   ) => Promise<unknown>;
+  /** Write the comment summary (dialog must be open). Null result = failed
+   *  (the dialog shows the error); non-null = the engine result. */
+  commentSummaryRun: (out: string) => Promise<unknown>;
   /** Guided-actions run with an injected terminal output path (panel must
    * be mounted; values keyed by step index carry ask-at-run params). */
   guidedRunWithOutput: (
@@ -3343,6 +3361,14 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       return exportImages.run(out, opts);
+    },
+    commentSummaryRun: async (out) => {
+      if (!commentSummary) {
+        const msg = 'commentSummaryRun: dialog not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return commentSummary.run(out);
     },
     guidedRunWithOutput: async (actionId, values, output) => {
       if (!guidedActionsHandlers) {
