@@ -300,3 +300,76 @@ def unreadable_colorspace_table_pdf(path, spot: str = "PANTONE 185 C",
     pdf.save(path)
     pdf.close()
     return str(path)
+
+
+def rgb_alternate_spot_pdf(path, spot: str = "RGB Spot"):
+    """A spot whose alternate space is DeviceRGB.
+
+    A device space carries no ICC description, so a proof of this colorant
+    has to assume a source profile. The fixture exists so the assumption is
+    stated back rather than taken silently.
+    """
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    fn = pdf.make_indirect(Dictionary(
+        FunctionType=2, Domain=Array([0, 1]), N=1,
+        C0=Array([1, 1, 1]), C1=Array([0.9, 0.1, 0.15]),
+        Range=Array([0, 1, 0, 1, 0, 1]),
+    ))
+    space = pdf.make_indirect(Array([
+        Name.Separation, Name("/" + spot), Name.DeviceRGB, fn,
+    ]))
+    page.Resources = Dictionary(ColorSpace=Dictionary(CS0=space))
+    page.Contents = pdf.make_stream(b"\n".join([
+        b"0 0 0 1 k 10 10 60 60 re f",
+        b"/CS0 cs 1 scn 100 10 60 60 re f",
+    ]))
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
+def nested_separation_spot_pdf(path, spot: str = "Nested Spot",
+                               inner: str = "Inner Spot"):
+    """A spot whose alternate is itself a /Separation.
+
+    There is no space a colour engine could describe the result in, so the
+    proof refuses it by name instead of rendering one colorant through a
+    different model from its neighbours.
+    """
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    inner_space = separation_space(pdf, inner, (0.0, 1.0, 0.75, 0.0))
+    fn = pdf.make_indirect(Dictionary(
+        FunctionType=2, Domain=Array([0, 1]), N=1,
+        C0=Array([0]), C1=Array([1]), Range=Array([0, 1]),
+    ))
+    space = pdf.make_indirect(Array([
+        Name.Separation, Name("/" + spot), inner_space, fn,
+    ]))
+    page.Resources = Dictionary(ColorSpace=Dictionary(CS0=space))
+    page.Contents = pdf.make_stream(b"\n".join([
+        b"0 0 0 1 k 10 10 60 60 re f",
+        b"/CS0 cs 1 scn 100 10 60 60 re f",
+    ]))
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
+def device_rgb_pdf(path):
+    """A page painted only through inline DeviceRGB operators.
+
+    It declares no colour space at all: the resource walk alone reports it as
+    carrying no colour, which is exactly the page whose plates came from
+    Ghostscript's compiled-in default rather than from any chosen press.
+    """
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    page.Resources = Dictionary()
+    page.Contents = pdf.make_stream(
+        b"1 0 0 rg 10 10 100 100 re f\n0 0 1 rg 50 50 40 40 re f"
+    )
+    pdf.save(path)
+    pdf.close()
+    return str(path)

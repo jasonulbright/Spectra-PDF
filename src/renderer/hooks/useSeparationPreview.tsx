@@ -10,24 +10,32 @@ import React, {
 import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { showableDocuments } from '../state/selectors';
 import { useEngine } from './useEngine';
-import { batch as batchBridge } from '../lib/tauri-bridge';
+import { batch as batchBridge, dialog } from '../lib/tauri-bridge';
 import { ensureGsPath } from '../panels/SettingsPanel';
 import {
   DEFAULT_TAC_LIMIT,
   clampLimit,
   compositeRequest,
   plateCacheKey,
+  plateProfileComponent,
   prunePlateCache,
   previewDpi,
   aliasIsAllowed,
   moveInSequence,
   readInventory,
+  readSimulation,
+  readSimulationProfiles,
+  resolveSimulationSource,
+  simulationRequest,
   type CacheEntry,
   type CompositeResult,
   type Ink,
   type InkAliases,
   type Plate,
   type PlateSet,
+  type SimulationProfiles,
+  type SimulationRecord,
+  type SimulationSource,
 } from '../lib/separation-preview';
 
 /**
@@ -73,6 +81,27 @@ export interface SeparationPreviewValue {
   setAlarm: (on: boolean) => void;
   overprint: boolean;
   setOverprint: (on: boolean) => void;
+  /** The press profiles this document can be proofed against. */
+  simulationProfiles: SimulationProfiles;
+  /** The source the panel is ASKING for. What it renders comes from
+   *  `simulation`, which is what the engine says it used. */
+  simulationSource: SimulationSource;
+  setSimulationSource: (source: SimulationSource) => void;
+  /** Open the picker and proof through the chosen file. The path goes
+   *  straight to the engine — the webview never reads the profile bytes. */
+  pickSimulationProfile: () => Promise<void>;
+  simulationProfilePath: string;
+  paperWhite: boolean;
+  setPaperWhite: (on: boolean) => void;
+  /** The user's own black-ink choice. Simulating paper white forces the
+   *  switch on without overwriting this, so turning paper white off restores
+   *  it. */
+  blackInk: boolean;
+  setBlackInk: (on: boolean) => void;
+  /** What the engine says it PROOFED THROUGH, or null while nothing has
+   *  answered yet. Never the request: an unhonoured request must not be able
+   *  to look honoured. */
+  simulation: SimulationRecord | null;
   stats: CompositeResult | null;
   busy: boolean;
   error: string;
@@ -113,8 +142,23 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
 
   const armed = state.ui.tool === 'outputpreview';
 
+  const NO_PROFILES: SimulationProfiles = useMemo(
+    () => ({
+      document: { present: false, embedded: false, identifier: '', name: '' },
+      bundled: { present: false, name: '' },
+    }),
+    [],
+  );
+
   const [inks, setInks] = useState<Ink[]>([]);
   const [inkUnknown, setInkUnknown] = useState<string[]>([]);
+  const [families, setFamilies] = useState<readonly string[]>(['']);
+  const [simulationProfiles, setSimulationProfiles] = useState<SimulationProfiles>(NO_PROFILES);
+  const [simulationSource, setSimulationSource] = useState<SimulationSource>('none');
+  const [simulationProfilePath, setSimulationProfilePath] = useState('');
+  const [paperWhite, setPaperWhite] = useState(false);
+  const [blackInk, setBlackInk] = useState(false);
+  const [simulation, setSimulation] = useState<SimulationRecord | null>(null);
   const [plates, setPlates] = useState<Plate[]>([]);
   const [coverage, setCoverage] = useState<Record<string, number>>({});
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set<string>());
@@ -245,6 +289,7 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
     if (!armed || !inventoryPath) {
       setInks([]);
       setInkUnknown([]);
+      setFamilies(['']);
       return;
     }
     let cancelled = false;
@@ -255,6 +300,7 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
         const inventory = readInventory(res);
         setInks(inventory.inks);
         setInkUnknown(inventory.unknown);
+        setFamilies(inventory.color_families);
       } catch (e: unknown) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
@@ -263,6 +309,45 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
       cancelled = true;
     };
   }, [armed, inventoryPath, generation, call]);
+
+  // Which presses this document can be proofed against, and which one the
+  // panel opens on. A read of the working file, so it runs through the GATED
+  // call for the same reason the inventory does.
+  useEffect(() => {
+    if (!armed || !inventoryPath) {
+      setSimulationProfiles(NO_PROFILES);
+      setSimulationSource('none');
+      setSimulationProfilePath('');
+      setSimulation(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const gsPath = await ensureGsPath();
+        const res = await call('list_simulation_profiles', {
+          file: inventoryPath,
+          gs_path: gsPath,
+        });
+        if (cancelled) return;
+        const offered = readSimulationProfiles(res);
+        setSimulationProfiles(offered);
+        setSimulationProfilePath('');
+        setSimulationSource(
+          resolveSimulationSource({
+            document: offered.document.embedded,
+            picked: false,
+            bundled: false,
+          }),
+        );
+      } catch (e: unknown) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [armed, inventoryPath, generation, call, NO_PROFILES]);
 
   // Raster and composite the wanted pages. Plates cache per page, resolution
   // and overprint, so an ink toggle re-composites and never re-runs the
@@ -275,9 +360,19 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
       setError('');
       try {
         const gsPath = await ensureGsPath();
+        const request = simulationRequest(
+          simulationSource, simulationProfilePath, paperWhite, blackInk,
+        );
+        // A profile change is a re-raster and a switch flip is only a
+        // re-composite: the separation device ignores the destination
+        // profile, so the plates move with the profile only where the page
+        // has to be colour-managed before it is separated.
+        const profileComponent = plateProfileComponent(request, families);
         for (const target of wanted) {
           if (cancelled) return;
-          const key = plateCacheKey(target.docId, target.pageId, target.dpi, overprint);
+          const key = plateCacheKey(
+            target.docId, target.pageId, target.dpi, overprint, profileComponent,
+          );
           let set = plateCache.current.get(key)?.value;
           if (!set) {
             const res = await call('render_separations', {
@@ -286,6 +381,7 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
               dpi: target.dpi,
               gs_path: gsPath,
               overprint,
+              simulation: request,
             });
             if (cancelled) return;
             if (!livePageIds.has(target.pageId)) continue;
@@ -296,17 +392,23 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
             setPlates(set.plates);
             setCoverage(set.coverage ?? {});
           }
-          // Compositing touches no PDF — it reads the cached plates. It stays
-          // off the gated path deliberately: gating it would commit the
-          // user's pending page edits on every ink checkbox.
+          // Compositing reads the cached plates, and the document's own tint
+          // transforms only through what the raster already cached beside
+          // them. It stays off the gated path deliberately: gating it would
+          // commit the user's pending page edits on every ink checkbox.
           const composite = (await callRaw('composite_separations', {
             dir: set.dir,
             inks: compositeRequest(set.plates, hidden, densities, aliases),
             limit_pct: limitPct,
             alarm,
+            simulation: request,
+            gs_path: gsPath,
           })) as unknown as CompositeResult;
           if (cancelled) return;
-          if (target.current) setStats(composite);
+          if (target.current) {
+            setStats(composite);
+            setSimulation(readSimulation(composite));
+          }
           const bytes = await batchBridge.readFileBuffer(composite.png);
           if (cancelled) return;
           rasterRef.current.set(key, {
@@ -328,7 +430,8 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
     // `wantedKey` stands for the page window: the array's identity changes on
     // every state tick and would restart the run for the same pages.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [armed, wantedKey, overprint, hidden, densities, aliases, limitPct, alarm, generation]);
+  }, [armed, wantedKey, overprint, hidden, densities, aliases, limitPct, alarm, generation,
+    simulationSource, simulationProfilePath, paperWhite, blackInk, families]);
 
   // A plate the sequence has never seen joins the end of it, so an ink the
   // document adds is listed rather than silently sorted to the front.
@@ -346,6 +449,7 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
     if (!armed) {
       releaseAll();
       setStats(null);
+      setSimulation(null);
     }
   }, [armed, releaseAll]);
 
@@ -360,16 +464,27 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
     [armed, rasters],
   );
 
+  const pickSimulationProfile = useCallback(async () => {
+    const picked = await dialog.pickIccFile();
+    if (!picked) return;
+    setSimulationProfilePath(picked);
+    setSimulationSource('file');
+  }, []);
+
   const value = useMemo<SeparationPreviewValue>(
     () => ({
       armed, setArmed, inks, inkUnknown, plates, coverage, hidden, toggleInk, showAllInks,
       hideAllInks, densities, setDensity, aliases, setAlias, sequence, moveInk, limitPct,
-      setLimitPct, alarm, setAlarm, overprint, setOverprint, stats, busy, error, invalidate,
-      rasterFor,
+      setLimitPct, alarm, setAlarm, overprint, setOverprint, simulationProfiles,
+      simulationSource, setSimulationSource, pickSimulationProfile, simulationProfilePath,
+      paperWhite, setPaperWhite, blackInk, setBlackInk, simulation, stats, busy, error,
+      invalidate, rasterFor,
     }),
     [armed, setArmed, inks, inkUnknown, plates, coverage, hidden, toggleInk, showAllInks,
       hideAllInks, densities, setDensity, aliases, setAlias, sequence, moveInk, limitPct,
-      setLimitPct, alarm, overprint, stats, busy, error, invalidate, rasterFor],
+      setLimitPct, alarm, overprint, simulationProfiles, simulationSource,
+      pickSimulationProfile, simulationProfilePath, paperWhite, blackInk, simulation,
+      stats, busy, error, invalidate, rasterFor],
   );
 
   return <PreviewContext.Provider value={value}>{children}</PreviewContext.Provider>;

@@ -6,21 +6,30 @@ import {
   MIN_PREVIEW_DPI,
   alarmTripped,
   aliasIsAllowed,
+  blackInkIsForced,
   clampDensity,
   clampLimit,
   compositePixel,
   compositeRequest,
   coverageRows,
+  effectiveBlackInk,
   inkRows,
   inventoryIsComplete,
   isToggleableInk,
   moveInSequence,
   orderInks,
   plateCacheKey,
+  plateProfileComponent,
   previewDpi,
   prunePlateCache,
   readInventory,
+  readSimulation,
+  readSimulationProfiles,
   resolveAlias,
+  resolveSimulationSource,
+  simulationIsLive,
+  simulationRequest,
+  stagingApplies,
   totalInk,
   visiblePlates,
   type CacheEntry,
@@ -60,8 +69,9 @@ describe('which inks the preview offers', () => {
       new Map([['Cyan', 0.4]]),
     );
     expect(request).toEqual([
-      { name: 'Cyan', display_rgb: [0, 174, 239], density: 0.4 },
-      { name: 'PANTONE 185 C', display_rgb: [228, 0, 43], density: DEFAULT_INK_DENSITY },
+      { name: 'Cyan', display_rgb: [0, 174, 239], density: 0.4, shown_as: 'Cyan' },
+      { name: 'PANTONE 185 C', display_rgb: [228, 0, 43],
+        density: DEFAULT_INK_DENSITY, shown_as: 'PANTONE 185 C' },
     ]);
   });
 
@@ -299,12 +309,181 @@ describe('what the ink inventory could not read', () => {
     // `inks` empty and `unknown` empty is the shape of "nothing found",
     // which is also the shape of a response that never arrived — the guard
     // here is that neither field is invented.
-    expect(readInventory({})).toEqual({ inks: [], unknown: [] });
-    expect(readInventory(null)).toEqual({ inks: [], unknown: [] });
-    expect(readInventory({ inks: 'nope', unknown: 'nope' })).toEqual({ inks: [], unknown: [] });
+    const nothing = { inks: [], unknown: [], color_families: [''] };
+    expect(readInventory({})).toEqual(nothing);
+    expect(readInventory(null)).toEqual(nothing);
+    expect(readInventory({ inks: 'nope', unknown: 'nope' })).toEqual(nothing);
   });
 
   it('renders every unknown reason as a string', () => {
     expect(readInventory({ unknown: [1, null] }).unknown).toEqual(['1', 'null']);
+  });
+});
+
+describe('the soft proof’s profile ladder', () => {
+  it('opens on the document’s own intent, then a picked file, then the bundled press', () => {
+    expect(resolveSimulationSource({ document: true, picked: true, bundled: true }))
+      .toBe('document');
+    expect(resolveSimulationSource({ document: false, picked: true, bundled: true }))
+      .toBe('file');
+    expect(resolveSimulationSource({ document: false, picked: false, bundled: true }))
+      .toBe('bundled');
+    expect(resolveSimulationSource({ document: false, picked: false, bundled: false }))
+      .toBe('none');
+  });
+
+  it('never opens on the bundled press by itself', () => {
+    // Offered, never assumed: a proof against a press neither the user chose
+    // nor the document declared is a claim about nobody's press.
+    expect(resolveSimulationSource({ document: false, picked: false, bundled: false }))
+      .toBe('none');
+  });
+});
+
+describe('the two switches', () => {
+  it('forces black ink on while paper white is on, and remembers the choice', () => {
+    expect(blackInkIsForced(true)).toBe(true);
+    expect(blackInkIsForced(false)).toBe(false);
+    // The user's own OFF survives being overridden, so turning paper white
+    // off restores it rather than leaving the forced value behind.
+    expect(effectiveBlackInk(true, false)).toBe(true);
+    expect(effectiveBlackInk(false, false)).toBe(false);
+    expect(effectiveBlackInk(false, true)).toBe(true);
+  });
+
+  it('is inert with no profile', () => {
+    expect(simulationIsLive('none')).toBe(false);
+    expect(simulationIsLive('bundled')).toBe(true);
+    const request = simulationRequest('none', '', true, true);
+    expect(request.paper_white).toBe(false);
+    expect(request.black_ink).toBe(false);
+  });
+
+  it('sends the picked path only for a picked profile', () => {
+    expect(simulationRequest('file', 'C:/press.icc', false, false).profile)
+      .toBe('C:/press.icc');
+    expect(simulationRequest('bundled', 'C:/press.icc', false, false).profile).toBe('');
+  });
+});
+
+describe('the plate cache under a profile', () => {
+  const CMYK_ONLY = ['DeviceCMYK', 'Separation', 'DeviceN'];
+  const WITH_RGB = ['DeviceCMYK', 'DeviceRGB'];
+
+  it('knows which pages a profile can move', () => {
+    expect(stagingApplies(CMYK_ONLY)).toBe(false);
+    expect(stagingApplies(WITH_RGB)).toBe(true);
+    expect(stagingApplies(['ICCBased'])).toBe(true);
+  });
+
+  it('gains a profile component only where the staging applies', () => {
+    const request = simulationRequest('bundled', '', false, false);
+    expect(plateProfileComponent(request, CMYK_ONLY)).toBe('');
+    expect(plateProfileComponent(request, WITH_RGB)).not.toBe('');
+    expect(plateProfileComponent(simulationRequest('none', '', false, false), WITH_RGB))
+      .toBe('');
+  });
+
+  it('re-rasters on a profile change and never on a switch flip', () => {
+    const key = (source: 'none' | 'bundled', paper: boolean): string =>
+      plateCacheKey('doc', 'p1', 150, true,
+        plateProfileComponent(simulationRequest(source, '', paper, false), WITH_RGB));
+    expect(key('bundled', false)).not.toBe(key('none', false));
+    expect(key('bundled', true)).toBe(key('bundled', false));
+  });
+
+  it('re-rasters a document whose families could not be read', () => {
+    // A payload that named no families is "could not tell", and the staging
+    // test answers yes: proofing plates that may have come from another press
+    // is the silent degradation, and a re-raster is only slower.
+    const families = readInventory({ inks: [], unknown: [] }).color_families;
+    expect(stagingApplies(families)).toBe(true);
+  });
+});
+
+describe('what the engine says it proofed through', () => {
+  const RECORD = {
+    source: 'bundled',
+    name: 'Artifex CMYK SWOP Profile',
+    intent: 'absolute',
+    black_point_compensation: false,
+    refusal: '',
+    assumed: ['sRGB'],
+  };
+
+  it('reads the record the composite returned', () => {
+    expect(readSimulation({ simulation: RECORD })).toEqual(RECORD);
+  });
+
+  it('reads a missing record as could-not-tell, never as off', () => {
+    expect(readSimulation({})).toBeNull();
+    expect(readSimulation({ simulation: null })).toBeNull();
+    expect(readSimulation(null)).toBeNull();
+    // "Off" is a record that says so, and it is a different answer.
+    expect(readSimulation({ simulation: { source: 'none' } })?.source).toBe('none');
+  });
+
+  it('reads an unrecognized source and intent as no proof at all', () => {
+    const read = readSimulation({ simulation: { source: 'press', intent: 'saturation' } });
+    expect(read?.source).toBe('none');
+    expect(read?.intent).toBe('');
+    expect(read?.refusal).toBe('');
+  });
+
+  it('carries the refusal verbatim so the panel can localize it', () => {
+    const read = readSimulation({
+      simulation: { ...RECORD, source: 'none', intent: '', refusal: 'that profile describes a RGB device, not a printing press' },
+    });
+    expect(read?.source).toBe('none');
+    expect(read?.refusal).toBe('that profile describes a RGB device, not a printing press');
+  });
+
+  it('reads the profiles a document offers', () => {
+    const offered = readSimulationProfiles({
+      document: { present: true, embedded: false, identifier: 'CGATS TR001', name: '' },
+      bundled: { present: true, name: 'Artifex CMYK SWOP Profile' },
+    });
+    expect(offered.document.present).toBe(true);
+    expect(offered.document.embedded).toBe(false);
+    expect(offered.document.identifier).toBe('CGATS TR001');
+    expect(offered.bundled.name).toBe('Artifex CMYK SWOP Profile');
+    // An intent present but not embeddable must not become the default, and
+    // the bundled press being AVAILABLE is not the bundled press being
+    // chosen — the panel opens unproofed rather than on a press nobody named.
+    expect(resolveSimulationSource({
+      document: offered.document.embedded, picked: false, bundled: false,
+    })).toBe('none');
+  });
+
+  it('reads an absent payload as offering nothing', () => {
+    const offered = readSimulationProfiles(undefined);
+    expect(offered.document.present).toBe(false);
+    expect(offered.bundled.present).toBe(false);
+  });
+});
+
+describe('the fourth caveat the proof adds', () => {
+  it('fires on exactly an incomplete inventory', () => {
+    expect(inventoryIsComplete(readInventory({ inks: [], unknown: [] }))).toBe(true);
+    expect(inventoryIsComplete(readInventory({ inks: [], unknown: ['a branch'] }))).toBe(false);
+  });
+});
+
+describe('what the engine is asked to composite under a profile', () => {
+  it('names the ink each plate is drawn as, so a channel can be found', () => {
+    const request = compositeRequest(
+      [CYAN, SPOT], new Set(), new Map(), new Map([['PANTONE 185 C', 'Cyan']]),
+    );
+    expect(request.map((r) => [r.name, r.shown_as])).toEqual([
+      ['Cyan', 'Cyan'],
+      ['PANTONE 185 C', 'Cyan'],
+    ]);
+  });
+
+  it('falls back to the plate’s own identity when the target is not on this page', () => {
+    const request = compositeRequest(
+      [SPOT], new Set(), new Map(), new Map([['PANTONE 185 C', 'Warm Red']]),
+    );
+    expect(request[0].shown_as).toBe('PANTONE 185 C');
   });
 });
