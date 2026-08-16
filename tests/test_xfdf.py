@@ -535,6 +535,187 @@ def test_export_empty_document(tmp_path):
     assert _elements(out) == []
 
 
+def _eight_comments(path: str) -> None:
+    """Eight markup annotations across three pages, two of which XFDF has no
+    element for and one of which carries a /Rect that is not a rectangle. A
+    /Popup rides along: it is not a comment and must count as neither."""
+    pdf = pikepdf.new()
+    for size in ((612, 792), (792, 612), (612, 792)):
+        pdf.add_blank_page(page_size=size)
+
+    def annot(page, subtype, rect, **kw):
+        d = pikepdf.Dictionary(
+            Type=pikepdf.Name("/Annot"),
+            Subtype=pikepdf.Name(subtype),
+            Rect=pikepdf.Array(rect),
+        )
+        for k, v in kw.items():
+            d["/" + k] = v
+        obj = pdf.make_indirect(d)
+        p = pdf.pages[page]
+        if p.obj.get("/Annots") is None:
+            p.obj["/Annots"] = pdf.make_indirect(pikepdf.Array())
+        p.obj["/Annots"].append(obj)
+        return obj
+
+    parent = annot(0, "/Text", [72, 700, 92, 720], NM=pikepdf.String("uuid-parent"))
+    reply = annot(0, "/Text", [92, 700, 112, 720], NM=pikepdf.String("uuid-reply"))
+    reply["/IRT"] = parent
+    reply["/RT"] = pikepdf.Name("/R")
+    grouped = annot(0, "/Square", [200, 600, 300, 660], NM=pikepdf.String("uuid-group"))
+    grouped["/IRT"] = parent
+    grouped["/RT"] = pikepdf.Name("/Group")
+    annot(1, "/Text", [400, 300, 420, 320], NM=pikepdf.String("uuid-orphan"))
+    annot(1, "/Popup", [500, 300, 640, 400], Open=False)
+    annot(
+        2, "/Highlight", [72, 100, 300, 130],
+        QuadPoints=pikepdf.Array([72, 130, 300, 130, 72, 100, 300, 100]),
+    )
+    bad = annot(2, "/Square", [0, 0, 10, 10])
+    bad["/Rect"] = pikepdf.String("not-an-array")
+    annot(1, "/FileAttachment", [100, 100, 120, 120])
+    annot(1, "/Redact", [150, 150, 250, 170])
+    pdf.save(path)
+    pdf.close()
+
+
+def test_one_malformed_rect_costs_that_comment_and_no_other(tmp_path):
+    """The export used to raise out of the whole document on a single /Rect
+    that would not read, leaving no file at all."""
+    src = str(tmp_path / "eight.pdf")
+    out = tmp_path / "eight.xfdf"
+    _eight_comments(src)
+
+    report = export_xfdf(src, str(out))
+
+    assert out.exists()
+    assert report["found"] == 8
+    assert report["count"] == 5
+    assert len(_elements(str(out))) == 5
+    bad = [s for s in report["skipped"] if "rect" in s["reason"]]
+    assert bad == [
+        {"page": 2, "subtype": "Square", "element": "square",
+         "reason": "the annotation rect cannot be read"}
+    ]
+    # The comments that read are all present, the thread among them intact.
+    assert report["by_type"] == {"text": 3, "square": 1, "highlight": 1}
+    assert report["relationships"] == {"R": 1, "Group": 1}
+
+
+def test_a_subtype_xfdf_cannot_carry_is_reported_not_dropped(tmp_path):
+    """/FileAttachment, /Sound and /Redact are markup annotations with no XFDF
+    element. They used to vanish with the report saying only how many elements
+    were written."""
+    src = str(tmp_path / "eight.pdf")
+    _eight_comments(src)
+    report = export_xfdf(src, str(tmp_path / "eight.xfdf"))
+
+    unmapped = sorted(
+        (s["page"], s["subtype"])
+        for s in report["skipped"]
+        if s["reason"] == "XFDF has no element for this subtype"
+    )
+    assert unmapped == [(1, "FileAttachment"), (1, "Redact")]
+    # The population is the markup set: a popup is not a comment, so it is
+    # neither exported nor reported as a loss.
+    assert report["found"] == 8
+    assert all(s["subtype"] != "Popup" for s in report["skipped"])
+
+
+def test_a_malformed_border_width_thins_one_comment_instead_of_failing(tmp_path):
+    src = str(tmp_path / "width.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(400, 400))
+    circle = _annot(pdf, "/Circle", [10, 10, 60, 60], Contents=pikepdf.String("hi"))
+    circle["/BS"] = pikepdf.Dictionary(W=pikepdf.Name("/Thick"))
+    pdf.save(src)
+    pdf.close()
+
+    out = tmp_path / "width.xfdf"
+    report = export_xfdf(src, str(out))
+
+    assert report["count"] == 1
+    assert report["found"] == 1
+    assert report["skipped"] == []
+    assert report["partial"] == [
+        {"page": 0, "subtype": "Circle", "element": "circle",
+         "attribute": "width", "reason": "the value cannot be read"}
+    ]
+    el = _elements(str(out))[0]
+    assert el.get("width") is None
+    assert el.get("rect") == "10,10,60,60"
+
+
+def test_an_annotation_with_no_rect_is_skipped_rather_than_placed_nowhere(tmp_path):
+    """Rect is required of every annotation, and it is what puts an XFDF
+    element on a page — an element without one is what our own import
+    refuses."""
+    src = str(tmp_path / "norect.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(400, 400))
+    a = _annot(pdf, "/Square", [10, 10, 60, 60], NM=pikepdf.String("no-rect"))
+    del a["/Rect"]
+    pdf.save(src)
+    pdf.close()
+
+    out = tmp_path / "norect.xfdf"
+    report = export_xfdf(src, str(out))
+
+    assert report["count"] == 0
+    assert report["found"] == 1
+    assert report["skipped"] == [
+        {"page": 0, "subtype": "Square", "name": "no-rect", "element": "square",
+         "reason": "the annotation has no rect"}
+    ]
+    assert _elements(str(out)) == []
+
+
+def test_unreadable_ink_geometry_skips_the_comment_not_the_export(tmp_path):
+    """An ink gesture whose points will not read exports as an empty box that a
+    re-import turns into an invisible annotation, so the comment is skipped."""
+    src = str(tmp_path / "ink.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(400, 400))
+    _annot(pdf, "/Square", [10, 10, 60, 60], NM=pikepdf.String("intact"))
+    ink = _annot(pdf, "/Ink", [100, 100, 200, 200], NM=pikepdf.String("broken"))
+    ink["/InkList"] = pikepdf.Array([pikepdf.String("not-points")])
+    pdf.save(src)
+    pdf.close()
+
+    out = tmp_path / "ink.xfdf"
+    report = export_xfdf(src, str(out))
+
+    assert report["count"] == 1
+    assert report["found"] == 2
+    assert report["skipped"] == [
+        {"page": 0, "subtype": "Ink", "name": "broken", "element": "ink",
+         "reason": "the /InkList geometry cannot be read"}
+    ]
+    assert [e.tag.rsplit("}", 1)[-1] for e in _elements(str(out))] == ["square"]
+
+
+def test_widgets_and_links_are_not_comments_and_are_not_reported_as_losses(tmp_path):
+    src = str(tmp_path / "chrome.pdf")
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(400, 400))
+    widget = _annot(
+        pdf, "/Widget", [10, 10, 60, 60],
+        FT=pikepdf.Name("/Tx"), T=pikepdf.String("field-1"),
+    )
+    pdf.Root["/AcroForm"] = pdf.make_indirect(
+        pikepdf.Dictionary(Fields=pikepdf.Array([widget]))
+    )
+    _annot(pdf, "/Link", [70, 10, 120, 60])
+    _annot(pdf, "/Square", [130, 10, 180, 60])
+    pdf.save(src)
+    pdf.close()
+
+    report = export_xfdf(src, str(tmp_path / "chrome.xfdf"))
+    assert report["found"] == 1
+    assert report["count"] == 1
+    assert report["skipped"] == []
+
+
 def test_import_missing_annots_section(tmp_path):
     bare = str(tmp_path / "bare.pdf")
     pdf = pikepdf.new()

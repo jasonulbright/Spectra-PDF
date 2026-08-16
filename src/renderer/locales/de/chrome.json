@@ -3107,6 +3107,7 @@
   "panel.comments.exportTitle": "Jeden Kommentar in eine XFDF-Austauschdatei exportieren",
   "panel.comments.exported_one": "{{count}} Kommentar nach XFDF exportiert",
   "panel.comments.exported_other": "{{count}} Kommentare nach XFDF exportiert",
+  "panel.comments.exportedIncomplete": "{{exported}} von {{found}} Kommentaren nach XFDF exportiert",
   "panel.comments.exporting": "XFDF wird exportiert…",
   "panel.comments.filterAny": "Beliebig",
   "panel.comments.filterAuthor": "Verfasst von",

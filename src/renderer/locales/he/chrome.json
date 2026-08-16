@@ -3174,6 +3174,7 @@
   "panel.comments.exported_one": "יוצאה {{count}} הערה לקובץ XFDF",
   "panel.comments.exported_other": "יוצאו {{count}} הערות לקובץ XFDF",
   "panel.comments.exported_two": "יוצאו {{count}} הערות לקובץ XFDF",
+  "panel.comments.exportedIncomplete": "יוצאו {{exported}} מתוך {{found}} הערות לקובץ XFDF",
   "panel.comments.exporting": "מייצא XFDF…",
   "panel.comments.filterAny": "הכול",
   "panel.comments.filterAuthor": "מחבר",

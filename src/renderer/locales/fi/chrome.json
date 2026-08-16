@@ -3107,6 +3107,7 @@
   "panel.comments.exportTitle": "Vie jokainen kommentti XFDF-vaihtotiedostoon",
   "panel.comments.exported_one": "{{count}} kommentti viety XFDF-muotoon",
   "panel.comments.exported_other": "{{count}} kommenttia viety XFDF-muotoon",
+  "panel.comments.exportedIncomplete": "{{exported}} / {{found}} kommenttia viety XFDF-muotoon",
   "panel.comments.exporting": "Viedään XFDF…",
   "panel.comments.filterAny": "Mikä tahansa",
   "panel.comments.filterAuthor": "Tekijä",

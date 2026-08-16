@@ -3174,6 +3174,7 @@
   "panel.comments.exported_few": "S-au exportat {{count}} comentarii în XFDF",
   "panel.comments.exported_one": "S-a exportat {{count}} comentariu în XFDF",
   "panel.comments.exported_other": "S-au exportat {{count}} de comentarii în XFDF",
+  "panel.comments.exportedIncomplete": "S-au exportat {{exported}} din {{found}} de comentarii în XFDF",
   "panel.comments.exporting": "Se exportă XFDF…",
   "panel.comments.filterAny": "Oricare",
   "panel.comments.filterAuthor": "Autor",

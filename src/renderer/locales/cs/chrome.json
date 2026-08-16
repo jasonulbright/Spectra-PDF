@@ -3241,6 +3241,7 @@
   "panel.comments.exported_many": "Exportováno {{count}} komentáře do XFDF",
   "panel.comments.exported_one": "Exportován {{count}} komentář do XFDF",
   "panel.comments.exported_other": "Exportováno {{count}} komentářů do XFDF",
+  "panel.comments.exportedIncomplete": "Exportováno {{exported}} z {{found}} komentářů do XFDF",
   "panel.comments.exporting": "Exportování XFDF…",
   "panel.comments.filterAny": "Libovolný",
   "panel.comments.filterAuthor": "Autor",
