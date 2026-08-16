@@ -3,10 +3,12 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
+import { StandardsAlterations } from '../components/StandardsAlterations';
 import { ensureGsPath } from './SettingsPanel';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 import { suffixedOutputName } from '../lib/output-names';
+import type { StandardsReport } from '../lib/standards-report';
 
 export function PdfaPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -16,15 +18,19 @@ export function PdfaPanel(): React.ReactElement {
   const [level, setLevel] = useState('2b');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [report, setReport] = useState<StandardsReport | null>(null);
 
   const handleConvert = useCallback(async () => {
     if (!activeFile) return;
     const output = await saveFile(suffixedOutputName(activeFile.name, "pdfa"));
     if (!output) return;
     setBusy(true); setStatus(tChrome('panel.pdfa.converting'));
+    // The previous run's report describes a file this run is replacing.
+    setReport(null);
     try {
       const r = await call('convert_pdfa', { file: activeFile.workingPath, output, level, gs_path: await ensureGsPath() });
       setStatus(tChrome('panel.pdfa.done', { level: r.level, size: (r.output_size / 1024).toFixed(0) }));
+      setReport(r);
     } catch (e: unknown) { setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) })); }
     finally { setBusy(false); }
   }, [activeFile, level, call, saveFile]);
@@ -44,6 +50,7 @@ export function PdfaPanel(): React.ReactElement {
         {busy ? tChrome('panel.pdfa.convertingBtn') : tChrome('panel.pdfa.convert')}
       </button>
       <StatusBar message={status} busy={busy} />
+      <StandardsAlterations report={report} />
     </div>
   );
 }

@@ -252,6 +252,52 @@ export const PANEL_STRINGS = {
   'panel.pdfa.convert': 'Convert to PDF/A',
   'panel.pdfa.done': 'Converted to {{level}} ({{size}} KB)',
 
+  // The alteration report both standards panels show. Row labels are keyed by
+  // the engine's own alteration kinds; an UNDETERMINED row's kind is the fact
+  // name the check could not read, so both vocabularies carry a label.
+  'panel.standards.heading': 'What this conversion changed to meet the standard',
+  'panel.standards.clean': 'Nothing was removed — every check ran and found the document intact.',
+  'panel.standards.undetermined': 'Could not be determined.',
+  'panel.standards.notices': 'Notes from the conversion tool, in its own words',
+  'panel.standards.detailTruncated': 'Only the first {{count}} are listed.',
+  'panel.standards.noticesTruncated': 'Only the first {{count}} notes are listed.',
+  'panel.standards.row.pages_removed': 'Pages removed',
+  'panel.standards.row.annotations_removed': 'Annotations removed',
+  'panel.standards.row.form_fields_removed': 'Form fields removed',
+  'panel.standards.row.attachments_removed': 'Attached files removed',
+  'panel.standards.row.document_scripts_removed': 'Document scripts removed',
+  'panel.standards.row.optional_content_removed': 'Optional content (layers) removed',
+  'panel.standards.row.tagged_structure_removed': 'Tag structure removed',
+  'panel.standards.row.outline_removed': 'Bookmarks removed',
+  'panel.standards.row.encryption_removed': 'Encryption removed',
+  'panel.standards.row.page_content_rasterized': 'Page content replaced by an image',
+  'panel.standards.row.images_removed': 'Images removed',
+  'panel.standards.row.fonts_substituted': 'Fonts replaced with metric-compatible substitutes',
+  'panel.standards.row.producer_removed_feature': 'Content the standard does not permit, removed',
+  'panel.standards.row.conformance_abandoned': 'The standard was abandoned during conversion',
+  'panel.standards.row.embedded_file_unvalidated': 'Attached files not checked against the standard',
+  'panel.standards.row.pages': 'Page count',
+  'panel.standards.row.annotations': 'Annotations',
+  'panel.standards.row.form_fields': 'Form fields',
+  'panel.standards.row.attachments': 'Attached files',
+  'panel.standards.row.document_scripts': 'Document scripts',
+  'panel.standards.row.optional_content': 'Optional content (layers)',
+  'panel.standards.row.tagged_structure': 'Tag structure',
+  'panel.standards.row.outline': 'Bookmarks',
+  'panel.standards.row.encryption': 'Encryption',
+  'panel.standards.row.page_marks': 'What each page draws',
+  'panel.standards.row.images': 'Images',
+  'panel.standards.detail.change': '{{from}} → {{to}}',
+  'panel.standards.detail.subtypeCount': '{{subtype}}: {{count}}',
+  'panel.standards.detail.pageMarks': 'Page {{page}} previously carried {{marks}}.',
+  'panel.standards.detail.partWas': '{{part}} ({{was}})',
+  'panel.standards.part.structure_tree': 'The structure tree',
+  'panel.standards.part.mark_information': 'The tagged-document declaration',
+  'panel.standards.part.document_language': 'The document language',
+  'panel.standards.mark.text': 'text',
+  'panel.standards.mark.vector': 'vector art',
+  'panel.standards.mark.image': 'images',
+
   'panel.comments.open': 'Open a PDF to review its comments',
   'panel.comments.empty': 'This document has no comments.',
   'panel.comments.summary_one': '{{count}} comment',
@@ -1765,6 +1811,8 @@ export const PANEL_STRINGS = {
     'This alternate text replaces the annotation’s own description: “{{hidden}}”.',
   'panel.a11y.detail.annotation_not_tagged':
     'A {{subtype}} annotation on page {{page}} is outside the structure tree.',
+  'panel.a11y.detail.annotations_unreadable':
+    'Page {{page}} carries an annotation that could not be read, so this check did not see everything on it.',
   'panel.a11y.detail.cell_outside_row': 'This cell’s parent is {{parent}}, not a table row.',
   'panel.a11y.detail.content_not_tagged':
     'Text on page {{page}} is covered by no tag and is not declared as decoration.',
@@ -1776,6 +1824,8 @@ export const PANEL_STRINGS = {
   'panel.a11y.detail.element_missing_description':
     'This {{role}} element has no description of its own, and the object it names carries none either.',
   'panel.a11y.detail.field_has_no_description': 'This {{type}} field has no description.',
+  'panel.a11y.detail.fields_unreadable':
+    'The form field tree could not be read to its end, so this check did not see every field.',
   'panel.a11y.detail.figure_missing_alt':
     'This {{role}} has neither alternate text nor actual text.',
   'panel.a11y.detail.font_has_no_unicode_mapping':
@@ -1801,6 +1851,8 @@ export const PANEL_STRINGS = {
     'Page {{page}} could not be read, so this check could not decide it.',
   'panel.a11y.detail.permission_blocks_extraction':
     'The encryption permissions do not allow text extraction.',
+  'panel.a11y.detail.permissions_unreadable':
+    'The document’s permissions could not be read, so whether assistive technology may read it is unknown.',
   'panel.a11y.detail.reading_order_disagrees':
     'On page {{page}}, {{inversions}} of {{items}} tagged items are read in a different order than they are laid out.',
   'panel.a11y.detail.repeated_target_across_pages':
@@ -1809,7 +1861,11 @@ export const PANEL_STRINGS = {
   'panel.a11y.detail.same_label_different_targets':
     'The same link text leads to {{count}} different targets: {{targets}}.',
   'panel.a11y.detail.script_site': 'A {{kind}} script named {{name}}.',
+  'panel.a11y.detail.scripts_unreadable':
+    'A script in this document could not be read, so this check did not see what it runs.',
   'panel.a11y.detail.structure_tree_missing': 'The document has no structure tree.',
+  'panel.a11y.detail.structure_truncated':
+    'The structure tree could not be walked past this element, so this check did not see everything below it.',
   'panel.a11y.detail.tab_order_missing':
     'Page {{page}} carries annotations and declares no tab order.',
   'panel.a11y.detail.tab_order_not_structure':
@@ -1817,6 +1873,8 @@ export const PANEL_STRINGS = {
   'panel.a11y.detail.table_has_no_header_cells':
     'This table has {{rows}} rows and {{cells}} cells, none of them a header.',
   'panel.a11y.detail.table_has_no_summary': 'This table has no summary.',
+  'panel.a11y.detail.table_not_modellable':
+    'This table’s rows hold no cells the column arithmetic can place, so its widths were not compared.',
   'panel.a11y.detail.table_rows_have_different_widths':
     'The rows of this table are {{widths}} cells wide.',
   'panel.a11y.detail.title_missing': 'The document has no title.',

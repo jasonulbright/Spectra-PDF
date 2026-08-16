@@ -15,6 +15,7 @@ interface PendingRequest {
 // signature carries the opaque action/dest/action_lossy payloads untouched.
 export type { OutlineNode } from '../lib/outline-reorder';
 import type { OutlineNode } from '../lib/outline-reorder';
+import type { AlterationRow } from '../lib/standards-report';
 
 /** Result of an engine operation. Which fields are populated depends on the operation invoked. */
 export interface EngineResult {
@@ -52,6 +53,12 @@ export interface EngineResult {
   pdfx_version: string;
   /** convert_pdfx: whether the output intent embeds a destination profile. */
   embedded_profile: boolean;
+  /** convert_pdfa / convert_pdfx: one row per thing reaching conformance cost
+   * the document, plus one per check that could not run. */
+  altered: AlterationRow[];
+  /** convert_pdfa / convert_pdfx: producer text no known shape matched. */
+  producer_notices: string[];
+  notices_truncated: boolean;
   has_user_password: boolean;
   recovered: number;
   total_pages: number;
