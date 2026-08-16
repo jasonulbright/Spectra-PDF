@@ -17,6 +17,11 @@ our ``%d`` is appended — gs treats ``%`` as a template character, and a name
 like "Q4 50% off.png" would otherwise silently splinter (the distill review's
 class). Page selection reuses the print dialog's strict ``parse_page_spec``
 (the lesson: a lax parse turns a typo into a whole-document run).
+
+Every page is framed on its CropBox, which is the page the viewer shows. An
+image of the MediaBox of a cropped page is the wrong size and carries the
+margin the crop exists to hide, so the exported file does not depict the page
+the user was looking at when they asked for it.
 """
 
 import subprocess
@@ -129,6 +134,10 @@ def export_images(
         "-dBATCH",
         "-dQUIET",
         "-dSAFER",
+        # The frame the viewer shows; see the module docstring. The device
+        # clips content to the CropBox either way, so this sets the frame and
+        # not what is drawn, and an uncropped page is unaffected.
+        "-dUseCropBox",
         # Anti-aliasing: text at screen DPIs is unreadable without it.
         "-dTextAlphaBits=4",
         "-dGraphicsAlphaBits=4",

@@ -320,11 +320,22 @@ def _render_ppm_range(
     silently, rc 0 — so short-result-as-EOF is only trustworthy after
     _strict_page_count has certified the tree (see compare_visual). NOTE:
     gs's %d output counter restarts at 1 per invocation; the caller owns
-    mapping file j back to real page first + j - 1."""
+    mapping file j back to real page first + j - 1.
+
+    -dUseCropBox frames every raster on the CropBox, which is the frame the
+    diff is presented against: the panel scales a region by the pdf.js
+    viewport's width, and that viewport is the crop-intersected box. A MediaBox
+    raster of a cropped page translates every region by the CropBox's offset
+    and measures the diff ratio over an area the page never displays. The
+    device clips page content to the CropBox either way, so the flag changes
+    the frame and not what is compared; a page with no CropBox is unaffected.
+    Differing frames between the two documents stay a reported difference —
+    _diff_pair pads to the union, so a re-crop reads as the change it is."""
     cmd = [
         gs_path,
         "-sDEVICE=ppmraw",
         f"-r{dpi}",
+        "-dUseCropBox",
         f"-dFirstPage={first}",
         f"-dLastPage={last}",
         "-dNOPAUSE",

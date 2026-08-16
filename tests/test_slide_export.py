@@ -1,6 +1,7 @@
 """One slide per page, and the slide count that proves it."""
 
 import os
+import pathlib
 import zipfile
 
 import pikepdf
@@ -119,6 +120,54 @@ def test_a_rotated_page_carries_its_text_at_the_display_position(tmp_dir, gs_pat
         "Heading of page 1", "Body sentence on page 1."
     }
     assert all(s.rotation == 90 for s in shapes)
+
+
+def _cropped(path, crop=(100, 500, 400, 700)):
+    """A letter page with a 300x200 window on it, drawn inside the window."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    page.obj[Name("/CropBox")] = Array(list(crop))
+    page.Contents = pdf.make_stream(b"1 0 0 RG 4 w 150 620 m 350 620 l S")
+    pdf.save(str(path))
+    pdf.close()
+    return str(path)
+
+
+def test_the_background_raster_is_framed_on_the_crop_box(tmp_dir, gs_path):
+    # The picture is placed at `_display_size(_crop_box(page), rotate)` and
+    # every text box is positioned against that same box, so a raster framed on
+    # the MediaBox is squeezed into a crop-sized frame — 612x792 pt of graphics
+    # crushed into 300x200, at 0.49 across and 0.25 down, sliding every rule and
+    # logo away from the text drawn over it.
+    from PIL import Image
+
+    from engine.slide_export import RASTER_DPI, _render_background
+
+    src = _cropped(os.path.join(tmp_dir, "cropped.pdf"))
+    png = pathlib.Path(tmp_dir) / "bg.png"
+    _render_background(src, 1, gs_path, png)
+    with Image.open(png) as image:
+        width_px, height_px = image.size
+    # 300 x 200 pt, the CropBox's own extent. The MediaBox answer is 612 x 792.
+    assert abs(width_px * 72 / RASTER_DPI - 300.0) <= 1.0
+    assert abs(height_px * 72 / RASTER_DPI - 200.0) <= 1.0
+
+
+def test_a_cropped_page_makes_a_crop_sized_slide(tmp_dir, gs_path):
+    # The frame the raster now carries is the frame the deck is built on.
+    src = _cropped(os.path.join(tmp_dir, "cropped.pdf"))
+    out = os.path.join(tmp_dir, "cropped.pptx")
+    result = export_document(src, out, "pptx", gs_path=gs_path)
+    assert result["rasterized_pages"] == 1
+    deck = Presentation(out)
+    assert round(deck.slide_width / EMU_PER_POINT) == 300
+    assert round(deck.slide_height / EMU_PER_POINT) == 200
+    picture = next(s for s in deck.slides[0].shapes if s.shape_type == 13)
+    # The picture fills the slide, so its own pixels must already be that
+    # shape: a MediaBox raster arrives at 612:792 and is stretched to 3:2.
+    assert round(picture.width / EMU_PER_POINT) == 300
+    assert round(picture.height / EMU_PER_POINT) == 200
+    assert abs(picture.image.size[0] / picture.image.size[1] - 1.5) <= 0.01
 
 
 def test_the_page_graphics_land_on_the_slide(tmp_dir, gs_path):
