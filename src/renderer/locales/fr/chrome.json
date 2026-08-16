@@ -3174,6 +3174,7 @@
   "panel.comments.exported_many": "{{count}} commentaires exportés au format XFDF",
   "panel.comments.exported_one": "{{count}} commentaire exporté au format XFDF",
   "panel.comments.exported_other": "{{count}} commentaires exportés au format XFDF",
+  "panel.comments.exportedIncomplete": "{{exported}} commentaires sur {{found}} exportés au format XFDF",
   "panel.comments.exporting": "Exportation XFDF…",
   "panel.comments.filterAny": "Indifférent",
   "panel.comments.filterAuthor": "Auteur",

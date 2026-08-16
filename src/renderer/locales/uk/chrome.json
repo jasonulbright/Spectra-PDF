@@ -3241,6 +3241,7 @@
   "panel.comments.exported_many": "Експортовано {{count}} коментарів до XFDF",
   "panel.comments.exported_one": "Експортовано {{count}} коментар до XFDF",
   "panel.comments.exported_other": "Експортовано {{count}} коментаря до XFDF",
+  "panel.comments.exportedIncomplete": "Експортовано {{exported}} з {{found}} коментарів до XFDF",
   "panel.comments.exporting": "Експорт XFDF…",
   "panel.comments.filterAny": "Будь-який",
   "panel.comments.filterAuthor": "Автор",

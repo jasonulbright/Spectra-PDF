@@ -3107,6 +3107,7 @@
   "panel.comments.exportTitle": "Elke opmerking naar een XFDF-uitwisselingsbestand exporteren",
   "panel.comments.exported_one": "{{count}} opmerking naar XFDF geëxporteerd",
   "panel.comments.exported_other": "{{count}} opmerkingen naar XFDF geëxporteerd",
+  "panel.comments.exportedIncomplete": "{{exported}} van {{found}} opmerkingen naar XFDF geëxporteerd",
   "panel.comments.exporting": "Bezig met exporteren van XFDF…",
   "panel.comments.filterAny": "Alle",
   "panel.comments.filterAuthor": "Auteur",

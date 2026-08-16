@@ -3040,6 +3040,7 @@
   "panel.comments.exportBtn": "XFDF を書き出し…",
   "panel.comments.exportTitle": "すべての注釈を XFDF 交換ファイルに書き出します",
   "panel.comments.exported_other": "{{count}} 件の注釈を XFDF に書き出しました",
+  "panel.comments.exportedIncomplete": "{{found}} 件中 {{exported}} 件の注釈を XFDF に書き出しました",
   "panel.comments.exporting": "XFDF を書き出し中…",
   "panel.comments.filterAny": "すべて",
   "panel.comments.filterAuthor": "作成者",
