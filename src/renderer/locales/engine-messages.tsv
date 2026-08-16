@@ -550,6 +550,11 @@ soffice.libreofficeAvailable	pattern	soffice	LibreOffice is not available at {{s
 soffice.libreofficeCannotConvertAccepted	pattern	soffice	LibreOffice cannot convert {{v0}} (accepted: {{v1}})
 soffice.libreofficeProducedPdfCannot	pattern	soffice	LibreOffice produced a PDF that cannot be read: {{exc}}
 soffice.libreofficeReportedSuccessPdf	exact	soffice	LibreOffice reported success but the PDF it wrote has no pages
+soft_proof.colorantConvertsWhichSpace	pattern	soft_proof	the colorant {{name}} converts to {{alternate}}, which is not a space this proof can describe
+soft_proof.documentSOutputIntent	pattern	soft_proof	this document's output intent names {{identifier}} but embeds no profile, so there is nothing to proof against
+soft_proof.fileColourProfileEngine	pattern	soft_proof	that file is not a colour profile this engine can read: {{detail}}
+soft_proof.processPlateShowingThere	exact	soft_proof	no process plate is showing, so there is nothing for the press profile to describe
+soft_proof.profileDescribesDevicePrinting	pattern	soft_proof	that profile describes a {{space}} device, not a printing press
 spelling.dictionaryAffFileDic	exact	spelling	A dictionary is an .aff file and a .dic file.
 spelling.dictionaryAlreadyBeenAdded	pattern	spelling	A {{name}} dictionary has already been added.
 spelling.dictionaryAlreadyShipsApp	pattern	spelling	A {{name}} dictionary already ships with the app.

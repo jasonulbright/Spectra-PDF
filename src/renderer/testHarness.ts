@@ -9,7 +9,7 @@
  * grant any capability the renderer doesn't already have. Treat it as a
  * scriptable remote control over the public IPC surface.
  */
-import { app, file, engine, scanner as scannerBridge } from './lib/tauri-bridge';
+import { app, dialog, file, engine, scanner as scannerBridge } from './lib/tauri-bridge';
 import { getRenderTimings, clearRenderTimings } from './components/canvas/raster';
 import {
   invokeCommand as invokeRegisteredCommand,
@@ -705,6 +705,32 @@ let watermarkPanel: WatermarkHandlers | null = null;
 
 export function registerWatermark(handlers: WatermarkHandlers | null): void {
   watermarkPanel = handlers;
+}
+
+/**
+ * The `.icc` picker: native, so WebDriver cannot drive it.
+ *
+ * The answer is injected at the DIALOG rather than at a caller's state, so
+ * every step a picked path drives — the source transition, the request the
+ * engine is called with, and the plate cache key that request produces — is
+ * the shipped one. An answer is consumed by a single pick; an unarmed pick
+ * still opens the real dialog.
+ */
+let armedIccPick: { path: string | null } | null = null;
+let iccPickerIntercepted = false;
+
+function armIccPicker(path: string | null): void {
+  if (!iccPickerIntercepted) {
+    const native = dialog.pickIccFile;
+    dialog.pickIccFile = async () => {
+      const armed = armedIccPick;
+      if (!armed) return native();
+      armedIccPick = null;
+      return armed.path;
+    };
+    iccPickerIntercepted = true;
+  }
+  armedIccPick = { path };
 }
 
 /**
@@ -1830,6 +1856,14 @@ export interface TestHarness {
   /** Watermark panel (panel must be mounted): select the PDF source and set
    * the file and page a native picker would have set. Apply is still clicked. */
   watermarkSetPdfSource: (path: string, page?: number) => void;
+  /** Answer the next native `.icc` pick with this path, or with `null` for a
+   * cancelled dialog. The pick is still STARTED by the control that opens it,
+   * so everything after the dialog runs unchanged. */
+  answerIccPicker: (path: string | null) => void;
+  /** Is an answer still waiting for a pick to take it? False once the picker
+   * has been opened and answered — the only evidence a control that changes
+   * nothing (a cancelled dialog) reached the dialog at all. */
+  iccPickerPending: () => boolean;
   /** Compress panel (panel must be mounted). Sets the panel's own
    * controls, then runs the real engine call with an injected output path. */
   compressRun: (
@@ -3247,6 +3281,8 @@ export function installTestHarness(deps: TestHarnessDeps): void {
       }
       watermarkPanel.setPdfSource(path, page ?? 1);
     },
+    answerIccPicker: (path) => armIccPicker(path),
+    iccPickerPending: () => armedIccPick !== null,
     combineRun: async (sources, output, options) => {
       if (!combine) {
         const msg = 'combineRun: dialog not mounted';

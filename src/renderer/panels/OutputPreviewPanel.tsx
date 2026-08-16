@@ -12,12 +12,15 @@ import {
   MAX_TAC_LIMIT,
   MIN_INK_DENSITY,
   MIN_TAC_LIMIT,
+  blackInkIsForced,
   coverageRows,
   inkRows,
   inventoryIsComplete,
   orderInks,
+  simulationIsLive,
   type Ink,
   type InkRow,
+  type SimulationSource,
 } from '../lib/separation-preview';
 
 /** A stable test handle for an ink row. The ink NAME is document content and
@@ -37,7 +40,9 @@ export function OutputPreviewPanel(): React.ReactElement {
   const {
     armed, setArmed, inks, inkUnknown, plates, coverage, hidden, toggleInk, showAllInks,
     hideAllInks, densities, setDensity, aliases, sequence, limitPct, setLimitPct, alarm,
-    setAlarm, overprint, setOverprint, stats, busy, error,
+    setAlarm, overprint, setOverprint, simulationProfiles, simulationSource,
+    setSimulationSource, pickSimulationProfile, setPaperWhite, setBlackInk, simulation,
+    stats, busy, error,
   } = useSeparationPreview();
 
   if (!activeFile) {
@@ -50,6 +55,19 @@ export function OutputPreviewPanel(): React.ReactElement {
   // carries the caveat that the set may be short one ink.
   const unknown = inkUnknown.map(localizeEngineMessage);
   const complete = inventoryIsComplete({ unknown: inkUnknown });
+
+  // Every proof control renders from what the engine says it USED, never from
+  // what was asked for: a request the engine refused must not be able to look
+  // honoured. A null record is "could not tell", which is not "off".
+  const proofing = simulation !== null && simulationIsLive(simulation.source);
+  const usedPaperWhite = simulation?.intent === 'absolute';
+  const usedBlackInk = proofing && simulation !== null && !simulation.black_point_compensation;
+  const blackInkForced = blackInkIsForced(usedPaperWhite);
+
+  const chooseSource = (next: SimulationSource): void => {
+    if (next === 'file') void pickSimulationProfile();
+    else setSimulationSource(next);
+  };
 
   const coverageByName = new Map(coverageRows(coverage).map((row) => [row.name, row.pct]));
   const nonInks: Ink[] = inks.filter((i) => i.kind === 'all' || i.kind === 'none');
@@ -145,6 +163,94 @@ export function OutputPreviewPanel(): React.ReactElement {
       )}
 
       <div className="flex flex-col gap-2">
+        <label className="flex flex-col gap-1 text-sm text-neutral-300">
+          <span className="text-xs uppercase tracking-wide text-neutral-500">
+            {tChrome('panel.outputPreview.simulation')}
+          </span>
+          <select
+            data-testid="output-preview-simulation"
+            className="px-1 py-1 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
+            value={simulationSource}
+            onChange={(e) => chooseSource(e.target.value as SimulationSource)}
+          >
+            <option value="none">{tChrome('panel.outputPreview.simulationNone')}</option>
+            {simulationProfiles.document.present && (
+              <option value="document">
+                {tChrome('panel.outputPreview.simulationDocument')}
+              </option>
+            )}
+            {simulationProfiles.bundled.present && (
+              <option value="bundled">
+                {tChrome('panel.outputPreview.simulationBundled')}
+              </option>
+            )}
+            <option value="file">{tChrome('panel.outputPreview.simulationFile')}</option>
+          </select>
+        </label>
+
+        {proofing && simulation !== null && (
+          <div className="text-xs text-neutral-400" data-testid="output-preview-simulation-using">
+            {tChrome('panel.outputPreview.simulationUsing', { name: simulation.name })}
+          </div>
+        )}
+        {simulation !== null && simulation.refusal !== '' && (
+          <div className="text-xs text-amber-400" data-testid="output-preview-simulation-off">
+            {tChrome('panel.outputPreview.simulationOff', {
+              reason: localizeEngineMessage(simulation.refusal),
+            })}
+          </div>
+        )}
+        {proofing && simulation !== null && simulation.assumed.length > 0 && (
+          <div
+            className="text-xs text-neutral-500"
+            data-testid="output-preview-simulation-assumed"
+          >
+            {tChrome('panel.outputPreview.simulationAssumed', {
+              spaces: simulation.assumed.join(', '),
+            })}
+          </div>
+        )}
+        {proofing && !complete && (
+          <div
+            className="text-xs text-amber-400"
+            data-testid="output-preview-simulation-caveat"
+          >
+            {tChrome('panel.outputPreview.simulationCaveat')}
+          </div>
+        )}
+
+        <label className="flex items-center gap-2 text-sm text-neutral-300">
+          <input
+            type="checkbox"
+            data-testid="output-preview-paper-white"
+            checked={usedPaperWhite}
+            disabled={!proofing}
+            onChange={(e) => setPaperWhite(e.target.checked)}
+          />
+          {tChrome('panel.outputPreview.paperWhite')}
+        </label>
+        <label
+          className="flex items-center gap-2 text-sm text-neutral-300"
+          title={blackInkForced ? tChrome('panel.outputPreview.blackInkForced') : undefined}
+        >
+          <input
+            type="checkbox"
+            data-testid="output-preview-black-ink"
+            checked={usedBlackInk}
+            disabled={!proofing || blackInkForced}
+            onChange={(e) => setBlackInk(e.target.checked)}
+          />
+          {tChrome('panel.outputPreview.blackInk')}
+        </label>
+        {blackInkForced && (
+          <div
+            className="text-xs text-neutral-500"
+            data-testid="output-preview-black-ink-forced"
+          >
+            {tChrome('panel.outputPreview.blackInkForced')}
+          </div>
+        )}
+
         <label className="flex items-center gap-2 text-sm text-neutral-300">
           <input
             type="checkbox"

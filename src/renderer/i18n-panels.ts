@@ -1126,6 +1126,21 @@ export const PANEL_STRINGS = {
   'panel.outputPreview.platesCaveat': 'This may not be every ink on the page.',
   'panel.outputPreview.figuresCaveat':
     'These figures cover only the plates listed below, so the real totals may be higher.',
+  'panel.outputPreview.simulation': 'Simulation profile',
+  'panel.outputPreview.simulationNone': 'No press — show the inks',
+  'panel.outputPreview.simulationDocument': 'This document’s output intent',
+  'panel.outputPreview.simulationBundled': 'Bundled press profile',
+  'panel.outputPreview.simulationFile': 'Choose a profile file…',
+  'panel.outputPreview.simulationUsing': 'Proofing through {{name}}',
+  'panel.outputPreview.simulationAssumed':
+    'Spot colours that are not described in CMYK are proofed through an assumed source space: {{spaces}}',
+  'panel.outputPreview.paperWhite': 'Simulate paper white',
+  'panel.outputPreview.blackInk': 'Simulate black ink',
+  'panel.outputPreview.blackInkForced':
+    'Simulating paper white already holds the black ink at its own value.',
+  'panel.outputPreview.simulationCaveat':
+    'An ink that could not be read is missing from this proof, so it shows the page short one colour.',
+  'panel.outputPreview.simulationOff': 'Not proofed: {{reason}}',
 
   'panel.inkManager.open': 'Open a PDF to manage its inks',
   'panel.inkManager.blurb':

@@ -17,7 +17,10 @@ plates instead.
 
 `composite_separations` turns a chosen subset of those plates into an RGB PNG
 plus the total-ink statistics, in numpy, so toggling an ink never re-runs
-Ghostscript.
+Ghostscript. With a simulation profile it composites through `soft_proof`
+instead: the coverages become a CMYK accumulation buffer and one ICC
+transform takes that buffer to sRGB. Without one the arithmetic is
+byte-for-byte what it always was.
 
 **Overprint can only be simulated by the separation device.** Every RGB device
 renders an overprinting fill identically to a knocking-out one, so no RGB
@@ -42,7 +45,7 @@ from pathlib import Path
 
 import pikepdf
 
-from . import budget
+from . import budget, soft_proof
 from .color_spaces import build_resolver
 from .preflight import COLORSPACE, walk_page_resources
 from .validate import validate_pdf
@@ -62,6 +65,11 @@ _FOLD_MARKER = "Max spot colorants reached"
 # every character a Windows path forbids. Everything else printable passes
 # through verbatim.
 _ESCAPED_BYTES = frozenset(b'%/\\:*?"<>|')
+
+#: How far the inventory follows a colorant space nested in another's
+#: alternate. ISO 32000 forbids the nesting; the cap is what keeps a
+#: self-referential one from recursing.
+_MAX_ALTERNATE_DEPTH = 4
 
 _PREVIEW_DIR_NAME = "separation-preview"
 # Plate sets left by earlier previews are evicted oldest-first past this many.
@@ -194,6 +202,58 @@ def _alternate_label(cs) -> str:
     return _name_text(alt)
 
 
+#: Content-stream operators that set a device colour without naming any
+#: resource. A page painted entirely through them declares no colour space,
+#: so the resource walk alone would report it as carrying no colour at all.
+_DEVICE_COLOUR_OPS = {
+    "g": "DeviceGray", "G": "DeviceGray",
+    "rg": "DeviceRGB", "RG": "DeviceRGB",
+    "k": "DeviceCMYK", "K": "DeviceCMYK",
+}
+
+#: The device spaces `cs`/`CS` may name directly, and the abbreviations an
+#: inline image's `/CS` may spell them with.
+_DEVICE_SPACE_NAMES = {
+    "DeviceGray": "DeviceGray", "G": "DeviceGray",
+    "DeviceRGB": "DeviceRGB", "RGB": "DeviceRGB",
+    "DeviceCMYK": "DeviceCMYK", "CMYK": "DeviceCMYK",
+}
+
+
+def _stream_families(obj) -> set:
+    """The device colour families one content stream sets inline."""
+    families: set = set()
+    try:
+        instructions = pikepdf.parse_content_stream(obj)
+    except Exception:
+        return families
+    for instruction in instructions:
+        try:
+            operator = str(instruction.operator)
+        except Exception:
+            continue
+        family = _DEVICE_COLOUR_OPS.get(operator)
+        if family is not None:
+            families.add(family)
+            continue
+        if operator in ("cs", "CS"):
+            try:
+                named = _name_text(instruction.operands[0])
+            except Exception:
+                continue
+            mapped = _DEVICE_SPACE_NAMES.get(named)
+            if mapped is not None:
+                families.add(mapped)
+            continue
+        if operator == "INLINE IMAGE":
+            try:
+                named = _name_text(instruction.operands[0].colorspace)
+            except Exception:
+                continue
+            families.add(_DEVICE_SPACE_NAMES.get(named, named))
+    return families
+
+
 def _page_numbers(pdf, pages) -> list[int]:
     total = len(pdf.pages)
     if pages is None:
@@ -222,6 +282,13 @@ def list_inks(file: str, pages=None) -> dict:
     display colour taken at full tint, the pages it appears on, and the
     resource categories it was reached through.
 
+    `color_families` is every colour family the pages carry, resource spaces
+    and inline device operators alike. It is what decides whether a soft
+    proof has to colour-manage the page before separating it: a page made
+    only of DeviceCMYK, Separation and DeviceN separates to the document's
+    own ink numbers on any press, and anything else on it reached the plates
+    through Ghostscript's compiled-in default.
+
     `unknown` is the other half of the answer. A resource branch the walk
     could not read may hold a colorant, so an inventory that reported only
     what it reached would present a plate list it has not earned — the ink
@@ -233,6 +300,7 @@ def list_inks(file: str, pages=None) -> dict:
     validate_pdf(file)
     found: dict[str, dict] = {}
     unknown: list[str] = []
+    families: set = set()
 
     with pikepdf.open(file) as pdf:
         numbers = _page_numbers(pdf, pages)
@@ -268,10 +336,17 @@ def list_inks(file: str, pages=None) -> dict:
                 if category not in entry["used_in"]:
                     entry["used_in"].append(category)
 
-            def on_colorspace(cs, category, _res=resources) -> None:
+            def on_stream(obj, _category) -> None:
+                families.update(_stream_families(obj))
+
+            def on_colorspace(cs, category, _res=resources, _depth=0) -> None:
+                if isinstance(cs, (str, pikepdf.Name)):
+                    families.add(_name_text(cs))
+                    return
                 if not isinstance(cs, pikepdf.Array) or len(cs) < 2:
                     return
                 family = _name_text(cs[0])
+                families.add(family)
                 if family == "Separation" and len(cs) >= 4:
                     name = _name_text(cs[1])
                     record(name, ink_kind(name), _alternate_label(cs),
@@ -285,8 +360,22 @@ def list_inks(file: str, pages=None) -> dict:
                         record(name, ink_kind(name), _alternate_label(cs),
                                _devicen_component_display(cs, _res, index, len(names)),
                                category)
+                else:
+                    return
+                # A colorant space nested in another one's alternate is still
+                # a colorant the device plates, and a plate the inventory does
+                # not know cannot be labelled — the whole preview refuses
+                # rather than mislabel one.
+                if _depth < _MAX_ALTERNATE_DEPTH:
+                    try:
+                        alternate = cs[2]
+                    except Exception:
+                        return
+                    if isinstance(alternate, pikepdf.Array):
+                        on_colorspace(alternate, category, _res, _depth + 1)
 
             walk_page_resources(page, on_colorspace=on_colorspace,
+                                on_stream=on_stream,
                                 on_unreadable=on_unreadable)
 
     inks = sorted(
@@ -301,6 +390,7 @@ def list_inks(file: str, pages=None) -> dict:
         "spot_count": len(spots),
         "pages": numbers,
         "unknown": unknown,
+        "color_families": sorted(families),
     }
 
 
@@ -327,16 +417,46 @@ def _evict_old_sets(root: Path) -> None:
         shutil.rmtree(stale, ignore_errors=True)
 
 
-def _set_key(file: str, page: int, dpi: int, overprint: bool) -> str:
+def _set_key(file: str, page: int, dpi: int, overprint: bool, profile: str = "") -> str:
+    """The plate set's identity.
+
+    `profile` is empty unless the page has to be colour-managed before it is
+    separated: the device ignores the destination profile, so a page already
+    made of device CMYK, spot and DeviceN plates identically under every
+    press and must not have its cache split by a choice that changes nothing.
+    """
     source = Path(file)
     try:
         stamp = f"{source.stat().st_mtime_ns}:{source.stat().st_size}"
     except OSError:
         stamp = "0:0"
     digest = hashlib.sha256(
-        f"{source}\0{stamp}\0{page}\0{dpi}\0{int(overprint)}".encode("utf-8")
+        f"{source}\0{stamp}\0{page}\0{dpi}\0{int(overprint)}\0{profile}".encode("utf-8")
     ).hexdigest()
     return digest[:24]
+
+
+def _stage_for_profile(file: str, page: int, profile_path: str, out_dir: Path,
+                       gs_path: str) -> Path:
+    """One page, colour-managed to the press profile, as its own PDF.
+
+    The separation device ignores the destination profile, so this is where
+    the profile enters the ink amounts. The page is extracted first and the
+    conversion runs over that alone: `convert_cmyk` stays the one door for
+    source-to-CMYK conversion, and staging a whole document to separate one
+    page of it would pay for every page the preview is not showing.
+    """
+    from .prepress import convert_cmyk
+    from .split import _render_part
+
+    single = out_dir / "page.pdf"
+    single.write_bytes(_render_part(file, [page - 1]))
+    staged = out_dir / "staged.pdf"
+    try:
+        convert_cmyk(str(single), str(staged), dest_profile=profile_path, gs_path=gs_path)
+    finally:
+        single.unlink(missing_ok=True)
+    return staged
 
 
 def render_separations(
@@ -346,6 +466,7 @@ def render_separations(
     gs_path: str = "gs",
     overprint: bool = True,
     reuse: bool = True,
+    simulation=None,
 ) -> dict:
     """Rasterize one page to one grayscale plate per separation.
 
@@ -358,9 +479,16 @@ def render_separations(
         gs_path: Path to the Ghostscript executable.
         overprint: False renders with overprint simulation disabled.
         reuse: False re-runs the device even when the plate set is cached.
+        simulation: The soft proof's profile request. A page carrying colour
+            that is not already device CMYK is colour-managed to that profile
+            BEFORE it is separated — the device ignores the destination
+            profile, so without the staging the ink amounts would come from
+            Ghostscript's compiled-in default rather than the chosen press.
 
-    The plate set is cached on disk keyed by file identity, page, resolution
-    and overprint, so an ink toggle re-composites without another device run.
+    The plate set is cached on disk keyed by file identity, page, resolution,
+    overprint and — only where the staging applies — the profile, so an ink
+    toggle re-composites without another device run and a page that separates
+    identically on every press keeps one cache entry.
     """
     validate_pdf(file)
     page = int(page)
@@ -376,8 +504,26 @@ def render_separations(
             f"This page uses {n} spot colours; separation preview supports {limit}."
         )
 
+    request = soft_proof.read_request(simulation)
+    profile = None
+    if request is not None and request.source != "none":
+        intent = (
+            soft_proof.read_output_intent(file)
+            if request.source == "document"
+            else None
+        )
+        # A refusal is not raised here: the composite resolves the same
+        # request and REPORTS it, so a proof that cannot be produced falls
+        # back to the ordinary plates rather than failing the raster.
+        profile, _refusal = soft_proof.resolve_profile(
+            request, intent=intent, gs_path=gs_path
+        )
+    stage = profile is not None and soft_proof.staging_applies(
+        inventory["color_families"]
+    )
+
     root = _cache_root()
-    out_dir = root / _set_key(file, page, dpi, overprint)
+    out_dir = root / _set_key(file, page, dpi, overprint, profile.digest if stage else "")
     marker = out_dir / "plates.done"
     if reuse and marker.is_file():
         os.utime(out_dir, None)
@@ -386,16 +532,23 @@ def render_separations(
     shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    if stage:
+        rastered = _stage_for_profile(file, page, profile.path, out_dir, gs_path)
+        first = 1
+    else:
+        rastered = Path(file)
+        first = page
+
     max_spots = min(MAX_SPOTS_CEILING, max(_MIN_SPOT_REQUEST, len(spots)))
     cmd = [
         gs_path, "-dNOPAUSE", "-dBATCH", "-dSAFER", "-q",
         "-sDEVICE=tiffsep", f"-r{dpi}",
-        f"-dFirstPage={page}", f"-dLastPage={page}",
+        f"-dFirstPage={first}", f"-dLastPage={first}",
         f"-dMaxSpots={max_spots}",
     ]
     if not overprint:
         cmd.append("-dOverprint=/disable")
-    cmd += ["-o", str(out_dir / "s%d.tif"), str(file)]
+    cmd += ["-o", str(out_dir / "s%d.tif"), str(rastered)]
 
     result = budget.gs(cmd, what="Separation render", path=file, pages=1)
     stdout = result.stdout or ""
@@ -471,6 +624,15 @@ def _describe_set(out_dir: Path, inks: list[dict], file: str, page: int,
         )
 
     width, height = _plate_extent(plates[0]["file"])
+    _record_source(out_dir, file, page)
+    # Coverage describes the ink actually on the plates, so a staged set is
+    # measured on the staged page: under a press profile the figure IS a
+    # number about that press.
+    staged = out_dir / "staged.pdf"
+    if staged.is_file():
+        measured, measured_page = str(staged), 1
+    else:
+        measured, measured_page = file, page
     return {
         "dir": str(out_dir),
         "plates": plates,
@@ -479,8 +641,25 @@ def _describe_set(out_dir: Path, inks: list[dict], file: str, page: int,
         "dpi": dpi,
         "page": page,
         "overprint": bool(overprint),
-        "coverage": _cached_coverage(out_dir, file, page, gs_path),
+        "coverage": _cached_coverage(out_dir, measured, measured_page, gs_path),
     }
+
+
+def _record_source(out_dir: Path, file: str, page: int) -> None:
+    """Name the document and page a plate set came from.
+
+    The composite reads it only when a soft proof needs the document's own
+    tint transforms or output intent, which is the one thing the plates
+    cannot carry. Toggling an ink still touches no PDF: what the read
+    produces is cached beside the plates.
+    """
+    store = out_dir / "source.json"
+    if store.is_file():
+        return
+    try:
+        store.write_text(json.dumps({"file": str(file), "page": int(page)}), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _cached_coverage(out_dir: Path, file: str, page: int, gs_path: str) -> dict:
@@ -594,10 +773,17 @@ def _statistics_of(total, limit_pct: float) -> dict:
     }
 
 
-def _ink_spec(entry) -> tuple[str, list[int] | None, float]:
-    """A requested ink as (name, display colour, density multiplier)."""
+def _ink_spec(entry) -> tuple[str, list[int] | None, float, str]:
+    """A requested ink as (name, display colour, density, the ink it is shown as).
+
+    A plate is found by its OWN name — that is the file the device wrote —
+    but it takes the identity of the ink it is drawn as. Under the multiply
+    model that identity is carried entirely by the display colour; under a
+    press profile it also decides which channel of the CMYK buffer the
+    coverage lands in, and a colour cannot answer that.
+    """
     if isinstance(entry, str):
-        return entry, None, 1.0
+        return entry, None, 1.0, entry
     name = str(entry.get("name", ""))
     rgb = entry.get("display_rgb")
     if rgb is not None:
@@ -611,7 +797,118 @@ def _ink_spec(entry) -> tuple[str, list[int] | None, float]:
         density = float(entry.get("density", 1.0))
     except (TypeError, ValueError):
         density = 1.0
-    return name, rgb, max(0.0, min(4.0, density))
+    return name, rgb, max(0.0, min(4.0, density)), str(entry.get("shown_as") or name)
+
+
+def _read_source(plate_dir: Path) -> tuple[str, int]:
+    """The document and page a plate set came from, or ("", 0)."""
+    try:
+        stored = json.loads((plate_dir / "source.json").read_text(encoding="utf-8"))
+        return str(stored.get("file") or ""), int(stored.get("page") or 0)
+    except (OSError, ValueError, TypeError):
+        return "", 0
+
+
+def _cached_alternates(plate_dir: Path) -> dict:
+    """The page's spot alternates, measured once per plate set.
+
+    A tint transform is document data, not press data, so the table is the
+    same under every profile and is cached beside the plates: only the first
+    composite under a proof opens the PDF, and an ink toggle never does.
+    """
+    store = plate_dir / "alternates.json"
+    if store.is_file():
+        try:
+            return json.loads(store.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+    file, page = _read_source(plate_dir)
+    if not file or page < 1:
+        return {}
+    found = soft_proof.page_alternates(file, page)
+    try:
+        store.write_text(json.dumps(found), encoding="utf-8")
+    except OSError:
+        pass
+    return found
+
+
+def _cached_output_intent(plate_dir: Path) -> dict:
+    """The document's own output intent, measured once per plate set."""
+    store = plate_dir / "output-intent.json"
+    profile = plate_dir / "output-intent.icc"
+    if store.is_file():
+        try:
+            stored = json.loads(store.read_text(encoding="utf-8"))
+            raw = profile.read_bytes() if profile.is_file() else b""
+            return {
+                "present": bool(stored.get("present")),
+                "identifier": str(stored.get("identifier") or ""),
+                "embedded": raw,
+            }
+        except (OSError, ValueError):
+            pass
+    file, _page = _read_source(plate_dir)
+    if not file:
+        return {"present": False, "identifier": "", "embedded": b""}
+    found = soft_proof.read_output_intent(file)
+    try:
+        store.write_text(
+            json.dumps({"present": found["present"], "identifier": found["identifier"]}),
+            encoding="utf-8",
+        )
+        if found["embedded"]:
+            profile.write_bytes(found["embedded"])
+    except OSError:
+        pass
+    return found
+
+
+def _resolve_proof(plate_dir: Path, request, chosen, gs_path: str):
+    """(the record to return, the CMYK→sRGB transform, the spot tables).
+
+    A refusal comes back as a record carrying the sentence and no transform:
+    the composite then draws the ordinary multiply image, and the panel
+    renders its controls from this record, so an unhonoured request cannot
+    look honoured.
+    """
+    intent = _cached_output_intent(plate_dir) if request.source == "document" else None
+    profile, refusal = soft_proof.resolve_profile(request, intent=intent, gs_path=gs_path)
+    if refusal:
+        return soft_proof.refused_record(refusal), None, {}
+    if profile is None:
+        return soft_proof.empty_record(), None, {}
+
+    shown = [shown_as for _n, _p, _c, _d, shown_as in chosen]
+    if not any(name in PROCESS_INKS for name in shown):
+        return soft_proof.refused_record(soft_proof.no_process_plate_message()), None, {}
+
+    spots = sorted({name for name in shown if name not in PROCESS_INKS})
+    tables: dict = {}
+    assumed: list = []
+    if spots:
+        tables, assumed, refusal = soft_proof.spot_tables(
+            spots, _cached_alternates(plate_dir), profile.path, gs_path
+        )
+        if refusal:
+            return soft_proof.refused_record(refusal), None, {}
+
+    intent_name, bpc = soft_proof.normalized_pair(request.paper_white, request.black_ink)
+    transform, refusal = soft_proof.build_transform(profile.path, intent_name, bpc)
+    if refusal:
+        return soft_proof.refused_record(refusal), None, {}
+    return (
+        {
+            "source": profile.source,
+            "name": profile.name,
+            "intent": intent_name,
+            "black_point_compensation": bpc,
+            "refusal": "",
+            "assumed": assumed,
+        },
+        transform,
+        tables,
+    )
 
 
 def composite_separations(
@@ -620,23 +917,43 @@ def composite_separations(
     limit_pct: float = 300.0,
     alarm: bool = False,
     output: str = "",
+    simulation=None,
+    gs_path: str = "gs",
 ) -> dict:
     """Composite the chosen plates into an RGB PNG, with the ink statistics.
 
     Args:
         dir: A plate-set directory `render_separations` produced.
         inks: The inks to show — names, or entries carrying `name`,
-            `display_rgb` and `density`. None shows every plate in the set.
+            `display_rgb`, `density` and `shown_as`. None shows every plate in
+            the set.
         limit_pct: Total-ink limit the alarm measures against.
         alarm: True tints the over-limit pixels in the composite.
         output: PNG path to write. Empty writes `composite.png` beside the
             plates.
+        simulation: The soft proof's profile request. Absent or `none`
+            composites through the multiply model, unchanged.
+        gs_path: Path to the Ghostscript executable, for the bundled press
+            profile and the gray profile a non-CMYK spot alternate needs.
 
-    Each visible ink multiplies its display colour down, scaled by its
-    density, so an ink switched off leaves the page exactly as if it had never
-    printed. The statistics are measured over the SAME plate subset the image
-    shows — a coverage figure counting a hidden ink would describe a different
-    page.
+    Without a profile each visible ink multiplies its display colour down,
+    scaled by its density, so an ink switched off leaves the page exactly as
+    if it had never printed. With one the same coverages accumulate into a
+    CMYK buffer — process inks into their own channel, spots through the
+    alternate space the document says they approximate — and one ICC
+    transform takes the buffer to sRGB.
+
+    The statistics are measured over the SAME plate subset the image shows,
+    on the coverage rather than on the transformed image: no display
+    transform changes how much ink is on the sheet, so the figures are
+    identical with and without a profile. The over-limit tint composites
+    AFTER the transform, in sRGB, because an alarm colour that dimmed with
+    the press profile would be a warning the user has to learn afresh per
+    profile.
+
+    `simulation` in the return says what was USED, never what was asked for:
+    a request the engine refused comes back with the reason and the source
+    `none`, so a proof that quietly fell back cannot look honoured.
     """
     import numpy as np
     from PIL import Image
@@ -650,25 +967,52 @@ def composite_separations(
         available[path.name[len("s1("):-len(").tif")]] = path
 
     requested = inks if inks is not None else sorted(available)
-    chosen: list[tuple[str, Path, list[int], float]] = []
+    chosen: list[tuple[str, Path, list[int], float, str]] = []
     for entry in requested:
-        name, rgb, density = _ink_spec(entry)
+        name, rgb, density, shown_as = _ink_spec(entry)
         path = available.get(plate_name_escape(name)) or available.get(name)
         if path is not None:
-            chosen.append((name, path, rgb or _default_display(name), density))
+            chosen.append((name, path, rgb or _default_display(name), density, shown_as))
 
     target = Path(output) if output else plate_dir / "composite.png"
     if not chosen:
         Image.fromarray(np.full((1, 1, 3), 255, dtype=np.uint8)).save(target, "PNG")
         return {"png": str(target), "width": 1, "height": 1, "inks": [],
-                "max_tac": 0.0, "over_pixels": 0, "total_pixels": 0, "over_fraction": 0.0}
+                "max_tac": 0.0, "over_pixels": 0, "total_pixels": 0, "over_fraction": 0.0,
+                "simulation": soft_proof.empty_record()}
 
-    layers = _load_ink_layers([p for _, p, _, _ in chosen])
+    request = soft_proof.read_request(simulation)
+    record = soft_proof.empty_record()
+    transform = None
+    spot_tables: dict = {}
+    if request is not None and request.source != "none":
+        record, transform, spot_tables = _resolve_proof(plate_dir, request, chosen, gs_path)
+
+    layers = _load_ink_layers([p for _, p, _, _, _ in chosen])
     height, width = layers[0].shape
-    rgb_out = np.ones((height, width, 3), dtype=np.float32)
-    for layer, (_name, _path, color, density) in zip(layers, chosen):
-        absorb = 1.0 - (np.asarray(color, dtype=np.float32) / 255.0)
-        rgb_out *= np.clip(1.0 - layer[..., None] * density * absorb[None, None, :], 0.0, 1.0)
+    if transform is None:
+        rgb_out = np.ones((height, width, 3), dtype=np.float32)
+        for layer, (_name, _path, color, density, _shown) in zip(layers, chosen):
+            absorb = 1.0 - (np.asarray(color, dtype=np.float32) / 255.0)
+            rgb_out *= np.clip(1.0 - layer[..., None] * density * absorb[None, None, :],
+                               0.0, 1.0)
+    else:
+        buffer = np.zeros((height, width, 4), dtype=np.float32)
+        for layer, (_name, _path, _color, density, shown) in zip(layers, chosen):
+            # Density above 1 can drive a channel past 100 %, and the buffer
+            # clips before the transform: there is no ICC description of
+            # 140 % cyan.
+            tint = np.clip(layer * density, 0.0, 1.0)
+            if shown in PROCESS_INKS:
+                buffer[..., PROCESS_INKS.index(shown)] += tint
+            else:
+                table = spot_tables[shown]
+                index = np.clip(
+                    tint * (soft_proof.TINT_STEPS - 1) + 0.5, 0, soft_proof.TINT_STEPS - 1
+                ).astype(np.uint8)
+                buffer += table[index]
+        np.clip(buffer, 0.0, 1.0, out=buffer)
+        rgb_out = soft_proof.to_srgb(buffer, transform)
 
     total = np.sum(np.stack(layers), axis=0) * 100.0
     stats = _statistics_of(total, limit_pct)
@@ -682,6 +1026,45 @@ def composite_separations(
         "png": str(target),
         "width": int(width),
         "height": int(height),
-        "inks": [name for name, _, _, _ in chosen],
+        "inks": [name for name, _, _, _, _ in chosen],
         **stats,
+        "simulation": record,
+    }
+
+
+def list_simulation_profiles(file: str = "", gs_path: str = "gs") -> dict:
+    """Which press profiles this document can be proofed against.
+
+    The panel needs this before it composites anything: the default is the
+    document's OWN output intent when it embeds a profile, and otherwise no
+    proof at all. Falling through to the bundled press would proof against a
+    press neither the user chose nor the document declared.
+
+    An intent that names a registered characterization by identifier alone is
+    reported `present` without `embedded` — it is still offered, and choosing
+    it refuses by name rather than substituting a press the document never
+    named.
+    """
+    intent = (
+        soft_proof.read_output_intent(file)
+        if file
+        else {"present": False, "identifier": "", "embedded": b""}
+    )
+    raw = bytes(intent.get("embedded") or b"")
+    name = ""
+    embedded = False
+    if raw:
+        description, space, refusal = soft_proof.describe_profile(raw)
+        if not refusal and space == "CMYK":
+            embedded = True
+            name = description
+    bundled_raw, bundled_name = soft_proof.bundled_profile(gs_path)
+    return {
+        "document": {
+            "present": bool(intent.get("present")),
+            "embedded": embedded,
+            "identifier": str(intent.get("identifier") or ""),
+            "name": name,
+        },
+        "bundled": {"present": bool(bundled_raw), "name": bundled_name},
     }

@@ -76,6 +76,7 @@ def walk_page_resources(
     on_image=_noop,
     on_transparency=_noop,
     on_extgstate=_noop,
+    on_stream=_noop,
     on_unreadable=_noop,
 ) -> None:
     """Visit everything one page can paint through.
@@ -92,6 +93,13 @@ def walk_page_resources(
     different checks in every commercial profile, and a Type 3 font inside an
     appearance stream is not page content; the category is what tells each
     pair apart.
+
+    `on_stream(obj, category)` hands over each content stream — the page's
+    own, every form XObject and tiling pattern, every annotation appearance.
+    A device colour set by a `g`/`rg`/`k` operator names no resource at all,
+    so a caller asking which colour families a page carries reads them here;
+    the resource callbacks alone would report a page painted entirely in
+    `1 0 0 rg` as carrying no colour space.
 
     `on_extgstate(gs, category)` hands over each graphics state whole. The
     transparency callback answers the alpha question; overprint is a different
@@ -125,6 +133,12 @@ def walk_page_resources(
         except Exception as exc:
             unreadable(facts, f"the {what} table will not read: {exc}")
             return ()
+
+    def stream(obj, origin) -> None:
+        try:
+            on_stream(obj, origin)
+        except Exception as exc:
+            unreadable((COLORSPACE,), f"a content stream will not read: {exc}")
 
     def mark(obj) -> bool:
         """False when this object has already been visited on this page."""
@@ -171,6 +185,7 @@ def walk_page_resources(
             if sh is not None:
                 visit_shading(sh, depth + 1)
             return
+        stream(pat, origin)
         try:
             res = pat.get("/Resources")
         except Exception as exc:
@@ -244,6 +259,7 @@ def walk_page_resources(
                         grp = obj.get("/Group")
                         if grp is not None and str(grp.get("/S")) == "/Transparency":
                             on_transparency()
+                        stream(obj, origin)
                         visit_res(obj.get("/Resources"), depth + 1, origin)
                 except Exception as exc:
                     unreadable(ALL_FACTS, f"an XObject will not read: {exc}")
@@ -269,6 +285,7 @@ def walk_page_resources(
     except Exception as exc:
         unreadable(ALL_FACTS, f"the page's resources will not read: {exc}")
         own = None
+    stream(page, "content")
     visit_res(own, 0, "content")
 
     try:
@@ -287,10 +304,11 @@ def walk_page_resources(
                     streams = [entry]
                     if not isinstance(entry, pikepdf.Stream):
                         streams = [entry[k] for k in list(entry.keys())]
-                    for stream in streams:
-                        if not mark(stream):
+                    for appearance in streams:
+                        if not mark(appearance):
                             continue
-                        visit_res(stream.get("/Resources"), 1, "annotation")
+                        stream(appearance, "annotation")
+                        visit_res(appearance.get("/Resources"), 1, "annotation")
             except Exception as exc:
                 unreadable(ALL_FACTS, f"an annotation appearance will not read: {exc}")
                 continue
