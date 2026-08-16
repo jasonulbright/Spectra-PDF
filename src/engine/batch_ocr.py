@@ -36,6 +36,7 @@ from engine.compress import compress
 # this module is a consumer like any other.
 from engine.create_pdf import IMAGE_SUFFIXES, image_to_pdf
 from engine.enhance_scan import enhance_scan
+from engine.form_detect import _crop_box, _display_rect_to_pdf, _page_rotate
 from engine.ocr_layer import apply_ocr_layer
 from engine.recognize import recognize
 from engine.repair import repair
@@ -818,41 +819,23 @@ def batch_ocr(
 def _to_pdf_rects(file: str, page_index: int, words: list[dict]) -> list[dict]:
     """Normalised display boxes -> PDF user-space rects (bottom-up).
 
-    The renderer does this with `displayRectToPdf`; the same arithmetic, against
-    the crop-intersected page box and its baked /Rotate.
+    Against the crop-intersected page box and its baked /Rotate, which is what
+    the renderer's `displayRectToPdf` and `form_detect._display_rect_to_pdf`
+    both map through. The mapping is CALLED rather than restated: a third copy
+    of four rotation cases is a third place for one case to drift, and this
+    module's own copy had /Rotate 270 mapping through the box's width and
+    height swapped, which puts the invisible text layer outside the page box.
     """
     with pikepdf.open(file) as pdf:
         page = pdf.pages[page_index]
-        box = page.get("/CropBox") or page.get("/MediaBox") or [0, 0, 612, 792]
-        x0, y0, x1, y1 = (float(v) for v in box)
-        width = abs(x1 - x0)
-        height = abs(y1 - y0)
-        rotate = int(page.get("/Rotate", 0) or 0) % 360
+        box = _crop_box(page)
+        rotate = _page_rotate(page) % 360
 
     out: list[dict] = []
     for w in words:
         if not w["text"].strip():
             continue
-        # Display space: x right, y DOWN from the top, fractions of the page as
-        # rendered (i.e. after rotation).
-        dw, dh = (height, width) if rotate in (90, 270) else (width, height)
-        px = w["x"] * dw
-        py = w["y"] * dh
-        pw = w["w"] * dw
-        ph = w["h"] * dh
-        if rotate == 90:
-            rect = [x0 + py, y0 + px, x0 + py + ph, y0 + px + pw]
-        elif rotate == 180:
-            rect = [x0 + width - px - pw, y0 + py, x0 + width - px, y0 + py + ph]
-        elif rotate == 270:
-            rect = [
-                x0 + height - py - ph,
-                y0 + width - px - pw,
-                x0 + height - py,
-                y0 + width - px,
-            ]
-        else:
-            rect = [x0 + px, y0 + height - py - ph, x0 + px + pw, y0 + height - py]
+        rect = _display_rect_to_pdf((w["x"], w["y"], w["w"], w["h"]), box, rotate)
         out.append({"text": w["text"], "rect": [float(v) for v in rect]})
     return out
 

@@ -96,6 +96,13 @@ def _render_background(file: str, page_number: int, gs_path: str, out_png: Path)
     The text is drawn separately as editable boxes, so a raster that kept it
     would double every glyph — visibly, because a box's own line breaking never
     lands exactly where the page's did.
+
+    -dUseCropBox frames the raster on the box the slide is built from: the
+    picture is placed at `_display_size(_crop_box(page), rotate)` and every text
+    box is positioned against that same box. A MediaBox raster of a cropped page
+    is squeezed into the crop-sized picture frame, so the graphics land at a
+    different scale from the text drawn over them. The device clips page content
+    to the CropBox either way, and a page with no CropBox is unaffected.
     """
     gs = Path(gs_path) if gs_path else Path()
     if not gs.is_file():
@@ -114,6 +121,7 @@ def _render_background(file: str, page_number: int, gs_path: str, out_png: Path)
         "-dTextAlphaBits=4",
         "-dGraphicsAlphaBits=4",
         f"-r{RASTER_DPI}",
+        "-dUseCropBox",
         f"-dFirstPage={page_number}",
         f"-dLastPage={page_number}",
         f"-sOutputFile={out_png}",
