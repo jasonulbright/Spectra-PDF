@@ -1383,10 +1383,14 @@ def _emit_tcy(instrs, csi, piece, style, name, rgb, lay, cursor, baseline, seg_w
     return (name, style["size"]), want_rgb
 
 
-def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, page) -> dict:
+def _emit_spans_box(pdf, p, lay, rgb, align, fonts, y_top=None) -> dict:
     """emitter: per-style fonts registered once, per-line baselines from
     each line's OWN leading, per-segment Tf/rg (only on change), the same
-    shift-up-to-visible rule, the same q/Q + rotation-frame envelope."""
+    shift-up-to-visible rule, the same q/Q + rotation-frame envelope.
+
+    An explicit `y_top` is the FIRST BASELINE in local space and suppresses
+    the shift-up rule: the caller has already decided where the block sits
+    and a rule that moves it would break the geometry drawn around it."""
     styles, styled_lines, leadings = lay.styles, lay.styled_lines, lay.line_leadings
     frame = lay.frame
     l_left, l_right, l_top, l_w = lay.l_left, lay.l_right, lay.l_top, lay.l_w
@@ -1420,7 +1424,7 @@ def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, pag
     # Baselines: the first sits one max-em below the local top; each next
     # line advances by ITS OWN leading (mixed sizes = mixed leadings).
     baselines: list[float] = []
-    y = l_top - first_size
+    y = (l_top - first_size) if y_top is None else float(y_top)
     for i, lead in enumerate(leadings):
         if i > 0:
             y -= lead
@@ -1437,7 +1441,7 @@ def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, pag
         except Exception:
             vbox = None
     page_lly, page_ury = _page_band(lay, vbox, first_size)
-    if baselines and baselines[-1] < page_lly:
+    if y_top is None and baselines and baselines[-1] < page_lly:
         shift = page_lly - baselines[-1]
         cap = page_ury - first_size
         shift = min(shift, max(0.0, cap - baselines[0]))
@@ -1506,14 +1510,86 @@ def _emit_spans_box(pdf, p, lay, rgb, align, fonts, input_path, output_path, pag
     content = pikepdf.unparse_content_stream(instrs)
     p.contents_add(b"q\n", prepend=True)
     p.contents_add(b"\nQ\n" + content, prepend=False)
-    _save(pdf, input_path, output_path)
     return {
-        "output": str(output_path),
-        "page": int(page),
         "lines": len(lay.lines),
         "chars": len(lay.body),
+        "text_height": round(sum(leadings), 4),
         "styles": len([s for s in styles if s["font_dict"] is not None]),
     }
+
+
+def layout_text_box(
+    pdf,
+    rect: list,
+    text: str,
+    size: float = 12.0,
+    font_path: str = "",
+    family: str | None = None,
+    rotate: int = 0,
+    bold: bool = False,
+    italic: bool = False,
+    kern: bool = True,
+    features: list | None = None,
+    alt_index: int = 0,
+    spans: list | None = None,
+    writing_mode: str = HORIZONTAL,
+) -> _BoxLayout:
+    """One prepared layout against an ALREADY-OPEN Pdf, ready to emit.
+
+    The same `_layout_box` pass `add_text_box` and `measure_text_box` run.
+    Splitting it out lets a caller that authors many boxes into one document
+    measure and draw from ONE pass — a second pass would re-embed the subset
+    and could wrap differently from the one that was measured."""
+    return _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic,
+                       kern, features, alt_index, spans, writing_mode)
+
+
+def block_height(lay: _BoxLayout) -> float:
+    """The vertical extent the block occupies, first baseline to last.
+
+    Per-span lines carry their OWN leadings; the whole-box path keeps the
+    uniform product. This is `measure_text_box`'s `text_height`."""
+    if lay.line_leadings is not None:
+        return round(sum(lay.line_leadings), 4)
+    return round(len(lay.lines) * lay.leading, 4)
+
+
+def emit_text_box(
+    pdf,
+    page,
+    lay: _BoxLayout,
+    color: list | None = None,
+    align: str = "left",
+    y_top: float | None = None,
+) -> dict:
+    """Draw a prepared layout onto `page` (a pikepdf.Page) of `pdf`.
+
+    `y_top` is the FIRST BASELINE in the layout's local space. Passing it
+    suppresses the shift-up-to-visible rule: a caller that placed the block
+    itself has geometry drawn around it, and a rule that moved the text would
+    leave that geometry pointing at nothing."""
+    rgb = _rgb(color)
+    res = page.obj.get("/Resources")
+    if res is None:
+        res = Dictionary()
+        page.obj["/Resources"] = res
+    fonts = res.get("/Font")
+    if fonts is None:
+        fonts = Dictionary()
+        res["/Font"] = fonts
+    if lay.styled_lines is not None:
+        return _emit_spans_box(pdf, page, lay, rgb, align, fonts, y_top)
+    return _emit_box(pdf, page, lay, rgb, align, fonts, y_top)
+
+
+def _rgb(color: list | None) -> tuple[float, float, float]:
+    if color is None:
+        return (0.0, 0.0, 0.0)
+    try:
+        rgb = tuple(max(0.0, min(1.0, float(c))) for c in color)[:3]
+    except (TypeError, ValueError):
+        return (0.0, 0.0, 0.0)
+    return rgb if len(rgb) == 3 else (0.0, 0.0, 0.0)
 
 
 def add_text_box(
@@ -1557,16 +1633,6 @@ def add_text_box(
     columns stack across its width; the direction comes from the text
     (`vertical`) and an explicit spelling is honoured only where the text
     agrees with it. A vertical box cannot also be rotated."""
-    if color is None:
-        rgb = (0.0, 0.0, 0.0)
-    else:
-        try:
-            rgb = tuple(max(0.0, min(1.0, float(c))) for c in color)[:3]
-        except (TypeError, ValueError):
-            rgb = (0.0, 0.0, 0.0)
-        if len(rgb) != 3:
-            rgb = (0.0, 0.0, 0.0)
-
     input_path = Path(file)
     output_path = Path(output)
     pdf = pikepdf.open(file)
@@ -1580,124 +1646,124 @@ def add_text_box(
         if not (1 <= int(page) <= total):
             raise ValueError(f"page {page} is out of range (1-{total})")
         p = pdf.pages[int(page) - 1]
-
-        body, lines, leading, sz = lay.body, lay.lines, lay.leading, lay.sz
-        l_left, l_right, l_top, l_w = lay.l_left, lay.l_right, lay.l_top, lay.l_w
-        frame = lay.frame
-        font_dict, encode, width_1000 = lay.font_dict, lay.encode, lay.width_1000
-
-        res = p.obj.get("/Resources")
-        if res is None:
-            res = Dictionary()
-            p.obj["/Resources"] = res
-        fonts = res.get("/Font")
-        if fonts is None:
-            fonts = Dictionary()
-            res["/Font"] = fonts
-        if lay.styled_lines is not None:
-            return _emit_spans_box(
-                pdf, p, lay, rgb, align, fonts, input_path, output_path, page
-            )
-        fname = _fresh_font_name(fonts)
-        fonts[Name(fname)] = font_dict
-
-        def csi(operands, op):
-            return _CSI(operands, Operator(op))
-
-        instrs = [
-            csi([], "q"),
-            csi([], "BT"),
-            csi([Name(fname), sz], "Tf"),
-            csi(list(rgb), "rg"),
-        ]
-        y_top = l_top - sz  # first baseline: one em below the (local) box top
-        # Keep the block on the VISIBLE page. The box's own bottom is only a
-        # hint — text may overflow it downward like any text box — but text off
-        # the sheet is silently invisible, so if the last baseline would fall
-        # below the page (cropbox: viewers clip to it; mediabox as fallback),
-        # shift the whole block UP, capped so the first line never rises above
-        # the page top. A block taller than the page still overflows at the
-        # bottom (genuinely too much text) but keeps its top visible — never a
-        # success that renders nothing. Rotated: the SAME rule in LOCAL space —
-        # the frame is a rigid 90°-step turn, so the page box's preimage is an
-        # axis-aligned local rect and its local-y band substitutes for
-        # [lly, ury]; local "down" is wherever overflow marches off the sheet
-        # (90: out the page's RIGHT edge, 180: the TOP, 270: the LEFT).
-        # Overflow past the drawn box itself stays permitted, like rotate=0.
-        # Vertical: the same rule one axis over — the band comes from the
-        # writing frame, so a column that would run off the sheet moves back
-        # along the axis its columns stack in.
-        try:
-            vbox = [float(v) for v in p.cropbox]
-        except Exception:
-            try:
-                vbox = [float(v) for v in p.mediabox]
-            except Exception:
-                vbox = None
-        page_lly, page_ury = _page_band(lay, vbox, sz)
-        last_baseline = y_top - (len(lines) - 1) * leading
-        if last_baseline < page_lly:
-            y_top = min(page_ury - sz, y_top + (page_lly - last_baseline))
-        g_a, g_b, g_c, g_d = lay.glyph_lin
-        for i, line in enumerate(lines):
-            if not line:
-                continue  # blank line: y still advances via `i`
-            line_w = width_1000(line) / 1000.0 * sz
-            if align == "center":
-                lx = l_left + (l_w - line_w) / 2
-            elif align == "right":
-                lx = l_right - line_w
-            else:
-                lx = l_left
-            ly = y_top - i * leading
-            # BOUNDARY 2 — the anchor leaves the writing frame here, and
-            # nothing else does. The linear part is the glyphs' own (identity
-            # for horizontal text and for an upright column; a quarter turn
-            # for horizontal glyphs laid down a column), so for a horizontal
-            # box these operands are the shipped ones.
-            tx, ty = _t_inv(lay.wframe, lx, ly)
-            instrs.append(csi([g_a, g_b, g_c, g_d, round(tx, 4), round(ty, 4)], "Tm"))
-            if lay.bidi is not None:
-                # The line permutes into visual order HERE, after the
-                # wrap — line breaks are a logical-order decision, and rule
-                # L1's line-end handling is meaningless before the lines
-                # exist. Same two boundaries as the paragraph reflow.
-                instrs.extend(
-                    _bidi_show(lay.bidi.pieces(line), encode, lay.bidi, sz, csi, pikepdf.Array)
-                )
-                continue
-            # A TJ array carrying the face's pair kerning; falls back to
-            # the shipped Tj when nothing kerns (kern=False, or a face like
-            # Liberation Mono that has no pairs at all).
-            instrs.append(_show_instruction(line, encode, lay.kern_pairs, csi, pikepdf.Array))
-        instrs.append(csi([], "ET"))
-        instrs.append(csi([], "Q"))
-        if frame is not None:
-            instrs = [csi([], "q"), csi(frame, "cm")] + instrs + [csi([], "Q")]
-
-        content = pikepdf.unparse_content_stream(instrs)
-        # Shield the EXISTING content in its own q/Q envelope before appending
-        # our object. Our object is already q/Q-wrapped, but that only saves
-        # whatever CTM is live when it starts — a page whose prior content left
-        # a dangling `cm`/`q` (unbalanced) would transform our text by it.
-        # Wrapping the original restores the page-initial CTM after its Q, which
-        # is the user space our rect/Tm coordinates are expressed in. This is
-        # what pikepdf's add_overlay does implicitly; contents_add does not.
-        p.contents_add(b"q\n", prepend=True)
-        p.contents_add(b"\nQ\n" + content, prepend=False)
-
+        info = emit_text_box(pdf, p, lay, color, align)
         _save(pdf, input_path, output_path)
-        return {
-            "output": str(output_path),
-            "page": int(page),
-            "lines": len(lines),
-            "chars": len(body),
-        }
+        out = {"output": str(output_path), "page": int(page)}
+        out.update(info)
+        del out["text_height"]
+        return out
     finally:
         try:
             pdf.close()
         except Exception:
             pass
+
+
+def _emit_box(pdf, p, lay, rgb, align, fonts, y_top=None) -> dict:
+    """The whole-box emitter — one face, one size, uniform leading.
+
+    An explicit `y_top` is the FIRST BASELINE in local space and suppresses
+    the shift-up rule: the caller has already decided where the block sits
+    and a rule that moves it would break the geometry drawn around it."""
+    placed = y_top is not None
+    body, lines, leading, sz = lay.body, lay.lines, lay.leading, lay.sz
+    l_left, l_right, l_top, l_w = lay.l_left, lay.l_right, lay.l_top, lay.l_w
+    frame = lay.frame
+    font_dict, encode, width_1000 = lay.font_dict, lay.encode, lay.width_1000
+
+    fname = _fresh_font_name(fonts)
+    fonts[Name(fname)] = font_dict
+
+    def csi(operands, op):
+        return _CSI(operands, Operator(op))
+
+    instrs = [
+        csi([], "q"),
+        csi([], "BT"),
+        csi([Name(fname), sz], "Tf"),
+        csi(list(rgb), "rg"),
+    ]
+    if not placed:
+        y_top = l_top - sz  # first baseline: one em below the (local) box top
+    # Keep the block on the VISIBLE page. The box's own bottom is only a
+    # hint — text may overflow it downward like any text box — but text off
+    # the sheet is silently invisible, so if the last baseline would fall
+    # below the page (cropbox: viewers clip to it; mediabox as fallback),
+    # shift the whole block UP, capped so the first line never rises above
+    # the page top. A block taller than the page still overflows at the
+    # bottom (genuinely too much text) but keeps its top visible — never a
+    # success that renders nothing. Rotated: the SAME rule in LOCAL space —
+    # the frame is a rigid 90°-step turn, so the page box's preimage is an
+    # axis-aligned local rect and its local-y band substitutes for
+    # [lly, ury]; local "down" is wherever overflow marches off the sheet
+    # (90: out the page's RIGHT edge, 180: the TOP, 270: the LEFT).
+    # Overflow past the drawn box itself stays permitted, like rotate=0.
+    # Vertical: the same rule one axis over — the band comes from the
+    # writing frame, so a column that would run off the sheet moves back
+    # along the axis its columns stack in.
+    try:
+        vbox = [float(v) for v in p.cropbox]
+    except Exception:
+        try:
+            vbox = [float(v) for v in p.mediabox]
+        except Exception:
+            vbox = None
+    page_lly, page_ury = _page_band(lay, vbox, sz)
+    last_baseline = y_top - (len(lines) - 1) * leading
+    if not placed and last_baseline < page_lly:
+        y_top = min(page_ury - sz, y_top + (page_lly - last_baseline))
+    g_a, g_b, g_c, g_d = lay.glyph_lin
+    for i, line in enumerate(lines):
+        if not line:
+            continue  # blank line: y still advances via `i`
+        line_w = width_1000(line) / 1000.0 * sz
+        if align == "center":
+            lx = l_left + (l_w - line_w) / 2
+        elif align == "right":
+            lx = l_right - line_w
+        else:
+            lx = l_left
+        ly = y_top - i * leading
+        # BOUNDARY 2 — the anchor leaves the writing frame here, and
+        # nothing else does. The linear part is the glyphs' own (identity
+        # for horizontal text and for an upright column; a quarter turn
+        # for horizontal glyphs laid down a column), so for a horizontal
+        # box these operands are the shipped ones.
+        tx, ty = _t_inv(lay.wframe, lx, ly)
+        instrs.append(csi([g_a, g_b, g_c, g_d, round(tx, 4), round(ty, 4)], "Tm"))
+        if lay.bidi is not None:
+            # The line permutes into visual order HERE, after the
+            # wrap — line breaks are a logical-order decision, and rule
+            # L1's line-end handling is meaningless before the lines
+            # exist. Same two boundaries as the paragraph reflow.
+            instrs.extend(
+                _bidi_show(lay.bidi.pieces(line), encode, lay.bidi, sz, csi, pikepdf.Array)
+            )
+            continue
+        # A TJ array carrying the face's pair kerning; falls back to
+        # the shipped Tj when nothing kerns (kern=False, or a face like
+        # Liberation Mono that has no pairs at all).
+        instrs.append(_show_instruction(line, encode, lay.kern_pairs, csi, pikepdf.Array))
+    instrs.append(csi([], "ET"))
+    instrs.append(csi([], "Q"))
+    if frame is not None:
+        instrs = [csi([], "q"), csi(frame, "cm")] + instrs + [csi([], "Q")]
+
+    content = pikepdf.unparse_content_stream(instrs)
+    # Shield the EXISTING content in its own q/Q envelope before appending
+    # our object. Our object is already q/Q-wrapped, but that only saves
+    # whatever CTM is live when it starts — a page whose prior content left
+    # a dangling `cm`/`q` (unbalanced) would transform our text by it.
+    # Wrapping the original restores the page-initial CTM after its Q, which
+    # is the user space our rect/Tm coordinates are expressed in. This is
+    # what pikepdf's add_overlay does implicitly; contents_add does not.
+    p.contents_add(b"q\n", prepend=True)
+    p.contents_add(b"\nQ\n" + content, prepend=False)
+    return {
+        "lines": len(lines),
+        "chars": len(body),
+        "text_height": round(len(lines) * leading, 4),
+    }
 
 
 def measure_text_box(
@@ -1742,12 +1808,7 @@ def measure_text_box(
         # Round BEFORE comparing so the verdict matches the reported numbers
         # and float noise can't flip an exact boundary (14*1.2 and a box's
         # subtracted height land on different last-bit values otherwise).
-        # Per-span lines carry their OWN leadings; the whole-box
-        # path keeps the shipped uniform product.
-        if lay.line_leadings is not None:
-            text_height = round(sum(lay.line_leadings), 4)
-        else:
-            text_height = round(len(lay.lines) * lay.leading, 4)
+        text_height = block_height(lay)
         box_height = round(lay.l_h, 4)
         return {
             "lines": len(lay.lines),

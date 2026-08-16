@@ -248,6 +248,52 @@ export async function exportImagesRun(
   );
 }
 
+/** What `summarize_comments` reports back. The reconciliation invariant is
+ *  `found === written + excluded.filtered + excluded.unmodelled`; comments
+ *  written without a badge or without their text are already inside `written`
+ *  and are counted separately. */
+export interface CommentSummaryReport {
+  output: string;
+  sheets: number;
+  found: number;
+  written: number;
+  excluded: {
+    filtered: number;
+    unmodelled: number;
+    no_position: number;
+    body_refused: number;
+  };
+  unreadable: { page: number }[];
+  no_box_pages: number[];
+  reconciles: boolean;
+  marks: { badge: number; page: number; comment: string; sheet: number; x: number; y: number }[];
+  mode: string;
+  placement: string;
+}
+
+/**
+ * Write the comment summary to an injected destination (dialog must be open).
+ *
+ * The save dialog is native and undrivable, so this supplies the path and runs
+ * the dialog's own gated path — the same catalog-resolved furniture and the
+ * same engine call the Create button makes. A null result means the run failed
+ * and the dialog is showing the error.
+ */
+export async function commentSummaryRun(out: string): Promise<CommentSummaryReport | null> {
+  const result = await browser.executeAsync<CommentSummaryReport | null | string, [string]>(
+    function (dest, done) {
+      (window as any).__SPECTRA_TEST__.commentSummaryRun(dest)
+        .then((r: unknown) => done((r ?? null) as any))
+        .catch((err: unknown) => done(('__SPECTRA_E2E_ERROR__:' + String(err)) as any));
+    },
+    out,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`commentSummaryRun failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}
+
 /** Export via the engine (bypasses the native save dialog). Returns the
  *  string '__SPECTRA_E2E_ERROR__:…' on failure so the spec can assert on it. */
 export async function exportActiveAs(

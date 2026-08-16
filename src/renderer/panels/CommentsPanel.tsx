@@ -3,12 +3,29 @@ import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { dialog, file } from '../lib/tauri-bridge';
-import { getCanvasServices } from '../commands/context';
+import { getCanvasServices, getCommandContext } from '../commands/context';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { ANNOTATION_PALETTE } from '../components/canvas/PageCell';
+import { CommentSummaryDialog } from '../components/CommentSummaryDialog';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tChromeCount } from '../i18n';
+import { tChrome, tChromeCount, tNumber } from '../i18n';
 import type { PanelKey } from '../i18n-panels';
+import {
+  COMMENT_SORTS,
+  DEFAULT_SUMMARY_OPTIONS,
+  filterIsActive,
+  formatCommentDate,
+  engineFilter,
+  matchWorkspaceRow,
+  orderedComments,
+  typeLabel,
+} from '../lib/comment-summary';
+import type {
+  CommentFilter,
+  CommentModel,
+  MatchableRow,
+  SummaryOptions,
+} from '../lib/comment-summary';
 
 // THE comments surface. One.
 //
@@ -19,15 +36,19 @@ import type { PanelKey } from '../i18n-panels';
 // dock titled both of them "Comments" — so the same word opened two different
 // lists with two different answers.
 //
-// This is the merge. It keeps BOTH truths and is honest about the difference:
-//   - the rows you can act on are the workspace's own annotations — every one
-//     of them now, not just the ones with a note (a highlight without a note is
-//     still a comment) — with jump, edit, recolour and delete;
-//   - the FILE's total comes from the engine, so a document carrying markup
-//     this app doesn't model reports honestly instead of quietly
-//     under-counting (multi-stroke ink and polygons, once that list's
-//     examples, are modeled — the residue is exotica like
-//     3D or rich-media annotations);
+// This is the merge, and the list now shows the FILE's own review model:
+//   - every comment the file carries, with its author, date, subject, state
+//     and reply thread, ORDERED AND NARROWED BY THE ENGINE. The order is not
+//     re-derived here: the same `list_comments` answer drives this list and
+//     the produced summary, so the two can never disagree about which
+//     comments, in what order;
+//   - each row picks up jump/edit/recolour/delete when a workspace annotation
+//     matches it by import fingerprint; one that does not is listed read-only
+//     rather than dropped, which is what the old under-count did;
+//   - a comment drawn on the canvas and not yet committed is not in the file
+//     at all, so no engine read can see it: those rows are listed FIRST, in
+//     document order, and the filter never removes them — they are the user's
+//     live edits;
 //   - Delete All is the engine op, so it removes everything and is undoable.
 
 // The PDF's own vocabulary, not the app's internal kind. A row that says
@@ -56,17 +77,17 @@ function labelFor(kind: string, markupType?: string): string {
   return key ? tChrome(key) : k;
 }
 
-interface EngineAnnot {
-  page: number;
-  subtype: string;
-  rect: number[] | null;
-  contents: string;
-  author: string;
-}
-interface Overview {
-  annotations: EngineAnnot[];
-  count: number;
-  by_type: Record<string, number>;
+interface WorkspaceRow {
+  docId: string;
+  pageId: string;
+  pageNumber: number;
+  annotationId: string;
+  label: string;
+  color: string;
+  note: string;
+  /** Present only for a row imported from the file — the raw PDF-space rect
+   * the engine also reports, which is what pairs the two. */
+  match: MatchableRow | null;
 }
 
 export function CommentsPanel(): React.ReactElement {
@@ -76,32 +97,28 @@ export function CommentsPanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
-  const [overview, setOverview] = useState<Overview | null>(null);
+  const [model, setModel] = useState<CommentModel | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [options, setOptions] = useState<SummaryOptions>(DEFAULT_SUMMARY_OPTIONS);
+  const [summaryOpen, setSummaryOpen] = useState(false);
 
   const buffer = activeFile?.buffer ?? null;
   const workingPath = activeFile?.workingPath ?? null;
+  const { sort, filter } = options;
 
-  // The editable rows: the workspace's own annotations for the document on
-  // show. Unfiltered — the old sidebar's `if (!a.note) continue` is exactly
-  // what made two "Comments" report different numbers.
-  const rows = useMemo(() => {
+  // The workspace's own annotations for the document on show. Unfiltered —
+  // the old sidebar's `if (!a.note) continue` is exactly what made two
+  // "Comments" report different numbers.
+  const rows = useMemo<WorkspaceRow[]>(() => {
     const docs = state.workspace.documents.filter((d) => d.path === activeFile?.path);
-    const out: {
-      docId: string;
-      pageId: string;
-      pageNumber: number;
-      annotationId: string;
-      label: string;
-      color: string;
-      note: string;
-    }[] = [];
+    const out: WorkspaceRow[] = [];
     for (const doc of docs) {
       doc.pages.forEach((page, i) => {
         for (const a of page.annotations ?? []) {
+          const original = a.importedOriginal;
           out.push({
             docId: doc.id,
             pageId: page.id,
@@ -110,6 +127,13 @@ export function CommentsPanel(): React.ReactElement {
             label: labelFor(a.kind, a.markupType),
             color: a.color,
             note: a.note ?? '',
+            match: original
+              ? {
+                  annotationId: a.id,
+                  subtype: original.subtype,
+                  rect: original.rect,
+                }
+              : null,
           });
         }
       });
@@ -120,21 +144,51 @@ export function CommentsPanel(): React.ReactElement {
   const refresh = useCallback(async () => {
     if (!workingPath) return;
     try {
-      const res = await call('list_annotations', { file: workingPath });
-      setOverview(res as unknown as Overview);
+      const res = await call('list_comments', {
+        file: workingPath,
+        sort,
+        filter: engineFilter(filter),
+      });
+      setModel(res as unknown as CommentModel);
     } catch {
-      setOverview(null);
+      setModel(null);
     }
-  }, [workingPath, call]);
+  }, [workingPath, call, sort, filter]);
 
   useEffect(() => {
     setConfirming(false);
     if (!buffer || !workingPath) {
-      setOverview(null);
+      setModel(null);
       return;
     }
     void refresh();
   }, [buffer, workingPath, refresh]);
+
+  // The file's comments in the engine's order, each paired with the workspace
+  // row that can act on it. `used` makes the pairing one-to-one: two identical
+  // annotations on one page are two rows, never one row claimed twice.
+  const listed = useMemo(() => {
+    if (!model) return [];
+    const candidates = rows.filter((r) => r.match !== null).map((r) => r.match as MatchableRow);
+    const used = new Set<string>();
+    const byId = new Map(rows.map((r) => [r.annotationId, r]));
+    return orderedComments(model).map(({ comment, depth }) => {
+      const hit = matchWorkspaceRow(comment, candidates, used);
+      return { comment, depth, row: hit ? (byId.get(hit.annotationId) ?? null) : null };
+    });
+  }, [model, rows]);
+
+  // A comment drawn on the canvas lives in the page tier until it is
+  // committed, so no engine read can see it. These are the user's live edits:
+  // listed first, in document order, and never narrowed away.
+  const pending = useMemo(() => rows.filter((r) => r.match === null), [rows]);
+
+  const notActionable = listed.filter((entry) => entry.row === null).length;
+
+  const setFilter = useCallback(
+    (next: CommentFilter) => setOptions((o) => ({ ...o, filter: next })),
+    [],
+  );
 
   // XFDF interchange (rung 4). Export is a gate-flushed read (the engine
   // call's commit gate bakes pending comments first, so the file it reads
@@ -216,15 +270,19 @@ export function CommentsPanel(): React.ReactElement {
     }
   }, [activeFile, call, dispatch, refresh]);
 
+  // The produced file opens like any other document — through App's one open
+  // funnel, never a second implementation of "open some files".
+  const summaryDone = useCallback(async (output: string) => {
+    setSummaryOpen(false);
+    setStatus(tChrome('panel.comments.summaryOpening'));
+    await getCommandContext()?.app?.openPath(output);
+  }, []);
+
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.comments.open')} />;
 
-  const fileCount = overview?.count ?? 0;
-  const types = Object.entries(overview?.by_type ?? {});
-  // Markup that lives in the FILE but not in the workspace tier — this app
-  // doesn't model every annotation type, and pretending otherwise would be the
-  // silent under-count this merge exists to kill.
-  const notShown = Math.max(0, fileCount - rows.length);
-  const total = Math.max(fileCount, rows.length);
+  const fileCount = model?.found ?? 0;
+  const types = Object.entries(model?.by_type ?? {});
+  const total = Math.max(fileCount, listed.length + pending.length);
 
   return (
     <div className="flex flex-col gap-3">
@@ -245,43 +303,218 @@ export function CommentsPanel(): React.ReactElement {
             )}
           </div>
 
+          <div className="flex items-end gap-2 flex-wrap">
+            <div>
+              <label className="block text-xs text-neutral-500 mb-1" htmlFor="comments-sort">
+                {tChrome('panel.comments.sort')}
+              </label>
+              <select
+                id="comments-sort"
+                data-testid="comments-sort"
+                className="px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
+                value={sort}
+                onChange={(e) =>
+                  setOptions((o) => ({ ...o, sort: e.target.value as SummaryOptions['sort'] }))
+                }
+              >
+                {COMMENT_SORTS.map((s) => (
+                  <option key={s} value={s}>
+                    {tChrome(SORT_KEY[s])}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-neutral-500 mb-1" htmlFor="comments-filter-author">
+                {tChrome('panel.comments.filterAuthor')}
+              </label>
+              <select
+                id="comments-filter-author"
+                data-testid="comments-filter-author"
+                className="px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs max-w-[10rem]"
+                value={filter.authors?.[0] ?? ''}
+                onChange={(e) =>
+                  setFilter({
+                    ...filter,
+                    authors: e.target.value ? [e.target.value] : undefined,
+                  })
+                }
+              >
+                <option value="">{tChrome('panel.comments.filterAny')}</option>
+                {(model?.authors ?? []).map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-neutral-500 mb-1" htmlFor="comments-filter-type">
+                {tChrome('panel.comments.filterType')}
+              </label>
+              <select
+                id="comments-filter-type"
+                data-testid="comments-filter-type"
+                className="px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs max-w-[10rem]"
+                value={filter.subtypes?.[0] ?? ''}
+                onChange={(e) =>
+                  setFilter({
+                    ...filter,
+                    subtypes: e.target.value ? [e.target.value] : undefined,
+                  })
+                }
+              >
+                <option value="">{tChrome('panel.comments.filterAny')}</option>
+                {(model?.subtypes ?? []).map((s) => (
+                  <option key={s} value={s}>
+                    {typeLabel(s)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-neutral-500 mb-1" htmlFor="comments-filter-state">
+                {tChrome('panel.comments.filterState')}
+              </label>
+              <select
+                id="comments-filter-state"
+                data-testid="comments-filter-state"
+                className="px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs max-w-[9rem]"
+                value={filter.states?.[0] ?? ''}
+                onChange={(e) =>
+                  setFilter({
+                    ...filter,
+                    states: e.target.value ? [e.target.value] : undefined,
+                  })
+                }
+              >
+                <option value="">{tChrome('panel.comments.filterAny')}</option>
+                {(model?.states ?? []).map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-neutral-500 mb-1" htmlFor="comments-filter-pages">
+                {tChrome('panel.comments.filterPages')}
+              </label>
+              <input
+                id="comments-filter-pages"
+                data-testid="comments-filter-pages"
+                type="text"
+                spellCheck={false}
+                className="px-2 py-1 w-24 bg-neutral-800 border border-neutral-700 rounded text-xs"
+                placeholder={tChrome('panel.comments.filterPagesPlaceholder')}
+                value={filter.pages ?? ''}
+                onChange={(e) => setFilter({ ...filter, pages: e.target.value || undefined })}
+              />
+            </div>
+            <label className="flex items-center gap-1.5 text-xs text-neutral-400 pb-1">
+              <input
+                type="checkbox"
+                data-testid="comments-filter-body"
+                checked={filter.has_body === true}
+                onChange={(e) => setFilter({ ...filter, has_body: e.target.checked || undefined })}
+              />
+              {tChrome('panel.comments.filterWithText')}
+            </label>
+          </div>
+
+          {model && filterIsActive(filter) && (
+            <p className="text-xs text-amber-300" data-testid="comments-filtered">
+              {tChrome('panel.comments.filteredAway', {
+                count: tNumber(model.excluded.filtered),
+              })}
+            </p>
+          )}
+
           <div className="flex flex-col gap-1 max-h-[26rem] overflow-y-auto" data-testid="comments-list" tabIndex={0} role="region" aria-label={tChrome('panel.comments.listAria')}>
-            {rows.map((e) => (
-              <div
+            {pending.map((e) => (
+              <CommentCard
                 key={e.annotationId}
+                row={e}
+                header={tChrome('panel.comments.pageLine', { label: e.label, page: e.pageNumber })}
+                pending
+                depth={0}
+                editing={editing}
+                setEditing={setEditing}
+                dispatch={dispatch}
+              />
+            ))}
+
+            {listed.map(({ comment, depth, row }) => (
+              <div
+                key={comment.id}
                 data-testid="comment-item"
+                data-comment-id={comment.id}
                 className="px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded border-s-2"
-                style={{ borderLeftColor: e.color }}
+                style={{
+                  borderLeftColor: row?.color ?? '#525252',
+                  marginInlineStart: `${depth * 12}px`,
+                }}
               >
                 <button
                   type="button"
-                  data-testid={`comment-jump-${e.annotationId}`}
+                  data-testid={row ? `comment-jump-${row.annotationId}` : undefined}
                   className="w-full text-start"
                   title={tChrome('panel.comments.jumpTitle')}
-                  onClick={() => getCanvasServices()?.openPageForReading(e.pageId)}
+                  disabled={!row}
+                  onClick={() => row && getCanvasServices()?.openPageForReading(row.pageId)}
                 >
                   <div className="text-xs text-neutral-400">
-                    {tChrome('panel.comments.pageLine', { label: e.label, page: e.pageNumber })}
+                    {tChrome('panel.comments.rowLine', {
+                      label: typeLabel(comment.subtype),
+                      page: tNumber(comment.page),
+                      author: comment.author || tChrome('panel.comments.doc.unknownAuthor'),
+                      date: formatCommentDate(comment.modified ?? comment.created),
+                    })}
                   </div>
-                  {e.note && !(editing === e.annotationId) && (
-                    <div className="text-sm text-neutral-200 truncate" title={e.note}>
-                      {e.note}
+                  {comment.subject && (
+                    <div className="text-xs text-neutral-500">
+                      {tChrome('panel.comments.rowSubject', { subject: comment.subject })}
+                    </div>
+                  )}
+                  {comment.state && (
+                    <div className="text-xs text-neutral-500">
+                      {tChrome('panel.comments.rowState', { state: comment.state })}
+                    </div>
+                  )}
+                  {comment.reply_type === 'group' && (
+                    <div className="text-xs text-neutral-500">
+                      {tChrome('panel.comments.rowGrouped')}
+                    </div>
+                  )}
+                  {comment.orphan && (
+                    <div className="text-xs text-amber-300" data-testid="comment-orphan">
+                      {tChrome('panel.comments.rowOrphan')}
+                    </div>
+                  )}
+                  {comment.cycle && (
+                    <div className="text-xs text-amber-300">
+                      {tChrome('panel.comments.rowCycle')}
+                    </div>
+                  )}
+                  {comment.contents && !(row && editing === row.annotationId) && (
+                    <div className="text-sm text-neutral-200 truncate" title={comment.contents}>
+                      {comment.contents}
                     </div>
                   )}
                 </button>
 
-                {editing === e.annotationId ? (
+                {row && editing === row.annotationId ? (
                   <textarea
                     autoFocus
                     data-testid="comment-note-input"
                     className="mt-1 w-full text-sm bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100"
-                    defaultValue={e.note}
+                    defaultValue={row.note}
                     onBlur={(ev) => {
                       dispatch({
                         type: 'UPDATE_ANNOTATION',
-                        docId: e.docId,
-                        pageId: e.pageId,
-                        annotationId: e.annotationId,
+                        docId: row.docId,
+                        pageId: row.pageId,
+                        annotationId: row.annotationId,
                         note: ev.target.value,
                       });
                       setEditing(null);
@@ -289,56 +522,24 @@ export function CommentsPanel(): React.ReactElement {
                   />
                 ) : null}
 
-                <div className="flex items-center gap-1 mt-1">
-                  <button
-                    type="button"
-                    data-testid={`comment-edit-${e.annotationId}`}
-                    className="text-xs px-1.5 py-0.5 rounded text-neutral-400 hover:bg-neutral-700 hover:text-neutral-100"
-                    onClick={() => setEditing(editing === e.annotationId ? null : e.annotationId)}
-                  >
-                    {e.note ? tChrome('panel.comments.editNote') : tChrome('panel.comments.addNote')}
-                  </button>
-                  {ANNOTATION_PALETTE.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      aria-label={tChrome('panel.comments.recolourTo', { color: c })}
-                      title={tChrome('panel.comments.recolour')}
-                      className="w-3.5 h-3.5 rounded-sm border border-black/30"
-                      style={{ background: c }}
-                      onClick={() =>
-                        dispatch({
-                          type: 'RECOLOR_ANNOTATION',
-                          docId: e.docId,
-                          pageId: e.pageId,
-                          annotationId: e.annotationId,
-                          color: c,
-                        })
-                      }
-                    />
-                  ))}
-                  <button
-                    type="button"
-                    data-testid={`comment-delete-${e.annotationId}`}
-                    className="ms-auto text-xs px-1.5 py-0.5 rounded text-neutral-400 hover:bg-red-600 hover:text-white"
-                    onClick={() =>
-                      dispatch({
-                        type: 'REMOVE_ANNOTATION',
-                        docId: e.docId,
-                        pageId: e.pageId,
-                        annotationId: e.annotationId,
-                      })
-                    }
-                  >
-                    {tChrome('panel.comments.delete')}
-                  </button>
-                </div>
+                {row ? (
+                  <RowActions
+                    row={row}
+                    editing={editing}
+                    setEditing={setEditing}
+                    dispatch={dispatch}
+                  />
+                ) : (
+                  <p className="text-xs text-neutral-600 mt-1" data-testid="comment-read-only">
+                    {tChrome('panel.comments.rowReadOnly')}
+                  </p>
+                )}
               </div>
             ))}
 
-            {notShown > 0 && (
+            {notActionable > 0 && (
               <p className="text-xs text-neutral-500 px-1 py-2" data-testid="comments-not-editable">
-                {tChromeCount('panel.comments.notShown', notShown)}
+                {tChromeCount('panel.comments.notShown', notActionable)}
               </p>
             )}
           </div>
@@ -372,6 +573,15 @@ export function CommentsPanel(): React.ReactElement {
                 {tChrome('panel.comments.deleteAll')}
               </button>
               <button
+                data-testid="comments-summary-open"
+                onClick={() => setSummaryOpen(true)}
+                disabled={busy || !model || model.count === 0}
+                title={tChrome('panel.comments.summaryHint')}
+                className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
+              >
+                {tChrome('panel.comments.summaryBtn')}
+              </button>
+              <button
                 data-testid="comments-export-xfdf"
                 onClick={() => void exportXfdf()}
                 disabled={busy}
@@ -394,6 +604,148 @@ export function CommentsPanel(): React.ReactElement {
         </>
       )}
       {status && <div className="text-xs text-neutral-400">{status}</div>}
+      {summaryOpen && model && (
+        <CommentSummaryDialog
+          file={{ workingPath: activeFile.workingPath, name: activeFile.name }}
+          model={model}
+          options={options}
+          onOptionsChange={setOptions}
+          onDone={(output) => void summaryDone(output)}
+          onClose={() => setSummaryOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+const SORT_KEY: Record<string, PanelKey> = {
+  page: 'panel.comments.sort.page',
+  author: 'panel.comments.sort.author',
+  date: 'panel.comments.sort.date',
+  type: 'panel.comments.sort.type',
+};
+
+function RowActions({
+  row,
+  editing,
+  setEditing,
+  dispatch,
+}: {
+  row: WorkspaceRow;
+  editing: string | null;
+  setEditing: (id: string | null) => void;
+  dispatch: ReturnType<typeof useAppDispatch>;
+}): React.ReactElement {
+  return (
+    <div className="flex items-center gap-1 mt-1">
+      <button
+        type="button"
+        data-testid={`comment-edit-${row.annotationId}`}
+        className="text-xs px-1.5 py-0.5 rounded text-neutral-400 hover:bg-neutral-700 hover:text-neutral-100"
+        onClick={() => setEditing(editing === row.annotationId ? null : row.annotationId)}
+      >
+        {row.note ? tChrome('panel.comments.editNote') : tChrome('panel.comments.addNote')}
+      </button>
+      {ANNOTATION_PALETTE.map((c) => (
+        <button
+          key={c}
+          type="button"
+          aria-label={tChrome('panel.comments.recolourTo', { color: c })}
+          title={tChrome('panel.comments.recolour')}
+          className="w-3.5 h-3.5 rounded-sm border border-black/30"
+          style={{ background: c }}
+          onClick={() =>
+            dispatch({
+              type: 'RECOLOR_ANNOTATION',
+              docId: row.docId,
+              pageId: row.pageId,
+              annotationId: row.annotationId,
+              color: c,
+            })
+          }
+        />
+      ))}
+      <button
+        type="button"
+        data-testid={`comment-delete-${row.annotationId}`}
+        className="ms-auto text-xs px-1.5 py-0.5 rounded text-neutral-400 hover:bg-red-600 hover:text-white"
+        onClick={() =>
+          dispatch({
+            type: 'REMOVE_ANNOTATION',
+            docId: row.docId,
+            pageId: row.pageId,
+            annotationId: row.annotationId,
+          })
+        }
+      >
+        {tChrome('panel.comments.delete')}
+      </button>
+    </div>
+  );
+}
+
+function CommentCard({
+  row,
+  header,
+  pending,
+  depth,
+  editing,
+  setEditing,
+  dispatch,
+}: {
+  row: WorkspaceRow;
+  header: string;
+  pending: boolean;
+  depth: number;
+  editing: string | null;
+  setEditing: (id: string | null) => void;
+  dispatch: ReturnType<typeof useAppDispatch>;
+}): React.ReactElement {
+  return (
+    <div
+      data-testid="comment-item"
+      data-comment-pending={pending ? 'true' : undefined}
+      className="px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded border-s-2"
+      style={{ borderLeftColor: row.color, marginInlineStart: `${depth * 12}px` }}
+    >
+      <button
+        type="button"
+        data-testid={`comment-jump-${row.annotationId}`}
+        className="w-full text-start"
+        title={tChrome('panel.comments.jumpTitle')}
+        onClick={() => getCanvasServices()?.openPageForReading(row.pageId)}
+      >
+        <div className="text-xs text-neutral-400">{header}</div>
+        {pending && (
+          <div className="text-xs text-neutral-600">{tChrome('panel.comments.rowPending')}</div>
+        )}
+        {row.note && !(editing === row.annotationId) && (
+          <div className="text-sm text-neutral-200 truncate" title={row.note}>
+            {row.note}
+          </div>
+        )}
+      </button>
+
+      {editing === row.annotationId ? (
+        <textarea
+          autoFocus
+          data-testid="comment-note-input"
+          className="mt-1 w-full text-sm bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-neutral-100"
+          defaultValue={row.note}
+          onBlur={(ev) => {
+            dispatch({
+              type: 'UPDATE_ANNOTATION',
+              docId: row.docId,
+              pageId: row.pageId,
+              annotationId: row.annotationId,
+              note: ev.target.value,
+            });
+            setEditing(null);
+          }}
+        />
+      ) : null}
+
+      <RowActions row={row} editing={editing} setEditing={setEditing} dispatch={dispatch} />
     </div>
   );
 }

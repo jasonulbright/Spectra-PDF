@@ -553,9 +553,18 @@ def face_can_shape(face_path: str, text: str) -> bool:
     The probe runs in the TEXT's own direction. It used to take
     `shape`'s right-to-left default, which is correct for every joining
     script but Mongolian — and a probe that shapes backwards answers about a
-    run nobody will draw."""
+    run nobody will draw.
+
+    Structural whitespace is a line break, not a glyph: it never embeds and
+    is never shaped, so the probe must not ask the face about it. It used to,
+    and the face answered `.notdef` — which failed the probe for every
+    MULTI-LINE box mixing a joining script with anything else, sent the
+    resolution back to a Latin face, and turned into "the fallback font
+    cannot express" for text a bundled face draws perfectly on one line. The
+    substitution keeps the word boundaries the per-word shaping relies on."""
+    probe = text.translate({0x0A: " ", 0x0D: " ", 0x09: " "})
     try:
-        shape(face_path, text, rtl=shapes_right_to_left(text))
+        shape(face_path, probe, rtl=shapes_right_to_left(probe))
         return True
     except Exception:
         return False
