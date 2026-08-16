@@ -23,6 +23,7 @@ from engine.separations import (
 )
 from separation_builders import (
     cmyk_spot_pdf,
+    cropped_page_pdf,
     device_rgb_pdf,
     inks_everywhere_pdf,
     many_spots_pdf,
@@ -279,6 +280,89 @@ class TestSeparationRaster:
         on = render_separations(src, page=1, dpi=72, gs_path=gs_path, overprint=True)
         off = render_separations(src, page=1, dpi=72, gs_path=gs_path, overprint=False)
         assert on["dir"] != off["dir"]
+
+
+@pytest.mark.usefixtures("gs_path")
+class TestTheRasterFrame:
+    """The plates carry the frame the viewer shows, not the MediaBox.
+
+    The canvas overlays the composite on a page cell sized from the CropBox, so
+    a MediaBox raster is stretched over a region the page never displays — and
+    the ink list, the per-ink coverage, the total-area alarm and the soft proof
+    are then all honest answers about an area nobody is looking at.
+
+    Every expectation below is the fixture's geometry: a 300x200 pt CropBox at
+    (100, 500) on a 612x792 pt MediaBox, one 100x50 pt bar inside it at
+    (150, 600) and one outside it at (20, 20). At 72 dpi one point is one
+    pixel, so the right answers are integers rather than tolerances, and the
+    MediaBox answers are different integers.
+    """
+
+    def test_the_raster_is_the_crop_box(self, tmp_path, gs_path):
+        src = cropped_page_pdf(tmp_path / "crop.pdf")
+        result = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        # 400 - 100 by 700 - 500. The MediaBox would give 612x792.
+        assert (result["width"], result["height"]) == (300, 200)
+        assert _plate(result, "Cyan").shape == (200, 300)
+
+    def test_the_ink_lands_where_the_crop_box_puts_it(self, tmp_path, gs_path):
+        src = cropped_page_pdf(tmp_path / "crop.pdf")
+        result = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        cyan = _plate(result, "Cyan")
+        rows, columns = np.nonzero(cyan > 0.5)
+        # The bar's left edge is 150 - 100 = 50 pt right of the frame's left
+        # edge, and its top edge is 700 - 650 = 50 pt below the frame's top.
+        assert (int(columns.min()), int(columns.max())) == (50, 149)
+        assert (int(rows.min()), int(rows.max())) == (50, 99)
+        assert int((cyan > 0.5).sum()) == 100 * 50
+
+    def test_ink_outside_the_crop_box_is_clipped_away(self, tmp_path, gs_path):
+        src = cropped_page_pdf(tmp_path / "crop.pdf")
+        result = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        # The magenta bar's top edge is at y = 70 and the frame's bottom edge
+        # is at y = 500. The CropBox clips page content as well as framing it,
+        # so this bar is off the plates under either framing — which is why a
+        # MediaBox raster of a cropped page is wrong about geometry and about
+        # every area-relative figure, and never about which inks are present.
+        assert float(_plate(result, "Magenta").max()) == 0.0
+
+    def test_coverage_is_a_fraction_of_the_cropped_area(self, tmp_path, gs_path):
+        src = cropped_page_pdf(tmp_path / "crop.pdf")
+        result = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        # 100 x 50 pt of solid cyan in a 300 x 200 pt frame. Measured over the
+        # MediaBox the same bar is 5000 / 484704 of the page — 1.03 %, a
+        # coverage figure for an area the plates do not cover.
+        assert result["coverage"]["Cyan"] == pytest.approx(5000 / 60000, abs=1e-4)
+
+    def test_the_device_applies_rotate_the_way_the_viewport_does(self, tmp_path, gs_path):
+        src = cropped_page_pdf(tmp_path / "rot90.pdf", rotate=90)
+        result = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        # A viewport swaps the frame's extents under /Rotate 90; so does the
+        # device. Disagreement here is a raster displayed on its side.
+        assert (result["width"], result["height"]) == (200, 300)
+        rows, columns = np.nonzero(_plate(result, "Cyan") > 0.5)
+        # A quarter turn clockwise sends the frame's y axis to the raster's x
+        # axis and the frame's x axis to the raster's downward axis, so the
+        # bar's y span 100…150 becomes its columns and its x span 50…150 its
+        # rows.
+        assert (int(columns.min()), int(columns.max())) == (100, 149)
+        assert (int(rows.min()), int(rows.max())) == (50, 149)
+
+    def test_a_staged_separation_keeps_the_frame(self, tmp_path, gs_path):
+        # A page carrying RGB is colour-managed to the press profile before it
+        # is separated. The intermediate is a second document, and a frame the
+        # device honours on the original but not on the intermediate would put
+        # the soft proof alone in the wrong box.
+        src = cropped_page_pdf(tmp_path / "rgbcrop.pdf", rgb=True)
+        result = render_separations(
+            src, page=1, dpi=72, gs_path=gs_path, simulation={"source": "bundled"})
+        assert (result["width"], result["height"]) == (300, 200)
+        total = np.sum(np.stack([
+            _plate(result, name) for name in ("Cyan", "Magenta", "Yellow", "Black")
+        ]), axis=0)
+        rows, columns = np.nonzero(total > 0.02)
+        assert (int(columns.min()), int(columns.max())) == (50, 149)
+        assert (int(rows.min()), int(rows.max())) == (50, 99)
 
 
 @pytest.mark.usefixtures("gs_path")
