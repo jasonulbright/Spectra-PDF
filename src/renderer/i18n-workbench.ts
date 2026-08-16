@@ -243,6 +243,17 @@ export const WORKBENCH_STRINGS = {
   'app.exit.unsaved': 'Unsaved changes in: {{names}}. Save before exiting?',
   'app.window.unsaved': 'Unsaved changes in: {{names}}. Save before closing?',
 
+  // Document ownership across windows. A file is live in at most one window,
+  // so the refusal names what it stopped and offers the window that holds it.
+  'app.window.claimTitle': 'Open in Another Window',
+  'app.window.openElsewhere':
+    'Already open in another window: {{names}}. A file can be edited in one window at a time.',
+  'app.window.importElsewhere':
+    'Pages cannot be imported from a file that is open in another window: {{names}}.',
+  'app.window.folderBusy':
+    'Another window is already writing to this folder: {{folder}}.',
+  'app.window.focusOther': 'Show That Window',
+
   // The commit-failure banner. Both messages were built by `+`-concatenating
   // two English halves around the engine's own text — one interpolated key
   // each now, so a translator controls where the cause lands in the sentence.

@@ -276,6 +276,10 @@ interface CanvasStatusBarProps {
   /** Write the pending marks into the file as /Redact annotations. */
   savingMarks: boolean;
   onSaveRedact: () => void;
+  /** How many engine requests another window has in flight. One sidecar
+   * serves every window serially, so this window's next operation queues
+   * behind them and the wait would otherwise render as a hang. */
+  otherWindowWork: number;
   /** The snap segment. Absent on the Organize board, which has
    * no drawing gestures to snap. */
   snap?: SnapSettings;
@@ -321,7 +325,11 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
     buttons.forEach((b, i) => { b.tabIndex = i === active ? 0 : -1; });
   };
 
-  const hasPending = props.dirty || props.pendingFormCount > 0 || props.markCount > 0;
+  const hasPending =
+    props.dirty ||
+    props.pendingFormCount > 0 ||
+    props.markCount > 0 ||
+    props.otherWindowWork > 0;
 
   return (
     <div
@@ -334,6 +342,15 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
     >
       {hasPending && (
         <div className="canvas-status-pending" data-testid="status-pending-segment">
+          {props.otherWindowWork > 0 && (
+            <span
+              data-testid="other-window-busy"
+              className="canvas-status-quiet px-2"
+              title={tChrome('chrome.status.otherWindowBusyTitle')}
+            >
+              {tChrome('chrome.status.otherWindowBusy')}
+            </span>
+          )}
           {props.pendingFormCount > 0 && (
             <>
               <button
