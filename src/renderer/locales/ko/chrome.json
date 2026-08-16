@@ -3040,6 +3040,7 @@
   "panel.comments.exportBtn": "XFDF 내보내기…",
   "panel.comments.exportTitle": "모든 주석을 XFDF 교환 파일로 내보냅니다",
   "panel.comments.exported_other": "주석 {{count}}개를 XFDF로 내보냈습니다",
+  "panel.comments.exportedIncomplete": "주석 {{found}}개 중 {{exported}}개를 XFDF로 내보냈습니다",
   "panel.comments.exporting": "XFDF를 내보내는 중…",
   "panel.comments.filterAny": "모두",
   "panel.comments.filterAuthor": "작성자",

@@ -206,8 +206,18 @@ export function CommentsPanel(): React.ReactElement {
     setStatus(tChrome('panel.comments.exporting'));
     try {
       const r = await call('export_xfdf', { file: activeFile.workingPath, output });
-      const n = (r as unknown as { count: number }).count;
-      setStatus(tChromeCount('panel.comments.exported', n));
+      // `count` is what the file holds and `found` is what the document held;
+      // a comment XFDF cannot carry, or one whose keys will not read, is in
+      // the engine's `skipped` list and in the gap between the two.
+      const rr = r as unknown as { count: number; found: number };
+      setStatus(
+        rr.count === rr.found
+          ? tChromeCount('panel.comments.exported', rr.count)
+          : tChrome('panel.comments.exportedIncomplete', {
+              exported: rr.count,
+              found: rr.found,
+            }),
+      );
     } catch (e: unknown) {
       setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {

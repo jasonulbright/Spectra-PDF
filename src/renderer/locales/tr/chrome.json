@@ -3107,6 +3107,7 @@
   "panel.comments.exportTitle": "Her yorumu bir XFDF değişim dosyasına aktar",
   "panel.comments.exported_one": "{{count}} yorum XFDF'ye aktarıldı",
   "panel.comments.exported_other": "{{count}} yorum XFDF'ye aktarıldı",
+  "panel.comments.exportedIncomplete": "{{found}} yorumdan {{exported}} tanesi XFDF'ye aktarıldı",
   "panel.comments.exporting": "XFDF dışa aktarılıyor…",
   "panel.comments.filterAny": "Herhangi",
   "panel.comments.filterAuthor": "Yazar",

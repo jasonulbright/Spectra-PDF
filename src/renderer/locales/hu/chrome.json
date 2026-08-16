@@ -3107,6 +3107,7 @@
   "panel.comments.exportTitle": "Minden megjegyzés exportálása XFDF csereformátumú fájlba",
   "panel.comments.exported_one": "{{count}} megjegyzés exportálva XFDF-be",
   "panel.comments.exported_other": "{{count}} megjegyzés exportálva XFDF-be",
+  "panel.comments.exportedIncomplete": "{{found}} megjegyzésből {{exported}} exportálva XFDF-be",
   "panel.comments.exporting": "XFDF exportálása…",
   "panel.comments.filterAny": "Bármelyik",
   "panel.comments.filterAuthor": "Szerző",

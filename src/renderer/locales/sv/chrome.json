@@ -3107,6 +3107,7 @@
   "panel.comments.exportTitle": "Exportera varje kommentar till en XFDF-utbytesfil",
   "panel.comments.exported_one": "{{count}} kommentar exporterades till XFDF",
   "panel.comments.exported_other": "{{count}} kommentarer exporterades till XFDF",
+  "panel.comments.exportedIncomplete": "{{exported}} av {{found}} kommentarer exporterades till XFDF",
   "panel.comments.exporting": "Exporterar XFDF…",
   "panel.comments.filterAny": "Alla",
   "panel.comments.filterAuthor": "Författare",

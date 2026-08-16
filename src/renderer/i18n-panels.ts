@@ -325,6 +325,9 @@ export const PANEL_STRINGS = {
   'panel.comments.exporting': 'Exporting XFDF…',
   'panel.comments.exported_one': 'Exported {{count}} comment to XFDF',
   'panel.comments.exported_other': 'Exported {{count}} comments to XFDF',
+  // Shown instead of the plain count whenever the two numbers differ, so a
+  // partial export never reads like a whole one.
+  'panel.comments.exportedIncomplete': 'Exported {{exported}} of {{found}} comments to XFDF',
   'panel.comments.importing': 'Importing XFDF…',
   'panel.comments.imported_one': 'Imported {{count}} comment{{skipped}} — undo with Ctrl+Z',
   'panel.comments.imported_other': 'Imported {{count}} comments{{skipped}} — undo with Ctrl+Z',
