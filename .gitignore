@@ -90,6 +90,10 @@ docs/reviews/
 docs/README.md
 docs/archive/
 docs/reference/
+# Licensed specification PDFs, obtained under a sponsored-access grant that
+# permits reading and not redistribution. This repository is public, so a
+# commit here republishes them.
+/pdfa/
 *.local.*
 # ...and scratch DIRECTORIES, which the pattern above misses: it needs a dot
 # after "local", so `u1-shots.local/` was landing in git status as untracked.
