@@ -357,6 +357,47 @@ def nested_separation_spot_pdf(path, spot: str = "Nested Spot",
     return str(path)
 
 
+#: The cropped fixture's geometry, in points. The MediaBox is letter; the
+#: CropBox is a 300x200 window whose lower-left corner is (100, 500). One bar
+#: sits wholly inside that window and one wholly outside it, so a raster of
+#: the wrong box differs in its dimensions, in where the inside bar lands, and
+#: in what fraction of the page that bar covers.
+CROPPED_MEDIA = (612.0, 792.0)
+CROPPED_BOX = (100.0, 500.0, 400.0, 700.0)
+CROPPED_INSIDE = (150.0, 600.0, 100.0, 50.0)
+CROPPED_OUTSIDE = (20.0, 20.0, 100.0, 50.0)
+
+
+def cropped_page_pdf(path, rotate: int = 0, rgb: bool = False):
+    """A page whose CropBox is a window on a larger MediaBox.
+
+    One bar paints inside the window and one outside it. The window is both
+    the frame the viewer shows and a clip on the page's content, so the plates
+    that describe this page carry the inside bar at a known place and carry
+    nothing at all from the outside one.
+
+    `rgb` paints both bars through DeviceRGB instead, which is the page that
+    has to be colour-managed before it is separated: the frame then has to
+    survive a staged intermediate as well as the device.
+    """
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=CROPPED_MEDIA)
+    page.Resources = Dictionary()
+    page.obj[Name("/CropBox")] = Array(list(CROPPED_BOX))
+    if rotate:
+        page.obj[Name("/Rotate")] = int(rotate)
+    inside, outside = (
+        (b"0 0 1 rg", b"0 1 0 rg") if rgb else (b"1 0 0 0 k", b"0 1 0 0 k")
+    )
+    page.Contents = pdf.make_stream(b"\n".join([
+        inside + b" %g %g %g %g re f" % CROPPED_INSIDE,
+        outside + b" %g %g %g %g re f" % CROPPED_OUTSIDE,
+    ]))
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
 def device_rgb_pdf(path):
     """A page painted only through inline DeviceRGB operators.
 

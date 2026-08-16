@@ -31,6 +31,18 @@ turns the simulation off; nothing turns it on, because it is the default.
 total ink is 340 %, its four fractions sum to 200 %. It ships as what it is —
 per-ink page coverage — and the over-limit alarm reads the per-pixel maximum
 off the plates.
+
+**Every stage frames on the CropBox.** `-dUseCropBox` puts the plates and the
+coverage measurement in the frame the viewer shows. Without it a page whose
+CropBox is smaller than its MediaBox rasters the larger box: the composite
+stretches over a region the page never displays, and every figure measured off
+it — the ink list, the per-ink coverage, the total-area alarm, the soft proof —
+describes area the reader cannot see. Ghostscript intersects the CropBox with
+the MediaBox, normalizes a reversed one and falls back to the MediaBox on an
+empty one, which is what the viewer's own page box does, so the two frames
+agree with no further normalization; both also apply `/Rotate` themselves. A
+staged intermediate carries the CropBox through `pdfwrite` verbatim, so the
+flag frames the staged separation too.
 """
 
 from __future__ import annotations
@@ -542,7 +554,7 @@ def render_separations(
     max_spots = min(MAX_SPOTS_CEILING, max(_MIN_SPOT_REQUEST, len(spots)))
     cmd = [
         gs_path, "-dNOPAUSE", "-dBATCH", "-dSAFER", "-q",
-        "-sDEVICE=tiffsep", f"-r{dpi}",
+        "-sDEVICE=tiffsep", f"-r{dpi}", "-dUseCropBox",
         f"-dFirstPage={first}", f"-dLastPage={first}",
         f"-dMaxSpots={max_spots}",
     ]
@@ -706,15 +718,19 @@ _INKCOV_LINE = re.compile(
 
 
 def _ink_coverage(file: str, page: int, gs_path: str) -> dict:
-    """Per-ink page coverage, as fractions of the page area.
+    """Per-ink page coverage, as fractions of the CROPPED page area.
 
     This is the device's own page AVERAGE and it is reported as one. It
     cannot drive the over-limit alarm: on a page whose true maximum total ink
     is 340 %, these four sum to 200 %.
+
+    The frame is the plates' frame. A coverage fraction taken over the
+    MediaBox of a cropped page is a fraction of an area the plates do not
+    cover, so the panel would print two figures about two different regions.
     """
     cmd = [
         gs_path, "-dNOPAUSE", "-dBATCH", "-dSAFER", "-q",
-        "-sDEVICE=inkcov", "-r72",
+        "-sDEVICE=inkcov", "-r72", "-dUseCropBox",
         f"-dFirstPage={page}", f"-dLastPage={page}",
         "-o", "-", str(file),
     ]
