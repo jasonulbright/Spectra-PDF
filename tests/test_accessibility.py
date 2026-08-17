@@ -1,9 +1,9 @@
-"""Accessibility checker — 32 checks, five verdicts, addressed findings.
+"""Accessibility checker — 33 checks, five verdicts, addressed findings.
 
 Every check is pinned TWICE: once on the fixture that fails it and once on the
 conforming twin that must not. The `_ok` fixtures are the false-failure guards
 — a checker that cries wolf on a well-tagged document is worse than the
-six-check one it replaced, because the reader now has 32 reasons to doubt it.
+six-check one it replaced, because the reader now has 33 reasons to doubt it.
 """
 
 import json
@@ -49,9 +49,9 @@ class TestReportShape:
     def test_every_check_is_reported_exactly_once(self, tmp_dir):
         res = check_accessibility(_build(tmp_dir, "baseline"))
         ids = [c["id"] for c in res["checks"]]
-        assert len(ids) == 32
+        assert len(ids) == 33
         assert ids == [cid for cid, _ in CHECK_INVENTORY]
-        assert len(set(ids)) == 32
+        assert len(set(ids)) == 33
 
     def test_categories_partition_the_checks(self, tmp_dir):
         res = check_accessibility(_build(tmp_dir, "baseline"))
@@ -62,8 +62,8 @@ class TestReportShape:
     def test_not_applicable_is_excluded_from_the_pass_tally(self, tmp_dir):
         res = check_accessibility(_build(tmp_dir, "baseline"))
         s = res["summary"]
-        assert s["passed"] + s["failed"] + s["warnings"] + s["needs_review"] + s["not_applicable"] == 32
-        assert s["applicable"] == 32 - s["not_applicable"]
+        assert s["passed"] + s["failed"] + s["warnings"] + s["needs_review"] + s["not_applicable"] == 33
+        assert s["applicable"] == 33 - s["not_applicable"]
         # A document with no tables reports all five table checks as
         # not_applicable and none of them counts as passed.
         for cid in ("table_rows", "table_cells", "table_headers", "table_regularity",
@@ -808,7 +808,7 @@ class TestAReadThatRaisesStillYieldsAReport:
         pdf.Root[Name.Names] = pdf.make_indirect(pikepdf.Object.parse(b"7"))
         res = check_accessibility(B.save(pdf, src))
         statuses = _statuses(res)
-        assert len(res["checks"]) == 32
+        assert len(res["checks"]) == 33
         for cid in ("scripts", "screen_flicker", "timed_responses"):
             assert statuses[cid] == "needs_review", cid
         # The other 29 are still answered: one unreadable structure costs one
@@ -829,7 +829,7 @@ class TestAReadThatRaisesStillYieldsAReport:
 
         monkeypatch.setattr(accessibility, "annots_of", raises)
         res = check_accessibility(src)
-        assert len(res["checks"]) == 32
+        assert len(res["checks"]) == 33
         for cid in ("tagged_annotations", "tab_order", "navigation_links",
                     "scripts", "screen_flicker", "timed_responses"):
             assert _statuses(res)[cid] == "needs_review", cid
@@ -925,6 +925,246 @@ class TestBoundedWalksSayTheyAreBounded:
             assert statuses[cid] == NA, cid
 
 
+class TestStructureNesting:
+    """Placement, judged against the tables that state it.
+
+    ISO 32000-2 14.8.4.7.1 makes "anywhere" the default, so a finding here has
+    to come from a table that says otherwise: Table 370 and Table 371's
+    `Internal to` categories, Table 369's content models, Table 372's caption
+    rule, and — for an element in the PDF 2.0 standard structure namespace
+    alone — Table L.2's parent lists. Everything else is reported as uncovered
+    rather than as verified.
+    """
+
+    def _nesting(self, tmp_dir, name):
+        return _check(check_accessibility(_build(tmp_dir, name)), "structure_nesting")
+
+    def test_a_label_hung_off_the_list_names_child_parent_and_path(self, tmp_dir):
+        row = self._nesting(tmp_dir, "lbl_under_l_fails")
+        assert row["status"] == "fail", json.dumps(row, indent=2)
+        assert [f["detail_key"] for f in row["findings"]] == [
+            "structure_nesting_violation"
+        ]
+        finding = row["findings"][0]
+        assert finding["values"] == {"child": "Lbl", "parent": "L", "page": 1}
+        assert finding["address"]["kind"] == "struct"
+        assert finding["address"]["path"] == [0, 1, 1]
+
+    def test_a_row_group_outside_a_table_is_named(self, tmp_dir):
+        row = self._nesting(tmp_dir, "thead_outside_table_fails")
+        assert row["status"] == "fail", json.dumps(row, indent=2)
+        assert row["findings"][0]["values"]["child"] == "THead"
+
+    def test_the_conforming_twins_report_what_they_checked(self, tmp_dir):
+        for name in ("lbl_under_li_ok", "lbl_in_fenote_ok", "toc_link_lbl_ok",
+                     "thead_tbody_ok"):
+            row = self._nesting(tmp_dir, name)
+            assert row["status"] == "pass", (name, json.dumps(row, indent=2))
+            assert row["data"]["judged"] > 0, name
+
+    @pytest.mark.parametrize(
+        "name,owner",
+        [
+            ("tr_outside_table", "table_rows"),
+            ("td_outside_tr", "table_cells"),
+            ("li_outside_l", "list_items"),
+            ("lbody_outside_li_fails", "list_labels"),
+        ],
+    )
+    def test_one_defect_is_reported_by_one_check(self, tmp_dir, name, owner):
+        """The two check sets divide the world between what an element is and
+        where it sits, so a misplaced row is one finding under one id."""
+        res = check_accessibility(_build(tmp_dir, name))
+        statuses = _statuses(res)
+        assert statuses[owner] == "fail", json.dumps(_check(res, owner), indent=2)
+        row = _check(res, "structure_nesting")
+        assert row["findings"] == [], json.dumps(row, indent=2)
+        assert row["data"]["delegated"] > 0
+
+    def test_a_role_mapped_tag_is_judged_as_what_it_maps_to(self, tmp_dir):
+        """The walk reads the resolved role, so a private tag mapped to `LI`
+        is counted as the list item it maps to rather than as a type no table
+        covers."""
+        row = self._nesting(tmp_dir, "custom_mapped_to_li_judged_as_li")
+        assert row["data"]["delegated"] == 2, json.dumps(row, indent=2)
+        assert row["findings"] == []
+
+    def test_a_document_with_no_tree_is_not_applicable(self, tmp_dir):
+        row = self._nesting(tmp_dir, "untagged")
+        assert row["status"] == NA
+        assert row["findings"] == []
+
+    def _tree(self, tmp_dir, name, build):
+        """One page, one paragraph, plus whatever `build` hangs off it."""
+        src = os.path.join(tmp_dir, f"{name}.pdf")
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        root, doc = B._one_tagged_paragraph(pdf, page)
+        build(pdf, page, root, doc)
+        B.make_conformant(pdf, page)
+        return check_accessibility(B.save(pdf, src))
+
+    def test_a_namespace_that_will_not_read_is_reviewed_not_passed(self, tmp_dir):
+        """Which rule set governs an element is what an unreadable `/NS`
+        withholds, so the element is not judged and the check says so."""
+
+        def build(pdf, page, root, doc):
+            stray = B.elem(pdf, "THead", doc, page=page,
+                           NS=pikepdf.Object.parse(b"7"))
+            doc[Name.K] = Array(list(doc[Name.K]) + [stray])
+
+        res = self._tree(tmp_dir, "bad_ns", build)
+        row = _check(res, "structure_nesting")
+        assert row["status"] == "needs_review", json.dumps(row, indent=2)
+        assert [f["detail_key"] for f in row["findings"]] == [
+            "structure_nesting_unreadable"
+        ]
+
+    def test_a_namespace_no_table_covers_is_uncovered_rather_than_failed(self, tmp_dir):
+        """ISO 32000-2 14.8.6.3's MathML namespace, on an element whose
+        position the PDF 2.0 tables would refuse. No table reaches it, so the
+        check counts it and reports nothing."""
+
+        from engine.struct_nesting import MATHML
+
+        def build(pdf, page, root, doc):
+            ns = pdf.make_indirect(
+                Dictionary(Type=Name.Namespace, NS=String(MATHML))
+            )
+            root[Name.Namespaces] = Array([ns])
+            stray = B.elem(pdf, "math", doc, page=page, NS=ns)
+            doc[Name.K] = Array(list(doc[Name.K]) + [stray])
+
+        res = self._tree(tmp_dir, "mathml_ns", build)
+        row = _check(res, "structure_nesting")
+        assert row["findings"] == [], json.dumps(row, indent=2)
+        assert row["data"]["uncovered"] >= 1
+
+    def test_a_grouping_element_that_inherits_containment_is_read_through(self, tmp_dir):
+        """ISO 32000-2 Table 365: `Div` inherits its parent's containment, so
+        a list item inside a `Div` inside the list is placed correctly and the
+        label beside it is too."""
+        src = os.path.join(tmp_dir, "div_between.pdf")
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        B.draw(
+            pdf, page,
+            "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Body copy.) Tj ET EMC\n"
+            "/Lbl <</MCID 1>> BDC BT /F1 11 Tf 40 660 Td (1.) Tj ET EMC\n"
+            "/LBody <</MCID 2>> BDC BT /F1 11 Tf 60 660 Td (An item.) Tj ET EMC",
+        )
+        root = B.struct_root(pdf)
+        ns = B.namespace(pdf, root)
+        doc = B.elem(pdf, "Document", root, NS=ns)
+        para = B.elem(pdf, "P", doc, page=page, mcid=0, NS=ns)
+        lbl = B.elem(pdf, "Lbl", doc, page=page, mcid=1, NS=ns)
+        body = B.elem(pdf, "LBody", doc, page=page, mcid=2, NS=ns)
+        item = B.elem(pdf, "LI", doc, kids=[lbl, body], NS=ns)
+        div = B.elem(pdf, "Div", doc, kids=[item], NS=ns)
+        lst = B.elem(pdf, "L", doc, kids=[div], NS=ns)
+        doc[Name.K] = Array([para, lst])
+        root[Name.K] = doc
+        B.parent_tree(pdf, root, page, [para, lbl, body])
+        B.make_conformant(pdf, page)
+        row = _check(check_accessibility(B.save(pdf, src)), "structure_nesting")
+        assert row["findings"] == [], json.dumps(row, indent=2)
+
+    def test_a_caption_between_the_list_items_is_named(self, tmp_dir):
+        """ISO 32000-2 Table 370: a caption inside a list shall be its first or
+        its last child."""
+        src = os.path.join(tmp_dir, "caption_middle.pdf")
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        B.draw(
+            pdf, page,
+            "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Body copy.) Tj ET EMC\n"
+            "/LBody <</MCID 1>> BDC BT /F1 11 Tf 60 660 Td (First.) Tj ET EMC\n"
+            "/Caption <</MCID 2>> BDC BT /F1 11 Tf 40 630 Td (A caption.) Tj ET EMC\n"
+            "/LBody <</MCID 3>> BDC BT /F1 11 Tf 60 600 Td (Second.) Tj ET EMC",
+        )
+        root = B.struct_root(pdf)
+        doc = B.elem(pdf, "Document", root)
+        para = B.elem(pdf, "P", doc, page=page, mcid=0)
+        first_lbl = B.elem(pdf, "Lbl", doc, page=page)
+        first = B.elem(pdf, "LI", doc, kids=[
+            first_lbl, B.elem(pdf, "LBody", doc, page=page, mcid=1)])
+        caption = B.elem(pdf, "Caption", doc, page=page, mcid=2)
+        second_lbl = B.elem(pdf, "Lbl", doc, page=page)
+        second = B.elem(pdf, "LI", doc, kids=[
+            second_lbl, B.elem(pdf, "LBody", doc, page=page, mcid=3)])
+        lst = B.elem(pdf, "L", doc, kids=[first, caption, second])
+        doc[Name.K] = Array([para, lst])
+        root[Name.K] = doc
+        B.parent_tree(pdf, root, page, [para])
+        B.make_conformant(pdf, page)
+        row = _check(check_accessibility(B.save(pdf, src)), "structure_nesting")
+        assert row["status"] == "fail", json.dumps(row, indent=2)
+        assert row["findings"][0]["values"]["child"] == "Caption"
+
+    def test_a_caption_at_the_end_of_the_list_is_not(self, tmp_dir):
+        """The false-failure twin: the same caption as the list's last child."""
+        src = os.path.join(tmp_dir, "caption_last.pdf")
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        B.draw(
+            pdf, page,
+            "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Body copy.) Tj ET EMC\n"
+            "/LBody <</MCID 1>> BDC BT /F1 11 Tf 60 660 Td (First.) Tj ET EMC\n"
+            "/Caption <</MCID 2>> BDC BT /F1 11 Tf 40 630 Td (A caption.) Tj ET EMC",
+        )
+        root = B.struct_root(pdf)
+        doc = B.elem(pdf, "Document", root)
+        para = B.elem(pdf, "P", doc, page=page, mcid=0)
+        item = B.elem(pdf, "LI", doc, kids=[
+            B.elem(pdf, "Lbl", doc, page=page),
+            B.elem(pdf, "LBody", doc, page=page, mcid=1)])
+        caption = B.elem(pdf, "Caption", doc, page=page, mcid=2)
+        lst = B.elem(pdf, "L", doc, kids=[item, caption])
+        doc[Name.K] = Array([para, lst])
+        root[Name.K] = doc
+        B.parent_tree(pdf, root, page, [para])
+        B.make_conformant(pdf, page)
+        row = _check(check_accessibility(B.save(pdf, src)), "structure_nesting")
+        assert row["findings"] == [], json.dumps(row, indent=2)
+
+
+class TestTheCompiledTable:
+    """The data the check reads, checked against the clauses it cites."""
+
+    def test_every_entry_cites_the_table_it_came_from(self):
+        from engine.struct_nesting import CATEGORY, CONTAINMENT, CONTENT_MODEL
+
+        for role, rule in CONTAINMENT.items():
+            assert rule.cite, role
+            assert (rule.parents is None) != (not rule.ancestor), role
+        for role, (allowed, cite) in CONTENT_MODEL.items():
+            assert allowed and cite, role
+        for role, (category, cite) in CATEGORY.items():
+            assert category and cite, role
+
+    def test_the_annex_whitelist_agrees_with_the_per_type_statements(self):
+        """Two readings of one standard: Table 370 and Table 371 name the
+        container in the Category column, Table L.2 lists the same containers
+        among the type's parents. A disagreement is a compiled-table error."""
+        from engine.struct_nesting import CONTAINMENT, PARENTS_2_0
+
+        for role, rule in CONTAINMENT.items():
+            if rule.parents is None:
+                continue
+            assert rule.parents <= PARENTS_2_0[role], role
+
+    def test_a_numbered_heading_is_read_as_the_family_the_tables_name(self):
+        from engine.struct_nesting import heading_family
+
+        assert heading_family("H1") == "Hn"
+        assert heading_family("H12") == "Hn"
+        assert heading_family("H") == "H"
+        # Table 366 forbids a leading zero and any prefix or postfix, so these
+        # are not headings and must not be judged as one.
+        for bad in ("H07", "H-7", "h7", "Hx", "Head"):
+            assert heading_family(bad) == bad, bad
+
+
 class TestCorpusGate:
     """Every PDF already in the tree, with its verdict pinned.
 
@@ -986,7 +1226,7 @@ class TestCategoryFilter:
     def test_one_category_runs_and_the_shape_is_unchanged(self, tmp_dir):
         src = _build(tmp_dir, "figure_no_alt")
         res = check_accessibility(src, category="alt_text")
-        assert len(res["checks"]) == 32
+        assert len(res["checks"]) == 33
         assert _statuses(res)["figures_alt"] == "fail"
         assert _statuses(res)["heading_nesting"] == NA
 

@@ -12,6 +12,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "warn",
@@ -47,9 +48,9 @@
         "failed": 3,
         "warnings": 1,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -58,6 +59,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -93,9 +95,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -104,6 +106,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -139,9 +142,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -150,6 +153,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -185,9 +189,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -196,6 +200,7 @@
         "permissions": "pass",
         "image_only": "pass",
         "tagged": "pass",
+        "structure_nesting": "not_applicable",
         "reading_order": "pass",
         "lang": "fail",
         "title": "fail",
@@ -231,9 +236,9 @@
         "failed": 2,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 22,
+        "not_applicable": 23,
         "applicable": 10,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -246,6 +251,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -281,9 +287,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -292,6 +298,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -327,9 +334,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -342,6 +349,7 @@
         "permissions": "pass",
         "image_only": "pass",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -377,9 +385,9 @@
         "failed": 3,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 25,
+        "not_applicable": 26,
         "applicable": 7,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -388,6 +396,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -423,9 +432,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -434,6 +443,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "warn",
@@ -469,9 +479,9 @@
         "failed": 3,
         "warnings": 1,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -480,6 +490,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -515,9 +526,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -526,6 +537,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -561,9 +573,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -572,6 +584,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -607,9 +620,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -618,6 +631,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -653,9 +667,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -664,6 +678,7 @@
         "permissions": "pass",
         "image_only": "pass",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -699,9 +714,9 @@
         "failed": 3,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 25,
+        "not_applicable": 26,
         "applicable": 7,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -710,6 +725,7 @@
         "permissions": "pass",
         "image_only": "pass",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -745,9 +761,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 26,
+        "not_applicable": 27,
         "applicable": 6,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -756,6 +772,7 @@
         "permissions": "pass",
         "image_only": "pass",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -791,9 +808,9 @@
         "failed": 3,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 25,
+        "not_applicable": 26,
         "applicable": 7,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -802,6 +819,7 @@
         "permissions": "pass",
         "image_only": "pass",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -837,9 +855,9 @@
         "failed": 3,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 25,
+        "not_applicable": 26,
         "applicable": 7,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -848,6 +866,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -883,9 +902,9 @@
         "failed": 7,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 24,
+        "not_applicable": 25,
         "applicable": 8,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -894,6 +913,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "warn",
@@ -929,9 +949,9 @@
         "failed": 3,
         "warnings": 1,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -940,6 +960,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -975,9 +996,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -986,6 +1007,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -1021,9 +1043,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -1032,6 +1054,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -1067,9 +1090,9 @@
         "failed": 7,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 24,
+        "not_applicable": 25,
         "applicable": 8,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -1078,6 +1101,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -1113,9 +1137,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -1124,6 +1148,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -1159,9 +1184,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -1170,6 +1195,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -1205,9 +1231,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -1216,6 +1242,7 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -1251,9 +1278,9 @@
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 28,
         "applicable": 5,
-        "total": 32
+        "total": 33
       }
     },
     {
@@ -1262,6 +1289,7 @@
         "permissions": "pass",
         "image_only": "pass",
         "tagged": "fail",
+        "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
         "title": "fail",
@@ -1297,9 +1325,9 @@
         "failed": 3,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 26,
+        "not_applicable": 27,
         "applicable": 6,
-        "total": 32
+        "total": 33
       }
     }
   ]
