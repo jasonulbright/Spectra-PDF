@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.1.3
+
+*Released 2026-08-17*
+
+### Tabs that move between windows
+
+- A document tab can be dragged from one window into another window's tab strip.
+- Dropping a tab on empty screen space tears it off into a new window.
+- A document with unsaved edits is saved as it moves, never silently reverted.
+- Escape cancels a drag, and moving a tab through the menu is now atomic.
+
+### Windows that remember themselves
+
+- Every window's size and position are remembered and restored on the next launch.
+- An optional preference reopens last session's windows and documents at launch, off by default.
+- A window saved on a monitor that is gone reopens centered on the primary.
+
+### Spell checking in two more languages
+
+- Korean spell checking now ships; a reader defect had rejected the dictionary's own words.
+- Korean suggestions now correct composed syllables instead of returning nothing.
+- Finnish spell checking ships on a bundled morphology engine covering inflected and compound forms.
+
+### Accessibility checking
+
+- A new check validates that structure types are nested where the standard allows.
+- A list item wrapped in a grouping element is no longer reported as misplaced.
+
+### Form fields
+
+- A text, dropdown or option-list field can be created writing vertically in four scripts.
+- An option list whose labels the built-in font cannot draw is refused by name.
+
+### Fixes
+
+- A startup preference no longer erases its sibling flags when toggled.
+
 ## 1.1.2
 
 *Released 2026-08-17*
