@@ -185,17 +185,11 @@ pub fn resolve_hover(
 
 const HOVER_EVENT: &str = "tabdrag://hover";
 const LEAVE_EVENT: &str = "tabdrag://leave";
-const DONE_EVENT: &str = "tabdrag://done";
 
 #[derive(Clone, Serialize)]
 struct HoverPayload {
     /// Physical pixels from the left edge of this window's own strip.
     x: i32,
-}
-
-#[derive(Clone, Serialize)]
-struct DonePayload {
-    path: String,
 }
 
 /// What a drop did. Structured rather than a message: the caller decides
@@ -417,6 +411,10 @@ pub async fn tabdrag_cancel(app: AppHandle) -> Result<(), String> {
 /// Only the path crosses. Page and document ids are minted against a
 /// per-renderer generation counter, so the same id string names a different
 /// physical page in every window.
+///
+/// The outcome is the source's whole answer: on a move it closes its tab
+/// WITHOUT releasing, because ownership already belongs to the receiving window
+/// and a release would strip the claim off it.
 #[tauri::command]
 pub async fn tabdrag_drop(
     app: AppHandle,
@@ -452,11 +450,6 @@ pub async fn tabdrag_drop(
             )),
         ),
     };
-    if result.outcome == TabDragResult::TRANSFERRED || result.outcome == TabDragResult::TORN_OFF {
-        // The source closes its tab WITHOUT releasing: ownership already moved,
-        // and a release would strip the claim from the window that now holds it.
-        let _ = app.emit_to(source.as_str(), DONE_EVENT, DonePayload { path });
-    }
     Ok(result)
 }
 

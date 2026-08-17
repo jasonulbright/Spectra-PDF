@@ -3000,3 +3000,51 @@ export async function folderPreflightSnapshot(): Promise<FolderPreflightSnapshot
     return (window as any).__SPECTRA_TEST__.folderPreflightSnapshot();
   });
 }
+
+// --- Cross-window tab drag -------------------------------------------------
+
+/** A point in PHYSICAL screen pixels — the only space every window agrees on. */
+export interface PhysicalScreenPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Release a tab drag at a physical screen point (the tab strip must be
+ * mounted). Resolves true when the document changed hands.
+ *
+ * The seam sits directly above the pointer gesture, which needs OS-level input
+ * to cross a window boundary: this is the same drop function pointerup calls,
+ * so the commit gate, the Rust resolution, the handover and the tab close all
+ * run unchanged.
+ */
+export async function tabDragDrop(path: string, point: PhysicalScreenPoint): Promise<boolean> {
+  const result = await browser.executeAsync<boolean | string, [string, PhysicalScreenPoint]>(
+    function (p, at, done) {
+      (window as any).__SPECTRA_TEST__.tabDragDrop(p, at)
+        .then((moved: boolean) => done(moved))
+        .catch((err: unknown) => done((('__SPECTRA_E2E_ERROR__:') + String(err)) as any));
+    },
+    path,
+    point,
+  );
+  if (typeof result === 'string') {
+    throw new Error(`tabDragDrop failed: ${result.replace(ERROR_TAG, '')}`);
+  }
+  return result;
+}
+
+/** Move a drag over a physical screen point; resolves to the window now
+ * drawing an insertion caret, or null. That window paints the caret from its
+ * OWN event, so read it in the window that should have it. */
+export async function tabDragTrack(point: PhysicalScreenPoint): Promise<string | null> {
+  const result = await browser.executeAsync<string | null, [PhysicalScreenPoint]>(
+    function (at, done) {
+      (window as any).__SPECTRA_TEST__.tabDragTrack(at)
+        .then((label: string | null) => done(label))
+        .catch(() => done(null));
+    },
+    point,
+  );
+  return result;
+}
