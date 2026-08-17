@@ -316,15 +316,41 @@ def check_word(dictionary: Any, word: str, custom: set[str]) -> bool:
     return any(dictionary.lookup(form) for form in _forms(word))
 
 
+def _in_the_form_of(word: str, candidate: str) -> str:
+    """`candidate` normalized the way `word` is written."""
+    for form in ("NFC", "NFD"):
+        if unicodedata.normalize(form, word) == word:
+            return unicodedata.normalize(form, candidate)
+    return candidate
+
+
 def suggest_word(dictionary: Any, word: str, limit: int = 5) -> list[str]:
-    """Up to `limit` suggestions, taken LAZILY — see the module docstring."""
-    out: list[str] = []
-    for candidate in dictionary.suggest(word):
-        if candidate not in out:
-            out.append(candidate)
-        if len(out) >= limit:
-            break
-    return out
+    """Up to `limit` suggestions, taken LAZILY — see the module docstring.
+
+    A misspelling is offered in every form `check_word` accepts, for the same
+    reason: a decomposed word list generates its candidates by editing the
+    characters of its own `TRY` set, which are the decomposed ones, so a
+    composed word yields nothing at all rather than worse matches. The
+    fallback only runs when the word as written suggests nothing, so a list
+    stored the way its documents are written answers exactly as before — and
+    what comes back is written the way the word was, because the suggestion
+    is replacement text for that document.
+    """
+
+    def take(source: Any) -> list[str]:
+        out: list[str] = []
+        for candidate in source:
+            if candidate not in out:
+                out.append(candidate)
+            if len(out) >= limit:
+                break
+        return out
+
+    for form in _forms(word):
+        found = take(dictionary.suggest(form))
+        if found:
+            return found if form == word else [_in_the_form_of(word, c) for c in found]
+    return []
 
 
 # ═══════════════════════════════ the doors ═════════════════════════════════
