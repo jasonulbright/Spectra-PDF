@@ -82,6 +82,25 @@ WORDS: dict[str, dict[str, list[str]]] = {
         "good": ["casa", "libro", "escuela", "agua", "persona", "ciudad", "trabajo", "día"],
         "bad": ["escuella", "ciudadd", "trabaxo"],
     },
+    # Finnish is checked by a morphological analyser rather than a word list,
+    # so the good set carries the two shapes no list could hold: a heavily
+    # inflected form and an unbounded compound. The bad set keeps the doubling
+    # shape used everywhere else and adds the garbage-sweep shape — a
+    # Finnish-alphabet string that spells nothing — because a generator that
+    # accepts everything would pass a doubling test by compounding.
+    "fi": {
+        "good": [
+            "talo",
+            "kirja",
+            "koulu",
+            "vesi",
+            "ihminen",
+            "kaupunki",
+            "kissoillammekaan",
+            "lentokonesuihkuturbiinimoottoriapumekaanikkoaliupseerioppilas",
+        ],
+        "bad": ["kirjja", "kaupunnki", "xqzptrv"],
+    },
     "fr_FR": {
         "good": ["maison", "livre", "école", "eau", "personne", "ville", "travail", "jour"],
         "bad": ["maisson", "écolle", "personnne"],
