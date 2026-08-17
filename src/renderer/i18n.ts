@@ -418,9 +418,9 @@ export function tOcrLanguage(code: string): string {
 /**
  * Any BCP-47 tag's language name in the current UI language.
  *
- * The `tOcrLanguage` rule, generalized: the 34 bundled spelling dictionaries
+ * The `tOcrLanguage` rule, generalized: the 35 bundled spelling dictionaries
  * name themselves with a BCP-47 tag, and every locale's ICU data already
- * spells all of them. Authoring that table into 28 catalogs would be 34
+ * spells all of them. Authoring that table into 28 catalogs would be 35
  * chances per locale to be wrong, and it would go stale the moment a
  * dictionary is added — including one the USER adds, whose tag no catalog
  * could ever have carried. The tag itself is the fallback.

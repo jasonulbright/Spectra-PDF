@@ -331,7 +331,7 @@ is no longer distributed.
 
 ## Spelling dictionaries
 
-34 Hunspell `.aff`/`.dic` pairs, vendored by
+35 Hunspell `.aff`/`.dic` pairs, vendored by
 `scripts/bundle-dictionaries.ps1` into the app's `dictionaries` resources from
 the **LibreOffice `dictionaries`** collection at a pinned commit. Every shipped
 file's SHA-256, SPDX expression and upstream URL is in
@@ -365,6 +365,7 @@ is met by naming the upstreams below, exactly as the bundled OCR runtime's
 | he_IL | he-IL | AGPL-3.0-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/he_IL> |
 | hu_HU | hu-HU | LGPL-2.1-or-later OR GPL-2.0-or-later OR MPL-1.1 | <https://github.com/LibreOffice/dictionaries/tree/master/hu_HU> |
 | it_IT | it-IT | GPL-3.0-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/it_IT> |
+| ko_KR | ko-KR | GPL-3.0-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/ko_KR> |
 | nb_NO | nb-NO | GPL-2.0-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/no> |
 | nl_NL | nl-NL | BSD-3-Clause OR CC-BY-3.0 | <https://github.com/LibreOffice/dictionaries/tree/master/nl_NL> |
 | nn_NO | nn-NO | GPL-2.0-or-later | <https://github.com/LibreOffice/dictionaries/tree/master/no> |

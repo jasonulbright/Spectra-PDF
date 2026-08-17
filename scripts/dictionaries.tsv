@@ -112,6 +112,9 @@ hu_HU	notice	hu_HU/README_hu_HU.txt	52b17fc3d53b6935eab747a71894507d702f7f0fde37
 it_IT	aff	it_IT/it_IT.aff	951afaa19272f13555b8823e8bcf9ccf78f8fe1a07835bdfb912ab3e4d537c2b	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/it_IT
 it_IT	dic	it_IT/it_IT.dic	bae1e3501dcd2a923669592493b3fde6c02aae7c7aab83bf5e5b49077e73dd64	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/it_IT
 it_IT	notice	it_IT/README_it_IT.txt	34c3e93595cf3cf5f3afc9bc0d98eea12593750383f1e82ed1d3ca29f9681283	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/it_IT
+ko_KR	aff	ko_KR/ko_KR.aff	43a984d8f1e2309490b69cfde31832d217a0b31164c67661e293efc096083688	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ko_KR
+ko_KR	dic	ko_KR/ko_KR.dic	14117a72811ed6a083ed374ceb728b0846a689da6f4dbfe0a84d3b3bce124e80	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ko_KR
+ko_KR	notice	ko_KR/README_ko_KR.txt	e0b13b74b287a71bc668a756fe0d1bcfe5adafb860acab0d81e71593333e1724	GPL-3.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/ko_KR
 nb_NO	aff	no/nb_NO.aff	68265c84eebd06d77031947c6c3e49de4c1e211cfcfed675f8d8dc63517df096	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/no
 nb_NO	dic	no/nb_NO.dic	b06ec5e56356d97165109abe914f162f1350ebebadfc5f89c2207b6e676c2316	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/no
 nb_NO	notice	no/COPYING	e7431ac20e815b6797369e802f9e4bb1b0082485060d8b096235f035d741bd89	GPL-2.0-or-later	https://github.com/LibreOffice/dictionaries/tree/master/no
