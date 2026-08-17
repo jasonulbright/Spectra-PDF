@@ -248,6 +248,25 @@ CONDITIONAL_2_0 = frozenset({
 })
 
 
+def effective_parent(node):
+    """The ancestor an element's placement is judged against.
+
+    ISO 32000-2 Table 365: `Part`, `Div` and `NonStruct` inherit the
+    containment requirements of their parent, recursing past further elements
+    of their own type, so the container a containment rule addresses is the
+    nearest ancestor outside `TRANSPARENT` — a `LI` inside a `Div` inside an
+    `L` is inside the list. `None` when no such ancestor exists, which places
+    the element at the tree root.
+
+    Every read of a placement parent goes through here: a second walk that
+    skipped the read-through would answer the same question differently.
+    """
+    parent = node.parent
+    while parent is not None and parent.role in TRANSPARENT:
+        parent = parent.parent
+    return parent
+
+
 def namespace_kind(uri: str) -> str:
     """Which rule set an element's own namespace admits.
 

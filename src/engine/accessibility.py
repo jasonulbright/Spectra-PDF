@@ -1841,11 +1841,16 @@ def _check_list_items(check, tree):
     if not items:
         check.status = NA
         return
+    # The parent a placement is judged against is the EFFECTIVE one (ISO
+    # 32000-2 Table 365), read through the one implementation `struct_nesting`
+    # owns: a grouping element that inherits its parent's containment is not a
+    # container of its own, so a `LI` reached through one is still in its list.
+    parents = [struct_nesting.effective_parent(n) for n in items]
     findings = [
         _finding(_struct_address(n), "list_item_outside_list",
-                 values={"parent": n.parent.role if n.parent else ""})
-        for n in items
-        if not (n.parent is not None and n.parent.role == "L")
+                 values={"parent": p.role if p is not None else ""})
+        for n, p in zip(items, parents)
+        if not (p is not None and p.role == "L")
     ]
     _verdict(check, len(items), findings)
 
@@ -1864,11 +1869,15 @@ def _check_list_labels(check, tree):
     if not bodies and not items:
         check.status = NA
         return
+    # Same effective-parent read as `list_items`, for the same reason: Table
+    # 365's grouping elements carry their parent's containment, so an `LBody`
+    # reached through one is still inside its list item.
+    parents = [struct_nesting.effective_parent(n) for n in bodies]
     misplaced = [
         _finding(_struct_address(n), "label_outside_list_item",
-                 values={"role": n.role, "parent": n.parent.role if n.parent else ""})
-        for n in bodies
-        if not (n.parent is not None and n.parent.role == "LI")
+                 values={"role": n.role, "parent": p.role if p is not None else ""})
+        for n, p in zip(bodies, parents)
+        if not (p is not None and p.role == "LI")
     ]
     unlabelled = [
         _finding(_struct_address(n), "list_item_has_no_label")
