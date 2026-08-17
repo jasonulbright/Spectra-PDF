@@ -260,6 +260,29 @@ impl ClaimState {
             .map(|c| c.label.clone())
     }
 
+    /// The documents a window has open, in path order.
+    ///
+    /// Write claims only: a read claim is an import SOURCE, a file whose bytes
+    /// were pulled into another document and which was never open in its own
+    /// right. Reopening one would put a document on screen the user never
+    /// opened.
+    pub fn write_claims(&self, label: &str) -> Vec<String> {
+        let Ok(map) = self.by_path.lock() else {
+            return Vec::new();
+        };
+        let mut paths: Vec<String> = map
+            .iter()
+            .filter(|(_, holders)| {
+                holders
+                    .iter()
+                    .any(|c| c.label == label && c.mode == ClaimMode::Write)
+            })
+            .map(|(path, _)| path.clone())
+            .collect();
+        paths.sort();
+        paths
+    }
+
     pub fn claim_root(&self, root: &str, label: &str) -> ClaimOutcome {
         let Ok(mut roots) = self.roots.lock() else {
             return ClaimOutcome::granted();
@@ -495,6 +518,7 @@ pub fn build_app_window(
         "none"
     };
     app.state::<BackdropState>().record(label, backdrop);
+    crate::session::on_window_created(app, &window);
     Ok(window)
 }
 
@@ -732,6 +756,32 @@ mod tests {
         assert_eq!(state.owner("C:\\a.pdf").as_deref(), Some("doc-1"));
         state.release_label("doc-1");
         assert_eq!(state.owner("C:\\a.pdf"), None);
+    }
+
+    #[test]
+    fn the_documents_a_window_has_open_are_its_write_claims_only() {
+        let state = ClaimState::new();
+        assert!(state.claim("C:\\b.pdf", "main", ClaimMode::Write).granted);
+        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+        assert!(state.claim("C:\\z.pdf", "doc-1", ClaimMode::Write).granted);
+        // An import source: read by main, never open in it.
+        assert!(state.claim("C:\\src.pdf", "main", ClaimMode::Read).granted);
+
+        assert_eq!(
+            state.write_claims("main"),
+            vec!["C:\\a.pdf".to_string(), "C:\\b.pdf".to_string()]
+        );
+        assert_eq!(state.write_claims("doc-1"), vec!["C:\\z.pdf".to_string()]);
+        assert!(state.write_claims("doc-9").is_empty());
+
+        // A transferred document is listed by whoever holds it now, and by
+        // nobody else — a session that recorded it twice would open two copies.
+        assert!(state.transfer("C:\\a.pdf", "main", "doc-1").granted);
+        assert_eq!(state.write_claims("main"), vec!["C:\\b.pdf".to_string()]);
+        assert_eq!(
+            state.write_claims("doc-1"),
+            vec!["C:\\a.pdf".to_string(), "C:\\z.pdf".to_string()]
+        );
     }
 
     #[test]

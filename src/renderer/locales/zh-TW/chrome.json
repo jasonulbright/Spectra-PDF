@@ -4538,6 +4538,8 @@
   "panel.settings.printerNotInstalled": "印表機未安裝",
   "panel.settings.printerReady": "已可接收工作",
   "panel.settings.removePrinter": "移除印表機…",
+  "panel.settings.restoreWindows": "啟動時還原上次工作階段",
+  "panel.settings.restoreWindowsHint": "重新開啟上次結束時開啟的視窗與文件。視窗大小與位置一律會記住；此選項決定文件是否也一併還原。",
   "panel.settings.rustNotices": "Rust crate 聲明",
   "panel.settings.saved": "已儲存設定",
   "panel.settings.singleKey": "使用單鍵快速鍵存取工具",

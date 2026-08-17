@@ -4750,6 +4750,8 @@
   "panel.settings.printerNotInstalled": "Impressora no instal·lada",
   "panel.settings.printerReady": "a punt per rebre tasques",
   "panel.settings.removePrinter": "Elimina la impressora…",
+  "panel.settings.restoreWindows": "Reobre la darrera sessió en iniciar",
+  "panel.settings.restoreWindowsHint": "Torna a obrir les finestres i els documents que hi havia oberts la darrera vegada que vau sortir. La mida i la posició de la finestra es recorden sempre; aquesta opció decideix si els documents també tornen.",
   "panel.settings.rustNotices": "Avisos dels crates de Rust",
   "panel.settings.saved": "Paràmetres desats",
   "panel.settings.singleKey": "Usa acceleradors d'una sola tecla per accedir a les eines",

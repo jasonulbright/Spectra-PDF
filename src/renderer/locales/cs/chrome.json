@@ -4856,6 +4856,8 @@
   "panel.settings.printerNotInstalled": "Tiskárna nenainstalována",
   "panel.settings.printerReady": "připravena přijímat úlohy",
   "panel.settings.removePrinter": "Odebrat tiskárnu…",
+  "panel.settings.restoreWindows": "Obnovit poslední relaci při spuštění",
+  "panel.settings.restoreWindowsHint": "Znovu otevře okna a dokumenty, které byly otevřené při posledním ukončení. Velikost a poloha okna se pamatují vždy; toto nastavení rozhoduje, zda se vrátí i dokumenty.",
   "panel.settings.rustNotices": "Oznámení balíčků Rust",
   "panel.settings.saved": "Nastavení uloženo",
   "panel.settings.singleKey": "Používat jednoklávesové zkratky pro přístup k nástrojům",
