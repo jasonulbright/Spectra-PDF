@@ -47,7 +47,15 @@ from engine.contrast import page_contrast
 from engine.extract_text import extract_text
 from engine.redact import IDENTITY, _resolve_resources
 from engine.sanitize_content import SCAN_COVERAGE, off_ocg_set, page_events
-from engine.struct_audit import CELLS, ROW_GROUPS, audit_tree, row_cells, scope, span_of
+from engine.struct_audit import (
+    CELLS,
+    ROW_GROUPS,
+    annots_of,
+    audit_tree,
+    row_cells,
+    scope,
+    span_of,
+)
 from engine.text_metrics import _FontCache
 from engine.text_runs import _walk_runs
 
@@ -133,6 +141,10 @@ _TIMER_CALLS = ("app.setTimeOut", "app.setInterval")
 
 # How deep the field-name walk descends before it stops and says so.
 _FIELD_TREE_DEPTH = 32
+
+# How deep the name-tree shape check descends before it stops and says so.
+# Also what bounds a `/Kids` cycle, which descends without ever widening.
+_NAME_TREE_DEPTH = 64
 
 # Which checks each bounded or fallible read feeds. A read that did not
 # complete degrades every check that consumed it to `needs_review`: the answer
@@ -261,6 +273,11 @@ class _Pages:
     A page that will not parse is recorded in `unreadable` and contributes no
     runs — every check that consumes runs asks `readable` before claiming a
     clean result.
+
+    The two stages fail independently: a page whose text parses and whose
+    paint walk does not has runs but no coverage and no contrast, so `painted`
+    is what a check consuming either of those asks. A page absent from
+    `scan_cover` was not measured at zero coverage; it was not measured.
     """
 
     def __init__(self, pdf):
@@ -268,6 +285,7 @@ class _Pages:
         self.runs: dict = {}
         self.contrast: dict = {}
         self.scan_cover: dict = {}
+        self.painted: set = set()
         self.unreadable: list = []
         off_set = off_ocg_set(pdf)
         for i, page in enumerate(pdf.pages):
@@ -292,6 +310,7 @@ class _Pages:
             try:
                 self.contrast[page_no] = page_contrast(pdf, page, page_no, off_set)
                 self.scan_cover[page_no] = page_events(pdf, page, off_set).scan_cover
+                self.painted.add(page_no)
             except Exception as exc:
                 self.unreadable.append({"page": page_no, "stage": "paint", "reason": str(exc)})
 
@@ -303,68 +322,49 @@ class _Pages:
         return bool(self.unreadable)
 
 
-def _annotations(pdf) -> tuple:
-    """Every annotation, addressed, and the pages whose list would not read.
+def _annotations(entries: list) -> list:
+    """`annots_of`'s entries, with everything the checks ask of an annotation
+    read off each one: subtype, rect, flags, contents and objgen.
 
-    Each entry: page, index, subtype, rect, flags, contents, and the raw
-    object. A page whose `/Annots` cannot be listed contributes no entries, so
-    it is NAMED — a check that mistook it for a page with no annotations would
-    report `not_applicable` for a page it never saw.
+    Which entries exist, and which could not be read, is `annots_of`'s answer
+    and not re-decided here.
     """
     out = []
-    unread: list = []
-    for i, page in enumerate(pdf.pages):
-        annots = page.obj.get("/Annots")
-        if annots is None:
-            continue
+    for entry in entries:
+        annot = entry["obj"]
         try:
-            items = list(annots)
-        except Exception as exc:
-            unread.append({"page": i + 1, "reason": str(exc)})
-            continue
-        for j, annot in enumerate(items):
-            if annot is None:
-                # A null entry references no object (ISO 32000-2 §7.3.9):
-                # nothing to read, rather than something left unread.
-                continue
-            if not isinstance(annot, pikepdf.Dictionary):
-                unread.append(
-                    {"page": i + 1, "reason": f"annotation {j} is not a dictionary"}
-                )
-                continue
-            try:
-                subtype = str(annot.get("/Subtype") or "")
-            except Exception:
-                subtype = ""
-            try:
-                flags = int(annot.get("/F") or 0)
-            except (TypeError, ValueError):
-                flags = 0
-            try:
-                rect = [float(v) for v in annot.get("/Rect")] if annot.get("/Rect") else None
-            except (TypeError, ValueError):
-                rect = None
-            try:
-                contents = str(annot.get("/Contents") or "").strip()
-            except Exception:
-                contents = ""
-            try:
-                og = annot.objgen
-            except Exception:
-                og = (0, 0)
-            out.append(
-                {
-                    "page": i + 1,
-                    "index": j,
-                    "subtype": subtype,
-                    "rect": rect,
-                    "flags": flags,
-                    "contents": contents,
-                    "objgen": og,
-                    "obj": annot,
-                }
-            )
-    return out, unread
+            subtype = str(annot.get("/Subtype") or "")
+        except Exception:
+            subtype = ""
+        try:
+            flags = int(annot.get("/F") or 0)
+        except (TypeError, ValueError):
+            flags = 0
+        try:
+            rect = [float(v) for v in annot.get("/Rect")] if annot.get("/Rect") else None
+        except (TypeError, ValueError):
+            rect = None
+        try:
+            contents = str(annot.get("/Contents") or "").strip()
+        except Exception:
+            contents = ""
+        try:
+            og = annot.objgen
+        except Exception:
+            og = (0, 0)
+        out.append(
+            {
+                "page": entry["page"],
+                "index": entry["index"],
+                "subtype": subtype,
+                "rect": rect,
+                "flags": flags,
+                "contents": contents,
+                "objgen": og,
+                "obj": annot,
+            }
+        )
+    return out
 
 
 def _visible(annot: dict) -> bool:
@@ -462,7 +462,45 @@ def _fields(pdf) -> tuple:
     return out, unread
 
 
-def _script_sites(pdf) -> tuple:
+def _name_tree_gaps(node, depth: int = 0) -> list:
+    """The shapes `pikepdf.NameTree` reads PAST rather than refusing.
+
+    A leaf whose `/Names` array is odd-length drops or mis-pairs its entries;
+    a `/Names` that is not an array, a node declaring neither `/Names` nor
+    `/Kids`, and a `/Kids` that is not an array each yield nothing at all. The
+    iteration raises for none of them, so an inventory built from it reports
+    "this document has no scripts" for a tree it could not read whole.
+
+    This answers only whether the shape is one the iteration reads whole. It
+    resolves no name and no value and produces no site, so it cannot disagree
+    with the iteration about what the tree holds.
+    """
+    if depth > _NAME_TREE_DEPTH:
+        return [{"reason": f"name tree deeper than {_NAME_TREE_DEPTH} levels"}]
+    if not isinstance(node, pikepdf.Dictionary):
+        return [{"reason": "a name tree node is not a dictionary"}]
+    try:
+        kids = node.get("/Kids")
+        names = node.get("/Names")
+    except Exception as exc:
+        return [{"reason": str(exc)}]
+    if kids is not None:
+        if not isinstance(kids, pikepdf.Array):
+            return [{"reason": "a name tree /Kids is not an array"}]
+        out: list = []
+        for kid in kids:
+            out.extend(_name_tree_gaps(kid, depth + 1))
+        return out
+    if names is None:
+        return [{"reason": "a name tree node declares neither /Kids nor /Names"}]
+    if not isinstance(names, pikepdf.Array):
+        return [{"reason": "a name tree /Names is not an array"}]
+    if len(names) % 2:
+        return [{"reason": "a name tree /Names array has an unpaired entry"}]
+    return []
+
+
+def _script_sites(pdf, annot_entries: list) -> tuple:
     """Every place this document carries JavaScript or a page action, and what
     of that inventory would not read.
 
@@ -473,8 +511,9 @@ def _script_sites(pdf) -> tuple:
 
     A name tree that will not enumerate yields NO sites and a body that will
     not decode yields an EMPTY one — the first reads as "this document has no
-    scripts" and the second as "no script here schedules work on a clock".
-    Both are named in the second return instead.
+    scripts" and the second as "no script here schedules work on a clock". An
+    action dictionary that will not read is a third. All are named in the
+    second return instead.
     """
     sites: list = []
     unread: list = []
@@ -499,47 +538,78 @@ def _script_sites(pdf) -> tuple:
         except Exception:
             return False
 
-    names = pdf.Root.get("/Names")
+    def actions_of(owner, what: str, address: dict):
+        """One `/AA` dictionary's entries. A present `/AA` that is not a
+        dictionary holds actions this walk cannot enumerate, so it is a gap
+        rather than an absence."""
+        try:
+            aa = owner.get("/AA")
+        except Exception as exc:
+            unread.append(dict(address, reason=str(exc)))
+            return []
+        if aa is None:
+            return []
+        if not isinstance(aa, pikepdf.Dictionary):
+            unread.append(dict(address, reason=f"the {what} /AA is not a dictionary"))
+            return []
+        try:
+            return list(aa.items())
+        except Exception as exc:
+            unread.append(dict(address, reason=str(exc)))
+            return []
+
+    try:
+        names = pdf.Root.get("/Names")
+    except Exception as exc:
+        names = None
+        unread.append({"reason": str(exc)})
+    tree = None
     if names is not None:
-        tree = names.get("/JavaScript")
-        if tree is not None:
+        if not isinstance(names, pikepdf.Dictionary):
+            unread.append({"reason": "the catalog /Names is not a dictionary"})
+        else:
             try:
-                for key, value in pikepdf.NameTree(tree).items():
-                    sites.append(
-                        {
-                            "kind": "document",
-                            "name": str(key),
-                            "body": body_of(value),
-                            "address": _object_address(),
-                        }
-                    )
+                tree = names.get("/JavaScript")
             except Exception as exc:
                 unread.append({"reason": str(exc)})
+    if tree is not None:
+        unread.extend(_name_tree_gaps(tree))
+        try:
+            for key, value in pikepdf.NameTree(tree).items():
+                sites.append(
+                    {
+                        "kind": "document",
+                        "name": str(key),
+                        "body": body_of(value),
+                        "address": _object_address(),
+                    }
+                )
+        except Exception as exc:
+            unread.append({"reason": str(exc)})
 
-    opener = pdf.Root.get("/OpenAction")
+    try:
+        opener = pdf.Root.get("/OpenAction")
+    except Exception as exc:
+        opener = None
+        unread.append({"reason": str(exc)})
     if is_js(opener):
         sites.append(
             {"kind": "open", "name": "", "body": body_of(opener), "address": _object_address()}
         )
 
-    catalog_aa = pdf.Root.get("/AA")
-    if isinstance(catalog_aa, pikepdf.Dictionary):
-        for key, value in catalog_aa.items():
-            if is_js(value):
-                sites.append(
-                    {
-                        "kind": "document_event",
-                        "name": str(key).lstrip("/"),
-                        "body": body_of(value),
-                        "address": _object_address(),
-                    }
-                )
+    for key, value in actions_of(pdf.Root, "catalog", {}):
+        if is_js(value):
+            sites.append(
+                {
+                    "kind": "document_event",
+                    "name": str(key).lstrip("/"),
+                    "body": body_of(value),
+                    "address": _object_address(),
+                }
+            )
 
     for i, page in enumerate(pdf.pages):
-        aa = page.obj.get("/AA")
-        if not isinstance(aa, pikepdf.Dictionary):
-            continue
-        for key, value in aa.items():
+        for key, value in actions_of(page.obj, "page", {"page": i + 1}):
             sites.append(
                 {
                     "kind": "page_event",
@@ -549,40 +619,32 @@ def _script_sites(pdf) -> tuple:
                 }
             )
 
-    for i, page in enumerate(pdf.pages):
-        annots = page.obj.get("/Annots")
-        if annots is None:
-            continue
+    for entry in annot_entries:
+        annot, page_no, index = entry["obj"], entry["page"], entry["index"]
         try:
-            items = list(annots)
-        except Exception as exc:
-            unread.append({"page": i + 1, "reason": str(exc)})
-            continue
-        for j, annot in enumerate(items):
-            if not isinstance(annot, pikepdf.Dictionary):
-                continue
             action = annot.get("/A")
-            if is_js(action):
+        except Exception as exc:
+            action = None
+            unread.append({"page": page_no, "reason": str(exc)})
+        if is_js(action):
+            sites.append(
+                {
+                    "kind": "annotation",
+                    "name": "",
+                    "body": body_of(action),
+                    "address": _object_address(page=page_no, annotation=index),
+                }
+            )
+        for key, value in actions_of(annot, "annotation", {"page": page_no}):
+            if is_js(value):
                 sites.append(
                     {
-                        "kind": "annotation",
-                        "name": "",
-                        "body": body_of(action),
-                        "address": _object_address(page=i + 1, annotation=j),
+                        "kind": "field_event",
+                        "name": str(key).lstrip("/"),
+                        "body": body_of(value),
+                        "address": _object_address(page=page_no, annotation=index),
                     }
                 )
-            aa = annot.get("/AA")
-            if isinstance(aa, pikepdf.Dictionary):
-                for key, value in aa.items():
-                    if is_js(value):
-                        sites.append(
-                            {
-                                "kind": "field_event",
-                                "name": str(key).lstrip("/"),
-                                "body": body_of(value),
-                                "address": _object_address(page=i + 1, annotation=j),
-                            }
-                        )
     return sites, unread
 
 
@@ -700,23 +762,27 @@ def _check_permissions(check, pdf):
 
 
 def _check_image_only(check, pdf, pages, file):
-    total = len(pdf.pages)
+    counted = 0
     findings = []
-    for i in range(total):
+    for i in range(len(pdf.pages)):
         page_no = i + 1
-        if not pages.readable(page_no):
+        # Both stages, not one: a page whose paint walk did not complete has
+        # no coverage to compare, and a missing coverage read as zero is a
+        # page reported as "not a scan" without being looked at.
+        if not pages.readable(page_no) or page_no not in pages.painted:
             continue
+        counted += 1
         has_text = any(str(r.get("text") or "").strip() for r in pages.runs[page_no])
         if has_text:
             continue
-        if pages.scan_cover.get(page_no, 0.0) >= SCAN_COVERAGE:
+        if pages.scan_cover[page_no] >= SCAN_COVERAGE:
             findings.append(
                 _finding(_content_address(page_no, 0), "page_is_an_image", values={"page": page_no})
             )
-    if total == 0:
+    if counted == 0:
         check.status = NA
         return
-    check.counted = total
+    check.counted = counted
     check.findings = findings
     if findings:
         check.status = FAIL
@@ -734,6 +800,15 @@ def _check_image_only(check, pdf, pages, file):
 
 
 def _check_tagged(check, pdf, tree):
+    """A `/StructTreeRoot` holding no structure element is not a tagged
+    document.
+
+    The root is the entry point to the structure hierarchy and `/K` is what
+    the hierarchy hangs from (ISO 32000-2 §14.7.2); a root with nothing under
+    it defines no reading order, associates no content with any element and
+    carries no alternate description. Reporting `pass` for it is the claim
+    this check exists to make, made over a document that delivers none of it.
+    """
     marked = False
     mark_info = pdf.Root.get("/MarkInfo")
     if mark_info is not None:
@@ -741,16 +816,17 @@ def _check_tagged(check, pdf, tree):
             marked = bool(mark_info.get("/Marked"))
         except Exception:
             marked = False
-    tagged = bool(tree["tagged"]) and marked
+    populated = bool(tree["tagged"]) and bool(tree["nodes"])
     check.counted = 1
-    check.status = PASS if tagged else FAIL
-    if not tagged:
-        check.findings = [
-            _finding(
-                _object_address(),
-                "structure_tree_missing" if not tree["tagged"] else "mark_info_missing",
-            )
-        ]
+    check.status = PASS if populated and marked else FAIL
+    if not (populated and marked):
+        if not tree["tagged"]:
+            detail = "structure_tree_missing"
+        elif not tree["nodes"]:
+            detail = "structure_tree_empty"
+        else:
+            detail = "mark_info_missing"
+        check.findings = [_finding(_object_address(), detail)]
 
 
 def _check_reading_order(check, tree, pages, mcid_tables):
@@ -1447,6 +1523,7 @@ def _check_table_regularity(check, tree, mcid_tables):
         return
     findings = []
     unmodellable = []
+    unread_spans = []
     for entry in found:
         table, rows = entry["table"], entry["rows"]
         if len(rows) < 2:
@@ -1454,6 +1531,7 @@ def _check_table_regularity(check, tree, mcid_tables):
         widths = []
         carried: dict = {}
         modellable = True
+        spans_read = True
         for row in rows:
             cells = row_cells(row)
             if not cells:
@@ -1468,8 +1546,14 @@ def _check_table_regularity(check, tree, mcid_tables):
                 column += 1
                 width += 1
             for cell in cells:
-                colspan = span_of(cell, "ColSpan")
-                rowspan = span_of(cell, "RowSpan")
+                colspan, col_read = span_of(cell, "ColSpan")
+                rowspan, row_read = span_of(cell, "RowSpan")
+                # A span that is not a positive integer states nothing about
+                # how many columns its cell occupies. The arithmetic carries
+                # the spec's default so the walk completes, but a width summed
+                # over a default that stood in for an unread value is not a
+                # measurement of this table.
+                spans_read = spans_read and col_read and row_read
                 for offset in range(colspan):
                     if rowspan > 1:
                         carried[column + offset] = rowspan - 1
@@ -1490,6 +1574,13 @@ def _check_table_regularity(check, tree, mcid_tables):
                          preview=preview[:80], rect=rect)
             )
             continue
+        if not spans_read:
+            preview, rect = _node_preview(table, mcid_tables)
+            unread_spans.append(
+                _finding(_struct_address(table), "table_span_unreadable",
+                         preview=preview[:80], rect=rect)
+            )
+            continue
         if len(set(widths)) == 1:
             continue
         preview, rect = _node_preview(table, mcid_tables)
@@ -1499,7 +1590,7 @@ def _check_table_regularity(check, tree, mcid_tables):
                      values={"widths": sorted(set(widths))})
         )
     _verdict(check, len(found), findings)
-    _also_review(check, unmodellable)
+    _also_review(check, unmodellable + unread_spans)
 
 
 def _check_table_summary(check, tree, mcid_tables):
@@ -1767,6 +1858,11 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
     `category` restricts the run to one of `CATEGORIES`; every other check
     still appears, reporting `not_applicable` for "not run", which keeps the
     report shape one shape.
+
+    Each inventory read is fail-OPEN at its own boundary. A read that raises
+    where nothing anticipated it becomes the same gap a read that returned
+    nothing does, so the answer to "is this document accessible" is 31 checks
+    and one review row rather than no report at all.
     """
     if category is not None and category not in CATEGORIES:
         raise ValueError(
@@ -1775,12 +1871,21 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
         )
     checks = {cid: _Check(cid, cat) for cid, cat in CHECK_INVENTORY}
 
+    def read(inventory):
+        """An inventory and its gaps, where a raise IS a gap."""
+        try:
+            return inventory()
+        except Exception as exc:
+            return [], [{"reason": str(exc)}]
+
     with pikepdf.open(file) as pdf:
         pages = _Pages(pdf)
-        tree = audit_tree(pdf)
-        annots, annots_unread = _annotations(pdf)
-        fields, fields_unread = _fields(pdf)
-        sites, sites_unread = _script_sites(pdf)
+        entries, annots_unread = read(lambda: annots_of(pdf))
+        tree = audit_tree(pdf, entries)
+        annots, annots_gaps = read(lambda: (_annotations(entries), []))
+        annots_unread = annots_unread + annots_gaps
+        fields, fields_unread = read(lambda: _fields(pdf))
+        sites, sites_unread = read(lambda: _script_sites(pdf, entries))
         mcid_tables = {p: _mcid_text(runs) for p, runs in pages.runs.items()}
 
         run = {
@@ -1843,6 +1948,11 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
             [
                 _finding(_object_address(page=u["page"]), "annotations_unreadable",
                          values={"page": u["page"]})
+                if u.get("page")
+                # A gap the reader could not attribute to a page: its sentence
+                # cannot name one, so it is a key of its own rather than one
+                # rendering an uninterpolated page number.
+                else _finding(_object_address(), "annotations_unreadable_document")
                 for u in annots_unread
             ],
         )
@@ -1851,6 +1961,9 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
             checks[cid],
             [_finding(_object_address(), "fields_unreadable") for _ in fields_unread],
         )
+    # An annotation the reader could not reach is a script site nobody looked
+    # at: /A and /AA are read off the same entries, so the script inventory is
+    # short by exactly what the annotation inventory is short by.
     for cid in _SCRIPT_CHECKS:
         _also_review(
             checks[cid],
@@ -1859,7 +1972,7 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
                     _object_address(page=u["page"]) if u.get("page") else _object_address(),
                     "scripts_unreadable",
                 )
-                for u in sites_unread
+                for u in sites_unread + annots_unread
             ],
         )
     tree_gaps = [

@@ -10,6 +10,7 @@ import pikepdf
 from pathlib import Path
 
 from engine.font_embedding import font_embedded
+from engine.font_inventory import walk_document_fonts
 
 
 def _font_label(font_obj, resource_name) -> str:
@@ -24,16 +25,28 @@ def _font_label(font_obj, resource_name) -> str:
     return str(resource_name)
 
 
+def _where(page_number: int) -> str:
+    """A page number, or the document itself for a font no page names — the
+    interactive form's default resources are reached that way."""
+    return f"Page {page_number}" if page_number > 0 else "Document resources"
+
+
 def _survey_fonts(pdf) -> dict:
-    """Every font named by a page's resources, sorted into the three answers.
+    """Every font the document reaches, sorted into the three answers.
+
+    The traversal is the font inventory's, not one of this module's own: a
+    font reached only through a Form XObject, a Type3 glyph procedure, an
+    annotation appearance stream or ``/AcroForm /DR`` is still a font the
+    document draws with, and a survey of page ``/Resources /Font`` alone is a
+    subset reported as a total.
 
     Counted once per indirect object: a font referenced from forty pages is
     one font program, and a total that counted references would report a
     document as forty times heavier in fonts than it is.
 
     Nothing is truncated and nothing degrades to a pass. A font whose
-    embedding will not read is held apart from both answers, and a page whose
-    font resources will not read becomes an issue naming that page — a
+    embedding will not read is held apart from both answers, and a resource
+    branch that will not read becomes an issue naming where it was — a
     swallowed failure would report a document with unknown fonts as one whose
     fonts are all embedded.
     """
@@ -43,45 +56,54 @@ def _survey_fonts(pdf) -> dict:
     problems: list[dict] = []
     seen: set = set()
 
-    for index, page in enumerate(pdf.pages):
-        page_num = index + 1
+    def on_font(font_obj, page_number, resource_name) -> None:
+        objgen = getattr(font_obj, "objgen", (0, 0))
+        if objgen != (0, 0):
+            if objgen in seen:
+                return
+            seen.add(objgen)
         try:
-            resources = page.get("/Resources")
-            font_dict = None if resources is None else resources.get("/Font")
-            if font_dict is None:
-                continue
-            names = list(font_dict.keys())
+            label = _font_label(font_obj, resource_name)
+            state = font_embedded(font_obj)
         except Exception as e:
             problems.append({
                 "severity": "warning",
                 "category": "fonts",
-                "message": f"Page {page_num}: font resources could not be read: {e}",
+                "message": (
+                    f"{_where(page_number)}: font {resource_name} "
+                    f"could not be read: {e}"
+                ),
             })
-            continue
+            return
+        if state is True:
+            embedded.append(label)
+        elif state is False:
+            not_embedded.append(label)
+        else:
+            unreadable.append(label)
 
-        for resource_name in names:
-            try:
-                font_obj = font_dict[resource_name]
-                objgen = getattr(font_obj, "objgen", (0, 0))
-                if objgen != (0, 0):
-                    if objgen in seen:
-                        continue
-                    seen.add(objgen)
-                label = _font_label(font_obj, resource_name)
-                state = font_embedded(font_obj)
-            except Exception as e:
-                problems.append({
-                    "severity": "warning",
-                    "category": "fonts",
-                    "message": f"Page {page_num}: font {resource_name} could not be read: {e}",
-                })
-                continue
-            if state is True:
-                embedded.append(label)
-            elif state is False:
-                not_embedded.append(label)
-            else:
-                unreadable.append(label)
+    def on_unreadable(page_number, resource_name, detail) -> None:
+        # A font entry that will not read is a font whose embedding is
+        # unknown, and belongs in the same count as one the shared answer
+        # could not settle. A whole table that will not read names no font,
+        # so it can only be reported as its own issue.
+        if resource_name is not None:
+            unreadable.append(resource_name)
+            return
+        problems.append({
+            "severity": "warning",
+            "category": "fonts",
+            "message": f"{_where(page_number)}: {detail}",
+        })
+
+    try:
+        walk_document_fonts(pdf, on_font, on_unreadable)
+    except Exception as e:
+        problems.append({
+            "severity": "warning",
+            "category": "fonts",
+            "message": f"The document's fonts could not be enumerated: {e}",
+        })
 
     return {
         "embedded": embedded,

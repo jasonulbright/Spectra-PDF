@@ -2,7 +2,7 @@
 // dispatcher's scope order (interceptors → editable guard → bindings), and
 // the Escape chain.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { KEY_BINDINGS, type KeyBinding } from '../src/renderer/commands/acrobat-keys';
+import { KEY_BINDINGS, type KeyBinding } from '../src/renderer/commands/standard-keys';
 import { dispatchKeyEvent, isEditable, resolveBinding, shortcutForCommand } from '../src/renderer/commands/keymap';
 import { COMMANDS } from '../src/renderer/commands/registry';
 import {

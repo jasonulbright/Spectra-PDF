@@ -24,7 +24,7 @@ import {
   setCommandStateSource,
 } from '../src/renderer/commands/context';
 import { showableDoc, showableFile, tabFiles } from '../src/renderer/state/selectors';
-import { KEY_BINDINGS } from '../src/renderer/commands/acrobat-keys';
+import { KEY_BINDINGS } from '../src/renderer/commands/standard-keys';
 import { resetPendingFind } from '../src/renderer/commands/find-intent';
 import type { AppCommandHandlers } from '../src/renderer/commands/types';
 import { appReducer, initialState } from '../src/renderer/state/reducer';

@@ -346,6 +346,52 @@ class TestGroupingAndPages:
         assert list_document_fonts(path, font_dir) == {"file": path, "fonts": [], "count": 0}
 
 
+class TestType3Policy:
+    """A Type 3 font's glyph programs are content streams under `/CharProcs`
+    (ISO 32000-2, 9.6.4), so it is embedded by construction — and without that
+    required dictionary the question has no answer at all.
+
+    The tab and the structural checker read one function, so a Type 3 cannot
+    be embedded in one report and not embedded in the other.
+    """
+
+    def _document(self, tmp_path, char_procs) -> str:
+        path = str(tmp_path / f"type3-{'drawn' if char_procs else 'empty'}.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(300, 300))
+        font = _type3(pdf)
+        if char_procs is None:
+            del font[Name.CharProcs]
+        page.obj[Name.Resources] = Dictionary(Font=Dictionary(T3=pdf.make_indirect(font)))
+        pdf.save(path)
+        pdf.close()
+        return path
+
+    def test_glyph_procedures_present_reads_as_embedded(self, tmp_path, font_dir):
+        result = list_document_fonts(self._document(tmp_path, True), font_dir)
+        assert result["fonts"][0]["embedded"] is True
+        assert result["fonts"][0]["substitute"] is None
+
+    def test_no_glyph_procedures_reads_as_unknown_and_offers_no_substitute(
+        self, tmp_path, font_dir
+    ):
+        """A substitution is only knowable once the program is known to be
+        missing, and no installed face draws a Type 3's glyphs in any case."""
+        result = list_document_fonts(self._document(tmp_path, None), font_dir)
+        assert result["fonts"][0]["embedded"] is None
+        assert result["fonts"][0]["substitute"] is None
+
+    def test_the_tab_and_the_checker_give_one_answer(self, tmp_path, font_dir):
+        from engine.check import check
+
+        path = self._document(tmp_path, None)
+        assert list_document_fonts(path, font_dir)["fonts"][0]["embedded"] is None
+        info = check(file=path)["info"]
+        assert info["fonts_embedded"] == 0
+        assert info["fonts_not_embedded"] == 0
+        assert info["fonts_unreadable"] == 1
+
+
 class TestEncodingNames:
     def test_a_differences_dictionary_reads_as_custom(self, tmp_path, font_dir):
         path = str(tmp_path / "diffs.pdf")

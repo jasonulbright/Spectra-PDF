@@ -8,15 +8,21 @@ stream keeps its own, and a form's default appearance fonts live in
 ``/AcroForm /DR /Font``. All of them are walked.
 
 What is reported per font: the name (subset prefix stripped for display), the
-type, the encoding, whether the program is EMBEDDED, and — when it is not —
-the face this app would actually substitute. That last field is answered by
-``font_fallback.resolve_fallback_font``, the resolver every emitter in this
-engine already uses, so the tab names the face the app really draws with
-rather than guessing at some other reader's system font.
+type, the encoding, whether the program is EMBEDDED, and — when it is known to
+be absent — the face this app would actually substitute. That last field is
+answered by ``font_fallback.resolve_fallback_font``, the resolver every emitter
+in this engine already uses, so the tab names the face the app really draws
+with rather than guessing at some other reader's system font.
+
+``embedded`` is the shared tri-state (``font_embedding.font_embedded``): true,
+false, or null where the font will not read. A null carries no substitution,
+because the face a reader would fall back to is only knowable once the program
+is known to be missing.
 """
 
 import pikepdf
 
+from .font_embedding import font_embedded
 from .font_fallback import classify_font_style, style_key
 from .pdf_fonts import _strip_subset_prefix
 
@@ -55,36 +61,6 @@ def _descendants(font_obj) -> list:
         if isinstance(raw, pikepdf.Dictionary):
             out.append(raw)
     return out
-
-
-def _descriptors(font_obj) -> list:
-    out = []
-    own = font_obj.get("/FontDescriptor")
-    if own is not None:
-        out.append(own)
-    for descendant in _descendants(font_obj):
-        child = descendant.get("/FontDescriptor")
-        if child is not None:
-            out.append(child)
-    return out
-
-
-def _is_embedded(font_obj) -> bool:
-    """A font program lives on the descriptor under one of three keys; a
-    composite font keeps its descriptor on the descendant."""
-    subtype = str(font_obj.get("/Subtype", "")).lstrip("/")
-    if subtype == "Type3":
-        # A Type3 font IS its glyph procedures — the program is in the file by
-        # construction, with no descriptor to carry it.
-        return font_obj.get("/CharProcs") is not None
-    for descriptor in _descriptors(font_obj):
-        try:
-            for key in ("/FontFile", "/FontFile2", "/FontFile3"):
-                if descriptor.get(key) is not None:
-                    return True
-        except (TypeError, ValueError, AttributeError):
-            continue
-    return False
 
 
 def _encoding_name(font_obj) -> str:
@@ -129,19 +105,32 @@ def _substitute_face(font_obj, font_dir: str | None) -> str | None:
     return basename(resolved)
 
 
-def _walk_fonts(resources, page_number: int, seen_resources: set, on_font,
-                depth: int) -> None:
-    """Walk one resource dictionary, handing every font dictionary it reaches
-    to `on_font(font_obj, page_number)` and descending into the nested
-    resources of its Form XObjects, patterns and Type3 glyph procedures.
+def _noop(*_args) -> None:
+    return None
 
-    The listing and the embedder share this traversal rather than each keeping
-    one: a font reachable by one and not the other would be a font the report
-    names and the fixup cannot repair.
+
+def _walk_fonts(resources, page_number: int, seen_resources: set, on_font,
+                on_unreadable, depth: int) -> None:
+    """Walk one resource dictionary, handing every font dictionary it reaches
+    to `on_font(font_obj, page_number, resource_name)` and descending into the
+    nested resources of its Form XObjects, patterns and Type3 glyph
+    procedures.
+
+    The listing, the checker and the embedder share this traversal rather than
+    each keeping one: a font reachable by one and not the other would be a
+    font one report names and the others cannot see.
+
+    A branch that will not read is REPORTED through
+    `on_unreadable(page_number, resource_name, detail)` rather than skipped,
+    because a caller that treats a skipped branch as "nothing there" turns
+    "I could not look" into a total. `resource_name` names the font entry
+    where the unreadable thing is one font, and is None where a whole table
+    is at stake.
     """
     if resources is None or depth > _MAX_DEPTH:
         return
     if not isinstance(resources, pikepdf.Dictionary):
+        on_unreadable(page_number, None, "a resource entry is not a dictionary")
         return
     try:
         marker = resources.objgen
@@ -154,44 +143,48 @@ def _walk_fonts(resources, page_number: int, seen_resources: set, on_font,
         seen_resources.add(key)
 
     fonts = resources.get("/Font")
+    if fonts is not None and not isinstance(fonts, pikepdf.Dictionary):
+        on_unreadable(page_number, None, "the /Font resources are not a dictionary")
     if isinstance(fonts, pikepdf.Dictionary):
-        for font_obj in fonts.values():
-            if isinstance(font_obj, pikepdf.Dictionary):
-                on_font(font_obj, page_number)
-                char_procs = font_obj.get("/CharProcs")
-                if isinstance(char_procs, pikepdf.Dictionary):
-                    for proc in char_procs.values():
-                        _walk_fonts(
-                            _stream_resources(proc), page_number, seen_resources,
-                            on_font, depth + 1,
-                        )
-                _walk_fonts(
-                    font_obj.get("/Resources"), page_number, seen_resources,
-                    on_font, depth + 1,
-                )
+        try:
+            named = list(fonts.items())
+        except Exception as exc:
+            on_unreadable(page_number, None,
+                          f"the /Font resources will not read: {exc}")
+            named = []
+        for resource_name, font_obj in named:
+            if not isinstance(font_obj, pikepdf.Dictionary):
+                on_unreadable(page_number, str(resource_name),
+                              "the font resource is not a font dictionary")
+                continue
+            on_font(font_obj, page_number, str(resource_name))
+            char_procs = font_obj.get("/CharProcs")
+            if isinstance(char_procs, pikepdf.Dictionary):
+                for proc in char_procs.values():
+                    _walk_fonts(
+                        _stream_resources(proc), page_number, seen_resources,
+                        on_font, on_unreadable, depth + 1,
+                    )
+            _walk_fonts(
+                font_obj.get("/Resources"), page_number, seen_resources,
+                on_font, on_unreadable, depth + 1,
+            )
 
     xobjects = resources.get("/XObject")
     if isinstance(xobjects, pikepdf.Dictionary):
         for xobj in xobjects.values():
             _walk_fonts(
-                _stream_resources(xobj), page_number, seen_resources, on_font, depth + 1
+                _stream_resources(xobj), page_number, seen_resources, on_font,
+                on_unreadable, depth + 1,
             )
 
     patterns = resources.get("/Pattern")
     if isinstance(patterns, pikepdf.Dictionary):
         for pattern in patterns.values():
             _walk_fonts(
-                _stream_resources(pattern), page_number, seen_resources, on_font, depth + 1
+                _stream_resources(pattern), page_number, seen_resources, on_font,
+                on_unreadable, depth + 1,
             )
-
-
-def _collect_fonts(resources, page_number: int, seen_resources: set, out: dict,
-                   font_dir: str | None, depth: int) -> None:
-    _walk_fonts(
-        resources, page_number, seen_resources,
-        lambda font_obj, page: _record(font_obj, page, out, font_dir),
-        depth,
-    )
 
 
 def _stream_resources(obj):
@@ -207,7 +200,7 @@ def _record(font_obj, page_number: int, out: dict, font_dir: str | None) -> None
     raw_name = str(font_obj.get("/BaseFont", "")).lstrip("/")
     font_type = _font_type(font_obj)
     encoding = _encoding_name(font_obj)
-    embedded = _is_embedded(font_obj)
+    embedded = font_embedded(font_obj)
     key = (raw_name, font_type, encoding, embedded)
     entry = out.get(key)
     if entry is None:
@@ -219,7 +212,9 @@ def _record(font_obj, page_number: int, out: dict, font_dir: str | None) -> None
             "encoding": encoding,
             "embedded": embedded,
             "subset": bool(raw_name) and name != raw_name,
-            "substitute": None if embedded else _substitute_face(font_obj, font_dir),
+            "substitute": (
+                _substitute_face(font_obj, font_dir) if embedded is False else None
+            ),
             "pages": [],
         }
         out[key] = entry
@@ -237,7 +232,10 @@ def list_document_fonts(file: str, font_dir: str | None = None) -> dict:
     """
     out: dict = {}
     with pikepdf.open(file) as pdf:
-        walk_document_fonts(pdf, lambda font_obj, page: _record(font_obj, page, out, font_dir))
+        walk_document_fonts(
+            pdf,
+            lambda font_obj, page, _name: _record(font_obj, page, out, font_dir),
+        )
 
     fonts = sorted(
         out.values(), key=lambda f: (f["name"].lower(), f["type"], f["encoding"])
@@ -249,12 +247,13 @@ def list_document_fonts(file: str, font_dir: str | None = None) -> dict:
 
 
 def _walk_annotation_fonts(annotations, page_number: int, seen_resources: set,
-                           on_font) -> None:
+                           on_font, on_unreadable) -> None:
     """An annotation's appearance streams carry their own resources — a
     freetext note's font is only ever reachable this way."""
     try:
         entries = list(annotations)
-    except (TypeError, ValueError, AttributeError):
+    except (TypeError, ValueError, AttributeError) as exc:
+        on_unreadable(page_number, None, f"the annotations will not read: {exc}")
         return
     for annotation in entries:
         if not isinstance(annotation, pikepdf.Dictionary):
@@ -268,20 +267,26 @@ def _walk_annotation_fonts(annotations, page_number: int, seen_resources: set,
                 # checkbox's /Off and /Yes) rather than a single stream.
                 for nested in state.values():
                     _walk_fonts(
-                        _stream_resources(nested), page_number, seen_resources, on_font, 1
+                        _stream_resources(nested), page_number, seen_resources,
+                        on_font, on_unreadable, 1,
                     )
             else:
                 _walk_fonts(
-                    _stream_resources(state), page_number, seen_resources, on_font, 1
+                    _stream_resources(state), page_number, seen_resources,
+                    on_font, on_unreadable, 1,
                 )
 
 
-def walk_document_fonts(pdf, on_font) -> None:
+def walk_document_fonts(pdf, on_font, on_unreadable=_noop) -> None:
     """Every font dictionary an open document reaches, once per page it is on.
 
     Page resources, nested forms, patterns, Type3 glyph procedures, annotation
     appearance streams and ``/AcroForm /DR /Font`` — page 0 means "used by the
     document, not by a page", which is where a default-appearance font lives.
+
+    A count taken from anything narrower than this walk is a subset: a font
+    reached only through one of those five indirections is still a font the
+    document draws with.
     """
     seen_resources: set = set()
     for index, page in enumerate(pdf.pages):
@@ -291,10 +296,23 @@ def walk_document_fonts(pdf, on_font) -> None:
             resources = page.resources
         except (AttributeError, KeyError):
             resources = page.obj.get("/Resources")
-        _walk_fonts(resources, index + 1, seen_resources, on_font, 0)
-        annotations = page.obj.get("/Annots")
+        except Exception as exc:
+            on_unreadable(index + 1, None, f"the page resources will not read: {exc}")
+            continue
+        _walk_fonts(resources, index + 1, seen_resources, on_font, on_unreadable, 0)
+        try:
+            annotations = page.obj.get("/Annots")
+        except Exception as exc:
+            on_unreadable(index + 1, None, f"the annotations will not read: {exc}")
+            continue
         if annotations is not None:
-            _walk_annotation_fonts(annotations, index + 1, seen_resources, on_font)
-    acroform = pdf.Root.get("/AcroForm")
+            _walk_annotation_fonts(
+                annotations, index + 1, seen_resources, on_font, on_unreadable
+            )
+    try:
+        acroform = pdf.Root.get("/AcroForm")
+    except Exception as exc:
+        on_unreadable(0, None, f"the interactive form will not read: {exc}")
+        return
     if isinstance(acroform, pikepdf.Dictionary):
-        _walk_fonts(acroform.get("/DR"), 0, seen_resources, on_font, 0)
+        _walk_fonts(acroform.get("/DR"), 0, seen_resources, on_font, on_unreadable, 0)
