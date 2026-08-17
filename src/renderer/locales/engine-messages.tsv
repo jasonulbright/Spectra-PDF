@@ -588,6 +588,10 @@ spelling.dictionaryCouldRead	pattern	spelling	That dictionary could not be read:
 spelling.dictionaryCouldRead2	pattern	spelling	The {{language}} dictionary could not be read: {{exc}}
 spelling.documentNothingSpellCheck	exact	spelling	This document has nothing to spell-check.
 spelling.fileFound	pattern	spelling	file not found: {{aff}}
+spelling.finnishDictionaryCouldRead	pattern	spelling	The Finnish dictionary could not be read: {{exc}}
+spelling.finnishSpellingEngineCould	exact	spelling	The Finnish spelling engine could not be loaded: its binding is unreadable.
+spelling.finnishSpellingEngineCould2	pattern	spelling	The Finnish spelling engine could not be loaded: {{exc}}
+spelling.finnishSpellingEngineIncomplete	pattern	spelling	The Finnish spelling engine is incomplete: {{v0}} is missing.
 spelling.spellingDictionary	pattern	spelling	No spelling dictionary for {{language}}.
 spelling.unknownSpellCheckSource	pattern	spelling	unknown spell-check source {{v0}} — use text, comments or fields
 spelling.usableDictionaryNameUse	pattern	spelling	{{name}} is not a usable dictionary name — use letters, digits and underscores.
@@ -599,6 +603,8 @@ split.pagesPerFileMust	pattern	split	pages per file must be a whole number, got 
 split.pagesPerFileMust2	pattern	split	pages per file must be at least 1, got {{every_n}}
 split.splitModeMustOne	pattern	split	split mode must be one of {{v0}}, got {{mode}}
 split.splitNeedsOutputFolder	exact	split	split needs an output folder
+struct_audit.namespaceDictionaryDeclaresName	exact	struct_audit	the namespace dictionary declares no name
+struct_audit.nsEntryNamespaceDictionary	exact	struct_audit	the /NS entry is not a namespace dictionary
 struct_fix.headerScopeHeaderCell	pattern	struct_fix,struct_tree	"{{scope}}" is not a header scope; a header cell reads Row, Column or Both.
 struct_fix.pathMustNameTable	exact	struct_fix	path must name a table, not the tree root
 struct_fix.pathNamesElementDocument	pattern	struct_fix	path {{v0}} names no element in this document's tree
