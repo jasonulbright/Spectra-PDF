@@ -186,6 +186,54 @@ def no_lang(path):
     return save(pdf, path)
 
 
+def lang_on_elements_ok(path):
+    """No catalog /Lang; every content-bearing structure element declares one.
+
+    ISO 32000-2 14.9.2.3 makes the catalog entry a DEFAULT that a structure
+    element overrides, so this document HAS declared a language for its text.
+    The checker used to read the catalog alone and tell the reader the document
+    declares no language, which was false for exactly this shape.
+    """
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _root, _doc = _one_tagged_paragraph(pdf, page)
+    make_conformant(pdf, page)
+    del pdf.Root[Name.Lang]
+    para = pdf.Root[Name.StructTreeRoot][Name.K][Name.K][0]
+    para[Name.Lang] = String("en-US")
+    return save(pdf, path)
+
+
+def lang_inherited_ok(path):
+    """The language is declared on an ANCESTOR only.
+
+    14.9.2.3: an element with no /Lang inherits from the nearest parent that
+    has one, so the paragraph's text is covered by the Document element's
+    declaration.
+    """
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    make_conformant(pdf, page)
+    del pdf.Root[Name.Lang]
+    pdf.Root[Name.StructTreeRoot][Name.K][Name.Lang] = String("en-US")
+    return save(pdf, path)
+
+
+def lang_empty_is_unknown(path):
+    """A present but EMPTY /Lang.
+
+    14.9.2.2: the empty text string states that the language is UNKNOWN, so it
+    is not a declaration and must not be accepted as one.
+    """
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    make_conformant(pdf, page)
+    pdf.Root[Name.Lang] = String("")
+    return save(pdf, path)
+
+
 def no_title(path):
     pdf = new_pdf()
     page = pdf.pages[0]
@@ -940,6 +988,9 @@ ROSTER = {
     "perm_blocked": (perm_blocked, "permissions", "fail"),
     "perm_blocked_owner_password": (perm_blocked_owner_password, "permissions", "fail"),
     "no_lang": (no_lang, "lang", "fail"),
+    "lang_on_elements_ok": (lang_on_elements_ok, "lang", "pass"),
+    "lang_inherited_ok": (lang_inherited_ok, "lang", "pass"),
+    "lang_empty_is_unknown": (lang_empty_is_unknown, "lang", "fail"),
     "no_title": (no_title, "title", "fail"),
     "title_not_displayed": (title_not_displayed, "title", "warn"),
     "no_bookmarks_long": (no_bookmarks_long, "bookmarks", "warn"),
