@@ -2,8 +2,8 @@
 
 The `derived_nav_builders` discipline: every document here is small enough to
 read in one screen and fails EXACTLY ONE check, so a verdict that moves can
-only have come from the check that owns it. The four documents whose names end
-in `_ok` are the false-failure guards — each is a CONFORMING shape a naive
+only have come from the check that owns it. The documents whose names end in
+`_ok` are the false-failure guards — each is a CONFORMING shape a naive
 implementation of its check reports as broken.
 
 One conformance question per file also means the pass fixture and the fail
@@ -50,6 +50,18 @@ def struct_root(pdf, role_map=None):
     pdf.Root[Name.StructTreeRoot] = root
     pdf.Root[Name.MarkInfo] = Dictionary(Marked=True)
     return root
+
+
+# ISO 32000-2 14.8.6.1. An element with no `/NS` is in the PDF 1.7 namespace,
+# so a fixture that wants the PDF 2.0 reading has to say so on every element.
+SSN_2_0 = "http://iso.org/pdf2/ssn"
+
+
+def namespace(pdf, root, uri=SSN_2_0):
+    """A namespace dictionary, registered in the root's `/Namespaces` array."""
+    ns = pdf.make_indirect(Dictionary(Type=Name.Namespace, NS=String(uri)))
+    root[Name.Namespaces] = Array([ns])
+    return ns
 
 
 def elem(pdf, tag, parent, page=None, mcid=None, kids=None, **extra):
@@ -989,6 +1001,206 @@ def lbl_outside_list_item_ok(path):
     return save(pdf, path)
 
 
+# ── structure nesting ─────────────────────────────────────────────────────
+
+
+def _ns_list_page(pdf, page, extra_lbl=False, link_lbl=False, footnote=False):
+    """One list in the PDF 2.0 standard structure namespace, with the three
+    shapes the nesting rules disagree about switched on individually.
+
+    `extra_lbl` hangs a second `Lbl` off the `L` itself, which is the position
+    ISO 32000-2 Table L.2 does not list for `Lbl`; the other two are positions
+    it does list.
+    """
+    parts = [
+        "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Body copy.) Tj ET EMC",
+        "/Lbl <</MCID 1>> BDC BT /F1 11 Tf 40 660 Td (1.) Tj ET EMC",
+        "/LBody <</MCID 2>> BDC BT /F1 11 Tf 60 660 Td (An item.) Tj ET EMC",
+        "/Lbl <</MCID 3>> BDC BT /F1 11 Tf 40 620 Td (a) Tj ET EMC",
+    ]
+    draw(pdf, page, "\n".join(parts))
+    root = struct_root(pdf)
+    ns = namespace(pdf, root)
+    doc = elem(pdf, "Document", root, NS=ns)
+    para = elem(pdf, "P", doc, page=page, mcid=0, NS=ns)
+    lbl = elem(pdf, "Lbl", doc, page=page, mcid=1, NS=ns)
+    order = [para, lbl]
+    body_kids = None
+    if link_lbl:
+        link = elem(pdf, "Link", doc, page=page, NS=ns)
+        inner = elem(pdf, "Lbl", link, page=page, mcid=3, NS=ns)
+        # The link's own content sits alongside the label it encloses, so the
+        # element has text of its own to be named by.
+        link[Name.K] = Array([2, inner])
+        body_kids = [link]
+        order += [link, inner]
+    body = elem(pdf, "LBody", doc, page=page, mcid=None if body_kids else 2,
+                kids=body_kids, NS=ns)
+    if not link_lbl:
+        order.append(body)
+    item = elem(pdf, "LI", doc, kids=[lbl, body], NS=ns)
+    kids = [item]
+    if extra_lbl:
+        stray = elem(pdf, "Lbl", doc, page=page, mcid=3, NS=ns)
+        kids.append(stray)
+        order.append(stray)
+    lst = elem(pdf, "L", doc, kids=kids, NS=ns)
+    top = [para, lst]
+    if footnote:
+        note_lbl = elem(pdf, "Lbl", doc, page=page, mcid=3, NS=ns)
+        note = elem(pdf, "FENote", doc, kids=[note_lbl], NS=ns)
+        top.append(note)
+        order.append(note_lbl)
+    doc[Name.K] = Array(top)
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, order)
+    return root, doc, lst
+
+
+def lbl_under_li_ok(path):
+    """PASS fixture — the ordinary list label, in the namespace whose table
+    lists `LI` among `Lbl`'s parents."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _ns_list_page(pdf, page)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def lbl_in_fenote_ok(path):
+    """PASS fixture — a footnote's label. `FENote` is the PDF 2.0 footnote
+    type, and Table L.2 lists it among `Lbl`'s parents."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _ns_list_page(pdf, page, footnote=True)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def toc_link_lbl_ok(path):
+    """PASS fixture — a table-of-contents entry, whose label sits inside the
+    entry's `Link`."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _ns_list_page(pdf, page, link_lbl=True)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def lbl_under_l_fails(path):
+    """A second `Lbl` hung off the `L` itself rather than off a list item —
+    the position no shipped check reported and the one this row was opened
+    for."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _ns_list_page(pdf, page, extra_lbl=True)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def _row_group_table(pdf, page, stray_row_group=False):
+    """A two-column table whose rows sit in `THead` and `TBody`.
+
+    `stray_row_group` hangs an EMPTY second `THead` off the document. Empty
+    keeps the one thing under test to the row group's own position: a stray
+    group carrying rows would move the row and header checks as well.
+    """
+    draw(
+        pdf, page,
+        "/P <</MCID 0>> BDC BT /F1 11 Tf 40 740 Td (Body copy.) Tj ET EMC\n"
+        "/TH <</MCID 1>> BDC BT /F1 11 Tf 40 700 Td (Region) Tj ET EMC\n"
+        "/TH <</MCID 2>> BDC BT /F1 11 Tf 160 700 Td (Revenue) Tj ET EMC\n"
+        "/TD <</MCID 3>> BDC BT /F1 11 Tf 40 670 Td (North) Tj ET EMC\n"
+        "/TD <</MCID 4>> BDC BT /F1 11 Tf 160 670 Td (120) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    h1 = elem(pdf, "TH", doc, page=page, mcid=1, Scope=Name.Column)
+    h2 = elem(pdf, "TH", doc, page=page, mcid=2, Scope=Name.Column)
+    d1 = elem(pdf, "TD", doc, page=page, mcid=3)
+    d2 = elem(pdf, "TD", doc, page=page, mcid=4)
+    head_row = elem(pdf, "TR", doc, kids=[h1, h2])
+    body_row = elem(pdf, "TR", doc, kids=[d1, d2])
+    head = elem(pdf, "THead", doc, kids=[head_row])
+    body = elem(pdf, "TBody", doc, kids=[body_row])
+    table = elem(pdf, "Table", doc, kids=[head, body],
+                 Summary=String("Revenue by region"))
+    top = [para, table]
+    if stray_row_group:
+        top.append(elem(pdf, "THead", doc, page=page))
+    doc[Name.K] = Array(top)
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para, h1, h2, d1, d2])
+
+
+def thead_tbody_ok(path):
+    """PASS fixture — the row groups a real table uses, correctly nested."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _row_group_table(pdf, page)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def thead_outside_table_fails(path):
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _row_group_table(pdf, page, stray_row_group=True)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def lbody_outside_li_fails(path):
+    """An `LBody` hung off the `L` rather than off a list item. Placement of
+    `LBody` is `list_labels`' answer, so this fixture pins that the nesting
+    check judges it and reports nothing."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf, page,
+        "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Body copy.) Tj ET EMC\n"
+        "/Lbl <</MCID 1>> BDC BT /F1 11 Tf 40 660 Td (1.) Tj ET EMC\n"
+        "/LBody <</MCID 2>> BDC BT /F1 11 Tf 60 660 Td (An item.) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    lbl = elem(pdf, "Lbl", doc, page=page, mcid=1)
+    body = elem(pdf, "LBody", doc, page=page, mcid=2)
+    item = elem(pdf, "LI", doc, kids=[lbl])
+    lst = elem(pdf, "L", doc, kids=[item, body])
+    doc[Name.K] = Array([para, lst])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para, lbl, body])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def custom_mapped_to_li_judged_as_li(path):
+    """A private tag role mapped to `LI`, outside any list. The nesting walk
+    reads the resolved role, so this is judged as the list item it maps to
+    rather than as a type no table covers."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf, page,
+        "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Body copy.) Tj ET EMC\n"
+        "/LBody <</MCID 1>> BDC BT /F1 11 Tf 60 660 Td (An item.) Tj ET EMC",
+    )
+    root = struct_root(pdf, role_map={"Punkt": "LI"})
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    lbl = elem(pdf, "Lbl", doc, page=page)
+    body = elem(pdf, "LBody", doc, page=page, mcid=1)
+    item = elem(pdf, "Punkt", doc, kids=[lbl, body])
+    doc[Name.K] = Array([para, item])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para, body])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
 # ── headings ──────────────────────────────────────────────────────────────
 
 
@@ -1118,6 +1330,16 @@ ROSTER = {
     "li_outside_l": (li_outside_l, "list_items", "fail"),
     "lbody_no_lbl": (lbody_no_lbl, "list_labels", "warn"),
     "lbl_outside_list_item_ok": (lbl_outside_list_item_ok, "list_labels", "pass"),
+    "lbl_under_li_ok": (lbl_under_li_ok, "structure_nesting", "pass"),
+    "lbl_in_fenote_ok": (lbl_in_fenote_ok, "structure_nesting", "pass"),
+    "toc_link_lbl_ok": (toc_link_lbl_ok, "structure_nesting", "pass"),
+    "thead_tbody_ok": (thead_tbody_ok, "structure_nesting", "pass"),
+    "lbl_under_l_fails": (lbl_under_l_fails, "structure_nesting", "fail"),
+    "thead_outside_table_fails": (thead_outside_table_fails, "structure_nesting", "fail"),
+    "lbody_outside_li_fails": (lbody_outside_li_fails, "list_labels", "fail"),
+    "custom_mapped_to_li_judged_as_li": (
+        custom_mapped_to_li_judged_as_li, "list_items", "fail",
+    ),
     "heading_skip": (heading_skip, "heading_nesting", "fail"),
     "heading_starts_at_h2_ok": (heading_starts_at_h2_ok, "heading_nesting", "pass"),
     "rolemap_custom_tags_ok": (rolemap_custom_tags_ok, "heading_nesting", "pass"),
