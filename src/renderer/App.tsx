@@ -88,6 +88,7 @@ import type { FormFieldValue } from './lib/forms';
 import { fillClosure, formCalculation, resolveFillTargets } from './lib/form-overlay';
 import { addFormFields } from './lib/form-authoring';
 import type { NewFieldSpec } from './lib/form-authoring';
+import { verticalFontCalls } from './lib/form-writing';
 import { DropZone } from './components/DropZone';
 import { OperationsProvider } from './hooks/useOperations';
 import { OperationQueue } from './components/OperationQueue';
@@ -1339,6 +1340,14 @@ function AppContent(): React.ReactElement {
   // One snapshot, one write, one reload — so N accepted fields are ONE undo
   // entry rather than N. The single-field placement path calls it with one
   // spec; there is no second creation path.
+  //
+  // A VERTICAL field takes a second write: pdf-lib cannot author the
+  // CID-keyed font a column needs, so the field is created here and BOUND by
+  // the engine door, one call per script. Both writes land inside the single
+  // snapshot/reload/UPDATE_FILE pair — the pair is what makes the gesture one
+  // undo entry, and splitting it would put a horizontal half-field on the
+  // stack. A refusal from the door restores the snapshot before it rethrows,
+  // so a create that could not become a column leaves nothing behind.
   const handleAddFormFields = useCallback(
     async (path: string, specs: readonly NewFieldSpec[]) => {
       const f = state.files.get(path);
@@ -1347,6 +1356,24 @@ function AppContent(): React.ReactElement {
       const bytes = await file.readBuffer(f.workingPath);
       const withFields = await addFormFields(bytes, specs);
       await file.writeBuffer(f.workingPath, withFields);
+      const vertical = verticalFontCalls(specs);
+      if (vertical.length > 0) {
+        const fontDir = await app.getEditFontPath();
+        try {
+          for (const bind of vertical) {
+            await call('author_vertical_field_font', {
+              file: f.workingPath,
+              output: f.workingPath,
+              fields: bind.fields,
+              script: bind.script,
+              font_dir: fontDir,
+            });
+          }
+        } catch (err) {
+          await file.restoreSnapshot(f.workingPath, snapshotPath);
+          throw err;
+        }
+      }
       const result = await reloadFile(path);
       if (!result) throw new Error(tChrome('refusal.file.noLongerOpen'));
       dispatch({
@@ -1357,7 +1384,7 @@ function AppContent(): React.ReactElement {
         snapshotPath,
       });
     },
-    [state.files, reloadFile, dispatch],
+    [state.files, reloadFile, dispatch, call],
   );
 
   const handleAddFormField = useCallback(

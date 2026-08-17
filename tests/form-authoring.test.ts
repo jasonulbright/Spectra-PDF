@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { addFormField, addFormFields } from '../src/renderer/lib/form-authoring';
+import { FieldSpecError, addFormField, addFormFields } from '../src/renderer/lib/form-authoring';
 import { readFormFields, fillFormFields } from './helpers/pdflib-forms';
 import { buildPdf } from '../src/renderer/lib/pdfx-build';
 
@@ -338,6 +338,132 @@ describe('addFormFields', () => {
         },
       ]),
     ).rejects.toThrow(/one line/);
+  });
+
+  // The writing mode. pdf-lib cannot author the CID-keyed font a column
+  // needs, so the create carries the request and the engine door binds it —
+  // but the combinations no font can express are refused HERE, before
+  // anything is written, because the door runs after the field already
+  // exists and a refusal there would leave a field that never became a
+  // column.
+  it('creates a vertical text field, leaving the binding to the engine door', async () => {
+    const bytes = await addFormFields(await blankPdf(), [
+      {
+        name: 'tategaki',
+        type: 'text',
+        pageIndex: 0,
+        rect: [400, 400, 430, 700],
+        writingMode: 'vertical',
+        script: 'japanese',
+      },
+    ]);
+    // The field is a real, readable, fillable text field: the create path is
+    // unchanged by the request it carries.
+    const m = await fieldMap(bytes);
+    expect(m.get('tategaki')).toMatchObject({ type: 'text', editable: true });
+  });
+
+  it('accepts a vertical dropdown and a vertical option list', async () => {
+    let bytes = await blankPdf();
+    bytes = await addFormFields(bytes, [
+      {
+        name: 'pick',
+        type: 'dropdown',
+        pageIndex: 0,
+        rect: [400, 400, 430, 700],
+        options: ['甲', '乙'],
+        writingMode: 'vertical',
+        script: 'traditional-chinese',
+      },
+      {
+        // ASCII labels deliberately: an option list lays every label out into
+        // its appearance through pdf-lib's standard-font encoder, which
+        // refuses anything outside WinAnsi. That limit is the same for a
+        // horizontal list and says nothing about the writing mode.
+        name: 'many',
+        type: 'optionlist',
+        pageIndex: 0,
+        rect: [340, 400, 370, 700],
+        options: ['A', 'B'],
+        writingMode: 'vertical',
+        script: 'korean',
+      },
+    ]);
+    const m = await fieldMap(bytes);
+    expect(m.get('pick')).toMatchObject({ type: 'dropdown' });
+    expect(m.get('many')).toMatchObject({ type: 'optionlist' });
+  });
+
+  it('refuses a writing mode on a kind that draws a mark', async () => {
+    const base = await blankPdf();
+    for (const type of ['checkbox', 'radio', 'signature'] as const) {
+      await expect(
+        addFormFields(base, [
+          {
+            name: 'm',
+            type,
+            pageIndex: 0,
+            rect: [10, 10, 40, 110],
+            ...(type === 'radio' ? { options: ['a', 'b'] } : {}),
+            writingMode: 'vertical',
+            script: 'japanese',
+          },
+        ]),
+      ).rejects.toThrow(/write vertically/);
+    }
+    // ONE problem, not two: a kind that cannot write vertically must not also
+    // be told its field "writes horizontally", which contradicts what was
+    // asked for.
+    let caught: unknown;
+    try {
+      await addFormFields(base, [
+        {
+          name: 'm',
+          type: 'checkbox',
+          pageIndex: 0,
+          rect: [10, 10, 40, 110],
+          writingMode: 'vertical',
+          script: 'japanese',
+        },
+      ]);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(FieldSpecError);
+    expect((caught as FieldSpecError).problems.map((p) => p.key)).toEqual([
+      'refusal.field.writingKindOnly',
+    ]);
+  });
+
+  it('refuses a vertical field with no script, and a script with no vertical', async () => {
+    const base = await blankPdf();
+    await expect(
+      addFormFields(base, [
+        { name: 'a', type: 'text', pageIndex: 0, rect: [10, 10, 40, 110], writingMode: 'vertical' },
+      ]),
+    ).rejects.toThrow(/needs the script/);
+    await expect(
+      addFormFields(base, [
+        { name: 'b', type: 'text', pageIndex: 0, rect: [10, 10, 40, 110], script: 'korean' },
+      ]),
+    ).rejects.toThrow(/writes horizontally/);
+  });
+
+  it('refuses a vertical comb field', async () => {
+    await expect(
+      addFormFields(await blankPdf(), [
+        {
+          name: 'grid',
+          type: 'text',
+          pageIndex: 0,
+          rect: [10, 10, 40, 110],
+          comb: true,
+          maxLength: 6,
+          writingMode: 'vertical',
+          script: 'simplified-chinese',
+        },
+      ]),
+    ).rejects.toThrow(/across the axis a column runs down/);
   });
 
   it('is what the single-field entry point calls', async () => {

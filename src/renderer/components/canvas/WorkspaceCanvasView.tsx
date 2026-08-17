@@ -165,6 +165,13 @@ import type { OverlayWidget } from '../../lib/form-overlay';
 import { readFormFields, type FormFieldValue } from '../../lib/forms';
 import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
 import {
+  FIELD_SCRIPTS,
+  fieldWritingParams,
+  writesTextRun,
+  type FieldScript,
+  type FieldWriting,
+} from '../../lib/form-writing';
+import {
   EMPTY_ACTIONS,
   FieldActionsControl,
   draftToActions,
@@ -214,7 +221,7 @@ import { PropertiesBar } from './PropertiesBar';
 import { CanvasStatusBar } from './CanvasStatusBar';
 import { useOtherWindowWork } from '../../hooks/useOtherWindowWork';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tChromeCount, tNumber, currentLanguage } from '../../i18n';
+import { tChrome, tChromeCount, tNumber, currentLanguage, type UiKey } from '../../i18n';
 
 interface WorkspaceCanvasViewProps {
   onOpenFiles: () => void;
@@ -535,6 +542,15 @@ const NO_READ_ALOUD: ReadonlyMap<string, PageReadAloud> = new Map();
 const NO_WIDGETS_BY_PAGE: ReadonlyMap<string, OverlayWidget[]> = new Map();
 const NO_LOCK_NAMES: readonly string[] = [];
 const NO_FORM_VALUES: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>> = new Map();
+
+/** The script select's option copy. A table, so a collection the build knows
+ * cannot reach the user unnamed. */
+const SCRIPT_KEYS = {
+  japanese: 'canvas.newfield.script.japanese',
+  'simplified-chinese': 'canvas.newfield.script.simplifiedChinese',
+  'traditional-chinese': 'canvas.newfield.script.traditionalChinese',
+  korean: 'canvas.newfield.script.korean',
+} as const satisfies Record<FieldScript, UiKey>;
 
 export function WorkspaceCanvasView({
   onOpenFiles,
@@ -1226,6 +1242,12 @@ export function WorkspaceCanvasView({
   // the card never offered.
   const [nfComb, setNfComb] = useState(false);
   const [nfMaxLength, setNfMaxLength] = useState('');
+  // Direction, and the character collection a column is bound to. The mode
+  // resets after a create (an armed mode going live on the next field is the
+  // hazard); the SCRIPT persists — it is inert while horizontal, and a form
+  // laid out in one script is laid out field after field.
+  const [nfWriting, setNfWriting] = useState<FieldWriting>('horizontal');
+  const [nfScript, setNfScript] = useState<FieldScript>('japanese');
   // What the field shows, what it accepts and what it calculates from.
   const [nfActions, setNfActions] = useState<FieldActionsDraft>(EMPTY_ACTIONS);
   // The `/Lock` seed a new SIGNATURE field is authored with — what whoever
@@ -1300,6 +1322,8 @@ export function WorkspaceCanvasView({
       multiline?: boolean;
       comb?: boolean;
       maxLength?: number;
+      writing?: FieldWriting;
+      script?: FieldScript;
       actions?: FieldActions;
       lock?: LockOptions;
     }): Promise<void> => {
@@ -1339,6 +1363,14 @@ export function WorkspaceCanvasView({
           ...(params.type === 'text' && params.multiline ? { multiline: true } : {}),
           ...(params.type === 'text' && params.comb ? { comb: true } : {}),
           ...(params.type === 'text' && params.maxLength ? { maxLength: params.maxLength } : {}),
+          // A kind that draws a mark carries no mode, so a mode left behind
+          // by a kind switch resolves away here rather than reaching a write
+          // that would refuse it.
+          ...fieldWritingParams(
+            params.type,
+            params.writing ?? 'horizontal',
+            params.script ?? 'japanese',
+          ),
           // Format, accepted range and calculation belong to the kinds that
           // carry a typed value; the write refuses them anywhere else.
           ...(params.actions && (params.type === 'text' || params.type === 'dropdown')
@@ -1364,6 +1396,7 @@ export function WorkspaceCanvasView({
         setNfMultiline(false);
         setNfComb(false);
         setNfMaxLength('');
+        setNfWriting('horizontal');
         setNfActions(EMPTY_ACTIONS);
         setNfLock(DEFAULT_LOCK);
         // Stay in Prepare Form's own mode, ready to place the next field.
@@ -1398,6 +1431,8 @@ export function WorkspaceCanvasView({
       multiline: nfMultiline,
       comb: nfComb,
       ...(nfMaxLength.trim() ? { maxLength: Number(nfMaxLength) } : {}),
+      writing: nfWriting,
+      script: nfScript,
       actions: draftToActions(nfActions),
       lock: nfLock,
     }).catch(() => undefined); // surfaced via nfError; the card stays open
@@ -1409,6 +1444,8 @@ export function WorkspaceCanvasView({
     nfMultiline,
     nfComb,
     nfMaxLength,
+    nfWriting,
+    nfScript,
     nfActions,
     nfLock,
   ]);
@@ -7240,7 +7277,7 @@ export function WorkspaceCanvasView({
                   data-testid="new-field-comb"
                   type="checkbox"
                   checked={nfComb}
-                  disabled={nfMultiline}
+                  disabled={nfMultiline || nfWriting === 'vertical'}
                   onChange={() => setNfComb((v) => !v)}
                   className="rounded bg-neutral-800 border-neutral-700"
                 />
@@ -7260,6 +7297,60 @@ export function WorkspaceCanvasView({
                 />
               </div>
             </>
+          )}
+          {writesTextRun(nfType) && (
+            <div className="flex items-center gap-2">
+              <span
+                className="text-xs text-neutral-400 w-20 shrink-0"
+                title={tChrome('canvas.newfield.writingModeTitle')}
+              >
+                {tChrome('canvas.newfield.writingMode')}
+              </span>
+              <select
+                data-testid="new-field-writing-mode"
+                value={nfWriting}
+                title={tChrome('canvas.newfield.writingModeTitle')}
+                onChange={(e) => {
+                  const next = e.target.value as FieldWriting;
+                  setNfWriting(next);
+                  // A comb divides the box across the axis a column runs
+                  // down, so the two cannot both be on; the mode wins because
+                  // it is the choice just made.
+                  if (next === 'vertical') setNfComb(false);
+                }}
+                className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
+              >
+                <option value="horizontal">
+                  {tChrome('canvas.newfield.writingMode.horizontal')}
+                </option>
+                <option value="vertical">
+                  {tChrome('canvas.newfield.writingMode.vertical')}
+                </option>
+              </select>
+            </div>
+          )}
+          {writesTextRun(nfType) && nfWriting === 'vertical' && (
+            <div className="flex items-center gap-2">
+              <span
+                className="text-xs text-neutral-400 w-20 shrink-0"
+                title={tChrome('canvas.newfield.scriptTitle')}
+              >
+                {tChrome('canvas.newfield.script')}
+              </span>
+              <select
+                data-testid="new-field-script"
+                value={nfScript}
+                title={tChrome('canvas.newfield.scriptTitle')}
+                onChange={(e) => setNfScript(e.target.value as FieldScript)}
+                className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
+              >
+                {FIELD_SCRIPTS.map((script) => (
+                  <option key={script} value={script}>
+                    {tChrome(SCRIPT_KEYS[script])}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
           {(nfType === 'text' || nfType === 'dropdown') && (
             <FieldActionsControl
