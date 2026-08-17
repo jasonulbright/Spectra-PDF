@@ -52,6 +52,21 @@ export interface ClaimResult {
   owner: string;
 }
 
+/** What handing a document to another window did.
+ *
+ * `transferred` — the window named by `label` owns it and its open is queued.
+ * `tornOff` — the same, into a window built for it.
+ * `sameWindow` — the pointer never left home; nothing moved.
+ * `refused` — `owner` still holds the path; the document has not gone anywhere.
+ *
+ * A move that reports anything but `transferred` or `tornOff` must leave the
+ * document open where it is: closing the tab on a refusal loses it. */
+export interface TabDragResult {
+  outcome: 'transferred' | 'tornOff' | 'sameWindow' | 'refused';
+  label: string;
+  owner: string;
+}
+
 /** Paths and output folders this window holds. The arbiter is Rust managed
  * state — one process, one table — and every claim is released when the
  * window is destroyed, so a hung renderer cannot wedge a path. */
@@ -582,11 +597,14 @@ export const app = {
   /** Open an empty second workspace; resolves to its label. */
   openNewWindow: () => invoke<string>('open_new_window'),
 
-  /** Hand paths to another window. Only PATHS cross a window boundary: page
-   * and document ids are minted against a per-window generation counter, so
-   * the same id string means a different physical page in each window. */
-  openInWindow: (label: string, files: string[], merge = false) =>
-    invoke<void>('open_in_window', { label, files, merge }),
+  /** Pop one document into a window built for it, handing ownership over in
+   * one step. Releasing the claim and re-taking it around the build leaves the
+   * path unowned for as long as the window takes to appear, and a third window
+   * that claimed it in that gap would leave the document with nowhere to land.
+   * Only the PATH crosses: page and document ids are minted against a
+   * per-window generation counter. */
+  moveToNewWindow: (path: string) =>
+    invoke<TabDragResult>('move_document_to_new_window', { path }),
 
   /** Raise a window by label (the "it is open over there" refusal's action). */
   focusWindow: (label: string) => invoke<void>('focus_app_window', { label }),
