@@ -81,6 +81,8 @@ export const REFUSAL_STRINGS = {
   'refusal.field.nameExists': 'A field named "{{name}}" already exists.',
   'refusal.field.optionRectsPartial':
     'Either every option carries its own rectangle, or none of them do.',
+  'refusal.field.optionListWinAnsi':
+    'An option list draws every label through the built-in font, which cannot draw these characters: {{chars}} — this build refuses rather than failing partway.',
   'refusal.field.combNeedsMaxLength':
     'A comb field needs a character count to divide its box into.',
   'refusal.field.combNotMultiline': 'A comb field holds one line, so it cannot be multiline.',
