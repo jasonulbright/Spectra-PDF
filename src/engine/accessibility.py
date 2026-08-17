@@ -57,7 +57,7 @@ from engine.struct_audit import (
     span_of,
 )
 from engine.text_metrics import _FontCache
-from engine.text_runs import _walk_runs
+from engine.text_runs import NOTHING_TO_EDIT, _walk_runs
 
 PASS = "pass"
 FAIL = "fail"
@@ -1092,18 +1092,26 @@ def _check_tab_order(check, pdf, annots):
 
 
 def _check_character_encoding(check, pages):
-    """A run whose bytes cannot be mapped to Unicode reads as nothing."""
+    """A run whose bytes cannot be mapped to Unicode reads as nothing.
+
+    A run the font decoded to whitespace is NOT that, and it used to be
+    reported as that: the old guard skipped a blank run only when it was
+    `editable`, and `text_runs` clears `editable` for every blank run by
+    construction, so the guard could never fire and every space between two
+    words was reported as a font with no Unicode mapping. The reason is
+    compared against the constant rather than the sentence.
+    """
     counted = 0
     findings = []
     seen_fonts: set = set()
     for page_no in sorted(pages.runs):
         for run in pages.runs[page_no]:
-            if not str(run.get("text") or "").strip() and run.get("editable"):
+            reason = str(run.get("reason") or "")
+            if reason == NOTHING_TO_EDIT:
                 continue
             counted += 1
             if run.get("editable"):
                 continue
-            reason = str(run.get("reason") or "")
             key = (page_no, str(run.get("font_name") or ""), reason)
             if key in seen_fonts:
                 continue

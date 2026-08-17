@@ -275,6 +275,58 @@ class TestType0Fonts:
         assert not cap3.editable and "Type3" in (cap3.reason or "")
 
 
+class TestAnEmbeddedCMapNamesItselfAndNothingElse:
+    """`/Encoding` is a NAME or a CMap STREAM (ISO 32000-2, 9.7.5.1).
+
+    The refusal reason reaches the user — it rides `reason` on a text run and
+    lands in an accessibility finding — so a stream must contribute a phrase,
+    not its object repr. `str()` of a pikepdf Stream is unbounded and carries
+    the CMap dictionary's own contents, which is what used to be reported.
+    """
+
+    def _stream_encoded_font(self, pdf):
+        cmap = pdf.make_stream(
+            b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap endcmap end end",
+            Type=Name("/CMap"),
+            CMapName=Name("/Custom-H"),
+            CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Korea1", Supplement=2),
+            WMode=0,
+        )
+        desc = pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/CIDFontType2"),
+                BaseFont=Name("/Embedded"),
+                CIDSystemInfo=Dictionary(Registry=b"Adobe", Ordering=b"Korea1", Supplement=2),
+            )
+        )
+        return pdf.make_indirect(
+            Dictionary(
+                Type=Name("/Font"),
+                Subtype=Name("/Type0"),
+                BaseFont=Name("/Embedded"),
+                Encoding=cmap,
+                DescendantFonts=Array([desc]),
+            )
+        )
+
+    def test_the_refusal_names_the_shape_not_the_object(self):
+        pdf = pikepdf.new()
+        cap = font_capability(self._stream_encoded_font(pdf))
+        assert not cap.editable
+        assert cap.reason == "unsupported composite-font encoding (embedded CMap)"
+
+    def test_the_refusal_carries_no_object_repr(self):
+        pdf = pikepdf.new()
+        reason = font_capability(self._stream_encoded_font(pdf)).reason
+        # The three shapes a repr leak takes: the class name, the dictionary
+        # dump, and the stream bytes.
+        assert "pikepdf" not in reason
+        assert "CIDSystemInfo" not in reason
+        assert chr(10) not in reason
+        assert len(reason) < 80
+
+
 class TestPredefinedCjkCMaps:
     """Type0 fonts with a named Unicode horizontal CMap."""
 

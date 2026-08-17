@@ -404,6 +404,33 @@ def no_tabs(path):
     return save(pdf, path)
 
 
+def blank_runs_ok(path):
+    """A tagged paragraph whose show ops include runs that draw only spaces.
+
+    The font decodes every byte; two of the runs simply hold whitespace, which
+    is a statement about the TEXT and none at all about the mapping. The
+    checker used to report each of them as a font with no Unicode mapping,
+    because its skip guard required a blank run to be `editable` and
+    `text_runs` clears `editable` for exactly those runs.
+    """
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf,
+        page,
+        "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Readable body copy) Tj "
+        "( ) Tj (at eleven points.) Tj ( ) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    doc[Name.K] = Array([para])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
 def bad_encoding(path):
     """A font with no /ToUnicode and a symbolic built-in encoding: its bytes
     map to no character, so the text reads as nothing."""
@@ -925,6 +952,7 @@ ROSTER = {
     "untagged_annotation": (untagged_annotation, "tagged_annotations", "fail"),
     "no_tabs": (no_tabs, "tab_order", "fail"),
     "bad_encoding": (bad_encoding, "character_encoding", "fail"),
+    "blank_runs_ok": (blank_runs_ok, "character_encoding", "pass"),
     "untagged_multimedia": (untagged_multimedia, "tagged_multimedia", "fail"),
     "has_scripts": (has_scripts, "scripts", "needs_review"),
     "repetitive_links": (repetitive_links, "navigation_links", "needs_review"),
