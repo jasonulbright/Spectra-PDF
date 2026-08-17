@@ -85,6 +85,16 @@ export const REFUSAL_STRINGS = {
     'A comb field needs a character count to divide its box into.',
   'refusal.field.combNotMultiline': 'A comb field holds one line, so it cannot be multiline.',
   'refusal.field.maxLengthPositive': 'The character limit must be at least 1.',
+  // The writing mode. A field states it in the CMap of the font its default
+  // appearance names, so every rule here is about what a font can express.
+  'refusal.field.writingKindOnly':
+    'Only a text, dropdown or option-list field can write vertically — the others draw a mark rather than text.',
+  'refusal.field.scriptRequired':
+    'A vertical field needs the script naming the character collection its font is bound to.',
+  'refusal.field.scriptOnHorizontal':
+    'A script belongs to a vertical field, and this field writes horizontally.',
+  'refusal.field.combNotVertical':
+    'A comb field divides its box across the axis a column runs down, so it cannot also write vertically.',
   'refusal.field.lockNotSignature': 'Only a signature field can lock form fields.',
   'refusal.field.lockTakesNoFields':
     'A lock covering every form field takes no field names.',
