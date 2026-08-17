@@ -3003,6 +3003,7 @@
   "panel.a11y.detail.field_has_no_description": "Questo campo {{type}} non ha descrizione.",
   "panel.a11y.detail.fields_unreadable": "Non è stato possibile leggere l’albero dei campi modulo fino in fondo, quindi questo controllo non ha visto tutti i campi.",
   "panel.a11y.detail.figure_missing_alt": "Questo elemento {{role}} non ha né testo alternativo né testo effettivo.",
+  "panel.a11y.detail.font_encoding_unsupported": "A pagina {{page}}, {{font}} usa una codifica che questa applicazione non riesce a leggere, quindi il suo testo non è stato controllato ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "A pagina {{page}}, {{font}} non corrisponde ad alcun carattere leggibile ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "Un campo modulo a pagina {{page}} è fuori dall’albero di struttura.",
   "panel.a11y.detail.header_cell_has_no_scope": "Questa cella di intestazione non dichiara un ambito, e nessuna cella la indica.",

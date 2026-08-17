@@ -2937,6 +2937,7 @@
   "panel.a11y.detail.field_has_no_description": "Ennek a(z) {{type}} mezőnek nincs leírása.",
   "panel.a11y.detail.fields_unreadable": "Az űrlapmezők fáját nem lehetett végig elolvasni, így ez az ellenőrzés nem látott minden mezőt.",
   "panel.a11y.detail.figure_missing_alt": "Ennek a(z) {{role}} elemnek sem alternatív, sem tényleges szövege nincs.",
+  "panel.a11y.detail.font_encoding_unsupported": "A(z) {{page}}. oldalon a(z) {{font}} olyan kódolást használ, amelyet ez az alkalmazás nem tud olvasni, ezért a szövegét nem ellenőriztük ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "A(z) {{page}}. oldalon a(z) {{font}} egyetlen olvasható karakternek sem felel meg ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "A(z) {{page}}. oldal egyik űrlapmezője a szerkezeti fán kívül van.",
   "panel.a11y.detail.header_cell_has_no_scope": "Ez a fejléccella nem ad meg hatókört, és egyetlen cella sem hivatkozik rá.",

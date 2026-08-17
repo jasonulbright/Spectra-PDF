@@ -3069,6 +3069,7 @@
   "panel.a11y.detail.field_has_no_description": "У этого поля {{type}} нет описания.",
   "panel.a11y.detail.fields_unreadable": "Дерево полей формы не удалось прочитать до конца, поэтому эта проверка увидела не все поля.",
   "panel.a11y.detail.figure_missing_alt": "У этого элемента {{role}} нет ни альтернативного, ни фактического текста.",
+  "panel.a11y.detail.font_encoding_unsupported": "На странице {{page}} шрифт {{font}} использует кодировку, которую это приложение не может прочитать, поэтому его текст не проверялся ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "На странице {{page}} шрифт {{font}} не соответствует ни одному читаемому символу ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "Поле формы на странице {{page}} находится вне дерева структуры.",
   "panel.a11y.detail.header_cell_has_no_scope": "Эта ячейка заголовка не объявляет область действия, и ни одна ячейка на неё не ссылается.",

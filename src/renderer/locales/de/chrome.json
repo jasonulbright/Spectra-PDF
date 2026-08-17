@@ -2937,6 +2937,7 @@
   "panel.a11y.detail.field_has_no_description": "Dieses {{type}}-Feld hat keine Beschreibung.",
   "panel.a11y.detail.fields_unreadable": "Der Baum der Formularfelder war nicht bis zum Ende lesbar, deshalb hat diese Prüfung nicht jedes Feld gesehen.",
   "panel.a11y.detail.figure_missing_alt": "Dieses {{role}}-Element hat weder Alternativtext noch tatsächlichen Text.",
+  "panel.a11y.detail.font_encoding_unsupported": "Auf Seite {{page}} verwendet {{font}} eine Kodierung, die diese Anwendung nicht lesen kann, deshalb wurde der Text nicht geprüft ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "Auf Seite {{page}} lässt sich {{font}} auf keine lesbaren Zeichen abbilden ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "Ein Formularfeld auf Seite {{page}} liegt außerhalb des Strukturbaums.",
   "panel.a11y.detail.header_cell_has_no_scope": "Diese Kopfzelle erklärt keinen Geltungsbereich, und keine Zelle verweist auf sie.",

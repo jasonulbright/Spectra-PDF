@@ -2871,6 +2871,7 @@
   "panel.a11y.detail.field_has_no_description": "이 {{type}} 필드에는 설명이 없습니다.",
   "panel.a11y.detail.fields_unreadable": "양식 필드 트리를 끝까지 읽지 못해 이 검사는 모든 필드를 보지 못했습니다.",
   "panel.a11y.detail.figure_missing_alt": "이 {{role}} 요소에는 대체 텍스트도 실제 텍스트도 없습니다.",
+  "panel.a11y.detail.font_encoding_unsupported": "{{page}}쪽에서 {{font}}는 이 앱이 읽을 수 없는 인코딩을 사용하므로 해당 텍스트를 검사하지 않았습니다({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "{{page}}쪽에서 {{font}}는 읽을 수 있는 문자에 대응되지 않습니다({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "{{page}}쪽의 양식 필드가 구조 트리 밖에 있습니다.",
   "panel.a11y.detail.header_cell_has_no_scope": "이 머리글 셀은 범위를 선언하지 않았고, 이 셀을 가리키는 셀도 없습니다.",
