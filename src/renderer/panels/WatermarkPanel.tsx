@@ -7,6 +7,12 @@ import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerWatermark } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
+import {
+  resolvedColumns,
+  writingParams,
+  type WatermarkSource,
+  type WatermarkWriting,
+} from '../lib/watermark-writing';
 
 // Muted set for stamp text — full-strength annotation colors read as marker
 // ink, not a watermark.
@@ -23,8 +29,6 @@ const POSITIONS = [
   'bottom-center',
   'bottom-right',
 ] as const;
-
-type WatermarkSource = 'text' | 'image' | 'pdf';
 
 export function WatermarkPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -46,8 +50,18 @@ export function WatermarkPanel(): React.ReactElement {
   const [tile, setTile] = useState(false);
   const [tileGap, setTileGap] = useState(24);
   const [pageInput, setPageInput] = useState('all');
+  // Writing mode, and the column direction the engine RESOLVED for it —
+  // derived from the text rather than requested, so it is shown only once a
+  // stamp has actually been laid down and is cleared the moment any input it
+  // was derived from changes.
+  const [writing, setWriting] = useState<WatermarkWriting>('horizontal');
+  const [columns, setColumns] = useState<'rtl' | 'ltr' | null>(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setColumns(null);
+  }, [text, source, writing]);
 
   const pickImage = useCallback(async () => {
     const picked = await dialog.pickWatermarkImage();
@@ -114,12 +128,14 @@ export function WatermarkPanel(): React.ReactElement {
         // fallback-face boundary — with a surfaced error).
         font_dir: await app.getEditFontPath(),
         ...(pages ? { pages } : {}),
+        ...writingParams(source, writing),
       });
       const buffer = await file.readBuffer(activeFile.workingPath);
       const info = await call('get_page_count', { file: activeFile.workingPath });
       dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer, snapshotPath });
       const count = (result as unknown as { pages_watermarked: number }).pages_watermarked;
       const frames = (result as unknown as { image_frames: number }).image_frames ?? 0;
+      setColumns(resolvedColumns((result as unknown as { writing_mode?: unknown }).writing_mode));
       setStatus(
         tChromeCount('panel.watermark.done', count) +
           (frames > 1 ? ' ' + tChromeCount('panel.watermark.usedFirstFrame', frames) : ''),
@@ -130,7 +146,7 @@ export function WatermarkPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [activeFile, source, text, imagePath, pdfPath, pdfPage, opacity, angle, color, layer, scale, position, margin, tile, tileGap, pageInput, call, dispatch]);
+  }, [activeFile, source, text, imagePath, pdfPath, pdfPage, opacity, angle, color, layer, scale, position, margin, tile, tileGap, pageInput, writing, call, dispatch]);
 
   // The pickers are native and undrivable, so e2e injects the chosen path
   // through the panel's OWN setter — the state an injected run reaches is the
@@ -182,7 +198,11 @@ export function WatermarkPanel(): React.ReactElement {
             className="w-64 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
           />
           <p className="text-xs text-neutral-500 mt-1">
-            {tChrome('panel.watermark.scriptsNote')}
+            {tChrome(
+              writing === 'vertical'
+                ? 'panel.watermark.scriptsNoteVertical'
+                : 'panel.watermark.scriptsNote',
+            )}
           </p>
         </div>
       ) : source === 'image' ? (
@@ -278,6 +298,39 @@ export function WatermarkPanel(): React.ReactElement {
                   }}
                 />
               ))}
+            </div>
+          </div>
+        )}
+        {source === 'text' && (
+          <div>
+            <label
+              className="block text-sm text-neutral-400 mb-1"
+              htmlFor="watermark-writing-mode"
+              title={tChrome('panel.watermark.writingModeTitle')}
+            >
+              {tChrome('panel.watermark.writingMode')}
+            </label>
+            <div className="flex items-center gap-2">
+              <select
+                id="watermark-writing-mode"
+                data-testid="watermark-writing-mode"
+                value={writing}
+                title={tChrome('panel.watermark.writingModeTitle')}
+                onChange={(e) => setWriting(e.target.value as WatermarkWriting)}
+                className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+              >
+                <option value="horizontal">{tChrome('panel.watermark.writingMode.horizontal')}</option>
+                <option value="vertical">{tChrome('panel.watermark.writingMode.vertical')}</option>
+              </select>
+              {writing === 'vertical' && columns && (
+                <span data-testid="watermark-columns" className="text-xs text-neutral-500">
+                  {tChrome(
+                    columns === 'ltr'
+                      ? 'panel.watermark.columnsLtr'
+                      : 'panel.watermark.columnsRtl',
+                  )}
+                </span>
+              )}
             </div>
           </div>
         )}

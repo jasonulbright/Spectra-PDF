@@ -797,6 +797,21 @@ export const PANEL_STRINGS = {
   'panel.watermark.pagesLabel': 'Pages (e.g. 1,3,5 or all)',
   'panel.watermark.pagesAria': 'Pages to watermark',
   'panel.watermark.scriptsNote': "Latin, Cyrillic, and Greek supported; other scripts (e.g. CJK) aren't yet.",
+  // The vertical note REPLACES the horizontal one rather than joining it: a
+  // vertical stamp embeds the bundled vertical face, so the script coverage
+  // the horizontal sentence describes is not the coverage in force.
+  'panel.watermark.scriptsNoteVertical':
+    'A vertical stamp draws through the bundled vertical face, which covers CJK.',
+  'panel.watermark.writingMode': 'Direction',
+  'panel.watermark.writingMode.horizontal': 'Horizontal',
+  'panel.watermark.writingMode.vertical': 'Vertical',
+  'panel.watermark.writingModeTitle':
+    'A vertical stamp is one column reading down the page, turned by the angle like any other stamp.',
+  // The direction the engine derived from the text — a readout of what was
+  // stamped, not a control. It names the script convention the column was
+  // set in, which is also what chose the face.
+  'panel.watermark.columnsRtl': 'Right-to-left vertical script.',
+  'panel.watermark.columnsLtr': 'Left-to-right vertical script.',
   'panel.watermark.source': 'Watermark from',
   'panel.watermark.sourceText': 'Text',
   'panel.watermark.sourceImage': 'Image',
