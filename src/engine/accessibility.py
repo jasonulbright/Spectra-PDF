@@ -764,6 +764,7 @@ def _check_permissions(check, pdf):
 def _check_image_only(check, pdf, pages, file):
     counted = 0
     findings = []
+    any_text = False
     for i in range(len(pdf.pages)):
         page_no = i + 1
         # Both stages, not one: a page whose paint walk did not complete has
@@ -774,6 +775,7 @@ def _check_image_only(check, pdf, pages, file):
         counted += 1
         has_text = any(str(r.get("text") or "").strip() for r in pages.runs[page_no])
         if has_text:
+            any_text = True
             continue
         if pages.scan_cover[page_no] >= SCAN_COVERAGE:
             findings.append(
@@ -787,9 +789,18 @@ def _check_image_only(check, pdf, pages, file):
     if findings:
         check.status = FAIL
         return
-    # A document with neither text nor a page-covering image is not a scan;
-    # the shipped extractable-text measurement is what decides the whole-file
-    # answer in that case.
+    if any_text:
+        # This module's own page walk already READ text off a page. Asking a
+        # second reader whether the document has any would be putting the
+        # question to whichever reader failed: the two disagree on documents
+        # whose fonts one of them declines, and the answer "no extractable
+        # text" over text we just extracted is a false statement, not a
+        # stricter one.
+        check.status = PASS
+        return
+    # No page carried text, and no page is covered by an image either. The
+    # shipped extractable-text measurement decides the whole-file answer in
+    # that case, which is the one case it was written for.
     try:
         extractable = bool(extract_text(file)["text"].strip())
     except Exception:
