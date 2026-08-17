@@ -152,6 +152,7 @@ _NAME_TREE_DEPTH = 64
 _ANNOTATION_CHECKS = (
     "tagged_annotations", "tab_order", "tagged_multimedia", "navigation_links",
     "tagged_form_fields", "alt_hides_annotation", "other_elements_alt",
+    "field_descriptions",
 )
 _FIELD_CHECKS = (
     "field_descriptions", "tagged_form_fields", "alt_hides_annotation",
@@ -163,7 +164,8 @@ _SCRIPT_CHECKS = ("screen_flicker", "scripts", "timed_responses")
 _STRUCTURE_CHECKS = (
     "reading_order", "tagged_annotations", "tagged_multimedia",
     "tagged_form_fields", "figures_alt", "nested_alt", "alt_no_content",
-    "alt_hides_annotation", "other_elements_alt", "table_rows", "table_cells",
+    "alt_hides_annotation", "other_elements_alt", "field_descriptions",
+    "table_rows", "table_cells",
     "table_headers", "table_regularity", "table_summary", "list_items",
     "list_labels", "heading_nesting",
 )
@@ -368,7 +370,37 @@ def _annotations(entries: list) -> list:
 
 
 def _visible(annot: dict) -> bool:
-    return not (annot["flags"] & (_F_HIDDEN | _F_NOVIEW))
+    """Can a reader perceive this annotation at all?
+
+    Two ways a file says no, and this is the one place either is decided. The
+    Hidden and NoView flags say it outright (ISO 32000-2, Table 167): neither
+    renders nor interacts. A `/Rect` whose opposite corners coincide bounds no
+    area — the shape ISO 32000-2, Table 166 exempts from carrying an
+    appearance stream, because there is nowhere to draw one.
+
+    An imperceptible annotation is owed no accessible name: a description of
+    something nobody encounters describes nothing.
+    """
+    if annot["flags"] & (_F_HIDDEN | _F_NOVIEW):
+        return False
+    rect = annot["rect"]
+    return not (
+        rect is not None
+        and len(rect) == 4
+        and rect[0] == rect[2]
+        and rect[1] == rect[3]
+    )
+
+
+def _weighable(records: list, complete: bool) -> bool:
+    """Is a target the check must still answer for?
+
+    True unless every object it names resolved AND none of them is
+    perceivable. An address the annotation inventory does not hold is a target
+    that could not be weighed, so it keeps the element in scope rather than
+    exempting it on a read that did not complete.
+    """
+    return not (records and complete and not any(_visible(r) for r in records))
 
 
 def _fields(pdf) -> tuple:
@@ -1372,17 +1404,63 @@ def _check_tagged_form_fields(check, tree, annots, fields):
     _verdict(check, len(widgets), findings)
 
 
-def _check_field_descriptions(check, fields):
+def _named_objects(node) -> list:
+    """Every `/OBJR` address this element and its descendants name.
+
+    An `/Alt` substitutes for the whole element (ISO 32000-2, 14.9.3), so what
+    it reaches is the subtree, not the one node that carries it.
+    """
+    return list(node.objrs) + [o for d in node.descendants() for o in d.objrs]
+
+
+def _described_objects(tree, annots) -> set:
+    """Objgens an element's own `/Alt` already describes.
+
+    ISO 32000-2, 14.9.3: the alternate description is a whole word or phrase
+    substitution for the element, and a reader announcing it does not descend.
+    A form field tagged by a `Form` element carrying the field's accessible
+    name is therefore described — the same shape `_check_alt_hides_annotation`
+    declines to fault.
+    """
+    og_of = {(a["page"], a["index"]): a["objgen"] for a in annots}
+    out: set = set()
+    for node in tree["nodes"]:
+        if not node.alt:
+            continue
+        for objr in _named_objects(node):
+            og = og_of.get((objr.get("page"), objr.get("index")))
+            if og is not None:
+                out.add(og)
+    return out
+
+
+def _check_field_descriptions(check, tree, annots, fields):
+    """A field with no accessible name a reader can reach.
+
+    `/TU` is the field's own alternative name (ISO 32000-2, 14.9.3). Where it
+    is absent the name may still arrive through the structure tree, so a field
+    an `/Alt` covers is named; and a field whose widgets are all imperceptible
+    is owed no name at all.
+    """
     if not fields:
         check.status = NA
         return
-    findings = [
-        _finding(_object_address(field=f["name"]), "field_has_no_description",
-                 preview=f["name"], values={"type": f["type"]})
-        for f in fields
-        if not f["description"]
-    ]
-    _verdict(check, len(fields), findings)
+    by_og = {a["objgen"]: a for a in annots}
+    described = _described_objects(tree, annots) if tree["tagged"] else set()
+    weighed = 0
+    findings = []
+    for field in fields:
+        records = [by_og[og] for og in field["widgets"] if og in by_og]
+        if not _weighable(records, len(records) == len(field["widgets"])):
+            continue
+        weighed += 1
+        if field["description"] or any(og in described for og in field["widgets"]):
+            continue
+        findings.append(
+            _finding(_object_address(field=field["name"]), "field_has_no_description",
+                     preview=field["name"], values={"type": field["type"]})
+        )
+    _verdict(check, weighed, findings)
 
 
 def _described_by_ancestor(node) -> bool:
@@ -1407,7 +1485,12 @@ def _check_figures_alt(check, tree, mcid_tables):
         return
     findings = []
     for node in figures:
-        if node.alt or node.actual_text or _described_by_ancestor(node):
+        # `/ActualText` present and EMPTY is a replacement that states the
+        # content has no text equivalent (ISO 32000-2, 14.9.4) — a declaration,
+        # not an absence. An empty `/Alt` is neither a word nor a phrase and so
+        # describes nothing (14.9.3), which is why only one of the two is
+        # tested for presence.
+        if node.alt or node.has_actual_text or _described_by_ancestor(node):
             continue
         preview, rect = _node_preview(node, mcid_tables)
         findings.append(
@@ -1470,17 +1553,20 @@ def _check_alt_hides_annotation(check, tree, annots, fields):
         return
     described: dict = {}
     for annot in annots:
-        if annot["contents"]:
+        # An imperceptible annotation's description reaches nobody, so an
+        # `/Alt` over it replaces nothing.
+        if annot["contents"] and _visible(annot):
             described[(annot["page"], annot["index"])] = annot["contents"]
     by_og = {(a["page"], a["index"]): a["objgen"] for a in annots}
+    visible_og = {a["objgen"] for a in annots if _visible(a)}
     widget_desc: dict = {}
     for field in fields:
         for og in field["widgets"]:
-            if field["description"]:
+            if field["description"] and og in visible_og:
                 widget_desc[og] = field["description"]
     findings = []
     for node in with_alt:
-        objrs = list(node.objrs) + [o for d in node.descendants() for o in d.objrs]
+        objrs = _named_objects(node)
         hidden = ""
         for objr in objrs:
             key = (objr.get("page"), objr.get("index"))
@@ -1499,11 +1585,27 @@ def _check_alt_hides_annotation(check, tree, annots, fields):
 
 def _check_other_elements_alt(check, tree, annots, fields, mcid_tables):
     """`Link`, `Form`, `Annot` and `Formula` elements with no description of
-    their own and none on the object they name."""
+    their own and none on the object they name.
+
+    An element whose every named object is imperceptible is not weighed at
+    all: nothing reaches the reader there to describe.
+    """
     if not tree["tagged"]:
         check.status = NA
         return
-    targets = [n for n in tree["nodes"] if n.role in _OTHER_ALT_ROLES]
+    by_address = {(a["page"], a["index"]): a for a in annots}
+    targets = []
+    for node in tree["nodes"]:
+        if node.role not in _OTHER_ALT_ROLES:
+            continue
+        objrs = _named_objects(node)
+        named = [
+            by_address[key]
+            for key in ((o.get("page"), o.get("index")) for o in objrs)
+            if key in by_address
+        ]
+        if _weighable(named, len(named) == len(objrs)):
+            targets.append(node)
     if not targets:
         check.status = NA
         return
@@ -1515,7 +1617,7 @@ def _check_other_elements_alt(check, tree, annots, fields, mcid_tables):
     og_address = {(a["page"], a["index"]): a["objgen"] for a in annots}
     findings = []
     for node in targets:
-        if node.alt or node.actual_text or node.title or _described_by_ancestor(node):
+        if node.alt or node.has_actual_text or node.title or _described_by_ancestor(node):
             continue
         described = False
         for objr in node.objrs:
@@ -1750,15 +1852,20 @@ def _check_list_labels(check, tree):
     if not tree["tagged"]:
         check.status = NA
         return
-    parts = [n for n in tree["nodes"] if n.role in ("Lbl", "LBody")]
+    # `Lbl` is a GENERAL inline label (ISO 32000-2, Table 368): it enumerates a
+    # section heading, a footnote, a definition term, a table-of-contents entry
+    # or a form field's label just as legitimately as a list item's bullet, so
+    # its parent is no business of a list check. `LBody` is the one that is
+    # bound to lists — its category is internal to `LI` structure elements.
+    bodies = [n for n in tree["nodes"] if n.role == "LBody"]
     items = [n for n in tree["nodes"] if n.role == "LI"]
-    if not parts and not items:
+    if not bodies and not items:
         check.status = NA
         return
     misplaced = [
         _finding(_struct_address(n), "label_outside_list_item",
                  values={"role": n.role, "parent": n.parent.role if n.parent else ""})
-        for n in parts
+        for n in bodies
         if not (n.parent is not None and n.parent.role == "LI")
     ]
     unlabelled = [
@@ -1766,7 +1873,7 @@ def _check_list_labels(check, tree):
         for n in items
         if any(c.role == "LBody" for c in n.children) and not any(c.role == "Lbl" for c in n.children)
     ]
-    check.counted = len(parts) + len(items)
+    check.counted = len(bodies) + len(items)
     check.findings = misplaced + unlabelled
     if check.counted == 0:
         check.status = NA
@@ -2020,7 +2127,7 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
             "timed_responses": lambda c: _check_timed_responses(c, sites),
             "navigation_links": lambda c: _check_navigation_links(c, annots, pages),
             "tagged_form_fields": lambda c: _check_tagged_form_fields(c, tree, annots, fields),
-            "field_descriptions": lambda c: _check_field_descriptions(c, fields),
+            "field_descriptions": lambda c: _check_field_descriptions(c, tree, annots, fields),
             "figures_alt": lambda c: _check_figures_alt(c, tree, mcid_tables),
             "nested_alt": lambda c: _check_nested_alt(c, tree, mcid_tables),
             "alt_no_content": lambda c: _check_alt_no_content(c, tree, mcid_tables),
