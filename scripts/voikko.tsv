@@ -1,0 +1,55 @@
+# Pinned manifest for the Finnish spelling engine.
+#
+# Finnish is agglutinative: its words are generated, not listed, so no
+# Hunspell .aff/.dic pair for it exists upstream and none could. Spell checking
+# it needs a morphological analyser -- libvoikko plus the voikko-fi vfst
+# transducer -- so the `fi` tag ships a DIFFERENT kind of dictionary from the
+# other 35, in the same resources/dictionaries tree.
+#
+# bundle-voikko.ps1 fetches two pinned upstream archives, verifies each against
+# the sha256 in the script, and writes resources/dictionaries/fi/. Every file it
+# writes has a row below, verified by sha256 before it lands.
+#
+# COLUMNS: file <TAB> component <TAB> role <TAB> sha256 <TAB> spdx <TAB> notice <TAB> source
+#   file      path as shipped, relative to resources/dictionaries/fi/
+#   component upstream project
+#   role      binary | module | data | notice | runtime
+#             `runtime` is copied from resources/tesseract, not fetched: the
+#             same three mingw DLLs already ship there with their own rows in
+#             scripts/tesseract-licenses.tsv, so they are accounted for once
+#             and copied beside libvoikko-1.dll because a DLL loaded out of
+#             resources/dictionaries/fi cannot see the OCR runtime's directory.
+#   sha256    of the shipped file. `-` for a runtime row, whose bytes are
+#             whatever bundle-tesseract.ps1 vendored.
+#   spdx      SPDX expression. "OR" = we may rely on any listed licence.
+#   notice    filename under fi/notices/ carrying the text that choice requires
+#   source    upstream the file came from
+#
+# RULES
+#  - Every shipped binary needs a row whose notice file is present.
+#    bundle-voikko.ps1 REFUSES to write the tree otherwise, and refuses just as
+#    hard when the tree holds a file with no row -- drift in either direction
+#    stops the build rather than shipping unnotified bytes.
+#  - libvoikko is tri-licensed; MPL-1.1 is the option this project exercises,
+#    and all three are recorded because the notice files carry all three.
+#  - voikko-fi is GPL-2.0-or-later. That is an ordinary row: this project is
+#    MIT open source with a public repository, so the source column answers
+#    "where is the source".
+#
+# -WriteManifest re-fetches and writes the sha256 column back instead of
+# verifying it. That is the pin-bump path: change the pins in the script, run
+# it once, review the diff, commit. Never wired into a build.
+file	component	role	sha256	spdx	notice	source
+5/mor-standard/autocorr.vfst	voikko-fi	data	0c27f8f07bf23fcbfd92962335139817066786ec2694d72ddfa2ca091764a7e0	GPL-2.0-or-later	copyright-voikko-fi	https://deb.debian.org/debian/pool/main/v/voikko-fi/voikko-fi_2.5-2_amd64.deb
+5/mor-standard/index.txt	voikko-fi	data	0e8cfc30f6cbafcd08aee7756772806106aa14f5722b87dcf4004cfb098eaf94	GPL-2.0-or-later	copyright-voikko-fi	https://deb.debian.org/debian/pool/main/v/voikko-fi/voikko-fi_2.5-2_amd64.deb
+5/mor-standard/mor.vfst	voikko-fi	data	884d5d88e4b02c7e873d17a77ca8fbf79df64e8597615df446b3c5e9c08b4869	GPL-2.0-or-later	copyright-voikko-fi	https://deb.debian.org/debian/pool/main/v/voikko-fi/voikko-fi_2.5-2_amd64.deb
+libgcc_s_seh-1.dll	GCC runtime library	runtime	-	GPL-3.0-or-later WITH GCC-exception-3.1	LICENSE-gcc-runtime.txt	resources/tesseract (scripts/tesseract-licenses.tsv)
+libstdc++-6.dll	GCC runtime library	runtime	-	GPL-3.0-or-later WITH GCC-exception-3.1	LICENSE-gcc-runtime.txt	resources/tesseract (scripts/tesseract-licenses.tsv)
+libvoikko-1.dll	libvoikko	binary	b1116583577d05c9a1d128eac7b83053d98622658c329cd1022c5abdae1140ef	MPL-1.1 OR GPL-2.0-or-later OR LGPL-2.1-or-later	COPYING	https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libvoikko-4.3.3-3-any.pkg.tar.zst
+libvoikko.py	libvoikko	module	0adcf542f35b82c19ced141c6c900cb396778e40705c5ba83ebf8b96e7f8e10e	MPL-1.1 OR GPL-2.0-or-later OR LGPL-2.1-or-later	COPYING	https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libvoikko-4.3.3-3-any.pkg.tar.zst
+libwinpthread-1.dll	mingw-w64 (winpthreads)	runtime	-	MIT AND Zope-2.1	LICENSE-mingw-w64.txt	resources/tesseract (scripts/tesseract-licenses.tsv)
+notices/COPYING	libvoikko	notice	27ef52459e11f9c962a6b6cac97a8ac30921cabc031a4ce6ea1391f838e31c74	MPL-1.1 OR GPL-2.0-or-later OR LGPL-2.1-or-later	COPYING	https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libvoikko-4.3.3-3-any.pkg.tar.zst
+notices/LICENSE-gcc-runtime.txt	GCC runtime library	notice	-	GPL-3.0-or-later WITH GCC-exception-3.1	LICENSE-gcc-runtime.txt	resources/tesseract (scripts/tesseract-licenses.tsv)
+notices/LICENSE-mingw-w64.txt	mingw-w64 (winpthreads)	notice	-	MIT AND Zope-2.1	LICENSE-mingw-w64.txt	resources/tesseract (scripts/tesseract-licenses.tsv)
+notices/LICENSE.CORE	libvoikko	notice	900044281cdfc9e18b92b641b577e1f5fb98575dfd74f679ac2f28ccc5cd8672	MPL-1.1 OR GPL-2.0-or-later OR LGPL-2.1-or-later	LICENSE.CORE	https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libvoikko-4.3.3-3-any.pkg.tar.zst
+notices/copyright-voikko-fi	voikko-fi	notice	e38e80aa018a3102afa593a7c5295864ae097ec4bee9685770cacdcc909279cf	GPL-2.0-or-later	copyright-voikko-fi	https://deb.debian.org/debian/pool/main/v/voikko-fi/voikko-fi_2.5-2_amd64.deb
