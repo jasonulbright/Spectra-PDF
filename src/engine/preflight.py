@@ -1444,7 +1444,7 @@ def _gather(file: str, profile: dict, gs_path: str, font_dir) -> dict:
     from engine.check import check as structural_check
     from engine.contrast import document_contrast
     from engine.doc_properties import get_advanced_properties
-    from engine.font_inventory import list_document_fonts
+    from engine.font_inventory import list_document_fonts, walk_document_fonts
     from engine.forms import read_form_fields
     from engine.image_resolution import summarize_image_resolution
     from engine.layers import list_layers
@@ -1471,6 +1471,16 @@ def _gather(file: str, profile: dict, gs_path: str, font_dir) -> dict:
     font_names: set = set()
     seen_colour: set = set()
 
+    def note_embedding(font) -> None:
+        embedded = font_embedded(font)
+        name = _font_name(font)
+        font_names.add(name)
+        if embedded is None:
+            note((FONT,), f"the font {name} will not read")
+            return
+        if not embedded and name not in non_embedded:
+            non_embedded.append(name)
+
     with pikepdf.open(file) as pdf:
         reads["version"] = str(pdf.pdf_version)
         try:
@@ -1495,19 +1505,13 @@ def _gather(file: str, profile: dict, gs_path: str, font_dir) -> dict:
             current = number
 
             def on_font(font, category, _n=current):
-                embedded = font_embedded(font)
-                name = _font_name(font)
-                font_names.add(name)
                 # A Type 3 glyph inside an appearance stream is the
                 # annotation's own drawing, not page content the press sets.
+                name = _font_name(font)
                 if (category != "annotation" and _font_subtype(font) == "Type3"
                         and name not in type3):
                     type3.append(name)
-                if embedded is None:
-                    note((FONT,), f"the font {name} will not read")
-                    return
-                if not embedded and name not in non_embedded:
-                    non_embedded.append(name)
+                note_embedding(font)
 
             def on_colorspace(cs, category, _n=current):
                 try:
@@ -1535,6 +1539,18 @@ def _gather(file: str, profile: dict, gs_path: str, font_dir) -> dict:
                 on_transparency=on_transparency,
                 on_unreadable=note,
             )
+
+        # A per-page walk cannot reach a font named only by a Type 3 glyph
+        # procedure or by `/AcroForm /DR`, and a font no walk sees cannot make
+        # a check fail — so the embedding check reports a PASS over a face
+        # that carries no program. The document walk answers the embedding
+        # fact for every route; the category a font is reached BY stays the
+        # page walk's, because only it knows which one that was.
+        walk_document_fonts(
+            pdf,
+            lambda font, _page, _name: note_embedding(font),
+            lambda _page, _name, detail: note((FONT,), detail),
+        )
 
         reads["pages"] = pages
         reads["page_count"] = len(pages)

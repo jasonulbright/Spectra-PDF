@@ -319,6 +319,444 @@ class TestReadsThatDidNotComplete:
         res = check_accessibility(B.save(pdf, src))
         assert _statuses(res)["bookmarks"] == "warn"
 
+    def test_a_page_whose_paint_walk_did_not_complete_is_not_counted(self, tmp_dir, monkeypatch):
+        """The count is what was measured, not what was present.
+
+        No malformed document reaches this: a broken image stream, an image
+        with no `/Width`, a broken `/OCProperties`, a `/Resources` that is not
+        a dictionary and an `/ExtGState` that is not a dictionary are all
+        absorbed by the paint walk. So the stage is broken where the checker
+        calls it, as the permissions read is.
+        """
+        from engine import accessibility
+
+        src = os.path.join(tmp_dir, "paint_stage.pdf")
+        pdf = B.new_pdf(pages=2)
+        B._one_tagged_paragraph(pdf, pdf.pages[0])
+        B.make_conformant(pdf, pdf.pages[0])
+        pdf.pages[1].obj[Name.Contents] = pdf.make_stream(
+            b"0.5 0.5 0.5 rg 0 0 612 792 re f"
+        )
+        B.save(pdf, src)
+
+        assert _check(check_accessibility(src), "image_only")["counted"] == 2
+
+        real = accessibility.page_events
+
+        def only_page_one(pdf_, page, off_set):
+            if pdf_.pages.index(page) == 1:
+                raise RuntimeError("this page's paint walk cannot complete")
+            return real(pdf_, page, off_set)
+
+        monkeypatch.setattr(accessibility, "page_events", only_page_one)
+        res = check_accessibility(src)
+        row = _check(res, "image_only")
+        # Two pages present, one measured: counting the unmeasured one put a
+        # page in the denominator the check never looked at.
+        assert row["counted"] == 1, json.dumps(row, indent=2)
+        assert row["status"] == "needs_review"
+        assert [u["stage"] for u in res["unreadable"]] == ["paint"]
+
+
+class TestATreeThatHoldsNothing:
+    """A `/StructTreeRoot` is an entry point, not a structure.
+
+    `/K` is what the hierarchy hangs from (ISO 32000-2 §14.7.2). A root with
+    nothing under it defines no reading order and associates no content with
+    any element, so `pass` on `tagged` is the claim the check exists to make,
+    made over a document that delivers none of it.
+    """
+
+    def _empty(self, path, k=None):
+        """A root holding no element, over a page whose text is all declared
+        artifact — so `tagged` is the only claim the document rests on."""
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        B.draw(pdf, page, "/Artifact BMC BT /F1 11 Tf 40 700 Td (Running header.) Tj ET EMC")
+        entries = {} if k is None else {"K": k}
+        root = pdf.make_indirect(Dictionary(Type=Name.StructTreeRoot, **entries))
+        pdf.Root[Name.StructTreeRoot] = root
+        pdf.Root[Name.MarkInfo] = Dictionary(Marked=True)
+        B.make_conformant(pdf, page)
+        return B.save(pdf, path)
+
+    def test_a_root_with_no_kids_is_not_a_tagged_document(self, tmp_dir):
+        res = check_accessibility(self._empty(os.path.join(tmp_dir, "no_k.pdf")))
+        row = _check(res, "tagged")
+        assert row["status"] == "fail", json.dumps(row, indent=2)
+        assert [f["detail_key"] for f in row["findings"]] == ["structure_tree_empty"]
+
+    def test_a_kids_array_holding_no_element_is_the_same_answer(self, tmp_dir):
+        res = check_accessibility(
+            self._empty(os.path.join(tmp_dir, "empty_k.pdf"), k=Array([]))
+        )
+        assert [f["detail_key"] for f in _check(res, "tagged")["findings"]] == [
+            "structure_tree_empty"
+        ]
+
+    def test_one_element_is_enough_for_the_twin_to_pass(self, tmp_dir):
+        """The false-failure guard: a tree with a single paragraph in it is a
+        tagged document and must not be caught by the emptiness rule."""
+        res = check_accessibility(_build(tmp_dir, "baseline"))
+        row = _check(res, "tagged")
+        assert row["status"] == "pass"
+        assert row["findings"] == []
+
+    def test_the_three_reasons_stay_distinguished(self, tmp_dir):
+        no_root = check_accessibility(_build(tmp_dir, "untagged"))
+        assert [f["detail_key"] for f in _check(no_root, "tagged")["findings"]] == [
+            "structure_tree_missing"
+        ]
+        src = os.path.join(tmp_dir, "no_markinfo.pdf")
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        B._one_tagged_paragraph(pdf, page)
+        B.make_conformant(pdf, page)
+        del pdf.Root[Name.MarkInfo]
+        unmarked = check_accessibility(B.save(pdf, src))
+        assert [f["detail_key"] for f in _check(unmarked, "tagged")["findings"]] == [
+            "mark_info_missing"
+        ]
+
+
+class TestNameTreeShapesTheIterationReadsPast:
+    """`pikepdf.NameTree` yields rather than raises on a malformed tree.
+
+    A leaf whose `/Names` array is odd-length drops or mis-pairs its entries;
+    a `/Names` that is not an array, a node declaring neither key, and a
+    `/Kids` that is not an array each yield nothing at all. Three checks read
+    that as "this document has no scripts", so each shape below is pinned to
+    the review row it must produce instead.
+    """
+
+    def _tree(self, path, build):
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        B._one_tagged_paragraph(pdf, page)
+        B.make_conformant(pdf, page)
+        action = pdf.make_indirect(
+            Dictionary(S=Name.JavaScript, JS=String("app.setInterval('tick()', 100);"))
+        )
+        pdf.Root[Name.Names] = Dictionary(
+            JavaScript=pdf.make_indirect(build(pdf, action))
+        )
+        return B.save(pdf, path)
+
+    SCRIPT_CHECKS = ("scripts", "screen_flicker", "timed_responses")
+
+    UNREADABLE = {
+        "lone_value": lambda pdf, a: Dictionary(Names=Array([a])),
+        "trailing_key": lambda pdf, a: Dictionary(
+            Names=Array([String("boot"), a, String("orphan")])
+        ),
+        "leading_key": lambda pdf, a: Dictionary(
+            Names=Array([String("orphan"), String("boot"), a])
+        ),
+        "names_not_an_array": lambda pdf, a: Dictionary(Names=pikepdf.Object.parse(b"7")),
+        "neither_key": lambda pdf, a: Dictionary(Limits=Array([String("a"), String("z")])),
+        "kids_not_an_array": lambda pdf, a: Dictionary(Kids=pikepdf.Object.parse(b"7")),
+        "odd_leaf_below_kids": lambda pdf, a: Dictionary(
+            Kids=Array([
+                pdf.make_indirect(
+                    Dictionary(Limits=Array([String("a"), String("z")]),
+                               Names=Array([String("boot"), a, String("orphan")]))
+                )
+            ])
+        ),
+    }
+
+    @pytest.mark.parametrize("shape", sorted(UNREADABLE))
+    def test_a_tree_read_past_is_named_on_every_script_check(self, tmp_dir, shape):
+        src = self._tree(os.path.join(tmp_dir, f"nt_{shape}.pdf"), self.UNREADABLE[shape])
+        res = check_accessibility(src)
+        for cid in self.SCRIPT_CHECKS:
+            row = _check(res, cid)
+            assert row["status"] == "needs_review", (shape, json.dumps(row, indent=2))
+            assert "scripts_unreadable" in {f["detail_key"] for f in row["findings"]}, shape
+
+    def test_a_site_the_iteration_did_reach_still_rides_with_the_gap(self, tmp_dir):
+        """An unpaired entry does not stop the iteration: the tree yields one
+        site AND is short by one, and the report says both."""
+        src = self._tree(os.path.join(tmp_dir, "nt_both.pdf"),
+                         self.UNREADABLE["trailing_key"])
+        row = _check(check_accessibility(src), "scripts")
+        assert sorted({f["detail_key"] for f in row["findings"]}) == [
+            "script_site", "scripts_unreadable"
+        ]
+
+    WELL_FORMED = {
+        "leaf": lambda pdf, a: Dictionary(Names=Array([String("boot"), a])),
+        "kid": lambda pdf, a: Dictionary(
+            Kids=Array([
+                pdf.make_indirect(
+                    Dictionary(Limits=Array([String("a"), String("z")]),
+                               Names=Array([String("boot"), a]))
+                )
+            ])
+        ),
+        # A tree that legitimately holds nothing. An even-length array of
+        # length zero is well-formed and must not read as unreadable.
+        "empty_leaf": lambda pdf, a: Dictionary(Names=Array([])),
+    }
+
+    @pytest.mark.parametrize("shape", sorted(WELL_FORMED))
+    def test_a_well_formed_tree_gains_no_review_row(self, tmp_dir, shape):
+        src = self._tree(os.path.join(tmp_dir, f"ok_{shape}.pdf"), self.WELL_FORMED[shape])
+        res = check_accessibility(src)
+        for cid in self.SCRIPT_CHECKS:
+            keys = {f["detail_key"] for f in _check(res, cid)["findings"]}
+            assert "scripts_unreadable" not in keys, (shape, cid)
+
+    def test_a_catalog_with_no_javascript_tree_is_not_a_gap(self, tmp_dir):
+        src = os.path.join(tmp_dir, "other_tree.pdf")
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        B._one_tagged_paragraph(pdf, page)
+        B.make_conformant(pdf, page)
+        pdf.Root[Name.Names] = Dictionary(
+            EmbeddedFiles=pdf.make_indirect(Dictionary(Names=Array([])))
+        )
+        statuses = _statuses(check_accessibility(B.save(pdf, src)))
+        for cid in self.SCRIPT_CHECKS:
+            assert statuses[cid] == NA, cid
+
+
+class TestASpanThatDoesNotRead:
+    """A malformed span is a width nobody measured.
+
+    The default of 1 still carries the walk, so a regular table is never
+    reported ragged — but the width it produces is not a measurement of THIS
+    table, and reporting it as one is a clean claim over an unread value.
+    """
+
+    def _table(self, path, extra):
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        B._table(
+            pdf, page,
+            [
+                [("Region", {"_role": "TH", "Scope": Name.Column}),
+                 ("Revenue", {"_role": "TH", "Scope": Name.Column})],
+                [("North", dict(extra)), ("120", {})],
+            ],
+            table_extra={"Summary": String("Revenue by region")},
+        )
+        B.make_conformant(pdf, page)
+        return B.save(pdf, path)
+
+    UNREADABLE = {
+        "a_name": {"ColSpan": Name.Wide},
+        "a_string": {"ColSpan": String("two")},
+        "zero": {"ColSpan": 0},
+        "negative_rowspan": {"RowSpan": -3},
+    }
+
+    @pytest.mark.parametrize("shape", sorted(UNREADABLE))
+    def test_a_span_that_is_not_a_positive_integer_is_reviewed(self, tmp_dir, shape):
+        src = self._table(os.path.join(tmp_dir, f"span_{shape}.pdf"),
+                          self.UNREADABLE[shape])
+        row = _check(check_accessibility(src), "table_regularity")
+        assert row["status"] == "needs_review", (shape, json.dumps(row, indent=2))
+        assert [f["detail_key"] for f in row["findings"]] == ["table_span_unreadable"]
+
+    @pytest.mark.parametrize("extra", [{}, {"ColSpan": 1}, {"RowSpan": 1}])
+    def test_a_span_that_reads_leaves_the_table_measured(self, tmp_dir, extra):
+        src = self._table(os.path.join(tmp_dir, "span_ok.pdf"), extra)
+        row = _check(check_accessibility(src), "table_regularity")
+        assert row["status"] == "pass", json.dumps(row, indent=2)
+        assert row["findings"] == []
+
+    def test_the_spanning_pass_fixtures_still_measure(self, tmp_dir):
+        """The two shipped false-failure guards: real spans are measurements
+        and must not be swept into the unread class."""
+        for name in ("table_colspan_regular_ok", "table_rowspan_regular_ok"):
+            row = _check(check_accessibility(_build(tmp_dir, name)), "table_regularity")
+            assert row["status"] == "pass", (name, json.dumps(row, indent=2))
+
+    def test_span_of_reports_whether_it_read(self):
+        from engine.struct_audit import Node, span_of
+
+        node = Node([0], "TD", "TD", None)
+        assert span_of(node, "ColSpan") == (1, True)
+        node.attrs = {"ColSpan": 2}
+        assert span_of(node, "ColSpan") == (2, True)
+        for bad in (0, -3, "two", None):
+            node.attrs = {"ColSpan": bad} if bad is not None else {"ColSpan": Name.Wide}
+            assert span_of(node, "ColSpan") == (1, False), bad
+
+
+class TestOneAnnotationReader:
+    """`/Annots` is walked once, and the walk names what it could not read.
+
+    Three call sites read that list — the annotation inventory, the script
+    inventory and the structure walk's `/OBJR` resolution — and only the first
+    reported the gap, so a script site behind an unreadable entry read as a
+    document with no scripts.
+    """
+
+    def _page_with(self, path, entries):
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        B._one_tagged_paragraph(pdf, page)
+        B.make_conformant(pdf, page)
+        page.obj[Name.Annots] = Array(entries(pdf, page))
+        return B.save(pdf, path)
+
+    ANNOTATION_CHECKS = ("tagged_annotations", "tab_order", "tagged_multimedia",
+                         "navigation_links", "tagged_form_fields",
+                         "alt_hides_annotation", "other_elements_alt")
+    SCRIPT_CHECKS = ("scripts", "screen_flicker", "timed_responses")
+
+    def test_an_unreadable_entry_reaches_the_script_checks_too(self, tmp_dir):
+        src = self._page_with(
+            os.path.join(tmp_dir, "bad_entry.pdf"),
+            lambda pdf, page: [String("not an annotation")],
+        )
+        res = check_accessibility(src)
+        for cid in self.ANNOTATION_CHECKS + self.SCRIPT_CHECKS:
+            assert _statuses(res)[cid] == "needs_review", cid
+        assert {f["detail_key"] for f in _check(res, "scripts")["findings"]} == {
+            "scripts_unreadable"
+        }
+
+    def test_a_null_entry_stays_silent_on_every_reader(self, tmp_dir):
+        """A null entry references no object (ISO 32000-2 §7.3.9): nothing to
+        read rather than something left unread, on all three readers."""
+        src = self._page_with(
+            os.path.join(tmp_dir, "null_entry.pdf"),
+            lambda pdf, page: [pikepdf.Object.parse(b"null")],
+        )
+        statuses = _statuses(check_accessibility(src))
+        for cid in ("tagged_annotations", "tab_order", "navigation_links") + self.SCRIPT_CHECKS:
+            assert statuses[cid] == NA, cid
+
+    def test_a_script_behind_a_null_entry_is_still_found(self, tmp_dir):
+        src = self._page_with(
+            os.path.join(tmp_dir, "null_then_script.pdf"),
+            lambda pdf, page: [
+                pikepdf.Object.parse(b"null"),
+                pdf.make_indirect(
+                    Dictionary(
+                        Type=Name.Annot, Subtype=Name.Link,
+                        Rect=Array([40, 400, 200, 420]), F=4,
+                        A=Dictionary(S=Name.JavaScript,
+                                     JS=String("app.setTimeOut('t()', 10);")),
+                    )
+                ),
+            ],
+        )
+        row = _check(check_accessibility(src), "timed_responses")
+        assert row["status"] == "needs_review"
+        assert row["findings"][0]["address"] == {
+            "kind": "object", "page": 1, "annotation": 1
+        }
+
+    def test_the_structure_walk_addresses_the_same_positions(self, tmp_dir):
+        """`/OBJR` resolution and the annotation inventory number the list the
+        same way, so a finding that pairs them survives a skipped entry."""
+        src = os.path.join(tmp_dir, "objr_after_null.pdf")
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        root, doc = B._one_tagged_paragraph(pdf, page)
+        annot = pdf.make_indirect(
+            Dictionary(Type=Name.Annot, Subtype=Name.Square,
+                       Rect=Array([40, 500, 200, 560]), F=4,
+                       Contents=String("The real note"))
+        )
+        page.obj[Name.Annots] = Array([pikepdf.Object.parse(b"null"), annot])
+        wrapper = B.elem(pdf, "Annot", doc, page=page,
+                         Alt=String("Something else entirely"),
+                         kids=[Dictionary(Type=Name.OBJR, Obj=annot)])
+        doc[Name.K] = Array(list(doc[Name.K]) + [wrapper])
+        B.make_conformant(pdf, page)
+        res = check_accessibility(B.save(pdf, src))
+        row = _check(res, "alt_hides_annotation")
+        assert row["status"] == "fail", json.dumps(row, indent=2)
+        assert row["findings"][0]["values"]["hidden"] == "The real note"
+
+    def test_the_reader_separates_nothing_from_unread(self, tmp_dir):
+        from engine.struct_audit import annots_of
+
+        src = self._page_with(
+            os.path.join(tmp_dir, "mixed.pdf"),
+            lambda pdf, page: [
+                pikepdf.Object.parse(b"null"),
+                String("not an annotation"),
+                pdf.make_indirect(
+                    Dictionary(Type=Name.Annot, Subtype=Name.Square,
+                               Rect=Array([40, 500, 200, 560]), F=4)
+                ),
+            ],
+        )
+        with pikepdf.open(src) as pdf:
+            entries, unread = annots_of(pdf)
+        assert [(e["page"], e["index"]) for e in entries] == [(1, 2)]
+        assert [u["page"] for u in unread] == [1]
+        assert "annotation 1" in unread[0]["reason"]
+
+
+class TestAReadThatRaisesStillYieldsAReport:
+    """A reader that raises is a gap, not the end of the report.
+
+    Fail-loud costs the reader all 32 answers to name one unreadable
+    structure; the same failure named as a review row costs one.
+    """
+
+    def test_a_catalog_names_that_is_not_a_dictionary_does_not_abort(self, tmp_dir):
+        src = os.path.join(tmp_dir, "names_is_an_integer.pdf")
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        B._one_tagged_paragraph(pdf, page)
+        B.make_conformant(pdf, page)
+        pdf.Root[Name.Names] = pdf.make_indirect(pikepdf.Object.parse(b"7"))
+        res = check_accessibility(B.save(pdf, src))
+        statuses = _statuses(res)
+        assert len(res["checks"]) == 32
+        for cid in ("scripts", "screen_flicker", "timed_responses"):
+            assert statuses[cid] == "needs_review", cid
+        # The other 29 are still answered: one unreadable structure costs one
+        # row, not the report.
+        assert statuses["tagged"] == "pass"
+        assert statuses["lang"] == "pass"
+        assert statuses["contrast"] == "pass"
+
+    def test_an_annotation_reader_that_raises_becomes_one_review_row(self, tmp_dir, monkeypatch):
+        """The reader's own boundary. A gap it cannot attribute to a page
+        carries the key whose sentence names none."""
+        from engine import accessibility
+
+        src = _build(tmp_dir, "baseline")
+
+        def raises(pdf):
+            raise RuntimeError("the annotation lists cannot be enumerated")
+
+        monkeypatch.setattr(accessibility, "annots_of", raises)
+        res = check_accessibility(src)
+        assert len(res["checks"]) == 32
+        for cid in ("tagged_annotations", "tab_order", "navigation_links",
+                    "scripts", "screen_flicker", "timed_responses"):
+            assert _statuses(res)[cid] == "needs_review", cid
+        assert {f["detail_key"] for f in _check(res, "tab_order")["findings"]} == {
+            "annotations_unreadable_document"
+        }
+        assert _statuses(res)["tagged"] == "pass"
+
+    def test_an_additional_actions_dictionary_that_is_not_one_is_named(self, tmp_dir):
+        for where, apply in (
+            ("catalog", lambda pdf, page: pdf.Root.__setitem__(
+                Name.AA, pdf.make_indirect(Array([String("x")])))),
+            ("page", lambda pdf, page: page.obj.__setitem__(
+                Name.AA, pdf.make_stream(b"nonsense"))),
+        ):
+            src = os.path.join(tmp_dir, f"aa_{where}.pdf")
+            pdf = B.new_pdf()
+            page = pdf.pages[0]
+            B._one_tagged_paragraph(pdf, page)
+            B.make_conformant(pdf, page)
+            apply(pdf, page)
+            statuses = _statuses(check_accessibility(B.save(pdf, src)))
+            assert statuses["scripts"] == "needs_review", where
+
 
 class TestBoundedWalksSayTheyAreBounded:
     """A walk that stopped short is not a document that ended there."""

@@ -545,7 +545,7 @@ def run_action(
                 "separate folder for the processed copies."
             )
     if move_processed_root:
-        # The watched-folder shape (Distiller's In -> Out -> Done): processed
+        # The watched-folder shape (In -> Out -> Done): processed
         # originals leave the intake so the next run never reprocesses them.
         moved = Path(move_processed_root).resolve()
         if dest_conflicts_with_source(str(source_path), str(moved)):

@@ -137,24 +137,57 @@ def _read_attrs(elem) -> dict:
     return out
 
 
-def _annot_index(pdf) -> dict:
-    """objgen → {"page": 1-based, "index": position in /Annots}."""
-    out: dict = {}
+def annots_of(pdf) -> tuple:
+    """Every `/Annots` entry that resolves to an annotation, and the reads that
+    did not complete.
+
+    The one place this repository decides what an `/Annots` entry IS. Each
+    entry is {"page": 1-based, "index": position, "obj": the dictionary}.
+
+    A **null** entry references no object (ISO 32000-2 §7.3.9), so it is
+    nothing to read rather than something left unread and it is skipped in
+    silence. A **non-null** entry that is not a dictionary, a list that will
+    not enumerate, and a `/Annots` that will not read at all are each named in
+    the second return, because a reader that mistook them for a page with no
+    annotations would report a clean claim over a page it never saw.
+    """
+    out: list = []
+    unread: list = []
     for i, page in enumerate(pdf.pages):
-        annots = page.obj.get("/Annots")
+        try:
+            annots = page.obj.get("/Annots")
+        except Exception as exc:
+            unread.append({"page": i + 1, "reason": str(exc)})
+            continue
         if annots is None:
             continue
         try:
             items = list(annots)
-        except Exception:
+        except Exception as exc:
+            unread.append({"page": i + 1, "reason": str(exc)})
             continue
         for j, annot in enumerate(items):
-            try:
-                og = annot.objgen
-            except Exception:
+            if annot is None:
                 continue
-            if og != (0, 0):
-                out[og] = {"page": i + 1, "index": j}
+            if not isinstance(annot, pikepdf.Dictionary):
+                unread.append(
+                    {"page": i + 1, "reason": f"annotation {j} is not a dictionary"}
+                )
+                continue
+            out.append({"page": i + 1, "index": j, "obj": annot})
+    return out, unread
+
+
+def _annot_index(entries: list) -> dict:
+    """objgen → {"page": 1-based, "index": position in /Annots}."""
+    out: dict = {}
+    for entry in entries:
+        try:
+            og = entry["obj"].objgen
+        except Exception:
+            continue
+        if og != (0, 0):
+            out[og] = {"page": entry["page"], "index": entry["index"]}
     return out
 
 
@@ -165,27 +198,39 @@ def _scope_of(value) -> str:
         return ""
 
 
-def span_of(node: Node, key: str) -> int:
-    """A cell's `/ColSpan` or `/RowSpan`, defaulting to 1 as the spec does. A
-    value that is not a positive integer is read as 1 — a malformed span is
-    not a reason to report a regular table as ragged."""
+def span_of(node: Node, key: str) -> tuple:
+    """A cell's `/ColSpan` or `/RowSpan`, and whether that is a measurement.
+
+    Returns (span, read). An absent value is the spec's own default of 1 and
+    IS a measurement. A value that is not a positive integer is 1 with `read`
+    false: the arithmetic still has a number to carry, so a malformed span is
+    never a reason to report a regular table as ragged, but the caller can no
+    longer present the width it computes as one it measured.
+    """
     value = node.attrs.get(key)
     if value is None:
-        return 1
+        return 1, True
     try:
         span = int(value)
     except (TypeError, ValueError):
-        return 1
-    return span if span >= 1 else 1
+        return 1, False
+    if span < 1:
+        return 1, False
+    return span, True
 
 
-def audit_tree(pdf) -> dict:
+def audit_tree(pdf, annots_entries: list | None = None) -> dict:
     """The resolved structure tree.
 
     Returns {"tagged", "nodes" (flat, tree order), "roots", "role_map",
     "annots" (objgen → address), "tagged_mcids" (page → set), "tagged_annots"
     (set of objgen), "truncated" (the elements whose children the walk did not
     reach)}.
+
+    `annots_entries` is `annots_of`'s first return. A caller that has already
+    read the annotations passes them so `/OBJR` targets resolve against the
+    same list the caller addresses findings by; a caller that has not reads
+    them here, through the same one reader.
 
     The walk is BOUNDED — by `_MAX_DEPTH` and by the visited-set cycle guard —
     so `nodes` is not always the whole tree. `truncated` names every element
@@ -201,7 +246,9 @@ def audit_tree(pdf) -> dict:
 
     role_map = _role_map(st)
     pages_by_og = _page_map(pdf)
-    annots = _annot_index(pdf)
+    annots = _annot_index(
+        annots_entries if annots_entries is not None else annots_of(pdf)[0]
+    )
     nodes: list = []
     roots: list = []
     tagged_mcids: dict = {}

@@ -2409,7 +2409,7 @@
         "spot_ink_names": "not_applicable",
         "ink_coverage_max": "not_applicable",
         "overprint": "not_applicable",
-        "fonts_embedded": "not_applicable",
+        "fonts_embedded": "fail",
         "fonts_subset": "not_applicable",
         "type3_fonts": "not_applicable",
         "min_type_size": "not_applicable",
@@ -2431,66 +2431,66 @@
       "summaries": {
         "sheetfed_offset": [
           8,
-          2,
+          3,
           1,
           0,
-          26
+          25
         ],
         "web_offset_heatset": [
           8,
-          2,
+          3,
           1,
           0,
-          26
+          25
         ],
         "newsprint": [
           8,
-          2,
+          3,
           1,
           0,
-          26
+          25
         ],
         "digital_printing": [
           7,
-          0,
+          1,
           3,
           0,
-          27
+          26
         ],
         "large_format": [
           6,
-          0,
+          1,
           4,
           0,
-          27
+          26
         ],
         "pdfx_1a": [
           12,
-          8,
+          9,
+          1,
+          0,
+          15
+        ],
+        "pdfx_3": [
+          11,
+          9,
           1,
           0,
           16
         ],
-        "pdfx_3": [
-          11,
-          8,
-          1,
-          0,
-          17
-        ],
         "pdfx_4": [
           8,
-          8,
+          9,
           1,
           0,
-          20
+          19
         ],
         "office_print": [
           4,
+          1,
           0,
           0,
-          0,
-          33
+          32
         ]
       }
     },

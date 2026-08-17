@@ -1,5 +1,5 @@
-"""PostScript/EPS → PDF conversion via Ghostscript (the
-Distiller job, done by the tool that is its documented work-alike).
+"""PostScript/EPS → PDF conversion (distilling) via Ghostscript's
+pdfwrite device.
 
 The compress.py invocation template: bundled gs, pdfwrite, -dSAFER (the
 input is an untrusted PROGRAM — PostScript is a full language), a DERIVED
@@ -22,12 +22,12 @@ from engine.acroform import adopt_orphan_widget_fields
 from engine.pdf_save import save_pdf
 
 # Reuses compress.py's preset vocabulary; 'default' emits no
-# -dPDFSETTINGS (Ghostscript's own defaults — Distiller's "Standard").
+# -dPDFSETTINGS, leaving Ghostscript's own defaults in place.
 PRESETS = {
-    "screen": "/screen",       # 72 dpi — Distiller "Smallest File Size"
-    "ebook": "/ebook",         # 150 dpi — "eBook"
-    "printer": "/printer",     # 300 dpi — "Print Quality"
-    "prepress": "/prepress",   # 300 dpi + color preservation — "Press Quality"
+    "screen": "/screen",       # 72 dpi
+    "ebook": "/ebook",         # 150 dpi
+    "printer": "/printer",     # 300 dpi
+    "prepress": "/prepress",   # 300 dpi + color preservation
 }
 
 
@@ -108,8 +108,8 @@ def distill(file: str, output: str, preset: str = "printer", gs_path: str = "gs"
         raise RuntimeError(f"Ghostscript failed: {result.stderr.strip() or 'no diagnostics'}")
 
     # Post-validate: the result must be a PDF pikepdf can open. In the same
-    # pass, register any form-field pdfmarks: gs lands Distiller /ANN
-    # Widget pdfmarks on the page with their field keys intact but never
+    # pass, register any form-field pdfmarks: gs lands /ANN Widget
+    # pdfmarks on the page with their field keys intact but never
     # writes /AcroForm — without adoption a distilled form renders dead.
     adopted = 0
     adopted_tmp: str | None = None

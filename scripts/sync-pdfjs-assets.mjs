@@ -13,7 +13,7 @@
 //                      qcms_bg.wasm    -> ICC-based colour spaces
 //   iccUrl             the CGATS CMYK profile -> /DeviceN + ICC CMYK
 //   cMapUrl            168 .bcmap files -> CJK encodings
-//   standardFontDataUrl the Foxit/Liberation faces -> the standard 14 when a
+//   standardFontDataUrl the bundled substitute faces -> the standard 14 when a
 //                                        document embeds nothing
 //
 // With the option null, pdf.js throws "Ensure that the `wasmUrl` API parameter

@@ -8,10 +8,14 @@ export interface DocumentFont {
   raw_name: string;
   type: string;
   encoding: string;
-  embedded: boolean;
+  /** Three states, not two: null is the engine declining to answer — a Type 3
+   * with no /CharProcs draws glyphs no installed face reproduces. Collapsing
+   * null to false offers a substitution that cannot work. */
+  embedded: boolean | null;
   subset: boolean;
-  /** The face this app would substitute; null when the font is embedded or
-   * when no fonts directory was available to resolve one. */
+  /** The face this app would substitute; null when the font is embedded, when
+   * its embedding is undetermined, or when no fonts directory was available to
+   * resolve one. */
   substitute: string | null;
   pages: number[];
   page_count: number;
@@ -48,7 +52,7 @@ export function parseDocumentFonts(raw: unknown): DocumentFont[] {
       raw_name: typeof font.raw_name === 'string' ? font.raw_name : '',
       type: typeof font.type === 'string' && font.type ? font.type : 'Unknown',
       encoding: typeof font.encoding === 'string' && font.encoding ? font.encoding : 'Built-in',
-      embedded: font.embedded === true,
+      embedded: font.embedded === true ? true : font.embedded === false ? false : null,
       subset: font.subset === true,
       substitute: typeof font.substitute === 'string' ? font.substitute : null,
       pages: pages as number[],
@@ -80,17 +84,24 @@ export function groupFonts(fonts: readonly DocumentFont[]): FontGroup[] {
     }));
 }
 
-/** How a font's program status reads, as a catalog key plus its values. Four
- * distinct states, because "embedded" and "embedded subset" are different
- * facts and so are the two ways a substitution can be unknown. */
+/** How a font's program status reads, as a catalog key plus its values. Five
+ * distinct states: "embedded" and "embedded subset" are different facts, so
+ * are the two ways a substitution can be unknown, and an undetermined
+ * embedding is not a negative one. */
 export type FontStatus =
   | { kind: 'embedded-subset' }
   | { kind: 'embedded' }
+  | { kind: 'embedding-unknown' }
   | { kind: 'substituted'; face: string }
   | { kind: 'not-embedded' };
 
+/** An undetermined embedding outranks a substitute the payload somehow
+ * carries: naming a face would assert the font is not embedded. */
 export function fontStatus(font: DocumentFont): FontStatus {
-  if (font.embedded) return font.subset ? { kind: 'embedded-subset' } : { kind: 'embedded' };
+  if (font.embedded === true) {
+    return font.subset ? { kind: 'embedded-subset' } : { kind: 'embedded' };
+  }
+  if (font.embedded === null) return { kind: 'embedding-unknown' };
   if (font.substitute) return { kind: 'substituted', face: font.substitute };
   return { kind: 'not-embedded' };
 }
