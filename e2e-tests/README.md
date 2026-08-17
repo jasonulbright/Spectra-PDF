@@ -136,6 +136,29 @@ npm run scan:log -- ..\battery-v1031.local.log
    and wait for it to change AND the content condition to hold — see
    `waitForReindexedListing` in `49-restyle-family.spec.ts`, which exists
    because exactly this race failed deterministically.
+5. **Never hold an element across a render.** A resolved handle polls the
+   node it resolved, so a re-render turns every later poll into a
+   stale-element round trip the driver has to detect and refetch — that
+   is where the suite's `stale element - terminating request` warnings
+   came from, in `31-print`, `137-scan` and `145-multi-window` alike.
+   Keep the SELECTOR in a constant and ask for it again each time, and
+   use `waitForDisplayedSelector` from the harness where the wait itself
+   spans the render.
+6. **Never call WDIO's `scrollIntoView()` on an element handle.** It
+   composes a wheel gesture through the Actions API, whose origin must
+   already lie inside the viewport, so anything currently off screen
+   raises `move target out of bounds` and silently falls back to the Web
+   API. `scrollIntoReach` in the harness calls the DOM's own
+   `scrollIntoView` inside the page instead — which is also why the
+   `node?.scrollIntoView(...)` calls inside a `browser.execute` are fine
+   — and returns the centre point only once a hit test lands on the
+   element, because a coordinate the pointer can be moved to is not yet a
+   coordinate the element's own handler sees.
+7. **`await $$(sel)` is not the resolved array.** `ChainablePromiseArray`
+   declares no `then`, so TypeScript leaves `.length` as
+   `Promise<number>` and a length comparison silently compares against a
+   promise. Use `await $$(sel).getElements()` when the array is what you
+   want, and the chainable's own async `map`/`length` when it is not.
 
 ## Tooling
 

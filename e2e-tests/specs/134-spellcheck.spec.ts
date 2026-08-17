@@ -118,7 +118,7 @@ describe('spell check', () => {
     // a beat after the editor does. The CLASS is what is asserted, not a
     // colour: the squiggle is painted by a stylesheet rule.
     await browser.waitUntil(
-      async () => (await $$('.page-editpara-misspelled')).length > 0,
+      async () => (await $$('.page-editpara-misspelled').getElements()).length > 0,
       { timeout: 30_000, timeoutMsg: 'the editor never marked the misspelling' },
     );
     const marked = await $('.page-editpara-misspelled').getText();

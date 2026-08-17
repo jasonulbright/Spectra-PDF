@@ -42,7 +42,6 @@ async function makeTextFixture(path: string): Promise<void> {
 async function pageTexts(path: string): Promise<string[]> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   const texts: string[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {

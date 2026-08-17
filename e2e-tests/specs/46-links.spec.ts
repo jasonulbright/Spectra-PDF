@@ -38,7 +38,7 @@ async function makeLinkedPdf(path: string): Promise<void> {
 }
 
 async function firstLinkUrl(path: string): Promise<string | undefined> {
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)), isEvalSupported: false }).promise;
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)) }).promise;
   const annots = (await (await pdf.getPage(1)).getAnnotations()) as { subtype: string; url?: string }[];
   await pdf.loadingTask.destroy();
   return annots.find((a) => a.subtype === 'Link')?.url;

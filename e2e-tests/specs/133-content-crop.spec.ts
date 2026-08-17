@@ -26,6 +26,7 @@ import {
   saveActiveAs,
   invokeAppCommand,
   closeAllFiles,
+  scrollIntoReach,
 } from '../support/harness.js';
 
 const require = createRequire(import.meta.url);
@@ -80,7 +81,7 @@ describe('content-aware crop', () => {
     // The auto block sits below the manual fields in a scrolling dock, so it
     // is clipped until the panel is scrolled to it.
     await $('[data-testid="pagebox-margin"]').waitForExist({ timeout: 15_000 });
-    await $('[data-testid="pagebox-margin"]').scrollIntoView();
+    await scrollIntoReach('[data-testid="pagebox-margin"]');
     await setReactInputValue('[data-testid="pagebox-margin"]', String(MARGIN));
 
     // Committing is refused until the measurement has run: the count shown

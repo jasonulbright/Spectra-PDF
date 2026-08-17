@@ -65,7 +65,7 @@ describe('custom stamp authoring', () => {
 
     // The pill appears and the library persisted.
     await browser.waitUntil(
-      async () => (await $$('[data-testid^="stamp-custom-"]')).length > 0,
+      async () => (await $$('[data-testid^="stamp-custom-"]').getElements()).length > 0,
       { timeoutMsg: 'the custom stamp pill never appeared' },
     );
     const stored = await customStampsInStore();
@@ -75,11 +75,11 @@ describe('custom stamp authoring', () => {
 
   it('placing it resolves the {date} token at placement time', async () => {
     // Select the custom pill (the only stamp-custom-* button, not the ×).
-    const pills = await $$('[data-testid^="stamp-custom-"]');
+    const pills = await $$('[data-testid^="stamp-custom-"]').getElements();
     let pill: WebdriverIO.Element | null = null;
     for (const p of await pills) {
       const tid = await p.getAttribute('data-testid');
-      if (!tid.includes('-del-')) pill = p;
+      if (tid !== null && !tid.includes('-del-')) pill = p;
     }
     expect(pill).not.toBeNull();
     await pill!.click();
@@ -100,12 +100,15 @@ describe('custom stamp authoring', () => {
       .up()
       .perform();
 
-    const a = (await browser.executeAsync(function (done) {
+    const a = await browser.executeAsync<
+      { kind: string; note?: string; annotationId: string; docId: string; pageId: string } | null,
+      []
+    >(function (done) {
       (window as any).__SPECTRA_TEST__
         .getFirstAnnotation(8000)
-        .then((x: unknown) => done(x))
-        .catch(() => done(null));
-    })) as { kind: string; note?: string; annotationId: string; docId: string; pageId: string } | null;
+        .then((x: unknown) => done(x as any))
+        .catch(() => done(null as any));
+    });
     expect(a).not.toBeNull();
     expect(a!.kind).toBe('stamp');
     expect(a!.note).toMatch(/^SIGNED \d/);
@@ -143,12 +146,12 @@ describe('custom stamp authoring', () => {
     )) as { annotationId?: string } | string;
     expect(typeof added).not.toBe('string');
 
-    const first = (await browser.executeAsync(function (done) {
+    const first = await browser.executeAsync<{ hasImage?: boolean } | null, []>(function (done) {
       (window as any).__SPECTRA_TEST__
         .getFirstAnnotation(8000)
-        .then((x: unknown) => done(x))
-        .catch(() => done(null));
-    })) as { hasImage?: boolean } | null;
+        .then((x: unknown) => done(x as any))
+        .catch(() => done(null as any));
+    });
     expect(first?.hasImage).toBe(true);
 
     // Through the REAL commit bridge + save, then the REAL CLI reads it back.
@@ -171,7 +174,7 @@ describe('custom stamp authoring', () => {
   });
 
   it('deleting the custom stamp empties the library', async () => {
-    const dels = await $$('[data-testid^="stamp-custom-del-"]');
+    const dels = await $$('[data-testid^="stamp-custom-del-"]').getElements();
     expect((await dels).length).toBe(1);
     // The × reveals on hover (opacity) — click it directly via the DOM.
     await browser.execute(() => {

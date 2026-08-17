@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.1.1
+
+*Released 2026-08-17*
+
+### Checks that could not read something now say so
+
+- A document whose annotations cannot be read no longer produces a clean accessibility result.
+- The scripts check no longer reports a document free of scripts after a partial read.
+- A structure tree holding no elements is reported as untagged rather than as tagged.
+- A table cell declaring an unreadable span is named instead of compared against a default.
+
+### One answer to whether a font is embedded
+
+- Preflight, the document checker and the Properties dialog now share one embedding answer.
+- A font whose embedding cannot be determined says so instead of reading as not embedded.
+- A Type 3 font is judged by the glyph programs it carries in its own dictionary.
+- Embedding rewrites only a font proven to carry no program, never one that will not read.
+
+### Fonts the document survey used to miss
+
+- The font survey now follows form XObjects, glyph procedures, appearance streams and form resources.
+- A document's font total is no longer an undercount presented as a complete figure.
+
+### Fixes
+
+- Form fields in a converted PostScript file are registered instead of left rendered and dead.
+
 ## 1.1.0
 
 *Released 2026-08-16*

@@ -30,7 +30,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 // tests in tests/workspace-commit.test.ts, just proving the annotation
 // survives the real Tauri IPC + commit-bridge round trip end to end.
 async function loadPdf(path: string) {
-  return pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)), isEvalSupported: false })
+  return pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)) })
     .promise;
 }
 
