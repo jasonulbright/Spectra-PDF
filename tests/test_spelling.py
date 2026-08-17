@@ -7,10 +7,11 @@ Three layers, each with its own failure mode:
 * the DICTIONARIES, gated per language against `spelling_words.py`. A word
   list that rejects its own everyday vocabulary paints the whole document red,
   so "ordinary words accepted, planted misspellings rejected" is the shipping
-  condition for a tag, checked for all 35 rather than sampled.
+  condition for a tag, checked for all 36 rather than sampled.
 * the DOCUMENT WALK and its refusals, over hand-built fixtures.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -21,6 +22,7 @@ import pytest
 from pikepdf import Dictionary, Name
 
 from engine.spelling import (
+    VoikkoDictionary,
     add_user_dictionary,
     check_spelling,
     check_word,
@@ -40,11 +42,24 @@ DICT_DIR = os.path.join(
 )
 
 
+#: The Finnish tag ships a morphological analyser instead of a word list, so
+#: its provisioning question is a different set of files.
+VOIKKO_TAG = "fi"
+VOIKKO_FILES = (
+    "libvoikko-1.dll",
+    "libvoikko.py",
+    os.path.join("5", "mor-standard", "index.txt"),
+    os.path.join("5", "mor-standard", "mor.vfst"),
+)
+
+
 def _provisioned(tag: str) -> bool:
     """The FILES, never the directory. `release.yml` creates an empty
     resources/dictionaries stub for the Tauri build script, and an
     `isdir` guard is satisfied by that stub — which is exactly the state
     neither a provisioned box nor a bare checkout ever reaches."""
+    if tag == VOIKKO_TAG:
+        return all(os.path.isfile(os.path.join(DICT_DIR, tag, name)) for name in VOIKKO_FILES)
     base = os.path.join(DICT_DIR, tag, tag)
     return os.path.isfile(base + ".aff") and os.path.isfile(base + ".dic")
 
@@ -226,6 +241,122 @@ class TestShippedDictionaries:
         assert suggestions
         for suggestion in suggestions:
             assert suggestion == unicodedata.normalize("NFC", suggestion)
+
+
+# ═════════════════════ the morphological dictionary ════════════════════════
+#
+# Finnish is checked by a transducer rather than a word list. What is pinned
+# here is the SEAM: the adapter answers the same two questions the Hunspell
+# path answers, the vendored library is the only one that can ever be loaded,
+# and a Voikko tree outside the shipped directory is not a dictionary.
+
+
+class TestFinnishMorphology:
+    def test_the_finnish_tag_resolves_and_loads_as_an_analyser(self):
+        _require(VOIKKO_TAG)
+        assert resolved_tag("fi", DICT_DIR) == VOIKKO_TAG
+        assert resolved_tag("fi-FI", DICT_DIR) == VOIKKO_TAG
+        assert isinstance(load_dictionary("fi", DICT_DIR), VoikkoDictionary)
+
+    def test_a_generated_form_no_word_list_could_hold_is_accepted(self):
+        # Both shapes the analyser exists for: an inflection nine morphemes
+        # deep, and a compound built at will. A frequency list holds neither.
+        _require(VOIKKO_TAG)
+        dictionary = load_dictionary("fi", DICT_DIR)
+        assert dictionary.lookup("juoksentelisinkohan")
+        assert dictionary.lookup("kissoillammekaan")
+        assert not dictionary.lookup("juoksentelisinkohaan")
+
+    def test_the_adapter_answers_an_empty_word_without_asking(self):
+        _require(VOIKKO_TAG)
+        dictionary = load_dictionary("fi", DICT_DIR)
+        assert dictionary.lookup("") is False
+        assert dictionary.suggest("") == []
+
+    def test_a_correction_may_be_a_SPLIT_and_is_offered_as_one(self):
+        # Voikko corrects a run-together pair by splitting it, so a replacement
+        # is not always one token. Every fix site replaces a code-point RANGE
+        # with a string, so a space in the replacement is ordinary; dropping
+        # these would leave the whole class of error with no correct answer.
+        _require(VOIKKO_TAG)
+        result = spelling_suggestions("menenkotiin", "fi", DICT_DIR, limit=10)
+        assert result["correct"] is False
+        assert "menen kotiin" in result["suggestions"]
+
+    def test_a_decomposed_word_is_accepted_and_answered_decomposed(self):
+        # The analyser folds normalization itself and always answers composed,
+        # so without the adapter's declared domain a document written in NFD
+        # would be corrected with NFC replacement text.
+        _require(VOIKKO_TAG)
+        dictionary = load_dictionary("fi", DICT_DIR)
+        composed = "työpöytä"
+        assert check_word(dictionary, composed, set())
+        assert check_word(dictionary, unicodedata.normalize("NFD", composed), set())
+        suggestions = spelling_suggestions(
+            unicodedata.normalize("NFD", "hyvvää"), "fi", DICT_DIR
+        )["suggestions"]
+        assert suggestions
+        for suggestion in suggestions:
+            assert suggestion == unicodedata.normalize("NFD", suggestion)
+
+    def test_a_tree_without_the_vendored_library_refuses_rather_than_finding_one(self, tmp_dir):
+        # The binding's own loader falls back to a BARE `libvoikko-1.dll`,
+        # which Windows resolves against the system search path. A morphology
+        # tree with no library beside it is exactly the state that fallback
+        # would rescue, so it must refuse instead — otherwise a machine with
+        # Voikko installed would silently spell-check against that copy.
+        tree = os.path.join(tmp_dir, "fi", "5", "mor-standard")
+        os.makedirs(tree)
+        with open(os.path.join(tree, "index.txt"), "w", encoding="utf-8") as f:
+            f.write("Voikko-Dictionary-Format: 5\nLanguage: fi-x-standard\n")
+        with pytest.raises(ValueError, match="incomplete"):
+            load_dictionary("fi", tmp_dir)
+
+    def test_a_voikko_tree_in_the_user_directory_is_not_a_dictionary(self, tmp_dir):
+        # One engine per shipped tree: the analyser is a vendored native
+        # library, and nothing dropped into the user directory can be the one
+        # the app links. User additions ride the custom-word list instead.
+        user_dir = os.path.join(tmp_dir, "user")
+        tree = os.path.join(user_dir, "zz_mor", "5", "mor-standard")
+        os.makedirs(tree)
+        with open(os.path.join(tree, "index.txt"), "w", encoding="utf-8") as f:
+            f.write("Voikko-Dictionary-Format: 5\nLanguage: zz\n")
+        assert list_dictionaries(None, user_dir)["dictionaries"] == []
+        with pytest.raises(ValueError, match="No spelling dictionary for"):
+            resolved_tag("zz_mor", None, user_dir)
+
+    def test_a_word_list_wins_over_a_voikko_tree_in_the_same_directory(self, tmp_dir):
+        # The refusal above is enforced by the tag scan, which never yields a
+        # user Voikko tree. A directory holding BOTH shapes still reaches the
+        # loader, so the loader keeps the same precedence rather than reading
+        # the tree that the scan already declined to offer.
+        user_dir = os.path.join(tmp_dir, "user")
+        tag_dir = os.path.join(user_dir, "zz_ZZ")
+        os.makedirs(os.path.join(tag_dir, "5", "mor-standard"))
+        with open(os.path.join(tag_dir, "5", "mor-standard", "index.txt"), "w", encoding="utf-8") as f:
+            f.write("Voikko-Dictionary-Format: 5\n")
+        with open(os.path.join(tag_dir, "zz_ZZ.aff"), "w", encoding="utf-8") as f:
+            f.write("SET UTF-8\n")
+        with open(os.path.join(tag_dir, "zz_ZZ.dic"), "w", encoding="utf-8") as f:
+            f.write("1\nwibble\n")
+        dictionary = load_dictionary("zz_ZZ", None, user_dir)
+        assert not isinstance(dictionary, VoikkoDictionary)
+        assert check_word(dictionary, "wibble", set())
+
+    def test_a_user_pair_cannot_take_the_finnish_tag(self, tmp_dir):
+        # The bundled-tag collision check reads the same widened listing, so
+        # the analyser's tag is claimed against user pairs like any other.
+        _require(VOIKKO_TAG)
+        aff = os.path.join(tmp_dir, "fi.aff")
+        dic = os.path.join(tmp_dir, "fi.dic")
+        with open(aff, "w", encoding="utf-8") as f:
+            f.write("SET UTF-8\n")
+        with open(dic, "w", encoding="utf-8") as f:
+            f.write("1\nwibble\n")
+        user_dir = os.path.join(tmp_dir, "user")
+        os.makedirs(user_dir)
+        with pytest.raises(ValueError, match="already ships with the app"):
+            add_user_dictionary(aff, dic, user_dir, DICT_DIR)
 
 
 # ═════════════════════════ resolution and lookup ═══════════════════════════
@@ -609,8 +740,10 @@ class TestManifest:
                 assert "notice" in present, tag
 
     def test_the_manifest_and_the_word_lists_name_the_same_tags(self):
+        # The morphological tag is smoke-gated like every other but has no
+        # word list to pin, so it is manifested by scripts/voikko.tsv instead.
         tags = {tag for tag, role, *_ in self.rows() if role == "aff"}
-        assert tags == set(SHIPPED_TAGS)
+        assert tags == set(SHIPPED_TAGS) - {VOIKKO_TAG}
 
     def test_the_provisioned_tree_ships_every_notice_the_manifest_names(self):
         if not _provisioned("en_US"):
@@ -620,3 +753,70 @@ class TestManifest:
                 continue
             expected = os.path.join(DICT_DIR, tag, "notices", os.path.basename(upstream))
             assert os.path.isfile(expected), expected
+
+
+class TestVoikkoManifest:
+    MANIFEST = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "voikko.tsv"
+    )
+
+    def rows(self):
+        out = []
+        with open(self.MANIFEST, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("#") or line.startswith("file\t") or not line.strip():
+                    continue
+                out.append(line.rstrip("\n").split("\t"))
+        return out
+
+    def test_every_row_carries_a_licence_a_notice_and_a_source(self):
+        notices = {os.path.basename(f) for f, _c, role, *_ in self.rows() if role == "notice"}
+        for file, component, role, sha, spdx, notice, source in self.rows():
+            assert component, file
+            assert spdx, file
+            assert source, file
+            # A `runtime` row's bytes are whatever bundle-tesseract.ps1
+            # vendored, so it pins a notice rather than a hash.
+            assert sha == "-" or len(sha) == 64, file
+            assert notice in notices, file
+
+    def test_every_shipped_binary_has_a_row(self):
+        if not _provisioned(VOIKKO_TAG):
+            pytest.skip("Finnish dictionary not provisioned")
+        listed = {file for file, *_ in self.rows()}
+        root = os.path.join(DICT_DIR, VOIKKO_TAG)
+        for dirpath, _dirs, files in os.walk(root):
+            for name in files:
+                if not name.lower().endswith(".dll"):
+                    continue
+                shipped = os.path.relpath(os.path.join(dirpath, name), root).replace(os.sep, "/")
+                assert shipped in listed, shipped
+
+    def test_the_provisioned_tree_ships_every_file_the_manifest_names(self):
+        if not _provisioned(VOIKKO_TAG):
+            pytest.skip("Finnish dictionary not provisioned")
+        for file, _component, _role, sha, *_ in self.rows():
+            path = os.path.join(DICT_DIR, VOIKKO_TAG, file.replace("/", os.sep))
+            assert os.path.isfile(path), path
+            if sha == "-":
+                continue
+            with open(path, "rb") as f:
+                assert hashlib.sha256(f.read()).hexdigest() == sha, file
+
+    def test_the_runtime_rows_name_binaries_the_ocr_manifest_already_covers(self):
+        # The three mingw DLLs libvoikko links already ship beside the OCR
+        # runtime with rows there; they are copied rather than re-fetched, and
+        # inventoried once. A copy with no row on either side is the failure.
+        ocr = os.path.join(
+            os.path.dirname(self.MANIFEST), "tesseract-licenses.tsv"
+        )
+        with open(ocr, encoding="utf-8") as f:
+            covered = {
+                line.split("\t")[0].strip()
+                for line in f
+                if not line.startswith("#") and "\t" in line
+            }
+        runtime = [file for file, _c, role, *_ in self.rows() if role == "runtime"]
+        assert runtime
+        for file in runtime:
+            assert file in covered, file

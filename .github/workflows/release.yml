@@ -194,11 +194,22 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-jbig2enc.ps1
 
       - name: Vendor spelling dictionaries
-        # P32: 34 Hunspell .aff/.dic pairs from LibreOffice/dictionaries at the
+        # P32: 35 Hunspell .aff/.dic pairs from LibreOffice/dictionaries at the
         # commit pinned in the script, each file SHA-256 verified against
         # scripts/dictionaries.tsv. The script REFUSES to write the tree if any
         # tag ships a dictionary with no notice row (the jbig2enc precedent).
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-dictionaries.ps1
+        shell: pwsh
+
+      - name: Vendor the Finnish morphological analyser
+        # N18: Finnish words are generated, not listed, so the fi tag ships
+        # libvoikko plus the voikko-fi transducer instead of an .aff/.dic pair.
+        # Two pinned archives, SHA-256 verified before extraction and every
+        # extracted file again against scripts/voikko.tsv. Must run AFTER the
+        # step above, which rebuilds resources/dictionaries wholesale, and after
+        # the Tesseract step, whose mingw runtime DLLs it copies beside
+        # libvoikko-1.dll.
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-voikko.ps1
         shell: pwsh
 
       - name: Stage OCR language models

@@ -135,6 +135,28 @@ describe('paragraphFix', () => {
     const fix = paragraphFix('recieve', [], issue({ start: 0, end: 7 }), 'receive', 3);
     expect(fix!.spans).toEqual([{ start: 0, end: 7, run: 3 }]);
   });
+
+  it('commits a correction that SPLITS one word into two', () => {
+    // A morphological checker corrects a run-together pair by splitting it, so
+    // a suggestion is not always one token. The fix is a range replacement, so
+    // the extra word is ordinary text — but the span map must still cover the
+    // longer paragraph, or the engine refuses the commit.
+    const text = 'the menenkotiin here';
+    const runs = [
+      { start: 0, end: 4, run: 0 },
+      { start: 4, end: 20, run: 1 },
+    ];
+    const fix = paragraphFix(
+      text,
+      runs,
+      { word: 'menenkotiin', start: 4, end: 15 },
+      'menen kotiin',
+    );
+    expect(fix).not.toBeNull();
+    expect(fix!.text).toBe('the menen kotiin here');
+    expect(fix!.spans[0].start).toBe(0);
+    expect(fix!.spans[fix!.spans.length - 1].end).toBe(fix!.text.length);
+  });
 });
 
 describe('occurrencesDescending', () => {
