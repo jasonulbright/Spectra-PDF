@@ -1001,6 +1001,54 @@ def lbl_outside_list_item_ok(path):
     return save(pdf, path)
 
 
+def _div_wrapped_item(pdf, page, container):
+    """A well-formed list item inside a `Div` inside `container`.
+
+    ISO 32000-2 Table 365 makes `Div` inherit its parent's containment, so the
+    item's placement is the container's to answer. `container` is what decides
+    whether that is legal: an `L` places the item correctly, anything else does
+    not, and the `Div` does not change the answer either way.
+    """
+    draw(
+        pdf, page,
+        "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Body copy.) Tj ET EMC\n"
+        "/Lbl <</MCID 1>> BDC BT /F1 11 Tf 40 660 Td (1.) Tj ET EMC\n"
+        "/LBody <</MCID 2>> BDC BT /F1 11 Tf 60 660 Td (An item.) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    lbl = elem(pdf, "Lbl", doc, page=page, mcid=1)
+    body = elem(pdf, "LBody", doc, page=page, mcid=2)
+    item = elem(pdf, "LI", doc, kids=[lbl, body])
+    div = elem(pdf, "Div", doc, kids=[item])
+    outer = elem(pdf, container, doc, kids=[div])
+    doc[Name.K] = Array([para, outer])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para, lbl, body])
+
+
+def li_in_div_in_l_ok(path):
+    """PASS fixture — the list item is inside the list, reached through the
+    `Div` that inherits the list's containment."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _div_wrapped_item(pdf, page, "L")
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def li_under_div_under_sect_fails(path):
+    """The same `Div` over a `Sect`, which is no list: reading through a
+    grouping element reaches the real container rather than laundering the
+    violation, so the item is still misplaced."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _div_wrapped_item(pdf, page, "Sect")
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
 # ── structure nesting ─────────────────────────────────────────────────────
 
 
@@ -1330,6 +1378,8 @@ ROSTER = {
     "li_outside_l": (li_outside_l, "list_items", "fail"),
     "lbody_no_lbl": (lbody_no_lbl, "list_labels", "warn"),
     "lbl_outside_list_item_ok": (lbl_outside_list_item_ok, "list_labels", "pass"),
+    "li_in_div_in_l_ok": (li_in_div_in_l_ok, "list_items", "pass"),
+    "li_under_div_under_sect_fails": (li_under_div_under_sect_fails, "list_items", "fail"),
     "lbl_under_li_ok": (lbl_under_li_ok, "structure_nesting", "pass"),
     "lbl_in_fenote_ok": (lbl_in_fenote_ok, "structure_nesting", "pass"),
     "toc_link_lbl_ok": (toc_link_lbl_ok, "structure_nesting", "pass"),

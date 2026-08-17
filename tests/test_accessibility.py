@@ -968,6 +968,7 @@ class TestStructureNesting:
             ("tr_outside_table", "table_rows"),
             ("td_outside_tr", "table_cells"),
             ("li_outside_l", "list_items"),
+            ("li_under_div_under_sect_fails", "list_items"),
             ("lbody_outside_li_fails", "list_labels"),
         ],
     )
@@ -1068,6 +1069,30 @@ class TestStructureNesting:
         B.make_conformant(pdf, page)
         row = _check(check_accessibility(B.save(pdf, src)), "structure_nesting")
         assert row["findings"] == [], json.dumps(row, indent=2)
+
+    def test_the_list_checks_read_the_same_inheritance(self, tmp_dir):
+        """One question, one answer: the list checks judge placement against
+        the effective parent the nesting check does, so a list item inside a
+        `Div` inside its `L` is placed correctly on every check that looks."""
+        res = check_accessibility(_build(tmp_dir, "li_in_div_in_l_ok"))
+        statuses = _statuses(res)
+        assert statuses["list_items"] == "pass", json.dumps(
+            _check(res, "list_items"), indent=2
+        )
+        assert statuses["list_labels"] == "pass", json.dumps(
+            _check(res, "list_labels"), indent=2
+        )
+        assert _check(res, "structure_nesting")["findings"] == []
+
+    def test_a_grouping_element_does_not_launder_a_misplaced_item(self, tmp_dir):
+        """The read-through reaches the real container rather than stopping at
+        the first thing that is not a list: a `Sect` is no list, so the item
+        under it is misplaced and the finding names the `Sect`."""
+        res = check_accessibility(_build(tmp_dir, "li_under_div_under_sect_fails"))
+        row = _check(res, "list_items")
+        assert row["status"] == "fail", json.dumps(row, indent=2)
+        assert [f["detail_key"] for f in row["findings"]] == ["list_item_outside_list"]
+        assert row["findings"][0]["values"] == {"parent": "Sect"}
 
     def test_a_caption_between_the_list_items_is_named(self, tmp_dir):
         """ISO 32000-2 Table 370: a caption inside a list shall be its first or
