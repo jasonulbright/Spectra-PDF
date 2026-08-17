@@ -129,9 +129,17 @@ class FontCapability:
         code_trie: Optional[dict] = None,
         default_declared: bool = False,
         writes_vertical: Optional[bool] = None,
+        reader_limit: bool = False,
     ):
         self.editable = editable
         self.reason = reason
+        # Does `reason` describe the DOCUMENT or THIS READER? A font that
+        # carries no mapping is a defect in the file; an encoding this build
+        # does not implement is a gap in us, and a check that reports the
+        # second as the first tells the reader something false about their
+        # document. Only the sites that genuinely mean "we cannot read this"
+        # set it — see `_refused`.
+        self.reader_limit = reader_limit
         self._code2uni = code2uni
         self._uni2code = uni2code
         self._widths = widths
@@ -326,6 +334,7 @@ def _refused(
     default_width: float = DEFAULT_WIDTH,
     default_declared: bool = False,
     writes_vertical: bool = False,
+    reader_limit: bool = False,
 ) -> FontCapability:
     """A non-editable capability. `code_bytes` must still be RIGHT (2 for
     composite fonts): the run LISTER measures refused runs' widths for
@@ -351,6 +360,7 @@ def _refused(
         code_bytes,
         default_declared=default_declared,
         writes_vertical=writes_vertical,
+        reader_limit=reader_limit,
     )
 
 
@@ -981,7 +991,7 @@ def font_capability(font_obj) -> FontCapability:
         named_cmap = None
         vertical = enc.endswith("-V")
 
-        def _refuse_composite(reason: str) -> FontCapability:
+        def _refuse_composite(reason: str, *, reader_limit: bool = False) -> FontCapability:
             """A composite refusal carrying whatever the document DECLARES
             Under Identity-H/V the byte code IS the CID, so /W (or
             /W2) is code-keyed as it stands and /DW answers for the rest —
@@ -1007,6 +1017,7 @@ def font_capability(font_obj) -> FontCapability:
                 default_width=default_r,
                 default_declared=declared_r,
                 writes_vertical=vertical,
+                reader_limit=reader_limit,
             )
 
         if enc not in ("Identity-H", "Identity-V"):
@@ -1033,9 +1044,15 @@ def font_capability(font_obj) -> FontCapability:
             # the name's -H/-V suffix (a disagreement is malformed) —
             # for -H names this is the is_vertical() gate unchanged.
             if cm is None or getattr(cm, "code2cid", None) is None:
+                # The bundled CMap tables do not carry this encoding, or it is
+                # an embedded CMap stream this build does not parse. The
+                # document may be perfectly well formed; we cannot read it.
                 return _refuse_composite(
-                    f"unsupported composite-font encoding ({enc or 'embedded CMap'})"
+                    f"unsupported composite-font encoding ({enc or 'embedded CMap'})",
+                    reader_limit=True,
                 )
+            # A writing mode that disagrees with the name's -H/-V suffix is
+            # MALFORMED, so this refusal stays a statement about the document.
             if cm.is_vertical() != vertical:
                 return _refuse_composite(
                     f"unsupported composite-font encoding ({enc})"

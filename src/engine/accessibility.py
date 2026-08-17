@@ -1194,9 +1194,16 @@ def _check_character_encoding(check, pages):
     construction, so the guard could never fire and every space between two
     words was reported as a font with no Unicode mapping. The reason is
     compared against the constant rather than the sentence.
+
+    A run whose font THIS READER declines is not that either. `reader_limit`
+    separates "the document carries no mapping for these bytes", which is a
+    defect in the file and a `fail`, from "this build does not implement that
+    encoding", which is a gap in us and can only be `needs_review` — reporting
+    the second as the first states something false about the reader's document.
     """
     counted = 0
     findings = []
+    gaps = []
     seen_fonts: set = set()
     for page_no in sorted(pages.runs):
         for run in pages.runs[page_no]:
@@ -1210,17 +1217,21 @@ def _check_character_encoding(check, pages):
             if key in seen_fonts:
                 continue
             seen_fonts.add(key)
-            findings.append(
-                _finding(
-                    _content_address(page_no, int(run.get("index", 0))),
-                    "font_has_no_unicode_mapping",
-                    preview=str(run.get("text") or "")[:80],
-                    rect=run.get("rect"),
-                    values={"page": page_no, "font": str(run.get("font_name") or ""),
-                            "reason": reason},
-                )
+            finding = _finding(
+                _content_address(page_no, int(run.get("index", 0))),
+                "font_encoding_unsupported" if run.get("reader_limit")
+                else "font_has_no_unicode_mapping",
+                preview=str(run.get("text") or "")[:80],
+                rect=run.get("rect"),
+                values={"page": page_no, "font": str(run.get("font_name") or ""),
+                        "reason": reason},
             )
+            (gaps if run.get("reader_limit") else findings).append(finding)
     _verdict(check, counted, findings)
+    # A font we could not read cannot support a clean claim over the text it
+    # draws, so a pass becomes a review and the gaps ride with it. A fail
+    # stands: it names bytes the DOCUMENT maps to nothing.
+    _also_review(check, gaps)
 
 
 def _check_tagged_multimedia(check, tree, annots):
