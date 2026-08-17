@@ -160,6 +160,7 @@ export const DIALOG_STRINGS = {
   'dialog.props.fontEmbeddedSubset': 'Embedded subset',
   'dialog.props.fontSubstituted': 'Not embedded — drawn with {{face}}',
   'dialog.props.fontNotEmbedded': 'Not embedded — the substitute face is unknown',
+  'dialog.props.fontEmbeddingUnknown': 'Whether this font is embedded could not be determined',
 
   'dialog.props.iv.pageLayout': 'Page layout',
   'dialog.props.iv.layout.default': 'Default',

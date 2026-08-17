@@ -160,7 +160,7 @@ class TestDistill:
             distill(src, out, gs_path=gs_path)
 
 
-# Distiller-style form-field pdfmarks. gs lands the /ANN Widget
+# Form-field pdfmarks. gs lands the /ANN Widget
 # annotations with field keys intact but never writes /AcroForm — the
 # distill op ADOPTS them (engine/acroform.adopt_orphan_widget_fields).
 FORMS_PS_FIXTURE = b"""%!PS-Adobe-3.0

@@ -244,7 +244,7 @@ pub enum CliCommand {
     BatchOcr(BatchOcrArgs),
     /// Rebuild a PDF (Tier 2: Ghostscript round-trip — re-render every page)
     Rebuild(RebuildArgs),
-    /// Convert a PostScript/EPS file to PDF (the Distiller job, via Ghostscript)
+    /// Convert a PostScript/EPS file to PDF (distilling, via Ghostscript)
     Distill(DistillArgs),
     /// Recover pages from a damaged PDF (Tier 3: per-page salvage extraction)
     Recover(RecoverArgs),

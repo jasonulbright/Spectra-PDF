@@ -1816,6 +1816,8 @@ export const PANEL_STRINGS = {
     'A {{subtype}} annotation on page {{page}} is outside the structure tree.',
   'panel.a11y.detail.annotations_unreadable':
     'Page {{page}} carries an annotation that could not be read, so this check did not see everything on it.',
+  'panel.a11y.detail.annotations_unreadable_document':
+    'The document’s annotations could not be read, so this check did not see them.',
   'panel.a11y.detail.cell_outside_row': 'This cell’s parent is {{parent}}, not a table row.',
   'panel.a11y.detail.content_not_tagged':
     'Text on page {{page}} is covered by no tag and is not declared as decoration.',
@@ -1866,6 +1868,8 @@ export const PANEL_STRINGS = {
   'panel.a11y.detail.script_site': 'A {{kind}} script named {{name}}.',
   'panel.a11y.detail.scripts_unreadable':
     'A script in this document could not be read, so this check did not see what it runs.',
+  'panel.a11y.detail.structure_tree_empty':
+    'The document’s structure tree holds no elements, so nothing in it is tagged.',
   'panel.a11y.detail.structure_tree_missing': 'The document has no structure tree.',
   'panel.a11y.detail.structure_truncated':
     'The structure tree could not be walked past this element, so this check did not see everything below it.',
@@ -1880,6 +1884,8 @@ export const PANEL_STRINGS = {
     'This table’s rows hold no cells the column arithmetic can place, so its widths were not compared.',
   'panel.a11y.detail.table_rows_have_different_widths':
     'The rows of this table are {{widths}} cells wide.',
+  'panel.a11y.detail.table_span_unreadable':
+    'A cell in this table declares a column or row span that is not a positive whole number, so its widths were not compared.',
   'panel.a11y.detail.title_missing': 'The document has no title.',
   'panel.a11y.detail.title_not_displayed':
     'The document has a title but is set to show its file name instead.',

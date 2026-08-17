@@ -1,12 +1,11 @@
 //! Watched folders — drop a PDF into an intake folder and a saved
 //! guided action runs over it automatically: processed copies mirror into a
-//! destination and the originals file into a processed folder (Distiller's
-//! classic In → Out → Done shape, which is also what makes the watch
-//! idempotent: the intake only ever holds unprocessed work).
+//! destination and the originals file into a processed folder. The
+//! intake → out → done shape is what makes the watch idempotent: the intake
+//! only ever holds unprocessed work.
 //!
-//! Watching is POLLING, on purpose: Distiller's own watched folders poll,
-//! a 5-second scan of one directory is negligible, and it needs no
-//! filesystem-event dependency. A file must hold the SAME SIZE across two
+//! Watching is POLLING, on purpose: a 5-second scan of one directory is
+//! negligible, and it needs no filesystem-event dependency. A file must hold the SAME SIZE across two
 //! consecutive ticks before it counts as arrived — a half-copied file never
 //! triggers a run (and if it slips through anyway, the run's per-file
 //! isolation reports it and leaves it in the intake for the next tick).

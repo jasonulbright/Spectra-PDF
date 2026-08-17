@@ -187,8 +187,9 @@ class TestTheFourRules:
             Widths=Array([500]), FontMatrix=Array([0.001, 0, 0, 0.001, 0, 0]),
             CharProcs=Dictionary(), Encoding=Name("/WinAnsiEncoding"),
         ))
-        # No /CharProcs entries, so the inventory reports it non-embedded and
-        # the embedder has to say WHY it cannot write a program.
+        # No /CharProcs, so whether a program travels with this font has no
+        # answer — but no program can ever be written for a Type 3 either, so
+        # the embedder still has to say WHY rather than skip it silently.
         del font["/CharProcs"]
         page = pdf.add_blank_page(page_size=(300, 200))
         page.obj["/Resources"] = Dictionary(Font=Dictionary(F1=font))

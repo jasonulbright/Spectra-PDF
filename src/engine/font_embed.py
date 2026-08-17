@@ -41,7 +41,8 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Dictionary, Name
 
-from engine.font_inventory import _descendants, _is_embedded, walk_document_fonts
+from engine.font_embedding import font_embedded
+from engine.font_inventory import _descendants, walk_document_fonts
 from engine.inplace import finish_staged, is_same_file, staging_target
 from engine.pdf_fonts import (
     _declared_simple_widths,
@@ -499,7 +500,7 @@ def embed_missing_fonts(file: str, output: str, sources=("system",),
     with pikepdf.open(file) as pdf:
         targets: list = []
 
-        def collect(font_obj, _page) -> None:
+        def collect(font_obj, _page, _name) -> None:
             try:
                 marker = font_obj.objgen
             except AttributeError:
@@ -508,7 +509,15 @@ def embed_missing_fonts(file: str, output: str, sources=("system",),
             if key in seen:
                 return
             seen.add(key)
-            if _is_embedded(font_obj):
+            state = font_embedded(font_obj)
+            if state is True:
+                return
+            # Only a font PROVEN to carry no program is rewritten: an unknown
+            # state is not a missing program, and embedding over it would
+            # replace a font whose own program may be intact. A Type 3 is the
+            # exception because no program can ever be written for it, so it
+            # is named whatever its glyph procedures read as.
+            if state is None and str(font_obj.get("/Subtype", "")).lstrip("/") != "Type3":
                 return
             targets.append(font_obj)
 

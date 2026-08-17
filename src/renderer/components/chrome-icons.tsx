@@ -3,7 +3,7 @@ import React from 'react';
 /**
  * Workbench-chrome glyphs — toolbar, tab strip, Home tab — in
  * the app's established icon idiom (see tool-icons.tsx / canvas/icons.tsx):
- * 24-grid, stroke-only, `currentColor`, round caps. No Adobe artwork;
+ * 24-grid, stroke-only, `currentColor`, round caps. No third-party artwork;
  * hand-authored. The Record is total over ChromeIconId, so a missing glyph
  * fails to compile (the GLYPHS precedent).
  */

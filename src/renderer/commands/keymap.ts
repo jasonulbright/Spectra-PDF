@@ -4,7 +4,7 @@
 // This replaces the six hand-rolled keydown effects and both duplicated
 // isEditable helpers this replaced.
 import { useEffect } from 'react';
-import { KEY_BINDINGS, type KeyBinding } from './acrobat-keys';
+import { KEY_BINDINGS, type KeyBinding } from './standard-keys';
 import { COMMANDS, type CommandId } from './registry';
 import {
   appModalCount,

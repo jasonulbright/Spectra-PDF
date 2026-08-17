@@ -589,6 +589,19 @@ class TestUnreadableIsNotAPass:
     def test_a_font_only_inside_a_form_is_still_found(self, tmp_dir):
         assert _statuses(_run(tmp_dir, "font_inside_form"))["fonts_embedded"] == "fail"
 
+    def test_a_font_only_inside_a_type3_glyph_procedure_is_still_found(self, tmp_dir):
+        """A per-page walk stops at the Type 3 font dictionary and never
+        enters its glyph procedures, so this document reported a PASS over a
+        face that carries no program."""
+        assert _statuses(_run(tmp_dir, "font_inside_type3_glyph"))["fonts_embedded"] \
+            == "fail"
+
+    def test_a_font_only_in_the_form_default_resources_is_still_found(self, tmp_dir):
+        """`/AcroForm /DR` hangs off the catalog, so no page walk reaches it
+        and this document reported as carrying no fonts at all."""
+        assert _statuses(_run(tmp_dir, "font_inside_form_default_resources"))[
+            "fonts_embedded"] == "fail"
+
     def test_a_disabled_check_is_not_promoted_to_review(self, tmp_dir):
         report = _run(tmp_dir, "unreadable_colorspace",
                       colour_family={"enabled": False})

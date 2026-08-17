@@ -106,6 +106,17 @@ function armsOf(text: string): string[] {
   return arms.flatMap((arm) => [...arm.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]));
 }
 
+/** The keys an argument that NAMES its value can evaluate to: every literal
+ * assigned to that name inside the enclosing `def`. A detail key is always a
+ * literal at its assignment, so the branches of an if/elif chain are the whole
+ * set; without this a key bound to a local reads as dead in the catalog. */
+function boundTo(name: string, at: number): string[] {
+  const defAt = ENGINE.lastIndexOf('\ndef ', at);
+  const body = ENGINE.slice(defAt < 0 ? 0 : defAt, at);
+  const assign = new RegExp(`\\n\\s*${name}\\s*=\\s*"([a-z_]+)"`, 'g');
+  return [...body.matchAll(assign)].map((m) => m[1]);
+}
+
 function detailKeys(): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
   const call = '_finding(';
@@ -118,7 +129,15 @@ function detailKeys(): Map<string, Set<string>> {
     const body = ENGINE.slice(at + call.length, callEnd(at + call.length));
     const dict = /values=\{([^{}]*)\}/.exec(body);
     if (dict) for (const m of dict[1].matchAll(/"([a-z_]+)":/g)) values.add(m[1]);
-    for (const key of armsOf(ENGINE.slice(firstEnd + 1, secondEnd))) {
+    const arg = ENGINE.slice(firstEnd + 1, secondEnd);
+    let keys = armsOf(arg);
+    if (keys.length === 0 && /^\s*[A-Za-z_][A-Za-z0-9_]*\s*$/.test(arg)) {
+      keys = boundTo(arg.trim(), at);
+    }
+    // A call site the scan reads no key out of is a silent hole: the catalog
+    // row it needs would report as dead and the missing sentence as absent.
+    expect(keys.length, `_finding at ${at} names no detail key`).toBeGreaterThan(0);
+    for (const key of keys) {
       const seen = out.get(key);
       if (seen) for (const v of values) seen.add(v);
       else out.set(key, new Set(values));
