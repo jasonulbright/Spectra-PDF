@@ -1,6 +1,8 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { AppStateProvider, useAppState, useAppDispatch } from './state/AppStateProvider';
-import { file, app, dialog, batch } from './lib/tauri-bridge';
+import { file, app, dialog, batch, tabDrag } from './lib/tauri-bridge';
+import type { PhysicalScreenPoint, TabDragResult } from './lib/tauri-bridge';
+import { tabMoved } from './lib/tab-drag';
 import {
   decodeToRawSource,
   engineWantsRawFallback,
@@ -2224,31 +2226,53 @@ function AppContent(): React.ReactElement {
     await app.confirmClose();
   }, [state.files, isFileDirty, showConfirm, commitOrAbort]);
 
-  // Move the active document to a new window. Pop-out MOVES: the document
-  // leaves this workspace, so two live copies of one file never exist and
-  // every "whose" question keeps its structural answer.
+  // Hand a document to another window. A hand-off MOVES: the document leaves
+  // this workspace, so two live copies of one file never exist and every
+  // "whose" question keeps its structural answer.
   //
   // Pending page edits are committed first — that is the shipped meaning of
   // leaving a view — and the bytes travel through the FILE, which is where
   // they already live. The message carries a path and nothing else: page and
   // document ids are minted against a per-window generation counter, so the
   // same id string names a different physical page in the other window.
+  //
+  // Ownership is handed over in one step, and the receiving window is built
+  // only once it has. Releasing the claim and re-taking it around the build
+  // leaves the path owned by nobody for as long as the window takes to appear:
+  // a third window claiming it in that gap would leave this document with
+  // nowhere to arrive, having already left the only window that could open it.
+  //
+  // One implementation for both gestures — the menu command and a dragged tab
+  // differ only in where the document is going.
+  const handOffDocument = useCallback(
+    async (path: string, hand: () => Promise<TabDragResult>): Promise<boolean> => {
+      if (!(await commitOrAbort())) return false;
+      const moved = await hand();
+      if (!tabMoved(moved)) return false;
+      // Closed WITHOUT a release — the path already belongs to the receiving
+      // window, and releasing here would strip the claim off the window that
+      // now holds it.
+      dispatch({ type: 'CLOSE_FILE', path });
+      return true;
+    },
+    [dispatch, commitOrAbort],
+  );
+
   const handleMoveToNewWindow = useCallback(async () => {
     const current = stateRef.current;
     const target = current.activeFileId ? current.files.get(current.activeFileId) : null;
     if (!target || target.importOnly) return;
-    if (!(await commitOrAbort())) return;
-    // Ownership is handed over in one step, and the window is built only once
-    // it has. Releasing the claim and re-taking it around the build leaves the
-    // path owned by nobody for as long as the window takes to appear: a third
-    // window claiming it in that gap would leave this document with nowhere to
-    // arrive, having already left the only window that could open it.
-    const moved = await app.moveToNewWindow(target.path);
-    if (moved.outcome !== 'tornOff') return;
-    // Closed WITHOUT a release — the path already belongs to the new window,
-    // and releasing here would strip the claim off the window that now holds it.
-    dispatch({ type: 'CLOSE_FILE', path: target.path });
-  }, [dispatch, commitOrAbort]);
+    await handOffDocument(target.path, () => app.moveToNewWindow(target.path));
+  }, [handOffDocument]);
+
+  // A released tab drag. The point is already in physical screen pixels; Rust
+  // decides from it whether this is another window's strip, this one's, or
+  // nowhere (a new window at the drop point).
+  const handleTabDrop = useCallback(
+    (path: string, point: PhysicalScreenPoint) =>
+      handOffDocument(path, () => tabDrag.drop(path, point)),
+    [handOffDocument],
+  );
 
   // --- Command layer ----------------------------------------------------
   // Reading mode's Escape exit (I.6). An interceptor, not a keymap entry —
@@ -2728,7 +2752,7 @@ function AppContent(): React.ReactElement {
       )}
 
       {!(state.ui.readingMode && isDocTab(state.ui.focusedTab)) && (
-        <TabStrip onCloseFile={(path) => void handleCloseFile(path)} />
+        <TabStrip onCloseFile={(path) => void handleCloseFile(path)} onTabDrop={handleTabDrop} />
       )}
 
       <div className="flex flex-1 overflow-hidden">

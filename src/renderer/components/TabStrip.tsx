@@ -8,14 +8,24 @@ import { tabFilePaths } from '../commands/registry';
 import { ChromeIcon } from './chrome-icons';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
+import { useStripRegistration, useTabDragSource, useTabDropCaret, type TabDropHandler } from './useTabDrag';
+import { TEST_HARNESS_ENABLED, registerTabDrag } from '../testHarness';
+import { tabDrag } from '../lib/tauri-bridge';
 
 // The tab strip: Home | Tools | one tab per open
 // document. A 1:1 evolution of the old Home/Tools/Canvas switcher + the
 // Tools-rail file list (both retire). Doc tabs carry a dirty dot, a close ×
 // (also middle-click), and an overflow dropdown when they don't fit.
+//
+// A doc tab also drags to another window. This side owns only the gesture and
+// its own caret: the strip publishes its box to Rust, which hit-tests every
+// window's box and tells whichever one is hovered to draw a caret. A window
+// never paints into another.
 
 interface TabStripProps {
   onCloseFile: (path: string) => void;
+  /** Resolve a released drag; true when the document changed hands. */
+  onTabDrop: TabDropHandler;
 }
 
 const tabBase =
@@ -24,7 +34,7 @@ const tabBase =
 const activeCls = 'bg-neutral-900 text-white';
 const idleCls = 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800';
 
-export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
+export function TabStrip({ onCloseFile, onTabDrop }: TabStripProps): React.ReactElement {
   // Re-render on language change; labels resolve via tChrome.
   useTranslation();
   const state = useAppState();
@@ -65,8 +75,38 @@ export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
 
   const focus = (tab: FocusedTab) => dispatch({ type: 'UI_FOCUS_TAB', tab });
 
+  // The box Rust hit-tests, republished whenever the strip can have moved
+  // inside the window or the tab count relaid it out.
+  const stripRef = useRef<HTMLDivElement>(null);
+  useStripRegistration(stripRef, docPaths.length);
+  const { onTabPointerDown, draggingPath } = useTabDragSource(onTabDrop);
+  const caret = useTabDropCaret();
+
+  // The e2e seam sits directly above the pointer gesture — a real drag between
+  // two windows needs OS-level input — so the drop it calls is the one
+  // pointerup calls, and nothing below it is bypassed.
+  const dropRef = useRef(onTabDrop);
+  dropRef.current = onTabDrop;
+  useEffect(() => {
+    if (!TEST_HARNESS_ENABLED) return;
+    registerTabDrag({
+      drop: (path, point) => dropRef.current(path, point),
+      track: (point) => tabDrag.track(point),
+    });
+    return () => registerTabDrag(null);
+  }, []);
+
   return (
-    <div data-testid="tab-strip" className="app-shell-bar app-tabstrip flex items-stretch h-8 border-b border-neutral-800 shrink-0 overflow-hidden">
+    <div
+      ref={stripRef}
+      data-testid="tab-strip"
+      // The hover offset in this window's own CSS pixels. Published so the
+      // cross-window hit-test can be checked against where this window says
+      // its strip is — the one place a device-pixel-ratio disagreement
+      // between windows would show up.
+      data-tabdrag-x={caret === null ? undefined : Math.round(caret)}
+      className="app-shell-bar app-tabstrip flex items-stretch h-8 border-b border-neutral-800 shrink-0 overflow-hidden"
+    >
       <button
         type="button"
         data-testid="tab-home"
@@ -89,6 +129,12 @@ export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
               key={path}
               data-tab-path={path}
               data-testid={`tab-doc-${i}`}
+              onPointerDown={(e) => {
+                // The close × and anything else clickable inside the tab keep
+                // their own press; only the tab body drags.
+                if ((e.target as HTMLElement).closest('button')) return;
+                onTabPointerDown(path, !f.importOnly, e);
+              }}
               onClick={() => focus({ doc: path })}
               onAuxClick={(e) => {
                 if (e.button === 1) {
@@ -97,7 +143,7 @@ export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
                 }
               }}
               title={f.path}
-              className={`${tabBase} ${active ? activeCls : idleCls}`}
+              className={`${tabBase} ${active ? activeCls : idleCls} ${draggingPath === path ? 'opacity-40' : ''}`}
             >
               <ChromeIcon icon="document" size={13} className="opacity-70 shrink-0" />
               <span className="truncate">{f.name}</span>
@@ -119,6 +165,16 @@ export function TabStrip({ onCloseFile }: TabStripProps): React.ReactElement {
             </div>
           );
         })}
+        {/* Where the incoming tab will actually land. Doc tabs carry no order
+            of their own — the order is open order — so the caret marks the end
+            of the strip rather than following the pointer to a gap the drop
+            would not honour. */}
+        {caret !== null && (
+          <div
+            data-testid="tab-drop-caret"
+            className="self-stretch w-0.5 bg-blue-400 shrink-0"
+          />
+        )}
       </div>
 
       {overflowing && (
