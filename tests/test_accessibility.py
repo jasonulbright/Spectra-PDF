@@ -123,6 +123,27 @@ class TestPerCheckVerdicts:
             assert moved <= B.moves_with(cid), (name, cid, sorted(moved))
 
 
+class TestOneDefectIsReportedOnce:
+    """A role two checks could both claim is claimed by exactly one of them.
+
+    Two findings for one missing description read as two defects, and fixing
+    the element clears both at once — a reader cannot tell that from the
+    report."""
+
+    def test_an_undescribed_formula_is_one_finding_under_figures_alt(self, tmp_dir):
+        res = check_accessibility(_build(tmp_dir, "formula_no_alt"))
+        figures = _check(res, "figures_alt")
+        assert figures["status"] == "fail"
+        assert len(figures["findings"]) == 1
+        assert figures["findings"][0]["values"]["role"] == "Formula"
+
+    def test_the_other_alt_check_does_not_weigh_a_formula(self, tmp_dir):
+        res = check_accessibility(_build(tmp_dir, "formula_no_alt"))
+        other = _check(res, "other_elements_alt")
+        assert other["status"] == NA
+        assert other["findings"] == []
+
+
 class TestAddresses:
     def test_struct_findings_address_the_element_by_path(self, tmp_dir):
         res = check_accessibility(_build(tmp_dir, "figure_no_alt"))
