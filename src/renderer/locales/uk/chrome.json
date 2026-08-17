@@ -4856,6 +4856,8 @@
   "panel.settings.printerNotInstalled": "Принтер не встановлено",
   "panel.settings.printerReady": "готовий приймати завдання",
   "panel.settings.removePrinter": "Видалити принтер…",
+  "panel.settings.restoreWindows": "Відновлювати останній сеанс під час запуску",
+  "panel.settings.restoreWindowsHint": "Знову відкриває вікна та документи, які були відкриті під час останнього виходу. Розмір і положення вікна запам’ятовуються завжди; цей параметр визначає, чи повернуться також документи.",
   "panel.settings.rustNotices": "Повідомлення крейтів Rust",
   "panel.settings.saved": "Налаштування збережено",
   "panel.settings.singleKey": "Використовувати однокнопкові прискорювачі для доступу до інструментів",

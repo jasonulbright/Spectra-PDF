@@ -4750,6 +4750,8 @@
   "panel.settings.printerNotInstalled": "Imprimantă neinstalată",
   "panel.settings.printerReady": "gata să primească lucrări",
   "panel.settings.removePrinter": "Eliminare imprimantă…",
+  "panel.settings.restoreWindows": "Se restaurează ultima sesiune la pornire",
+  "panel.settings.restoreWindowsHint": "Redeschide ferestrele și documentele care erau deschise la ultima ieșire. Dimensiunea și poziția ferestrei sunt reținute întotdeauna; această opțiune decide dacă revin și documentele.",
   "panel.settings.rustNotices": "Notificările crate-urilor Rust",
   "panel.settings.saved": "Setări salvate",
   "panel.settings.singleKey": "Utilizarea acceleratorilor cu o singură tastă pentru accesul la instrumente",

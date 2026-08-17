@@ -4538,6 +4538,8 @@
   "panel.settings.printerNotInstalled": "打印机未安装",
   "panel.settings.printerReady": "可以接收作业",
   "panel.settings.removePrinter": "移除打印机…",
+  "panel.settings.restoreWindows": "启动时恢复上次会话",
+  "panel.settings.restoreWindowsHint": "重新打开上次退出时打开的窗口和文档。窗口大小和位置始终会被记住；此选项决定文档是否也一并恢复。",
   "panel.settings.rustNotices": "Rust crate 声明",
   "panel.settings.saved": "已保存设置",
   "panel.settings.singleKey": "使用单键快捷键切换工具",

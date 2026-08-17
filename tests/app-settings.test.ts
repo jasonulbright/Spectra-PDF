@@ -42,6 +42,26 @@ describe('app settings', () => {
     expect(loadSettings().checkUpdatesOnLaunch).toBe(false);
   });
 
+  it('does not reopen the last session unless asked', () => {
+    // OFF by default: a launch does nothing the user did not ask for, and
+    // anyone who quit to be rid of a pile of documents does not want them back.
+    expect(DEFAULTS.restoreWindowsOnLaunch).toBe(false);
+    expect(loadSettings().restoreWindowsOnLaunch).toBe(false);
+  });
+
+  it('gives an EXISTING install the session default rather than undefined', () => {
+    // Rust reads this preference from its own config file, so an `undefined`
+    // here is not merely falsy — it is a value the settings checkbox would
+    // render unchecked while never writing anything for Rust to read.
+    store.set('spectra-settings', JSON.stringify({ theme: 'dark', gsSource: 'builtin' }));
+    expect(loadSettings().restoreWindowsOnLaunch).toBe(false);
+  });
+
+  it('round-trips turning session restore on', () => {
+    saveSettings({ ...DEFAULTS, restoreWindowsOnLaunch: true });
+    expect(loadSettings().restoreWindowsOnLaunch).toBe(true);
+  });
+
   it('logs batch runs by default, kept for 30 days', () => {
     // The people this serves run batches unattended and will never open
     // Preferences to switch a log on, so OFF-by-default would mean the feature

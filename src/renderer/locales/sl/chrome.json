@@ -4856,6 +4856,8 @@
   "panel.settings.printerNotInstalled": "Tiskalnik ni nameščen",
   "panel.settings.printerReady": "pripravljen na sprejem opravil",
   "panel.settings.removePrinter": "Odstrani tiskalnik …",
+  "panel.settings.restoreWindows": "Ob zagonu obnovi zadnjo sejo",
+  "panel.settings.restoreWindowsHint": "Znova odpre okna in dokumente, ki so bili odprti ob zadnjem izhodu. Velikost in položaj okna si program vedno zapomni; ta nastavitev določa, ali se vrnejo tudi dokumenti.",
   "panel.settings.rustNotices": "Obvestila zabojev Rust",
   "panel.settings.saved": "Nastavitve shranjene",
   "panel.settings.singleKey": "Uporabi enotipkovne bližnjice za dostop do orodij",

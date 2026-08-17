@@ -5068,6 +5068,8 @@
   "panel.settings.printerNotInstalled": "لم تُثبَّت الطابعة",
   "panel.settings.printerReady": "جاهز لاستقبال المهام",
   "panel.settings.removePrinter": "إزالة الطابعة…",
+  "panel.settings.restoreWindows": "استعادة الجلسة الأخيرة عند بدء التشغيل",
+  "panel.settings.restoreWindowsHint": "يعيد فتح النوافذ والمستندات التي كانت مفتوحة عند آخر خروج. يُحتفظ دائمًا بحجم النافذة وموضعها؛ ويحدّد هذا الخيار ما إذا كانت المستندات ستعود أيضًا.",
   "panel.settings.rustNotices": "إشعارات حزم Rust",
   "panel.settings.saved": "تم حفظ الإعدادات",
   "panel.settings.singleKey": "استخدام مفاتيح الاختصار المفردة للوصول إلى الأدوات",

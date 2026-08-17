@@ -2195,6 +2195,9 @@ export const PANEL_STRINGS = {
   'panel.settings.minimizeToTray': 'Minimize to system tray on close',
   'panel.settings.startMinimized': 'Start minimized to tray',
   'panel.settings.startWithWindows': 'Start with Windows',
+  'panel.settings.restoreWindows': 'Reopen last session on launch',
+  'panel.settings.restoreWindowsHint':
+    'Reopens the windows and documents that were open when you last quit. Window size and position are always remembered; this decides whether the documents come back too.',
   'panel.settings.updates': 'Updates',
   'panel.settings.checkOnLaunch': 'Check for updates on launch',
   'panel.settings.updatesHint':

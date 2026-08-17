@@ -4644,6 +4644,8 @@
   "panel.settings.printerNotInstalled": "Tulostinta ei ole asennettu",
   "panel.settings.printerReady": "valmis vastaanottamaan töitä",
   "panel.settings.removePrinter": "Poista tulostin…",
+  "panel.settings.restoreWindows": "Palauta edellinen istunto käynnistyksen yhteydessä",
+  "panel.settings.restoreWindowsHint": "Avaa uudelleen ikkunat ja asiakirjat, jotka olivat auki viimeksi lopetettaessa. Ikkunan koko ja sijainti muistetaan aina; tämä asetus ratkaisee, palaavatko myös asiakirjat.",
   "panel.settings.rustNotices": "Rust-cratejen ilmoitukset",
   "panel.settings.saved": "Asetukset tallennettu",
   "panel.settings.singleKey": "Käytä yhden näppäimen pikanäppäimiä työkaluihin",
