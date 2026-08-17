@@ -31,6 +31,7 @@ import {
   type FieldFormat,
   type FieldValidate,
 } from './af-emit';
+import { effectiveFieldWriting, writesTextRun, type FieldScript } from './form-writing';
 // The spec problems are USER-FACING copy, so they resolve
 // through the catalog. i18n is itself a data module (catalogs + i18next), so
 // this file stays pure over bytes and unit-testable with no DOM.
@@ -78,6 +79,14 @@ export interface NewFieldSpec {
   calculate?: FieldCalculate;
   /** `/DV` — what a form reset restores this field to. */
   defaultValue?: string | boolean | string[];
+  /** A column rather than a line. pdf-lib cannot write the CID-keyed font a
+   * column needs, so this key does not change what THIS module writes — it
+   * states which created fields the caller still has to bind through the
+   * engine. Absent is horizontal. */
+  writingMode?: 'vertical';
+  /** The character collection a vertical field's font is bound to. Required
+   * with `writingMode`, refused without it. */
+  script?: FieldScript;
 }
 
 /** Wire action → the PDF name the `/Lock` dictionary carries. A table, not a
@@ -354,6 +363,23 @@ function validateSpecs(doc: PDFDocument, specs: readonly NewFieldSpec[]): void {
       if (spec.maxLength !== undefined && spec.maxLength <= 0) {
         push('refusal.field.maxLengthPositive');
       }
+    }
+    // The writing mode and the script it binds. Mirrors the engine's rule
+    // rather than deferring to it: the engine door runs AFTER pdf-lib has
+    // already written the field, so a combination refused only there would
+    // leave a created field that never became a column.
+    if (spec.writingMode !== undefined && !writesTextRun(spec.type)) {
+      push('refusal.field.writingKindOnly');
+    }
+    if (effectiveFieldWriting(spec.type, spec.writingMode ?? 'horizontal') === 'vertical') {
+      if (spec.script === undefined) push('refusal.field.scriptRequired');
+      // A comb divides the box across the very axis a column runs down.
+      if (spec.type === 'text' && spec.comb) push('refusal.field.combNotVertical');
+    } else if (spec.script !== undefined && spec.writingMode === undefined) {
+      // Only when no mode was asked for. A mark-drawing kind that asked for
+      // one is already answered by the row above, and telling the same author
+      // their field "writes horizontally" would contradict what they typed.
+      push('refusal.field.scriptOnHorizontal');
     }
     // Format and Validate belong to the kinds that carry a typed value;
     // Calculate writes one, which only a text field can hold.
