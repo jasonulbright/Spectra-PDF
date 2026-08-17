@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.1.2
+
+*Released 2026-08-17*
+
+### A public conformance corpus now measures the checkers
+
+- A pinned fetch script assembles 2,940 conformance PDFs from two public archival test suites.
+- A clause index binds 2,838 corpus files to 203 clauses across eleven standard parts.
+- A scoreboard records the product's verdict per corpus file for human review.
+
+### Accessibility checks that over-fired
+
+- Runs of spaces between words are no longer reported as fonts without character mappings.
+- An embedded character map is named as such instead of printing its own contents.
+- Language checking now honors declarations on structure elements and ancestors, not only the document default.
+- A document whose pages carry readable text is no longer reported as image-only.
+- An encoding this reader cannot interpret is flagged for review instead of failed.
+- An empty text replacement is honored as deliberate rather than treated as missing.
+- Hidden and zero-size annotations are no longer required to carry an accessible name.
+- A form element's alternate text now counts as its field's accessible description.
+- A label outside a list is no longer reported as a misplaced list label.
+
+### Vertical text in watermarks and form fields
+
+- A text watermark can be written vertically, from the panel or a guided action.
+- A form field declaring a vertical font now fills down its column instead of across it.
+- Vertical field values draw through the declared font instead of producing unreadable characters.
+
 ## 1.1.1
 
 *Released 2026-08-17*
