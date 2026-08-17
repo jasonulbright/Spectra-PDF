@@ -358,6 +358,53 @@ class TestReadsThatDidNotComplete:
         assert [u["stage"] for u in res["unreadable"]] == ["paint"]
 
 
+class TestTwoReadersOfOneDocument:
+    """`image_only` used to put the whole-file question to whichever reader
+    failed.
+
+    The check walks the pages itself and then, when no page looked like a
+    scan, asked `extract_text` whether the document has any text at all. That
+    second question ran even when the walk had ALREADY read text off a page,
+    so a document the two readers disagree about was reported as having no
+    extractable text over text the checker had just extracted. Measured on the
+    conformance corpus: 12 files.
+    """
+
+    def test_text_the_page_walk_read_settles_it(self, tmp_dir, monkeypatch):
+        from engine import accessibility
+
+        src = _build(tmp_dir, "baseline")
+        assert _check(check_accessibility(src), "image_only")["status"] == "pass"
+
+        def finds_nothing(_file, **_kw):
+            return {"text": ""}
+
+        monkeypatch.setattr(accessibility, "extract_text", finds_nothing)
+        row = _check(check_accessibility(src), "image_only")
+        assert row["status"] == "pass", json.dumps(row, indent=2)
+        assert row["findings"] == []
+
+    def test_a_document_with_no_text_at_all_still_fails(self, tmp_dir, monkeypatch):
+        """The guard must not swallow the case the fall-through exists for."""
+        from engine import accessibility
+
+        src = os.path.join(tmp_dir, "no_text.pdf")
+        pdf = B.new_pdf()
+        # Painted, but nothing a reader can read, and far too small a mark to
+        # count as a page-covering scan.
+        pdf.pages[0].obj[Name.Contents] = pdf.make_stream(b"0 0 0 rg 10 10 4 4 re f")
+        B.make_conformant(pdf, pdf.pages[0])
+        B.save(pdf, src)
+
+        def finds_nothing(_file, **_kw):
+            return {"text": ""}
+
+        monkeypatch.setattr(accessibility, "extract_text", finds_nothing)
+        row = _check(check_accessibility(src), "image_only")
+        assert row["status"] == "fail", json.dumps(row, indent=2)
+        assert [f["detail_key"] for f in row["findings"]] == ["no_extractable_text"]
+
+
 class TestATreeThatHoldsNothing:
     """A `/StructTreeRoot` is an entry point, not a structure.
 
