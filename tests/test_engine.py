@@ -1983,6 +1983,145 @@ class TestWatermark:
         r = watermark(file=src, output=out, text="日本語", font_dir=_WM_FONTS_DIR, pages=[])
         assert r["pages_watermarked"] == 0
 
+    def test_watermark_rejects_a_bad_writing_mode(self, tmp_dir):
+        # Refused by NAME and BEFORE any page work — a silently coerced
+        # writing mode flips the whole geometry, which is the same reasoning
+        # `rotate` is strict for in the authoring path.
+        src = os.path.join(tmp_dir, "wv_in.pdf")
+        out = os.path.join(tmp_dir, "wv_out.pdf")
+        _make_watermark_fixture(src, page_count=1)
+        for bad in ("sideways", "", 90, True, None):
+            with pytest.raises(ValueError, match="writing_mode must be"):
+                watermark(file=src, output=out, text="X", writing_mode=bad)
+        assert not os.path.exists(out)
+
+    def test_watermark_writing_mode_belongs_to_the_text_source(self, tmp_dir):
+        # A picture and a lifted page carry their own orientation, so a
+        # writing mode on one of them would be a control that did nothing.
+        src = os.path.join(tmp_dir, "wv_in.pdf")
+        out = os.path.join(tmp_dir, "wv_out.pdf")
+        _make_watermark_fixture(src, page_count=1)
+        with pytest.raises(ValueError, match="only a text watermark has a writing mode"):
+            watermark(file=src, output=out, image="logo.png", writing_mode="vertical")
+        assert not os.path.exists(out)
+
+    def test_watermark_vertical_without_font_dir_refused(self, tmp_dir):
+        # No standard-14 face states a vertical advance, so a column always
+        # embeds — and says so rather than falling back to a horizontal line.
+        src = os.path.join(tmp_dir, "wv_in.pdf")
+        out = os.path.join(tmp_dir, "wv_out.pdf")
+        _make_watermark_fixture(src, page_count=1)
+        with pytest.raises(ValueError, match="no fallback font is available"):
+            watermark(file=src, output=out, text="機密", font_dir="", writing_mode="vertical")
+        assert not os.path.exists(out)
+
+    @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_watermark_horizontal_writing_mode_is_byte_identical(self, tmp_dir):
+        # The shipped stamp is what `writing_mode="horizontal"` means, to the
+        # byte — the gate that lets the vertical arm land beside it.
+        src = os.path.join(tmp_dir, "wv_in.pdf")
+        _make_watermark_fixture(src, page_count=1)
+        bodies = []
+        for i, kw in enumerate(({}, {"writing_mode": "horizontal"})):
+            out = os.path.join(tmp_dir, f"wv_h{i}.pdf")
+            watermark(file=src, output=out, text="DRAFT", font_dir=_WM_FONTS_DIR, **kw)
+            with pikepdf.open(out) as pdf:
+                bodies.append(_find_watermark_forms(pdf.pages[0])[0].read_bytes())
+        assert bodies[0] == bodies[1]
+
+    @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_watermark_vertical_stamps_a_column(self, tmp_dir):
+        # The stamp is an /Identity-V embed carrying /W2 — the face's own
+        # vertical advances — and it reads back through the paragraph lister
+        # as the same construct an authored vertical box produces. Checked
+        # through the lister because that is the only reader that can say
+        # which way a run runs.
+        from engine.text_paragraphs import list_text_paragraphs
+
+        cjk = os.path.join(_WM_FONTS_DIR, "NotoSansCJKsc-Regular.otf")
+        if not os.path.isfile(cjk):
+            pytest.skip("bundled CJK face not provisioned")
+        src = os.path.join(tmp_dir, "wv_in.pdf")
+        out = os.path.join(tmp_dir, "wv_col.pdf")
+        # A NON-SQUARE page on purpose: on a square one the two axes of the
+        # auto fit are interchangeable and the quarter turn cannot be seen.
+        _make_watermark_fixture(src, page_count=1, page_size=(400, 800))
+        res = watermark(
+            file=src, output=out, text="機密文書", font_dir=_WM_FONTS_DIR,
+            angle=0, opacity=1.0, writing_mode="vertical",
+        )
+        # A bare `vertical` derives its column direction from the text.
+        assert res["writing_mode"] == "vertical-rl"
+        # 4 full-width glyphs advance 1 em each, and the column runs down the
+        # HEIGHT: 0.65 x 800 / 4. The same fraction the horizontal fit uses,
+        # measured a quarter turn round — untuned it would read the width and
+        # answer 65.0.
+        assert res["font_size_applied"] == 130.0
+        with pikepdf.open(out) as pdf:
+            form = _find_watermark_forms(pdf.pages[0])[0]
+            font = form["/Resources"]["/Font"]["/F0"]
+            assert str(font["/Encoding"]) == "/Identity-V"
+            assert "/W2" in font["/DescendantFonts"][0]
+            # The pen is the column's own centre line (/W2's position vector
+            # puts it there), so the anchor is half the column back along the
+            # reading axis and nothing across it: 4 x 130 / 2 = 260.
+            assert _tm_operands(form) == [1.0, 0.0, 0.0, 1.0, 0.0, 260.0]
+        p = next(
+            q for q in list_text_paragraphs(out, 1)["paragraphs"]
+            if q["text"] == "機密文書"
+        )
+        assert p["orientation"] == "vertical-rl"
+        x0, y0, x1, y1 = p["box"]
+        # `position="center"` on a 400x800 page, and a column centres on its
+        # pen: the drawn block's centre IS the page centre, exactly.
+        assert (round((x0 + x1) / 2, 4), round((y0 + y1) / 2, 4)) == (200.0, 400.0)
+
+    @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_watermark_vertical_mongolian_turns_the_glyphs(self, tmp_dir):
+        # The other legal vertical representation: a horizontal shaped subset
+        # under a quarter-turn Tm, columns advancing left to right. The face
+        # states no vertical advance worth embedding as /W2, so an
+        # /Identity-V embed of it would be an invented metric.
+        from engine.text_paragraphs import list_text_paragraphs
+
+        mong = os.path.join(_WM_FONTS_DIR, "NotoSansMongolian-Regular.ttf")
+        if not os.path.isfile(mong):
+            pytest.skip("bundled Mongolian face not provisioned")
+        src = os.path.join(tmp_dir, "wv_in.pdf")
+        out = os.path.join(tmp_dir, "wv_mong.pdf")
+        _make_watermark_fixture(src, page_count=1)
+        res = watermark(
+            file=src, output=out, text="ᠮᠣᠩᠭᠣᠯ", font_dir=_WM_FONTS_DIR,
+            angle=0, opacity=1.0, writing_mode="vertical",
+        )
+        assert res["writing_mode"] == "vertical-lr"
+        with pikepdf.open(out) as pdf:
+            form = _find_watermark_forms(pdf.pages[0])[0]
+            assert str(form["/Resources"]["/Font"]["/F0"]["/Encoding"]) == "/Identity-H"
+            assert _tm_operands(form)[:4] == [0.0, -1.0, 1.0, 0.0]
+        p = next(
+            q for q in list_text_paragraphs(out, 1)["paragraphs"]
+            if q["text"] == "ᠮᠣᠩᠭᠣᠯ"
+        )
+        assert p["orientation"] == "vertical-lr"
+
+    @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
+    def test_watermark_vertical_explicit_direction_must_agree(self, tmp_dir):
+        # The authoring refusal, reached through the stamp: an explicit
+        # spelling the text disagrees with would stamp a column read in the
+        # opposite order to the one it was written in.
+        cjk = os.path.join(_WM_FONTS_DIR, "NotoSansCJKsc-Regular.otf")
+        if not os.path.isfile(cjk):
+            pytest.skip("bundled CJK face not provisioned")
+        src = os.path.join(tmp_dir, "wv_in.pdf")
+        out = os.path.join(tmp_dir, "wv_bad.pdf")
+        _make_watermark_fixture(src, page_count=1)
+        with pytest.raises(ValueError, match="use vertical-rl"):
+            watermark(
+                file=src, output=out, text="機密文書", font_dir=_WM_FONTS_DIR,
+                writing_mode="vertical-lr",
+            )
+
     @pytest.mark.skipif(not _WM_HAS_FONTS, reason="bundled fonts not provisioned")
     def test_watermark_unicode_auto_size_respects_real_font_height(self, tmp_dir):
         # regression: the auto-size must use the EMBEDDED face's real

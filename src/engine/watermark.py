@@ -301,6 +301,26 @@ def _unicode_watermark_face(font_dir: str, text: str = "") -> str | None:
         return None
 
 
+def _vertical_stamp(pdf, font_dir: str, draw_text: str, writing_mode: str):
+    """The `VerticalText` a vertical stamp draws through.
+
+    Every decision a column needs — the writing frame, the column
+    direction, the face ladder, the two legal vertical representations — is
+    the shared one, so a stamped column and an authored one are the same
+    construct. There is no standard-14 vertical face, so a vertical stamp
+    always embeds and always needs the bundled fonts; saying so is the
+    alternative to drawing the row of glyphs sideways that a horizontal
+    fallback would produce."""
+    from engine import vertical_text
+
+    if not font_dir or not Path(font_dir).is_dir():
+        raise ValueError(
+            "a vertical watermark draws through an embedded vertical face and "
+            "no fallback font is available"
+        )
+    return vertical_text.build(pdf, font_dir, draw_text, writing_mode)
+
+
 def _rtl_stamp(pdf, face: str, draw_text: str):
     """(font object, em width, show bytes) for a right-to-left stamp,
     or None when the text is not right-to-left.
@@ -683,6 +703,42 @@ def _text_draw(
     return out, font_obj, em_width
 
 
+def _vertical_text_draw(
+    vt,
+    text: str,
+    size: float,
+    rgb: tuple[float, float, float],
+    theta: float,
+    centers: list[tuple[float, float]],
+) -> bytes:
+    """Content ops for a vertical text stamp — one column per centre.
+
+    Two frames compose and neither knows about the other: the column is
+    placed in the WRITING frame and leaves it at one boundary
+    (`VerticalText.matrix`), and the page `angle` is a rigid `cm` around
+    that. The stamp is a single column for the same reason the horizontal
+    stamp is a single line — it is auto-sized to fit rather than wrapped.
+    """
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
+    length = vt.advance_em(text) * size
+    # The column is centred on the anchor: it starts half its length back
+    # along the reading axis, and `cross_offset_em` states where the pen
+    # sits inside the column's own width.
+    placement = vt.matrix(-length / 2.0, vt.cross_offset_em * size)
+    r, g, b = rgb
+    head = (
+        f"{_n(r)} {_n(g)} {_n(b)} rg BT /F0 {_n(size)} Tf "
+    ).encode("latin-1")
+    show = vt.show(text, size)
+    out = b""
+    for cx, cy in centers:
+        out += (
+            f"q {_n(cos_t)} {_n(sin_t)} {_n(-sin_t)} {_n(cos_t)} "
+            f"{_n(cx)} {_n(cy)} cm "
+        ).encode("latin-1") + head + placement + b" " + show + b" ET Q"
+    return out
+
+
 def _stamp_draw_size(
     src_w: float,
     src_h: float,
@@ -786,6 +842,7 @@ def watermark(
     margin: float = DEFAULT_MARGIN,
     tile: bool = False,
     tile_gap: float = DEFAULT_TILE_GAP,
+    writing_mode: str = "horizontal",
 ) -> dict:
     """Stamp translucent text, an image or a PDF page across pages.
 
@@ -826,6 +883,13 @@ def watermark(
         tile: Repeat the stamp across the whole page box on a centred grid;
             ``position`` is ignored while tiling.
         tile_gap: Points between tiles in both directions.
+        writing_mode: ``"horizontal"`` (default, byte-identical to omitting
+            it), ``"vertical"``, ``"vertical-rl"`` or ``"vertical-lr"``. A
+            vertical stamp is one COLUMN reading down the page, turned by
+            ``angle`` like any other stamp; the column direction comes from
+            the text and an explicit spelling is honoured only where the
+            text agrees with it. Text is the only source a writing mode
+            means anything for.
     """
     has_text = bool(text and text.strip())
     has_image = bool(image and str(image).strip())
@@ -854,6 +918,21 @@ def watermark(
     gap_value = float(tile_gap)
     if gap_value < 0:
         raise ValueError(f"watermark tile gap must not be negative, got {tile_gap}")
+    # The mode list is the authoring one, imported rather than restated: a
+    # second spelling of the same four values is a second thing to keep in
+    # step with the frame table behind them.
+    from engine.text_authoring import HORIZONTAL, WRITING_MODES
+
+    if not isinstance(writing_mode, str) or writing_mode not in WRITING_MODES:
+        raise ValueError(
+            "writing_mode must be horizontal, vertical, vertical-rl or "
+            f"vertical-lr (got {writing_mode!r})"
+        )
+    # A picture and a lifted page carry their own orientation; a writing mode
+    # on one of them would be a control that quietly did nothing.
+    is_vertical = writing_mode != HORIZONTAL
+    if is_vertical and not has_text:
+        raise ValueError("only a text watermark has a writing mode")
     rgb = _parse_color(color)
 
     input_path = Path(file)
@@ -908,21 +987,28 @@ def watermark(
         draw_text = ""
         glyph_height: float | None = None
         if has_text:
-            try:
-                text.encode("latin-1")
-            except UnicodeEncodeError:
-                needs_unicode = True
-                face = _unicode_watermark_face(font_dir, text) or ""
-                if not face:
-                    raise ValueError(
-                        "watermark text contains characters outside Latin-1 and no "
-                        "fallback font is available"
-                    )
-                # A stamp is single-line: every layout control or separator,
-                # including \x0b, \x0c, and U+2028,
-                # flattens to space so the drawn glyph set matches the embed.
+            # A stamp is single-line: every layout control or separator,
+            # including \x0b, \x0c, and U+2028,
+            # flattens to space so the drawn glyph set matches the embed.
+            if is_vertical:
+                # There is no standard-14 vertical face, so a column always
+                # embeds — the Latin-1 shortcut has nothing to shortcut to,
+                # and the vertical arm builds its own embed rather than the
+                # `needs_unicode` one.
                 draw_text = _flatten_control_chars(text, keep_newline=False)
-                glyph_height = _face_glyph_height_em(face)
+            else:
+                try:
+                    text.encode("latin-1")
+                except UnicodeEncodeError:
+                    needs_unicode = True
+                    face = _unicode_watermark_face(font_dir, text) or ""
+                    if not face:
+                        raise ValueError(
+                            "watermark text contains characters outside Latin-1 and no "
+                            "fallback font is available"
+                        )
+                    draw_text = _flatten_control_chars(text, keep_newline=False)
+                    glyph_height = _face_glyph_height_em(face)
 
         # The picture embeds ONCE, before the loop: one XObject in the file
         # however many pages reference it. Doing it here also means a bad
@@ -967,6 +1053,8 @@ def watermark(
         uni: tuple | None = None
         auto_em: float | None = None
         auto_gh: float | None = None
+        vt = None
+        resolved_mode = writing_mode
         for index, page in enumerate(pdf.pages, start=1):
             if wanted is not None and index not in wanted:
                 continue
@@ -999,6 +1087,36 @@ def watermark(
                     )
                     resources = Dictionary(XObject=Dictionary(Fm0=source_obj))
                 size = 0.0
+            elif is_vertical:
+                if vt is None:
+                    # Built LAZILY on the first stamped page, like the
+                    # horizontal embed: pages=[] stays a true no-op that
+                    # never fails on the coverage of text it will not draw.
+                    vt = _vertical_stamp(pdf, font_dir, draw_text, writing_mode)
+                    auto_em = vt.advance_em(draw_text)
+                    auto_gh = vt.cross_em
+                    resolved_mode = (
+                        "vertical-lr" if vt.columns == "ltr" else "vertical-rl"
+                    )
+                # A column's reading axis is a quarter turn off the baseline
+                # the stamp's `angle` names, so the auto fit is the SAME fit
+                # measured a quarter turn round — the column length takes the
+                # advance term and the column width takes the perpendicular
+                # one. Passing the turn is what keeps one auto-size rule.
+                size = (
+                    float(font_size)
+                    if float(font_size) > 0
+                    else _auto_font_size(
+                        text, width, height, rotate, angle - 90.0,
+                        em_width=auto_em, glyph_height_em=auto_gh,
+                    ) * scale_value
+                )
+                centers = _centers(
+                    disp_w, disp_h, float(angle), auto_gh * size, auto_em * size,
+                    position, margin_value, bool(tile), gap_value,
+                )
+                body = _vertical_text_draw(vt, draw_text, size, rgb, theta, centers)
+                resources = Dictionary(Font=Dictionary(F0=vt.font_obj))
             else:
                 if needs_unicode and uni is None:
                     # A right-to-left stamp reorders (and shapes, where the
@@ -1071,4 +1189,8 @@ def watermark(
         "pdf_page_used": page_number if has_pdf else 0,
         "scale_applied": round(scale_value, 4),
         "tiles_per_page": tiles_per_page,
+        # The RESOLVED mode. A bare `vertical` derives its column direction
+        # from the text, and a caller has no way to know which way that went
+        # without asking the code that decided.
+        "writing_mode": resolved_mode,
     }

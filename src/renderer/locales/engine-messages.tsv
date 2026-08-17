@@ -187,6 +187,7 @@ form_detect.scanMustAutoNever	exact	form_detect	scan must be "auto", "never" or 
 form_prepare.unknownFieldKindChoose	pattern	form_prepare	unknown field kind: {{v0}} (choose from {{v1}})
 forms.acroformFieldTreeNested	exact	forms	AcroForm field tree nested too deeply
 forms.couldnTRegenerateAppearance	pattern	forms	couldn't regenerate the appearance for {{v0}}: {{exc}}
+forms.fieldWritesVerticallyFallback	exact	forms	this field writes vertically and no fallback font is available
 forms.nameFormDataFile	exact	forms	Name the form-data file to import.
 forms.nameFormFieldsShow	exact	forms	Name the form fields to show or hide.
 forms.unknownSubmissionFormatExpected	pattern	forms	unknown submission format {{fmt}}; expected one of {{v1}}
@@ -660,7 +661,7 @@ text_authoring.tateChuYokoOnly	exact	text_authoring	tate-chu-yoko only applies i
 text_authoring.textAdd	exact	text_authoring	no text to add
 text_authoring.textSetsColumnsLeft	exact	text_authoring	this text sets columns left to right — use vertical-lr
 text_authoring.textSetsColumnsRight	exact	text_authoring	this text sets columns right to left — use vertical-rl
-text_authoring.writingModeMustHorizontal	pattern	text_authoring	writing_mode must be horizontal, vertical, vertical-rl or vertical-lr (got {{writing_mode}})
+text_authoring.writingModeMustHorizontal	pattern	text_authoring,watermark	writing_mode must be horizontal, vertical, vertical-rl or vertical-lr (got {{writing_mode}})
 text_export.documentTextLayerThere	exact	text_export	this document has no text layer, so there is nothing to export as text -- run OCR on it first to add one
 text_export.unknownTextLayoutChoose	pattern	text_export	unknown text layout {{layout}} (choose reading or layout)
 text_match.unknownPatternBuiltPatterns	pattern	text_match	unknown pattern {{pattern_id}} — the built-in patterns are: {{known}}
@@ -737,8 +738,10 @@ trapping.ripTrappingLanguagelevelFacility	exact	trapping	In-RIP trapping is a La
 trapping.ripTrappingParameter	pattern	trapping	{{field}} is not an In-RIP trapping parameter.
 validate.fileExceedsMbLimit	pattern	validate	File exceeds {{MAX_FILE_SIZE_MB}} MB limit ({{v1}} MB)
 validate.pageCountExceedsLimit	pattern	validate	Page count {{page_count}} exceeds {{MAX_PAGES}} limit
+vertical_text.textBlockVertical	exact	vertical_text	this text block is not vertical
 watermark.colorMustRrggbbGot	pattern	watermark	color must be #rrggbb, got: {{color}}
 watermark.layerMustOverUnder	pattern	watermark	layer must be "over" or "under", got {{layer}}
+watermark.onlyTextWatermarkWriting	exact	watermark	only a text watermark has a writing mode
 watermark.opacityMustGot	pattern	watermark	opacity must be in (0, 1], got {{opacity}}
 watermark.pageCropboxMediaboxAnywhere	exact	watermark	page has no /CropBox or /MediaBox anywhere in its page tree
 watermark.pdfCannotOwnWatermark	pattern	watermark	a PDF cannot be its own watermark source: {{source_path}}
@@ -747,6 +750,7 @@ watermark.tilingWatermarkWouldNeed	pattern	watermark	tiling this watermark would
 watermark.unreadableWatermarkImage	pattern	watermark	unreadable watermark image: {{path}} ({{exc}})
 watermark.unreadableWatermarkImageImage	pattern	watermark	unreadable watermark image: {{path}} (no image stream)
 watermark.unreadableWatermarkPdf	pattern	watermark	unreadable watermark PDF: {{source_path}} ({{exc}})
+watermark.verticalWatermarkDrawsThrough	exact	watermark	a vertical watermark draws through an embedded vertical face and no fallback font is available
 watermark.watermarkImageEmpty	pattern	watermark	watermark image is empty: {{path}}
 watermark.watermarkImageFound	pattern	watermark	watermark image not found: {{path}}
 watermark.watermarkImagePixels	exact	watermark	the watermark image has no pixels
