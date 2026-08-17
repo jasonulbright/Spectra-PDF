@@ -466,6 +466,103 @@ describe('addFormFields', () => {
     ).rejects.toThrow(/across the axis a column runs down/);
   });
 
+  // The option-list appearance lays out EVERY label, so the create runs each
+  // one through the standard font's WinAnsi encoder. Before the refusal below
+  // that encoder threw its own internal message from inside pdf-lib's
+  // appearance provider, mid-batch, with part of the document already written.
+  // The boundary is the encoder's own table, not "non-ASCII": everything
+  // WinAnsi has a code for still creates.
+  it('refuses an option list whose labels leave WinAnsi, naming the characters', async () => {
+    const base = await blankPdf();
+    const cases: [string, string[], string][] = [
+      ['cjk', ['가나', 'plain'], '"가" (U+AC00), "나" (U+B098)'],
+      ['cyrillic', ['Да', 'plain'], '"Д" (U+0414), "а" (U+0430)'],
+      // A code point above the BMP: the check iterates by CODE POINT exactly
+      // as the encoder does, so this is ONE character, not two surrogate
+      // halves (U+D83D, U+DE00) — the reading a charCodeAt loop would give.
+      ['astral', ['a\u{1F600}b'], '"\u{1F600}" (U+1F600)'],
+      // Inside the BMP, outside WinAnsi, and visually a hyphen: the minus sign
+      // is the case a "looks Latin" eyeball test would wave through.
+      ['minus', ['− 5'], '"−" (U+2212)'],
+    ];
+    for (const [label, options, expected] of cases) {
+      let caught: unknown;
+      try {
+        await addFormFields(base, [
+          { name: label, type: 'optionlist', pageIndex: 0, rect: [50, 500, 250, 560], options },
+        ]);
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught, label).toBeInstanceOf(FieldSpecError);
+      expect((caught as FieldSpecError).problems.map((p) => p.key), label).toEqual([
+        'refusal.field.optionListWinAnsi',
+      ]);
+      expect((caught as FieldSpecError).problems[0].vars, label).toEqual({ chars: expected });
+    }
+  });
+
+  it('creates an option list from every label WinAnsi does cover', async () => {
+    // Each of these is OUTSIDE ASCII and INSIDE WinAnsi, so a codePoint > 0x7F
+    // test would refuse work that pdf-lib draws without complaint.
+    const options = ['Café', '“Quoted” ‘x’', 'a—b', '€100', '• item', '™', 'Ærø', 'plain'];
+    const bytes = await addFormFields(await blankPdf(), [
+      { name: 'covered', type: 'optionlist', pageIndex: 0, rect: [50, 400, 300, 560], options },
+    ]);
+    const m = await fieldMap(bytes);
+    expect(m.get('covered')).toMatchObject({ type: 'optionlist', options });
+  });
+
+  it('creates a dropdown and a radio group from the labels an option list refuses', async () => {
+    // The refusal must not over-reach. A dropdown's appearance draws only the
+    // SELECTED value and a new field has none; a radio option draws a mark.
+    // Neither reaches the encoder, so neither is refused.
+    let bytes = await blankPdf();
+    bytes = await addFormFields(bytes, [
+      {
+        name: 'country',
+        type: 'dropdown',
+        pageIndex: 0,
+        rect: [50, 600, 250, 624],
+        options: ['US', '한국', 'Да'],
+      },
+      {
+        name: 'pick',
+        type: 'radio',
+        pageIndex: 0,
+        rect: [50, 500, 250, 524],
+        options: ['가나', '다라'],
+      },
+    ]);
+    const m = await fieldMap(bytes);
+    expect(m.get('country')).toMatchObject({ type: 'dropdown', options: ['US', '한국', 'Да'] });
+    expect(m.get('pick')).toMatchObject({ type: 'radio' });
+  });
+
+  it('elides a long run of unencodable characters', async () => {
+    // Distinct characters, in first-seen order across the labels, capped: a
+    // label pasted from another script contributes one entry per character.
+    let caught: unknown;
+    try {
+      await addFormFields(await blankPdf(), [
+        {
+          name: 'many',
+          type: 'optionlist',
+          pageIndex: 0,
+          rect: [50, 400, 300, 560],
+          // Ten distinct Greek letters, the last two of them repeats.
+          options: ['ΑΒΓΔΕ', 'ΖΗΘΙΚΑΒ'],
+        },
+      ]);
+    } catch (e) {
+      caught = e;
+    }
+    const chars = (caught as FieldSpecError).problems[0].vars!.chars as string;
+    expect(chars.split(', ')).toHaveLength(9);
+    expect(chars.startsWith('"Α" (U+0391), "Β" (U+0392)')).toBe(true);
+    expect(chars.endsWith('"Θ" (U+0398), …')).toBe(true);
+  });
+
   it('is what the single-field entry point calls', async () => {
     const one = await addFormField(await blankPdf(), {
       name: 'solo',

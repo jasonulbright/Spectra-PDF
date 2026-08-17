@@ -12,7 +12,17 @@
 // redaction marks, and signature placement, none of which have CLI arms; the
 // CLI's forms parity surface is the fill/read/flatten TRANSFORM (the
 // `forms` subcommand), which is unchanged by this.
-import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRef, PDFString } from 'pdf-lib';
+import {
+  PDFArray,
+  PDFDict,
+  PDFDocument,
+  PDFHexString,
+  PDFName,
+  PDFRef,
+  PDFString,
+  StandardFontEmbedder,
+  StandardFonts,
+} from 'pdf-lib';
 import type { PdfBuffer } from '../state/types';
 import type { FieldLock, LockAction } from './signatures';
 import {
@@ -125,6 +135,50 @@ const EMIT_KEY = {
 interface ResolvedOption {
   label: string;
   rect?: [number, number, number, number];
+}
+
+/** Beyond this many distinct unencodable characters the list is elided: a label
+ * pasted from another script contributes one entry per character, and a refusal
+ * naming forty of them says nothing the first few did not. */
+const MAX_REPORTED_CHARS = 8;
+
+/** The font name the embedder is asked for. pdf-lib types this parameter
+ * against the enum of the sub-package that owns the metrics, and re-exports
+ * neither that enum nor the encodings themselves; the two enums carry the same
+ * members with the same string values. Any name but Symbol and ZapfDingbats
+ * selects WinAnsi. */
+const WIN_ANSI_FONT = StandardFonts.Helvetica as unknown as Parameters<
+  typeof StandardFontEmbedder.for
+>[0];
+
+/** pdf-lib's own WinAnsi table — the very object its standard-font encoder
+ * consults — so this predicate cannot drift from what the appearance provider
+ * accepts. Built on first use: constructing the embedder decompresses the
+ * font's metrics, which a batch carrying no option list never needs. */
+let winAnsi: { canEncodeUnicodeCodePoint(codePoint: number): boolean } | null = null;
+
+/** The characters in these labels the standard font has no WinAnsi code for,
+ * distinct and in first-seen order. Each is shown with its code point: a
+ * character no font of ours can draw usually has nothing to show. */
+function winAnsiGaps(labels: readonly string[]): string[] {
+  const encoding = (winAnsi ??= StandardFontEmbedder.for(WIN_ANSI_FONT).encoding);
+  const seen = new Set<number>();
+  const out: string[] = [];
+  for (const label of labels) {
+    // Iterated by CODE POINT, as the encoder itself iterates: a lone surrogate
+    // half is never what it is asked to encode.
+    for (const ch of label) {
+      const code = ch.codePointAt(0)!;
+      if (seen.has(code) || encoding.canEncodeUnicodeCodePoint(code)) continue;
+      seen.add(code);
+      if (out.length < MAX_REPORTED_CHARS) {
+        out.push(`"${ch}" (U+${code.toString(16).toUpperCase().padStart(4, '0')})`);
+      } else if (out.length === MAX_REPORTED_CHARS) {
+        out.push('…');
+      }
+    }
+  }
+  return out;
 }
 
 function resolveOptions(options: readonly NewFieldOption[] | undefined): ResolvedOption[] {
@@ -353,6 +407,17 @@ function validateSpecs(doc: PDFDocument, specs: readonly NewFieldSpec[]): void {
       const placed = options.filter((o) => o.rect).length;
       if (placed > 0 && placed !== options.length) {
         push('refusal.field.optionRectsPartial');
+      }
+      // An option list's appearance lays out EVERY label, so the create runs
+      // each one through the standard font's WinAnsi encoder, which throws on
+      // a character it has no code for. Refused here, before anything is
+      // written: the encoder is reached from inside the appearance provider,
+      // where the throw is an internal message and the document already
+      // carries part of the batch. A dropdown draws only its selected value
+      // and a new field has none, so the same labels are fine there.
+      if (spec.type === 'optionlist') {
+        const gaps = winAnsiGaps(options.map((o) => o.label));
+        if (gaps.length > 0) push('refusal.field.optionListWinAnsi', { chars: gaps.join(', ') });
       }
     }
     if (spec.type === 'text') {
