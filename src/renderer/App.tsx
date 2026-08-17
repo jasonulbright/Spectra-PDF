@@ -2238,10 +2238,16 @@ function AppContent(): React.ReactElement {
     const target = current.activeFileId ? current.files.get(current.activeFileId) : null;
     if (!target || target.importOnly) return;
     if (!(await commitOrAbort())) return;
-    const label = await app.openNewWindow();
+    // Ownership is handed over in one step, and the window is built only once
+    // it has. Releasing the claim and re-taking it around the build leaves the
+    // path owned by nobody for as long as the window takes to appear: a third
+    // window claiming it in that gap would leave this document with nowhere to
+    // arrive, having already left the only window that could open it.
+    const moved = await app.moveToNewWindow(target.path);
+    if (moved.outcome !== 'tornOff') return;
+    // Closed WITHOUT a release — the path already belongs to the new window,
+    // and releasing here would strip the claim off the window that now holds it.
     dispatch({ type: 'CLOSE_FILE', path: target.path });
-    await releasePaths([target.path]);
-    await app.openInWindow(label, [target.path]);
   }, [dispatch, commitOrAbort]);
 
   // --- Command layer ----------------------------------------------------

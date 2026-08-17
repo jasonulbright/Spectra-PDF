@@ -12,6 +12,7 @@ mod engine;
 mod printers;
 pub mod scanner;
 pub mod app_windows;
+pub mod tabdrag;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
@@ -78,6 +79,7 @@ pub fn run() {
         .manage(app_windows::BackdropState::new())
         .manage(app_windows::WindowRegistry::new())
         .manage(app_windows::ClaimState::new())
+        .manage(tabdrag::StripRegistry::new())
         .manage(scanner::ScannerSessions::new())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -214,8 +216,12 @@ pub fn run() {
             app_windows::claim_output_root,
             app_windows::release_output_root,
             app_windows::focus_app_window,
-            app_windows::open_in_window,
             app_windows::take_pending_opens,
+            tabdrag::register_strip_rect,
+            tabdrag::tabdrag_track,
+            tabdrag::tabdrag_cancel,
+            tabdrag::tabdrag_drop,
+            tabdrag::move_document_to_new_window,
             snapshot::copy_image_to_clipboard,
             snapshot::save_snapshot_png,
             clipboard_read::read_clipboard_source,
@@ -348,7 +354,15 @@ pub fn run() {
                 tauri::WindowEvent::Focused(true) => {
                     app_windows::on_window_focused(app, window.label());
                 }
+                // The strip registry hears geometry changes here rather than
+                // from the renderer: this side learns of them first, and a rect
+                // that lags one frame behind a human-speed drag still names the
+                // right window.
+                tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
+                    tabdrag::on_window_geometry_changed(app, window);
+                }
                 tauri::WindowEvent::Destroyed => {
+                    tabdrag::on_window_destroyed(app, window.label());
                     app_windows::on_window_destroyed(app, window.label());
                 }
                 _ => {}
