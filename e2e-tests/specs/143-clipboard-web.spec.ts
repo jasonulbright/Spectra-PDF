@@ -245,14 +245,18 @@ async function slowSite(delayMs: number): Promise<{ server: Server; port: number
   let port = 0;
   const server: Server = createServer((req, res) => {
     const path = (req.url ?? '/').split('?')[0];
+    // The crawler follows only the six links the index serves, so the
+    // response is composed from a whitelisted name and never from the
+    // request: no request-derived string reaches the body.
+    const name = /^\/[a-f]$/.test(path) ? path.slice(1) : 'page';
     const body =
       path === '/'
         ? '<!DOCTYPE html><html><head><title>Slow Index</title></head><body>' +
           ['a', 'b', 'c', 'd', 'e', 'f']
-            .map((name) => `<a href="/${name}">${name}</a>`)
+            .map((leaf) => `<a href="/${leaf}">${leaf}</a>`)
             .join('') +
           '</body></html>'
-        : `<!DOCTYPE html><html><head><title>Slow ${path}</title></head><body>${path}</body></html>`;
+        : `<!DOCTYPE html><html><head><title>Slow ${name}</title></head><body>${name}</body></html>`;
     setTimeout(
       () => {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
