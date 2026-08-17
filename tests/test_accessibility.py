@@ -405,6 +405,56 @@ class TestTwoReadersOfOneDocument:
         assert [f["detail_key"] for f in row["findings"]] == ["no_extractable_text"]
 
 
+class TestWhatAnImperceptibleAnnotationIsOwed:
+    """A widget the file stops from rendering presents nothing to a reader.
+
+    Two ways a file says so, and neither was honoured by the checks that read
+    descriptions off the structure tree: the Hidden and NoView flags (ISO
+    32000-2, Table 167), and a `/Rect` whose corners coincide — the shape ISO
+    32000-2, Table 166 exempts from carrying an appearance stream. Measured on
+    the conformance corpus: 3 files reported a field with no description and 4
+    an element with none, over annotations nobody can encounter.
+    """
+
+    def _one_field(self, tmp_dir, name, widget_extra=None, form_extra=None):
+        src = os.path.join(tmp_dir, f"{name}.pdf")
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        _root, doc = B._one_tagged_paragraph(pdf, page)
+        B._tagged_field(pdf, page, doc, widget_extra=widget_extra, form_extra=form_extra)
+        B.make_conformant(pdf, page)
+        return check_accessibility(B.save(pdf, src))
+
+    @pytest.mark.parametrize("flag", [2, 32])
+    def test_a_flag_that_stops_rendering_exempts_the_field(self, tmp_dir, flag):
+        res = self._one_field(tmp_dir, f"flag{flag}", widget_extra={"F": flag})
+        assert _statuses(res)["field_descriptions"] == NA
+        assert _statuses(res)["other_elements_alt"] == NA
+
+    def test_a_perceivable_widget_is_still_weighed(self, tmp_dir):
+        """The guard must not swallow the case the check exists for."""
+        res = self._one_field(tmp_dir, "visible", form_extra={"T": String("Name field")})
+        assert _statuses(res)["field_descriptions"] == "fail"
+
+    def test_an_alt_over_an_imperceptible_widget_replaces_nothing(self, tmp_dir):
+        res = self._one_field(
+            tmp_dir, "hidden_described",
+            widget_extra={"F": 2, "TU": String("Your full name")},
+            form_extra={"Alt": String("Something else entirely")},
+        )
+        assert _statuses(res)["alt_hides_annotation"] == "pass"
+
+    def test_an_alt_over_a_named_widget_still_replaces_it(self, tmp_dir):
+        res = self._one_field(
+            tmp_dir, "described",
+            widget_extra={"TU": String("Your full name")},
+            form_extra={"Alt": String("Something else entirely")},
+        )
+        row = _check(res, "alt_hides_annotation")
+        assert row["status"] == "fail", json.dumps(row, indent=2)
+        assert row["findings"][0]["values"]["hidden"] == "Your full name"
+
+
 class TestATreeThatHoldsNothing:
     """A `/StructTreeRoot` is an entry point, not a structure.
 

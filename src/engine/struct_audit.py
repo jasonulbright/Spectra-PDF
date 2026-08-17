@@ -48,8 +48,9 @@ class Node:
     """One structure element, resolved."""
 
     __slots__ = (
-        "path", "tag", "role", "level", "alt", "actual_text", "title", "lang",
-        "attrs", "page", "mcids", "objrs", "children", "parent", "sid",
+        "path", "tag", "role", "level", "alt", "actual_text", "has_actual_text",
+        "title", "lang", "attrs", "page", "mcids", "objrs", "children", "parent",
+        "sid",
     )
 
     def __init__(self, path, tag, role, level):
@@ -61,6 +62,10 @@ class Node:
         self.sid = None
         self.alt = ""
         self.actual_text = ""
+        # `/ActualText` is a replacement, not a description (ISO 32000-2
+        # 14.9.4), so the EMPTY string is a statement — the content's text
+        # equivalent is nothing — and differs from the entry being absent.
+        self.has_actual_text = False
         self.title = ""
         self.lang = ""
         self.attrs: dict = {}
@@ -88,6 +93,13 @@ class Node:
         while node is not None:
             yield node
             node = node.parent
+
+
+def _present(elem, key: str) -> bool:
+    try:
+        return elem.get(key) is not None
+    except Exception:
+        return False
 
 
 def _text(elem, key: str) -> str:
@@ -312,6 +324,7 @@ def audit_tree(pdf, annots_entries: list | None = None) -> dict:
         node.parent = parent
         node.alt = _text(elem, "/Alt")
         node.actual_text = _text(elem, "/ActualText")
+        node.has_actual_text = _present(elem, "/ActualText")
         node.title = _text(elem, "/T")
         node.lang = _text(elem, "/Lang")
         node.attrs = _read_attrs(elem)
