@@ -219,17 +219,11 @@ class TestAuthoredFixes:
     def test_field_description(self, tmp_dir):
         src = _build(tmp_dir, "field_no_tu")
         name = _check(src, "field_descriptions")["findings"][0]["address"]["field"]
-        moved = _round_trip(
+        _round_trip(
             src,
             "field_descriptions",
             lambda p: set_field_description(p, p, name, "Your full legal name"),
-            # The fixture wraps the widget in a Form element carrying its own
-            # /Alt. Once the FIELD has a description, that /Alt is replacing a
-            # real one — which is check 23's finding, correctly, and only
-            # becomes visible because this fix landed.
-            allow_moves=("alt_hides_annotation",),
         )
-        assert moved.get("alt_hides_annotation") == ("pass", "fail")
         fields = {f["name"]: f for f in read_form_fields(src)["fields"]}
         assert fields[name]["description"] == "Your full legal name"
 
