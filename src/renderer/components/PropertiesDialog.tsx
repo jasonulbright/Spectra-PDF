@@ -640,6 +640,8 @@ function fontStatusText(font: DocumentFont): string {
       return tChrome('dialog.props.fontEmbeddedSubset');
     case 'embedded':
       return tChrome('dialog.props.fontEmbedded');
+    case 'embedding-unknown':
+      return tChrome('dialog.props.fontEmbeddingUnknown');
     case 'substituted':
       return tChrome('dialog.props.fontSubstituted', { face: state.face });
     default:

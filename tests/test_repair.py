@@ -345,3 +345,189 @@ class TestCheckFontEmbedding:
         result = check(file=path)
         assert result["info"]["fonts_checked"] == 1
         assert result["info"]["fonts_embedded"] == 1
+
+
+def _simple_font(pdf, name="Helvetica"):
+    return pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name.Font,
+        Subtype=pikepdf.Name.Type1,
+        BaseFont=pikepdf.Name("/" + name),
+    ))
+
+
+def _form_xobject(pdf, resources, body=b"BT /F1 12 Tf ET"):
+    form = pdf.make_stream(body)
+    form["/Type"] = pikepdf.Name.XObject
+    form["/Subtype"] = pikepdf.Name.Form
+    form["/BBox"] = pikepdf.Array([0, 0, 100, 100])
+    form["/Resources"] = resources
+    return pdf.make_indirect(form)
+
+
+def _type3_font(pdf, char_procs):
+    """A Type 3 font, with or without the glyph procedures 9.6.4 requires."""
+    font = pikepdf.Dictionary(
+        Type=pikepdf.Name.Font,
+        Subtype=pikepdf.Name.Type3,
+        FontBBox=pikepdf.Array([0, 0, 100, 100]),
+        FontMatrix=pikepdf.Array([0.001, 0, 0, 0.001, 0, 0]),
+        Encoding=pikepdf.Dictionary(
+            Type=pikepdf.Name.Encoding,
+            Differences=pikepdf.Array([97, pikepdf.Name("/square")]),
+        ),
+        FirstChar=97,
+        LastChar=97,
+        Widths=pikepdf.Array([100]),
+    )
+    if char_procs is not None:
+        font["/CharProcs"] = char_procs
+    return pdf.make_indirect(font)
+
+
+class TestCheckReachesEveryFont:
+    """The font total is the DOCUMENT's, not one resource dictionary's.
+
+    Four routes reach a font that no page `/Resources /Font` names, and each
+    of these documents was reported as carrying one font fewer than it does.
+    """
+
+    def test_a_font_only_a_form_xobject_names_is_counted(self, tmp_dir):
+        path = os.path.join(tmp_dir, "form-only-font.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        form = _form_xobject(pdf, pikepdf.Dictionary(
+            Font=pikepdf.Dictionary(F1=_simple_font(pdf))
+        ))
+        page.obj["/Resources"] = pikepdf.Dictionary(
+            XObject=pikepdf.Dictionary(Fm0=form)
+        )
+        pdf.save(path)
+        pdf.close()
+
+        result = check(file=path)
+        assert result["info"]["fonts_checked"] == 1
+        assert result["info"]["fonts_not_embedded"] == 1
+        assert any("Helvetica" in i["message"] for i in result["issues"])
+
+    def test_a_font_only_a_type3_glyph_procedure_names_is_counted(self, tmp_dir):
+        path = os.path.join(tmp_dir, "type3-nested-font.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        proc = pdf.make_stream(b"0 0 0 0 0 0 d1 BT /F1 8 Tf ET")
+        proc["/Resources"] = pikepdf.Dictionary(
+            Font=pikepdf.Dictionary(F1=_simple_font(pdf))
+        )
+        type3 = _type3_font(pdf, pikepdf.Dictionary(square=pdf.make_indirect(proc)))
+        page.obj["/Resources"] = pikepdf.Dictionary(
+            Font=pikepdf.Dictionary(T3=type3)
+        )
+        pdf.save(path)
+        pdf.close()
+
+        result = check(file=path)
+        assert result["info"]["fonts_checked"] == 2
+        assert result["info"]["fonts_embedded"] == 1
+        assert result["info"]["fonts_not_embedded"] == 1
+        assert any("Helvetica" in i["message"] for i in result["issues"])
+
+    def test_a_font_only_an_annotation_appearance_names_is_counted(self, tmp_dir):
+        path = os.path.join(tmp_dir, "annot-only-font.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        appearance = _form_xobject(
+            pdf,
+            pikepdf.Dictionary(Font=pikepdf.Dictionary(F1=_simple_font(pdf))),
+            body=b"BT /F1 12 Tf (x) Tj ET",
+        )
+        page.obj["/Resources"] = pikepdf.Dictionary()
+        page.obj["/Annots"] = pikepdf.Array([pdf.make_indirect(pikepdf.Dictionary(
+            Type=pikepdf.Name.Annot,
+            Subtype=pikepdf.Name.FreeText,
+            Rect=pikepdf.Array([0, 0, 50, 20]),
+            AP=pikepdf.Dictionary(N=appearance),
+        ))])
+        pdf.save(path)
+        pdf.close()
+
+        result = check(file=path)
+        assert result["info"]["fonts_checked"] == 1
+        assert result["info"]["fonts_not_embedded"] == 1
+        assert any("Helvetica" in i["message"] for i in result["issues"])
+
+    def test_a_font_only_the_form_default_resources_name_is_counted(self, tmp_dir):
+        path = os.path.join(tmp_dir, "acroform-only-font.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        page.obj["/Resources"] = pikepdf.Dictionary()
+        pdf.Root["/AcroForm"] = pikepdf.Dictionary(
+            Fields=pikepdf.Array([]),
+            DR=pikepdf.Dictionary(Font=pikepdf.Dictionary(Helv=_simple_font(pdf))),
+        )
+        pdf.save(path)
+        pdf.close()
+
+        result = check(file=path)
+        assert result["info"]["fonts_checked"] == 1
+        assert result["info"]["fonts_not_embedded"] == 1
+        assert any("Helvetica" in i["message"] for i in result["issues"])
+
+    def test_one_font_reached_by_two_routes_is_one_font(self, tmp_dir):
+        """The same indirect object named by a page and by the form's default
+        resources is one font program, not two."""
+        path = os.path.join(tmp_dir, "two-routes.pdf")
+        pdf = pikepdf.new()
+        shared = _simple_font(pdf)
+        page = pdf.add_blank_page(page_size=(200, 200))
+        page.obj["/Resources"] = pikepdf.Dictionary(
+            Font=pikepdf.Dictionary(F1=shared)
+        )
+        pdf.Root["/AcroForm"] = pikepdf.Dictionary(
+            Fields=pikepdf.Array([]),
+            DR=pikepdf.Dictionary(Font=pikepdf.Dictionary(Helv=shared)),
+        )
+        pdf.save(path)
+        pdf.close()
+
+        assert check(file=path)["info"]["fonts_checked"] == 1
+
+
+class TestCheckType3Policy:
+    """A Type 3 font's glyph programs are content streams in the font itself
+    (ISO 32000-2, 9.6.4), so the descriptor question does not apply to it and
+    the checker answers it by the one shared rule."""
+
+    def test_a_type3_with_glyph_procedures_is_embedded(self, tmp_dir):
+        path = os.path.join(tmp_dir, "type3-drawn.pdf")
+        pdf = pikepdf.new()
+        proc = pdf.make_indirect(pdf.make_stream(b"0 0 0 0 0 0 d1"))
+        page = pdf.add_blank_page(page_size=(200, 200))
+        page.obj["/Resources"] = pikepdf.Dictionary(Font=pikepdf.Dictionary(
+            T3=_type3_font(pdf, pikepdf.Dictionary(square=proc))
+        ))
+        pdf.save(path)
+        pdf.close()
+
+        result = check(file=path)
+        assert result["info"]["fonts_checked"] == 1
+        assert result["info"]["fonts_embedded"] == 1
+        assert result["info"]["fonts_unreadable"] == 0
+
+    def test_a_type3_with_no_glyph_procedures_is_neither_answer(self, tmp_dir):
+        """`/CharProcs` is required, and without it the font carries no glyph
+        programs at all. Reporting it embedded claims programs that are
+        provably absent; reporting it not embedded claims a face a reader
+        could substitute, which no Type 3 has."""
+        path = os.path.join(tmp_dir, "type3-empty.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        page.obj["/Resources"] = pikepdf.Dictionary(Font=pikepdf.Dictionary(
+            T3=_type3_font(pdf, None)
+        ))
+        pdf.save(path)
+        pdf.close()
+
+        result = check(file=path)
+        assert result["info"]["fonts_checked"] == 1
+        assert result["info"]["fonts_embedded"] == 0
+        assert result["info"]["fonts_not_embedded"] == 0
+        assert result["info"]["fonts_unreadable"] == 1

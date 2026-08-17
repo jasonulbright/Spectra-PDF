@@ -440,19 +440,20 @@ def _reconcile_co_in_place(pdf: pikepdf.Pdf) -> None:
 def adopt_orphan_widget_fields(pdf: pikepdf.Pdf) -> int:
     """Register orphan field-keyed widgets in /AcroForm (distill forms).
 
-    gs pdfwrite honours /ANN pdfmarks — Distiller's form syntax — well enough
-    to land Widget annotations with their /T //FT //V intact on the page, but
-    it never writes the document /AcroForm (probe-verified against bundled
-    10.07.1), leaving every distilled field an orphan: rendered, dead. The
-    widgets ARE the fields (Distiller pdfmark forms are flat — no /Parent
-    trees arrive this way), so adoption is: collect page widgets carrying
-    BOTH /T and /FT that no /Fields forest already reaches, append them to
-    /AcroForm /Fields (created on demand with the standard Helv /DR + /DA),
-    and set /NeedAppearances when any adopted field lacks an /AP — readers
-    regenerate, and this app's own fill builds real appearances on first
-    edit. Widgets with /T but no /FT stay orphans (an untyped field cannot
-    be honestly registered). Same-named widgets adopt as one logical field
-    per the spec's shared-/V rule — exactly Distiller's semantics.
+    gs pdfwrite honours /ANN pdfmarks — the pdfmark operator's form syntax —
+    well enough to land Widget annotations with their /T //FT //V intact on
+    the page, but it never writes the document /AcroForm (probe-verified
+    against bundled 10.07.1), leaving every distilled field an orphan:
+    rendered, dead. The widgets ARE the fields (/ANN pdfmark forms are flat —
+    no /Parent trees arrive this way), so adoption is: collect page widgets
+    carrying BOTH /T and /FT that no /Fields forest already reaches, append
+    them to /AcroForm /Fields (created on demand with the standard Helv /DR +
+    /DA), and set /NeedAppearances when any adopted field lacks an /AP —
+    readers regenerate, and this app's own fill builds real appearances on
+    first edit. Widgets with /T but no /FT stay orphans (an untyped field
+    cannot be honestly registered). Same-named widgets adopt as one logical
+    field per the spec's shared-/V rule — the same resolution the pdfmark
+    producer assumes.
 
     Returns the number of widgets adopted (0 = untouched document).
     """

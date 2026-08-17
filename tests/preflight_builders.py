@@ -590,6 +590,34 @@ def _font_inside_form(doc) -> None:
              b"", boxes=_full_boxes())
 
 
+def _font_inside_type3_glyph(doc) -> None:
+    """A font named only by a Type 3 glyph procedure's own resources."""
+    glyph = doc.make_stream(b"10 0 0 0 10 10 d0 BT /FF 4 Tf (y) Tj ET")
+    glyph["/Resources"] = Dictionary(Font=Dictionary(FF=nonembedded_font(doc)))
+    font = doc.make_indirect(Dictionary(
+        Type=Name.Font, Subtype=Name.Type3,
+        FontBBox=Array([0, 0, 10, 10]), FontMatrix=Array([0.001, 0, 0, 0.001, 0, 0]),
+        CharProcs=Dictionary(a=glyph), Encoding=Dictionary(
+            Type=Name.Encoding, Differences=Array([97, Name("/a")])
+        ),
+        FirstChar=97, LastChar=97, Widths=Array([10]),
+    ))
+    add_page(doc, Dictionary(Font=Dictionary(F1=font),
+                             ColorSpace=Dictionary(CS0=Name.DeviceCMYK)),
+             b"BT /F1 12 Tf 20 20 Td (a) Tj ET", boxes=_full_boxes())
+
+
+def _font_inside_form_default_resources(doc) -> None:
+    """A font named only by the interactive form's default resources — where a
+    field's default appearance resolves its face, and no page names it."""
+    add_page(doc, Dictionary(ColorSpace=Dictionary(CS0=Name.DeviceCMYK)),
+             b"", boxes=_full_boxes())
+    doc.Root["/AcroForm"] = Dictionary(
+        Fields=Array([]),
+        DR=Dictionary(Font=Dictionary(Helv=nonembedded_font(doc))),
+    )
+
+
 BUILDERS = {
     "baseline": _baseline,
     "version_too_new": _version_too_new,
@@ -654,6 +682,8 @@ BUILDERS = {
     "unparseable_page": _unparseable_page,
     "rgb_and_unreadable_xobject": _rgb_and_unreadable_xobject,
     "font_inside_form": _font_inside_form,
+    "font_inside_type3_glyph": _font_inside_type3_glyph,
+    "font_inside_form_default_resources": _font_inside_form_default_resources,
 }
 
 

@@ -1,5 +1,5 @@
 // The Fonts tab's model: parsing the engine payload, grouping and ordering,
-// the four program-status states, and the stable per-row DOM handle.
+// the five program-status states, and the stable per-row DOM handle.
 import { describe, it, expect } from 'vitest';
 import {
   fontStatus,
@@ -55,7 +55,23 @@ describe('parseDocumentFonts', () => {
     const [parsed] = parseDocumentFonts({ fonts: [{ name: 'X' }] });
     expect(parsed.type).toBe('Unknown');
     expect(parsed.encoding).toBe('Built-in');
-    expect(parsed.embedded).toBe(false);
+    expect(parsed.embedded).toBeNull();
+  });
+
+  it('keeps embedding as three states, so an unanswered one is not a denial', () => {
+    const [yes] = parseDocumentFonts({ fonts: [{ name: 'A', embedded: true }] });
+    const [no] = parseDocumentFonts({ fonts: [{ name: 'B', embedded: false }] });
+    const [unknown] = parseDocumentFonts({ fonts: [{ name: 'C', embedded: null }] });
+    expect(yes.embedded).toBe(true);
+    expect(no.embedded).toBe(false);
+    expect(unknown.embedded).toBeNull();
+  });
+
+  it('reads a value that is neither boolean as unknown rather than as not embedded', () => {
+    for (const embedded of [undefined, 'true', 1, {}]) {
+      const [parsed] = parseDocumentFonts({ fonts: [{ name: 'X', embedded }] });
+      expect(parsed.embedded, String(embedded)).toBeNull();
+    }
   });
 
   it('derives a missing page count from the page list', () => {
@@ -146,6 +162,21 @@ describe('fontStatus', () => {
   it('ignores a substitute an embedded font somehow carries', () => {
     expect(fontStatus(font({ embedded: true, substitute: 'X.ttf' }))).toEqual({
       kind: 'embedded',
+    });
+  });
+
+  it('reports an undetermined embedding as its own state, never as not embedded', () => {
+    expect(fontStatus(font({ embedded: null, type: 'Type3' }))).toEqual({
+      kind: 'embedding-unknown',
+    });
+    expect(fontStatus(font({ embedded: null, subset: true }))).toEqual({
+      kind: 'embedding-unknown',
+    });
+  });
+
+  it('never names a substitute face for an undetermined embedding', () => {
+    expect(fontStatus(font({ embedded: null, substitute: 'X.ttf' }))).toEqual({
+      kind: 'embedding-unknown',
     });
   });
 });
