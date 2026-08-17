@@ -33,6 +33,7 @@ import {
   preflightImportProfile,
   preflightExportProfile,
   preflightFix,
+  waitForDisplayedSelector,
 } from '../support/harness.js';
 
 const SPOT = resolve(__dirname, '..', 'fixtures', 'separations-spot.pdf');
@@ -432,9 +433,9 @@ async function openOutputPreview(): Promise<void> {
   // the page raster, so the page has to stay on screen.
   await setView('operations');
   await invokeAppCommand('view.documentView');
-  await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 15_000 });
+  await waitForDisplayedSelector('[data-testid="document-view"]', { timeout: 15_000 });
   await setActiveOp('outputpreview');
-  await $('[data-testid="output-preview-arm"]').waitForDisplayed({ timeout: 15_000 });
+  await waitForDisplayedSelector('[data-testid="output-preview-arm"]', { timeout: 15_000 });
 }
 
 describe('output preview', () => {
@@ -461,13 +462,15 @@ describe('output preview', () => {
   });
 
   it('lists the plates the page actually separated into', async () => {
-    await $('[data-testid="output-preview-ink-list"]').waitForDisplayed({ timeout: 20_000 });
+    await waitForDisplayedSelector('[data-testid="output-preview-ink-list"]', { timeout: 20_000 });
     for (const slug of ['cyan', 'magenta', 'yellow', 'black']) {
-      await $(`[data-testid="output-preview-ink-${slug}"]`).waitForDisplayed({ timeout: 20_000 });
+      await waitForDisplayedSelector(`[data-testid="output-preview-ink-${slug}"]`, {
+        timeout: 20_000,
+      });
     }
     // The fixture's spot colorant gets a plate of its own, which is the whole
     // reason the preview exists — an RGB render folds it into process.
-    await $('[data-testid="output-preview-ink-pantone-185-c"]').waitForDisplayed({
+    await waitForDisplayedSelector('[data-testid="output-preview-ink-pantone-185-c"]', {
       timeout: 20_000,
     });
   });
@@ -517,7 +520,7 @@ describe('output preview', () => {
     await waitForSeparations();
 
     await $('[data-testid="output-preview-alarm"]').click();
-    await $('[data-testid="output-preview-maxtac"]').waitForDisplayed({ timeout: 30_000 });
+    await waitForDisplayedSelector('[data-testid="output-preview-maxtac"]', { timeout: 30_000 });
 
     let reported = 0;
     await browser.waitUntil(
