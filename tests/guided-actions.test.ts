@@ -9,6 +9,7 @@ import {
   askedParamKeys,
   buildStepParams,
   createsItsOwnSource,
+  editorParams,
   inPlaceBlocker,
   openDocumentBlocker,
   isGuidedAction,
@@ -19,6 +20,7 @@ import {
   unattendedBlocker,
   validateAction,
   validateRunValues,
+  watermarkSource,
   type GuidedAction,
 } from '../src/renderer/lib/guided-actions';
 
@@ -64,6 +66,96 @@ describe('step catalog integrity', () => {
     const params = buildStepParams(step);
     expect(params.opacity).toBe(1); // clamped to max
     expect(params.angle).toBe(45); // unparsable → default
+  });
+});
+
+describe('watermark direction', () => {
+  // The engine pins `writing_mode="horizontal"` as byte-identical to omitting
+  // the parameter; omitting it is what keeps that pin honest from this side.
+  const HORIZONTAL_KEYS = [
+    'angle',
+    'image',
+    'opacity',
+    'pdf_page',
+    'pdf_source',
+    'position',
+    'scale',
+    'text',
+  ];
+
+  it('a horizontal stamp builds the call it built before the param existed', () => {
+    const wm = newStep('watermark');
+    wm.params.text = 'DRAFT';
+    const params = buildStepParams(wm);
+    expect(Object.keys(params).sort()).toEqual(HORIZONTAL_KEYS);
+    expect(params.writing_mode).toBeUndefined();
+  });
+
+  it('a vertical text stamp carries the mode', () => {
+    const wm = newStep('watermark');
+    wm.params.text = '機密';
+    wm.params.writing_mode = 'vertical';
+    expect(buildStepParams(wm).writing_mode).toBe('vertical');
+  });
+
+  it('a picture or a lifted page NEVER carries a mode, even one left behind', () => {
+    // The failure this prevents: a mode chosen for text, then a source switch
+    // the control is no longer on screen for. The engine refuses a mode on
+    // either source, so a stray one would fail the run.
+    for (const source of ['image', 'pdf_source']) {
+      const wm = newStep('watermark');
+      wm.params.text = '';
+      wm.params[source] = source === 'image' ? 'logo.png' : 'brand.pdf';
+      wm.params.writing_mode = 'vertical';
+      const params = buildStepParams(wm);
+      expect(params.writing_mode, source).toBeUndefined();
+      expect(watermarkSource(wm.params)).toBe(source === 'image' ? 'image' : 'pdf');
+    }
+  });
+
+  it('an ask-at-run text value decides the source at RUN time', () => {
+    const wm = newStep('watermark');
+    wm.params.text = '';
+    wm.params.writing_mode = 'vertical';
+    wm.ask = ['text'];
+    expect(buildStepParams(wm, { text: '縦書き' }).writing_mode).toBe('vertical');
+  });
+
+  it('the editor drops Direction once a non-text source is named, and keeps it while one is asked', () => {
+    const has = (step: Parameters<typeof editorParams>[0]): boolean =>
+      editorParams(step).some((p) => p.key === 'writing_mode');
+    const wm = newStep('watermark');
+    wm.params.text = 'DRAFT';
+    expect(has(wm)).toBe(true);
+    wm.params.text = '';
+    wm.params.image = 'logo.png';
+    expect(has(wm)).toBe(false);
+    wm.ask = ['image'];
+    expect(has(wm)).toBe(true);
+    // An ask mark left behind on the dropped param collects nothing.
+    wm.ask = ['writing_mode'];
+    expect(askedParamKeys(wm)).toEqual([]);
+    // Every other step is untouched by the rule.
+    expect(editorParams(newStep('compress'))).toEqual(
+      STEP_CATALOG.find((d) => d.op === 'compress')!.params,
+    );
+  });
+
+  it('the mode survives a save and an action-file round trip, and a bogus one is refused', () => {
+    const wm = newStep('watermark');
+    wm.params.text = 'DRAFT';
+    wm.params.writing_mode = 'vertical';
+    const back = parseActionFile(actionFileJson({ id: 'orig', name: 'Mark', steps: [wm] }));
+    expect(back.steps[0].params.writing_mode).toBe('vertical');
+    expect(buildStepParams(back.steps[0]).writing_mode).toBe('vertical');
+    expect(() =>
+      parseActionFile(
+        JSON.stringify({
+          name: 'x',
+          steps: [{ op: 'watermark', params: { text: 'A', writing_mode: 'sideways' } }],
+        }),
+      ),
+    ).toThrow(/invalid value 'sideways' for 'writing_mode'/);
   });
 });
 
@@ -227,6 +319,7 @@ describe('action files (export/import)', () => {
             pdf_page: 1,
             opacity: 0.15,
             angle: 45,
+            writing_mode: 'horizontal',
             scale: 1,
             position: 'center',
           },
@@ -477,15 +570,18 @@ describe('the two step catalogs are pinned against each other', () => {
   });
 
   it('the conditionally-emitted params are accepted too', () => {
-    // Three steps emit a key only when its form value is non-empty, so the
-    // defaults pass above cannot reach them.
+    // Four steps emit a key only for a particular form value, so the defaults
+    // pass above cannot reach them.
     const redact = newStep('search_redact');
     redact.params.overlay_text = 'EXEMPT';
     const forms = newStep('prepare_forms');
     forms.params.kinds = 'text,checkbox';
     const header = newStep('add_header_footer');
     header.params.text = 'Page {page}';
-    for (const step of [redact, forms, header]) {
+    const mark = newStep('watermark');
+    mark.params.text = '機密';
+    mark.params.writing_mode = 'vertical';
+    for (const step of [redact, forms, header, mark]) {
       const allowed = new Set(fixture.steps[step.op].params);
       for (const key of Object.keys(buildStepParams(step))) {
         expect(allowed.has(key), `${step.op}.${key}`).toBe(true);
@@ -493,6 +589,7 @@ describe('the two step catalogs are pinned against each other', () => {
     }
     expect(Object.keys(buildStepParams(redact))).toContain('properties');
     expect(Object.keys(buildStepParams(forms))).toContain('kinds');
+    expect(Object.keys(buildStepParams(mark))).toContain('writing_mode');
   });
 
   it('builds the scan-enhancement step the engine already dispatched', () => {

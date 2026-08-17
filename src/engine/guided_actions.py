@@ -162,6 +162,7 @@ _STEPS: dict = {
                 "margin",
                 "tile",
                 "tile_gap",
+                "writing_mode",
             }
         ),
         frozenset({"font_dir"}),
