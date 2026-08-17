@@ -19,6 +19,10 @@ import { tChrome, tStepParam, tStepTitle } from '../i18n';
 // a second list here would drift from the engine's own refusals.
 import { EXPORT_TARGETS, exportParams, type ExportFormat } from './export-targets';
 import { pagesParam } from './page-scope';
+// The watermark step's Direction resolves through the SAME helper the
+// Watermark panel uses, so the two surfaces cannot disagree about what a mode
+// on a non-text source means or about a horizontal stamp sending no key.
+import { writingParams, type WatermarkSource } from './watermark-writing';
 
 // Slice 2 grew the catalog: OCR (the batch pipeline's single-file arm),
 // header/footer (one positioned text per step — several positions compose as
@@ -522,6 +526,20 @@ export const STEP_CATALOG: readonly StepDef[] = [
         step: 0.05,
       },
       { key: 'angle', label: 'Angle', kind: 'number', defaultValue: 45, min: -180, max: 180, step: 5 },
+      {
+        // A property of DRAWN TEXT: a picture and a lifted page carry their own
+        // orientation, and the engine refuses a mode on either. `mapParams`
+        // resolves the stored mode against the step's actual source, so a mode
+        // left behind by a source switch cannot reach the call.
+        key: 'writing_mode',
+        label: 'Direction',
+        kind: 'select',
+        options: [
+          { value: 'horizontal', label: 'Horizontal' },
+          { value: 'vertical', label: 'Vertical' },
+        ],
+        defaultValue: 'horizontal',
+      },
       { key: 'scale', label: 'Scale', kind: 'number', defaultValue: 1, min: 0.05, max: 4, step: 0.05 },
       {
         key: 'position',
@@ -541,6 +559,17 @@ export const STEP_CATALOG: readonly StepDef[] = [
         defaultValue: 'center',
       },
     ],
+    // A HORIZONTAL stamp emits no `writing_mode` at all: the engine pins
+    // horizontal as byte-identical to omitting the parameter, so an action
+    // saved before this param existed and one saved with Direction left alone
+    // build the same call, argument for argument.
+    mapParams: (params) => {
+      const { writing_mode: mode, ...rest } = params;
+      return {
+        ...rest,
+        ...writingParams(watermarkSource(params), mode === 'vertical' ? 'vertical' : 'horizontal'),
+      };
+    },
   },
   {
     op: 'ocr_file',
@@ -1043,6 +1072,15 @@ export const STEP_CATALOG: readonly StepDef[] = [
   },
 ];
 
+/** The source a watermark step stamps from. Exactly one of the three fields
+ * carries a value (`requireOneOf`), so a named picture or PDF IS the source
+ * and everything else is text. */
+export function watermarkSource(params: Record<string, string | number>): WatermarkSource {
+  if (String(params.image ?? '').trim()) return 'image';
+  if (String(params.pdf_source ?? '').trim()) return 'pdf';
+  return 'text';
+}
+
 export function stepDefFor(op: GuidedStepOp): StepDef {
   const def = STEP_CATALOG.find((d) => d.op === op);
   if (!def) throw new Error(`unknown guided step: ${op}`);
@@ -1057,13 +1095,31 @@ export function newStep(op: GuidedStepOp): GuidedStep {
   return { op, params };
 }
 
-/** The param keys a run must collect up front: everything the user marked
- * ask-at-run, plus every secret (which is never stored). */
-export function askedParamKeys(step: GuidedStep): string[] {
+/**
+ * The params the step EDITOR offers. Everything the step declares, minus the
+ * watermark's Direction once a picture or a PDF page is named: that source
+ * carries its own orientation, so the control would sit there governing
+ * nothing — the same disappearance the Watermark panel performs. A source
+ * collected at run time is undecided here, so the control stays.
+ */
+export function editorParams(step: GuidedStep): readonly StepParamDef[] {
   const def = stepDefFor(step.op);
+  if (def.op !== 'watermark') return def.params;
   const asked = new Set(step.ask ?? []);
-  for (const p of def.params) if (p.secret) asked.add(p.key);
-  return def.params.filter((p) => asked.has(p.key)).map((p) => p.key);
+  const undecided = ['text', 'image', 'pdf_source'].some((k) => asked.has(k));
+  if (undecided || watermarkSource(step.params) === 'text') return def.params;
+  return def.params.filter((p) => p.key !== 'writing_mode');
+}
+
+/** The param keys a run must collect up front: everything the user marked
+ * ask-at-run, plus every secret (which is never stored). Read from the params
+ * the step OFFERS, so an ask mark left behind on a param the step no longer
+ * shows cannot make the pre-run form collect a value nothing reads. */
+export function askedParamKeys(step: GuidedStep): string[] {
+  const offered = editorParams(step);
+  const asked = new Set(step.ask ?? []);
+  for (const p of offered) if (p.secret) asked.add(p.key);
+  return offered.filter((p) => asked.has(p.key)).map((p) => p.key);
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   actionFileJson,
   askedParamKeys,
   buildStepParams,
+  editorParams,
   inPlaceBlocker,
   loadGuidedActions,
   newStep,
@@ -386,6 +387,7 @@ export function GuidedActionsPanel(): React.ReactElement {
         <div className="flex flex-col gap-2" data-testid="action-steps">
           {action.steps.map((step, i) => {
             const def = stepDefFor(step.op);
+            const shown = editorParams(step);
             return (
               <div
                 key={i}
@@ -433,9 +435,9 @@ export function GuidedActionsPanel(): React.ReactElement {
                     {tChrome('panel.ga.remove')}
                   </button>
                 </div>
-                {def.params.length > 0 && (
+                {shown.length > 0 && (
                   <div className="flex flex-wrap items-center gap-2">
-                    {def.params.map((p) => {
+                    {shown.map((p) => {
                       // Secrets are never stored: no input, just the fact.
                       if (p.secret) {
                         return (
