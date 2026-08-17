@@ -607,6 +607,24 @@ mod tests {
     }
 
     #[test]
+    fn the_exclusive_owner_reclaiming_is_granted_and_stacks_no_second_holder() {
+        let state = ClaimState::new();
+        assert!(state.claim("C:\\a.pdf", "doc-1", ClaimMode::Write).granted);
+
+        let again = state.claim("C:\\a.pdf", "doc-1", ClaimMode::Write);
+        assert!(again.granted);
+        assert!(again.owner.is_empty());
+        assert_eq!(state.owner("C:\\a.pdf").as_deref(), Some("doc-1"));
+
+        // A re-claim updates the holder in place rather than pushing a second
+        // one: a stacked holder would survive its window's single release and
+        // wedge the path for the rest of the session.
+        state.release("C:\\a.pdf", "doc-1");
+        assert_eq!(state.owner("C:\\a.pdf"), None);
+        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+    }
+
+    #[test]
     fn read_claims_coexist_and_still_block_a_write() {
         let state = ClaimState::new();
         assert!(state.claim("C:\\src.pdf", "main", ClaimMode::Read).granted);
