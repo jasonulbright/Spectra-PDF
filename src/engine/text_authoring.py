@@ -253,6 +253,42 @@ def vertical_face(font_path, family, style: str, body: str, columns: str) -> tup
     return resolve_vertical_font(str(font_path), body, style=style), True
 
 
+#: Script -> (predefined vertical CMap, registry, ordering, supplement) for a
+#: NON-EMBEDDED vertical font: one row per collection the ladder above can
+#: draw, and the only table that binds the two halves together.
+#:
+#: ISO 32000-2 Table 116 names the predefined CMaps; 9.7.5.2 states that a
+#: name ending in V selects vertical writing mode and that a name containing
+#: UTF16 encodes UTF-16BE. UTF-16BE is the encoding of a PDF text string, so
+#: the UTF16 rows keep a supplementary-plane character expressible where the
+#: UCS2 rows stop at the BMP.
+#:
+#: 9.7.3 requires a CIDFont and its CMap to share Registry and Ordering, and
+#: 9.7.5.2 forbids Identity-H and Identity-V with a non-embedded font --
+#: together those make a collection CMap the only conforming encoding here.
+#:
+#: Supplements are the ones 9.7.5.2 states a processor supports, except
+#: Korean: every predefined Korean Unicode CMap in Table 116 declares the
+#: Korea1 ordering and no predefined CMap name declares the KR one, so the
+#: Korea1 collection is what a conforming non-embedded pairing can name.
+VERTICAL_SCRIPTS = {
+    "japanese": ("UniJIS-UTF16-V", "Adobe", "Japan1", 7),
+    "simplified-chinese": ("UniGB-UTF16-V", "Adobe", "GB1", 5),
+    "traditional-chinese": ("UniCNS-UTF16-V", "Adobe", "CNS1", 7),
+    "korean": ("UniKS-UTF16-V", "Adobe", "Korea1", 2),
+}
+
+
+def vertical_collection(script) -> tuple:
+    """(CMap name, registry, ordering, supplement) for a script name."""
+    key = str(script or "").strip().lower()
+    entry = VERTICAL_SCRIPTS.get(key)
+    if entry is None:
+        allowed = ", ".join(sorted(VERTICAL_SCRIPTS))
+        raise ValueError(f"the script must be one of: {allowed} (got {script!r})")
+    return entry
+
+
 def _fresh_font_name(fonts) -> str:
     taken = {str(k) for k in fonts.keys()} if fonts is not None else set()
     i = 0
