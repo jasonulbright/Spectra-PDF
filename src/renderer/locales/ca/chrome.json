@@ -3003,6 +3003,7 @@
   "panel.a11y.detail.field_has_no_description": "Aquest camp {{type}} no té descripció.",
   "panel.a11y.detail.fields_unreadable": "L’arbre de camps de formulari no s’ha pogut llegir fins al final, així que aquesta comprovació no ha vist tots els camps.",
   "panel.a11y.detail.figure_missing_alt": "Aquest element {{role}} no té ni text alternatiu ni text real.",
+  "panel.a11y.detail.font_encoding_unsupported": "A la pàgina {{page}}, {{font}} utilitza una codificació que aquesta aplicació no pot llegir, de manera que el seu text no s'ha comprovat ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "A la pàgina {{page}}, {{font}} no es correspon amb cap caràcter llegible ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "Un camp de formulari de la pàgina {{page}} és fora de l’arbre d’estructura.",
   "panel.a11y.detail.header_cell_has_no_scope": "Aquesta cel·la de capçalera no declara cap àmbit i cap cel·la no hi apunta.",

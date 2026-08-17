@@ -2937,6 +2937,7 @@
   "panel.a11y.detail.field_has_no_description": "Dit {{type}}-veld heeft geen beschrijving.",
   "panel.a11y.detail.fields_unreadable": "De boom met formuliervelden kon niet tot het einde worden gelezen, dus deze controle heeft niet elk veld gezien.",
   "panel.a11y.detail.figure_missing_alt": "Dit {{role}}-element heeft geen alternatieve tekst en geen werkelijke tekst.",
+  "panel.a11y.detail.font_encoding_unsupported": "Op pagina {{page}} gebruikt {{font}} een codering die deze toepassing niet kan lezen, dus de tekst is niet gecontroleerd ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "Op pagina {{page}} verwijst {{font}} naar geen enkel leesbaar teken ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "Een formulierveld op pagina {{page}} staat buiten de structuurboom.",
   "panel.a11y.detail.header_cell_has_no_scope": "Deze kopcel geeft geen bereik op, en geen enkele cel verwijst ernaar.",

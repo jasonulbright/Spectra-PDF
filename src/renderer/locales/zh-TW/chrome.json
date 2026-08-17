@@ -2871,6 +2871,7 @@
   "panel.a11y.detail.field_has_no_description": "此 {{type}} 欄位沒有說明。",
   "panel.a11y.detail.fields_unreadable": "表單欄位樹無法讀到末端，因此本項檢查未看到全部欄位。",
   "panel.a11y.detail.figure_missing_alt": "此 {{role}} 既無替代文字也無實際文字。",
+  "panel.a11y.detail.font_encoding_unsupported": "第 {{page}} 頁，{{font}} 使用了本應用程式無法讀取的編碼，因此未檢查其文字（{{reason}}）。",
   "panel.a11y.detail.font_has_no_unicode_mapping": "第 {{page}} 頁，{{font}} 無法對應為可讀字元（{{reason}}）。",
   "panel.a11y.detail.form_field_not_tagged": "第 {{page}} 頁的表單欄位位於結構樹之外。",
   "panel.a11y.detail.header_cell_has_no_scope": "此標頭儲存格未宣告範圍，也沒有儲存格指向它。",
