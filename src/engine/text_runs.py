@@ -85,6 +85,12 @@ from engine.text_metrics import (  # noqa: F401  (_operand_bytes is a re-export)
 
 SHOW_OPS = ("Tj", "'", '"', "TJ")
 
+# The one `reason` that is NOT a font problem: the font decoded the run and the
+# run turned out to be whitespace. Callers that ask "did the encoding fail"
+# must compare against this constant rather than re-spell the sentence, because
+# a blank run is evidence about the text and none at all about the mapping.
+NOTHING_TO_EDIT = "nothing to edit"
+
 
 # ── listing ───────────────────────────────────────────────────────────────
 
@@ -225,7 +231,7 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
             elif not cap.editable:
                 reason = cap.reason
             elif not text.strip():
-                reason = "nothing to edit"
+                reason = NOTHING_TO_EDIT
             out.append(
                 {
                     "index": len(out),
