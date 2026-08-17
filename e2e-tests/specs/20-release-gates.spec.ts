@@ -45,7 +45,6 @@ async function makeTwoPager(path: string): Promise<void> {
 async function pageText(path: string, pageNumber: number): Promise<string> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   const content = (await (await pdf.getPage(pageNumber)).getTextContent()) as {
     items: { str?: string }[];
@@ -57,7 +56,6 @@ async function pageText(path: string, pageNumber: number): Promise<string> {
 async function pageRotation(path: string, pageNumber: number): Promise<number> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   const rotate = (await pdf.getPage(pageNumber)).rotate;
   await pdf.loadingTask.destroy();
@@ -67,7 +65,6 @@ async function pageRotation(path: string, pageNumber: number): Promise<number> {
 async function outlineTitles(path: string): Promise<string[]> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   const outline = ((await pdf.getOutline()) ?? []) as { title: string }[];
   await pdf.loadingTask.destroy();
@@ -193,7 +190,6 @@ describe('release gates (2p)', () => {
     expect(await pageRotation(dest, 1)).toBe(90);
     const pdf = await pdfjs.getDocument({
       data: new Uint8Array(readFileSync(dest)),
-      isEvalSupported: false,
     }).promise;
     expect(pdf.numPages).toBe(1);
     await pdf.loadingTask.destroy();

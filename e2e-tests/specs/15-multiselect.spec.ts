@@ -33,7 +33,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
 ).href;
 
 async function loadPdf(path: string) {
-  return pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)), isEvalSupported: false })
+  return pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)) })
     .promise;
 }
 

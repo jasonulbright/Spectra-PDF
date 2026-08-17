@@ -98,7 +98,7 @@ describe('guided actions', () => {
   });
 
   it('runs the action over the open document, every step green', async () => {
-    const runButtons = await $$('[data-testid^="action-run-"]');
+    const runButtons = await $$('[data-testid^="action-run-"]').getElements();
     expect((await runButtons).length).toBe(1);
     await runButtons[0].click();
 
@@ -153,7 +153,7 @@ describe('guided actions', () => {
     await $('[data-testid="action-new"]').click();
     await setReactSelectValue('[data-testid="action-add-op"]', 'ocr_file');
     await $('[data-testid="action-add-step"]').click();
-    const options = await $$('[data-testid="action-step-0-language"] option');
+    const options = await $$('[data-testid="action-step-0-language"] option').getElements();
     expect((await options).length).toBeGreaterThanOrEqual(40);
     await $('[data-testid="action-cancel"]').click();
     await $('[data-testid="actions-list"]').waitForDisplayed();

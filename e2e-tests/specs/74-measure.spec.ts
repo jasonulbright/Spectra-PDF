@@ -39,11 +39,11 @@ async function firstCellRect(): Promise<CellRect> {
 }
 
 async function firstAnnotation(): Promise<{ kind: string; note?: string } | null> {
-  return await browser.executeAsync(function (done) {
+  return await browser.executeAsync<{ kind: string; note?: string } | null, []>(function (done) {
     (window as any).__SPECTRA_TEST__
       .getFirstAnnotation(8000)
-      .then((a: unknown) => done(a))
-      .catch(() => done(null));
+      .then((a: unknown) => done(a as any))
+      .catch(() => done(null as any));
   });
 }
 

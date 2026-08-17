@@ -92,7 +92,7 @@ describe('long documents past the element ceiling', () => {
     await browser.waitUntil(
       async () => {
         const v = await $('[data-testid="page-nav-box"]').getValue();
-        const rows = await $$('[data-testid="document-view"] .docview-row');
+        const rows = await $$('[data-testid="document-view"] .docview-row').getElements();
         return v === String(PAGE_COUNT) && rows.length > 0;
       },
       { timeout: 20_000, timeoutMsg: 'the jump to the last page did not land' },

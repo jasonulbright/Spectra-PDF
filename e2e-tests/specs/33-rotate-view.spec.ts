@@ -133,7 +133,6 @@ describe('rotate view', () => {
 
     const doc = await pdfjs.getDocument({
       data: new Uint8Array(readFileSync(dest)),
-      isEvalSupported: false,
     }).promise;
     const page = await doc.getPage(1);
     // The highlight tool draws translucent BOXES — committed as /Square

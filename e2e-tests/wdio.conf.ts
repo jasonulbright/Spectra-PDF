@@ -29,7 +29,8 @@
  *
  * Then: npm test
  */
-import { spawn, spawnSync, ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, spawnSync, ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
 import { resolve, basename } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { scanText } from './scan-run-log.js';
@@ -41,7 +42,9 @@ const TAURI_DRIVER_PORT = 4444;
 const RUN_LOG_DIR = resolve(__dirname, 'logs');
 const RUN_LOG = resolve(RUN_LOG_DIR, 'last-run.log');
 
-let tauriDriver: ChildProcessWithoutNullStreams | null = null;
+// stdin is ignored and both output streams are piped, which is what the
+// stdio tuple below declares — the process type has to say the same.
+let tauriDriver: ChildProcessByStdio<null, Readable, Readable> | null = null;
 
 // The driver-level WARN/ERROR rows are emitted inside the worker processes and
 // reach the launcher only as forwarded output, so no launcher-side logger hook
@@ -118,10 +121,6 @@ export const config: WebdriverIO.Config = {
   framework: 'mocha',
   reporters: ['spec'],
   mochaOpts: { ui: 'bdd', timeout: 60_000 },
-  autoCompileOpts: {
-    autoCompile: true,
-    tsNodeOpts: { transpileOnly: true, project: './tsconfig.json' },
-  },
   onPrepare: () => {
     captureOutput();
     if (!existsSync(APP_BINARY)) {
@@ -146,7 +145,7 @@ export const config: WebdriverIO.Config = {
 
       // Set SPECTRAPDF_E2E so the Tauri binary skips single-instance + tray —
       // each WDIO session needs a clean launch and a clean exit.
-      const env = { ...process.env, SPECTRAPDF_E2E: '1' };
+      const env: NodeJS.ProcessEnv = { ...process.env, SPECTRAPDF_E2E: '1' };
       // The fallback spec's session launches the app with the backdrop forced
       // OFF (an e2e-gated lever in lib.rs), so the opaque presentation —
       // otherwise unreachable on a machine where Mica composes — runs live.

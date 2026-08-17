@@ -74,10 +74,10 @@ describe('navigation pane — Bookmarks panel', () => {
   });
 
   it('adds a new bookmark', async () => {
-    const before = (await $$('[data-testid="bookmark-row"]')).length;
+    const before = (await $$('[data-testid="bookmark-row"]').getElements()).length;
     await $('[data-testid="bookmark-add"]').click();
     await browser.waitUntil(
-      async () => (await $$('[data-testid="bookmark-row"]')).length === before + 1,
+      async () => (await $$('[data-testid="bookmark-row"]').getElements()).length === before + 1,
       { timeoutMsg: 'add bookmark did not create a row' },
     );
   });

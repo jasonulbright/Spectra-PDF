@@ -110,21 +110,21 @@ describe('flattener preview', () => {
   it('marks the region and its objects on the page', async () => {
     await $('[data-testid="flattener-armed"]').click();
     await browser.waitUntil(
-      async () => (await $$('[data-flatten-category="region"]')).length > 0,
+      async () => (await $$('[data-flatten-category="region"]').getElements()).length > 0,
       { timeout: WAIT_MS, timeoutMsg: 'the region was never marked on the page' },
     );
-    const marks = await $$('[data-flatten-category="transparent"]');
+    const marks = await $$('[data-flatten-category="transparent"]').getElements();
     expect(marks.length).toBe(1);
   });
 
   it('a category switched off stops being drawn', async () => {
     await $('[data-testid="flattener-category-transparent"] input').click();
     await browser.waitUntil(
-      async () => (await $$('[data-flatten-category="transparent"]')).length === 0,
+      async () => (await $$('[data-flatten-category="transparent"]').getElements()).length === 0,
       { timeout: 20_000, timeoutMsg: 'the transparent marks outlived the checkbox' },
     );
     // The region is not a category, so it stays.
-    expect((await $$('[data-flatten-category="region"]')).length).toBeGreaterThan(0);
+    expect((await $$('[data-flatten-category="region"]').getElements()).length).toBeGreaterThan(0);
     await $('[data-testid="flattener-category-transparent"] input').click();
   });
 

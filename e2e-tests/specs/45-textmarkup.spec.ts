@@ -42,7 +42,7 @@ async function makeHighlightedPdf(path: string): Promise<void> {
 }
 
 async function highlightCount(path: string): Promise<number> {
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)), isEvalSupported: false }).promise;
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)) }).promise;
   const annots = (await (await pdf.getPage(1)).getAnnotations()) as { subtype: string }[];
   await pdf.loadingTask.destroy();
   return annots.filter((a) => a.subtype === 'Highlight').length;

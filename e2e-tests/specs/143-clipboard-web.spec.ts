@@ -121,7 +121,6 @@ async function readPdf(
 ): Promise<{ pages: number; boxes: number[][]; text: string; outline: string[] }> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   const boxes: number[][] = [];
   let text = '';

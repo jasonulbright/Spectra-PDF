@@ -77,7 +77,6 @@ describe('create PDF from PostScript', () => {
     expect(existsSync(outPath)).toBe(true);
     const pdf = await pdfjs.getDocument({
       data: new Uint8Array(readFileSync(outPath)),
-      isEvalSupported: false,
     }).promise;
     expect(pdf.numPages).toBe(1);
     await pdf.loadingTask.destroy();

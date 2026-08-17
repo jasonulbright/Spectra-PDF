@@ -109,7 +109,7 @@ describe('split view', () => {
       reverse: true,
       timeoutMsg: 'pane B survived toggling split off',
     });
-    const views = await $$('[data-testid="document-view"]');
+    const views = await $$('[data-testid="document-view"]').getElements();
     expect(views.length).toBe(1);
   });
 });

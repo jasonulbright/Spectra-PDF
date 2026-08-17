@@ -15,6 +15,7 @@ import {
   editImageSelection,
   editImageAct,
 } from '../support/harness.js';
+import type { ImagePlacement } from '../support/harness.js';
 
 // Image adjustments against the built binary: opacity (a
 // page-local ExtGState the LISTING seeds back), crop (a unit-space clip —
@@ -29,12 +30,7 @@ const RED_DOT_PNG = Buffer.from(
   'base64',
 );
 
-async function firstPlacement(): Promise<{
-  pageId: string;
-  p:
-    | { index: number; nested: boolean; matrix: number[]; opacity: number; crop: number[] | null }
-    | undefined;
-}> {
+async function firstPlacement(): Promise<{ pageId: string; p: ImagePlacement | undefined }> {
   const ids = await editImagePageIds();
   if (ids.length === 0) return { pageId: '', p: undefined };
   return { pageId: ids[0], p: (await editImagePlacements(ids[0]))[0] };
