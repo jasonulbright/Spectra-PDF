@@ -4644,6 +4644,8 @@
   "panel.settings.printerNotInstalled": "A nyomtató nincs telepítve",
   "panel.settings.printerReady": "készen áll feladatok fogadására",
   "panel.settings.removePrinter": "Nyomtató eltávolítása…",
+  "panel.settings.restoreWindows": "Az előző munkamenet visszaállítása indításkor",
+  "panel.settings.restoreWindowsHint": "Újra megnyitja azokat az ablakokat és dokumentumokat, amelyek a legutóbbi kilépéskor nyitva voltak. Az ablak mérete és helyzete mindig megjegyződik; ez a beállítás dönti el, hogy a dokumentumok is visszatérjenek-e.",
   "panel.settings.rustNotices": "Rust-csomagközlemények",
   "panel.settings.saved": "A beállítások mentve",
   "panel.settings.singleKey": "Egybillentyűs gyorsbillentyűk használata az eszközök eléréséhez",

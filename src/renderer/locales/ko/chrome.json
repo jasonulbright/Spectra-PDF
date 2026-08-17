@@ -4538,6 +4538,8 @@
   "panel.settings.printerNotInstalled": "프린터가 설치되지 않음",
   "panel.settings.printerReady": "작업을 받을 준비됨",
   "panel.settings.removePrinter": "프린터 제거…",
+  "panel.settings.restoreWindows": "시작할 때 마지막 세션 복원",
+  "panel.settings.restoreWindowsHint": "마지막으로 종료할 때 열려 있던 창과 문서를 다시 엽니다. 창 크기와 위치는 항상 기억되며, 이 설정은 문서도 함께 복원할지를 결정합니다.",
   "panel.settings.rustNotices": "Rust 크레이트 고지",
   "panel.settings.saved": "설정을 저장했습니다",
   "panel.settings.singleKey": "단일 키 단축키로 도구 사용",

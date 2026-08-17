@@ -627,6 +627,12 @@ export const app = {
   setStartMinimized: (enabled: boolean) =>
     invoke('set_start_minimized', { enabled }),
 
+  /** Mirror restore-windows-on-launch into the same Rust-readable file. The
+   * windows are rebuilt during startup, before a renderer exists to be asked
+   * what the preference says. */
+  setRestoreWindowsOnLaunch: (enabled: boolean) =>
+    invoke('set_restore_windows_on_launch', { enabled }),
+
   /** Close THIS window, quitting only when it was the last one. The count is
    * taken in Rust: a renderer knows nothing about another window's unsaved
    * work, and destroying a fixed label discards whichever window did not ask. */

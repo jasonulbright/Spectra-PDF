@@ -666,6 +666,28 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         />
         <span className="text-sm text-neutral-400">{tChrome('panel.settings.startWithWindows')}</span>
       </label>
+
+      <div data-testid="restore-windows-pref">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            data-testid="pref-restore-windows"
+            checked={settings.restoreWindowsOnLaunch}
+            onChange={() => {
+              const next = !settings.restoreWindowsOnLaunch;
+              update('restoreWindowsOnLaunch', next);
+              // Mirrored to the Rust-readable config: the windows are rebuilt
+              // during startup, before a renderer exists to be asked.
+              app.setRestoreWindowsOnLaunch(next).catch(() => {});
+            }}
+            className="rounded bg-neutral-800 border-neutral-700"
+          />
+          <span className="text-sm text-neutral-400">{tChrome('panel.settings.restoreWindows')}</span>
+        </label>
+        <p className="text-xs text-neutral-500 mt-1.5">
+          {tChrome('panel.settings.restoreWindowsHint')}
+        </p>
+      </div>
       </>
       )}
 

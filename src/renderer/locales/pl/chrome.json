@@ -4856,6 +4856,8 @@
   "panel.settings.printerNotInstalled": "Drukarka niezainstalowana",
   "panel.settings.printerReady": "gotowa do przyjmowania zadań",
   "panel.settings.removePrinter": "Usuń drukarkę…",
+  "panel.settings.restoreWindows": "Przywracaj ostatnią sesję przy uruchamianiu",
+  "panel.settings.restoreWindowsHint": "Ponownie otwiera okna i dokumenty, które były otwarte przy ostatnim zamknięciu. Rozmiar i położenie okna są zapamiętywane zawsze; ta opcja decyduje, czy wrócą także dokumenty.",
   "panel.settings.rustNotices": "Informacje o pakietach Rust",
   "panel.settings.saved": "Zapisano ustawienia",
   "panel.settings.singleKey": "Używaj skrótów jednoklawiszowych do narzędzi",

@@ -4538,6 +4538,8 @@
   "panel.settings.printerNotInstalled": "プリンターは未インストール",
   "panel.settings.printerReady": "ジョブを受け取れます",
   "panel.settings.removePrinter": "プリンターを削除…",
+  "panel.settings.restoreWindows": "起動時に前回のセッションを復元する",
+  "panel.settings.restoreWindowsHint": "前回終了したときに開いていたウィンドウと文書を開き直します。ウィンドウの大きさと位置は常に記憶されます。この設定は文書も復元するかどうかを決めます。",
   "panel.settings.rustNotices": "Rust クレートの告知",
   "panel.settings.saved": "設定を保存しました",
   "panel.settings.singleKey": "1 キーのショートカットでツールを切り替える",

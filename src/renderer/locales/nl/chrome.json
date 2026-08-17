@@ -4644,6 +4644,8 @@
   "panel.settings.printerNotInstalled": "Printer niet geïnstalleerd",
   "panel.settings.printerReady": "gereed om taken te ontvangen",
   "panel.settings.removePrinter": "Printer verwijderen…",
+  "panel.settings.restoreWindows": "Laatste sessie bij het starten heropenen",
+  "panel.settings.restoreWindowsHint": "Heropent de vensters en documenten die openstonden toen u de laatste keer afsloot. De grootte en positie van het venster worden altijd onthouden; deze instelling bepaalt of de documenten ook terugkomen.",
   "panel.settings.rustNotices": "Rust-crate-meldingen",
   "panel.settings.saved": "Instellingen opgeslagen",
   "panel.settings.singleKey": "Sneltoetsen met één toets gebruiken voor gereedschappen",
