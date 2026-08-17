@@ -585,13 +585,61 @@ def untagged_field(path):
     return save(pdf, path)
 
 
+def _tagged_field(pdf, page, doc, widget_extra=None, form_extra=None):
+    field = _annot(pdf, page, "Widget", [300, 500, 500, 520], FT=Name.Tx,
+                   T=String("name"), **(widget_extra or {}))
+    tagged = elem(pdf, "Form", doc, page=page,
+                  kids=[Dictionary(Type=Name.OBJR, Obj=field)], **(form_extra or {}))
+    doc[Name.K] = Array(list(doc[Name.K]) + [tagged])
+    pdf.Root[Name.AcroForm] = pdf.make_indirect(
+        Dictionary(Fields=Array([field]), DA=String("/Helv 0 Tf 0 g"))
+    )
+    return field, tagged
+
+
 def field_no_tu(path):
+    """The `Form` element carries a TITLE, not a description: it keeps the
+    element's own check quiet while leaving the field unnamed, so the one
+    verdict that moves is the field's."""
     pdf = new_pdf()
     page = pdf.pages[0]
     root, doc = _one_tagged_paragraph(pdf, page)
-    field = _annot(pdf, page, "Widget", [300, 500, 500, 520], FT=Name.Tx, T=String("name"))
+    _tagged_field(pdf, page, doc, form_extra={"T": String("Name field")})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def field_named_by_element_ok(path):
+    """PASS fixture — a field with no `/TU` whose tagging `Form` element
+    carries the accessible name is named."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    root, doc = _one_tagged_paragraph(pdf, page)
+    _tagged_field(pdf, page, doc, form_extra={"Alt": String("Your full name")})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def hidden_field_ok(path):
+    """PASS fixture — a widget the Hidden flag stops from rendering is owed no
+    accessible name."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    root, doc = _one_tagged_paragraph(pdf, page)
+    _tagged_field(pdf, page, doc, widget_extra={"F": 2})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def zero_area_field_ok(path):
+    """PASS fixture — a widget whose `/Rect` corners coincide bounds no area
+    and presents nothing to name."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    root, doc = _one_tagged_paragraph(pdf, page)
+    field = _annot(pdf, page, "Widget", [800, 800, 800, 800], FT=Name.Tx, T=String("name"))
     tagged = elem(pdf, "Form", doc, page=page,
-                  kids=[Dictionary(Type=Name.OBJR, Obj=field)], Alt=String("Name field"))
+                  kids=[Dictionary(Type=Name.OBJR, Obj=field)])
     doc[Name.K] = Array(list(doc[Name.K]) + [tagged])
     pdf.Root[Name.AcroForm] = pdf.make_indirect(
         Dictionary(Fields=Array([field]), DA=String("/Helv 0 Tf 0 g"))
@@ -639,6 +687,16 @@ def figure_actual_text_ok(path):
     pdf = new_pdf()
     page = pdf.pages[0]
     _figure_page(pdf, page, actual="Quarterly revenue, 2026")
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def figure_empty_actual_text_ok(path):
+    """PASS fixture — `/ActualText` present and empty states the figure's text
+    equivalent IS nothing, which is a declaration rather than a missing one."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _figure_page(pdf, page, actual="")
     make_conformant(pdf, page)
     return save(pdf, path)
 
@@ -901,6 +959,36 @@ def lbody_no_lbl(path):
     return save(pdf, path)
 
 
+def lbl_outside_list_item_ok(path):
+    """PASS fixture — a footnote's `Lbl` is a label on something that is not a
+    list item, alongside a well-formed list so the check still has work."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf, page,
+        "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Body copy.) Tj ET EMC\n"
+        "/Lbl <</MCID 1>> BDC BT /F1 11 Tf 40 660 Td (1.) Tj ET EMC\n"
+        "/LBody <</MCID 2>> BDC BT /F1 11 Tf 60 660 Td (An item.) Tj ET EMC\n"
+        "/Lbl <</MCID 3>> BDC BT /F1 9 Tf 40 100 Td (a) Tj ET EMC\n"
+        "/P <</MCID 4>> BDC BT /F1 9 Tf 52 100 Td (A footnote.) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    lbl = elem(pdf, "Lbl", doc, page=page, mcid=1)
+    body = elem(pdf, "LBody", doc, page=page, mcid=2)
+    item = elem(pdf, "LI", doc, kids=[lbl, body])
+    lst = elem(pdf, "L", doc, kids=[item])
+    note_lbl = elem(pdf, "Lbl", doc, page=page, mcid=3)
+    note_body = elem(pdf, "P", doc, page=page, mcid=4)
+    note = elem(pdf, "Note", doc, kids=[note_lbl, note_body])
+    doc[Name.K] = Array([para, lst, note])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para, lbl, body, note_lbl, note_body])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
 # ── headings ──────────────────────────────────────────────────────────────
 
 
@@ -1009,8 +1097,12 @@ ROSTER = {
     "repetitive_links": (repetitive_links, "navigation_links", "needs_review"),
     "untagged_field": (untagged_field, "tagged_form_fields", "fail"),
     "field_no_tu": (field_no_tu, "field_descriptions", "fail"),
+    "field_named_by_element_ok": (field_named_by_element_ok, "field_descriptions", "pass"),
+    "hidden_field_ok": (hidden_field_ok, "field_descriptions", "not_applicable"),
+    "zero_area_field_ok": (zero_area_field_ok, "field_descriptions", "not_applicable"),
     "figure_no_alt": (figure_no_alt, "figures_alt", "fail"),
     "figure_actual_text_ok": (figure_actual_text_ok, "figures_alt", "pass"),
+    "figure_empty_actual_text_ok": (figure_empty_actual_text_ok, "figures_alt", "pass"),
     "nested_alt": (nested_alt, "nested_alt", "fail"),
     "alt_no_content": (alt_no_content, "alt_no_content", "fail"),
     "alt_hides_annot": (alt_hides_annot, "alt_hides_annotation", "fail"),
@@ -1025,6 +1117,7 @@ ROSTER = {
     "table_no_summary": (table_no_summary, "table_summary", "warn"),
     "li_outside_l": (li_outside_l, "list_items", "fail"),
     "lbody_no_lbl": (lbody_no_lbl, "list_labels", "warn"),
+    "lbl_outside_list_item_ok": (lbl_outside_list_item_ok, "list_labels", "pass"),
     "heading_skip": (heading_skip, "heading_nesting", "fail"),
     "heading_starts_at_h2_ok": (heading_starts_at_h2_ok, "heading_nesting", "pass"),
     "rolemap_custom_tags_ok": (rolemap_custom_tags_ok, "heading_nesting", "pass"),
