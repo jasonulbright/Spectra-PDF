@@ -3201,6 +3201,7 @@
   "panel.a11y.detail.field_has_no_description": "هذا الحقل {{type}} ليس له وصف.",
   "panel.a11y.detail.fields_unreadable": "تعذّرت قراءة شجرة حقول النموذج حتى نهايتها، لذا لم يرَ هذا الفحص كل الحقول.",
   "panel.a11y.detail.figure_missing_alt": "هذا العنصر {{role}} ليس له نص بديل ولا نص فعلي.",
+  "panel.a11y.detail.font_encoding_unsupported": "في الصفحة {{page}}، يستخدم الخط {{font}} ترميزًا لا يستطيع هذا التطبيق قراءته، لذلك لم يُفحص نصه ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "في الصفحة {{page}}، الخط {{font}} لا يقابل أي حرف قابل للقراءة ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "حقل نموذج في الصفحة {{page}} خارج شجرة البنية.",
   "panel.a11y.detail.header_cell_has_no_scope": "خلية الرأس هذه لا تعلن نطاقًا، ولا تشير إليها أي خلية.",

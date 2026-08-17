@@ -2871,6 +2871,7 @@
   "panel.a11y.detail.field_has_no_description": "此 {{type}} 字段没有说明。",
   "panel.a11y.detail.fields_unreadable": "表单字段树无法读到末端，因此本项检查未看到全部字段。",
   "panel.a11y.detail.figure_missing_alt": "此 {{role}} 既无替代文本也无实际文本。",
+  "panel.a11y.detail.font_encoding_unsupported": "第 {{page}} 页，{{font}} 使用了本应用无法读取的编码，因此未检查其文本（{{reason}}）。",
   "panel.a11y.detail.font_has_no_unicode_mapping": "第 {{page}} 页，{{font}} 无法映射为可读字符（{{reason}}）。",
   "panel.a11y.detail.form_field_not_tagged": "第 {{page}} 页的表单字段位于结构树之外。",
   "panel.a11y.detail.header_cell_has_no_scope": "此表头单元格未声明范围，也没有单元格指向它。",

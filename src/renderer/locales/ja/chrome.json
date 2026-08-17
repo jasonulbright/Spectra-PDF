@@ -2871,6 +2871,7 @@
   "panel.a11y.detail.field_has_no_description": "この {{type}} フィールドには説明がありません。",
   "panel.a11y.detail.fields_unreadable": "フォームフィールドのツリーを最後まで読み取れなかったため、この確認はすべてのフィールドを見たわけではありません。",
   "panel.a11y.detail.figure_missing_alt": "この {{role}} には代替テキストも実テキストもありません。",
+  "panel.a11y.detail.font_encoding_unsupported": "{{page}} ページで、{{font}} はこのアプリが読み取れないエンコーディングを使っているため、そのテキストは検査されませんでした（{{reason}}）。",
   "panel.a11y.detail.font_has_no_unicode_mapping": "{{page}} ページで、{{font}} は読める文字に対応していません（{{reason}}）。",
   "panel.a11y.detail.form_field_not_tagged": "{{page}} ページのフォームフィールドが構造ツリーの外にあります。",
   "panel.a11y.detail.header_cell_has_no_scope": "この見出しセルはスコープを宣言しておらず、どのセルからも参照されていません。",

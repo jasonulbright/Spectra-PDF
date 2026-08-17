@@ -2937,6 +2937,7 @@
   "panel.a11y.detail.field_has_no_description": "Bu {{type}} alanının açıklaması yok.",
   "panel.a11y.detail.fields_unreadable": "Form alanları ağacı sonuna kadar okunamadı, bu yüzden bu denetim her alanı görmedi.",
   "panel.a11y.detail.figure_missing_alt": "Bu {{role}} öğesinin ne alternatif metni ne de gerçek metni var.",
+  "panel.a11y.detail.font_encoding_unsupported": "{{page}}. sayfada {{font}} bu uygulamanın okuyamadığı bir kodlama kullanıyor, bu yüzden metni denetlenmedi ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "{{page}}. sayfada {{font}} hiçbir okunabilir karaktere karşılık gelmiyor ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "{{page}}. sayfadaki bir form alanı yapı ağacının dışında.",
   "panel.a11y.detail.header_cell_has_no_scope": "Bu başlık hücresi bir kapsam bildirmiyor ve hiçbir hücre ona işaret etmiyor.",

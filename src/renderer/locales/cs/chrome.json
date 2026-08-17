@@ -3069,6 +3069,7 @@
   "panel.a11y.detail.field_has_no_description": "Toto pole {{type}} nemá popis.",
   "panel.a11y.detail.fields_unreadable": "Strom polí formuláře se nepodařilo přečíst až do konce, takže tato kontrola neviděla každé pole.",
   "panel.a11y.detail.figure_missing_alt": "Tento prvek {{role}} nemá ani alternativní, ani skutečný text.",
+  "panel.a11y.detail.font_encoding_unsupported": "Na stránce {{page}} používá písmo {{font}} kódování, které tato aplikace neumí přečíst, takže jeho text nebyl zkontrolován ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "Na stránce {{page}} písmo {{font}} neodpovídá žádnému čitelnému znaku ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "Pole formuláře na stránce {{page}} je mimo strom struktury.",
   "panel.a11y.detail.header_cell_has_no_scope": "Tato záhlavní buňka nedeklaruje rozsah a žádná buňka na ni neodkazuje.",

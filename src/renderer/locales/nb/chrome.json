@@ -2937,6 +2937,7 @@
   "panel.a11y.detail.field_has_no_description": "Dette {{type}}-feltet har ingen beskrivelse.",
   "panel.a11y.detail.fields_unreadable": "Treet av skjemafelt lot seg ikke lese helt til slutt, så denne kontrollen så ikke hvert felt.",
   "panel.a11y.detail.figure_missing_alt": "Dette {{role}}-elementet har verken alternativ tekst eller faktisk tekst.",
+  "panel.a11y.detail.font_encoding_unsupported": "På side {{page}} bruker {{font}} en koding som dette programmet ikke kan lese, så teksten ble ikke kontrollert ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "På side {{page}} svarer {{font}} ikke til noen lesbare tegn ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "Et skjemafelt på side {{page}} ligger utenfor strukturtreet.",
   "panel.a11y.detail.header_cell_has_no_scope": "Denne overskriftscellen angir ikke noe omfang, og ingen celle peker på den.",

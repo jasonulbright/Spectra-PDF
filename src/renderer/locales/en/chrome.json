@@ -2937,6 +2937,7 @@
   "panel.a11y.detail.field_has_no_description": "This {{type}} field has no description.",
   "panel.a11y.detail.fields_unreadable": "The form field tree could not be read to its end, so this check did not see every field.",
   "panel.a11y.detail.figure_missing_alt": "This {{role}} has neither alternate text nor actual text.",
+  "panel.a11y.detail.font_encoding_unsupported": "On page {{page}}, {{font}} uses an encoding this app cannot read, so its text was not checked ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "On page {{page}}, {{font}} maps to no readable characters ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "A form field on page {{page}} is outside the structure tree.",
   "panel.a11y.detail.header_cell_has_no_scope": "This header cell declares no scope, and no cell points at it.",

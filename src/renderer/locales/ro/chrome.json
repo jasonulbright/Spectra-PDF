@@ -3003,6 +3003,7 @@
   "panel.a11y.detail.field_has_no_description": "Acest câmp {{type}} nu are descriere.",
   "panel.a11y.detail.fields_unreadable": "Arborele câmpurilor de formular nu a putut fi citit până la capăt, așa că această verificare nu a văzut fiecare câmp.",
   "panel.a11y.detail.figure_missing_alt": "Acest element {{role}} nu are nici text alternativ, nici text real.",
+  "panel.a11y.detail.font_encoding_unsupported": "La pagina {{page}}, fontul {{font}} folosește o codificare pe care această aplicație nu o poate citi, așa că textul său nu a fost verificat ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "La pagina {{page}}, fontul {{font}} nu corespunde niciunui caracter lizibil ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "Un câmp de formular de la pagina {{page}} se află în afara arborelui de structură.",
   "panel.a11y.detail.header_cell_has_no_scope": "Această celulă de antet nu declară un domeniu și nicio celulă nu o indică.",

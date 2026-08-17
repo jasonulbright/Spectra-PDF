@@ -2937,6 +2937,7 @@
   "panel.a11y.detail.field_has_no_description": "Det här {{type}}-fältet har ingen beskrivning.",
   "panel.a11y.detail.fields_unreadable": "Trädet med formulärfält gick inte att läsa till slutet, så den här kontrollen såg inte varje fält.",
   "panel.a11y.detail.figure_missing_alt": "Det här {{role}}-elementet har varken alternativtext eller faktisk text.",
+  "panel.a11y.detail.font_encoding_unsupported": "På sidan {{page}} använder {{font}} en kodning som det här programmet inte kan läsa, så texten kontrollerades inte ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "På sidan {{page}} motsvarar {{font}} inga läsbara tecken ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "Ett formulärfält på sidan {{page}} ligger utanför strukturträdet.",
   "panel.a11y.detail.header_cell_has_no_scope": "Den här rubrikcellen anger inget omfång, och ingen cell pekar på den.",

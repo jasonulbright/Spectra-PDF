@@ -3069,6 +3069,7 @@
   "panel.a11y.detail.field_has_no_description": "To polje {{type}} nima opisa.",
   "panel.a11y.detail.fields_unreadable": "Drevesa polj obrazca ni bilo mogoče prebrati do konca, zato ta preverba ni videla vsakega polja.",
   "panel.a11y.detail.figure_missing_alt": "Ta element {{role}} nima ne nadomestnega ne dejanskega besedila.",
+  "panel.a11y.detail.font_encoding_unsupported": "Na strani {{page}} pisava {{font}} uporablja kodiranje, ki ga ta program ne more prebrati, zato njeno besedilo ni bilo preverjeno ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "Na strani {{page}} pisava {{font}} ne ustreza nobenemu berljivemu znaku ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "Polje obrazca na strani {{page}} je zunaj drevesa strukture.",
   "panel.a11y.detail.header_cell_has_no_scope": "Ta glava celice ne razglaša obsega in nobena celica ne kaže nanjo.",
