@@ -1,4 +1,4 @@
-"""Accessibility checker — 32 checks across seven categories.
+"""Accessibility checker — 33 checks across seven categories.
 
 A check is a CLAIM, and every claim states how it was reached. Each check
 yields one of five verdicts and, when it has something to name, a list of
@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import pikepdf
 
-from engine import struct_audit
+from engine import struct_audit, struct_nesting
 from engine.contrast import page_contrast
 from engine.extract_text import extract_text
 from engine.redact import IDENTITY, _resolve_resources
@@ -52,6 +52,7 @@ from engine.struct_audit import (
     ROW_GROUPS,
     annots_of,
     audit_tree,
+    nesting_edges,
     row_cells,
     scope,
     span_of,
@@ -83,6 +84,7 @@ CHECK_INVENTORY = (
     ("permissions", "document"),
     ("image_only", "document"),
     ("tagged", "document"),
+    ("structure_nesting", "document"),
     ("reading_order", "document"),
     ("lang", "document"),
     ("title", "document"),
@@ -167,7 +169,7 @@ _STRUCTURE_CHECKS = (
     "alt_hides_annotation", "other_elements_alt", "field_descriptions",
     "table_rows", "table_cells",
     "table_headers", "table_regularity", "table_summary", "list_items",
-    "list_labels", "heading_nesting",
+    "list_labels", "heading_nesting", "structure_nesting",
 )
 
 # The three whose FINDINGS are themselves claims about what the tree does not
@@ -1886,6 +1888,67 @@ def _check_list_labels(check, tree):
         check.status = PASS
 
 
+# Placement of these roles is the answer of the check that already owns the
+# role, so this check judges them and reports nothing: one defect reported
+# under two ids is noise, and the two check sets divide the world between what
+# an element IS and where it sits.
+_NESTING_DELEGATED = {
+    "TR": "table_rows",
+    "TH": "table_cells",
+    "TD": "table_cells",
+    "LI": "list_items",
+    "LBody": "list_labels",
+}
+
+
+def _check_structure_nesting(check, tree):
+    if not tree["tagged"]:
+        check.status = NA
+        return
+    edges, unread = nesting_edges(tree)
+    judged = 0
+    delegated = 0
+    uncovered = 0
+    findings = []
+    for edge in edges:
+        verdict, _cite, _rule = struct_nesting.judge(edge)
+        if verdict == struct_nesting.UNCOVERED:
+            uncovered += 1
+            continue
+        if edge.role in _NESTING_DELEGATED:
+            delegated += 1
+            continue
+        judged += 1
+        if verdict != struct_nesting.VIOLATION:
+            continue
+        findings.append(
+            _finding(
+                _struct_address(edge.node),
+                "structure_nesting_violation",
+                values={
+                    "child": edge.role,
+                    "parent": edge.parent_role,
+                    "page": edge.node.page,
+                },
+            )
+        )
+    # What was checked is stated alongside the verdict: a type the compiled
+    # tables hold no rule for is counted, never reported as verified.
+    check.data = {"judged": judged, "delegated": delegated, "uncovered": uncovered}
+    _verdict(check, judged, findings)
+    _also_review(
+        check,
+        [
+            _finding(
+                {"kind": "struct", "path": list(u["path"]), "page": u["page"]},
+                "structure_nesting_unreadable",
+                values={"reason": u["reason"]},
+            )
+            for u in unread
+        ],
+    )
+
+
 def _check_heading_nesting(check, tree, mcid_tables):
     if not tree["tagged"]:
         check.status = NA
@@ -1930,6 +1993,10 @@ _ENGLISH = {
     "tagged": (
         "Document is tagged",
         "Structure tags let assistive technology read content in a defined order.",
+    ),
+    "structure_nesting": (
+        "Structure types are nested where the standard allows",
+        "A tag inside a parent the standard does not allow it in breaks the structure it describes.",
     ),
     "reading_order": (
         "Reading order follows the page",
@@ -2112,6 +2179,7 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
             "permissions": lambda c: _check_permissions(c, pdf),
             "image_only": lambda c: _check_image_only(c, pdf, pages, file),
             "tagged": lambda c: _check_tagged(c, pdf, tree),
+            "structure_nesting": lambda c: _check_structure_nesting(c, tree),
             "reading_order": lambda c: _check_reading_order(c, tree, pages, mcid_tables),
             "lang": lambda c: _check_lang(c, pdf, tree, pages),
             "title": lambda c: _check_title(c, pdf),

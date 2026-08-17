@@ -32,6 +32,7 @@ from engine.derived_nav import (
     _resolve_role,
     _role_map,
 )
+from engine.struct_nesting import ROOT as _ROOT_ROLE, TRANSPARENT as _TRANSPARENT
 from engine.struct_tree import _is_elem, _kids, _MAX_DEPTH, _page_map, _page_no
 
 # Table attributes, wherever they are spelled. The key is the PDF name; the
@@ -50,7 +51,7 @@ class Node:
     __slots__ = (
         "path", "tag", "role", "level", "alt", "actual_text", "has_actual_text",
         "title", "lang", "attrs", "page", "mcids", "objrs", "children", "parent",
-        "sid",
+        "sid", "ns",
     )
 
     def __init__(self, path, tag, role, level):
@@ -58,6 +59,10 @@ class Node:
         self.tag = tag
         self.role = role
         self.level = level
+        # The namespace name this element declares, or "" for the absent /NS
+        # case, which ISO 32000-2 14.8.6.1 places in the default standard
+        # structure namespace rather than in none.
+        self.ns = ""
         # The element's own /ID, which is what a cell's /Headers array names.
         self.sid = None
         self.alt = ""
@@ -203,6 +208,25 @@ def _annot_index(entries: list) -> dict:
     return out
 
 
+def _namespace_of(elem) -> str:
+    """The namespace name an element declares, through its `/NS` entry.
+
+    `/NS` is an indirect reference to a namespace dictionary whose own `/NS`
+    entry is the name (ISO 32000-2 Table 356). An absent entry is the default
+    standard structure namespace, which is a namespace rather than a gap, so it
+    reads as the empty string and the caller resolves the default.
+    """
+    value = elem.get("/NS")
+    if value is None:
+        return ""
+    if not isinstance(value, pikepdf.Dictionary):
+        raise ValueError("the /NS entry is not a namespace dictionary")
+    name = value.get("/NS")
+    if name is None:
+        raise ValueError("the namespace dictionary declares no name")
+    return str(name)
+
+
 def _scope_of(value) -> str:
     try:
         return str(value).lstrip("/")
@@ -237,7 +261,7 @@ def audit_tree(pdf, annots_entries: list | None = None) -> dict:
     Returns {"tagged", "nodes" (flat, tree order), "roots", "role_map",
     "annots" (objgen → address), "tagged_mcids" (page → set), "tagged_annots"
     (set of objgen), "truncated" (the elements whose children the walk did not
-    reach)}.
+    reach), "ns_unread" (the elements whose `/NS` would not resolve)}.
 
     `annots_entries` is `annots_of`'s first return. A caller that has already
     read the annotations passes them so `/OBJR` targets resolve against the
@@ -254,6 +278,7 @@ def audit_tree(pdf, annots_entries: list | None = None) -> dict:
         return {
             "tagged": False, "nodes": [], "roots": [], "role_map": {},
             "tagged_mcids": {}, "tagged_annots": set(), "truncated": [],
+            "ns_unread": [],
         }
 
     role_map = _role_map(st)
@@ -266,6 +291,7 @@ def audit_tree(pdf, annots_entries: list | None = None) -> dict:
     tagged_mcids: dict = {}
     tagged_annots: set = set()
     truncated: list = []
+    ns_unread: list = []
     visited: set = set()
 
     def content_of(elem, node: Node, own_page):
@@ -335,6 +361,14 @@ def audit_tree(pdf, annots_entries: list | None = None) -> dict:
             node.sid = None
         own_page = _page_no(pages_by_og, elem.get("/Pg"), inherited_page)
         node.page = own_page
+        try:
+            node.ns = _namespace_of(elem)
+        except Exception as exc:
+            # A namespace that will not resolve is not the default namespace:
+            # which rule set governs the element is exactly what was not read.
+            node.ns = None
+            ns_unread.append({"path": [int(v) for v in path], "page": own_page,
+                              "reason": str(exc)})
         content_of(elem, node, own_page)
         for ref in node.mcids:
             if ref.get("form"):
@@ -394,7 +428,69 @@ def audit_tree(pdf, annots_entries: list | None = None) -> dict:
         "tagged_mcids": tagged_mcids,
         "tagged_annots": tagged_annots,
         "truncated": truncated,
+        "ns_unread": ns_unread,
     }
+
+
+class Edge:
+    """One element and the parent its placement is judged against.
+
+    The parent is the EFFECTIVE one: ISO 32000-2 Table 365 makes `Part`, `Div`
+    and `NonStruct` inherit their parent's containment requirements, so the
+    ancestor a rule addresses is the nearest one outside that set. `index` and
+    `sibling_roles` are taken from the DIRECT parent, because the positional
+    rules are stated over the parent element's own children.
+    """
+
+    __slots__ = ("node", "role", "ns", "parent_role", "ancestor_roles", "index",
+                 "sibling_roles")
+
+    def __init__(self, node, role, ns, parent_role, ancestor_roles, index,
+                 sibling_roles):
+        self.node = node
+        self.role = role
+        self.ns = ns
+        self.parent_role = parent_role
+        self.ancestor_roles = ancestor_roles
+        self.index = index
+        self.sibling_roles = sibling_roles
+
+
+def nesting_edges(tree: dict) -> tuple:
+    """Every element paired with the parent its placement is judged against.
+
+    Reads the tree `audit_tree` already built — roles are the `/RoleMap`
+    resolved ones it recorded, so there is one resolver rather than a second
+    copy. Returns (edges, unread), where `unread` names the elements whose
+    namespace did not resolve: an element whose governing rule set is unknown
+    is not an element that passed.
+    """
+    edges: list = []
+    unread = list(tree.get("ns_unread") or [])
+    for node in tree.get("nodes") or []:
+        if node.ns is None:
+            continue
+        effective = node.parent
+        while effective is not None and effective.role in _TRANSPARENT:
+            effective = effective.parent
+        ancestors = frozenset(a.role for a in node.ancestors())
+        siblings = node.parent.children if node.parent is not None else tree["roots"]
+        try:
+            index = siblings.index(node)
+        except ValueError:
+            index = -1
+        edges.append(
+            Edge(
+                node,
+                node.role,
+                node.ns,
+                effective.role if effective is not None else _ROOT_ROLE,
+                ancestors,
+                index,
+                [child.role for child in siblings],
+            )
+        )
+    return edges, unread
 
 
 def tables(nodes: list) -> list:
