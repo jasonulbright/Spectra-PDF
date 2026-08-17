@@ -38,13 +38,14 @@ describe('navigation pane — Pages panel', () => {
 
     // Thumbnails render (sample.pdf has 5 pages; the window covers the top).
     await $('[data-testid="thumb"]').waitForDisplayed({ timeoutMsg: 'no thumbnails rendered' });
-    const thumbs = await $$('[data-testid="thumb"]');
+    const thumbs = await $$('[data-testid="thumb"]').getElements();
     expect(thumbs.length).toBeGreaterThan(0);
   });
 
   it('clicking a thumbnail selects that page (shared selection)', async () => {
     const firstThumb = $('[data-testid="thumb"]');
     const pageId = await firstThumb.getAttribute('data-page-id');
+    if (pageId === null) throw new Error('the thumbnail carries no page id');
     await firstThumb.click();
     await browser.waitUntil(
       async () => (await getSelectedPageIds()).includes(pageId),

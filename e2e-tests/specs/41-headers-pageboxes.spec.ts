@@ -37,7 +37,7 @@ async function makeFixture(path: string): Promise<void> {
 }
 
 async function pageTexts(path: string): Promise<string[]> {
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)), isEvalSupported: false }).promise;
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)) }).promise;
   const out: string[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const content = (await (await pdf.getPage(i)).getTextContent()) as { items: { str?: string }[] };
@@ -48,7 +48,7 @@ async function pageTexts(path: string): Promise<string[]> {
 }
 
 async function cropBox(path: string, pageNum: number): Promise<number[]> {
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)), isEvalSupported: false }).promise;
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)) }).promise;
   const view = (await pdf.getPage(pageNum)).view as number[]; // the crop box [x0,y0,x1,y1]
   await pdf.loadingTask.destroy();
   return view;
@@ -124,7 +124,7 @@ describe('header/footer + page-box panels', () => {
     const dest = resolve(tmp, 'labeled.pdf');
     await applyAndSave(dest);
     // Verify the /PageLabels tree via pdf.js (getPageLabels returns per-page).
-    const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(dest)), isEvalSupported: false }).promise;
+    const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(dest)) }).promise;
     const labels = await pdf.getPageLabels();
     await pdf.loadingTask.destroy();
     expect(labels).toEqual(['i', 'ii']);

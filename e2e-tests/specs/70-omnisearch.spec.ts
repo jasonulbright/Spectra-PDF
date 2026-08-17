@@ -90,10 +90,10 @@ describe('omnisearch', () => {
   it('a phrase finds DOCUMENT TEXT, per page, with a snippet', async () => {
     await typeQuery('quarterly');
     await browser.waitUntil(
-      async () => (await $$('[data-testid^="omnisearch-text-"]')).length >= 2,
+      async () => (await $$('[data-testid^="omnisearch-text-"]').getElements()).length >= 2,
       { timeout: 15_000, timeoutMsg: 'a term present on both pages did not produce two hits' },
     );
-    const rows = await $$('[data-testid^="omnisearch-text-"]');
+    const rows = await $$('[data-testid^="omnisearch-text-"]').getElements();
     const first = await rows[0].getText();
     // Page number AND context — a bare page list would not be a search result.
     expect(first).toContain('p.1');

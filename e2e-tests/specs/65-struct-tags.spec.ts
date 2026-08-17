@@ -103,7 +103,7 @@ interface StructNode {
 
 // Page 1's structure tree as an independent reader (pdf.js) sees it on disk.
 async function readStructTree(path: string): Promise<StructNode | null> {
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)), isEvalSupported: false }).promise;
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(readFileSync(path)) }).promise;
   const tree = (await (await pdf.getPage(1)).getStructTree()) as StructNode | null;
   await pdf.loadingTask.destroy();
   return tree;
@@ -217,7 +217,7 @@ describe('structure tags + reading order (I.6)', () => {
       timeout: 20_000,
       timeoutMsg: 'the MCID content preview never rendered on the first row',
     });
-    expect((await $$('[data-testid^="order-item-"]')).length).toBe(3);
+    expect((await $$('[data-testid^="order-item-"]').getElements()).length).toBe(3);
 
     await $('[data-testid="order-down-0"]').click();
     await browser.waitUntil(
@@ -279,7 +279,7 @@ describe('structure tags + reading order (I.6)', () => {
     // two autotagged children (H1, P) appear.
     await $('[data-testid^="tag-toggle-"]').click();
     await browser.waitUntil(
-      async () => (await $$('[data-testid^="tag-row-"]')).length === 3,
+      async () => (await $$('[data-testid^="tag-row-"]').getElements()).length === 3,
       { timeoutMsg: 'expanding the root did not reveal the autotagged children' },
     );
   });

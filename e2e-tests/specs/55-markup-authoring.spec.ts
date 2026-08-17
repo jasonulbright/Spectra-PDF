@@ -63,7 +63,6 @@ interface AnnotOnDisk {
 async function annotationsOf(path: string): Promise<AnnotOnDisk[]> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   const annots = (await (await pdf.getPage(1)).getAnnotations()) as AnnotOnDisk[];
   await pdf.loadingTask.destroy();
@@ -91,7 +90,7 @@ describe('authoring text markup from a selection', () => {
     // The reading view is where the text layer lives; a document opens there.
     await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 15_000 });
     await browser.waitUntil(
-      async () => (await $$('[data-testid="text-layer"] span')).length > 0,
+      async () => (await $$('[data-testid="text-layer"] span').getElements()).length > 0,
       { timeout: 20_000, timeoutMsg: 'the text layer never rendered' },
     );
 
@@ -117,7 +116,7 @@ describe('authoring text markup from a selection', () => {
 
   it('links the same selection to a URL', async () => {
     await browser.waitUntil(
-      async () => (await $$('[data-testid="text-layer"] span')).length > 0,
+      async () => (await $$('[data-testid="text-layer"] span').getElements()).length > 0,
       { timeout: 20_000, timeoutMsg: 'the text layer never rendered' },
     );
     await selectFirstTextSpan();

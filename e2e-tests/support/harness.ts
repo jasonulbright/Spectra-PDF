@@ -385,6 +385,8 @@ export async function removeAnnotation(docId: string, pageId: string, annotation
   );
 }
 
+/** Mirrors `testHarness.ts`'s `getFirstAnnotation` return, which is the
+ *  contract; the per-kind fields are present only for their own kind. */
 export interface FirstAnnotation {
   docId: string;
   pageId: string;
@@ -392,6 +394,13 @@ export interface FirstAnnotation {
   kind: string;
   color: string;
   note?: string;
+  /** textmarkup only: the style, and how many quads it carries. */
+  markupType?: string;
+  quadCount?: number;
+  /** ink only: how many pen strokes it carries. */
+  strokeCount?: number;
+  /** stamp only: whether it carries a custom image. */
+  hasImage?: boolean;
 }
 
 export async function getFirstAnnotation(timeoutMs = 10_000): Promise<FirstAnnotation | null> {
@@ -1059,6 +1068,100 @@ export async function buildSignatureAppearance(): Promise<{
 }
 
 /**
+ * Wait for a selector to be displayed (or, with `reverse`, to stop being
+ * displayed), asking the selector again on every poll.
+ *
+ * `element.waitForDisplayed()` resolves its element once and then polls THAT
+ * node, so a re-render mid-wait turns each remaining poll into a stale-element
+ * round trip that the driver has to detect and refetch. Nothing is held across
+ * a poll here, so there is no handle to go stale — which also makes the wait
+ * correct for a node that is unmounted and remounted rather than updated.
+ */
+export async function waitForDisplayedSelector(
+  selector: string,
+  opts: { reverse?: boolean; timeout?: number; timeoutMsg?: string } = {},
+): Promise<void> {
+  const reverse = opts.reverse ?? false;
+  await browser.waitUntil(async () => (await $(selector).isDisplayed()) !== reverse, {
+    timeout: opts.timeout ?? 15_000,
+    interval: 100,
+    timeoutMsg:
+      opts.timeoutMsg ?? `${selector} was never ${reverse ? 'hidden' : 'displayed'}`,
+  });
+}
+
+/**
+ * Bring an element's centre somewhere the pointer can actually reach, and
+ * return that point.
+ *
+ * `element.scrollIntoView()` composes a wheel gesture through the WebDriver
+ * Actions API, and an Actions gesture names an origin that must already lie
+ * inside the viewport — so scrolling to anything currently off screen raises
+ * `move target out of bounds` and falls back to the Web API, one round trip
+ * later and with the result unproven. The DOM's own `scrollIntoView` has no
+ * origin, so it is called directly here.
+ *
+ * The point is held only once a hit test lands on the element: a coordinate
+ * the pointer can be moved to is not yet a coordinate the element's own
+ * handler sees. The box must also repeat between polls, because a virtualized
+ * column repositions its rows and a point measured before that lands names a
+ * place the element has since left.
+ */
+export async function scrollIntoReach(
+  selector: string,
+  timeoutMs = 20_000,
+): Promise<{ x: number; y: number }> {
+  let held = { x: 0, y: 0 };
+  let previous: string | null = null;
+  await browser.waitUntil(
+    async () => {
+      const now = await browser.execute(function (sel: string) {
+        const el = document.querySelector(sel) as HTMLElement | null;
+        if (!el) return { x: 0, y: 0, key: '', reachable: false };
+        const box = (): DOMRect => el.getBoundingClientRect();
+        const first = box();
+        if (
+          first.top < 0 ||
+          first.bottom > window.innerHeight ||
+          first.left < 0 ||
+          first.right > window.innerWidth
+        ) {
+          el.scrollIntoView({ block: 'center', inline: 'center' });
+        }
+        const r = box();
+        const x = Math.round(r.left + r.width / 2);
+        const y = Math.round(r.top + r.height / 2);
+        const hit = document.elementFromPoint(x, y);
+        return {
+          x,
+          y,
+          key: `${r.left},${r.top},${r.width},${r.height}`,
+          reachable:
+            r.width > 0 &&
+            r.height > 0 &&
+            x >= 0 &&
+            y >= 0 &&
+            x < window.innerWidth &&
+            y < window.innerHeight &&
+            hit !== null &&
+            (el === hit || el.contains(hit)),
+        };
+      }, selector);
+      const settled = previous === now.key;
+      previous = now.key;
+      held = { x: now.x, y: now.y };
+      return settled && now.reachable;
+    },
+    {
+      timeout: timeoutMs,
+      interval: 150,
+      timeoutMsg: `${selector} never came into reach`,
+    },
+  );
+  return held;
+}
+
+/**
  * Set a React-controlled input's value atomically. WDIO's `setValue` is
  * unreliable here twice over: its clearValue can be undone by React
  * re-rendering the controlled value, and char-by-char typing into the
@@ -1384,7 +1487,9 @@ export async function commitAddText(params: {
   size?: number;
   color?: [number, number, number];
   family?: 'sans' | 'serif' | 'mono';
-  rotate?: 0 | 90 | 180 | 270;
+  /** Any finite angle — the emitter builds one cos/sin frame, so the
+   *  quadrants carry no privilege (`testHarness.ts` types it the same). */
+  rotate?: number;
   bold?: boolean;
   italic?: boolean;
   // OpenType features.
@@ -1934,37 +2039,26 @@ export async function settledEditImagePageIds(): Promise<string[] | null> {
   });
 }
 
-export async function editImagePlacements(
-  pageId: string,
-): Promise<
-  {
-    index: number;
-    nested: boolean;
-    matrix: number[];
-    opacity: number;
-    blend: string;
-    mask: {
-      kind: string;
-      from: [number, number];
-      to: [number, number];
-      startAlpha: number;
-      endAlpha: number;
-    } | null;
+/** One image placement as the canvas lists it. */
+export interface ImagePlacement {
+  index: number;
+  nested: boolean;
+  matrix: number[];
+  opacity: number;
+  blend: string;
+  mask: {
     kind: string;
-    crop: number[] | null;
-  }[]
-> {
-  return await browser.execute<
-    {
-      index: number;
-      nested: boolean;
-      matrix: number[];
-      opacity: number;
-      kind: string;
-      crop: number[] | null;
-    }[],
-    [string]
-  >(
+    from: [number, number];
+    to: [number, number];
+    startAlpha: number;
+    endAlpha: number;
+  } | null;
+  kind: string;
+  crop: number[] | null;
+}
+
+export async function editImagePlacements(pageId: string): Promise<ImagePlacement[]> {
+  return await browser.execute<ImagePlacement[], [string]>(
     function (p) {
       return (window as any).__SPECTRA_TEST__.editImagePlacements(p);
     },

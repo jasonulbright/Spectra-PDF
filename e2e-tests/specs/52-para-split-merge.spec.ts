@@ -11,6 +11,7 @@ import {
   setParagraphSelection,
   setReactInputValue,
   openParagraphEditor,
+  scrollIntoReach,
 } from '../support/harness.js';
 
 // Paragraph split (Enter mid-text) + merge (Backspace at the
@@ -78,14 +79,14 @@ async function waitForListedParas(timeoutMsg: string): Promise<string> {
  * are read together in ONE in-page call for the same reason. */
 async function waitForReindexedParas(
   preOpId: string,
-  test: (paras: { index: number; text: string }[]) => boolean,
+  test: (paras: { index: number; text: string; lineCount: number }[]) => boolean,
   timeoutMsg: string,
 ): Promise<string> {
   let landed = '';
   await browser.waitUntil(
     async () => {
       const cur = await browser.execute<
-        { pageId: string; paras: { index: number; text: string }[] } | null,
+        { pageId: string; paras: { index: number; text: string; lineCount: number }[] } | null,
         []
       >(function () {
         const h = (window as any).__SPECTRA_TEST__;
@@ -298,14 +299,13 @@ describe('paragraph split + merge', () => {
     const grip = $('[data-testid="edit-para-grip-end"]');
     await grip.waitForDisplayed({ timeout: 10_000 });
     // The canvas scrolls; W3C pointer coordinates are viewport-bound, so
-    // the grip must actually be on screen before the drag is composed.
-    await grip.scrollIntoView({ block: 'center', inline: 'center' });
+    // the grip must actually be on screen before the drag is composed. The
+    // point comes back from the same poll that proved it hit-testable —
+    // reading the geometry again afterwards would reopen the window the
+    // scroll just closed.
+    const { x: cx, y: cy } = await scrollIntoReach('[data-testid="edit-para-grip-end"]');
     const card = $('.page-editpara-editor');
     const cardW = (await card.getSize()).width;
-    const loc = await grip.getLocation();
-    const gsz = await grip.getSize();
-    const cx = Math.round(loc.x + gsz.width / 2);
-    const cy = Math.round(loc.y + gsz.height / 2);
     await browser.performActions([
       {
         type: 'pointer',

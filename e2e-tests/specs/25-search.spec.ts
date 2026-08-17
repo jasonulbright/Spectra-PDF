@@ -59,7 +59,7 @@ describe('navigation pane — Search panel', () => {
       timeout: 20_000,
       timeoutMsg: 'search never surfaced a hit',
     });
-    const hits = await $$('[data-testid="search-hit"]');
+    const hits = await $$('[data-testid="search-hit"]').getElements();
     expect(hits.length).toBe(1); // only page 1 matches
     const hitText = await $('[data-testid="search-hit"]').getText();
     expect(hitText).toContain('Page 1');

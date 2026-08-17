@@ -77,7 +77,15 @@ async function setEditorValue(text: string): Promise<void> {
 
 async function waitForReindexedParas(
   preOpId: string,
-  test: (paras: { index: number; text: string; orientation: string }[]) => boolean,
+  test: (
+    paras: {
+      index: number;
+      text: string;
+      lineCount: number;
+      vertical: boolean;
+      orientation: string;
+    }[],
+  ) => boolean,
   timeoutMsg: string,
 ): Promise<void> {
   await browser.waitUntil(

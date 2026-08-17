@@ -160,7 +160,7 @@ describe('right tool dock', () => {
       timeout: 15_000,
     });
     // Both are listed: the noted one from the previous leg and the note-less one.
-    const items = await $$('[data-testid="tool-dock"] [data-testid="comment-item"]');
+    const items = await $$('[data-testid="tool-dock"] [data-testid="comment-item"]').getElements();
     expect(items.length).toBeGreaterThanOrEqual(2);
     // ...and the summary agrees with the list rather than reporting a different
     // number, which is what two surfaces reading two sources used to do.

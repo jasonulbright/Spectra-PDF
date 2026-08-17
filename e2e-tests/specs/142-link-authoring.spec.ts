@@ -62,7 +62,6 @@ async function makeFixture(path: string): Promise<void> {
 async function linksOn(path: string, pageNumber: number): Promise<RawLink[]> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   const annots = (await (await pdf.getPage(pageNumber)).getAnnotations()) as RawLink[];
   await pdf.loadingTask.destroy();
@@ -194,7 +193,7 @@ describe('link authoring', () => {
 
   it('the created link is listed, and its Go to lands on its own page', async () => {
     await $('[data-testid="link-item"]').waitForDisplayed({ timeout: 20_000 });
-    expect((await $$('[data-testid="link-item"]')).length).toBe(1);
+    expect((await $$('[data-testid="link-item"]').getElements()).length).toBe(1);
     // The listing names the kind the document actually carries.
     expect(await $('[data-testid="link-item"]').getAttribute('data-link-kind')).toBe('internal');
 
@@ -264,7 +263,7 @@ describe('link authoring', () => {
     await setReactInputValue('[data-testid="link-new-file-page"]', '2');
     await $('[data-testid="link-new-create"]').click();
 
-    await browser.waitUntil(async () => ((await $$('[data-testid="link-item"]')).length) === 2, {
+    await browser.waitUntil(async () => ((await $$('[data-testid="link-item"]').getElements()).length) === 2, {
       timeout: 20_000,
       timeoutMsg: 'the file link never appeared in the listing',
     });
@@ -282,7 +281,7 @@ describe('link authoring', () => {
     await setActiveOp('links');
     await $('[data-testid="link-delete-1-1"]').waitForDisplayed({ timeout: 20_000 });
     await $('[data-testid="link-delete-1-1"]').click();
-    await browser.waitUntil(async () => ((await $$('[data-testid="link-item"]')).length) === 1, {
+    await browser.waitUntil(async () => ((await $$('[data-testid="link-item"]').getElements()).length) === 1, {
       timeout: 20_000,
       timeoutMsg: 'the link was never removed from the listing',
     });

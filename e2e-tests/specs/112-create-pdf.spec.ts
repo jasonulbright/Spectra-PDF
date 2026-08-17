@@ -83,7 +83,6 @@ async function readPdf(
 ): Promise<{ pages: number; boxes: number[][]; text: string; fields: string[] }> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   const boxes: number[][] = [];
   let text = '';
@@ -242,7 +241,7 @@ describe('Create PDF from any file', () => {
     await $('[data-testid="create-pdf-dialog"]').waitForDisplayed({ timeout: 10_000 });
 
     const bogus = resolve(tmp, 'thing.zip');
-    writeFileSync(bogus, Buffer.from('PKnot a document'));
+    writeFileSync(bogus, Buffer.from('PK\u0003\u0004not a document'));
     const outPath = resolve(tmp, 'never.pdf');
     const result = await createPdfRun([bogus], outPath);
     expect(result).toBe(null);

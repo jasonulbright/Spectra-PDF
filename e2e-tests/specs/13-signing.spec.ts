@@ -32,7 +32,6 @@ const TEST_PEM_CERT = resolve(__dirname, '..', 'fixtures', 'test-signer.crt.pem'
 async function widgetFieldNames(path: string): Promise<string[]> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   const objs = (await pdf.getFieldObjects()) as Record<string, unknown[]> | null;
   await pdf.loadingTask.destroy();
@@ -131,7 +130,6 @@ describe('signing applies a verifiable signature via the panel + engine', () => 
     // converted rect, with a generated (non-empty) appearance.
     const pdf = await pdfjs.getDocument({
       data: new Uint8Array(readFileSync(visOut)),
-      isEvalSupported: false,
     }).promise;
     const page = await pdf.getPage(1);
     const annots = (await page.getAnnotations()) as Array<{

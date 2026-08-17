@@ -106,7 +106,6 @@ describe('canvas whole-document merge', () => {
 
     const pdf = await pdfjs.getDocument({
       data: new Uint8Array(readFileSync(dest)),
-      isEvalSupported: false,
     }).promise;
     expect(pdf.numPages).toBe(3);
     // Page order: target's two pages, then the merged page with the field.
