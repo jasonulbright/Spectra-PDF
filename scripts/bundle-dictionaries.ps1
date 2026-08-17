@@ -137,6 +137,10 @@ foreach ($r in $rows) {
 # Written into a staging tree and swapped in at the end, so an interrupted run
 # never leaves a half-populated dictionary directory that would then load and
 # reject every word of some language.
+#
+# The swap replaces $DestDir WHOLESALE, so a tag written by another script is
+# destroyed by it: bundle-voikko.ps1 writes the fi tree into this same
+# directory and must run after this one.
 $staging = "$DestDir.staging"
 Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
 foreach ($r in $rows) {
