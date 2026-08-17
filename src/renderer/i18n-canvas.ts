@@ -563,6 +563,20 @@ export const CANVAS_STRINGS = {
   'canvas.newfield.multiline': 'Multiline',
   'canvas.newfield.comb': 'One box per character',
   'canvas.newfield.maxLength': 'Character limit',
+  // Direction and the script it binds. Two choices only, as elsewhere: the
+  // column direction is a property of the script, not a thing to pick.
+  'canvas.newfield.writingMode': 'Direction',
+  'canvas.newfield.writingMode.horizontal': 'Horizontal',
+  'canvas.newfield.writingMode.vertical': 'Vertical',
+  'canvas.newfield.writingModeTitle':
+    'A vertical field reads down its box and fills across it. Its typed value is drawn in the script chosen below.',
+  'canvas.newfield.script': 'Script',
+  'canvas.newfield.scriptTitle':
+    'The character collection the field is bound to — a vertical field is bound to exactly one.',
+  'canvas.newfield.script.japanese': 'Japanese',
+  'canvas.newfield.script.simplifiedChinese': 'Simplified Chinese',
+  'canvas.newfield.script.traditionalChinese': 'Traditional Chinese',
+  'canvas.newfield.script.korean': 'Korean',
   'canvas.newfield.options': 'Options',
   'canvas.newfield.optionsPlaceholder': 'one per line (or comma-separated)',
   'canvas.newfield.creating': 'Creating…',
