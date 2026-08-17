@@ -1069,20 +1069,35 @@ export async function buildSignatureAppearance(): Promise<{
 
 /**
  * Wait for a selector to be displayed (or, with `reverse`, to stop being
- * displayed), asking the selector again on every poll.
+ * displayed), answered entirely inside one in-page call.
  *
  * `element.waitForDisplayed()` resolves its element once and then polls THAT
  * node, so a re-render mid-wait turns each remaining poll into a stale-element
- * round trip that the driver has to detect and refetch. Nothing is held across
- * a poll here, so there is no handle to go stale — which also makes the wait
- * correct for a node that is unmounted and remounted rather than updated.
+ * round trip the driver has to detect and refetch. Re-querying per poll from
+ * the OUTSIDE only narrows that window — the driver still finds the element and
+ * then asks about it in a second request, and the node can be replaced between
+ * the two. The query and the answer therefore live in one synchronous frame,
+ * where no element reference exists to go stale.
+ *
+ * `display: none` is covered by the zero-area test, which is what
+ * `getBoundingClientRect` reports for it; visibility and opacity are read
+ * separately because a laid-out box can still be invisible.
  */
 export async function waitForDisplayedSelector(
   selector: string,
   opts: { reverse?: boolean; timeout?: number; timeoutMsg?: string } = {},
 ): Promise<void> {
   const reverse = opts.reverse ?? false;
-  await browser.waitUntil(async () => (await $(selector).isDisplayed()) !== reverse, {
+  const shown = async (): Promise<boolean> =>
+    await browser.execute(function (sel: string) {
+      const el = document.querySelector(sel) as HTMLElement | null;
+      if (!el || !el.isConnected) return false;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return false;
+      const style = window.getComputedStyle(el);
+      return style.visibility !== 'hidden' && style.opacity !== '0';
+    }, selector);
+  await browser.waitUntil(async () => (await shown()) !== reverse, {
     timeout: opts.timeout ?? 15_000,
     interval: 100,
     timeoutMsg:
