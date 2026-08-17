@@ -12,6 +12,7 @@ mod engine;
 mod printers;
 pub mod scanner;
 pub mod app_windows;
+pub mod session;
 pub mod tabdrag;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -80,6 +81,7 @@ pub fn run() {
         .manage(app_windows::WindowRegistry::new())
         .manage(app_windows::ClaimState::new())
         .manage(tabdrag::StripRegistry::new())
+        .manage(session::SessionState::new())
         .manage(scanner::ScannerSessions::new())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -206,6 +208,7 @@ pub fn run() {
             commands::get_startup_enabled,
             commands::set_startup_enabled,
             commands::set_start_minimized,
+            commands::set_restore_windows_on_launch,
             commands::confirm_close,
             commands::close_window,
             commands::request_quit,
@@ -233,6 +236,23 @@ pub fn run() {
             // live on a machine where Mica would compose (spec 94; the RDP/
             // transparency-off case is otherwise unreachable on a dev box).
             app_windows::build_app_window(&app.handle().clone(), app_windows::MAIN_LABEL, e2e, false)?;
+
+            let args: Vec<String> = std::env::args().collect();
+            // Under end-to-end control the window is force-shown below, so the
+            // preference must not decide anything about visibility here.
+            let start_minimized = !e2e
+                && (args.iter().any(|a| a == "--minimized")
+                    || commands::read_start_minimized(&*app));
+
+            // The main window's geometry comes back on every launch — it
+            // belongs to the window, not to the session — while the documents
+            // and the second window wait on the preference.
+            session::apply_launch(
+                &app.handle().clone(),
+                commands::read_restore_windows_on_launch(&*app),
+                e2e,
+                !start_minimized,
+            );
 
             // Watched folders: resume every enabled watcher. Deliberately
             // BEFORE the e2e early-return — the watchers are part of the
@@ -276,6 +296,10 @@ pub fn run() {
                         let _ = app.emit_to(target.as_str(), "app:trayAction", "merge");
                     }
                     "quit" => {
+                        // Before the exit, not after: every window is still
+                        // standing and still holding the documents the session
+                        // records.
+                        session::capture_and_seal(app);
                         QUITTING.store(true, Ordering::SeqCst);
                         app.exit(0);
                     }
@@ -294,10 +318,6 @@ pub fn run() {
 
             // Window starts hidden (visible: false in tauri.conf.json).
             // Show it unless --minimized flag or startup config says to stay hidden.
-            let args: Vec<String> = std::env::args().collect();
-            let start_minimized = args.iter().any(|a| a == "--minimized")
-                || commands::read_start_minimized(app);
-
             if !start_minimized {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
@@ -360,8 +380,13 @@ pub fn run() {
                 // right window.
                 tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
                     tabdrag::on_window_geometry_changed(app, window);
+                    session::on_window_geometry_changed(app, window.label());
                 }
+                // The session capture runs FIRST: it reads the claims that the
+                // line below it drops, and the last window's destruction is the
+                // one quit path that never passes through `close_window`.
                 tauri::WindowEvent::Destroyed => {
+                    session::on_window_destroyed(app, window.label());
                     tabdrag::on_window_destroyed(app, window.label());
                     app_windows::on_window_destroyed(app, window.label());
                 }

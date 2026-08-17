@@ -4644,6 +4644,8 @@
   "panel.settings.printerNotInstalled": "Printeren er ikke installeret",
   "panel.settings.printerReady": "klar til at modtage job",
   "panel.settings.removePrinter": "Fjern printer…",
+  "panel.settings.restoreWindows": "Genåbn seneste session ved start",
+  "panel.settings.restoreWindowsHint": "Genåbner de vinduer og dokumenter, der var åbne, da du sidst afsluttede. Vinduets størrelse og placering huskes altid; denne indstilling afgør, om dokumenterne også kommer tilbage.",
   "panel.settings.rustNotices": "Rust-crate-meddelelser",
   "panel.settings.saved": "Indstillingerne er gemt",
   "panel.settings.singleKey": "Brug genveje med én tast til værktøjer",

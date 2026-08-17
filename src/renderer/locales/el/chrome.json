@@ -4644,6 +4644,8 @@
   "panel.settings.printerNotInstalled": "Ο εκτυπωτής δεν είναι εγκατεστημένος",
   "panel.settings.printerReady": "έτοιμος να λάβει εργασίες",
   "panel.settings.removePrinter": "Κατάργηση εκτυπωτή…",
+  "panel.settings.restoreWindows": "Επαναφορά της τελευταίας συνεδρίας κατά την εκκίνηση",
+  "panel.settings.restoreWindowsHint": "Ανοίγει ξανά τα παράθυρα και τα έγγραφα που ήταν ανοιχτά την τελευταία φορά που κλείσατε την εφαρμογή. Το μέγεθος και η θέση του παραθύρου θυμούνται πάντα· αυτή η επιλογή καθορίζει αν θα επιστρέψουν και τα έγγραφα.",
   "panel.settings.rustNotices": "Ειδοποιήσεις των crate της Rust",
   "panel.settings.saved": "Οι ρυθμίσεις αποθηκεύτηκαν",
   "panel.settings.singleKey": "Χρήση συντομεύσεων ενός πλήκτρου για πρόσβαση στα εργαλεία",

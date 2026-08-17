@@ -4644,6 +4644,8 @@
   "panel.settings.printerReady": "ready to receive jobs",
   "panel.settings.printTo": "Print to Spectra PDF",
   "panel.settings.removePrinter": "Remove printer…",
+  "panel.settings.restoreWindows": "Reopen last session on launch",
+  "panel.settings.restoreWindowsHint": "Reopens the windows and documents that were open when you last quit. Window size and position are always remembered; this decides whether the documents come back too.",
   "panel.settings.rustNotices": "Rust crate notices",
   "panel.settings.saved": "Settings saved",
   "panel.settings.singleKey": "Use single-key accelerators to access tools",

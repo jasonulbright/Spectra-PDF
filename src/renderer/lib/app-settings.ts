@@ -28,6 +28,13 @@ export interface Settings {
    * deployments, or suppress it machine-wide with the DisableAutoUpdate
    * policy, which still wins over this preference. */
   checkUpdatesOnLaunch: boolean;
+  /** Reopen the windows and documents that were open at the last quit.
+   *
+   * Default OFF, and mirrored into the Rust-readable startup config because
+   * the decision is taken while the windows are being built — before any
+   * renderer exists to be asked. Window POSITION is restored either way: it
+   * belongs to the window, and this preference is about documents. */
+  restoreWindowsOnLaunch: boolean;
   /** Write a log file for every Batch OCR run. Default
    * ON: a batch runs unattended over folders the user cannot re-inspect
    * afterwards, and the on-screen report dies with the dialog. */
@@ -96,6 +103,7 @@ export const DEFAULTS: Settings = {
   startMinimized: false,
   singleKeyAccelerators: false,
   checkUpdatesOnLaunch: true,
+  restoreWindowsOnLaunch: false,
   batchLogEnabled: true,
   batchLogRetentionDays: 30,
   batchLogDir: '',

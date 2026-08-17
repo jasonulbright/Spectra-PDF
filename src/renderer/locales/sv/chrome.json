@@ -4644,6 +4644,8 @@
   "panel.settings.printerNotInstalled": "Skrivaren är inte installerad",
   "panel.settings.printerReady": "redo att ta emot jobb",
   "panel.settings.removePrinter": "Ta bort skrivare…",
+  "panel.settings.restoreWindows": "Återöppna senaste sessionen vid start",
+  "panel.settings.restoreWindowsHint": "Återöppnar de fönster och dokument som var öppna när du avslutade senast. Fönstrets storlek och position kommer alltid ihåg; den här inställningen avgör om dokumenten också kommer tillbaka.",
   "panel.settings.rustNotices": "Rust-crate-meddelanden",
   "panel.settings.saved": "Inställningarna sparades",
   "panel.settings.singleKey": "Använd enteckensgenvägar för att nå verktyg",

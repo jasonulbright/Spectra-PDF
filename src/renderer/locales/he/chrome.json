@@ -4750,6 +4750,8 @@
   "panel.settings.printerNotInstalled": "המדפסת אינה מותקנת",
   "panel.settings.printerReady": "מוכן לקבלת עבודות",
   "panel.settings.removePrinter": "הסר מדפסת…",
+  "panel.settings.restoreWindows": "פתח מחדש את החלונות והמסמכים בעת ההפעלה",
+  "panel.settings.restoreWindowsHint": "פותח מחדש את החלונות והמסמכים שהיו פתוחים ביציאה האחרונה. גודל החלון ומיקומו נזכרים תמיד; הגדרה זו קובעת אם גם המסמכים יחזרו.",
   "panel.settings.rustNotices": "הודעות ארגזי Rust",
   "panel.settings.saved": "ההגדרות נשמרו",
   "panel.settings.singleKey": "השתמש בקיצורי מקש בודד לגישה לכלים",

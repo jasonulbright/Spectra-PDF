@@ -4644,6 +4644,8 @@
   "panel.settings.printerNotInstalled": "Skriveren er ikke installert",
   "panel.settings.printerReady": "klar til å ta imot jobber",
   "panel.settings.removePrinter": "Fjern skriver…",
+  "panel.settings.restoreWindows": "Gjenåpne forrige økt ved oppstart",
+  "panel.settings.restoreWindowsHint": "Gjenåpner vinduene og dokumentene som var åpne da du avsluttet sist. Vinduets størrelse og plassering huskes alltid; denne innstillingen avgjør om dokumentene også kommer tilbake.",
   "panel.settings.rustNotices": "Rust-crate-merknader",
   "panel.settings.saved": "Innstillingene er lagret",
   "panel.settings.singleKey": "Bruk hurtigtaster med én tast for verktøy",

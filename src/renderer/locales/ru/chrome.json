@@ -4856,6 +4856,8 @@
   "panel.settings.printerNotInstalled": "Принтер не установлен",
   "panel.settings.printerReady": "готов принимать задания",
   "panel.settings.removePrinter": "Удалить принтер…",
+  "panel.settings.restoreWindows": "Восстанавливать последний сеанс при запуске",
+  "panel.settings.restoreWindowsHint": "Открывает заново окна и документы, которые были открыты при последнем выходе. Размер и положение окна запоминаются всегда; этот параметр определяет, вернутся ли и документы.",
   "panel.settings.rustNotices": "Уведомления крейтов Rust",
   "panel.settings.saved": "Настройки сохранены",
   "panel.settings.singleKey": "Использовать однокнопочные ускорители для доступа к инструментам",

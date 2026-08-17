@@ -4644,6 +4644,8 @@
   "panel.settings.printerNotInstalled": "Yazıcı kurulmadı",
   "panel.settings.printerReady": "iş almaya hazır",
   "panel.settings.removePrinter": "Yazıcıyı kaldır…",
+  "panel.settings.restoreWindows": "Başlatıldığında son oturumu geri yükle",
+  "panel.settings.restoreWindowsHint": "En son çıktığınızda açık olan pencereleri ve belgeleri yeniden açar. Pencere boyutu ve konumu her zaman hatırlanır; bu seçenek belgelerin de geri gelip gelmeyeceğini belirler.",
   "panel.settings.rustNotices": "Rust paketi bildirimleri",
   "panel.settings.saved": "Ayarlar kaydedildi",
   "panel.settings.singleKey": "Araçlara erişmek için tek tuşlu kısayolları kullan",

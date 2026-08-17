@@ -4750,6 +4750,8 @@
   "panel.settings.printerNotInstalled": "Imprimante non installée",
   "panel.settings.printerReady": "prêt à recevoir des tâches",
   "panel.settings.removePrinter": "Supprimer l’imprimante…",
+  "panel.settings.restoreWindows": "Rouvrir la dernière session au démarrage",
+  "panel.settings.restoreWindowsHint": "Rouvre les fenêtres et les documents ouverts lors de la dernière fermeture. La taille et la position de la fenêtre sont toujours mémorisées ; cette option décide si les documents reviennent aussi.",
   "panel.settings.rustNotices": "Notices des crates Rust",
   "panel.settings.saved": "Paramètres enregistrés",
   "panel.settings.singleKey": "Utiliser des raccourcis à une seule touche pour accéder aux outils",

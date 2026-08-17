@@ -1589,6 +1589,10 @@ pub async fn close_window(
         return Ok(());
     }
     if others == 0 {
+        // The session is captured while this window still stands: its geometry
+        // and its claims are read from managed state, and destroying it is what
+        // releases them.
+        crate::session::capture_and_seal(&app);
         // Set the quitting flag so ExitRequested handler allows exit
         crate::QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = window.destroy();
@@ -1627,34 +1631,72 @@ pub async fn hide_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
 
 // ── Startup config (Rust-readable settings for pre-window decisions) ─────
 
-/// Write start-minimized preference to a JSON file that Rust reads before
-/// showing the window. This avoids the flash caused by renderer-side hide.
-#[tauri::command]
-pub async fn set_start_minimized(app: AppHandle, enabled: bool) -> Result<(), String> {
+const STARTUP_CONFIG_FILE: &str = "startup.json";
+
+/// Set one flag in the startup config, keeping the others.
+///
+/// Read-modify-write rather than a fresh object per setting: the file carries
+/// more than one flag, and rewriting it whole from a single caller silently
+/// drops whichever ones that caller does not know about.
+fn write_startup_flag(app: &AppHandle, key: &str, value: bool) -> Result<(), String> {
     let app_data = app.path().app_data_dir().map_err(|e| format!("{}", e))?;
     fs::create_dir_all(&app_data).ok();
-    let config_path = app_data.join("startup.json");
-    let json = serde_json::json!({ "startMinimized": enabled });
+    let config_path = app_data.join(STARTUP_CONFIG_FILE);
+    let mut json = fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+        .filter(|v| v.is_object())
+        .unwrap_or_else(|| serde_json::json!({}));
+    json[key] = serde_json::Value::Bool(value);
     fs::write(&config_path, json.to_string())
         .map_err(|e| format!("Failed to write startup config: {}", e))?;
     Ok(())
 }
 
-/// Read start-minimized from the config file. Used by lib.rs setup().
-pub fn read_start_minimized(app: &tauri::App) -> bool {
+/// Read one flag from the startup config. Anything unreadable, unparseable or
+/// absent reads as the default, which is what a first run gets.
+fn read_startup_flag<R: tauri::Runtime, M: tauri::Manager<R>>(
+    app: &M,
+    key: &str,
+    default: bool,
+) -> bool {
     let Ok(app_data) = app.path().app_data_dir() else {
-        return false;
+        return default;
     };
-    let config_path = app_data.join("startup.json");
+    let config_path = app_data.join(STARTUP_CONFIG_FILE);
     let Ok(contents) = fs::read_to_string(&config_path) else {
-        return false;
+        return default;
     };
     let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) else {
-        return false;
+        return default;
     };
-    json.get("startMinimized")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+    json.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
+}
+
+/// Mirror start-minimized into the file Rust reads before showing the window.
+/// Reading it from localStorage instead would need a renderer, and the flash
+/// it exists to prevent has already happened by then.
+#[tauri::command]
+pub async fn set_start_minimized(app: AppHandle, enabled: bool) -> Result<(), String> {
+    write_startup_flag(&app, "startMinimized", enabled)
+}
+
+/// Mirror restore-windows-on-launch into the same file. Same reason: the
+/// decision is taken while the windows are being built, before any renderer
+/// exists to be asked.
+#[tauri::command]
+pub async fn set_restore_windows_on_launch(app: AppHandle, enabled: bool) -> Result<(), String> {
+    write_startup_flag(&app, "restoreWindowsOnLaunch", enabled)
+}
+
+pub fn read_start_minimized<R: tauri::Runtime, M: tauri::Manager<R>>(app: &M) -> bool {
+    read_startup_flag(app, "startMinimized", false)
+}
+
+/// Default OFF: a launch does nothing the user did not ask for, and reopening
+/// last week's documents is a surprise for anyone who quit to be rid of them.
+pub fn read_restore_windows_on_launch<R: tauri::Runtime, M: tauri::Manager<R>>(app: &M) -> bool {
+    read_startup_flag(app, "restoreWindowsOnLaunch", false)
 }
 
 // ── Enterprise policy ─────────────────────────────────────────────────────

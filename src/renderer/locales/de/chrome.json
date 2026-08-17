@@ -4644,6 +4644,8 @@
   "panel.settings.printerNotInstalled": "Drucker nicht installiert",
   "panel.settings.printerReady": "bereit, Aufträge entgegenzunehmen",
   "panel.settings.removePrinter": "Drucker entfernen…",
+  "panel.settings.restoreWindows": "Letzte Sitzung beim Start wiederherstellen",
+  "panel.settings.restoreWindowsHint": "Öffnet die Fenster und Dokumente erneut, die beim letzten Beenden geöffnet waren. Größe und Position des Fensters werden immer gemerkt; diese Einstellung entscheidet, ob auch die Dokumente zurückkommen.",
   "panel.settings.rustNotices": "Hinweise zu Rust-Crates",
   "panel.settings.saved": "Einstellungen gespeichert",
   "panel.settings.singleKey": "Einzeltasten für den Zugriff auf Werkzeuge verwenden",
