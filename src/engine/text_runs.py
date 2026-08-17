@@ -242,6 +242,10 @@ def _walk_runs(pdf, instructions, resources, base_ctm, depth, fallback, out, nes
                     "font_size": state.font_size,
                     "editable": editable,
                     "reason": reason,
+                    # Does `reason` describe the document or this reader? A
+                    # caller that reports the second as the first tells the
+                    # user something false about their file.
+                    "reader_limit": bool(cap is not None and cap.reader_limit),
                     "encodable": cap.encodable() if (cap and cap.editable) else "",
                     # Additive: the ligature sequences encode() will
                     # round-trip — the renderer's longest-match validation
