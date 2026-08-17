@@ -879,17 +879,100 @@ def _check_reading_order(check, tree, pages, mcid_tables):
     check.status = REVIEW if findings else PASS
 
 
-def _check_lang(check, pdf):
+def _effective_langs(tree) -> dict:
+    """(page, mcid) → the language in effect for that marked content.
+
+    ISO 32000-2, 14.9.2.3: a structure element's `/Lang` overrides the
+    document default, and an element without one inherits from the nearest
+    ancestor that has one. Only marked content the structure hierarchy reaches
+    can be answered here; everything else is the caller's problem.
+    """
+    covered: dict = {}
+    for node in tree["nodes"]:
+        lang = str(node.lang or "").strip()
+        if not lang:
+            for ancestor in node.ancestors():
+                lang = str(ancestor.lang or "").strip()
+                if lang:
+                    break
+        if not lang:
+            continue
+        for ref in node.mcids:
+            covered[(ref["page"], ref["mcid"])] = lang
+    return covered
+
+
+def _check_lang(check, pdf, tree, pages):
+    """Whether every piece of text has a natural language in effect.
+
+    The question is NOT "does the catalog carry `/Lang`". ISO 32000-2 14.9.2.3
+    makes the catalog entry the DEFAULT for all text in the document and lets a
+    structure element override it, inheriting from an ancestor when it declares
+    none — so a document that declares a language on every content-bearing
+    element has declared one for that content. Reading the catalog alone told
+    those readers "The document declares no language" about a document that
+    does, which is the false-statement class rather than a strictness choice.
+
+    14.9.2.2: the empty text string means the language is UNKNOWN. It is not a
+    declaration and is not accepted as one, at any level.
+
+    The remedy the panel offers is unchanged and still right: setting the
+    catalog default covers everything no element overrides.
+    """
     try:
         value = pdf.Root.get("/Lang")
-        lang = str(value).strip() if value is not None else ""
+        default = str(value).strip() if value is not None else ""
     except Exception:
-        lang = ""
-    check.counted = 1
-    check.status = PASS if lang else FAIL
-    check.data = {"lang": lang}
-    if not lang:
+        default = ""
+    check.data = {"lang": default}
+
+    if default:
+        check.counted = 1
+        check.status = PASS
+        return
+
+    covered = _effective_langs(tree) if tree["tagged"] else {}
+    if not covered:
+        # Nothing declares a language anywhere, so no text has one.
+        check.counted = 1
+        check.status = FAIL
         check.findings = [_finding(_object_address(), "document_language_missing")]
+        return
+
+    counted = 0
+    findings = []
+    for page_no in sorted(pages.runs):
+        for run in pages.runs[page_no]:
+            if not str(run.get("text") or "").strip():
+                continue
+            if run.get("artifact"):
+                continue
+            if run.get("nested"):
+                # A run inside a form XObject carries that stream's own MCID
+                # numbering, which the page-keyed map cannot answer for — the
+                # same exclusion `tagged_content` makes, for the same reason.
+                continue
+            counted += 1
+            mcid = run.get("mcid")
+            if mcid is not None and (page_no, int(mcid)) in covered:
+                continue
+            findings.append(
+                _finding(
+                    _content_address(page_no, int(run.get("index", 0))),
+                    "document_language_missing",
+                    preview=str(run.get("text") or "")[:80],
+                    rect=run.get("rect"),
+                    values={"page": page_no},
+                )
+            )
+    if counted == 0:
+        # Declared languages but no text to apply them to.
+        check.counted = 1
+        check.status = PASS
+        return
+    check.counted = counted
+    check.findings = findings
+    check.status = FAIL if findings else PASS
 
 
 def _meta_title(pdf) -> str:
@@ -1901,7 +1984,7 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
             "image_only": lambda c: _check_image_only(c, pdf, pages, file),
             "tagged": lambda c: _check_tagged(c, pdf, tree),
             "reading_order": lambda c: _check_reading_order(c, tree, pages, mcid_tables),
-            "lang": lambda c: _check_lang(c, pdf),
+            "lang": lambda c: _check_lang(c, pdf, tree, pages),
             "title": lambda c: _check_title(c, pdf),
             "bookmarks": lambda c: _check_bookmarks(c, pdf, tree),
             "contrast": lambda c: _check_contrast(c, pages),
