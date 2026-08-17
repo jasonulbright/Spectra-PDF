@@ -42,7 +42,6 @@ async function makeFormFixture(path: string): Promise<void> {
 async function fieldValues(path: string, pageNumber = 1): Promise<Map<string, unknown>> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   const annots = (await (await pdf.getPage(pageNumber)).getAnnotations()) as {
     fieldName?: string;
@@ -122,7 +121,6 @@ describe('forms panel fills AcroForm fields and bakes them into the saved file',
 
     const pdf = await pdfjs.getDocument({
       data: new Uint8Array(readFileSync(rotatedDest)),
-      isEvalSupported: false,
     }).promise;
     const page = await pdf.getPage(1);
     expect(page.rotate).toBe(90); // the rebuild really ran

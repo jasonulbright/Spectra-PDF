@@ -53,7 +53,7 @@ describe('document view', () => {
     });
     // A page's raster cell mounts in the column (PageView renders when near).
     await browser.waitUntil(
-      async () => (await $$('[data-testid="document-view"] .pageview')).length > 0,
+      async () => (await $$('[data-testid="document-view"] .pageview').getElements()).length > 0,
       { timeout: 15_000, timeoutMsg: 'no page rendered in the reading view' },
     );
   });

@@ -110,7 +110,6 @@ async function readFields(path: string): Promise<Map<string, FieldRead>> {
   // buffer shared with anything else comes back detached.
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   const annots = (await (await pdf.getPage(1)).getAnnotations()) as {
     fieldName?: string;

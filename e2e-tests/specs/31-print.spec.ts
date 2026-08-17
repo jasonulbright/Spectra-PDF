@@ -6,6 +6,7 @@ import {
   openByPaths,
   closeAllFiles,
   setReactInputValue,
+  waitForDisplayedSelector,
 } from '../support/harness.js';
 
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
@@ -20,7 +21,7 @@ const BINARY = resolve(__dirname, '..', '..', 'src-tauri', 'target', 'debug', 's
 
 /** The dialog's printer <option> labels. */
 async function printerOptions(): Promise<string[]> {
-  const opts = await $$('[data-testid="print-printer"] option');
+  const opts = await $$('[data-testid="print-printer"] option').getElements();
   const out: string[] = [];
   for (const o of opts) out.push(await o.getText());
   return out;
@@ -76,18 +77,24 @@ describe('print', () => {
     // Empty custom range: not an error, but nothing to print either.
     await expect($('[data-testid="print-submit"]')).toBeDisabled();
 
+    // The error node is mounted and unmounted by each edit, so it is
+    // re-queried at every step: a handle held across those renders names a
+    // node React has already replaced.
+    const RANGE_ERROR = '[data-testid="print-range-error"]';
+
     await setReactInputValue('[data-testid="print-range-input"]', '7');
-    const err = $('[data-testid="print-range-error"]');
-    await err.waitForDisplayed({ timeoutMsg: 'no range error for page 7 of 5' });
-    expect(await err.getText()).toContain('beyond the document (5 pages)');
+    await waitForDisplayedSelector(RANGE_ERROR, {
+      timeoutMsg: 'no range error for page 7 of 5',
+    });
+    expect(await $(RANGE_ERROR).getText()).toContain('beyond the document (5 pages)');
     await expect($('[data-testid="print-submit"]')).toBeDisabled();
 
     await setReactInputValue('[data-testid="print-range-input"]', 'abc');
-    await err.waitForDisplayed();
+    await waitForDisplayedSelector(RANGE_ERROR);
     await expect($('[data-testid="print-submit"]')).toBeDisabled();
 
     await setReactInputValue('[data-testid="print-range-input"]', '2-4');
-    await err.waitForDisplayed({
+    await waitForDisplayedSelector(RANGE_ERROR, {
       reverse: true,
       timeoutMsg: 'valid range 2-4 still flagged',
     });
@@ -153,7 +160,7 @@ describe('print', () => {
       async () => await $('[data-testid="print-paper"]').isEnabled(),
       { timeoutMsg: 'paper capabilities never arrived' },
     );
-    const papers = await $$('[data-testid="print-paper"] option');
+    const papers = await $$('[data-testid="print-paper"] option').getElements();
     expect(papers.length).toBeGreaterThan(1); // "Printer default" + real papers
 
     await $('[data-testid="print-cancel"]').click();
@@ -171,14 +178,15 @@ describe('print', () => {
       timeout: 30_000,
       timeoutMsg: 'print preview never rendered',
     });
-    const count = $('[data-testid="print-preview-count"]');
-    expect(await count.getText()).toContain('Sheet 1 of 5');
+    const COUNT = '[data-testid="print-preview-count"]';
+    expect(await $(COUNT).getText()).toContain('Sheet 1 of 5');
 
     // 2x2 imposition folds five pages onto two sheets — the preview count
-    // must follow the PREPARED output, not the document page count.
+    // must follow the PREPARED output, not the document page count. Each poll
+    // re-queries: the re-render that changes the text also replaces the node.
     await $('[data-testid="print-layout"]').selectByAttribute('value', 'nup');
     await browser.waitUntil(
-      async () => (await count.getText()).includes('of 2'),
+      async () => (await $(COUNT).getText()).includes('of 2'),
       { timeout: 30_000, timeoutMsg: 'n-up preview never re-rendered' },
     );
 

@@ -2,7 +2,12 @@ import { expect } from '@wdio/globals';
 import { resolve } from 'node:path';
 import { copyFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { waitForHarness, getState, invokeAppCommand } from '../support/harness.js';
+import {
+  waitForHarness,
+  getState,
+  invokeAppCommand,
+  waitForDisplayedSelector,
+} from '../support/harness.js';
 
 /**
  * A second workspace window, and the four failures that are live the instant
@@ -116,16 +121,18 @@ describe('multi-window', () => {
     // The refusal is a dialog that names the file and offers the window that
     // holds it. Silent divergence here is data loss: both windows would edit
     // private working copies of one file and the later save would win.
-    const message = $('[data-testid="confirm-message"]');
-    await message.waitForDisplayed({ timeout: 15_000 });
-    expect(await message.getText()).toContain('owned.pdf');
+    // Re-queried at every step: affirming unmounts the dialog, and a handle
+    // taken before the click names a node that no longer exists.
+    const MESSAGE = '[data-testid="confirm-message"]';
+    await waitForDisplayedSelector(MESSAGE, { timeout: 15_000 });
+    expect(await $(MESSAGE).getText()).toContain('owned.pdf');
     await expect($('[data-testid="confirm-affirm"]')).toBeDisplayed();
 
     // Nothing was opened, and no working copy was minted.
     expect((await getState()).fileCount).toBe(0);
 
     await $('[data-testid="confirm-affirm"]').click();
-    await message.waitForDisplayed({ timeout: 10_000, reverse: true });
+    await waitForDisplayedSelector(MESSAGE, { timeout: 10_000, reverse: true });
 
     // Focusing the other window must not have moved the driver's own idea of
     // which window it is driving.

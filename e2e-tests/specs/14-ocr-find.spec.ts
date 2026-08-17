@@ -43,7 +43,6 @@ async function ensureFindOpen(): Promise<void> {
 async function extractAllText(path: string): Promise<string> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   let out = '';
   for (let i = 1; i <= pdf.numPages; i++) {

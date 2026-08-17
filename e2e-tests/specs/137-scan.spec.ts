@@ -184,17 +184,19 @@ describe('scan', () => {
 
     // The honest empty state: a named screen with what to check and a working
     // Refresh — not a spinner, not an error toast, not a disabled dropdown.
-    const empty = $('[data-testid="scan-empty"]');
-    await empty.waitForExist({ timeout: 20_000 });
-    expect(await empty.getText()).toContain('No scanners found');
+    const EMPTY = '[data-testid="scan-empty"]';
+    await $(EMPTY).waitForExist({ timeout: 20_000 });
+    expect(await $(EMPTY).getText()).toContain('No scanners found');
     const refresh = $('[data-testid="scan-refresh"]');
     expect(await refresh.isExisting()).toBe(true);
     expect(await refresh.isEnabled()).toBe(true);
     expect(await $('[data-testid="scan-error"]').isExisting()).toBe(false);
-    // Refresh re-enumerates and lands back on the same honest answer.
+    // Refresh re-enumerates and lands back on the same honest answer. The
+    // re-enumeration unmounts the empty panel and mounts a new one, so the
+    // selector is asked again rather than a handle from before the click.
     await refresh.click();
-    await empty.waitForExist({ timeout: 20_000 });
-    expect(await $('[data-testid="scan-empty"]').isExisting()).toBe(true);
+    await $(EMPTY).waitForExist({ timeout: 20_000 });
+    expect(await $(EMPTY).isExisting()).toBe(true);
   });
 
   it('answers the command contract: an empty list is a result, an unknown id refuses by name', async function () {

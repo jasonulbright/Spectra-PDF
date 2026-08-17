@@ -51,7 +51,6 @@ async function makeFormFixture(path: string): Promise<void> {
 async function fieldValues(path: string): Promise<Map<string, unknown>> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   const annots = (await (await pdf.getPage(1)).getAnnotations()) as {
     fieldName?: string;
@@ -132,7 +131,6 @@ describe('on-canvas form filling', () => {
     await saveActiveAs(dest);
     const pdf = await pdfjs.getDocument({
       data: new Uint8Array(readFileSync(dest)),
-      isEvalSupported: false,
     }).promise;
     expect((await pdf.getPage(1)).rotate).toBe(90);
     await pdf.loadingTask.destroy();

@@ -86,7 +86,6 @@ async function makeArtworkFixture(path: string): Promise<void> {
 async function pageItems(path: string, page = 1): Promise<string[]> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   const content = (await (await pdf.getPage(page)).getTextContent()) as {
     items: { str?: string }[];
@@ -99,7 +98,6 @@ async function pageItems(path: string, page = 1): Promise<string[]> {
 async function pageTexts(path: string): Promise<string[]> {
   const pdf = await pdfjs.getDocument({
     data: new Uint8Array(readFileSync(path)),
-    isEvalSupported: false,
   }).promise;
   const texts: string[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {

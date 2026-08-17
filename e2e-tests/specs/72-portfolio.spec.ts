@@ -29,7 +29,7 @@ let OUT = '';
 let SAVED = '';
 
 async function memberNames(): Promise<string[]> {
-  const items = await $$('[data-testid="portfolio-item"]');
+  const items = await $$('[data-testid="portfolio-item"]').getElements();
   const names: string[] = [];
   for (const item of await items) {
     names.push(await item.$('.text-neutral-200').getText());

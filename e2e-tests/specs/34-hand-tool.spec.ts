@@ -162,7 +162,7 @@ describe('hand tool', () => {
     // Page 1 is the wrong-behavior fallback (the stale-ref jump landed there,
     // regression) — only a non-first page discriminates.
     const targetId = (await getWorkspacePageIds())[2];
-    const cells = await $$('[data-page-id]');
+    const cells = await $$('[data-page-id]').getElements();
     let target: WebdriverIO.Element | null = null;
     for (const c of cells) {
       if ((await c.getAttribute('data-page-id')) === targetId) { target = c; break; }
