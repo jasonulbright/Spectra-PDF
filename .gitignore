@@ -94,6 +94,11 @@ docs/reference/
 # permits reading and not redistribution. This repository is public, so a
 # commit here republishes them.
 /pdfa/
+# Public PDF/A conformance suites (bfocom/pdfa-testsuite, veraPDF/veraPDF-corpus,
+# which bundles Isartor), fetched by scripts/fetch-pdfa-corpus.py. NEITHER
+# DECLARES A LICENCE, so they are read on a developer disk and never
+# redistributed. This repository is public.
+/pdfa-corpus/
 *.local.*
 # ...and scratch DIRECTORIES, which the pattern above misses: it needs a dot
 # after "local", so `u1-shots.local/` was landing in git status as untracked.
