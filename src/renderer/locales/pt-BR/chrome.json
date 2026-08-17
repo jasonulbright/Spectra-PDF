@@ -3003,6 +3003,7 @@
   "panel.a11y.detail.field_has_no_description": "Este campo {{type}} não tem descrição.",
   "panel.a11y.detail.fields_unreadable": "A árvore de campos de formulário não pôde ser lida até o fim, então esta verificação não viu todos os campos.",
   "panel.a11y.detail.figure_missing_alt": "Este elemento {{role}} não tem texto alternativo nem texto real.",
+  "panel.a11y.detail.font_encoding_unsupported": "Na página {{page}}, {{font}} usa uma codificação que este aplicativo não consegue ler, portanto seu texto não foi verificado ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "Na página {{page}}, {{font}} não corresponde a nenhum caractere legível ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "Um campo de formulário na página {{page}} está fora da árvore de estrutura.",
   "panel.a11y.detail.header_cell_has_no_scope": "Esta célula de cabeçalho não declara escopo, e nenhuma célula aponta para ela.",

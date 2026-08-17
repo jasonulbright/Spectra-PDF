@@ -2937,6 +2937,7 @@
   "panel.a11y.detail.field_has_no_description": "Dette {{type}}-felt har ingen beskrivelse.",
   "panel.a11y.detail.fields_unreadable": "Træet af formularfelter kunne ikke læses til ende, så denne kontrol så ikke hvert felt.",
   "panel.a11y.detail.figure_missing_alt": "Dette {{role}}-element har hverken alternativ tekst eller faktisk tekst.",
+  "panel.a11y.detail.font_encoding_unsupported": "På side {{page}} bruger {{font}} en kodning, som dette program ikke kan læse, så teksten blev ikke kontrolleret ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "På side {{page}} peger {{font}} ikke på nogen læsbare tegn ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "Et formularfelt på side {{page}} ligger uden for strukturtræet.",
   "panel.a11y.detail.header_cell_has_no_scope": "Denne hovedcelle angiver intet omfang, og ingen celle peger på den.",

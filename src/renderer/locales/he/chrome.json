@@ -3003,6 +3003,7 @@
   "panel.a11y.detail.field_has_no_description": "לשדה {{type}} הזה אין תיאור.",
   "panel.a11y.detail.fields_unreadable": "לא ניתן היה לקרוא את עץ שדות הטופס עד סופו, ולכן הבדיקה הזו לא ראתה כל שדה.",
   "panel.a11y.detail.figure_missing_alt": "לרכיב {{role}} הזה אין לא טקסט חלופי ולא טקסט ממשי.",
+  "panel.a11y.detail.font_encoding_unsupported": "בעמוד {{page}}, הגופן {{font}} משתמש בקידוד שהיישום הזה אינו יכול לקרוא, ולכן הטקסט שלו לא נבדק ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "בעמוד {{page}}, הגופן {{font}} אינו מתאים לשום תו קריא ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "שדה טופס בעמוד {{page}} נמצא מחוץ לעץ המבנה.",
   "panel.a11y.detail.header_cell_has_no_scope": "תא הכותרת הזה אינו מצהיר על תחולה, ואף תא אינו מצביע עליו.",

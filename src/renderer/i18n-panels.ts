@@ -1833,6 +1833,8 @@ export const PANEL_STRINGS = {
     'The form field tree could not be read to its end, so this check did not see every field.',
   'panel.a11y.detail.figure_missing_alt':
     'This {{role}} has neither alternate text nor actual text.',
+  'panel.a11y.detail.font_encoding_unsupported':
+    'On page {{page}}, {{font}} uses an encoding this app cannot read, so its text was not checked ({{reason}}).',
   'panel.a11y.detail.font_has_no_unicode_mapping':
     'On page {{page}}, {{font}} maps to no readable characters ({{reason}}).',
   'panel.a11y.detail.form_field_not_tagged':

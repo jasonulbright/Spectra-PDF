@@ -2937,6 +2937,7 @@
   "panel.a11y.detail.field_has_no_description": "Tällä {{type}}-kentällä ei ole kuvausta.",
   "panel.a11y.detail.fields_unreadable": "Lomakekenttien puuta ei voitu lukea loppuun asti, joten tämä tarkistus ei nähnyt kaikkia kenttiä.",
   "panel.a11y.detail.figure_missing_alt": "Tällä {{role}}-elementillä ei ole vaihtoehtoista eikä todellista tekstiä.",
+  "panel.a11y.detail.font_encoding_unsupported": "Sivulla {{page}} {{font}} käyttää koodausta, jota tämä sovellus ei osaa lukea, joten sen tekstiä ei tarkistettu ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "Sivulla {{page}} {{font}} ei vastaa yhtään luettavaa merkkiä ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "Sivun {{page}} lomakekenttä on rakennepuun ulkopuolella.",
   "panel.a11y.detail.header_cell_has_no_scope": "Tämä otsikkosolu ei ilmoita aluetta, eikä yksikään solu viittaa siihen.",

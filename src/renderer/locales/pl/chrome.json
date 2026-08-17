@@ -3069,6 +3069,7 @@
   "panel.a11y.detail.field_has_no_description": "To pole {{type}} nie ma opisu.",
   "panel.a11y.detail.fields_unreadable": "Nie udało się odczytać drzewa pól formularza do końca, więc ta kontrola nie zobaczyła każdego pola.",
   "panel.a11y.detail.figure_missing_alt": "Ten element {{role}} nie ma ani tekstu alternatywnego, ani tekstu rzeczywistego.",
+  "panel.a11y.detail.font_encoding_unsupported": "Na stronie {{page}} czcionka {{font}} używa kodowania, którego ta aplikacja nie potrafi odczytać, więc jej tekst nie został sprawdzony ({{reason}}).",
   "panel.a11y.detail.font_has_no_unicode_mapping": "Na stronie {{page}} czcionka {{font}} nie odpowiada żadnemu czytelnemu znakowi ({{reason}}).",
   "panel.a11y.detail.form_field_not_tagged": "Pole formularza na stronie {{page}} znajduje się poza drzewem struktury.",
   "panel.a11y.detail.header_cell_has_no_scope": "Ta komórka nagłówkowa nie deklaruje zakresu i żadna komórka na nią nie wskazuje.",
