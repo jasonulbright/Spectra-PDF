@@ -2230,11 +2230,17 @@ function AppContent(): React.ReactElement {
   // this workspace, so two live copies of one file never exist and every
   // "whose" question keeps its structural answer.
   //
-  // Pending page edits are committed first — that is the shipped meaning of
-  // leaving a view — and the bytes travel through the FILE, which is where
-  // they already live. The message carries a path and nothing else: page and
-  // document ids are minted against a per-window generation counter, so the
-  // same id string names a different physical page in the other window.
+  // The message carries a path and nothing else: page and document ids are
+  // minted against a per-window generation counter, so the same id string
+  // names a different physical page in the other window.
+  //
+  // Which means the FILE is the only channel the document travels through, and
+  // everything it is carrying has to be in it before it leaves. Pending page
+  // edits are committed — that is the shipped meaning of leaving a view — and
+  // then the working copy is written back, because the receiving window opens
+  // the path and mints a working copy of its own from whatever is on disk.
+  // Without the write, every unsaved edit is discarded at the moment of the
+  // move, with no prompt and nothing to undo.
   //
   // Ownership is handed over in one step, and the receiving window is built
   // only once it has. Releasing the claim and re-taking it around the build
@@ -2247,6 +2253,13 @@ function AppContent(): React.ReactElement {
   const handOffDocument = useCallback(
     async (path: string, hand: () => Promise<TabDragResult>): Promise<boolean> => {
       if (!(await commitOrAbort())) return false;
+      // Before the handover, not after: the receiving window is told to open
+      // the path the instant the claim moves, and it reads the file then.
+      const handed = stateRef.current.files.get(path);
+      if (handed && isFileDirty(handed)) {
+        await file.saveAs(handed.workingPath, handed.path);
+        dispatch({ type: 'MARK_SAVED', path });
+      }
       const moved = await hand();
       if (!tabMoved(moved)) return false;
       // Closed WITHOUT a release — the path already belongs to the receiving
@@ -2255,7 +2268,7 @@ function AppContent(): React.ReactElement {
       dispatch({ type: 'CLOSE_FILE', path });
       return true;
     },
-    [dispatch, commitOrAbort],
+    [dispatch, commitOrAbort, isFileDirty],
   );
 
   const handleMoveToNewWindow = useCallback(async () => {
