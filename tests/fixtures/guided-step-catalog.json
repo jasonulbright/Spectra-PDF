@@ -182,7 +182,8 @@
         "scale",
         "text",
         "tile",
-        "tile_gap"
+        "tile_gap",
+        "writing_mode"
       ]
     }
   }
