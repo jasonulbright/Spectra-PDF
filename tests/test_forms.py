@@ -1052,3 +1052,107 @@ class TestRightToLeftFill:
         assert r["filled"] == 1
         fields = {f["name"]: f for f in read_form_fields(out)["fields"]}
         assert fields["notes"]["value"] == value
+
+
+# ── Vertical fields ───────────────────────────────────────────────────────
+
+
+def _make_vertical_form(path: str) -> None:
+    """A form whose /DA names a VERTICAL /DR font — the shape a column-set
+    Japanese form arrives in, and the only place the format states that a
+    field writes down the page. `plain` shares the page under the ordinary
+    horizontal /DA so both arms are exercised against one document."""
+    from engine.font_fallback import build_vertical_font, resolve_vertical_font
+    from engine.form_authoring import add_form_fields
+
+    blank = path + ".blank.pdf"
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    pdf.save(blank)
+    pdf.close()
+    add_form_fields(
+        blank, path,
+        fields=[
+            {"name": "note", "type": "text", "page_index": 0,
+             "rect": [400, 400, 460, 700]},
+            {"name": "plain", "type": "text", "page_index": 0,
+             "rect": [100, 100, 300, 130]},
+        ],
+    )
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        face = resolve_vertical_font(FONTS_DIR, "機密文書")
+        pdf.Root["/AcroForm"]["/DR"]["/Font"]["/VJp"] = build_vertical_font(
+            pdf, face, "機密文書"
+        )[0]
+        for entry in pdf.Root["/AcroForm"]["/Fields"]:
+            if str(entry.get("/T")) == "note":
+                entry["/DA"] = pikepdf.String("/VJp 0 Tf 0 g")
+        pdf.save(path)
+
+
+def _appearance_body(path: str, name: str) -> bytes:
+    with pikepdf.open(path) as pdf:
+        for entry in pdf.Root["/AcroForm"]["/Fields"]:
+            if str(entry.get("/T")) == name:
+                return bytes(entry["/AP"]["/N"].read_bytes())
+    raise AssertionError(f"no field named {name}")
+
+
+_HAS_CJK = os.path.isfile(os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf"))
+
+
+class TestVerticalFieldAppearance:
+    @pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+    def test_vertical_field_draws_its_value_as_a_column(self, tmp_dir):
+        # INVERTED: the fill used to draw every value across the box, so a
+        # column-set field came back reading the wrong way with nothing to
+        # notice. The appearance now runs the shared column geometry.
+        from engine.text_paragraphs import list_text_paragraphs
+
+        src = os.path.join(tmp_dir, "v.pdf")
+        out = os.path.join(tmp_dir, "v_out.pdf")
+        _make_vertical_form(src)
+        r = fill_form_fields(src, out, {"note": "機密文書"}, font_dir=FONTS_DIR)
+        assert r["filled"] == 1
+        # An intentional embed, never reported as a /DR-missing substitution.
+        assert r["fonts_substituted"] == []
+        body = _appearance_body(out, "note")
+        assert b"/TxV" in body  # the appearance's own vertical embed
+        # 60x300 box: the auto fit is capped at 2x the default size, the
+        # column starts one pad down the reading axis and half its own width
+        # in from the stacking edge — 60 - 2 - 24/2 = 46, 300 - 2 = 298.
+        assert b"/TxV 24 Tf" in body
+        assert b"1 0 0 1 46 298 Tm" in body
+        # The lister reads PAGE content, so the appearance is put in front of
+        # an independent reader the only way one can reach it.
+        flat = os.path.join(tmp_dir, "v_flat.pdf")
+        fill_form_fields(src, flat, {"note": "機密文書"}, font_dir=FONTS_DIR, flatten=True)
+        p = next(
+            q for q in list_text_paragraphs(flat, 1)["paragraphs"]
+            if q["text"] == "機密文書"
+        )
+        assert p["orientation"] == "vertical-rl"
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+    def test_horizontal_field_on_the_same_document_is_unchanged(self, tmp_dir):
+        # The vertical arm is gated on the field's OWN /DA font, so a
+        # horizontal field beside it keeps the shipped WinAnsi emission.
+        src = os.path.join(tmp_dir, "v.pdf")
+        out = os.path.join(tmp_dir, "v_out.pdf")
+        _make_vertical_form(src)
+        fill_form_fields(src, out, {"plain": "ABC"}, font_dir=FONTS_DIR)
+        body = _appearance_body(out, "plain")
+        assert b"/Helv" in body and b"(ABC) Tj" in body
+        assert b"/TxV" not in body and b"Tm" not in body
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+    def test_vertical_field_without_a_font_dir_is_refused(self, tmp_dir):
+        # No standard-14 face states a vertical advance, so there is no
+        # WinAnsi shortcut to fall back to — refused in VALIDATION, so the
+        # fill stays atomic.
+        src = os.path.join(tmp_dir, "v.pdf")
+        out = os.path.join(tmp_dir, "v_out.pdf")
+        _make_vertical_form(src)
+        with pytest.raises(ValueError, match="writes vertically and no available font"):
+            fill_form_fields(src, out, {"note": "ABC"}, font_dir="")
+        assert not os.path.exists(out)

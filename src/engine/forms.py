@@ -717,14 +717,28 @@ def _wrap_lines(text: str, size: float, max_width: float, width_em=text_width_em
     return lines
 
 
-def _fit_font_size(text: str, multiline: bool, w: float, h: float, width_em=text_width_em) -> float:
+def _fit_font_size(
+    text: str,
+    multiline: bool,
+    w: float,
+    h: float,
+    width_em=text_width_em,
+    wrap=_wrap_lines,
+    cross_em: float = GLYPH_HEIGHT_EM,
+) -> float:
     """Auto-size (DA size 0): largest size that fits the box, pdf-lib-style
-    downward scan, floored at MIN_FONT_SIZE. `width_em` as in `_wrap_lines`."""
+    downward scan, floored at MIN_FONT_SIZE. `width_em` as in `_wrap_lines`.
+
+    `w` is the extent along the READING axis and `h` the extent across it,
+    which is what lets a column run this same scan with the two swapped:
+    its wrap and its perpendicular metric are the only axis-dependent terms
+    and both arrive as arguments. The defaults are the shipped horizontal
+    ones, so the line path is unchanged by construction."""
     size = min(DEFAULT_FONT_SIZE * 2, h - 2 * TEXT_PAD)
     size = max(size, MIN_FONT_SIZE)
     while size > MIN_FONT_SIZE:
         if multiline:
-            lines = _wrap_lines(text, size, w - 2 * TEXT_PAD, width_em)
+            lines = wrap(text, size, w - 2 * TEXT_PAD, width_em)
             needed = len(lines) * size * LINE_SPACING
             widest = max((width_em(ln) * size for ln in lines), default=0.0)
             if needed <= h - 2 * TEXT_PAD and widest <= w - 2 * TEXT_PAD:
@@ -732,7 +746,7 @@ def _fit_font_size(text: str, multiline: bool, w: float, h: float, width_em=text
         else:
             if (
                 width_em(text) * size <= w - 2 * TEXT_PAD
-                and size * GLYPH_HEIGHT_EM <= h - 2 * TEXT_PAD
+                and size * cross_em <= h - 2 * TEXT_PAD
             ):
                 return size
         size -= 0.5
@@ -773,6 +787,56 @@ def _unicode_face(font_dir: str, da: str | None, value: str = "") -> str | None:
             font_dir, synthetic_family_font(_family_for_da(da)), text=value or None,
             rtl_ok=bidi.has_strong_rtl(value or ""),
         )
+    except (ValueError, OSError):
+        return None
+
+
+def _da_writes_vertically(pdf: pikepdf.Pdf, da: str | None) -> bool:
+    """Whether the /DA-requested /DR font's CMap writes DOWN the page.
+
+    The format states a field's writing mode in exactly one place — the CMap
+    its /DA font is encoded with — so that is where this reads it. A
+    predefined vertical CMap is named `…-V`; an embedded one carries
+    /WMode 1. Everything else, a missing /DR entry included, is horizontal:
+    a field is never guessed into a column."""
+    requested, _size, _color = _parse_da(da)
+    acro = _acroform(pdf)
+    if acro is None:
+        return False
+    try:
+        dr = acro.get("/DR")
+        fonts = dr.get("/Font") if isinstance(dr, Dictionary) else None
+        font = fonts.get(Name("/" + requested)) if isinstance(fonts, Dictionary) else None
+        if font is None:
+            return False
+        encoding = font.get("/Encoding")
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if encoding is None:
+        return False
+    if isinstance(encoding, pikepdf.Stream):
+        try:
+            return int(encoding.get("/WMode", 0)) == 1
+        except (TypeError, ValueError):
+            return False
+    return str(encoding).endswith("-V")
+
+
+def _vertical_field_face(font_dir: str, da: str | None, value: str) -> str | None:
+    """The bundled face a VERTICAL field's value draws through, or None when
+    nothing bundled can draw it.
+
+    Resolved through the shared vertical ladder and WITHOUT embedding
+    anything, so the fill's "report every problem, then mutate nothing"
+    atomicity holds for a column exactly as it does for a Unicode line."""
+    if not font_dir or not Path(font_dir).is_dir():
+        return None
+    from engine.text_authoring import resolve_writing, vertical_face
+
+    drawn = flatten_control_chars(value, keep_newline=True)
+    try:
+        _frame, columns, _vertical = resolve_writing("vertical", drawn)
+        return vertical_face(font_dir, _family_for_da(da), "regular", drawn, columns)[0]
     except (ValueError, OSError):
         return None
 
@@ -821,6 +885,14 @@ def _text_appearance(
     w = abs(rect[2] - rect[0])
     h = abs(rect[3] - rect[1])
     requested_font, size, color = _parse_da(da)
+
+    if _da_writes_vertically(pdf, da):
+        _vertical_appearance(
+            pdf, widget, value, da, multiline, quadding, font_dir, w, h, size, color
+        )
+        # An intentional embed, not a /DR-missing fallback — the same
+        # distinction the Unicode line path draws.
+        return False
 
     try:
         value.encode("cp1252")
@@ -928,6 +1000,102 @@ def _text_appearance(
     return substituted
 
 
+def _vertical_appearance(
+    pdf: pikepdf.Pdf,
+    widget,
+    value: str,
+    da: str | None,
+    multiline: bool,
+    quadding: int,
+    font_dir: str,
+    w: float,
+    h: float,
+    size: float,
+    color: str,
+) -> None:
+    """Regenerate a VERTICAL field's /AP /N — the value as columns.
+
+    A field is vertical when its /DA font's CMap says so, which is the only
+    place the format states it. Drawing such a field's value across its own
+    columns is the silent degradation this replaces: the value lands where
+    the form was never laid out and the document reads as neither.
+
+    The /DR font is the SIGNAL, never the drawing face. Its CMap may be a
+    predefined one whose CID tables this app does not ship, so the
+    appearance embeds its own subset into its own /Resources — the honesty
+    `_dr_font` already states for a substituted line font, one axis over.
+
+    Geometry is the shared column geometry (`vertical_text`), reached
+    through the writing frame at the same two boundaries the authored box
+    uses: the widget box enters at `box`, each column's pen leaves at
+    `matrix`. `quadding` keeps meaning alignment along the READING axis,
+    which for a column is its top, middle or bottom."""
+    from engine import vertical_text
+
+    layout_value = flatten_control_chars(value, keep_newline=True)
+    if not font_dir or not Path(font_dir).is_dir():
+        raise ValueError(
+            "this field writes vertically and no fallback font is available"
+        )
+    vt = vertical_text.build(
+        pdf, font_dir, layout_value.replace("\n", " "),
+        family=_family_for_da(da),
+    )
+
+    def wrap(text: str, at_size: float, max_length: float, _width_em=None) -> list[str]:
+        return vt.wrap(text, at_size, max_length)
+
+    if size <= 0:
+        fit_value = layout_value if multiline else layout_value.replace("\n", " ")
+        # The reading axis is the box's HEIGHT and the stacking axis its
+        # WIDTH, so the shared scan runs with the two swapped.
+        size = _fit_font_size(
+            fit_value, multiline, h, w,
+            width_em=vt.advance_em, wrap=wrap, cross_em=vt.cross_em,
+        )
+
+    if multiline:
+        columns = vt.wrap(layout_value, size, h - 2 * TEXT_PAD)
+    else:
+        columns = [layout_value.replace("\n", " ")]
+
+    l_left, l_right, l_top, _l_bottom = vt.box(0.0, 0.0, w, h)
+    reading = l_right - l_left
+    # The first column's centre line sits half its own width in from the
+    # stacking axis' leading edge, and the pen offset states where the pen
+    # is inside that width — zero for an upright column, whose /W2 position
+    # vector already puts it on the centre line.
+    across = (
+        l_top - TEXT_PAD - vt.cross_em * size / 2.0 + vt.cross_offset_em * size
+    )
+    parts = [b"/Tx BMC", b"q", f"1 1 {_fmt(w - 2)} {_fmt(h - 2)} re W n".encode("ascii"), b"BT"]
+    parts.append(color.encode("ascii"))
+    parts.append(f"/TxV {_fmt(size)} Tf".encode("ascii"))
+    for index, column in enumerate(columns):
+        if not column:
+            continue  # a blank column still consumes its pitch, via `index`
+        length = vt.advance_em(column) * size
+        if quadding == 1:
+            along = l_left + (reading - length) / 2.0
+        elif quadding == 2:
+            along = l_right - TEXT_PAD - length
+        else:
+            along = l_left + TEXT_PAD
+        along = max(along, l_left + TEXT_PAD)
+        parts.append(vt.matrix(along, across - index * size * LINE_SPACING))
+        parts.append(vt.show(column, size))
+    parts.extend([b"ET", b"Q", b"EMC"])
+
+    stream = pdf.make_stream(b"\n".join(parts))
+    stream["/Type"] = Name.XObject
+    stream["/Subtype"] = Name.Form
+    stream["/BBox"] = pikepdf.Array([0, 0, w, h])
+    stream["/Resources"] = Dictionary(Font=Dictionary({"/TxV": vt.font_obj}))
+    widget["/AP"] = Dictionary(N=pdf.make_indirect(stream))
+    if "/AS" in widget:
+        del widget["/AS"]
+
+
 def _fmt(v: float) -> str:
     return f"{v:.2f}".rstrip("0").rstrip(".") or "0"
 
@@ -955,13 +1123,27 @@ def _field_da(field, acro) -> str | None:
     return str(da) if da is not None else None
 
 
-def _text_value_problem(name: str, text: str, da: str | None, font_dir: str) -> str | None:
+def _text_value_problem(
+    name: str, text: str, da: str | None, font_dir: str, vertical: bool = False
+) -> str | None:
     """None when `text` can be DRAWN into `name`'s appearance — WinAnsi
     directly, or via an embedded Unicode font when `font_dir` provides a
     face that covers every glyph. Else the problem string. Doing the coverage
     check HERE keeps the fill's 'list ALL problems, then mutate nothing on
     failure' atomicity for the Unicode path too (the appearance writer never
-    half-fills then raises)."""
+    half-fills then raises).
+
+    A VERTICAL field has no WinAnsi shortcut to take: no standard-14 face
+    states a vertical advance, so every value goes through the vertical
+    ladder and a value it cannot draw is refused here rather than drawn
+    across the column it belongs in."""
+    if vertical:
+        if _vertical_field_face(font_dir, da, text) is None:
+            return (
+                f"value for {name} writes vertically and no available font can "
+                f"draw it that way"
+            )
+        return None
     try:
         text.encode("cp1252")
         return None
@@ -1329,7 +1511,10 @@ def fill_form_fields(
                 # encoding failure so multiple bad fields report together. A
                 # non-WinAnsi value is fillable via an embedded Unicode font
                 # when `font_dir` covers it, else refused here.
-                prob = _text_value_problem(name, text, _field_da(field, acro), font_dir)
+                fda = _field_da(field, acro)
+                prob = _text_value_problem(
+                    name, text, fda, font_dir, _da_writes_vertically(pdf, fda)
+                )
                 if prob is not None:
                     problems.append(prob)
                 else:
@@ -1371,7 +1556,10 @@ def fill_form_fields(
                     # The appearance draws the selected exports (one per line);
                     # coverage-check that combined text.
                     joined = "\n".join(e for e, _i in pairs)
-                    prob = _text_value_problem(name, joined, _field_da(field, acro), font_dir)
+                    fda = _field_da(field, acro)
+                    prob = _text_value_problem(
+                        name, joined, fda, font_dir, _da_writes_vertically(pdf, fda)
+                    )
                     if prob is not None:
                         problems.append(prob)
                     else:
@@ -1387,7 +1575,10 @@ def fill_form_fields(
                     problems.append(f"{ftype} {name} has no option {value!r} (options: {opts})")
                 else:
                     chosen = export if export is not None else str(value)
-                    prob = _text_value_problem(name, chosen, _field_da(field, acro), font_dir)
+                    fda = _field_da(field, acro)
+                    prob = _text_value_problem(
+                        name, chosen, fda, font_dir, _da_writes_vertically(pdf, fda)
+                    )
                     if prob is not None:
                         problems.append(prob)
                     else:
@@ -1486,13 +1677,19 @@ def fill_form_fields(
                     scripts_not_run.append(field.name)
                 continue
             display[field.name] = shown
-            prob = _text_value_problem(field.name, shown, _field_da(field, acro), font_dir)
+            fda = _field_da(field, acro)
+            prob = _text_value_problem(
+                field.name, shown, fda, font_dir, _da_writes_vertically(pdf, fda)
+            )
             if prob is not None:
                 problems.append(prob)
         for field, _ftype, value in derived:
             if field.name in display:
                 continue
-            prob = _text_value_problem(field.name, value, _field_da(field, acro), font_dir)
+            fda = _field_da(field, acro)
+            prob = _text_value_problem(
+                field.name, value, fda, font_dir, _da_writes_vertically(pdf, fda)
+            )
             if prob is not None:
                 problems.append(prob)
 
