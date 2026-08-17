@@ -209,6 +209,24 @@ class TestShippedDictionaries:
         assert check_word(dictionary, composed, set())
         assert check_word(dictionary, unicodedata.normalize("NFD", composed), set())
 
+    def test_a_decomposed_word_list_suggests_for_a_composed_word(self):
+        # The candidates are built by editing the characters of the list's own
+        # TRY set — decomposed jamo — so a composed misspelling generates
+        # nothing at all unless it is offered decomposed first.
+        _require("ko_KR")
+        result = spelling_suggestions("한구국", "ko_KR", DICT_DIR)
+        assert result["correct"] is False
+        assert "한국" in result["suggestions"]
+
+    def test_a_suggestion_is_written_the_way_the_word_was(self):
+        # The suggestion is replacement text for the document, so it must not
+        # arrive decomposed because the word list happens to be.
+        _require("ko_KR")
+        suggestions = spelling_suggestions("한구국", "ko_KR", DICT_DIR)["suggestions"]
+        assert suggestions
+        for suggestion in suggestions:
+            assert suggestion == unicodedata.normalize("NFC", suggestion)
+
 
 # ═════════════════════════ resolution and lookup ═══════════════════════════
 
