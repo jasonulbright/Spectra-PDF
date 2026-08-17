@@ -84,6 +84,7 @@ export const CHECK_INVENTORY: readonly (readonly [string, string])[] = [
   ['permissions', 'document'],
   ['image_only', 'document'],
   ['tagged', 'document'],
+  ['structure_nesting', 'document'],
   ['reading_order', 'document'],
   ['lang', 'document'],
   ['title', 'document'],

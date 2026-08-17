@@ -1713,6 +1713,9 @@ export const PANEL_STRINGS = {
   'panel.a11y.check.tagged': 'Document is tagged',
   'panel.a11y.explain.tagged':
     'Structure tags let assistive technology read content in a defined order.',
+  'panel.a11y.check.structure_nesting': 'Structure types are nested where the standard allows',
+  'panel.a11y.explain.structure_nesting':
+    'A tag inside a parent the standard does not allow it in breaks the structure it describes.',
   'panel.a11y.check.reading_order': 'Reading order follows the page',
   'panel.a11y.explain.reading_order':
     'Tag order is what is read; where it disagrees with the layout, a person decides.',
@@ -1885,6 +1888,10 @@ export const PANEL_STRINGS = {
   'panel.a11y.detail.script_site': 'A {{kind}} script named {{name}}.',
   'panel.a11y.detail.scripts_unreadable':
     'A script in this document could not be read, so this check did not see what it runs.',
+  'panel.a11y.detail.structure_nesting_unreadable':
+    'A structure element’s namespace could not be read: {{reason}}. Its nesting was not checked.',
+  'panel.a11y.detail.structure_nesting_violation':
+    '{{child}} is inside {{parent}} on page {{page}}, where the standard does not allow it.',
   'panel.a11y.detail.structure_tree_empty':
     'The document’s structure tree holds no elements, so nothing in it is tagged.',
   'panel.a11y.detail.structure_tree_missing': 'The document has no structure tree.',
