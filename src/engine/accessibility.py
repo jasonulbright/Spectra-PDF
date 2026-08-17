@@ -129,9 +129,12 @@ _MULTIMEDIA = frozenset({"/Screen", "/Movie", "/RichMedia", "/3D"})
 _ANNOT_EXEMPT = frozenset({"/Popup", "/Widget"})
 
 # Structure roles that carry an alternate description of something the reader
-# cannot otherwise perceive.
+# cannot otherwise perceive. The two rosters are disjoint: ISO 32000-2 14.8.4.8.6
+# states the alternate-description requirement for `Figure` and `Formula`
+# together, so `figures_alt` owns `Formula` and a `Formula` with no description
+# yields exactly one finding rather than the same finding under two check ids.
 _FIGURE_ROLES = frozenset({"Figure", "Formula"})
-_OTHER_ALT_ROLES = frozenset({"Link", "Form", "Annot", "Formula"})
+_OTHER_ALT_ROLES = frozenset({"Link", "Form", "Annot"})
 
 # Annotation flag bits (1-based positions in /F).
 _F_HIDDEN = 1 << 1
@@ -1586,8 +1589,8 @@ def _check_alt_hides_annotation(check, tree, annots, fields):
 
 
 def _check_other_elements_alt(check, tree, annots, fields, mcid_tables):
-    """`Link`, `Form`, `Annot` and `Formula` elements with no description of
-    their own and none on the object they name.
+    """`Link`, `Form` and `Annot` elements with no description of their own and
+    none on the object they name.
 
     An element whose every named object is imperceptible is not weighed at
     all: nothing reaches the reader there to describe.
