@@ -959,7 +959,17 @@ def font_capability(font_obj) -> FontCapability:
         )
 
     if subtype == "Type0":
-        enc = str(font_obj.get("/Encoding", "")).lstrip("/")
+        # /Encoding is a NAME or a CMap STREAM (ISO 32000-2, 9.7.5.1). Only a
+        # name has a name; `str()` of a stream is its object repr, which is
+        # unbounded, carries the CMap dictionary's contents, and reaches the
+        # user through the refusal reason below. A stream therefore yields the
+        # empty name, so the refusal says "embedded CMap" as it was written to.
+        _encoding = font_obj.get("/Encoding")
+        enc = (
+            ""
+            if _encoding is None or isinstance(_encoding, pikepdf.Stream)
+            else str(_encoding).lstrip("/")
+        )
         # Identity-H (code == CID) OR a predefined UNICODE horizontal CMap
         # (Uni*-H — the modern CJK majority), plus their vertical
         # twins Identity-V / Uni*-UCS2-V — same 2-byte codes, same
