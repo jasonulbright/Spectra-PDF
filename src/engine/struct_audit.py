@@ -32,7 +32,7 @@ from engine.derived_nav import (
     _resolve_role,
     _role_map,
 )
-from engine.struct_nesting import ROOT as _ROOT_ROLE, TRANSPARENT as _TRANSPARENT
+from engine.struct_nesting import ROOT as _ROOT_ROLE, effective_parent
 from engine.struct_tree import _is_elem, _kids, _MAX_DEPTH, _page_map, _page_no
 
 # Table attributes, wherever they are spelled. The key is the PDF name; the
@@ -470,9 +470,7 @@ def nesting_edges(tree: dict) -> tuple:
     for node in tree.get("nodes") or []:
         if node.ns is None:
             continue
-        effective = node.parent
-        while effective is not None and effective.role in _TRANSPARENT:
-            effective = effective.parent
+        effective = effective_parent(node)
         ancestors = frozenset(a.role for a in node.ancestors())
         siblings = node.parent.children if node.parent is not None else tree["roots"]
         try:
