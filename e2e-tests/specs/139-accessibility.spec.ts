@@ -202,7 +202,7 @@ describe('the accessibility report', () => {
 
   it('reports the nine failures the document actually has', async () => {
     const snapshot = (await a11ySnapshot())!;
-    expect(snapshot.checks).toHaveLength(32);
+    expect(snapshot.checks).toHaveLength(33);
     // The whole point of the round: the six-check checker called this clean.
     expect(snapshot.summary.failed).toBeGreaterThanOrEqual(9);
     for (const id of [
@@ -219,7 +219,7 @@ describe('the accessibility report', () => {
       expect(failed(snapshot)).toContain(id);
     }
     // Not-applicable is a state of its own and stays out of the pass tally.
-    expect(snapshot.summary.applicable).toBe(32 - snapshot.summary.not_applicable);
+    expect(snapshot.summary.applicable).toBe(33 - snapshot.summary.not_applicable);
     expect(
       snapshot.summary.passed +
         snapshot.summary.failed +
@@ -386,7 +386,7 @@ describe('the accessibility report', () => {
       timeoutMsg: 'the stale findings stayed on the page after the document changed',
     });
     // And the report itself came back rather than being left empty.
-    await browser.waitUntil(async () => (await a11ySnapshot())?.checks.length === 32, {
+    await browser.waitUntil(async () => (await a11ySnapshot())?.checks.length === 33, {
       timeout: 60_000,
       interval: 250,
       timeoutMsg: 'the checker never re-ran on the new bytes',
