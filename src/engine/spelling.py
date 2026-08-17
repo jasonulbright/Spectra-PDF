@@ -61,6 +61,46 @@ def _tolerate_rep_patterns() -> None:
     aff_data.RepPattern._spectra_tolerant = True
 
 
+def _literal_directive_flags() -> None:
+    """Decode an `.aff` flag DIRECTIVE as a literal flag, never as an AF alias.
+
+    Hunspell expands the AF alias table in exactly two places — a `.dic`
+    entry's flag field and an affix rule's continuation-flag field. A flag-type
+    directive (`FORBIDDENWORD`, `ONLYINCOMPOUND`, `COMPOUNDFLAG`, …) is decoded
+    as a flag. `spylls` expands the aliases inside its shared flag parser, so
+    once an AF table is present ANY all-digit directive value is read as an
+    alias index; `parse_flag` then takes an arbitrary member of that alias's
+    SET, so the resolved flag also varies with the process hash seed.
+
+    A `FLAG num` dictionary that carries an AF table therefore gets a
+    `FORBIDDENWORD` that most of its own stems hold, and rejects its own
+    vocabulary — non-deterministically. Korean is such a dictionary.
+
+    Only the singular parser is replaced: the plural one is what the two
+    aliasing sites legitimately use.
+    """
+    from spylls.hunspell.readers import aff as aff_reader
+
+    if getattr(aff_reader.Context, "_spectra_literal_flags", False):
+        return
+
+    def parse_flag(self: Any, string: str) -> str:
+        synonyms = self.flag_synonyms
+        self.flag_synonyms = {}
+        try:
+            return list(self.parse_flags(string))[0]
+        finally:
+            self.flag_synonyms = synonyms
+
+    aff_reader.Context.parse_flag = parse_flag
+    aff_reader.Context._spectra_literal_flags = True
+
+
+def _install_reader_shims() -> None:
+    _tolerate_rep_patterns()
+    _literal_directive_flags()
+
+
 # ═══════════════════════════ dictionary discovery ══════════════════════════
 
 #: Loaded dictionaries, keyed by the `.aff`/`.dic` base path. A dictionary
@@ -96,9 +136,9 @@ def list_dictionaries(
     """Every dictionary on disk, with the BCP-47 tag its name is read from.
 
     The name itself is deliberately NOT produced here: every UI locale's ICU
-    data already spells all 34 language names, and the renderer reads them
+    data already spells all 35 language names, and the renderer reads them
     through `Intl.DisplayNames` off `bcp47`. Authoring that table per shipped
-    locale would be 34 chances per locale to be wrong.
+    locale would be 35 chances per locale to be wrong.
     """
     out: list[dict] = []
     seen: set[str] = set()
@@ -146,7 +186,7 @@ def load_dictionary(
     key = str(base)
     if key in _LOADED:
         return _LOADED[key]
-    _tolerate_rep_patterns()
+    _install_reader_shims()
     from spylls.hunspell import Dictionary
 
     try:
@@ -569,7 +609,7 @@ def add_user_dictionary(
     try:
         shutil.copyfile(aff_path, staging / f"{name}.aff")
         shutil.copyfile(dic_path, staging / f"{name}.dic")
-        _tolerate_rep_patterns()
+        _install_reader_shims()
         from spylls.hunspell import Dictionary
 
         Dictionary.from_files(str(staging / name))

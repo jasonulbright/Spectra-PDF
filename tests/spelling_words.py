@@ -98,6 +98,13 @@ WORDS: dict[str, dict[str, list[str]]] = {
         "good": ["casa", "libro", "scuola", "acqua", "persona", "città", "lavoro", "giorno"],
         "bad": ["scuolla", "giornno", "acqqua"],
     },
+    # Korean is written here in composed (NFC) form, the way a document
+    # carries it; the word list itself is stored decomposed and the .aff's
+    # ICONV table is what bridges the two.
+    "ko_KR": {
+        "good": ["사람", "학교", "한국", "책", "고양이", "물", "나무", "하늘"],
+        "bad": ["사람람", "학교교", "고양양이"],
+    },
     "nb_NO": {
         "good": ["hus", "bok", "skole", "vann", "menneske", "by", "arbeid", "dag"],
         "bad": ["boook", "skoole", "vannnn"],

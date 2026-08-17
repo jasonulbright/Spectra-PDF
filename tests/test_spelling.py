@@ -7,13 +7,14 @@ Three layers, each with its own failure mode:
 * the DICTIONARIES, gated per language against `spelling_words.py`. A word
   list that rejects its own everyday vocabulary paints the whole document red,
   so "ordinary words accepted, planted misspellings rejected" is the shipping
-  condition for a tag, checked for all 34 rather than sampled.
+  condition for a tag, checked for all 35 rather than sampled.
 * the DOCUMENT WALK and its refusals, over hand-built fixtures.
 """
 
 import json
 import os
 import shutil
+import unicodedata
 
 import pikepdf
 import pytest
@@ -183,6 +184,30 @@ class TestShippedDictionaries:
         _require("hu_HU")
         dictionary = load_dictionary("hu_HU", DICT_DIR)
         assert check_word(dictionary, "iskola", set())
+
+    def test_a_flag_directive_is_not_read_as_an_alias_index(self):
+        # spylls expands the AF alias table inside its shared flag parser, so a
+        # `FLAG num` dictionary that also carries AF has every all-digit
+        # DIRECTIVE value read as an alias index — and the singular parser then
+        # picks an arbitrary member of that alias's set, which varies with the
+        # process hash seed. Korean is such a dictionary: the misread
+        # FORBIDDENWORD is a flag most of its own stems hold.
+        _require("ko_KR")
+        load_dictionary("ko_KR", DICT_DIR)
+        from spylls.hunspell import Dictionary
+
+        aff = Dictionary.from_files(os.path.join(DICT_DIR, "ko_KR", "ko_KR")).aff
+        assert aff.FORBIDDENWORD == "15"
+        assert aff.ONLYINCOMPOUND == "1"
+
+    def test_a_decomposed_word_list_answers_a_composed_document(self):
+        # The Korean list stores stems as conjoining jamo while a document
+        # carries precomposed syllables; the .aff's ICONV table is the bridge.
+        _require("ko_KR")
+        dictionary = load_dictionary("ko_KR", DICT_DIR)
+        composed = "사람"
+        assert check_word(dictionary, composed, set())
+        assert check_word(dictionary, unicodedata.normalize("NFD", composed), set())
 
 
 # ═════════════════════════ resolution and lookup ═══════════════════════════
