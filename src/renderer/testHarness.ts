@@ -693,6 +693,29 @@ export function registerWebCapture(handlers: WebCaptureHandlers | null): void {
 }
 
 /**
+ * The cross-window tab drag.
+ *
+ * The pointer gesture is the only undrivable step — a real drag between two
+ * windows needs OS-level input, because injected synthetics are renderer-local
+ * and never establish the capture the drag depends on. So the seam sits exactly
+ * above it: `drop` is the same function pointerup calls, with the release point
+ * supplied, and everything below it — commit gate, resolution, the handover,
+ * closing the tab — runs unchanged. `track` is the same call a throttled move
+ * makes, so a spec can drive a target window's caret by naming a point inside
+ * that window's registered strip.
+ */
+export interface TabDragHandlers {
+  drop: (path: string, point: { x: number; y: number }) => Promise<boolean>;
+  track: (point: { x: number; y: number }) => Promise<string | null>;
+}
+
+let tabDragSeam: TabDragHandlers | null = null;
+
+export function registerTabDrag(handlers: TabDragHandlers | null): void {
+  tabDragSeam = handlers;
+}
+
+/**
  * Watermark panel: the PDF-source picker is native and undrivable, so e2e
  * injects the chosen path through the panel's own setters and then drives the
  * REAL Apply button. Every other control is an ordinary input the spec sets
@@ -1887,6 +1910,15 @@ export interface TestHarness {
     output: string,
     options?: CombineRunOptions,
   ) => Promise<{ output: string; pages: number } | null>;
+  /** Release a tab drag at a PHYSICAL SCREEN point (the tab strip must be
+   * mounted). Resolves true when the document changed hands. The point decides
+   * everything: inside another window's registered strip it transfers, inside
+   * this window's it does nothing, anywhere else it tears off a window. */
+  tabDragDrop: (path: string, point: { x: number; y: number }) => Promise<boolean>;
+  /** Move a tab drag over a PHYSICAL SCREEN point; resolves to the window now
+   * drawing an insertion caret, or null. That window paints it from its own
+   * event, so read the caret in the window that should have it. */
+  tabDragTrack: (point: { x: number; y: number }) => Promise<string | null>;
   /** Watermark panel (panel must be mounted): select the PDF source and set
    * the file and page a native picker would have set. Apply is still clicked. */
   watermarkSetPdfSource: (path: string, page?: number) => void;
@@ -3339,6 +3371,22 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       return webCapture.run(request);
+    },
+    tabDragDrop: async (path, point) => {
+      if (!tabDragSeam) {
+        const msg = 'tabDragDrop: tab strip not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return tabDragSeam.drop(path, point);
+    },
+    tabDragTrack: async (point) => {
+      if (!tabDragSeam) {
+        const msg = 'tabDragTrack: tab strip not mounted';
+        lastError = msg;
+        throw new Error(msg);
+      }
+      return tabDragSeam.track(point);
     },
     watermarkSetPdfSource: (path, page) => {
       if (!watermarkPanel) {
