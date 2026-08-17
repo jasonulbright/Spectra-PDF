@@ -165,22 +165,28 @@ font_fallback.fontVerticalMetricsPick	exact	font_fallback,text_authoring,text_pa
 font_fallback.libertinusSerifFeatureFont	pattern	font_fallback	Libertinus Serif (feature font) not found in {{font_path}}
 font_fallback.textEmbed	exact	font_fallback	no text to embed
 font_fallback.verticalFallbackFontCannot	pattern	font_fallback	the vertical fallback font cannot express {{ch}}
+form_authoring.bundledVerticalFontStates	exact	form_authoring	the bundled vertical font states no PostScript name, so no font descriptor can name it
 form_authoring.documentCertifiedAllowChanges	exact	form_authoring	this document is certified to allow no changes, so adding form fields would produce a file that reports as illegally modified
 form_authoring.documentCertifiedAllowChanges2	exact	form_authoring	this document is certified to allow no changes, so setting a field lock would produce a file that reports as illegally modified
 form_authoring.documentCertifiedAllowChanges3	exact	form_authoring	this document is certified to allow no changes, so setting a field action would produce a file that reports as illegally modified
 form_authoring.documentCertifiedAllowChanges4	exact	form_authoring	this document is certified to allow no changes, so setting a field description would produce a file that reports as illegally modified
+form_authoring.documentCertifiedAllowChanges5	exact	form_authoring	this document is certified to allow no changes, so setting a field's writing mode would produce a file that reports as illegally modified
 form_authoring.documentFormFieldNamed	pattern	form_authoring	This document has no form field named "{{name}}".
 form_authoring.documentSignedAddingForm	exact	form_authoring	this document is signed and adding form fields invalidates its signatures -- the run must state that signed documents are included before it will touch one
 form_authoring.documentSignedSettingField	exact	form_authoring	this document is signed and setting a field lock invalidates its signatures -- the run must state that signed documents are included before it will touch one
 form_authoring.documentSignedSettingField2	exact	form_authoring	this document is signed and setting a field action invalidates its signatures -- the run must state that signed documents are included before it will touch one
 form_authoring.documentSignedSettingField3	exact	form_authoring	this document is signed and setting a field description invalidates its signatures -- the run must state that signed documents are included before it will touch one
+form_authoring.documentSignedSettingField4	exact	form_authoring	this document is signed and setting a field's writing mode invalidates its signatures -- the run must state that signed documents are included before it will touch one
+form_authoring.fieldWritesVerticallyVertical	exact	form_authoring	this field writes vertically and no vertical font is available to state its metrics
 form_authoring.formFieldSActions	pattern	form_authoring	this form field's actions cannot be set: {{text}}
 form_authoring.formFieldSignatureField	pattern	form_authoring	Form field "{{name}}" is not a signature field, and only a signature field can lock form fields.
 form_authoring.nameFormFieldWhose	exact	form_authoring	Name the form field whose actions are being set.
 form_authoring.nameFormFieldWhose2	exact	form_authoring	Name the form field whose description is being set.
+form_authoring.nameFormFieldsWhose	exact	form_authoring	Name the form fields whose writing mode is being set.
 form_authoring.nameSignatureFieldWhose	exact	form_authoring	Name the signature field whose lock is being set.
 form_authoring.signatureFieldAlreadySigned	pattern	form_authoring	Signature field "{{name}}" is already signed, so its field lock can no longer change. Its lock is part of what that signature covers.
 form_authoring.theseFormFieldsCannot	pattern	form_authoring	these form fields cannot be created: {{joined}}
+form_authoring.theseFormFieldsCannot2	pattern	form_authoring	these form fields cannot write vertically: {{joined}}
 form_detect.cannotNameDetectedField	pattern	form_detect,form_prepare	cannot name the detected field {{base}}: too many fields already carry that name
 form_detect.maxCandidatesMustPositive	exact	form_detect	max_candidates must be a positive number
 form_detect.scanMustAutoNever	exact	form_detect	scan must be "auto", "never" or "always"
@@ -646,6 +652,7 @@ text_authoring.italicMustTrueFalse	pattern	text_authoring	italic must be true or
 text_authoring.kernMustTrueFalse	pattern	text_authoring	kern must be true or false (got {{kern}})
 text_authoring.rotateMustNumberDegrees	pattern	text_authoring	rotate must be a number of degrees (got {{rotate}})
 text_authoring.rotatedBoxCannotAlso	exact	text_authoring	a rotated box cannot also have a vertical writing mode
+text_authoring.scriptMustOneGot	pattern	text_authoring	the script must be one of: {{allowed}} (got {{script}})
 text_authoring.smallCapsAlternatesDo	exact	text_authoring	small caps and alternates do not apply to this script
 text_authoring.smallCapsAlternatesDo2	exact	text_authoring	small caps and alternates do not apply to vertical text
 text_authoring.spanColorMustR	exact	text_authoring	span color must be [r,g,b] in 0..1
