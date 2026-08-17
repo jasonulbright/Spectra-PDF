@@ -43,8 +43,10 @@ OUT = CORPUS / "clause-index.json"
 # `…-6-1-13-t04-fail-a.pdf` / `…-6-1-13-bfo-t01-pass.pdf`: the clause digits,
 # the test number, the verdict, and an optional variant letter.
 STEM = re.compile(
-    # One level or many: PDF/A names `6-1-13`, PDF/UA names a top-level `5`.
-    r"(?P<clause>\d+(?:-\d+)*)-(?:bfo-)?t(?P<test>\d+)"
+    # One level or many, and the two families separate their levels
+    # differently: PDF/A writes `6-1-13`, PDF/UA writes `7.21.3.1` (and a
+    # top-level `5`). Both are normalized to dots by `_clause_from_stem`.
+    r"(?P<clause>\d+(?:[-.]\d+)*)-(?:bfo-)?t(?P<test>\d+)"
     r"(?:-(?P<verdict>fail|pass|undefined))?(?:-(?P<variant>[a-z0-9]+))?$",
     re.IGNORECASE,
 )
