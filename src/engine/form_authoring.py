@@ -75,6 +75,18 @@ _MAX_PARENT_DEPTH = 32
 FIELD_TYPES = ("text", "checkbox", "radio", "dropdown", "optionlist", "signature")
 CHOICE_TYPES = ("radio", "dropdown", "optionlist")
 
+#: The writing modes a FIELD may state. A field states its writing mode in
+#: its /DA font's CMap (ISO 32000-2 9.7.5.1), and a CMap carries no column
+#: direction, so the two explicit spellings the authored-box tier accepts
+#: (`vertical-rl`, `vertical-lr`) cannot be expressed here and are refused by
+#: name rather than silently narrowed to `vertical`.
+FIELD_WRITING_MODES = ("horizontal", "vertical")
+
+#: The kinds whose value is drawn as a text run. A button draws a mark from
+#: ZapfDingbats and a signature field draws no value at all, so vertical
+#: writing is undefined for them.
+VERTICAL_FIELD_TYPES = ("text", "dropdown", "optionlist")
+
 # The border and background every created widget carries, so a prepared field
 # is visible on a page that only ever had a printed rule under it.
 BORDER_WIDTH = 1.0
@@ -159,6 +171,80 @@ def _rect_of(spec, key="rect") -> tuple:
 def _lock_of(spec: dict) -> dict | None:
     raw = spec.get("lock")
     return raw if isinstance(raw, dict) else None
+
+
+def _writing_of(spec: dict) -> tuple[str, str]:
+    """``(writing_mode, script)`` as the spec states them.
+
+    An absent ``writing_mode`` is horizontal: a surface that offers no
+    direction control contributes no key, which is the same shape the
+    authored-box tier's writing parameters take.
+    """
+    mode = str(spec.get("writing_mode") or "horizontal").strip().lower()
+    script = str(spec.get("script") or "").strip().lower()
+    return mode, script
+
+
+def _require_vertical_face(font_dir: str) -> None:
+    """Refuse before anything is written when the bundled vertical face is
+    out of reach. The /DR font's descriptor is read off that face, so its
+    absence is a problem the batch reports with the rest rather than a throw
+    from inside the write."""
+    if not font_dir or not Path(font_dir).is_dir():
+        raise ValueError(
+            "this field writes vertically and no vertical font is available to "
+            "state its metrics"
+        )
+
+
+def _writing_problems(spec: dict, kind: str) -> list[str]:
+    """Every problem the spec's writing mode and script carry.
+
+    Vertical writing is a property of the FONT a field's /DA names, so the
+    combinations refused here are the ones no font can express: a field kind
+    whose value is a mark rather than a text run, a comb field (whose cells
+    divide the box across the very axis a column runs down), and a column
+    direction, which a CMap does not carry.
+    """
+    from engine.text_authoring import VERTICAL_SCRIPTS
+
+    mode, script = _writing_of(spec)
+    problems: list[str] = []
+    if mode not in FIELD_WRITING_MODES:
+        if mode in ("vertical-rl", "vertical-lr"):
+            problems.append(
+                "a field states its writing mode in its font's CMap, which carries no "
+                "column direction -- use vertical"
+            )
+        else:
+            problems.append(f"unknown writing mode {mode or '(none)'}")
+        return problems
+    if mode == "horizontal":
+        if script:
+            problems.append(
+                "a script names the character collection a vertical field's font is "
+                "bound to, and this field writes horizontally"
+            )
+        return problems
+    if kind not in VERTICAL_FIELD_TYPES:
+        problems.append(
+            f"a {kind or '(none)'} field draws a mark rather than a text run, so it "
+            "has no writing mode"
+        )
+    if not script:
+        problems.append(
+            "a vertical field needs the script naming the character collection its "
+            "font is bound to"
+        )
+    elif script not in VERTICAL_SCRIPTS:
+        allowed = ", ".join(sorted(VERTICAL_SCRIPTS))
+        problems.append(f"unknown script {script} (the scripts are: {allowed})")
+    if kind == "text" and spec.get("comb"):
+        problems.append(
+            "a comb field divides its box across the axis a column runs down, so it "
+            "cannot also write vertically"
+        )
+    return problems
 
 
 # ── Field actions (/AA), the calculation order (/CO) and /DV ──────────────
@@ -333,7 +419,7 @@ def _action_problems(spec: dict, kind: str) -> list:
     return problems
 
 
-def _validate(pdf: pikepdf.Pdf, specs: list) -> None:
+def _validate(pdf: pikepdf.Pdf, specs: list, font_dir: str = "") -> None:
     problems: list[str] = []
     taken = _top_level_names(pdf)
     for field in _all_fields(pdf):
@@ -400,6 +486,8 @@ def _validate(pdf: pikepdf.Pdf, specs: list) -> None:
                     problem("a comb field cannot also be multiline")
         for text in _action_problems(spec, kind):
             problem(text)
+        for text in _writing_problems(spec, kind):
+            problem(text)
         calc = _calculate_of(spec)
         if calc is not None:
             try:
@@ -448,6 +536,11 @@ def _validate(pdf: pikepdf.Pdf, specs: list) -> None:
     if problems:
         joined = "; ".join(problems)
         raise FieldSpecError(f"these form fields cannot be created: {joined}", problems)
+
+    if any(
+        isinstance(spec, dict) and _writing_of(spec)[0] != "horizontal" for spec in specs
+    ):
+        _require_vertical_face(font_dir)
 
 
 # ── Appearances ───────────────────────────────────────────────────────────
@@ -504,6 +597,109 @@ def _zapf(pdf: pikepdf.Pdf):
     )
     fonts["/ZaDb"] = font
     return font
+
+
+def _vertical_face_metrics(font_dir: str) -> tuple[str, dict]:
+    """``(PostScript name, metrics)`` of the bundled vertical face.
+
+    The /DR font this module writes embeds NOTHING, so its descriptor is a
+    description of the face the fill will actually draw through rather than
+    of a font program in the file. Every number is read off that face; none
+    is assumed.
+    """
+    from fontTools.ttLib import TTFont
+
+    from engine.font_fallback import _font_metrics, resolve_vertical_font
+
+    _require_vertical_face(font_dir)
+    face = resolve_vertical_font(font_dir, "", style="regular")
+    ttf = TTFont(face, fontNumber=0, lazy=True)
+    try:
+        name = ttf["name"].getDebugName(6)
+        metrics = _font_metrics(ttf)
+        metrics["cff"] = "CFF " in ttf
+        metrics["italic_angle"] = float(ttf["post"].italicAngle)
+    finally:
+        ttf.close()
+    if not name:
+        raise ValueError(
+            "the bundled vertical font states no PostScript name, so no font "
+            "descriptor can name it"
+        )
+    return str(name), metrics
+
+
+def _vertical_font(pdf: pikepdf.Pdf, script: str, font_dir: str) -> str:
+    """The /DR resource name of the NON-EMBEDDED vertical font for ``script``,
+    created on demand and shared by every field bound to that collection.
+
+    The font is a Type 0 on a predefined vertical CMap (ISO 32000-2 Table
+    116) over a CID-keyed descendant whose /CIDSystemInfo names the
+    collection (9.7.3). Nothing is embedded: an empty field's /DA font has to
+    cover characters nobody has typed yet, and the value's own glyphs are
+    embedded as a subset inside the appearance stream when the field is
+    filled.
+    """
+    from engine.text_authoring import vertical_collection
+
+    cmap, registry, ordering, supplement = vertical_collection(script)
+    fonts = _dr_fonts(pdf)
+    resource = f"V{ordering}"
+    existing = fonts.get("/" + resource)
+    if existing is not None:
+        if str(existing.get("/Encoding", "")) == "/" + cmap:
+            return resource
+        # A name already bound to a different encoding is somebody else's
+        # font; a fresh one is written rather than that one rewritten.
+        index = 2
+        while fonts.get(f"/{resource}{index}") is not None:
+            index += 1
+        resource = f"{resource}{index}"
+
+    base, metrics = _vertical_face_metrics(font_dir)
+    descriptor = pdf.make_indirect(
+        Dictionary(
+            Type=Name("/FontDescriptor"),
+            FontName=Name("/" + base),
+            # 9.8.2 bit 3: the character set lies outside the Latin one the
+            # standard encodings describe.
+            Flags=4,
+            FontBBox=Array(metrics["bbox"]),
+            ItalicAngle=metrics["italic_angle"],
+            Ascent=metrics["ascent"],
+            Descent=metrics["descent"],
+            CapHeight=metrics["cap_height"],
+            # 9.8.1 Table 120: zero states an UNKNOWN dominant stem width,
+            # which is the honest value for a face whose program is absent.
+            StemV=0,
+        )
+    )
+    descendant = pdf.make_indirect(
+        Dictionary(
+            Type=Name("/Font"),
+            # 9.7.4.1: a CFF-based CIDFont is CIDFontType0, a TrueType-based
+            # one CIDFontType2. /CIDToGIDMap is defined for the latter alone
+            # and is absent here by construction (nothing is embedded).
+            Subtype=Name("/CIDFontType0" if metrics["cff"] else "/CIDFontType2"),
+            BaseFont=Name("/" + base),
+            CIDSystemInfo=Dictionary(
+                Registry=String(registry),
+                Ordering=String(ordering),
+                Supplement=supplement,
+            ),
+            FontDescriptor=descriptor,
+        )
+    )
+    fonts["/" + resource] = pdf.make_indirect(
+        Dictionary(
+            Type=Name("/Font"),
+            Subtype=Name("/Type0"),
+            BaseFont=Name("/" + base),
+            Encoding=Name("/" + cmap),
+            DescendantFonts=Array([descendant]),
+        )
+    )
+    return resource
 
 
 def _chrome(w: float, h: float) -> str:
@@ -592,12 +788,26 @@ def _widget(pdf: pikepdf.Pdf, page, rect: tuple, caption: str = "") -> Dictionar
     )
 
 
-def _create_text(pdf: pikepdf.Pdf, page, spec: dict, rect: tuple):
+def _default_appearance(pdf: pikepdf.Pdf, spec: dict, font_dir: str) -> str:
+    """The /DA string a spec's field carries.
+
+    A vertical field's /DA names the collection font written into /DR: the
+    CMap that font is encoded with is the one place the format states a
+    field's writing mode (ISO 32000-2 9.7.5.1), so naming it IS the request.
+    Size 0 leaves the fill to auto-size, as the horizontal default does.
+    """
+    mode, script = _writing_of(spec)
+    if mode == "horizontal":
+        return DEFAULT_DA
+    return f"/{_vertical_font(pdf, script, font_dir)} 0 Tf 0 g"
+
+
+def _create_text(pdf: pikepdf.Pdf, page, spec: dict, rect: tuple, font_dir: str = ""):
     w, h = rect[2] - rect[0], rect[3] - rect[1]
     field = _widget(pdf, page, rect)
     field["/FT"] = Name("/Tx")
     field["/T"] = String(spec["name"].strip())
-    field["/DA"] = String(DEFAULT_DA)
+    field["/DA"] = String(_default_appearance(pdf, spec, font_dir))
     flags = 0
     if spec.get("multiline"):
         flags |= FF_MULTILINE
@@ -690,12 +900,14 @@ def _create_radio(pdf: pikepdf.Pdf, page, spec: dict, rect: tuple, options: list
     return field, kids
 
 
-def _create_choice(pdf: pikepdf.Pdf, page, spec: dict, rect: tuple, options: list):
+def _create_choice(
+    pdf: pikepdf.Pdf, page, spec: dict, rect: tuple, options: list, font_dir: str = ""
+):
     w, h = rect[2] - rect[0], rect[3] - rect[1]
     field = _widget(pdf, page, rect)
     field["/FT"] = Name("/Ch")
     field["/T"] = String(spec["name"].strip())
-    field["/DA"] = String(DEFAULT_DA)
+    field["/DA"] = String(_default_appearance(pdf, spec, font_dir))
     field["/Opt"] = Array([String(o["label"]) for o in options])
     field["/Ff"] = FF_COMBO if spec["type"] == "dropdown" else FF_MULTISELECT
     field["/AP"] = Dictionary(N=_text_ap(pdf, w, h))
@@ -703,7 +915,7 @@ def _create_choice(pdf: pikepdf.Pdf, page, spec: dict, rect: tuple, options: lis
     return pdf.make_indirect(field)
 
 
-def _create(pdf: pikepdf.Pdf, spec: dict) -> list:
+def _create(pdf: pikepdf.Pdf, spec: dict, font_dir: str = "") -> list:
     """One spec into the document; returns the /Fields entries it adds."""
     page = pdf.pages[int(spec["page_index"])]
     rect = _rect_of(spec)
@@ -716,13 +928,13 @@ def _create(pdf: pikepdf.Pdf, spec: dict) -> list:
             _attach(pdf, page, kid)
         return [field]
     if kind in ("dropdown", "optionlist"):
-        field = _create_choice(pdf, page, spec, rect, options)
+        field = _create_choice(pdf, page, spec, rect, options, font_dir)
     elif kind == "checkbox":
         field = _create_checkbox(pdf, page, spec, rect)
     elif kind == "signature":
         field = _create_signature(pdf, page, spec, rect)
     else:
-        field = _create_text(pdf, page, spec, rect)
+        field = _create_text(pdf, page, spec, rect, font_dir)
     _attach(pdf, page, field)
     return [field]
 
@@ -757,6 +969,11 @@ def add_form_fields(
     Returns ``{output, created, names}``. Every problem in the batch is
     reported at once and nothing is written when any of them fails.
 
+    ``font_dir`` is the bundled font folder. A spec asking for vertical
+    writing is bound to a non-embedded collection font whose descriptor is
+    read off the bundled vertical face, so a vertical spec without it
+    refuses; a batch of horizontal specs never reads it.
+
     A document certified to allow no changes REFUSES; one whose signatures the
     edit merely invalidates refuses unless ``allow_signed`` says the caller
     accepted that. Adding a field is a structural edit -- it is outside the
@@ -784,13 +1001,13 @@ def add_form_fields(
     names = []
     with pikepdf.open(file) as pdf:
         refuse_if_xfa(pdf, input_path, "adding form fields")
-        _validate(pdf, specs)
+        _validate(pdf, specs, font_dir)
         acro = _acroform(pdf)
         _helv(pdf)
         entries = list(acro["/Fields"])
         has_signature = False
         for spec in specs:
-            for created in _create(pdf, spec):
+            for created in _create(pdf, spec, font_dir):
                 entries.append(created)
             names.append(str(spec["name"]).strip())
             has_signature = has_signature or spec["type"] == "signature"
@@ -811,6 +1028,151 @@ def add_form_fields(
     if same_file:
         shutil.move(staged, str(output_path))
     return {"output": str(output_path), "created": len(specs), "names": names}
+
+
+def author_vertical_field_font(
+    file: str,
+    output: str,
+    fields=None,
+    script: str = "",
+    font_dir: str = "",
+    allow_signed: bool = False,
+) -> dict:
+    """Bind EXISTING text-ish fields to a vertical font, and write ``output``.
+
+    Returns ``{output, fields, font, cmap, registry, ordering, supplement}``.
+
+    The font half of vertical field authoring, for the tiers that create the
+    field itself with something that cannot write a CID-keyed font. It writes
+    the non-embedded collection font into /AcroForm /DR once and renames each
+    field's /DA font to it, keeping that /DA's size and colour -- the writing
+    mode is the ONLY axis this door moves.
+
+    Every problem is reported at once and nothing is written when any of them
+    fails, which is the posture the create path already takes: a run that
+    bound half a form to a vertical font leaves a document nobody can reason
+    about.
+    """
+    from engine.forms import _parse_da
+    from engine.text_authoring import vertical_collection
+
+    names = [str(name).strip() for name in (fields or []) if str(name).strip()]
+    if not names:
+        raise ValueError("Name the form fields whose writing mode is being set.")
+    cmap, registry, ordering, supplement = vertical_collection(script)
+    _require_vertical_face(font_dir)
+    validate_pdf(file)
+    decision = signed_edit_decision(signature_policy(file), "structural")
+    if decision["kind"] == "refuse":
+        raise RuntimeError(
+            "this document is certified to allow no changes, so setting a field's "
+            "writing mode would produce a file that reports as illegally modified"
+        )
+    if decision["kind"] == "warn" and not allow_signed:
+        raise RuntimeError(
+            "this document is signed and setting a field's writing mode invalidates "
+            "its signatures -- the run must state that signed documents are "
+            "included before it will touch one"
+        )
+
+    input_path = Path(file)
+    output_path = Path(output)
+    same_file = input_path.resolve() == output_path.resolve()
+    with pikepdf.open(file) as pdf:
+        refuse_if_xfa(pdf, input_path, "setting a field's writing mode")
+        forest = form_field_forest(pdf)
+        problems: list[str] = []
+        targets = []
+        for name in names:
+            target = forest.get(name)
+            if target is None:
+                problems.append(
+                    f"{name}: this document has no form field with that name"
+                )
+                continue
+            kind = _kind_of_field(target)
+            if kind not in VERTICAL_FIELD_TYPES:
+                problems.append(
+                    f"{name}: a {kind} field draws a mark rather than a text run, so "
+                    "it has no writing mode"
+                )
+                continue
+            # Bit 25 means COMB on a text field alone; on a choice field the
+            # same bit is CommitOnSelChange, so reading it there would refuse
+            # a dropdown for a flag that says nothing about its box.
+            if kind == "text" and _effective_flags(target) & FF_COMB:
+                problems.append(
+                    f"{name}: a comb field divides its box across the axis a column "
+                    "runs down, so it cannot also write vertically"
+                )
+                continue
+            targets.append((name, target))
+        if problems:
+            joined = "; ".join(problems)
+            raise FieldSpecError(
+                f"these form fields cannot write vertically: {joined}", problems
+            )
+        resource = _vertical_font(pdf, script, font_dir)
+        for _name, target in targets:
+            _requested, size, color = _parse_da(_field_appearance(target, pdf))
+            target["/DA"] = String(f"/{resource} {_fmt_size(size)} Tf {color}")
+        if same_file:
+            with tempfile.NamedTemporaryFile(
+                suffix=".pdf", delete=False, dir=str(input_path.parent)
+            ) as tmp:
+                staged = tmp.name
+            save_pdf(pdf, staged)
+        else:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            save_pdf(pdf, output_path)
+    if same_file:
+        shutil.move(staged, str(output_path))
+    return {
+        "output": str(output_path),
+        "fields": [name for name, _target in targets],
+        "font": resource,
+        "cmap": cmap,
+        "registry": registry,
+        "ordering": ordering,
+        "supplement": supplement,
+    }
+
+
+def _field_appearance(field, pdf: pikepdf.Pdf) -> str | None:
+    """The /DA in effect for a field: its own, inherited, else the form's."""
+    node = field
+    for _ in range(_MAX_PARENT_DEPTH):
+        if node is None:
+            break
+        da = node.get("/DA")
+        if da is not None:
+            return str(da)
+        node = node.get("/Parent")
+    acro = pdf.Root.get("/AcroForm")
+    da = acro.get("/DA") if acro is not None else None
+    return str(da) if da is not None else None
+
+
+def _effective_flags(field) -> int:
+    """A field's ``/Ff``, inherited from its ancestors when it carries none."""
+    node = field
+    for _ in range(_MAX_PARENT_DEPTH):
+        if node is None:
+            return 0
+        flags = node.get("/Ff")
+        if flags is not None:
+            try:
+                return int(flags)
+            except (TypeError, ValueError):
+                return 0
+        node = node.get("/Parent")
+    return 0
+
+
+def _fmt_size(size: float) -> str:
+    """A /DA font size, with an integral value written as an integer so the
+    ordinary auto-size string stays `0` rather than `0.0`."""
+    return str(int(size)) if float(size).is_integer() else f"{size:g}"
 
 
 def _effective_ft(field):

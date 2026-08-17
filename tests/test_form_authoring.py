@@ -7,14 +7,25 @@ validation pins are the fail-closed posture: every problem at once, nothing
 written when any of them fails.
 """
 
+import os
 import pathlib
+import re
 
 import pikepdf
 import pytest
 from pikepdf import Array, Dictionary, String
 
-from engine.form_authoring import FieldSpecError, add_form_fields, existing_field_names
-from engine.forms import read_form_fields
+from engine.form_authoring import (
+    FieldSpecError,
+    add_form_fields,
+    author_vertical_field_font,
+    existing_field_names,
+)
+from engine.forms import fill_form_fields, read_form_fields
+
+FONTS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resources", "fonts"
+)
 
 
 def _blank(path, pages=1):
@@ -446,3 +457,380 @@ def test_signature_fields_do_not_clear_an_existing_flag(tmp_path):
     assert pathlib.Path(out).exists()
     with pikepdf.open(out) as pdf:
         assert pdf.Root["/AcroForm"].get("/SigFlags") is None
+
+
+# ── Vertical fields ───────────────────────────────────────────────────────
+#
+# The CREATE half of a vertical field. A field writes down the page when its
+# /DA names a /DR font on a vertical CMap, so what is pinned here is that
+# font: its subtype, its CMap, and the character collection its descendant
+# declares. The value's own glyphs are NOT in it — an empty field's /DA font
+# has to cover characters nobody has typed — so the pins also hold the two
+# halves apart: no font program in /DR, an embedded subset in the appearance
+# the fill writes.
+
+_HAS_CJK = os.path.isfile(os.path.join(FONTS_DIR, "NotoSansCJKsc-Regular.otf"))
+
+#: script -> (/DR resource name, CMap, registry, ordering, supplement). Exact
+#: values, because a viewer resolves a non-embedded CID font by exactly these.
+VERTICAL_PINS = {
+    "japanese": ("VJapan1", "/UniJIS-UTF16-V", "Adobe", "Japan1", 7),
+    "simplified-chinese": ("VGB1", "/UniGB-UTF16-V", "Adobe", "GB1", 5),
+    "traditional-chinese": ("VCNS1", "/UniCNS-UTF16-V", "Adobe", "CNS1", 7),
+    "korean": ("VKorea1", "/UniKS-UTF16-V", "Adobe", "Korea1", 2),
+}
+
+#: script -> (a value in that script, a value mixing it with Latin).
+VERTICAL_VALUES = {
+    "japanese": ("機密文書", "型番 AB-12"),
+    "simplified-chinese": ("机密文件", "型号 AB-12"),
+    "traditional-chinese": ("機密文件", "型號 AB-12"),
+    "korean": ("기밀문서", "모델 AB-12"),
+}
+
+_FONT_PROGRAM_KEYS = ("/FontFile", "/FontFile2", "/FontFile3")
+
+
+def _vertical(name="note", script="japanese", page=0, rect=None):
+    return {
+        "name": name,
+        "type": "text",
+        "page_index": page,
+        "rect": rect or [400, 400, 460, 700],
+        "writing_mode": "vertical",
+        "script": script,
+    }
+
+
+def _font_facts(font) -> dict:
+    """What a composite font declares, as plain values a closed Pdf keeps.
+
+    A composite font keeps its PROGRAM on the descendant's descriptor, so
+    "embedded" is a claim about that one, never about the Type 0 wrapper.
+    """
+    descendant = font["/DescendantFonts"][0]
+    info = descendant["/CIDSystemInfo"]
+    descriptor = descendant["/FontDescriptor"]
+    return {
+        "subtype": str(font["/Subtype"]),
+        "encoding": str(font["/Encoding"]),
+        "descendant_subtype": str(descendant["/Subtype"]),
+        "collection": (
+            str(info["/Registry"]),
+            str(info["/Ordering"]),
+            int(info["/Supplement"]),
+        ),
+        "programs": {str(k) for k in descriptor.keys()} & set(_FONT_PROGRAM_KEYS),
+    }
+
+
+def _dr_font(path, resource) -> dict:
+    with pikepdf.open(path) as pdf:
+        return _font_facts(pdf.Root["/AcroForm"]["/DR"]["/Font"]["/" + resource])
+
+
+def _field_da(path, name):
+    with pikepdf.open(path) as pdf:
+        for entry in pdf.Root["/AcroForm"]["/Fields"]:
+            if str(entry.get("/T")) == name:
+                return str(entry["/DA"])
+    raise AssertionError(f"no field named {name}")
+
+
+def _appearance(path, name):
+    """(appearance bytes, {resource name: facts}) for the widget's /AP /N."""
+    with pikepdf.open(path) as pdf:
+        for entry in pdf.Root["/AcroForm"]["/Fields"]:
+            if str(entry.get("/T")) == name:
+                ap = entry["/AP"]["/N"]
+                fonts = ap["/Resources"]["/Font"]
+                return bytes(ap.read_bytes()), {
+                    str(k): _font_facts(fonts[k]) for k in fonts.keys()
+                }
+    raise AssertionError(f"no field named {name}")
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+@pytest.mark.parametrize("script", sorted(VERTICAL_PINS))
+def test_a_vertical_field_binds_its_dr_font_to_the_scripts_collection(tmp_path, script):
+    resource, cmap, registry, ordering, supplement = VERTICAL_PINS[script]
+    src = _blank(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+    add_form_fields(src, out, [_vertical(script=script)], font_dir=FONTS_DIR)
+
+    assert _field_da(out, "note") == f"/{resource} 0 Tf 0 g"
+    facts = _dr_font(out, resource)
+    assert facts["subtype"] == "/Type0"
+    assert facts["encoding"] == cmap
+    assert facts["descendant_subtype"] == "/CIDFontType0"
+    assert facts["collection"] == (registry, ordering, supplement)
+    assert facts["programs"] == set()
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+@pytest.mark.parametrize("script", sorted(VERTICAL_PINS))
+@pytest.mark.parametrize("which", (0, 1))
+def test_an_authored_vertical_field_fills_as_a_column(tmp_path, script, which):
+    # The author-then-fill matrix: every script, a value in that script and a
+    # value mixing it with Latin. What the fill does with an authored field is
+    # exactly what it does with one that arrived from anywhere else.
+    resource = VERTICAL_PINS[script][0]
+    value = VERTICAL_VALUES[script][which]
+    src = _blank(tmp_path / "in.pdf")
+    authored = str(tmp_path / "authored.pdf")
+    filled = str(tmp_path / "filled.pdf")
+    add_form_fields(src, authored, [_vertical(script=script)], font_dir=FONTS_DIR)
+
+    result = fill_form_fields(authored, filled, {"note": value}, font_dir=FONTS_DIR)
+    assert result["filled"] == 1
+    # An intentional embed, never reported as a /DR-missing substitution.
+    assert result["fonts_substituted"] == []
+
+    body, fonts = _appearance(filled, "note")
+    assert re.search(rb"/TxV \d+(?:\.\d+)? Tf", body)
+    # The column head: the pen starts one pad down the reading axis, which is
+    # the box's HEIGHT (300 - 2), under the upright identity linear part.
+    assert re.search(rb"1 0 0 1 \d+(?:\.\d+)? 298 Tm", body)
+    # The appearance carries its OWN subset, so the value renders in a viewer
+    # that has no font for the collection the /DR font names.
+    assert set(fonts) == {"/TxV"}
+    assert fonts["/TxV"]["programs"]
+    # …and the /DR font still carries none.
+    assert _dr_font(filled, resource)["programs"] == set()
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+def test_the_authored_column_reproduces_the_pinned_geometry(tmp_path):
+    # The exact bytes T30 pinned for a 60x300 box: the auto fit caps at twice
+    # the default size, and the pen lands half the column's own width in from
+    # the stacking edge (60 - 2 - 24/2) at the reading axis' head (300 - 2).
+    src = _blank(tmp_path / "in.pdf")
+    authored = str(tmp_path / "authored.pdf")
+    filled = str(tmp_path / "filled.pdf")
+    add_form_fields(src, authored, [_vertical()], font_dir=FONTS_DIR)
+    fill_form_fields(authored, filled, {"note": "機密文書"}, font_dir=FONTS_DIR)
+    body, _fonts = _appearance(filled, "note")
+    assert b"/TxV 24 Tf" in body
+    assert b"1 0 0 1 46 298 Tm" in body
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+def test_two_scripts_on_one_form_get_one_dr_font_each(tmp_path):
+    src = _blank(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+    add_form_fields(
+        src,
+        out,
+        [
+            _vertical("jp", "japanese", rect=[400, 400, 460, 700]),
+            _vertical("kr", "korean", rect=[300, 400, 360, 700]),
+            _text("plain"),
+        ],
+        font_dir=FONTS_DIR,
+    )
+    with pikepdf.open(out) as pdf:
+        fonts = pdf.Root["/AcroForm"]["/DR"]["/Font"]
+        assert {str(k) for k in fonts.keys()} == {"/Helv", "/VJapan1", "/VKorea1"}
+    assert _field_da(out, "jp") == "/VJapan1 0 Tf 0 g"
+    assert _field_da(out, "kr") == "/VKorea1 0 Tf 0 g"
+    # A horizontal field beside them is untouched.
+    assert _field_da(out, "plain") == "/Helv 0 Tf 0 g"
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+def test_a_dropdown_can_write_vertically(tmp_path):
+    src = _blank(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+    add_form_fields(
+        src,
+        out,
+        [
+            {
+                "name": "size",
+                "type": "dropdown",
+                "page_index": 0,
+                "rect": [400, 400, 460, 700],
+                "options": ["大", "中", "小"],
+                "writing_mode": "vertical",
+                "script": "japanese",
+            }
+        ],
+        font_dir=FONTS_DIR,
+    )
+    assert _field_da(out, "size") == "/VJapan1 0 Tf 0 g"
+
+
+def test_a_vertical_field_without_a_font_dir_is_refused(tmp_path):
+    # The descriptor states the metrics of the face the fill will draw
+    # through; with no face there is nothing to state, so nothing is written.
+    src = _blank(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+    with pytest.raises(ValueError, match="no vertical font is available"):
+        add_form_fields(src, out, [_vertical()], font_dir="")
+    assert not pathlib.Path(out).exists()
+
+
+@pytest.mark.parametrize(
+    "spec, expected",
+    (
+        ({"type": "checkbox"}, "draws a mark rather than a text run"),
+        ({"type": "radio", "options": ["a", "b"]}, "draws a mark rather than a text run"),
+        ({"type": "signature"}, "draws a mark rather than a text run"),
+    ),
+)
+def test_vertical_writing_is_refused_where_it_is_undefined(tmp_path, spec, expected):
+    src = _blank(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+    field = {
+        "name": "mark",
+        "page_index": 0,
+        "rect": [100, 100, 140, 140],
+        "writing_mode": "vertical",
+        "script": "japanese",
+        **spec,
+    }
+    with pytest.raises(FieldSpecError) as exc:
+        add_form_fields(src, out, [field], font_dir=FONTS_DIR)
+    assert any(expected in problem for problem in exc.value.problems)
+    assert not pathlib.Path(out).exists()
+
+
+@pytest.mark.parametrize(
+    "extra, expected",
+    (
+        ({"script": "japanese"}, "this field writes horizontally"),
+        ({"writing_mode": "vertical"}, "needs the script"),
+        ({"writing_mode": "vertical", "script": "klingon"}, "unknown script klingon"),
+        ({"writing_mode": "sideways"}, "unknown writing mode sideways"),
+        ({"writing_mode": "vertical-rl", "script": "japanese"}, "no column direction"),
+        ({"writing_mode": "vertical-lr", "script": "japanese"}, "no column direction"),
+        (
+            {
+                "writing_mode": "vertical",
+                "script": "japanese",
+                "comb": True,
+                "max_length": 8,
+            },
+            "divides its box across",
+        ),
+    ),
+)
+def test_the_writing_mode_and_script_are_validated_together(tmp_path, extra, expected):
+    src = _blank(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+    with pytest.raises(FieldSpecError) as exc:
+        add_form_fields(src, out, [{**_text(), **extra}], font_dir=FONTS_DIR)
+    assert any(expected in problem for problem in exc.value.problems)
+    assert not pathlib.Path(out).exists()
+
+
+# ── The font door, for a field somebody else created ──────────────────────
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+@pytest.mark.parametrize("script", sorted(VERTICAL_PINS))
+def test_the_door_binds_an_existing_field_to_a_vertical_font(tmp_path, script):
+    resource, cmap, registry, ordering, supplement = VERTICAL_PINS[script]
+    src = _blank(tmp_path / "in.pdf")
+    horizontal = str(tmp_path / "h.pdf")
+    out = str(tmp_path / "out.pdf")
+    add_form_fields(src, horizontal, [_text("note")])
+
+    result = author_vertical_field_font(
+        horizontal, out, fields=["note"], script=script, font_dir=FONTS_DIR
+    )
+    assert result["fields"] == ["note"]
+    assert (result["font"], result["cmap"]) == (resource, cmap.lstrip("/"))
+    assert (result["registry"], result["ordering"], result["supplement"]) == (
+        registry,
+        ordering,
+        supplement,
+    )
+    assert _field_da(out, "note") == f"/{resource} 0 Tf 0 g"
+    assert _dr_font(out, resource)["encoding"] == cmap
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+def test_the_door_keeps_the_size_and_colour_the_field_already_had(tmp_path):
+    src = _blank(tmp_path / "in.pdf")
+    horizontal = str(tmp_path / "h.pdf")
+    out = str(tmp_path / "out.pdf")
+    add_form_fields(src, horizontal, [_text("note")])
+    with pikepdf.open(horizontal, allow_overwriting_input=True) as pdf:
+        for entry in pdf.Root["/AcroForm"]["/Fields"]:
+            entry["/DA"] = String("/Helv 9 Tf 1 0 0 rg")
+        pdf.save(horizontal)
+    author_vertical_field_font(
+        horizontal, out, fields=["note"], script="japanese", font_dir=FONTS_DIR
+    )
+    assert _field_da(out, "note") == "/VJapan1 9 Tf 1 0 0 rg"
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+def test_the_door_reports_every_problem_and_writes_nothing(tmp_path):
+    src = _blank(tmp_path / "in.pdf")
+    horizontal = str(tmp_path / "h.pdf")
+    out = str(tmp_path / "out.pdf")
+    add_form_fields(
+        src,
+        horizontal,
+        [
+            _text("note"),
+            {
+                "name": "agree",
+                "type": "checkbox",
+                "page_index": 0,
+                "rect": [100, 100, 120, 120],
+            },
+            {
+                "name": "code",
+                "type": "text",
+                "page_index": 0,
+                "rect": [100, 200, 300, 220],
+                "comb": True,
+                "max_length": 8,
+            },
+        ],
+    )
+    with pytest.raises(FieldSpecError) as exc:
+        author_vertical_field_font(
+            horizontal,
+            out,
+            fields=["note", "agree", "code", "ghost"],
+            script="japanese",
+            font_dir=FONTS_DIR,
+        )
+    problems = exc.value.problems
+    assert len(problems) == 3
+    assert any("agree: a checkbox field draws a mark" in p for p in problems)
+    assert any("code: a comb field divides its box" in p for p in problems)
+    assert any("ghost: this document has no form field" in p for p in problems)
+    assert not pathlib.Path(out).exists()
+
+
+def test_the_door_refuses_an_unknown_script(tmp_path):
+    src = _blank(tmp_path / "in.pdf")
+    horizontal = str(tmp_path / "h.pdf")
+    add_form_fields(src, horizontal, [_text("note")])
+    with pytest.raises(ValueError, match="the script must be one of"):
+        author_vertical_field_font(
+            horizontal,
+            str(tmp_path / "out.pdf"),
+            fields=["note"],
+            script="",
+            font_dir=FONTS_DIR,
+        )
+
+
+def test_the_door_needs_a_field_to_bind(tmp_path):
+    src = _blank(tmp_path / "in.pdf")
+    horizontal = str(tmp_path / "h.pdf")
+    add_form_fields(src, horizontal, [_text("note")])
+    with pytest.raises(ValueError, match="Name the form fields"):
+        author_vertical_field_font(
+            horizontal,
+            str(tmp_path / "out.pdf"),
+            fields=[],
+            script="japanese",
+            font_dir=FONTS_DIR,
+        )
