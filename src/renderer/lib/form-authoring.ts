@@ -20,9 +20,8 @@ import {
   PDFName,
   PDFRef,
   PDFString,
-  StandardFontEmbedder,
-  StandardFonts,
 } from 'pdf-lib';
+import { Encodings } from '@pdf-lib/standard-fonts';
 import type { PdfBuffer } from '../state/types';
 import type { FieldLock, LockAction } from './signatures';
 import {
@@ -142,26 +141,15 @@ interface ResolvedOption {
  * naming forty of them says nothing the first few did not. */
 const MAX_REPORTED_CHARS = 8;
 
-/** The font name the embedder is asked for. pdf-lib types this parameter
- * against the enum of the sub-package that owns the metrics, and re-exports
- * neither that enum nor the encodings themselves; the two enums carry the same
- * members with the same string values. Any name but Symbol and ZapfDingbats
- * selects WinAnsi. */
-const WIN_ANSI_FONT = StandardFonts.Helvetica as unknown as Parameters<
-  typeof StandardFontEmbedder.for
->[0];
-
-/** pdf-lib's own WinAnsi table — the very object its standard-font encoder
- * consults — so this predicate cannot drift from what the appearance provider
- * accepts. Built on first use: constructing the embedder decompresses the
- * font's metrics, which a batch carrying no option list never needs. */
-let winAnsi: { canEncodeUnicodeCodePoint(codePoint: number): boolean } | null = null;
-
 /** The characters in these labels the standard font has no WinAnsi code for,
  * distinct and in first-seen order. Each is shown with its code point: a
- * character no font of ours can draw usually has nothing to show. */
+ * character no font of ours can draw usually has nothing to show.
+ *
+ * `Encodings.WinAnsi` is the same object pdf-lib's standard-font embedder
+ * assigns as its own encoding for every name but Symbol and ZapfDingbats, so
+ * this predicate cannot drift from what the appearance provider accepts. */
 function winAnsiGaps(labels: readonly string[]): string[] {
-  const encoding = (winAnsi ??= StandardFontEmbedder.for(WIN_ANSI_FONT).encoding);
+  const encoding = Encodings.WinAnsi;
   const seen = new Set<number>();
   const out: string[] = [];
   for (const label of labels) {
