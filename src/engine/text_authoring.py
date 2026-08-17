@@ -65,8 +65,8 @@ _MAX_SIZE = 1638.0
 
 # The writing modes a caller may request. `vertical` derives its column
 # direction from the text; the two explicit spellings are honoured only when
-# the text agrees with them (see `_resolve_writing`).
-_WRITING_MODES = (HORIZONTAL, "vertical", VERTICAL_RL, VERTICAL_LR)
+# the text agrees with them (see `resolve_writing`).
+WRITING_MODES = (HORIZONTAL, "vertical", VERTICAL_RL, VERTICAL_LR)
 _H_FRAME = _ORIENTATIONS[HORIZONTAL]
 
 # The OpenType features we can honestly apply (small caps + stylistic
@@ -121,7 +121,7 @@ def _explicit_face(family, style_key_name: str):
     return resolve_face(raw)
 
 
-def _resolve_writing(writing_mode, body: str) -> tuple:
+def resolve_writing(writing_mode, body: str) -> tuple:
     """(frame, columns, vertical) for the requested writing mode.
 
     The column DIRECTION is derived from the text by the same evidence the
@@ -131,7 +131,7 @@ def _resolve_writing(writing_mode, body: str) -> tuple:
     to the one they were written in, with no error anywhere. Text carrying no
     evidence at all (digits, punctuation) takes the request, or right-to-left
     columns for a bare `vertical`, which is the shipped default."""
-    if not isinstance(writing_mode, str) or writing_mode not in _WRITING_MODES:
+    if not isinstance(writing_mode, str) or writing_mode not in WRITING_MODES:
         raise ValueError(
             "writing_mode must be horizontal, vertical, vertical-rl or vertical-lr "
             f"(got {writing_mode!r})"
@@ -155,7 +155,7 @@ def _resolve_writing(writing_mode, body: str) -> tuple:
     return _ORIENTATIONS[name], columns, True
 
 
-def _frame_rect(frame, x0: float, y0: float, x1: float, y1: float) -> tuple:
+def frame_rect(frame, x0: float, y0: float, x1: float, y1: float) -> tuple:
     """A rect's corners in the writing frame: (left, right, top, bottom).
 
     Boundary 1. The horizontal frame is the identity, so every number is the
@@ -219,7 +219,7 @@ def _page_band(lay: "_BoxLayout", vbox, first_size: float) -> tuple:
     return min(ys), max(ys)
 
 
-def _vertical_face(font_path, family, style: str, body: str, columns: str) -> tuple:
+def vertical_face(font_path, family, style: str, body: str, columns: str) -> tuple:
     """(face, upright) for a vertical box — the shipped vertical ladder.
 
     `upright` says which of the two legal vertical representations this face
@@ -307,6 +307,29 @@ def _wrap(units, width_1000, size: float, max_width: float) -> list[str]:
             cur = candidate
     if cur:
         lines.append(cur)
+    return lines
+
+
+def wrap_text(body: str, width_1000, size: float, max_width: float) -> list[str]:
+    """`body` broken into drawn lines — hard breaks honoured, each segment
+    greedy-wrapped at `max_width`, leading and trailing blanks trimmed.
+
+    The whole of the break policy lives here, so an emitter that assembles
+    its own bytes (a watermark stamp, a field appearance) wraps where the
+    authored box wraps and where the reflow would re-break. `max_width` is
+    the extent along the READING axis, which in a writing frame is a
+    column's length rather than a line's width."""
+    lines: list[str] = []
+    for segment in body.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        seg_units = _units(segment)
+        if not seg_units:
+            lines.append("")
+            continue
+        lines.extend(_wrap(seg_units, width_1000, size, max_width))
+    while lines and lines[0] == "":
+        lines.pop(0)
+    while lines and lines[-1] == "":
+        lines.pop()
     return lines
 
 
@@ -742,7 +765,7 @@ def _layout_box_spans(
         # Which vertical REPRESENTATION this box takes is a property of the
         # text's script, not of a style, so it is answered once here and the
         # per-style resolution below only picks the face.
-        upright = _vertical_face(
+        upright = vertical_face(
             font_path, family, style_key(bold, italic), body, columns
         )[1]
 
@@ -753,7 +776,7 @@ def _layout_box_spans(
             # position — no vertical serif is vendored), so the style axes
             # resolve through the vertical ladder rather than the bundled
             # family map.
-            return _vertical_face(font_path, family, skey, body, columns)[0]
+            return vertical_face(font_path, family, skey, body, columns)[0]
         # A tate-chu-yoko block is HORIZONTAL text inside the column, so it
         # resolves the ordinary way even in a vertical box.
         explicit = _explicit_face(family, skey)
@@ -1140,7 +1163,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     # itself rather than surfacing whatever the font machinery hits on the way.
     if not isinstance(kern, bool):
         raise ValueError(f"kern must be true or false (got {kern!r})")
-    wframe, columns, vertical = _resolve_writing(writing_mode, body)
+    wframe, columns, vertical = resolve_writing(writing_mode, body)
     _ang = float(rotate) % 360.0
     if _ang in (0.0, 90.0, 180.0, 270.0):
         rot, angle = int(_ang), None  # the shipped step path, byte-identical
@@ -1203,7 +1226,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     # READING axis (a column's length), `l_h` the extent across it (how many
     # columns fit). The horizontal frame is the identity, so both are the
     # shipped quantities bit for bit.
-    l_left, l_right, l_top, l_bottom = _frame_rect(wframe, *local)
+    l_left, l_right, l_top, l_bottom = frame_rect(wframe, *local)
     l_w = max(l_right - l_left, 1.0)
     l_h = l_top - l_bottom
 
@@ -1236,7 +1259,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
         # on a column would be a control that quietly did nothing.
         if feats:
             raise ValueError("small caps and alternates do not apply to vertical text")
-        face, upright = _vertical_face(font_path, family, sk, body, columns)
+        face, upright = vertical_face(font_path, family, sk, body, columns)
     else:
         explicit = _explicit_face(family, sk)
         if explicit is not None:
@@ -1317,17 +1340,7 @@ def _layout_box(pdf, text, rect, size, font_path, family, rotate, bold, italic, 
     # Honour the user's line breaks as HARD breaks (the entry control is a
     # textarea), then greedy-wrap each segment to the box width. A blank
     # line stays a blank line; leading/trailing blanks are trimmed.
-    lines: list[str] = []
-    for segment in body.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        seg_units = _units(segment)
-        if not seg_units:
-            lines.append("")
-            continue
-        lines.extend(_wrap(seg_units, width_1000, sz, l_w))
-    while lines and lines[0] == "":
-        lines.pop(0)
-    while lines and lines[-1] == "":
-        lines.pop()
+    lines = wrap_text(body, width_1000, sz, l_w)
 
     return _BoxLayout(
         lines=lines, body=body, leading=leading, sz=sz, rot=rot, angle=angle,
