@@ -713,6 +713,32 @@ def figure_empty_actual_text_ok(path):
     return save(pdf, path)
 
 
+def formula_no_alt(path):
+    """An undescribed `Formula` — the role both alt-text rosters could claim.
+
+    `figures_alt` owns it, so this fixture must move that check and only that
+    check: a second finding under `other_elements_alt` is the same defect
+    reported twice.
+    """
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf,
+        page,
+        "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Body copy.) Tj ET EMC\n"
+        "/Formula <</MCID 1>> BDC BT /F1 11 Tf 40 500 Td (E = mc2) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    formula = elem(pdf, "Formula", doc, page=page, mcid=1)
+    doc[Name.K] = Array([para, formula])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para, formula])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
 def nested_alt(path):
     pdf = new_pdf()
     page = pdf.pages[0]
@@ -1363,6 +1389,7 @@ ROSTER = {
     "figure_no_alt": (figure_no_alt, "figures_alt", "fail"),
     "figure_actual_text_ok": (figure_actual_text_ok, "figures_alt", "pass"),
     "figure_empty_actual_text_ok": (figure_empty_actual_text_ok, "figures_alt", "pass"),
+    "formula_no_alt": (formula_no_alt, "figures_alt", "fail"),
     "nested_alt": (nested_alt, "nested_alt", "fail"),
     "alt_no_content": (alt_no_content, "alt_no_content", "fail"),
     "alt_hides_annot": (alt_hides_annot, "alt_hides_annotation", "fail"),
