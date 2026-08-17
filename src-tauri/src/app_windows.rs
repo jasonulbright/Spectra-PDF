@@ -200,6 +200,43 @@ impl ClaimState {
         ClaimOutcome::granted()
     }
 
+    /// Hand a path from one window to another without it ever being unowned.
+    ///
+    /// Release-then-claim has a window in which the path belongs to nobody and
+    /// a third window can take it; the tab would then arrive at a window that
+    /// cannot open it, having already left the one that could. The swap
+    /// happens under the same mutex `claim` and `release` take, and the entry
+    /// is edited in place rather than removed and re-inserted.
+    ///
+    /// Refused unless `from` holds the path exclusively for writing: a second
+    /// holder of any kind means someone else's pending pages address positions
+    /// in this file, and a sole read holder never owned it exclusively in the
+    /// first place. A refusal names the holder the caller lost to.
+    pub fn transfer(&self, path: &str, from: &str, to: &str) -> ClaimOutcome {
+        // Failing closed, unlike `claim`: a granted transfer that did not
+        // happen closes the tab in a window that still owns the path.
+        let Ok(mut map) = self.by_path.lock() else {
+            return ClaimOutcome::refused("");
+        };
+        let Some(holders) = map.get_mut(path) else {
+            return ClaimOutcome::refused("");
+        };
+        let exclusive = holders.len() == 1
+            && holders[0].label == from
+            && holders[0].mode == ClaimMode::Write;
+        if !exclusive {
+            let blocker = holders
+                .iter()
+                .find(|c| c.label != from)
+                .or_else(|| holders.first())
+                .map(|c| c.label.as_str())
+                .unwrap_or("");
+            return ClaimOutcome::refused(blocker);
+        }
+        holders[0].label = to.to_string();
+        ClaimOutcome::granted()
+    }
+
     pub fn release(&self, path: &str, label: &str) {
         if let Ok(mut map) = self.by_path.lock() {
             if let Some(holders) = map.get_mut(path) {
@@ -543,28 +580,6 @@ pub async fn focus_app_window(app: AppHandle, label: String) -> Result<(), Strin
     Ok(())
 }
 
-/// Hand paths to another window (the pop-out). Only a path crosses: page and
-/// document ids are minted against a per-renderer generation counter, so the
-/// same id string means a different physical page in each window.
-#[tauri::command]
-pub async fn open_in_window(
-    app: AppHandle,
-    label: String,
-    files: Vec<String>,
-    merge: bool,
-) -> Result<(), String> {
-    if !is_app_window(&label) {
-        return Err(format!("Not a workspace window: {}", label));
-    }
-    let files: Vec<String> = files
-        .iter()
-        .map(|f| crate::commands::canonical_path(f))
-        .collect();
-    deliver_open(&app, &label, files, merge);
-    focus_label(&app, &label);
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn take_pending_opens(
     app: AppHandle,
@@ -622,6 +637,101 @@ mod tests {
         state.release("C:\\a.pdf", "doc-1");
         assert_eq!(state.owner("C:\\a.pdf"), None);
         assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+    }
+
+    #[test]
+    fn a_transfer_swaps_the_owner_without_the_path_ever_being_free() {
+        let state = ClaimState::new();
+        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+
+        let moved = state.transfer("C:\\a.pdf", "main", "doc-1");
+        assert!(moved.granted);
+        assert!(moved.owner.is_empty());
+        assert_eq!(state.owner("C:\\a.pdf").as_deref(), Some("doc-1"));
+
+        // Exclusivity moved with it: neither a third window nor the window that
+        // just gave it up can take the path back.
+        let third = state.claim("C:\\a.pdf", "doc-2", ClaimMode::Write);
+        assert!(!third.granted);
+        assert_eq!(third.owner, "doc-1");
+        let back = state.claim("C:\\a.pdf", "main", ClaimMode::Write);
+        assert!(!back.granted);
+        assert_eq!(back.owner, "doc-1");
+    }
+
+    #[test]
+    fn a_transfer_from_a_window_that_does_not_own_the_path_is_refused() {
+        let state = ClaimState::new();
+        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+
+        let refused = state.transfer("C:\\a.pdf", "doc-1", "doc-2");
+        assert!(!refused.granted);
+        assert_eq!(refused.owner, "main");
+        assert_eq!(state.owner("C:\\a.pdf").as_deref(), Some("main"));
+
+        // A path nobody holds has nothing to hand over, and a refusal must not
+        // leave a holder behind for a path that was never claimed.
+        let unowned = state.transfer("C:\\ghost.pdf", "main", "doc-1");
+        assert!(!unowned.granted);
+        assert!(unowned.owner.is_empty());
+        assert_eq!(state.owner("C:\\ghost.pdf"), None);
+        assert!(state.claim("C:\\ghost.pdf", "doc-2", ClaimMode::Write).granted);
+    }
+
+    #[test]
+    fn a_transfer_is_refused_while_a_second_window_holds_the_path() {
+        let state = ClaimState::new();
+        assert!(state.claim("C:\\src.pdf", "main", ClaimMode::Read).granted);
+        assert!(state.claim("C:\\src.pdf", "doc-1", ClaimMode::Read).granted);
+
+        // Two readers means neither is the exclusive owner: the other window's
+        // pending pages address positions in this file.
+        let refused = state.transfer("C:\\src.pdf", "main", "doc-2");
+        assert!(!refused.granted);
+        assert_eq!(refused.owner, "doc-1");
+        assert_eq!(state.owner("C:\\src.pdf").as_deref(), Some("main"));
+
+        // A sole reader is still not an exclusive owner — a read claim never
+        // conferred the right to hand the file to somebody else.
+        state.release("C:\\src.pdf", "doc-1");
+        let sole_reader = state.transfer("C:\\src.pdf", "main", "doc-2");
+        assert!(!sole_reader.granted);
+        assert_eq!(sole_reader.owner, "main");
+    }
+
+    #[test]
+    fn releasing_after_a_transfer_leaves_no_residue_in_either_window() {
+        let state = ClaimState::new();
+        assert!(state.claim("C:\\a.pdf", "doc-3", ClaimMode::Write).granted);
+        assert!(state.transfer("C:\\a.pdf", "doc-3", "doc-4").granted);
+
+        // The new owner's SINGLE release frees the path completely: a swap that
+        // left the source stacked behind the new holder would keep the path
+        // owned here, and wedge it for the rest of the session.
+        state.release("C:\\a.pdf", "doc-4");
+        assert_eq!(state.owner("C:\\a.pdf"), None);
+        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+
+        // The source closes its tab without releasing; a stray release from it
+        // must not strip the claim off the window that now holds the path.
+        assert!(state.claim("C:\\b.pdf", "doc-3", ClaimMode::Write).granted);
+        assert!(state.transfer("C:\\b.pdf", "doc-3", "doc-4").granted);
+        state.release("C:\\b.pdf", "doc-3");
+        assert_eq!(state.owner("C:\\b.pdf").as_deref(), Some("doc-4"));
+    }
+
+    #[test]
+    fn destroying_the_window_a_path_was_transferred_to_frees_it() {
+        let state = ClaimState::new();
+        assert!(state.claim("C:\\a.pdf", "main", ClaimMode::Write).granted);
+        assert!(state.transfer("C:\\a.pdf", "main", "doc-1").granted);
+
+        // Release is driven by the window's own destruction, so the transferred
+        // path follows the label it moved to, not the one it came from.
+        state.release_label("main");
+        assert_eq!(state.owner("C:\\a.pdf").as_deref(), Some("doc-1"));
+        state.release_label("doc-1");
+        assert_eq!(state.owner("C:\\a.pdf"), None);
     }
 
     #[test]
