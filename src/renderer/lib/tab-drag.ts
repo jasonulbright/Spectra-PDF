@@ -90,6 +90,100 @@ export function hoverCssX(physicalX: number, devicePixelRatio: number): number {
   return physicalX / devicePixelRatio;
 }
 
+// ── Insertion gaps ────────────────────────────────────────────────────────
+
+/** A tab's box in CSS pixels from its strip's own left edge. */
+export interface TabBox {
+  left: number;
+  width: number;
+}
+
+/** Where an insertion caret goes: which gap, and how far into the strip it is
+ * painted. Both in the strip's own space. */
+export interface TabGap {
+  /** 0 is before the first tab, `tabs.length` after the last. */
+  index: number;
+  /** CSS pixels from the strip's left edge. */
+  offset: number;
+}
+
+/**
+ * The gap a pointer at `x` names, counting tabs whose midpoint it has passed.
+ *
+ * ONE implementation for both carets. The window a drag started in measures
+ * its own strip and the window a drag hovers measures its own — neither ever
+ * sees the other's DOM — so the only way the caret can mean the same thing in
+ * both is for the arithmetic to be the same arithmetic. `x` and the boxes are
+ * in the strip's own CSS space, which is also the space a hover offset arrives
+ * in, so nothing about either window's scale factor is involved.
+ *
+ * Boxes are in strip order and do not overlap.
+ */
+export function gapIndexFor(boxes: TabBox[], x: number): number {
+  let index = 0;
+  for (const box of boxes) {
+    if (x >= box.left + box.width / 2) index += 1;
+  }
+  return index;
+}
+
+/** Where the caret for a gap is painted, in the strip's own CSS space. */
+export function gapOffsetFor(boxes: TabBox[], index: number): number {
+  if (boxes.length === 0) return 0;
+  if (index <= 0) return boxes[0].left;
+  const last = boxes[Math.min(index, boxes.length) - 1];
+  return last.left + last.width;
+}
+
+/** The gap a pointer at `x` names, ready to paint. */
+export function tabGapFor(boxes: TabBox[], x: number): TabGap {
+  const index = gapIndexFor(boxes, x);
+  return { index, offset: gapOffsetFor(boxes, index) };
+}
+
+/**
+ * The index a tab dragged from position `from` takes when it is released in
+ * gap `gap`.
+ *
+ * A gap counts the tabs BEFORE it, and the dragged tab is still one of them:
+ * released past its own position, every tab it passed has already shifted left
+ * by one. A document arriving from another window is not in the list yet, so
+ * its gap IS its index and it never comes through here.
+ */
+export function reorderIndexFor(from: number, gap: number): number {
+  return gap > from ? gap - 1 : gap;
+}
+
+/** What a window knows about itself while resolving a point over its own strip. */
+export interface OwnStripFrame {
+  /** The window's INNER origin in CSS screen pixels (`window.screenX/Y`) —
+   * the same origin the far side anchors this window's strip to. */
+  originX: number;
+  originY: number;
+  devicePixelRatio: number;
+  /** The strip's box, viewport-relative CSS pixels. */
+  strip: ViewportRect;
+}
+
+/**
+ * A physical screen point in CSS pixels from this window's own strip's left
+ * edge, or null when the point is not over that strip.
+ *
+ * Within one window the far side is not asked at all: it would answer from a
+ * rectangle this window published, about geometry this window measured. The
+ * far edges are half-open exactly as they are there, so a point can never be
+ * both inside this strip and inside one abutting it.
+ */
+export function ownStripX(point: PhysicalPoint, frame: OwnStripFrame): number | null {
+  const { left, top, width, height } = frame.strip;
+  if (width <= 0 || height <= 0) return null;
+  const x = point.x / frame.devicePixelRatio - frame.originX;
+  const y = point.y / frame.devicePixelRatio - frame.originY;
+  if (x < left || x >= left + width) return null;
+  if (y < top || y >= top + height) return null;
+  return x - left;
+}
+
 // ── Arm state machine ─────────────────────────────────────────────────────
 
 export type TabDragPhase = 'idle' | 'armed' | 'dragging' | 'dropping';

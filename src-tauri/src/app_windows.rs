@@ -337,6 +337,16 @@ impl Default for ClaimState {
 pub struct PendingOpen {
     pub files: Vec<String>,
     pub merge: bool,
+    /// Where the first file lands in the receiving window's tab order, when the
+    /// open came from a gesture that named a position — a dropped tab lands at
+    /// the gap its caret marked rather than at the end of the lane.
+    ///
+    /// An index is DATA, not an identity: page and document ids are minted
+    /// against a per-renderer generation counter and can never cross, but a
+    /// position in a list the receiver owns means the same thing in both
+    /// windows. A stale one clamps on arrival, so nothing has to be agreed.
+    #[serde(default)]
+    pub index: Option<u32>,
 }
 
 pub struct WindowRegistry {
@@ -493,7 +503,30 @@ pub fn queue_open(
     files: Vec<String>,
     merge: bool,
 ) -> bool {
-    registry.push_pending(label, PendingOpen { files, merge })
+    queue_open_at(registry, label, files, merge, None)
+}
+
+/// Queue an open that names where it lands in the receiving window's strip.
+///
+/// Only a released tab has a position to name: it was dropped at a gap the
+/// target window itself measured and painted a caret in. Every other open —
+/// a shell association, a second instance, a restored session, a tear-off into
+/// a window with no tabs at all — appends.
+pub fn queue_open_at(
+    registry: &WindowRegistry,
+    label: &str,
+    files: Vec<String>,
+    merge: bool,
+    index: Option<u32>,
+) -> bool {
+    registry.push_pending(
+        label,
+        PendingOpen {
+            files,
+            merge,
+            index,
+        },
+    )
 }
 
 /// Tell a window it has queued opens waiting.
@@ -900,6 +933,7 @@ mod tests {
             PendingOpen {
                 files: vec!["C:\\a.pdf".into()],
                 merge: false,
+                index: None,
             },
         );
         registry.push_pending(
@@ -907,12 +941,54 @@ mod tests {
             PendingOpen {
                 files: vec!["C:\\b.pdf".into()],
                 merge: true,
+                index: None,
             },
         );
         let drained = registry.take_pending("doc-1");
         assert_eq!(drained.len(), 2);
         assert!(drained[1].merge);
         assert!(registry.take_pending("doc-1").is_empty());
+    }
+
+    #[test]
+    fn only_an_open_that_named_a_position_carries_one() {
+        let registry = WindowRegistry::new();
+        // A released tab: it was dropped at a gap the receiving window itself
+        // measured, and the index is what makes the drop land where the caret
+        // promised instead of at the end of the lane.
+        assert!(queue_open_at(
+            &registry,
+            "doc-1",
+            vec!["C:\\a.pdf".into()],
+            false,
+            Some(2),
+        ));
+        // Everything else appends, and says so rather than guessing a position.
+        assert!(queue_open(&registry, "doc-1", vec!["C:\\b.pdf".into()], false));
+        let drained = registry.take_pending("doc-1");
+        assert_eq!(drained[0].index, Some(2));
+        assert_eq!(drained[1].index, None);
+    }
+
+    #[test]
+    fn a_queued_position_survives_the_wire_and_an_older_record_has_none() {
+        let queued = PendingOpen {
+            files: vec!["C:\\a.pdf".into()],
+            merge: false,
+            index: Some(0),
+        };
+        let json = serde_json::to_string(&queued).unwrap();
+        assert_eq!(
+            serde_json::from_str::<PendingOpen>(&json).unwrap().index,
+            Some(0),
+            "{json}"
+        );
+        // Zero is a real gap — before every tab — so it must not be confused
+        // with the absent index that means "append".
+        assert!(json.contains("\"index\":0"));
+        let lean: PendingOpen =
+            serde_json::from_str(r#"{"files":["C:\\a.pdf"],"merge":false}"#).unwrap();
+        assert_eq!(lean.index, None);
     }
 
     #[test]

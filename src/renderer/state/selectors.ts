@@ -43,6 +43,45 @@ export function tabFiles(state: AppState): OpenFile[] {
 }
 
 /**
+ * `files` with `path`'s TAB moved to `index`, clamped into range.
+ *
+ * Tab order IS the Map's insertion order (`tabFiles` reads it straight off),
+ * so a move rebuilds the Map rather than keeping a second list beside it —
+ * two orders can disagree and one of them would then have to win.
+ *
+ * The index is in TAB space: byte-only import sources have no tab, so they are
+ * not positions a drop can name. They keep the Map slots they already occupy
+ * and the tabs fill the rest in their new order, which is what makes the index
+ * space the user's own strip rather than an internal one.
+ *
+ * Returns the SAME Map when nothing moves — a path with no tab, an index that
+ * resolves to where the tab already is — so a caller can compare by identity.
+ */
+export function placeTabAt(
+  files: Map<string, OpenFile>,
+  path: string,
+  index: number,
+): Map<string, OpenFile> {
+  const entries = [...files.entries()];
+  const slots: number[] = [];
+  for (let i = 0; i < entries.length; i += 1) {
+    if (!entries[i][1].importOnly) slots.push(i);
+  }
+  const from = slots.findIndex((slot) => entries[slot][0] === path);
+  if (from === -1) return files;
+  const to = Math.min(Math.max(Math.trunc(index), 0), slots.length - 1);
+  if (to === from) return files;
+  const tabs = slots.map((slot) => entries[slot]);
+  const [moved] = tabs.splice(from, 1);
+  tabs.splice(to, 0, moved);
+  const next = entries.slice();
+  slots.forEach((slot, i) => {
+    next[slot] = tabs[i];
+  });
+  return new Map(next);
+}
+
+/**
  * Every workspace DOCUMENT the user can see — `tabFiles`, asked per partition.
  *
  * `tabFiles` is not the same question: one file can carry several workspace

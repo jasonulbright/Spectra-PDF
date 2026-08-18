@@ -692,9 +692,13 @@ function AppContent(): React.ReactElement {
     [showNotice, showActionConfirm],
   );
 
-  const openByPaths = useCallback(async (paths: string[], opts?: { focus?: boolean }) => {
+  // `index` is a tab position for the opens that have one — a tab dropped in
+  // from another window lands at the gap its caret marked, and a batch lands
+  // in order from there. Every other open appends; a stale index clamps.
+  const openByPaths = useCallback(async (paths: string[], opts?: { focus?: boolean; index?: number }) => {
     let recent = stateRef.current.ui.recentFiles;
     let lastOpened: string | null = null;
+    let inserted = 0;
     // The file that was really OPENED (not re-activated) and became the
     // landing tab. Only a fresh open applies an initial view: re-activating a
     // tab must not undo a layout the user chose while it was open.
@@ -775,7 +779,13 @@ function AppContent(): React.ReactElement {
         }
         const prepared = await prepareFileBytes(filePath);
         if (!prepared) continue; // cancelled encrypted file
-        dispatch({ type: 'OPEN_FILE', path: filePath, ...prepared });
+        dispatch({
+          type: 'OPEN_FILE',
+          path: filePath,
+          ...prepared,
+          index: opts?.index === undefined ? undefined : opts.index + inserted,
+        });
+        inserted += 1;
         recent = withRecent(recent, filePath, Date.now());
         lastOpened = filePath;
         freshlyOpened = { path: filePath, workingPath: prepared.workingPath };
@@ -2336,17 +2346,40 @@ function AppContent(): React.ReactElement {
     await handOffDocument(target.path, () => app.moveToNewWindow(target.path));
   }, [handOffDocument]);
 
-  // A released tab drag. The point is already in physical screen pixels; Rust
-  // decides from it whether this is another window's strip, this one's, or
-  // nowhere (a new window at the drop point).
+  // A release that never left this window's own strip. Nothing crosses, so
+  // Rust is not asked: the strip measured the gap itself, and the far side
+  // would only answer from a rectangle this window published about geometry
+  // this window measured.
+  //
+  // The commit gate still runs: a released tab flushes the page tier into the
+  // WORKING copy, which is a different write from the one a hand-off makes
+  // over the user's own file. The reorder itself is arrangement — no file is
+  // written, nothing is marked saved, and no history is touched; marking a
+  // document saved here would discard its undo chain for a tab that moved.
+  const reorderTab = useCallback(
+    async (path: string, index: number): Promise<boolean> => {
+      if (!(await commitOrAbort())) return false;
+      dispatch({ type: 'REORDER_FILE', path, index });
+      // The document did not change hands: the tab is still here, in its new
+      // place, and the caller must not close it.
+      return false;
+    },
+    [commitOrAbort, dispatch],
+  );
+
+  // A released tab drag. The point is already in physical screen pixels; for
+  // anything outside this window's own strip Rust decides from it whether it
+  // is another window's strip or nowhere (a new window at the drop point).
   const handleTabDrop = useCallback(
-    (path: string, point: PhysicalScreenPoint) =>
-      handOffDocument(
-        path,
-        () => tabDrag.drop(path, point),
-        () => tabDrag.wouldMove(point),
-      ),
-    [handOffDocument],
+    (path: string, point: PhysicalScreenPoint, reorderTo: number | null) =>
+      reorderTo === null
+        ? handOffDocument(
+            path,
+            () => tabDrag.drop(path, point),
+            () => tabDrag.wouldMove(point),
+          )
+        : reorderTab(path, reorderTo),
+    [handOffDocument, reorderTab],
   );
 
   // --- Command layer ----------------------------------------------------
@@ -2614,7 +2647,12 @@ function AppContent(): React.ReactElement {
     const drain = async (): Promise<void> => {
       for (const pending of await app.takePendingOpens()) {
         if (cancelled) return;
-        await openByPaths(pending.files);
+        // A dropped tab carries the gap its caret marked in the receiving
+        // window; every other queued open carries none and appends.
+        await openByPaths(
+          pending.files,
+          pending.index === null ? undefined : { index: pending.index },
+        );
       }
     };
     void drain();

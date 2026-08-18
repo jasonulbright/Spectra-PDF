@@ -71,11 +71,26 @@ pub enum DropTarget {
     TearOff,
 }
 
+/// The window currently showing an insertion caret, and where that window says
+/// the caret is.
+///
+/// The index is derived by the hovered window from its OWN tabs and sent back,
+/// because only that window knows how many tabs it has or how wide they are.
+/// It is held beside the label so it can never outlive the hover it belongs to:
+/// a caret that moved to another window, or stopped being drawn, takes its
+/// index with it, and a drop can only ever read the index of the window it
+/// actually resolves into.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Hover {
+    label: String,
+    index: Option<u32>,
+}
+
 /// Every window's strip, plus which window is currently showing an insertion
 /// caret. Managed state beside `WindowRegistry`.
 pub struct StripRegistry {
     strips: Mutex<HashMap<String, StripEntry>>,
-    hover: Mutex<Option<String>>,
+    hover: Mutex<Option<Hover>>,
 }
 
 impl StripRegistry {
@@ -118,7 +133,7 @@ impl StripRegistry {
             strips.remove(label);
         }
         if let Ok(mut hover) = self.hover.lock() {
-            if hover.as_deref() == Some(label) {
+            if hover.as_ref().map(|h| h.label.as_str()) == Some(label) {
                 *hover = None;
             }
         }
@@ -152,6 +167,10 @@ impl StripRegistry {
     /// The queued open is part of the same unit. A transfer whose delivery was
     /// refused is undone rather than reported: ownership that moved with nothing
     /// to open it is the same lost document by a different route.
+    ///
+    /// `at` is the gap the caret was last reported in, paired with the window
+    /// that reported it: a drop honours a position only in the window that
+    /// measured it, so a transfer into any other label appends.
     fn resolve_release(
         &self,
         claims: &ClaimState,
@@ -159,6 +178,7 @@ impl StripRegistry {
         live: &[String],
         source: &str,
         path: &str,
+        at: Option<(String, Option<u32>)>,
         x: i32,
         y: i32,
     ) -> HandOver {
@@ -176,7 +196,17 @@ impl StripRegistry {
                 if !moved.granted {
                     return HandOver::Refused(moved.owner);
                 }
-                if !app_windows::queue_open(registry, &target, vec![path.to_string()], false) {
+                let index = match &at {
+                    Some((label, index)) if *label == target => *index,
+                    _ => None,
+                };
+                if !app_windows::queue_open_at(
+                    registry,
+                    &target,
+                    vec![path.to_string()],
+                    false,
+                    index,
+                ) {
                     let _ = claims.transfer(path, &target, source);
                     return HandOver::Refused(source.to_string());
                 }
@@ -185,13 +215,59 @@ impl StripRegistry {
         }
     }
 
-    fn take_hover(&self) -> Option<String> {
-        self.hover.lock().ok().and_then(|mut h| h.take())
+    /// Which window is drawing a caret, without stopping it.
+    fn hover_label(&self) -> Option<String> {
+        self.hover
+            .lock()
+            .ok()
+            .and_then(|h| h.as_ref().map(|h| h.label.clone()))
     }
 
-    fn set_hover(&self, label: Option<&str>) {
+    /// Stop drawing, and say who was.
+    fn take_hover(&self) -> Option<String> {
+        self.hover
+            .lock()
+            .ok()
+            .and_then(|mut h| h.take())
+            .map(|h| h.label)
+    }
+
+    /// Stop drawing, and say who was and where they said the caret was.
+    fn take_hover_state(&self) -> Option<(String, Option<u32>)> {
+        self.hover
+            .lock()
+            .ok()
+            .and_then(|mut h| h.take())
+            .map(|h| (h.label, h.index))
+    }
+
+    /// Move the caret to a window. A caret arriving somewhere new has no index
+    /// yet — the window that has it will report one — and re-entering the same
+    /// window is not an arrival, so an index already reported survives the
+    /// moves that follow it.
+    fn set_hover(&self, label: &str) {
         if let Ok(mut hover) = self.hover.lock() {
-            *hover = label.map(|l| l.to_string());
+            if hover.as_ref().map(|h| h.label.as_str()) != Some(label) {
+                *hover = Some(Hover {
+                    label: label.to_string(),
+                    index: None,
+                });
+            }
+        }
+    }
+
+    /// Record where a window says its caret is.
+    ///
+    /// Ignored unless that window is the one currently hovered: a report that
+    /// crossed with the caret leaving would otherwise place a drop at a gap in
+    /// a strip the pointer is no longer over.
+    fn set_hover_index(&self, label: &str, index: u32) {
+        if let Ok(mut hover) = self.hover.lock() {
+            if let Some(current) = hover.as_mut() {
+                if current.label == label {
+                    current.index = Some(index);
+                }
+            }
         }
     }
 }
@@ -479,7 +555,10 @@ pub async fn tabdrag_track(
 ) -> Result<Option<String>, String> {
     let registry = app.state::<StripRegistry>();
     let hovered = resolve_hover(&registry.snapshot(), window.label(), screen_x, screen_y);
-    let previous = registry.take_hover();
+    // Peeked rather than taken: the hovered window's reported caret position
+    // lives beside this label, and clearing it on every move would throw away
+    // the gap a drop is supposed to honour.
+    let previous = registry.hover_label();
     match &hovered {
         Some((label, offset)) => {
             if previous.as_deref() != Some(label.as_str()) {
@@ -487,18 +566,39 @@ pub async fn tabdrag_track(
                     let _ = app.emit_to(previous.as_str(), LEAVE_EVENT, ());
                 }
             }
-            registry.set_hover(Some(label));
+            registry.set_hover(label);
             // Emitted every move, not only on entry: the caret's position
             // inside the strip is the payload, and it changes with the pointer.
             let _ = app.emit_to(label.as_str(), HOVER_EVENT, HoverPayload { x: *offset });
         }
         None => {
-            if let Some(previous) = previous {
+            // Taken, not peeked: the caret is stopping, and the gap it reported
+            // stops with it.
+            if let Some(previous) = registry.take_hover() {
                 let _ = app.emit_to(previous.as_str(), LEAVE_EVENT, ());
             }
         }
     }
     Ok(hovered.map(|(label, _)| label))
+}
+
+/// The gap the calling window is painting its caret in, for the drag it is
+/// hovering but not running.
+///
+/// The offset this side sends says where the pointer is; only the hovered
+/// window knows what is under it, so the index comes back rather than being
+/// guessed here. Reported on every crossing of a tab's midpoint and dropped
+/// with the caret, so a release lands where the caret promised or, having never
+/// been told, at the end of the lane.
+#[tauri::command]
+pub async fn tabdrag_hover_index(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    index: u32,
+) -> Result<(), String> {
+    app.state::<StripRegistry>()
+        .set_hover_index(window.label(), index);
+    Ok(())
 }
 
 /// Abandon a drag (Escape, or a gesture cancelled before release). Nothing
@@ -547,7 +647,13 @@ pub async fn tabdrag_drop(
     screen_x: i32,
     screen_y: i32,
 ) -> Result<TabDragResult, String> {
-    clear_hover(&app);
+    // The caret stops being drawn and its gap is read in the same step: the
+    // position a release honours is the last one the receiving window reported,
+    // and it must not be readable by the drop after it.
+    let at = app.state::<StripRegistry>().take_hover_state();
+    if let Some((label, _)) = &at {
+        let _ = app.emit_to(label.as_str(), LEAVE_EVENT, ());
+    }
     let path = crate::commands::canonical_path(&path);
     let source = window.label().to_string();
     // Everything that decides ownership happens inside `resolve_release`, which
@@ -561,6 +667,7 @@ pub async fn tabdrag_drop(
         &live,
         &source,
         &path,
+        at,
         screen_x,
         screen_y,
     );
@@ -805,7 +912,7 @@ mod tests {
             },
             (0, 0),
         );
-        registry.set_hover(Some("doc-1"));
+        registry.set_hover("doc-1");
         registry.forget("doc-1");
         assert!(registry.snapshot().is_empty());
         // A destroyed window must not be told to stop drawing a caret it can no
@@ -819,9 +926,53 @@ mod tests {
     #[test]
     fn the_hover_target_is_handed_over_once() {
         let registry = StripRegistry::new();
-        registry.set_hover(Some("doc-1"));
+        registry.set_hover("doc-1");
         assert_eq!(registry.take_hover().as_deref(), Some("doc-1"));
         assert_eq!(registry.take_hover(), None);
+    }
+
+    #[test]
+    fn a_reported_gap_survives_the_moves_inside_one_strip_and_dies_leaving_it() {
+        let registry = StripRegistry::new();
+        registry.set_hover("doc-1");
+        registry.set_hover_index("doc-1", 2);
+        // Every pointer move re-hovers the same window; the gap it reported
+        // must not be thrown away on each one, or a drop has nothing to honour.
+        registry.set_hover("doc-1");
+        assert_eq!(registry.take_hover_state(), Some(("doc-1".into(), Some(2))));
+
+        // A caret that moved to another window starts with no gap: the index
+        // it had was a position in a strip the pointer has left.
+        registry.set_hover("doc-1");
+        registry.set_hover_index("doc-1", 2);
+        registry.set_hover("doc-2");
+        assert_eq!(registry.take_hover_state(), Some(("doc-2".into(), None)));
+    }
+
+    #[test]
+    fn only_the_window_actually_hovered_can_report_a_gap() {
+        let registry = StripRegistry::new();
+        registry.set_hover("doc-1");
+        // A report that crossed with the caret leaving would otherwise place a
+        // drop at a gap in a strip the pointer is not over.
+        registry.set_hover_index("doc-2", 5);
+        assert_eq!(registry.take_hover_state(), Some(("doc-1".into(), None)));
+
+        // And with no caret drawn at all there is nothing to report against.
+        registry.set_hover_index("doc-1", 5);
+        assert_eq!(registry.take_hover_state(), None);
+    }
+
+    #[test]
+    fn a_cancelled_drag_leaves_no_gap_behind() {
+        let registry = StripRegistry::new();
+        registry.set_hover("doc-1");
+        registry.set_hover_index("doc-1", 3);
+        // Escape, and a strip that stopped being rendered, both clear the
+        // caret through this — the gap goes with it, so the next drag cannot
+        // inherit a position from the one that was abandoned.
+        assert_eq!(registry.take_hover().as_deref(), Some("doc-1"));
+        assert_eq!(registry.take_hover_state(), None);
     }
 
     // ── Handover, and the destroyed-target interleavings ──────────────────
@@ -858,6 +1009,7 @@ mod tests {
                 &live(&["main", "doc-1"]),
                 "main",
                 DOC,
+                None,
                 950,
                 110,
             ),
@@ -868,6 +1020,55 @@ mod tests {
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].files, vec![DOC.to_string()]);
         assert!(!queued[0].merge);
+        // No caret was ever reported, so the document appends rather than
+        // landing at a position nobody named.
+        assert_eq!(queued[0].index, None);
+    }
+
+    #[test]
+    fn a_release_lands_at_the_gap_the_receiving_window_reported() {
+        let (strips, claims, registry) = two_windows();
+        strips.set_hover("doc-1");
+        strips.set_hover_index("doc-1", 2);
+        assert_eq!(
+            strips.resolve_release(
+                &claims,
+                &registry,
+                &live(&["main", "doc-1"]),
+                "main",
+                DOC,
+                strips.take_hover_state(),
+                950,
+                110,
+            ),
+            HandOver::Moved("doc-1".to_string())
+        );
+        assert_eq!(registry.take_pending("doc-1")[0].index, Some(2));
+    }
+
+    #[test]
+    fn a_gap_measured_in_one_window_is_never_honoured_in_another() {
+        let (strips, claims, registry) = two_windows();
+        // The caret was in a third window when the pointer moved on. An index
+        // is a position in the reporting window's OWN strip, so carrying it
+        // into the window the drop resolves into would place the tab at a gap
+        // measured somewhere else.
+        strips.set_hover("doc-9");
+        strips.set_hover_index("doc-9", 3);
+        assert_eq!(
+            strips.resolve_release(
+                &claims,
+                &registry,
+                &live(&["main", "doc-1"]),
+                "main",
+                DOC,
+                strips.take_hover_state(),
+                950,
+                110,
+            ),
+            HandOver::Moved("doc-1".to_string())
+        );
+        assert_eq!(registry.take_pending("doc-1")[0].index, None);
     }
 
     #[test]
@@ -885,6 +1086,7 @@ mod tests {
                 &live(&["main", "doc-1"]),
                 "main",
                 DOC,
+                None,
                 950,
                 110,
             ),
@@ -901,7 +1103,16 @@ mod tests {
         // been processed — but it is not among the windows that can take a
         // drop, so the point falls through to a tear-off rather than into it.
         assert_eq!(
-            strips.resolve_release(&claims, &registry, &live(&["main"]), "main", DOC, 950, 110),
+            strips.resolve_release(
+                &claims,
+                &registry,
+                &live(&["main"]),
+                "main",
+                DOC,
+                None,
+                950,
+                110,
+            ),
             HandOver::TearOff
         );
         assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
@@ -921,6 +1132,7 @@ mod tests {
                 &live(&["main", "doc-1"]),
                 "main",
                 DOC,
+                None,
                 950,
                 110,
             ),
@@ -941,6 +1153,7 @@ mod tests {
                 &live(&["main", "doc-1"]),
                 "doc-1",
                 DOC,
+                None,
                 10,
                 10,
             ),
@@ -960,6 +1173,7 @@ mod tests {
                 &live(&["main", "doc-1"]),
                 "main",
                 DOC,
+                None,
                 10,
                 10,
             ),
