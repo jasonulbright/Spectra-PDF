@@ -109,9 +109,8 @@ const pageIdsOf = async (path: string): Promise<string[]> =>
  * longer exists; the reindex's own prune cannot help, because it only drops
  * ids that were selected BEFORE it ran. What is left is a selection the
  * commands still count as one and the reducer then rejects — a gesture that
- * does nothing, which reads exactly like a gate that failed to fire. (It cost
- * one debugging round here; a user cannot reach it, since a page they can
- * click is a page that is on screen.)
+ * does nothing, which reads exactly like a gate that failed to fire. It is a
+ * driving hazard only: a page a user can click is a page that is on screen.
  */
 async function selectFirstPage(path: string): Promise<string[]> {
   await setView('canvas');
