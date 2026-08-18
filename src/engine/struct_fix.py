@@ -95,7 +95,7 @@ def set_table_headers(
             promoted.append([int(v) for v in cell.path])
         if not promoted:
             raise ValueError("this table's first row has no cells to promote.")
-        _save(pdf, input_path, output_path, same_file)
+        _save(pdf, output_path, same_file)
     return {
         "output": str(output_path),
         "path": [int(v) for v in path],
