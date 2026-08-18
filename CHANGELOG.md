@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.1.4
+
+*Released 2026-08-17*
+
+### Windows and session restore
+
+- Exiting the app now records every open window for session restore, not one.
+- Cancelling an exit returns session tracking to live instead of freezing it.
+- A tab can no longer be transferred into a window that just closed.
+- A drag dropped back on its own tab strip no longer saves or clears undo.
+- Tab drags respond only to the pointer that started them.
+- A moved window can no longer offset where dropped tabs land.
+
+### Form fields
+
+- Clearing a vertical field or dropdown no longer fails to redraw.
+- Rotated text fields, dropdowns and option lists now draw their content rotated.
+- Each option label in a list resolves its own text direction.
+- Flattening a rotated field stamps it rotated instead of upright.
+
+### Spelling
+
+- Accented words in decomposed form are no longer split into fragments.
+- Pointed Arabic text now checks as whole words instead of fragments.
+
+### Accessibility checking
+
+- Ruby and Warichu tags are checked for order and completeness, not membership alone.
+
 ## 1.1.3
 
 *Released 2026-08-17*
