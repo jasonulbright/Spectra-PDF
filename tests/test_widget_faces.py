@@ -31,6 +31,17 @@ import pytest
 from engine.compress import compress
 from engine.grayscale import grayscale
 
+# The vendored fallback faces (Rust `get_edit_font_path` at run time, threaded
+# to the engine as `font_dir`). Only the non-WinAnsi pins need them.
+FONTS_DIR = Path(__file__).resolve().parent.parent / "resources" / "fonts"
+_HAS_CJK_FACE = (FONTS_DIR / "NotoSansCJKsc-Regular.otf").is_file()
+
+#: The bytes a PDF text string outside WinAnsi begins with (ISO 32000-2 7.9.2.2
+#: — the UTF-16BE byte order marker). The producer's synthesized appearance
+#: draws `/V` through the form's WinAnsi face, so finding them in a page's
+#: content stream IS the flattened mojibake.
+UTF16_BOM = b"\xfe\xff"
+
 
 def _content(path):
     with pikepdf.open(path) as pdf:
@@ -574,6 +585,115 @@ class TestCompressWidgetFaces:
         field = _widgets(filled)["field1"]
         assert field["value"] == "Goodbye"
         assert b"(Goodbye)" in field["faces"]["/N"]
+
+
+@pytest.mark.skipif(not _HAS_CJK_FACE, reason="bundled CJK face not provisioned")
+class TestBareFieldOutsideWinAnsi:
+    """The case `font_dir` is the whole difference on, end to end.
+
+    A widget carrying no `/AP` whose value leaves WinAnsi is the one the
+    producer cannot synthesize an honest appearance for: it draws `/V`'s own
+    UTF-16BE bytes (ISO 32000-2 7.9.2.2) through the form's WinAnsi Helvetica
+    and flattens THAT into the page, under a widget the field reattach then
+    restores over it. The mojibake outlives the value it was drawn from.
+
+    `regenerate_appearances_file` can only give the widget the appearance that
+    forestalls it when a `font_dir` supplies a face that spells the value —
+    which is why every caller of these ops has to pass one. Each test below
+    carries its own font_dir-less control: the assertions are about the
+    parameter, not about the op.
+    """
+
+    def test_the_face_is_embedded_and_composite_before_the_producer_runs(
+            self, tmp_path):
+        from engine.widget_faces import regenerate_appearances_file
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "bare-unicode.pdf", "bare-unicode")
+        regenerated = regenerate_appearances_file(
+            Path(src), tmp_path, str(FONTS_DIR))
+        assert regenerated is not None
+
+        face = _widgets(regenerated)["bare"]["faces"]["/N"]
+        # A hex show through the embedded subset's own codes, not a WinAnsi
+        # literal — the two are distinguishable by syntax alone.
+        assert b"> Tj" in face
+        assert UTF16_BOM not in face
+        with pikepdf.open(regenerated) as pdf:
+            font = (pdf.pages[0].Annots[0]["/AP"]["/N"]["/Resources"]["/Font"]
+                    ["/TxU"])
+            assert font.get("/Subtype") == pikepdf.Name("/Type0")
+            descendant = font["/DescendantFonts"][0]
+            descriptor = descendant["/FontDescriptor"]
+            assert any(str(k).startswith("/FontFile") for k in descriptor.keys())
+
+    def test_nothing_is_regenerated_without_a_font_dir(self, tmp_path):
+        # The refusal the wiring exists to prevent reaching: no face can spell
+        # the value, so the widget keeps no appearance and the producer is
+        # left to synthesize one.
+        from engine.widget_faces import regenerate_appearances_file
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "bare-unicode.pdf", "bare-unicode")
+        assert regenerate_appearances_file(Path(src), tmp_path, "") is None
+
+    def test_grayscale_leaves_no_mojibake_in_the_page(self, tmp_path, gs_path):
+        from separation_builders import FORM_UNICODE_VALUE, form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "bare-unicode.pdf", "bare-unicode")
+        out = tmp_path / "gray.pdf"
+        grayscale(src, str(out), gs_path=gs_path, font_dir=str(FONTS_DIR))
+
+        page = _content(out)
+        assert UTF16_BOM not in page
+        assert b"Tj" not in page and b"TJ" not in page
+        field = _widgets(out)["bare"]
+        assert field["value"] == FORM_UNICODE_VALUE
+        assert b"TJ" in field["faces"]["/N"] or b"Tj" in field["faces"]["/N"]
+
+    def test_grayscale_without_a_font_dir_flattens_the_mojibake(
+            self, tmp_path, gs_path):
+        # The control, and the mutation proof for the test above: drop the
+        # parameter and the producer's own synthesis lands in the page content
+        # as the value's UTF-16BE bytes, with the widget left bare on top.
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "bare-unicode.pdf", "bare-unicode")
+        out = tmp_path / "gray.pdf"
+        grayscale(src, str(out), gs_path=gs_path, font_dir="")
+
+        page = _content(out)
+        assert UTF16_BOM in page
+        assert b"Tj" in page
+        assert _widgets(out)["bare"]["faces"] == {}
+
+    def test_compress_leaves_no_mojibake_in_the_page(self, tmp_path, gs_path):
+        from separation_builders import FORM_UNICODE_VALUE, form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "bare-unicode.pdf", "bare-unicode")
+        out = tmp_path / "small.pdf"
+        compress(src, str(out), quality="ebook", gs_path=gs_path,
+                 font_dir=str(FONTS_DIR))
+
+        page = _content(out)
+        assert UTF16_BOM not in page
+        assert b"Tj" not in page and b"TJ" not in page
+        field = _widgets(out)["bare"]
+        assert field["value"] == FORM_UNICODE_VALUE
+        assert b"TJ" in field["faces"]["/N"] or b"Tj" in field["faces"]["/N"]
+
+    def test_compress_without_a_font_dir_flattens_the_mojibake(
+            self, tmp_path, gs_path):
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "bare-unicode.pdf", "bare-unicode")
+        out = tmp_path / "small.pdf"
+        compress(src, str(out), quality="ebook", gs_path=gs_path, font_dir="")
+
+        page = _content(out)
+        assert UTF16_BOM in page
+        assert b"Tj" in page
+        assert _widgets(out)["bare"]["faces"] == {}
 
 
 class TestStagingIsScaffoldingOnly:

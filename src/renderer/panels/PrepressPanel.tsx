@@ -5,7 +5,7 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { StandardsAlterations } from '../components/StandardsAlterations';
 import { ensureGsPath } from './SettingsPanel';
-import { dialog } from '../lib/tauri-bridge';
+import { app, dialog } from '../lib/tauri-bridge';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import type { PanelKey } from '../i18n-panels';
@@ -77,6 +77,7 @@ export function PrepressPanel(): React.ReactElement {
         render_intent: renderIntent,
         dest_profile: profileParam(profile),
         gs_path: await ensureGsPath(),
+        font_dir: await app.getEditFontPath(),
       });
       const orig = (r.original_size / 1024).toFixed(0);
       const out = (r.output_size / 1024).toFixed(0);

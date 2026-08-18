@@ -2,6 +2,7 @@
 per-file isolation, logs — plus the encrypt/decrypt in-place pins the runner
 forced (the same latent CLI bug class fixed for five other ops)."""
 
+import inspect
 import json
 import os
 import pathlib
@@ -668,6 +669,21 @@ class TestCatalogPin:
         for op, (fn, _allowed, needed) in _STEPS.items():
             assert callable(fn), op
             assert set(needed) <= known, op
+
+    def test_every_op_declares_every_tool_path_its_callable_takes(self):
+        # The totality the fixture cannot state: a tool-path keyword the op
+        # ACCEPTS but does not declare is never injected, so the op runs with
+        # the parameter's default and silently loses whatever it enables. The
+        # instance this pin exists for is the `font_dir` a bare non-WinAnsi
+        # widget appearance needs on `compress` and `grayscale`.
+        known = {"gs_path", "tesseract_path", "soffice_path", "font_dir", "jbig2_path"}
+        for op, (fn, _allowed, needed) in _STEPS.items():
+            takes = known & set(inspect.signature(fn).parameters)
+            assert takes == set(needed), op
+
+    def test_the_tool_paths_match_the_fixture_in_both_directions(self):
+        for op, entry in self.FIXTURE["steps"].items():
+            assert sorted(_STEPS[op][2]) == entry["tools"], op
 
 
 class TestFolderGroupingSource:
