@@ -16,6 +16,7 @@ import {
   cancelDrag,
   createFrameThrottle,
   createSerialPublisher,
+  flushTabOrder,
   gapIndexFor,
   gapOffsetFor,
   hoverCssX,
@@ -25,6 +26,8 @@ import {
   planHandOff,
   releaseDrag,
   reorderIndexFor,
+  reservationHolds,
+  setTabOrderChannel,
   settleDrop,
   stripRectFor,
   tabGapFor,
@@ -34,7 +37,7 @@ import {
   type TabBox,
   type TabDragState,
 } from '../src/renderer/lib/tab-drag';
-import type { TabDragResult } from '../src/renderer/lib/tauri-bridge';
+import type { TabDragReservation, TabDragResult } from '../src/renderer/lib/tauri-bridge';
 
 /** The pointer that arms every gesture here. */
 const POINTER = 7;
@@ -303,6 +306,50 @@ describe('hand-off plan', () => {
   });
 });
 
+describe('reservations', () => {
+  const reserved = (
+    outcome: TabDragResult['outcome'],
+    token: number,
+  ): TabDragReservation => ({
+    outcome,
+    label: token === 0 ? '' : 'doc-1',
+    owner: outcome === 'refused' ? 'doc-2' : '',
+    token,
+  });
+
+  // The defect this pins is the successor to the one above: the release used to
+  // be CLASSIFIED and then resolved a second time, with the write in between.
+  // Whatever the second answer was, the file had already been written over and
+  // the document marked saved — so a release the far side then resolved as a
+  // same-window drop, or refused, had cost the user their undo history for a
+  // document that never moved. Only a held destination is written for.
+  it('writes the file only for a destination that is actually held', () => {
+    expect(planHandOff(reservationHolds(reserved('transferred', 4)), true)).toEqual({
+      hand: true,
+      saveFirst: true,
+    });
+    expect(planHandOff(reservationHolds(reserved('tornOff', 9)), true)).toEqual({
+      hand: true,
+      saveFirst: true,
+    });
+  });
+
+  it('holds nothing when the release stayed in this window or was refused', () => {
+    expect(reservationHolds(reserved('sameWindow', 0))).toBe(false);
+    expect(reservationHolds(reserved('refused', 0))).toBe(false);
+    expect(planHandOff(reservationHolds(reserved('sameWindow', 0)), true)).toEqual({
+      hand: false,
+      saveFirst: false,
+    });
+  });
+
+  it('treats a move that named no token as holding nothing', () => {
+    // There is nothing to commit and nothing to cancel, so there is nothing to
+    // write the user's file for either.
+    expect(reservationHolds(reserved('transferred', 0))).toBe(false);
+  });
+});
+
 describe('screen coordinates', () => {
   it('scales a pointer screen position into physical pixels', () => {
     // screenX/screenY are CSS pixels in the SCREEN's space, so only the scale
@@ -519,6 +566,114 @@ describe('serial publisher', () => {
     // A window that could not take one rect must still take the next: the
     // last one published is what says the strip is gone.
     expect(sent).toEqual([1, 2]);
+  });
+
+  // The defect this pins: the quit SEALS the session record and takes whatever
+  // tab order arrived last, while the publisher's newest value can still be
+  // waiting behind an in-flight publish. Exit right after a reorder therefore
+  // persisted the arrangement the user had just changed. The flush is what the
+  // exit path awaits before the seal — and the seal is the seal, so it has to
+  // finish BEFORE, not be forgiven after.
+  it('does not finish while the newest order is still waiting to be published', async () => {
+    const { send, sent, settle } = deferred();
+    const publisher = createSerialPublisher(send);
+    publisher.post(1);
+    publisher.post(2);
+    expect(sent).toEqual([1]);
+
+    let flushed = false;
+    const done = publisher.flush().then(() => {
+      flushed = true;
+    });
+    settle[0]();
+    await Promise.resolve();
+    // The second publish is only now in flight: finishing here would seal the
+    // record on the order the reorder replaced.
+    expect(sent).toEqual([1, 2]);
+    expect(flushed).toBe(false);
+
+    settle[1]();
+    await done;
+    expect(flushed).toBe(true);
+  });
+
+  it('finishes immediately when nothing is outstanding', async () => {
+    const { send, sent, settle } = deferred();
+    const publisher = createSerialPublisher(send);
+    // An idle publisher must not make a quit wait for a publish that will
+    // never be posted.
+    await publisher.flush();
+    publisher.post(1);
+    settle[0]();
+    await publisher.flush();
+    expect(sent).toEqual([1]);
+  });
+
+  it('waits for an order posted while it is already flushing', async () => {
+    const { send, sent, settle } = deferred();
+    const publisher = createSerialPublisher(send);
+    publisher.post(1);
+    let flushed = false;
+    const done = publisher.flush().then(() => {
+      flushed = true;
+    });
+    publisher.post(2);
+    settle[0]();
+    await Promise.resolve();
+    expect(flushed).toBe(false);
+    settle[1]();
+    await done;
+    expect(sent).toEqual([1, 2]);
+  });
+
+  it('finishes on a publish that failed rather than waiting for one that cannot come', async () => {
+    let fail: ((reason: Error) => void) | null = null;
+    const publisher = createSerialPublisher<number>(
+      () => new Promise<void>((_, reject) => (fail = reject)),
+    );
+    publisher.post(1);
+    const done = publisher.flush();
+    (fail as unknown as (reason: Error) => void)(new Error('no window'));
+    // A window that cannot answer must not hold the quit open.
+    await done;
+  });
+});
+
+describe('the tab order flush', () => {
+  it('is a no-op for a window whose strip never registered one', async () => {
+    setTabOrderChannel(null);
+    await flushTabOrder();
+  });
+
+  it('drains the strip publisher the exit path cannot reach itself', async () => {
+    const sent: string[][] = [];
+    const settle: Array<() => void> = [];
+    const publisher = createSerialPublisher<string[]>((order) => {
+      sent.push(order);
+      return new Promise<void>((resolve) => settle.push(resolve));
+    });
+    setTabOrderChannel(publisher);
+    try {
+      publisher.post(['a', 'b']);
+      // The reorder: the newest order is waiting behind the publish above it,
+      // which is exactly the state Exit used to seal over.
+      publisher.post(['b', 'a']);
+      let flushed = false;
+      const done = flushTabOrder().then(() => {
+        flushed = true;
+      });
+      settle[0]();
+      await Promise.resolve();
+      expect(flushed).toBe(false);
+      settle[1]();
+      await done;
+      expect(sent).toEqual([
+        ['a', 'b'],
+        ['b', 'a'],
+      ]);
+    } finally {
+      setTabOrderChannel(null);
+    }
   });
 });
 

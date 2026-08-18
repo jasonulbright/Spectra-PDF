@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { AppStateProvider, useAppState, useAppDispatch } from './state/AppStateProvider';
 import { file, app, dialog, batch, tabDrag } from './lib/tauri-bridge';
-import type { PhysicalScreenPoint, TabDragResult } from './lib/tauri-bridge';
-import { planHandOff, tabMoved } from './lib/tab-drag';
+import type { PhysicalScreenPoint, TabDragReservation, TabDragResult } from './lib/tauri-bridge';
+import { flushTabOrder, planHandOff, reservationHolds, tabMoved } from './lib/tab-drag';
 import {
   decodeToRawSource,
   engineWantsRawFallback,
@@ -618,6 +618,13 @@ function AppContent(): React.ReactElement {
 
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // Documents this window has handed to another and not yet heard the outcome
+  // for. A handover moves ownership before the receiving window has opened
+  // anything, so a window destroyed in that gap gives the document back — and
+  // whether that return means "keep the tab you were about to close" or "open
+  // this again" is a question only the hand-off in flight can answer.
+  const handOffsInFlight = useRef(new Map<string, { returned: boolean }>());
 
   // A newly opened document's own initial view: the layout, navigation pane
   // and reading mode land as one reducer act; the opening page and its
@@ -2271,6 +2278,13 @@ function AppContent(): React.ReactElement {
         for (const f of dirtyFiles) await file.saveAs(f.workingPath, f.path);
       }
     }
+    // The quit SEALS the session record, and the seal takes whatever tab order
+    // arrived last. The order publishes serially and nothing waits on it — a
+    // reorder made in the seconds before Exit can still be behind an in-flight
+    // publish, and the restored session would then arrange this window's tabs
+    // the way they were before the user moved them. Flushed here, ahead of the
+    // seal, because a post-seal publish is correctly ignored.
+    await flushTabOrder();
     // Every other window runs its own close flow and closes itself; whichever
     // window closes last exits the process. A window that cancels keeps both
     // itself and the app, which is what a cancel means.
@@ -2301,14 +2315,19 @@ function AppContent(): React.ReactElement {
   // unsaved edit is discarded at the moment of the move, with no prompt and
   // nothing to undo.
   //
-  // So the order is: flush the page tier, learn where the release resolved, and
-  // only then — for a document that is actually leaving — write the file and
-  // mark it saved. A release that lands back in this window writes nothing: it
-  // is not a hand-off, and marking a document saved discards its undo history.
+  // So the order is: flush the page tier, RESERVE the destination, and only
+  // then — for a document that is actually leaving — write the file, mark it
+  // saved and commit. A release that lands back in this window writes nothing:
+  // it is not a hand-off, and marking a document saved discards its undo
+  // history.
   //
-  // The destination is settled before the write and the handover is resolved
-  // after it, because the receiving window is told to open the path the instant
-  // the claim moves and reads the file then.
+  // The reservation is what makes that order safe. Classifying the release and
+  // then resolving it again are two answers to the same question with the write
+  // in between: a pointer released a pixel further on, or a window closed while
+  // the file was being written, and the document stays put having already been
+  // saved and had its history reset. So the first answer BINDS — the claim and
+  // the queued open move under it, and the commit only reports what already
+  // happened or hears that the destination is gone.
   //
   // Ownership is handed over in one step, and the receiving window is built
   // only once it has. Releasing the claim and re-taking it around the build
@@ -2320,24 +2339,36 @@ function AppContent(): React.ReactElement {
   // differ only in where the document is going, and an explicit menu command
   // has no destination to resolve.
   const handOffDocument = useCallback(
-    async (
-      path: string,
-      hand: () => Promise<TabDragResult>,
-      willMove?: () => Promise<boolean>,
-    ): Promise<boolean> => {
+    async (path: string, reserve: () => Promise<TabDragReservation>): Promise<boolean> => {
       if (!(await commitOrAbort())) return false;
+      const held = await reserve();
       const handed = stateRef.current.files.get(path);
-      const plan = planHandOff(
-        willMove ? await willMove() : true,
-        !!handed && isFileDirty(handed),
-      );
+      const plan = planHandOff(reservationHolds(held), !!handed && isFileDirty(handed));
       if (!plan.hand) return false;
-      if (plan.saveFirst && handed) {
-        await file.saveAs(handed.workingPath, handed.path);
-        dispatch({ type: 'MARK_SAVED', path });
+      // A destination that dies before it opens the document gives it back, and
+      // the window it goes back to is this one. Recorded per path so the return
+      // can be told apart from a document arriving from anywhere else: the tab
+      // is still open here, and re-opening it would be a second copy.
+      const flight = { returned: false };
+      handOffsInFlight.current.set(path, flight);
+      let moved: TabDragResult;
+      try {
+        if (plan.saveFirst && handed) {
+          await file.saveAs(handed.workingPath, handed.path);
+          dispatch({ type: 'MARK_SAVED', path });
+        }
+        moved = await tabDrag.commit(held.token);
+      } catch (e) {
+        // The write a move costs failed. The document is still held somewhere
+        // else, and nothing will ever come for it.
+        handOffsInFlight.current.delete(path);
+        await tabDrag.release(held.token).catch(() => {});
+        throw e;
       }
-      const moved = await hand();
-      if (!tabMoved(moved)) return false;
+      handOffsInFlight.current.delete(path);
+      // Nothing below this line awaits, so a return that arrives after the
+      // check finds no flight and re-opens the document instead.
+      if (!tabMoved(moved) || flight.returned) return false;
       // Closed WITHOUT a release — the path already belongs to the receiving
       // window, and releasing here would strip the claim off the window that
       // now holds it.
@@ -2351,7 +2382,7 @@ function AppContent(): React.ReactElement {
     const current = stateRef.current;
     const target = current.activeFileId ? current.files.get(current.activeFileId) : null;
     if (!target || target.importOnly) return;
-    await handOffDocument(target.path, () => app.moveToNewWindow(target.path));
+    await handOffDocument(target.path, () => tabDrag.reserveNewWindow(target.path));
   }, [handOffDocument]);
 
   // A release that never left this window's own strip. Nothing crosses, so
@@ -2381,11 +2412,7 @@ function AppContent(): React.ReactElement {
   const handleTabDrop = useCallback(
     (path: string, point: PhysicalScreenPoint, reorderTo: number | null) =>
       reorderTo === null
-        ? handOffDocument(
-            path,
-            () => tabDrag.drop(path, point),
-            () => tabDrag.wouldMove(point),
-          )
+        ? handOffDocument(path, () => tabDrag.reserve(path, point))
         : reorderTab(path, reorderTo),
     [handOffDocument, reorderTab],
   );
@@ -2579,6 +2606,10 @@ function AppContent(): React.ReactElement {
       const dirtyFiles = Array.from(filesRef.current.values()).filter(
         (f) => f.dirty || pageDirtyRef.current.includes(f.path),
       );
+      // The last window closing seals the session record too, so the order
+      // this window's strip is in has to be published before it goes — same
+      // reason as Exit, reached by the × instead.
+      await flushTabOrder();
       // Rust decides between hiding and closing, because only it knows whether
       // this is the last workspace window: tray residency is an app-level
       // state, so a second window's × closes that window rather than hiding
@@ -2670,6 +2701,25 @@ function AppContent(): React.ReactElement {
     void drain();
     const unlisten = app.onOpenFile(() => { void drain(); });
     return () => { cancelled = true; unlisten.then((fn) => fn()); };
+  }, [openByPaths]);
+
+  // A document coming back from a handover the receiving window died holding.
+  // Ownership is already back here; what is left is where it should appear.
+  //
+  // Not a queued open, because the answer depends on what this window has
+  // already done about the hand-off: one still in flight has a tab open that
+  // it was about to close, and opening the document again would make a second
+  // copy of it. One that has already closed its tab needs exactly that open.
+  useEffect(() => {
+    const unlisten = tabDrag.onReturned((path) => {
+      const flight = handOffsInFlight.current.get(path);
+      if (flight) {
+        flight.returned = true;
+        return;
+      }
+      void openByPaths([path]);
+    });
+    return () => { void unlisten.then((fn) => fn()); };
   }, [openByPaths]);
 
   // Test harness — only compiled in when VITE_E2E=1 was set at build time.
