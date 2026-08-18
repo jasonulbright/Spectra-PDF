@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import { useSeparationPreview } from '../hooks/useSeparationPreview';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
@@ -93,9 +94,13 @@ export function InkManagerPanel(): React.ReactElement {
       setBusy(true);
       setStatus(tChrome('panel.inkManager.applying'));
       try {
-        await performOperation(filePath, 'alias_ink', {
+        const r = await performOperation(filePath, 'alias_ink', {
           source, target, accept_target_transform: accept,
         });
+        if (r === EDIT_DECLINED) {
+          setStatus('');
+          return;
+        }
         setPendingAlias(null);
         invalidate();
         setStatus(tChrome('panel.inkManager.aliasApplied', { source, target }));
@@ -117,6 +122,10 @@ export function InkManagerPanel(): React.ReactElement {
       setStatus(tChrome('panel.inkManager.converting'));
       try {
         const result = await performOperation(filePath, 'spot_to_process', { inks: [name] });
+        if (result === EDIT_DECLINED) {
+          setStatus('');
+          return;
+        }
         invalidate();
         setStatus(convertedToProcessMessage(name, readSkippedShadings(result)));
       } catch (e: unknown) {

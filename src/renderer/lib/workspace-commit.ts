@@ -6,6 +6,7 @@ import type { AppAction, OpenDocument, OpenFile, PdfBuffer, Workspace } from '..
 // the catalog (the concurrent-entry throw below is an internal invariant —
 // a programming error nobody is meant to read, so it stays English).
 import { tChrome } from '../i18n';
+import { preserveReason, type PreserveOutcome, type PreserveRefusal } from './preserve-reason';
 
 // A page's 1-based position within its file's committed order: pages of all
 // same-path documents in workspace order — what the file looks like after
@@ -191,10 +192,13 @@ interface CommitDeps {
   rename: (fromPath: string, toPath: string) => Promise<unknown>;
   remove: (filePath: string) => Promise<unknown>;
   /** Rewrite a staged temp as an incremental append onto the SIGNED
-   *  working copy (engine `transplant_incremental`). Returns whether it
-   *  applied — false covers unsigned files and out-of-scope deltas (page
-   *  removal/reorder, content edits), which keep the plain rewrite. */
-  preserveSignatures?: (workingPath: string, stagedPath: string) => Promise<boolean>;
+   *  working copy (engine `transplant_incremental`).
+   *
+   *  Returns the engine's OUTCOME, not a boolean: `applied` false covers
+   *  unsigned files and out-of-scope deltas alike, and those are opposite
+   *  events — one is the standing behaviour, the other silently costs the
+   *  user a signature. The reason is what tells them apart, so it travels. */
+  preserveSignatures?: (workingPath: string, stagedPath: string) => Promise<PreserveOutcome>;
   /** Read a staged file's bytes back — the state buffer must carry the
    *  TRANSPLANTED bytes, not the pdf-lib rebuild's (buffer identity keys
    *  the reindex). Required whenever preserveSignatures is supplied. */
@@ -209,6 +213,15 @@ let commitSeq = 0;
 // in-flight promise across all commit entry points); this turns a bypass of
 // that contract into an explicit error instead of silent file corruption.
 let commitRunning = false;
+
+/** What the commit has to report afterwards. A commit that lands is not
+ * necessarily a commit that cost nothing: a signed file whose transplant
+ * refused was rewritten, and the caller owes the user that sentence. */
+export interface CommitOutcome {
+  /** One entry per signed file the append could not carry — empty on every
+   * ordinary commit, including one with no signed file in it. */
+  signatureRefusals: PreserveRefusal[];
+}
 
 // Materialize pending page edits: rebuild every dirty file via pdf-lib and
 // land the rebuilds on the snapshot undo chain in one atomic dispatch. All
@@ -233,16 +246,17 @@ export async function commitPageEdits({
   remove,
   preserveSignatures,
   readBack,
-}: CommitDeps): Promise<void> {
+}: CommitDeps): Promise<CommitOutcome> {
   if (commitRunning) {
     throw new Error('commitPageEdits is already running — callers must share the in-flight run');
   }
   commitRunning = true;
+  const signatureRefusals: PreserveRefusal[] = [];
   try {
     const plans = planCommit(workspace, files, dirtyPaths);
     if (plans.length === 0) {
       dispatch({ type: 'CLEAR_PAGE_EDITS' });
-      return;
+      return { signatureRefusals };
     }
     const built = await Promise.all(plans.map(buildCommitBytes));
 
@@ -267,8 +281,15 @@ export async function commitPageEdits({
         // and the fallback for every out-of-scope delta.
         if (preserveSignatures && readBack) {
           try {
-            if (await preserveSignatures(plans[i].workingPath, tmp)) {
+            const outcome = await preserveSignatures(plans[i].workingPath, tmp);
+            if (outcome.applied) {
               built[i] = await readBack(tmp);
+            } else {
+              // The rewrite proceeds — it always has — but a signed file whose
+              // append refused loses its signatures to it, and that is the
+              // fact the old boolean discarded.
+              const reason = preserveReason(outcome);
+              if (reason) signatureRefusals.push({ path: plans[i].path, reason });
             }
           } catch (err) {
             console.warn('signature-preserving commit unavailable:', err);
@@ -294,6 +315,7 @@ export async function commitPageEdits({
       throw err;
     }
     dispatch({ type: 'COMMIT_PAGE_EDITS', updates });
+    return { signatureRefusals };
   } finally {
     commitRunning = false;
   }

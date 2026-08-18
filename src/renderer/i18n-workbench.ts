@@ -263,6 +263,32 @@ export const WORKBENCH_STRINGS = {
     'Applying page changes failed: {{message}}. Nothing was saved — your edits are still pending.',
   'app.commit.retry': 'Retry',
   'app.commit.dismiss': 'Dismiss',
+
+  // A signed document whose page changes could not be appended. The rewrite
+  // is the standing fallback and it lands; what used to be missing is the
+  // sentence saying so. The reason is its own key so the cause is a clause a
+  // translator places, not two English halves glued together.
+  'app.preserve.title': 'Signature not preserved',
+  'app.preserve.notPreserved':
+    'The page changes to "{{name}}" were applied, but its digital signatures could not be kept: {{reason}}. The document no longer verifies as signed.',
+  'app.preserve.encrypted': 'the document is encrypted',
+  'app.preserve.catalogChanged': 'the change goes further than an appended revision can carry',
+  'app.preserve.noDelta': 'no appendable change could be identified',
+  'app.preserve.certifiedNoChanges': 'the document is certified to allow no changes at all',
+  'app.preserve.certifiedFormFill':
+    'the document is certified to allow only form filling and signing',
+  'app.preserve.certifiedAnnotate':
+    'the document is certified to allow only form filling, signing and commenting',
+  'app.preserve.certifiedUnknown':
+    'the document is certified in a way this version does not recognise',
+  'app.preserve.unrecognized': '{{detail}}',
+
+  // Exit was called off because a window did not answer. Fail-closed by
+  // design: nothing closed, and the session record went back to following
+  // the windows that are still standing.
+  'app.exit.abortedTitle': 'Exit cancelled',
+  'app.exit.aborted':
+    'A window did not respond to the request to close, so nothing was closed. Try again, or close that window yourself first.',
 } as const;
 
 export type WorkbenchKey = keyof typeof WORKBENCH_STRINGS;

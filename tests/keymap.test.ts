@@ -189,8 +189,18 @@ function wire(state: AppState): { dispatched: AppAction[]; current: () => AppSta
       current = appReducer(current, a);
     },
   }));
+  // The page-tier commands consult App's signed-document gate before they
+  // dispatch and are unavailable without it, so a keymap test that wants them
+  // to run has to stand one up — App registers its bundle in the same mount
+  // effect that installs this dispatcher.
+  registerAppCommandHandlers({
+    confirmPageEdit: async () => true,
+  } as unknown as Parameters<typeof registerAppCommandHandlers>[0]);
   return { dispatched, current: () => current };
 }
+
+/** The page-tier commands answer the gate on a later turn. */
+const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 function uiState(partial: Partial<AppState['ui']>): AppState {
   return { ...initialState, ui: { ...initialState.ui, ...partial } };
@@ -386,22 +396,34 @@ describe('dispatchKeyEvent', () => {
     expect(dispatched).toEqual([]);
   });
 
-  it('Delete with a selection dispatches the batched delete + clear', () => {
+  it('Delete with a selection dispatches the batched delete + clear', async () => {
     const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' }, selectedPageIds: new Set(['x#p0']) }));
     const e = fakeEvent({ key: 'Delete', target: DIV });
     dispatchKeyEvent(e);
     expect(e.defaultPrevented).toBe(true);
+    await settle();
     expect(dispatched.map((a) => a.type)).toEqual(['DELETE_PAGE_REFS', 'UI_CLEAR_SELECTION']);
   });
 
-  it('] and [ rotate the selection', () => {
+  it('] and [ rotate the selection', async () => {
     const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' }, selectedPageIds: new Set(['x#p0']) }));
     dispatchKeyEvent(fakeEvent({ key: ']', target: DIV }));
     dispatchKeyEvent(fakeEvent({ key: '[', target: DIV }));
+    await settle();
     expect(dispatched).toEqual([
       { type: 'ROTATE_PAGE_REFS', pageIds: ['x#p0'], delta: 90 },
       { type: 'ROTATE_PAGE_REFS', pageIds: ['x#p0'], delta: 270 },
     ]);
+  });
+
+  it('Delete falls through when the signed-document gate is unreachable', () => {
+    // Fail-closed at the keyboard too: the command is unavailable without the
+    // gate, so the key is not consumed and nothing is dispatched.
+    wire(uiState({ focusedTab: { doc: 'x.pdf' }, selectedPageIds: new Set(['x#p0']) }));
+    registerAppCommandHandlers(null);
+    const e = fakeEvent({ key: 'Delete', target: DIV });
+    dispatchKeyEvent(e);
+    expect(e.defaultPrevented).toBe(false);
   });
 });
 

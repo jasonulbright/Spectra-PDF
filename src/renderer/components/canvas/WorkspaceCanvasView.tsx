@@ -179,7 +179,7 @@ import {
 } from '../../components/FieldActionsControl';
 import type { FieldActions } from '../../lib/form-candidates';
 import { TEST_HARNESS_ENABLED, registerCanvasRedaction, registerCanvasSignature, registerCanvasCrop, registerCanvasSnapshot, registerCanvasOcr, registerCanvasSelection, registerCanvasForms, registerCanvasMerge, registerCanvasEditImages } from '../../testHarness';
-import { invokeCommand, registerCanvasServices, pushEscapeInterceptor } from '../../commands/context';
+import { invokeCommand, confirmPageEditNow, registerCanvasServices, pushEscapeInterceptor } from '../../commands/context';
 import { buildPageContextMenu } from '../../lib/page-context-menu';
 import { ContextMenu } from '../ContextMenu';
 import type { MenuItem } from '../ContextMenu';
@@ -6144,65 +6144,90 @@ export function WorkspaceCanvasView({
     [selectedPageIds, flatOrder],
   );
 
+  // Every FILE a page move touches: the sources the pages leave and the
+  // document they arrive in. A move is `page-structure` in both, and each
+  // file's own signatures decide for it — so the gate is asked about the set,
+  // not about the document under the pointer.
+  const movePaths = useCallback(
+    (movingIds: string[], targetDocId?: string): string[] => {
+      const paths: string[] = [];
+      const add = (p: string | undefined): void => {
+        if (p && !paths.includes(p)) paths.push(p);
+      };
+      for (const d of docs) if (d.pages.some((p) => movingIds.includes(p.id))) add(d.path);
+      if (targetDocId) add(docs.find((d) => d.id === targetDocId)?.path);
+      return paths;
+    },
+    [docs],
+  );
+
   const movePagesInto = useCallback(
     (movingIds: string[], targetDocId: string, index: number) => {
       if (movingIds.length === 0) return;
-      if (movingIds.length === 1) {
-        // Keep the exact single-page semantics (same-doc no-op guard, etc.).
-        const src = docs.find((d) => d.pages.some((p) => p.id === movingIds[0]));
-        if (!src) return;
+      void (async () => {
+        if (!(await confirmPageEditNow(movePaths(movingIds, targetDocId), 'page-structure'))) return;
+        if (movingIds.length === 1) {
+          // Keep the exact single-page semantics (same-doc no-op guard, etc.).
+          const src = docs.find((d) => d.pages.some((p) => p.id === movingIds[0]));
+          if (!src) return;
+          dispatch({
+            type: 'MOVE_PAGE',
+            fromDocId: src.id,
+            toDocId: targetDocId,
+            pageId: movingIds[0],
+            toIndex: index,
+          });
+        } else {
+          dispatch({ type: 'MOVE_PAGES', pageIds: movingIds, toDocId: targetDocId, toIndex: index });
+        }
+        // A drag re-selects its moved pages on drop.
         dispatch({
-          type: 'MOVE_PAGE',
-          fromDocId: src.id,
-          toDocId: targetDocId,
-          pageId: movingIds[0],
-          toIndex: index,
+          type: 'UI_SET_SELECTION',
+          pageIds: movingIds,
+          anchor: movingIds[movingIds.length - 1],
         });
-      } else {
-        dispatch({ type: 'MOVE_PAGES', pageIds: movingIds, toDocId: targetDocId, toIndex: index });
-      }
-      // A drag re-selects its moved pages on drop.
-      dispatch({
-        type: 'UI_SET_SELECTION',
-        pageIds: movingIds,
-        anchor: movingIds[movingIds.length - 1],
-      });
+      })();
     },
-    [dispatch, docs],
+    [dispatch, docs, movePaths],
   );
 
   const movePagesToNewDoc = useCallback(
     (movingIds: string[], docIndex: number) => {
       if (movingIds.length === 0) return;
-      // Template on the first moving page's document (matches the reducer).
-      const first = docs.find((d) => d.pages.some((p) => p.id === movingIds[0]));
-      if (!first) return;
-      const movingSet = new Set(movingIds);
-      const newDocId = crypto.randomUUID();
-      // Free a fully-emptied source doc's name for reuse by the new doc.
-      const taken = new Set(
-        docs.filter((d) => !d.pages.every((p) => movingSet.has(p.id))).map((d) => d.name),
-      );
-      const newName = uniqueDocName(first.name, taken);
-      if (movingIds.length === 1) {
+      void (async () => {
+        // The new document is a partition of the SOURCE's own file, so the
+        // source paths are the whole set.
+        if (!(await confirmPageEditNow(movePaths(movingIds), 'page-structure'))) return;
+        // Template on the first moving page's document (matches the reducer).
+        const first = docs.find((d) => d.pages.some((p) => p.id === movingIds[0]));
+        if (!first) return;
+        const movingSet = new Set(movingIds);
+        const newDocId = crypto.randomUUID();
+        // Free a fully-emptied source doc's name for reuse by the new doc.
+        const taken = new Set(
+          docs.filter((d) => !d.pages.every((p) => movingSet.has(p.id))).map((d) => d.name),
+        );
+        const newName = uniqueDocName(first.name, taken);
+        if (movingIds.length === 1) {
+          dispatch({
+            type: 'MOVE_PAGE_TO_NEW_DOC',
+            fromDocId: first.id,
+            pageId: movingIds[0],
+            docIndex,
+            newDocId,
+            newName,
+          });
+        } else {
+          dispatch({ type: 'MOVE_PAGES_TO_NEW_DOC', pageIds: movingIds, docIndex, newDocId, newName });
+        }
         dispatch({
-          type: 'MOVE_PAGE_TO_NEW_DOC',
-          fromDocId: first.id,
-          pageId: movingIds[0],
-          docIndex,
-          newDocId,
-          newName,
+          type: 'UI_SET_SELECTION',
+          pageIds: movingIds,
+          anchor: movingIds[movingIds.length - 1],
         });
-      } else {
-        dispatch({ type: 'MOVE_PAGES_TO_NEW_DOC', pageIds: movingIds, docIndex, newDocId, newName });
-      }
-      dispatch({
-        type: 'UI_SET_SELECTION',
-        pageIds: movingIds,
-        anchor: movingIds[movingIds.length - 1],
-      });
+      })();
     },
-    [dispatch, docs],
+    [dispatch, docs, movePaths],
   );
 
   const drag = usePageDrag({
@@ -6282,6 +6307,7 @@ export function WorkspaceCanvasView({
       pageId: menu.pageId,
       selectedPageIds,
       dispatch,
+      confirmPageEdit: confirmPageEditNow,
       onOpen: onOpenPage,
       onExtractText,
     });
