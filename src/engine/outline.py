@@ -1,12 +1,11 @@
 """PDF outline (bookmarks) read/write using pikepdf."""
 
 import base64
-import shutil
-import tempfile
 from pathlib import Path
 
 import pikepdf
 from pikepdf import OutlineItem
+from engine.inplace import staged_write
 from engine.pdf_save import save_pdf
 
 MAX_DEPTH = 32
@@ -290,15 +289,10 @@ def set_outline(file: str, outline: list[dict], output: str) -> dict:
             ol.root.extend(items)
 
         if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                tmp_path = tmp.name
-            save_pdf(pdf, tmp_path)
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, str(staged))
+                pdf.close()
         else:
             save_pdf(pdf, output_path)
-
-    if same_file:
-        shutil.move(tmp_path, str(output_path))
 
     return {"output": str(output_path), "count": _count(outline or [])}
