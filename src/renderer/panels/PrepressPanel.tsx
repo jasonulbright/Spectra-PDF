@@ -68,8 +68,7 @@ export function PrepressPanel(): React.ReactElement {
     if (!output) return;
     setBusy(true);
     setStatus(tChrome('panel.prepress.convertingCmyk'));
-    // A CMYK conversion reports no alterations, so a PDF/X report left on
-    // screen would describe a file this action did not write.
+    // A report left on screen would describe a file this action did not write.
     setReport(null);
     try {
       const r = await call('convert_cmyk', {
@@ -82,6 +81,9 @@ export function PrepressPanel(): React.ReactElement {
       const orig = (r.original_size / 1024).toFixed(0);
       const out = (r.output_size / 1024).toFixed(0);
       setStatus(tChrome('panel.prepress.cmykDone', { from: orig, to: out }));
+      // A colour conversion can destroy a printing plate while every mark
+      // stays on the page, so its own report is drawn beside the result.
+      setReport(r);
     } catch (e: unknown) {
       setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {

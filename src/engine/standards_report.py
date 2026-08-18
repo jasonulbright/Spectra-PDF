@@ -324,6 +324,37 @@ def _compare_marks(before: list, after: list):
     return _row("page_content_rasterized", len(detail), detail)
 
 
+def colorants_lost(before: list, after: list):
+    """The plates a colour conversion did not carry through, by name.
+
+    A colorant is the one thing a colour conversion can destroy without
+    removing a page, an annotation or an image: the marks stay, they simply
+    print on process plates that a spot job does not run. Nothing in a
+    producer's diagnostics says so, so the row is built from the two ink
+    lists.
+    """
+    lost = [name for name in before if name not in set(after)]
+    if not lost:
+        return None
+    return _row("colorants_removed", len(lost), [{"name": n} for n in lost])
+
+
+def colorant_shadings_lost(colorants: list):
+    """Gradients whose colorant space the producer could not carry.
+
+    A shading in a colorant space that the destination cannot describe
+    without a transform comes back as a picture of itself in process colour.
+    The gradient still looks right and the plate is gone, which is why it is
+    named here rather than left to the ink list alone: the colorant may still
+    print elsewhere on the page.
+    """
+    names = sorted({str(n) for n in colorants})
+    if not names:
+        return None
+    return _row("colorant_shadings_rasterized", len(names),
+                [{"name": n} for n in names])
+
+
 def compare(before: _Facts, after: _Facts) -> list:
     """One row per fact that changed for the worse, or could not be read.
 

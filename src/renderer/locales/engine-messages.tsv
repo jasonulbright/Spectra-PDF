@@ -444,8 +444,11 @@ preflight_sweep.preflightProfileCarriesFixups	pattern	preflight_sweep	The prefli
 preflight_sweep.preflightSweepRunsMode	pattern	preflight_sweep	A preflight sweep runs in {{v0}} mode, not {{mode}}.
 prepress.couldExtractBundledProfile	pattern	prepress	Could not extract the bundled profile {{name}}: {{v1}}
 prepress.destinationIccProfileFound	pattern	prepress	Destination ICC profile not found: {{profile}}
+prepress.destinationProfileDescribesColour	pattern	prepress	The destination profile "{{label}}" describes "{{space}}" colour, not CMYK.
+prepress.destinationProfileProfileWhich	pattern	prepress	The destination profile "{{label}}" is a "{{profile_class}}" profile, which does not describe an output condition.
 prepress.ghostscriptCmykConversionFailed	pattern	prepress	Ghostscript CMYK conversion failed: {{v0}}
 prepress.ghostscriptPdfXConversion	pattern	prepress	Ghostscript PDF/X conversion failed: {{v0}}
+prepress.iccProfile	pattern	prepress	"{{label}}" is not an ICC profile.
 prepress.pdfXConversionAbandoned	pattern	prepress	PDF/X conversion abandoned the standard: {{said}}
 prepress.pdfXOutputCarries	exact	prepress	PDF/X output carries no /OutputIntents — conversion failed.
 prepress.renderIntentMustPerceptual	exact	prepress	render_intent must be perceptual, relative, saturation, or absolute.

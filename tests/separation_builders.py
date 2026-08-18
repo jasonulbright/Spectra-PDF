@@ -414,3 +414,85 @@ def device_rgb_pdf(path):
     pdf.save(path)
     pdf.close()
     return str(path)
+
+
+def spot_shading_pdf(path, spot: str = "PANTONE 185 C",
+                     pattern_spot: str = "PatternSpot"):
+    """Every route a GRADIENT takes into a colour conversion, on one page.
+
+    A colorant `sh`, a colorant shading worn by a shading pattern, a
+    DeviceCMYK `sh` beside them (the control that says whether a loss is
+    about colorants or about shadings), a DeviceN duotone fill and a DeviceRGB
+    fill that must come out CMYK. The shading coordinates are USER space and
+    no `cm` intervenes, so each ramp spans the band it paints — a gradient
+    running off the page would lay down no ink and make "the plate is
+    unchanged" mean nothing.
+    """
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(400, 400))
+    spot_cs = separation_space(pdf, spot, (0.0, 1.0, 0.75, 0.0))
+    duo = devicen_space(pdf, ["Warm Red", "Deep Black"], {
+        "Warm Red": (0.0, 0.9, 0.8, 0.0), "Deep Black": (0, 0, 0, 1.0),
+    })
+    ramp = Dictionary(FunctionType=2, Domain=Array([0, 1]), N=1,
+                      C0=Array([0.2]), C1=Array([1]))
+    spot_sh = pdf.make_indirect(Dictionary(
+        ShadingType=2, ColorSpace=spot_cs, Coords=Array([10, 0, 390, 0]),
+        Function=ramp, Extend=Array([True, True])))
+    cmyk_sh = pdf.make_indirect(Dictionary(
+        ShadingType=2, ColorSpace=Name.DeviceCMYK, Coords=Array([10, 0, 390, 0]),
+        Function=Dictionary(FunctionType=2, Domain=Array([0, 1]), N=1,
+                            C0=Array([0, 0, 0, 0]), C1=Array([0, 1, 1, 0])),
+        Extend=Array([True, True])))
+    pattern_cs = separation_space(pdf, pattern_spot, (0.0, 0.5, 1.0, 0.0))
+    pattern = pdf.make_indirect(Dictionary(
+        Type=Name.Pattern, PatternType=2,
+        Shading=Dictionary(
+            ShadingType=2, ColorSpace=pattern_cs, Coords=Array([10, 0, 390, 0]),
+            Function=ramp, Extend=Array([True, True]))))
+    page.Resources = Dictionary(
+        ColorSpace=Dictionary(CS0=spot_cs, CS1=duo),
+        Pattern=Dictionary(P0=pattern),
+        Shading=Dictionary(ShSpot=spot_sh, ShCmyk=cmyk_sh))
+    page.Contents = pdf.make_stream(b"\n".join([
+        b"/CS0 cs 1 scn 10 340 180 50 re f",
+        b"/CS1 cs 0.8 0.4 scn 210 340 180 50 re f",
+        b"1 0 0 rg 10 270 180 50 re f",
+        b"0 0 0 1 k 210 270 180 50 re f",
+        b"q 10 190 380 60 re W n /ShSpot sh Q",
+        b"q 10 110 380 60 re W n /ShCmyk sh Q",
+        b"/Pattern cs /P0 scn 120 20 270 30 re f",
+    ]))
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
+def rgb_alternate_shading_pdf(path, spot: str = "RGB Spot"):
+    """A GRADIENT in a spot whose alternate is DeviceRGB.
+
+    The colorant cannot be described in a CMYK destination without running
+    the transform, so this is the shading a conversion genuinely has to
+    convert — the branch that must report a loss rather than hide one.
+    """
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    fn = pdf.make_indirect(Dictionary(
+        FunctionType=2, Domain=Array([0, 1]), N=1,
+        C0=Array([1, 1, 1]), C1=Array([0.9, 0.1, 0.15]),
+        Range=Array([0, 1, 0, 1, 0, 1]),
+    ))
+    space = pdf.make_indirect(Array([
+        Name.Separation, Name("/" + spot), Name.DeviceRGB, fn,
+    ]))
+    shading = pdf.make_indirect(Dictionary(
+        ShadingType=2, ColorSpace=space, Coords=Array([10, 0, 190, 0]),
+        Function=Dictionary(FunctionType=2, Domain=Array([0, 1]), N=1,
+                            C0=Array([0.2]), C1=Array([1])),
+        Extend=Array([True, True])))
+    page.Resources = Dictionary(Shading=Dictionary(ShRgb=shading))
+    page.Contents = pdf.make_stream(
+        b"q 10 40 180 120 re W n /ShRgb sh Q")
+    pdf.save(path)
+    pdf.close()
+    return str(path)
