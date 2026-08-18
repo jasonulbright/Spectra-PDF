@@ -881,10 +881,14 @@ def _text_appearance(
     that differ are the font resource, the width metric, and the show-string
     encoding; wrapping, quadding and vertical placement are shared (Liberation
     is metric-compatible with Helvetica, so the Helvetica descent/height keep
-    the baseline consistent)."""
+    the baseline consistent).
+
+    Everything below lays out in the frame /MK /R turns onto the rect, so a
+    quarter-turned widget wraps, auto-sizes and centres against the swapped
+    axes rather than turning a copy of the upright layout."""
     rect = [float(v) for v in widget["/Rect"]]
-    w = abs(rect[2] - rect[0])
-    h = abs(rect[3] - rect[1])
+    rotation = _widget_rotation(widget)
+    w, h = _rotated_frame(abs(rect[2] - rect[0]), abs(rect[3] - rect[1]), rotation)
     requested_font, size, color = _parse_da(da)
 
     # Nothing drawn has no direction and nothing to embed, so a cleared field
@@ -893,7 +897,8 @@ def _text_appearance(
     # mode, so the next value to arrive comes back as columns.
     if flatten_control_chars(value, keep_newline=False) and _da_writes_vertically(pdf, da):
         _vertical_appearance(
-            pdf, widget, value, da, multiline, quadding, font_dir, w, h, size, color
+            pdf, widget, value, da, multiline, quadding, font_dir, w, h, size, color,
+            rotation,
         )
         # An intentional embed, not a /DR-missing fallback — the same
         # distinction the Unicode line path draws.
@@ -994,7 +999,7 @@ def _text_appearance(
         parts.append(emit(line))
     parts.extend([b"ET", b"Q", b"EMC"])
 
-    _put_appearance(pdf, widget, parts, w, h, {("/" + font_name): font_obj})
+    _put_appearance(pdf, widget, parts, w, h, {("/" + font_name): font_obj}, rotation)
     return substituted
 
 
@@ -1010,6 +1015,7 @@ def _vertical_appearance(
     h: float,
     size: float,
     color: str,
+    rotation: int = 0,
 ) -> None:
     """Regenerate a VERTICAL field's /AP /N — the value as columns.
 
@@ -1027,7 +1033,11 @@ def _vertical_appearance(
     through the writing frame at the same two boundaries the authored box
     uses: the widget box enters at `box`, each column's pen leaves at
     `matrix`. `quadding` keeps meaning alignment along the READING axis,
-    which for a column is its top, middle or bottom."""
+    which for a column is its top, middle or bottom.
+
+    `w` and `h` arrive already swapped for a quarter-turned widget, and
+    `rotation` is what turns that frame back onto the rect — the writing
+    frame is the text's own axes and states nothing about the widget's."""
     from engine import vertical_text
 
     layout_value = flatten_control_chars(value, keep_newline=True)
@@ -1084,7 +1094,7 @@ def _vertical_appearance(
         parts.append(vt.show(column, size))
     parts.extend([b"ET", b"Q", b"EMC"])
 
-    _put_appearance(pdf, widget, parts, w, h, {"/TxV": vt.font_obj})
+    _put_appearance(pdf, widget, parts, w, h, {"/TxV": vt.font_obj}, rotation)
 
 
 # ── Option-list appearances ───────────────────────────────────────────────
