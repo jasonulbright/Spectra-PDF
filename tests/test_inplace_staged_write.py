@@ -30,15 +30,22 @@ from pikepdf import Array, Dictionary, Name, String
 
 from engine import annotations as annotations_mod
 from engine import attachments as attachments_mod
+from engine import batch_ocr as batch_ocr_mod
 from engine import budget as budget_mod
 from engine import hairlines as hairlines_mod
 from engine import compress as compress_mod
 from engine import content_crop as content_crop_mod
 from engine import delete as delete_mod
 from engine import document_js as document_js_mod
+from engine import enhance_scan as enhance_scan_mod
+from engine import flattener as flattener_mod
 from engine import form_authoring as form_authoring_mod
+from engine import form_detect as form_detect_mod
+from engine import form_prepare as form_prepare_mod
 from engine import forms as forms_mod
 from engine import headers as headers_mod
+from engine import incremental as incremental_mod
+from engine import ink_manager as ink_manager_mod
 from engine import layers as layers_mod
 from engine import links as links_mod
 from engine import mrc as mrc_mod
@@ -50,22 +57,28 @@ from engine import page_labels as page_labels_mod
 from engine import page_vectors as page_vectors_mod
 from engine import portfolio as portfolio_mod
 from engine import printer_marks as printer_marks_mod
+from engine import pubkey_crypt as pubkey_crypt_mod
 from engine import redact as redact_mod
 from engine import redact_marks as redact_marks_mod
 from engine import rotate as rotate_mod
 from engine import pdfa as pdfa_mod
 from engine import search_redact as search_redact_mod
+from engine import signatures as signatures_mod
 from engine import struct_audit as struct_audit_mod
 from engine import tag_content as tag_content_mod
 from engine import text_authoring as text_authoring_mod
+from engine import text_paragraphs as text_paragraphs_mod
 from engine import text_runs as text_runs_mod
 from engine import struct_fix as struct_fix_mod
 from engine import struct_tree as struct_tree_mod
+from engine import trapping as trapping_mod
 from engine import watermark as watermark_mod
 from engine import xfdf as xfdf_mod
 from engine.extract_text import extract_text
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+RESOURCES = FIXTURES.parent.parent / "resources"
+TESSERACT = RESOURCES / "tesseract" / "tesseract.exe"
 
 
 # ── the documents ──────────────────────────────────────────────────────────
@@ -405,6 +418,227 @@ def _scan_fixture(path: Path) -> Path:
     return path
 
 
+def _unrecognised_scan_fixture(path: Path) -> Path:
+    """A scan carrying NO text layer. `scan-text.pdf` is built with an
+    invisible one, so a recognition door handed it reports a document with
+    nothing to do and never writes — which is not the question here."""
+    source = FIXTURES / "scan-photo.pdf"
+    if not source.is_file():
+        pytest.skip("scan-photo.pdf not generated (tests/fixtures/make_scans.py)")
+    shutil.copy2(source, path)
+    return path
+
+
+def _skew_fixture(path: Path) -> Path:
+    """A scan with a known skew — what enhancement is offered on. Built by
+    `tests/fixtures/make_enhance_scans.py`, so the document the arms run
+    against here is the one they run against there."""
+    source = FIXTURES / "scan-skew.pdf"
+    if not source.is_file():
+        pytest.skip("scan-skew.pdf not generated (tests/fixtures/make_enhance_scans.py)")
+    shutil.copy2(source, path)
+    return path
+
+
+#: The two colorants an alias joins. Identical alternates and exponents, so
+#: the alias is one the door takes without the appearance consent.
+ALIAS_SOURCE = "Alias Source"
+ALIAS_TARGET = "Alias Target"
+SPOT_INK = "PANTONE 185 C"
+
+
+def _two_spots(path: Path) -> Path:
+    """Two separation colorants describing one colour. Built by the
+    separations fixtures so the document the ink doors run against here is
+    the one they run against there."""
+    import separation_builders
+
+    separation_builders.two_spots_pdf(
+        path, ALIAS_SOURCE, ALIAS_TARGET, (0.0, 1.0, 0.75, 0.0), (0.0, 1.0, 0.75, 0.0)
+    )
+    return path
+
+
+def _cmyk_spot(path: Path) -> Path:
+    """Process patches plus a spot at two tints and a DeviceN duotone — what
+    converting a spot to process is offered on."""
+    import separation_builders
+
+    separation_builders.cmyk_spot_pdf(path, SPOT_INK)
+    return path
+
+
+def _alpha_page(path: Path) -> Path:
+    """Live text and one constant-alpha square — a page with exactly one
+    transparent region and text outside it."""
+    import transparency_builders
+
+    transparency_builders.text_and_alpha_square_pdf(str(path))
+    return path
+
+
+LIST_FIELD = "country"
+#: Labels the standard face covers, so the redraw needs no font tree — the
+#: case is about the WRITE, not about which font a row picks.
+LIST_OPTIONS = ["Red", "Grun", "Cafe"]
+
+
+def _with_option_list(path: Path) -> Path:
+    """An option list whose widget appearance is out of date with its `/DA`.
+
+    Creating the field already draws one appearance, so redrawing the field
+    as created would land the bytes it already had and prove nothing. The
+    `/DA` is moved to a different size first, which is the state the door
+    exists for: a field some other tier created, drawn by something that
+    could not lay its labels out.
+    """
+    plain = path.parent / "plain.pdf"
+    _blank(plain, pages=1, size=(612, 792))
+    form_authoring_mod.add_form_fields(str(plain), str(path), [{
+        "name": LIST_FIELD, "type": "optionlist", "page_index": 0,
+        "rect": [72, 600, 300, 700], "options": list(LIST_OPTIONS),
+    }])
+    plain.unlink()
+    with pikepdf.open(str(path), allow_overwriting_input=True) as pdf:
+        for entry in pdf.Root["/AcroForm"]["/Fields"]:
+            entry["/DA"] = String("/Helv 7 Tf 0 g")
+        pdf.save(str(path))
+    return path
+
+
+RULED_LABELS = ("First name:", "Last name:", "Email address:", "Telephone:")
+
+
+def _ruled_form(path: Path) -> Path:
+    """Labelled rules — a flat form the detector reads offline, so the field
+    doors built on it need no recogniser."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    font = pdf.make_indirect(Dictionary(
+        Type=Name.Font, Subtype=Name.Type1,
+        BaseFont=Name("/Helvetica"), Encoding=Name("/WinAnsiEncoding"),
+    ))
+    page.obj["/Resources"] = Dictionary(Font=Dictionary(F1=font))
+    lines = []
+    y = 700
+    for label in RULED_LABELS:
+        lines.append(f"BT /F1 11 Tf 72 {y + 3} Td ({label}) Tj ET")
+        lines.append(f"0.7 w 170 {y} m 520 {y} l S")
+        y -= 40
+    page.Contents = pdf.make_stream("\n".join(lines).encode("latin-1"))
+    pdf.save(str(path))
+    pdf.close()
+    return path
+
+
+#: The certificate-encryption identity a case reads. Like the XFDF above it
+#: sits beside the document for the whole case and is declared on
+#: `Case.leaves`.
+CERT_NAME = "recipient.cer"
+PFX_NAME = "recipient.pfx"
+PFX_PASSWORD = "test-pass"
+#: The signing identity, likewise beside the document for the whole case.
+SIGNER_NAME = "signer.pfx"
+SIGNER_PASSWORD = "pw"
+#: The signed document a transplant appends onto — the case's OTHER input.
+ORIGINAL_NAME = "original.pdf"
+
+
+def _identity_beside(directory: Path) -> tuple:
+    """(certificate, PKCS#12) for a fresh self-signed recipient, written
+    beside the document. Built by the certificate suite's own identity
+    builder, so the keys the crypt doors run against here are the ones they
+    run against there."""
+    import test_pubkey_crypt
+
+    return test_pubkey_crypt._identity(
+        str(directory), Path(CERT_NAME).stem, PFX_PASSWORD.encode()
+    )
+
+
+def _blank_with_identity(path: Path) -> Path:
+    _identity_beside(path.parent)
+    return _blank(path, pages=1)
+
+
+def _cert_encrypted(path: Path) -> Path:
+    """A document locked to a recipient certificate, with that recipient's
+    key bundle beside it — what decrypting one is offered on."""
+    cert, _pfx = _identity_beside(path.parent)
+    plain = path.parent / "plain.pdf"
+    _blank(plain, pages=1)
+    pubkey_crypt_mod.encrypt_with_certs(str(plain), str(path), [cert])
+    plain.unlink()
+    return path
+
+
+def _signer_beside(directory: Path) -> str:
+    """A self-signed PKCS#12 signer beside the document. Built by the signing
+    suite's own builder, for the same reason the recipient identity is."""
+    import test_engine
+
+    return test_engine._make_test_pfx(str(directory / SIGNER_NAME), SIGNER_PASSWORD)
+
+
+def _signable(path: Path) -> Path:
+    _signer_beside(path.parent)
+    return _blank(path, pages=1)
+
+
+def _add_square(pdf) -> None:
+    appearance = pdf.make_stream(b"1 0 0 rg 0 0 40 40 re f")
+    appearance.stream_dict["/Type"] = Name("/XObject")
+    appearance.stream_dict["/Subtype"] = Name("/Form")
+    appearance.stream_dict["/BBox"] = Array([0, 0, 40, 40])
+    annot = pdf.make_indirect(Dictionary(
+        Type=Name.Annot, Subtype=Name.Square,
+        Rect=Array([50, 600, 90, 640]), F=4, C=Array([1, 0, 0]),
+        NM=String("transplanted"), AP=Dictionary(N=appearance),
+    ))
+    page = pdf.pages[0].obj
+    existing = list(page.get("/Annots") or [])
+    page["/Annots"] = Array(existing + [annot])
+
+
+def _signed_and_modified(path: Path) -> Path:
+    """The document a transplant is handed as its SECOND input: a signed
+    original (beside it, on `Case.leaves`) rewritten with one annotation
+    added. The rewrite breaks the signature, which is exactly the state the
+    transplant exists to repair — it re-lands the delta as an append onto the
+    original's own bytes."""
+    signer = _signer_beside(path.parent)
+    original = path.parent / ORIGINAL_NAME
+    plain = path.parent / "plain.pdf"
+    _blank(plain, pages=1)
+    signatures_mod.sign_pdf(
+        file=str(plain), output=str(original), pfx_path=signer, password=SIGNER_PASSWORD)
+    plain.unlink()
+    with pikepdf.open(str(original)) as pdf:
+        _add_square(pdf)
+        pdf.save(str(path))
+    return path
+
+
+def _two_paragraphs(path: Path) -> Path:
+    """Two left-aligned paragraphs in one text object — what replacing a
+    paragraph's text and merging one into the one above are offered on."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(612, 792))
+    font = pdf.make_indirect(Dictionary(
+        Type=Name.Font, Subtype=Name.Type1,
+        BaseFont=Name("/Helvetica"), Encoding=Name("/WinAnsiEncoding"),
+    ))
+    page.obj["/Resources"] = Dictionary(Font=Dictionary(F1=font))
+    page.Contents = pdf.make_stream(
+        b"BT /F1 12 Tf 72 700 Td (Alpha beta gamma delta) Tj "
+        b"0 -14 Td (epsilon zeta eta theta) Tj ET\n"
+        b"BT /F1 12 Tf 72 600 Td (Iota kappa lambda mu) Tj ET"
+    )
+    pdf.save(str(path))
+    pdf.close()
+    return path
+
+
 # ── the ops ────────────────────────────────────────────────────────────────
 
 
@@ -448,6 +682,12 @@ class Case:
     second argument is that path — the shape every pikepdf-backed op has. An op
     whose producer is Ghostscript names `budget.gs` instead, and reads the
     staged path out of the command line it was handed.
+
+    `compare` is how the two runs are read when the op is not deterministic;
+    `_drawn` by default. An op whose output cannot be REOPENED as an ordinary
+    PDF — a document locked to a certificate — names a reader that can, so
+    "in place did the same thing" stays a comparison of the document rather
+    than of the container.
     """
 
     name: str
@@ -458,6 +698,8 @@ class Case:
     doors: tuple = ()
     needs_gs: bool = False
     needs_fonts: bool = False
+    needs_cjk: bool = False
+    needs_tesseract: bool = False
     leaves: tuple = ()
     deterministic: bool = True
     run_gs: Callable[[str, str, str], dict] | None = None
@@ -465,6 +707,7 @@ class Case:
     dies: str = "save_pdf"
     staged_of: Callable[[tuple], str] = None
     varies: tuple = ()
+    compare: Callable[[Path], object] | None = None
 
 
 def _second_argument(args: tuple) -> str:
@@ -479,6 +722,30 @@ def _gs_output_file(args: tuple) -> str:
         if str(token).startswith("-sOutputFile="):
             return str(token).split("=", 1)[1]
     return ""
+
+
+def _first_argument(args: tuple) -> str:
+    """`verify_signatures(staged)` and `os.replace(staged, destination)` —
+    for both, the staged file is what the call was handed first."""
+    return str(args[0])
+
+
+def _written_stream_name(args: tuple) -> str:
+    """`writer.write(stream)` — the staged path is the name of the stream the
+    writer was handed, the way Ghostscript's is the operand it was handed."""
+    return str(getattr(args[1], "name", ""))
+
+
+def _pyhanko_writer():
+    """The class whose `write` produces the bytes the certificate crypt doors
+    stage. Their producer is a method on a value rather than a module-level
+    function, so the death test replaces it where it is defined."""
+    from pyhanko.pdf_utils.writer import BasePdfFileWriter
+
+    return BasePdfFileWriter
+
+
+_PYHANKO_WRITER = _pyhanko_writer()
 
 
 def _ocr_effect(path: str) -> object:
@@ -660,6 +927,139 @@ def _field_descriptions(path: str) -> object:
 
 def _mark_count(path: str) -> object:
     return redact_marks_mod.list_redact_annotations(path)["count"]
+
+
+def _colorant_names(path: str) -> object:
+    """Every colorant the first page's colour spaces name — what an alias
+    renames and a conversion removes."""
+    names = set()
+    with pikepdf.open(path) as pdf:
+        table = pdf.pages[0].obj.get("/Resources", {}).get("/ColorSpace")
+        for key in list((table or {}).keys()):
+            space = table[key]
+            if not isinstance(space, Array) or len(space) < 2:
+                continue
+            head = str(space[0])
+            if head == "/Separation":
+                names.add(str(space[1]).lstrip("/"))
+            elif head == "/DeviceN":
+                names.update(str(n).lstrip("/") for n in space[1])
+    return sorted(names)
+
+
+def _trap_assignments(path: str) -> object:
+    read = trapping_mod.list_trap_presets(path)
+    return (
+        read["trapped"],
+        [(e["first"], e["last"], e["name"]) for e in read["assignments"]],
+    )
+
+
+def _list_appearance(path: str) -> object:
+    """The option list's drawn appearance — the whole claim the redraw
+    makes, since laying the rows out IS what the door does."""
+    with pikepdf.open(path) as pdf:
+        for annot in pdf.pages[0].obj.get("/Annots", []):
+            if str(annot.get("/T", "")) == LIST_FIELD:
+                return bytes(annot["/AP"]["/N"].read_bytes())
+    return None
+
+
+def _field_appearance_strings(path: str) -> object:
+    """Every field's `/DA` — the font a vertical binding renames, and its
+    size and colour, which that binding must keep."""
+    with pikepdf.open(path) as pdf:
+        return sorted(
+            str(entry.get("/DA", ""))
+            for entry in pdf.Root["/AcroForm"]["/Fields"]
+        )
+
+
+def _encryption_kind(path: str) -> object:
+    return pubkey_crypt_mod.classify_encryption(path)
+
+
+def _decrypted_drawing(path: str) -> list:
+    """What a certificate-encrypted document still draws, read by opening it
+    as its own recipient. pikepdf cannot read this handler at all, so there
+    is nothing for `_drawn` to compare until the file is decrypted."""
+    import tempfile
+
+    work = Path(tempfile.mkdtemp(prefix="spectrapdf-inplace-pubkey-"))
+    try:
+        plain = work / "plain.pdf"
+        pubkey_crypt_mod.decrypt_with_pfx(
+            path, str(plain), str(Path(path).parent / PFX_NAME), PFX_PASSWORD)
+        return _drawn(plain)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _page_image_digests(path: str) -> object:
+    """Each first-page image XObject's stored bytes, digested — what a
+    re-encoded scan changes and a document nothing happened to does not."""
+    import hashlib
+
+    with pikepdf.open(path) as pdf:
+        xobjects = pdf.pages[0].obj.get("/Resources", {}).get("/XObject") or {}
+        return sorted(
+            hashlib.sha256(bytes(xobjects[key].read_raw_bytes())).hexdigest()
+            for key in xobjects.keys()
+        )
+
+
+def _signature_state(path: str) -> object:
+    """Every signature the document carries and whether each still verifies —
+    the whole readable claim about a signing or a transplant."""
+    read = signatures_mod.verify_signatures(path)
+    return sorted(
+        (row.get("field"), bool(row.get("valid")), bool(row.get("intact")))
+        for row in read["signatures"]
+    )
+
+
+def _paragraph_texts(path: str) -> object:
+    return [
+        row["text"] for row in text_paragraphs_mod.list_text_paragraphs(path, 1)["paragraphs"]
+    ]
+
+
+def _create_reviewed_fields(src: str, out: str) -> dict:
+    """The door takes the detector's OWN rows, so they are resolved from the
+    document the same way the review surface resolves them."""
+    rows = form_detect_mod.detect_form_fields(src, scan="never")["candidates"]
+    return form_prepare_mod.create_detected_fields(src, out, rows)
+
+
+def _replace_first_paragraph(src: str, out: str) -> dict:
+    """The door refuses a stale view, so the fingerprint is read off the
+    listing the way the editor reads it."""
+    para = text_paragraphs_mod.list_text_paragraphs(src, 1)["paragraphs"][0]
+    text = "Rewritten alpha beta gamma"
+    return text_paragraphs_mod.replace_paragraph_text(
+        src, out, 1, para["index"], text,
+        [{"start": 0, "end": len(text), "run": para["runs"][0]}],
+        para["runs"], para["text"],
+    )
+
+
+def _merge_second_paragraph(src: str, out: str) -> dict:
+    """Both paragraphs are fingerprinted, so both are read off the listing."""
+    paragraphs = text_paragraphs_mod.list_text_paragraphs(src, 1)["paragraphs"]
+    previous, current = paragraphs[0], paragraphs[1]
+    return text_paragraphs_mod.merge_paragraph_with_previous(
+        src, out, 1, current["index"],
+        previous["runs"], previous["text"], current["runs"], current["text"],
+    )
+
+
+def _transplant_onto_the_original(src: str, out: str) -> dict:
+    """The door takes an original AND the modified document; `src` is the
+    modified one and the original sits beside it, so the case's `(file,
+    output)` shape still asks the in-place question about the file the door
+    is allowed to write."""
+    return incremental_mod.transplant_incremental(
+        str(Path(src).parent / ORIGINAL_NAME), src, out)
 
 
 CASES = (
@@ -1252,6 +1652,215 @@ CASES = (
         # two runs of one input differ in the second they ran.
         deterministic=False,
     ),
+    Case(
+        "ink_alias",
+        ink_manager_mod,
+        _two_spots,
+        lambda src, out: ink_manager_mod.alias_ink(src, out, ALIAS_SOURCE, ALIAS_TARGET),
+        _colorant_names,
+        doors=("alias_ink",),
+    ),
+    Case(
+        "ink_spot_to_process",
+        ink_manager_mod,
+        _cmyk_spot,
+        lambda src, out: ink_manager_mod.spot_to_process(src, out, [SPOT_INK]),
+        _colorant_names,
+        doors=("spot_to_process",),
+    ),
+    Case(
+        # `trapping` writes through `page_images._save`, so the module whose
+        # `save_pdf` the death test replaces is `page_images`.
+        "trapping_assign",
+        page_images_mod,
+        _blank,
+        lambda src, out: trapping_mod.assign_presets(src, out, assignments=[
+            {"first": 1, "last": 2, "name": "Press A", "preset": {"TrapWidth": 2.5}},
+        ]),
+        _trap_assignments,
+        doors=("assign_trap_presets",),
+    ),
+    Case(
+        "form_authoring_choice_appearance",
+        form_authoring_mod,
+        _with_option_list,
+        lambda src, out: form_authoring_mod.author_choice_appearance(
+            src, out, fields=[LIST_FIELD], font_dir=""),
+        _list_appearance,
+        doors=("author_choice_appearance",),
+    ),
+    Case(
+        "form_authoring_vertical_font",
+        form_authoring_mod,
+        _with_field,
+        lambda src, out: form_authoring_mod.author_vertical_field_font(
+            src, out, fields=["Full_name"], script="japanese",
+            font_dir=str(FONTS_DIR)),
+        _field_appearance_strings,
+        doors=("author_vertical_field_font",),
+        needs_cjk=True,
+    ),
+    Case(
+        # `text_runs` writes through `page_images._save`, like its siblings
+        # above.
+        "text_runs_convert",
+        page_images_mod,
+        _with_text,
+        lambda src, out: text_runs_mod.convert_text_run(
+            src, out, 1, 0, "CONVERTED", str(FONTS_DIR)),
+        _text_of,
+        doors=("convert_text_run",),
+        needs_fonts=True,
+    ),
+    Case(
+        # The field doors write through `form_authoring._save`, so that is
+        # the module the death test replaces.
+        "form_prepare_create_detected",
+        form_authoring_mod,
+        _ruled_form,
+        _create_reviewed_fields,
+        _field_names,
+        doors=("create_detected_fields",),
+    ),
+    Case(
+        "form_prepare_headless",
+        form_authoring_mod,
+        _ruled_form,
+        lambda src, out: form_prepare_mod.prepare_form_fields(src, out, scan="never"),
+        _field_names,
+        doors=("prepare_form_fields",),
+    ),
+    Case(
+        "pubkey_encrypt",
+        pubkey_crypt_mod,
+        _blank_with_identity,
+        lambda src, out: pubkey_crypt_mod.encrypt_with_certs(
+            src, out, [str(Path(src).parent / CERT_NAME)]),
+        _encryption_kind,
+        doors=("encrypt_pubkey",),
+        leaves=(CERT_NAME, PFX_NAME),
+        # A fresh content-encryption key per run, so one input has more than
+        # one correct output.
+        deterministic=False,
+        compare=_decrypted_drawing,
+        dies_on=_PYHANKO_WRITER,
+        dies="write",
+        staged_of=_written_stream_name,
+        # The container's size is a function of the key material the run drew.
+        varies=("size_bytes",),
+    ),
+    Case(
+        "pubkey_decrypt",
+        pubkey_crypt_mod,
+        _cert_encrypted,
+        lambda src, out: pubkey_crypt_mod.decrypt_with_pfx(
+            src, out, str(Path(src).parent / PFX_NAME), PFX_PASSWORD),
+        _encryption_kind,
+        doors=("decrypt_pubkey",),
+        leaves=(CERT_NAME, PFX_NAME),
+        dies_on=_PYHANKO_WRITER,
+        dies="write",
+        staged_of=_written_stream_name,
+        # The rewrite draws a fresh trailer `/ID`, so one input has more than
+        # one correct output.
+        deterministic=False,
+    ),
+    Case(
+        # `enhance_scan` writes through `mrc._save`, so the module whose
+        # `save_pdf` the death test replaces is `mrc`.
+        "enhance_scan",
+        mrc_mod,
+        _skew_fixture,
+        None,  # filled in below; the run needs the Ghostscript path
+        _page_image_digests,
+        doors=("enhance_scan",),
+        needs_gs=True,
+        # Orientation is the one arm that asks a recogniser; the raster arms
+        # this case drives do not, so the case does not need one.
+        run_gs=lambda src, out, gs: enhance_scan_mod.enhance_scan(
+            src, out, orientation=False, gs_path=gs),
+    ),
+    Case(
+        # `flattener` writes through `page_images._save` too.
+        "flatten_transparency",
+        page_images_mod,
+        _alpha_page,
+        None,  # filled in below; the run needs the Ghostscript path
+        _xobjects,
+        doors=("flatten_transparency",),
+        needs_gs=True,
+        run_gs=lambda src, out, gs: flattener_mod.flatten_transparency(
+            src, out, balance=0.0, gs_path=gs),
+    ),
+    Case(
+        # The paragraph editors write through `page_images._save` as well.
+        "text_paragraphs_replace",
+        page_images_mod,
+        _two_paragraphs,
+        _replace_first_paragraph,
+        _paragraph_texts,
+        doors=("replace_paragraph_text",),
+    ),
+    Case(
+        "text_paragraphs_merge",
+        page_images_mod,
+        _two_paragraphs,
+        _merge_second_paragraph,
+        _paragraph_texts,
+        doors=("merge_paragraph_with_previous",),
+    ),
+    Case(
+        # `ocr_file` writes through `apply_ocr_layer`, so the module whose
+        # `save_pdf` the death test replaces is `ocr_layer`.
+        "ocr_file",
+        ocr_layer_mod,
+        _unrecognised_scan_fixture,
+        None,  # filled in below; the run needs the Ghostscript path
+        _ocr_effect,
+        doors=("ocr_file",),
+        needs_gs=True,
+        needs_tesseract=True,
+        run_gs=lambda src, out, gs: batch_ocr_mod.ocr_file(
+            src, out, tesseract_path=str(TESSERACT), gs_path=gs),
+    ),
+    Case(
+        # Signing stages by hand: the revision is written to a temp beside
+        # the output, VERIFIED there, and only then swapped in. The verify is
+        # what the death test replaces, because it is the one producer call
+        # inside the span the staged file exists for.
+        "sign_pdf",
+        signatures_mod,
+        _signable,
+        lambda src, out: signatures_mod.sign_pdf(
+            file=src, output=out, pfx_path=str(Path(src).parent / SIGNER_NAME),
+            password=SIGNER_PASSWORD, allow_in_place=True),
+        _signature_state,
+        doors=("sign_pdf",),
+        leaves=(SIGNER_NAME,),
+        dies="verify_signatures",
+        staged_of=_first_argument,
+        # A signature carries the moment it was made and fresh padding, so
+        # one input has more than one correct output.
+        deterministic=False,
+    ),
+    Case(
+        # The transplant stages by hand as well: the appended revision is
+        # written to a temp beside the output and landed with `os.replace`,
+        # which is therefore the call the death test replaces.
+        "transplant_incremental",
+        incremental_mod,
+        _signed_and_modified,
+        _transplant_onto_the_original,
+        _signature_state,
+        doors=("transplant_incremental",),
+        leaves=(ORIGINAL_NAME, SIGNER_NAME),
+        dies_on=incremental_mod.os,
+        dies="replace",
+        staged_of=_first_argument,
+        # The appended revision carries its own update `/ID`, drawn fresh per
+        # run, so one input has more than one correct output.
+        deterministic=False,
+    ),
 )
 
 
@@ -1260,6 +1869,10 @@ def case(request, gs_path_or_none):
     subject = request.param
     if subject.needs_fonts and not (FONTS_DIR / "LiberationSans-Regular.ttf").is_file():
         pytest.skip("bundled fonts not provisioned")
+    if subject.needs_cjk and not (FONTS_DIR / "NotoSansCJKsc-Regular.otf").is_file():
+        pytest.skip("bundled CJK face not provisioned")
+    if subject.needs_tesseract and not TESSERACT.is_file():
+        pytest.skip("Tesseract not vendored")
     if subject.needs_gs:
         if gs_path_or_none is None:
             pytest.skip("Ghostscript not available")
@@ -1341,7 +1954,8 @@ class TestWritingBackOverTheInput:
         if case.deterministic:
             assert subject.read_bytes() == control.read_bytes()
         else:
-            assert _drawn(subject) == _drawn(control)
+            read = case.compare or _drawn
+            assert read(subject) == read(control)
         assert case.effect(str(subject)) == case.effect(str(control))
         # The op has to have DONE something, or byte-identity is the identity
         # of two documents nothing happened to.
@@ -1506,52 +2120,41 @@ EXCLUDED_DOORS = {
     ),
 }
 
-#: Doors that DO accept writing over their input and have no case here yet —
-#: a recorded gap, not a disposition. Each says what a case for it needs, so
-#: the next lane can pick one up; the guard fails if one is added or if one is
-#: cased and left behind.
-UNCASED_DOORS = {
-    "alias_ink": "needs a document carrying spot-colour separations",
-    "spot_to_process": "needs a document carrying spot-colour separations",
-    "assign_trap_presets": "needs an authored trapping setup to assign",
-    "author_choice_appearance": "needs a list or combo field to redraw",
-    "author_vertical_field_font": (
-        "needs a vertical-script field and the bundled text fonts"
-    ),
-    "convert_text_run": "needs a font file to convert the run into",
-    "create_detected_fields": "needs the field detector's candidate rows",
-    "encrypt_pubkey": "needs a recipient certificate",
-    "decrypt_pubkey": "needs a certificate and the PFX holding its key",
-    "enhance_scan": "needs Ghostscript and a scanned page to enhance",
-    "flatten_transparency": "needs Ghostscript and an authored transparency group",
-    "merge_paragraph_with_previous": (
-        "needs the paragraph lister's expected-runs and expected-text arguments"
-    ),
-    "replace_paragraph_text": (
-        "needs the paragraph lister's expected-runs and expected-text arguments"
-    ),
-    "ocr_file": "needs Tesseract",
-    "prepare_form_fields": "needs Tesseract",
+#: Doors whose in-place mode is real but is NOT a `(file, output)` question:
+#: the walk is handed two FOLDERS and a flag, and the write over an input
+#: happens per file inside it. A `Case` cannot ask that — its whole shape is
+#: one document handed in twice — so each of these is held to the file that
+#: asks the same three properties of the walk instead. The site is named to a
+#: test, and the guard below opens it: a citation nothing backs is worse than
+#: a gap, because it reads as coverage.
+WALK_DOORS = {
     "batch_ocr": (
-        "a folder walk rather than a (file, output) door; its in-place mode "
-        "is pinned by tests/test_batch_ocr_tails.py"
+        "a folder walk: the sweep is handed a source folder and an in-place "
+        "flag, and replaces each original from a staging file beside it",
+        "test_inplace_folder_walks.py",
+        "TestBatchOcrInPlace",
     ),
     "run_action": (
-        "a folder walk rather than a (file, output) door; its in-place mode "
-        "is pinned by tests/test_guided_actions.py"
+        "a folder walk: the action runs its steps into a staging file beside "
+        "each original and swaps that in",
+        "test_inplace_folder_walks.py",
+        "TestRunActionInPlace",
     ),
     "run_preflight_sweep": (
-        "a folder walk rather than a (file, output) door"
-    ),
-    "sign_pdf": (
-        "stages by hand and gates in-place behind `allow_in_place`; that mode "
-        "is pinned by tests/test_engine.py"
-    ),
-    "transplant_incremental": (
-        "takes an original AND a modified document, so 'the input' is two "
-        "files; its writes are pinned by tests/test_certification.py"
+        "a folder walk: fix mode stages each repaired file beside the "
+        "original and swaps that in",
+        "test_inplace_folder_walks.py",
+        "TestPreflightSweepInPlace",
     ),
 }
+
+#: Doors that DO accept writing over their input and have no case here yet —
+#: a recorded gap, not a disposition. Each would say what a case for it
+#: needs, so the next lane could pick one up; the guard fails if one is added
+#: and left uncased, or if one is cased and left behind. It is empty: every
+#: door the engine stages for is cased here, cased in the `finish_staged`
+#: family, walked (above), or excluded (below).
+UNCASED_DOORS: dict = {}
 
 #: Grayscale's op is driven by `TestTheProducerShapedStaging` in the
 #: `finish_staged` family rather than by a `Case`, because its staging is
@@ -1584,6 +2187,7 @@ class TestEveryInPlaceDoorIsAccountedFor:
             set(same_path_capable())
             - _cased_doors()
             - set(EXCLUDED_DOORS)
+            - set(WALK_DOORS)
             - set(UNCASED_DOORS)
         )
         assert uncovered == [], (
@@ -1595,18 +2199,30 @@ class TestEveryInPlaceDoorIsAccountedFor:
             "EXCLUDED_DOORS with the reason its output can never be its input."
         )
 
+    def test_the_roster_of_gaps_is_empty(self):
+        """`UNCASED_DOORS` records doors nothing exercises. A door parked
+        there is a door whose in-place write is proven by nothing, so the
+        roster's resting state is empty and an addition to it is a red."""
+        assert sorted(UNCASED_DOORS) == []
+
     def test_a_door_that_gained_a_case_leaves_the_roster(self):
         """A stale roster entry is how a covered door goes on reading as a
         gap, and how an excluded one keeps an exclusion it no longer earns."""
         cased = _cased_doors()
         assert sorted(cased & set(UNCASED_DOORS)) == []
         assert sorted(cased & set(EXCLUDED_DOORS)) == []
+        assert sorted(cased & set(WALK_DOORS)) == []
 
     def test_every_name_in_the_tables_is_a_door_the_engine_registers(self):
         """A typo, or a door that was renamed or removed, would otherwise sit
         in a table forever excusing nothing."""
         registered = set(registered_doors())
-        named = set(EXCLUDED_DOORS) | set(UNCASED_DOORS) | _cased_doors()
+        named = (
+            set(EXCLUDED_DOORS)
+            | set(WALK_DOORS)
+            | set(UNCASED_DOORS)
+            | _cased_doors()
+        )
         assert sorted(named - registered) == []
 
     def test_every_door_a_case_claims_accepts_writing_over_its_input(self):
@@ -1615,8 +2231,32 @@ class TestEveryInPlaceDoorIsAccountedFor:
         capable = set(same_path_capable())
         assert sorted(_cased_doors() - capable) == []
 
-    def test_no_uncased_door_is_also_excluded(self):
-        assert sorted(set(UNCASED_DOORS) & set(EXCLUDED_DOORS)) == []
+    def test_no_door_is_named_in_two_tables(self):
+        tables = (set(UNCASED_DOORS), set(EXCLUDED_DOORS), set(WALK_DOORS))
+        for first in range(len(tables)):
+            for second in range(first + 1, len(tables)):
+                assert sorted(tables[first] & tables[second]) == []
+
+    def test_every_walked_door_is_held_to_a_live_site(self):
+        """A folder walk is excused by a test that asks the SAME questions of
+        it, so the citation is opened rather than trusted: the file has to
+        exist, it has to name the class the row cites, and that class has to
+        drive the door it is cited for. A citation nothing backs reads as
+        coverage and is worse than an admitted gap.
+        """
+        here = Path(__file__).resolve().parent
+        for door, (_reason, filename, klass) in WALK_DOORS.items():
+            site = here / filename
+            assert site.is_file(), f"{door}: {filename} does not exist"
+            source = site.read_text(encoding="utf-8")
+            assert f"class {klass}" in source, (
+                f"{door}: {filename} has no {klass}"
+            )
+            body = source.split(f"class {klass}", 1)[1]
+            body = body.split("\nclass ", 1)[0]
+            assert door in body, (
+                f"{door}: {filename}'s {klass} never calls it"
+            )
 
 
 class TestTheGuardWouldHaveCaughtIt:
@@ -1635,6 +2275,7 @@ class TestTheGuardWouldHaveCaughtIt:
             set(same_path_capable())
             - _cased_doors()
             - set(EXCLUDED_DOORS)
+            - set(WALK_DOORS)
             - set(UNCASED_DOORS)
         )
 
@@ -1666,5 +2307,11 @@ class TestTheGuardWouldHaveCaughtIt:
         without = tuple(case for case in CASES if case.name != "struct_fix")
         assert self._uncovered_with(without, monkeypatch) != []
 
-        blind = sorted(set() - _cased_doors() - set(EXCLUDED_DOORS) - set(UNCASED_DOORS))
+        blind = sorted(
+            set()
+            - _cased_doors()
+            - set(EXCLUDED_DOORS)
+            - set(WALK_DOORS)
+            - set(UNCASED_DOORS)
+        )
         assert blind == []
