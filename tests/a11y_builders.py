@@ -1275,6 +1275,90 @@ def custom_mapped_to_li_judged_as_li(path):
     return save(pdf, path)
 
 
+def _inline_assembly(pdf, page, container, tags):
+    """One `Ruby` or `Warichu` assembly holding `tags` in the order given.
+
+    Each child is drawn on its own line down the page in tree order, so tag
+    order and page order agree and the only thing that can move is the content
+    model of the container. Real ruby sets its annotation beside the base text;
+    a fixture that did would move the reading-order check as well.
+    """
+    parts = ["/P <</MCID 0>> BDC BT /F1 11 Tf 40 740 Td (Body copy.) Tj ET EMC"]
+    for i, tag in enumerate(tags):
+        parts.append(
+            f"/{tag} <</MCID {i + 1}>> BDC BT /F1 11 Tf 40 {700 - i * 30} Td "
+            f"(Text {i + 1}) Tj ET EMC"
+        )
+    draw(pdf, page, "\n".join(parts))
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    kids = [elem(pdf, tag, doc, page=page, mcid=i + 1) for i, tag in enumerate(tags)]
+    assembly = elem(pdf, container, doc, kids=kids)
+    doc[Name.K] = Array([para, assembly])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para, *kids])
+
+
+def ruby_rb_rt_ok(path):
+    """PASS fixture — ISO 32000-2 Table 369's shorter ruby: one `RB` followed
+    by an `RT`."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _inline_assembly(pdf, page, "Ruby", ["RB", "RT"])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def ruby_four_child_ok(path):
+    """PASS fixture — Table 369's other ruby: one `RB` followed by the
+    three-element sequence `RP`, `RT`, `RP`. A check that only counted
+    children, or only read the first two, would fail this."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _inline_assembly(pdf, page, "Ruby", ["RB", "RP", "RT", "RP"])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def warichu_wp_wt_wp_ok(path):
+    """PASS fixture — Table 369's warichu sequence, complete."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _inline_assembly(pdf, page, "Warichu", ["WP", "WT", "WP"])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def ruby_annotation_before_base_fails(path):
+    """The right children in the wrong order: Table 369 puts the `RB` first."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _inline_assembly(pdf, page, "Ruby", ["RT", "RB"])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def ruby_two_bases_fails(path):
+    """The right children in the right order, one too many: Table 369 admits
+    ONE `RB`."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _inline_assembly(pdf, page, "Ruby", ["RB", "RB", "RT"])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def warichu_unclosed_fails(path):
+    """A warichu missing its closing punctuation. Every child is one Table 369
+    admits, so a membership-only reading calls this conformant."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _inline_assembly(pdf, page, "Warichu", ["WP", "WT"])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
 # ── headings ──────────────────────────────────────────────────────────────
 
 
@@ -1413,6 +1497,14 @@ ROSTER = {
     "thead_tbody_ok": (thead_tbody_ok, "structure_nesting", "pass"),
     "lbl_under_l_fails": (lbl_under_l_fails, "structure_nesting", "fail"),
     "thead_outside_table_fails": (thead_outside_table_fails, "structure_nesting", "fail"),
+    "ruby_rb_rt_ok": (ruby_rb_rt_ok, "structure_nesting", "pass"),
+    "ruby_four_child_ok": (ruby_four_child_ok, "structure_nesting", "pass"),
+    "warichu_wp_wt_wp_ok": (warichu_wp_wt_wp_ok, "structure_nesting", "pass"),
+    "ruby_annotation_before_base_fails": (
+        ruby_annotation_before_base_fails, "structure_nesting", "fail",
+    ),
+    "ruby_two_bases_fails": (ruby_two_bases_fails, "structure_nesting", "fail"),
+    "warichu_unclosed_fails": (warichu_unclosed_fails, "structure_nesting", "fail"),
     "lbody_outside_li_fails": (lbody_outside_li_fails, "list_labels", "fail"),
     "custom_mapped_to_li_judged_as_li": (
         custom_mapped_to_li_judged_as_li, "list_items", "fail",
