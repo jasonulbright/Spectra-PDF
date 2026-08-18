@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -40,6 +41,7 @@ from engine.form_detect import _crop_box, _display_rect_to_pdf, _page_rotate
 from engine.ocr_layer import apply_ocr_layer
 from engine.recognize import recognize
 from engine.repair import repair
+from engine.widget_faces import regenerate_appearances_file
 
 # Mirrors search/extract.ts MIN_TEXT_CHARS -- the GUI and the CLI must not
 # disagree about whether a page is a scan.
@@ -54,6 +56,7 @@ def _mrc_step(
     lang: str,
     gs_path: str,
     tesseract_path: str,
+    font_dir: str = "",
 ) -> tuple[bool, str]:
     """MRC-compress one already-recognised file. Returns (applied, note).
 
@@ -68,10 +71,19 @@ def _mrc_step(
     A file with no scanned page refuses by name from the engine and that
     refusal is the ordinary case for a mixed folder -- it is reported as a
     note, not as an error, and the file keeps the bytes it already had.
+
+    The MRC pass reads its source as CONTENT, so it takes the same prepared
+    copy the Ghostscript-backed ops take: a widget carrying no appearance is
+    given one first. MRC drops no widget and flattens nothing (measured), so
+    a document whose fields all carry an appearance comes out byte-identical
+    either way -- what the shared preparation buys is that the two staged
+    reads cannot drift apart, not a change today.
     """
+    scratch = Path(tempfile.mkdtemp(prefix="spectra-batch-mrc-"))
     try:
+        prepared = regenerate_appearances_file(Path(source), scratch, font_dir) or source
         report = compress(
-            str(source),
+            str(prepared),
             str(dest),
             quality="mrc",
             mrc_preset=preset,
@@ -82,6 +94,8 @@ def _mrc_step(
         )
     except Exception as exc:  # noqa: BLE001 - per-file isolation, as above
         return False, f"MRC compression did not apply: {exc}"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
     note = (
         f"MRC compressed {report['pages_mrc']} page(s), "
         f"{report['original_size']} -> {report['compressed_size']} bytes"
@@ -335,6 +349,7 @@ def ocr_file(
     mrc_verify_text: bool = False,
     enhance: bool = False,
     enhance_orientation: bool = True,
+    font_dir: str = "",
 ) -> dict:
     """Make ONE file searchable — the single-file arm of the batch pipeline.
 
@@ -397,7 +412,7 @@ def ocr_file(
         # same-file case with a staged temp and a rename.
         applied, note = _mrc_step(
             output_path, output_path, mrc_preset, mrc_verify_text, language, gs_path,
-            tesseract_path,
+            tesseract_path, font_dir,
         )
         result["mrc"] = note
         if applied:
@@ -462,6 +477,7 @@ def batch_ocr(
     mrc_verify_text: bool = False,
     enhance: bool = False,
     enhance_orientation: bool = True,
+    font_dir: str = "",
 ) -> dict:
     """Mirror a folder of PDFs into searchable copies — or, with `in_place`,
     REPLACE each original with its searchable version (in-place batch
@@ -709,7 +725,7 @@ def batch_ocr(
                     mrc_source = out_path
                 applied_mrc, note = _mrc_step(
                     mrc_source, out_path, mrc_preset, mrc_verify_text, lang, gs_path,
-                    tesseract_path,
+                    tesseract_path, font_dir,
                 )
                 result["mrc"] = note
                 if applied_mrc:

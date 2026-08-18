@@ -588,6 +588,9 @@ export const STEP_CATALOG: readonly StepDef[] = [
     title: 'Make Searchable (OCR)',
     needsGs: true,
     needsTesseract: true,
+    // The MRC tail prepares its source the way the Ghostscript-backed ops
+    // prepare theirs, so an /AP-less field is not left to the producer.
+    needsFontDir: true,
     params: [
       {
         key: 'language',

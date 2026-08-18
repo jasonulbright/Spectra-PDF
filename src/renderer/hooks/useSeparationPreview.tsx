@@ -10,7 +10,7 @@ import React, {
 import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { showableDocuments } from '../state/selectors';
 import { useEngine } from './useEngine';
-import { batch as batchBridge, dialog } from '../lib/tauri-bridge';
+import { app, batch as batchBridge, dialog } from '../lib/tauri-bridge';
 import { ensureGsPath } from '../panels/SettingsPanel';
 import {
   DEFAULT_TAC_LIMIT,
@@ -412,6 +412,10 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
       setError('');
       try {
         const gsPath = await ensureGsPath();
+        // A field carrying no appearance rasters through the device's own
+        // synthesis without these, so the plates would show a value the
+        // document does not state.
+        const fontDir = await app.getEditFontPath();
         const request = simulationRequest(
           simulationSource, simulationProfilePath, paperWhite, blackInk,
         );
@@ -434,6 +438,7 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
               gs_path: gsPath,
               overprint,
               simulation: request,
+              font_dir: fontDir,
             });
             if (cancelled) return;
             if (!livePageIds.has(target.pageId)) continue;
