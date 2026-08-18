@@ -25,6 +25,15 @@ describe('preserveReason', () => {
     expect(preserveReason({ applied: false, reason: 'no-delta' })).toEqual({
       key: 'app.preserve.noDelta',
     });
+    // Both AcroForm refusals are named reasons, not free text: a form the edit
+    // dropped and a form the catalog stores directly are distinct causes, and
+    // the raw-detail path would have shown the enum name as prose.
+    expect(preserveReason({ applied: false, reason: 'acroform-removed' })).toEqual({
+      key: 'app.preserve.acroformRemoved',
+    });
+    expect(preserveReason({ applied: false, reason: 'acroform-inline' })).toEqual({
+      key: 'app.preserve.acroformInline',
+    });
   });
 
   it('reads the certification level as a FIELD, never by splitting the reason', () => {

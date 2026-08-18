@@ -40,6 +40,8 @@ export type PreserveReasonKey =
   | 'app.preserve.encrypted'
   | 'app.preserve.catalogChanged'
   | 'app.preserve.noDelta'
+  | 'app.preserve.acroformRemoved'
+  | 'app.preserve.acroformInline'
   | 'app.preserve.certifiedNoChanges'
   | 'app.preserve.certifiedFormFill'
   | 'app.preserve.certifiedAnnotate'
@@ -56,6 +58,8 @@ const NAMED: Record<string, PreserveReasonKey> = {
   encrypted: 'app.preserve.encrypted',
   'catalog-changed': 'app.preserve.catalogChanged',
   'no-delta': 'app.preserve.noDelta',
+  'acroform-removed': 'app.preserve.acroformRemoved',
+  'acroform-inline': 'app.preserve.acroformInline',
 };
 
 const CERTIFIED: Record<string, PreserveReasonKey> = {

@@ -28,6 +28,8 @@
   "app.prefs.aria": "Préférences",
   "app.prefs.close": "Fermer",
   "app.prefs.title": "Préférences",
+  "app.preserve.acroformInline": "le formulaire du document est enregistré d’une manière qu’une révision ajoutée ne peut pas mettre à jour",
+  "app.preserve.acroformRemoved": "la modification supprime le formulaire du document",
   "app.preserve.catalogChanged": "la modification va au-delà de ce qu’une révision ajoutée peut porter",
   "app.preserve.certifiedAnnotate": "le document est certifié et seuls le remplissage de ses formulaires, sa signature et les commentaires sont autorisés",
   "app.preserve.certifiedFormFill": "le document est certifié et seuls le remplissage de ses formulaires et sa signature sont autorisés",
