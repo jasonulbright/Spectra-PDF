@@ -1,10 +1,13 @@
 // Certification (DocMDP) signatures end to end: certifying in place, the
 // panel's certified readout, and what the document's own policy permits.
 //
-// The two properties under test are the ones a user acts on: a change the
+// The three properties under test are the ones a user acts on: a change the
 // certification ALLOWS must not be reported as a violation (the failure that
-// would make the feature accuse its own users), and a certification that
-// allows nothing must REFUSE an edit rather than warn about it.
+// would make the feature accuse its own users); a certification that allows
+// nothing must REFUSE an edit rather than warn about it; and a change the
+// certification forbids must not be APPENDED into a file this product's own
+// verifier calls illegally modified — the append is refused, the rewrite lands,
+// and the loss of the signature is stated rather than left to be found here.
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -79,7 +82,7 @@ describe('certification signatures', () => {
     await waitForHarness();
   });
 
-  it('certifies for form filling, and reports the level, the permitted fill, and the violation', async () => {
+  it('certifies for form filling, reports the level, permits the fill, and refuses to append a comment', async () => {
     const work = await formFixture(join(tmp, 'certify-form-fill.pdf'));
     await closeAllFiles();
     await openByPaths([work]);
@@ -133,27 +136,42 @@ describe('certification signatures', () => {
     expect(filled.signatures[0].policy_ok).toBe(true);
     expect(filled.signatures[0].modification_level).toBe('FORM_FILLING');
 
-    // A comment is not: the certification is reported as violated, and the
-    // panel still names the level it allows.
+    // A comment is not, and the answer to that is a REFUSAL, not a preserved
+    // file that reports as a policy violation. The append tier's ceiling
+    // refuses every class the certification forbids, so the ordinary rewrite
+    // lands instead — and the commit says so rather than leaving the loss to
+    // be discovered in this panel.
+    //
+    // This case used to assert the opposite (append it, then report the
+    // violation), because that is what the product did before the ceiling
+    // existed. Producing a document our own verifier calls illegally modified
+    // is the behaviour that was removed, so the expectation moves with it.
     await setView('canvas');
     await focusTab({ doc: work });
     await addAnnotation({ kind: 'highlight', x: 0.2, y: 0.2, w: 0.25, h: 0.1, color: '#ffd54f' });
     await commitPendingEdits();
 
-    const annotated = await verifyOnPanel();
-    expect(annotated.any_policy_violation).toBe(true);
-    expect(annotated.signatures[0].policy_judged).toBe(true);
-    expect(annotated.signatures[0].policy_ok).toBe(false);
+    const notice = await $('[data-testid="confirm-message"]');
+    await notice.waitForDisplayed({ timeout: 20_000 });
+    const noticeText = await notice.getText();
+    expect(noticeText).toContain('could not be kept');
+    // The engine's structured reason, named as the level it allows.
+    expect(noticeText).toContain('certified to allow only form filling and signing');
+    // Nothing to decide: the rewrite has already landed.
+    await $('[data-testid="notice-ok"]').waitForExist({ timeout: 20_000 });
+    expect(await $('[data-testid="confirm-affirm"]').isExisting()).toBe(false);
+    await clickEl('[data-testid="notice-ok"]');
 
-    const violatedBanner = await $('[data-testid="certification-banner"]');
-    await violatedBanner.waitForDisplayed({ timeout: 20_000 });
-    expect(await violatedBanner.getAttribute('data-violated')).toBe('true');
-    expect(await (await $('[data-testid="certification-level"]')).getText()).toContain(
-      'Form filling',
-    );
-    const violation = await $('[data-testid="certification-violation"]');
-    await violation.waitForDisplayed({ timeout: 20_000 });
-    expect(await violation.getText()).toContain('annotations');
+    // And what the document is afterwards, said plainly: the rewrite took the
+    // certification with it, so there is no policy left to violate and the
+    // signature no longer verifies. A violated certification is now something
+    // this product REPORTS about files from elsewhere, never something it makes.
+    const annotated = await verifyOnPanel();
+    expect(annotated.certified).toBe(false);
+    expect(annotated.certification_level).toBe(null);
+    expect(annotated.all_valid).toBe(false);
+    expect(annotated.any_policy_violation).toBe(false);
+    expect(await $('[data-testid="certification-banner"]').isExisting()).toBe(false);
 
     await closeAllFiles();
   });
