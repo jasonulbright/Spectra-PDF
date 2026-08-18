@@ -1096,6 +1096,489 @@ def _vertical_appearance(
         del widget["/AS"]
 
 
+# ── Option-list appearances ───────────────────────────────────────────────
+#
+# A list box's appearance draws EVERY option, not just the selected ones, so
+# it is the one field kind whose appearance depends on arbitrary authored text
+# rather than on a value somebody typed. That is why it gets its own emitter
+# instead of borrowing the multiline text path: each option is its own line
+# with its own font, chosen by `_text_appearance`'s ladder per LINE, so a list
+# mixing Latin and CJK labels embeds only what its non-Latin lines need.
+#
+# One emitter for the surface: the create-time door and the fill both come
+# here, so an option list never has two appearance authors that could disagree
+# about where a row sits.
+
+#: The band drawn behind a selected row — pdf-lib's list-box highlight colour,
+#: so a list this emitter draws reads the same as one its provider drew.
+SELECTION_FILL = b"0.6 0.7569 0.8549 rg"
+
+#: The gap between a list box's border and its rows. pdf-lib's own list-box
+#: padding: a list this emitter redraws must not shift the rows the provider
+#: already laid out, or selecting an option would visibly move the whole list.
+LIST_PAD = 1.0
+
+
+def _row_pitch(size: float) -> float:
+    """The baseline-to-baseline distance of a list box's rows.
+
+    The glyph height rather than the point size carries the leading here,
+    which is what the other author of this surface uses. It differs from
+    `_text_appearance`'s multiline pitch deliberately: that draws a value's
+    wrapped lines, this draws rows a provider may already have placed.
+    """
+    return size * GLYPH_HEIGHT_EM * LINE_SPACING
+
+
+def _border_width(widget) -> float:
+    """The widget's border width, the format's default of 1 when it states
+    none (ISO 32000-2 Table 168 /BS /W)."""
+    bs = widget.get("/BS")
+    try:
+        return float(bs.get("/W", 1)) if bs is not None else 1.0
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _mk_color(components, stroke: bool) -> bytes | None:
+    """A /MK colour array as its colour operator, or None for the empty array.
+
+    An empty array is the format's "no colour" (ISO 32000-2 12.5.6.19), which
+    is why it is distinguished from a missing key only by reaching here at
+    all: both mean nothing is painted.
+    """
+    try:
+        values = [float(v) for v in components]
+    except (TypeError, ValueError):
+        return None
+    if len(values) == 1:
+        op = "G" if stroke else "g"
+    elif len(values) == 3:
+        op = "RG" if stroke else "rg"
+    elif len(values) == 4:
+        op = "K" if stroke else "k"
+    else:
+        return None
+    return (" ".join(_fmt(v) for v in values) + " " + op).encode("ascii")
+
+
+def _widget_chrome(widget, w: float, h: float) -> list[bytes]:
+    """The background and border operators a widget's own /MK and /BS state.
+
+    The emitter REPLACES the whole /AP /N, so a widget whose chrome it did not
+    redraw would lose the border and background it was created with. The
+    border is stroked on the inset centre line, so a 1 pt stroke lands inside
+    the rectangle rather than straddling it.
+    """
+    mk = widget.get("/MK")
+
+    def colour(key: str, stroke: bool) -> bytes | None:
+        if mk is None:
+            return None
+        components = mk.get(key)
+        return None if components is None else _mk_color(components, stroke)
+
+    background = colour("/BG", False)
+    border = colour("/BC", True)
+    width = _border_width(widget)
+    parts: list[bytes] = []
+    if background is not None:
+        parts.append(b"q")
+        parts.append(background)
+        parts.append(f"0 0 {_fmt(w)} {_fmt(h)} re f".encode("ascii"))
+        parts.append(b"Q")
+    if border is not None and width > 0:
+        half = width / 2.0
+        parts.append(b"q")
+        parts.append(border)
+        parts.append(f"{_fmt(width)} w".encode("ascii"))
+        parts.append(
+            f"{_fmt(half)} {_fmt(half)} {_fmt(w - width)} {_fmt(h - width)} re S".encode("ascii")
+        )
+        parts.append(b"Q")
+    return parts
+
+
+class _LineFont:
+    """One font a choice list draws a line through.
+
+    `width_em` measures a line and `emit` produces its show operators; a
+    standard WinAnsi face and an embedded subset differ in exactly those two
+    operations plus the resource name, which is what lets one emitter mix
+    them line by line.
+    """
+
+    __slots__ = ("name", "obj", "width_em", "emit")
+
+    def __init__(self, name: str, obj, width_em, emit):
+        self.name = name
+        self.obj = obj
+        self.width_em = width_em
+        self.emit = emit
+
+
+def _encodes_winansi(text: str) -> bool:
+    try:
+        text.encode("cp1252")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _standard_line_font(pdf: pikepdf.Pdf, requested: str) -> tuple[_LineFont, bool]:
+    """The /DA-requested /DR font, for the lines WinAnsi covers."""
+    name, obj, substituted = _dr_font(pdf, requested)
+
+    def emit(line: str, _size: float) -> bytes:
+        return b"(" + _escape_pdf_text(line) + b") Tj"
+
+    return _LineFont(name, obj, text_width_em, emit), substituted
+
+
+def _embedded_line_font(pdf: pikepdf.Pdf, name: str, face: str, text: str) -> _LineFont:
+    """A subset of `face` covering `text`, for the lines WinAnsi does not.
+
+    Built once per FACE over every line that resolved to it, so one subset
+    carries every glyph those lines draw. A face whose text reorders or
+    shapes goes through the shared right-to-left builder, exactly as the
+    value path does.
+    """
+    from engine import rtl_text
+
+    rtl = rtl_text.build(pdf, face, text)
+    if rtl is not None:
+        return _LineFont(
+            name, rtl.font_obj, rtl.width_em, lambda line, size, _r=rtl: _r.show(line, size)
+        )
+    from engine.font_fallback import build_fallback_font
+
+    obj, encode, width_1000 = build_fallback_font(pdf, face, text)
+    return _LineFont(
+        name,
+        obj,
+        lambda s, _w=width_1000: _w(s) / 1000.0,
+        lambda line, _size, _e=encode: b"<" + _e(line).hex().encode("ascii") + b"> Tj",
+    )
+
+
+def _choice_line_fonts(
+    pdf: pikepdf.Pdf, lines: list[str], da: str | None, font_dir: str
+) -> tuple[list[_LineFont], bool]:
+    """A font per line, in the lines' own order.
+
+    Raises ValueError naming the line when nothing bundled can draw it —
+    the same honest floor the value path has, reached before anything is
+    written so a refusal leaves no half-drawn appearance behind.
+    """
+    requested, _size, _color = _parse_da(da)
+    face_of: dict[str, str] = {}
+    for line in lines:
+        if _encodes_winansi(line) or line in face_of:
+            continue
+        face = _unicode_face(font_dir, da, line)
+        if face is None:
+            raise ValueError(
+                f"option {line!r} is outside the form font's encoding (WinAnsi) "
+                "and no fallback font is available"
+            )
+        missing = _face_missing(face, line)
+        if missing:
+            pretty = " ".join(f"'{c}'" for c in sorted(set(missing)))
+            raise ValueError(
+                f"option {line!r} contains characters no available font can render ({pretty})"
+            )
+        face_of[line] = face
+    by_face: dict[str, list[str]] = {}
+    for line, face in face_of.items():
+        by_face.setdefault(face, []).append(line)
+    embedded = {
+        face: _embedded_line_font(pdf, f"TxU{index}", face, " ".join(members))
+        for index, (face, members) in enumerate(by_face.items())
+    }
+    standard: _LineFont | None = None
+    substituted = False
+    out: list[_LineFont] = []
+    for line in lines:
+        if line in face_of:
+            out.append(embedded[face_of[line]])
+            continue
+        if standard is None:
+            standard, substituted = _standard_line_font(pdf, requested)
+        out.append(standard)
+    return out, substituted
+
+
+def _fit_choice_size(lines: list[str], fonts: list[_LineFont], w: float, h: float) -> float:
+    """Auto-size (/DA size 0) for a list: the largest size at which every
+    option's own row fits the box, on the shared downward scan."""
+    size = min(DEFAULT_FONT_SIZE * 2, h)
+    size = max(size, MIN_FONT_SIZE)
+    while size > MIN_FONT_SIZE:
+        needed = len(lines) * _row_pitch(size)
+        widest = max(
+            (font.width_em(line) * size for line, font in zip(lines, fonts)), default=0.0
+        )
+        if needed <= h and widest <= w:
+            return size
+        size -= 0.5
+    return MIN_FONT_SIZE
+
+
+def _visible_rows(labels: list[str], selected, top_index: int) -> tuple[list[str], set[int]]:
+    """The rows a list box shows and which of them are selected.
+
+    /TI is the index of the row drawn at the TOP (ISO 32000-2 12.7.5.4), so
+    everything above it has been scrolled out and the selection indices move
+    with it. A /TI past the end shows nothing rather than wrapping.
+    """
+    start = max(0, int(top_index))
+    rows = [flatten_control_chars(label, keep_newline=False) for label in labels[start:]]
+    marked = {index - start for index in selected if index >= start}
+    return rows, {index for index in marked if index < len(rows)}
+
+
+def _choice_list_appearance(
+    pdf: pikepdf.Pdf,
+    widget,
+    labels: list[str],
+    selected,
+    top_index: int,
+    da: str | None,
+    quadding: int,
+    font_dir: str = "",
+) -> bool:
+    """Regenerate a list box widget's /AP /N — every option as its own line.
+
+    Returns True when the /DA-requested font was missing from /DR and
+    Helvetica was substituted, the same signal `_text_appearance` returns.
+
+    A row is never wrapped: a list box shows one row per option and a label
+    too wide for the box is clipped, which is what the row/selection
+    correspondence means. The selection band is drawn under the clip so a
+    row scrolled past the bottom cannot paint outside the widget.
+    """
+    rect = [float(v) for v in widget["/Rect"]]
+    w = abs(rect[2] - rect[0])
+    h = abs(rect[3] - rect[1])
+    _requested, size, color = _parse_da(da)
+    rows, marked = _visible_rows(labels, selected, top_index)
+
+    if _da_writes_vertically(pdf, da):
+        _choice_vertical_appearance(
+            pdf, widget, rows, marked, da, quadding, font_dir, w, h, size, color
+        )
+        return False
+
+    border = _border_width(widget)
+    inset = border + LIST_PAD
+    box_w = w - 2 * inset
+    box_h = h - 2 * inset
+    fonts, substituted = _choice_line_fonts(pdf, rows, da, font_dir)
+    if size <= 0:
+        size = _fit_choice_size(rows, fonts, box_w, box_h)
+
+    pitch = _row_pitch(size)
+    slack = pitch - size * GLYPH_HEIGHT_EM
+    top = inset + box_h - pitch
+
+    clip = border / 2.0 + LIST_PAD
+    parts = [*_widget_chrome(widget, w, h), b"/Tx BMC", b"q"]
+    parts.append(
+        f"{_fmt(clip)} {_fmt(clip)} {_fmt(w - 2 * clip)} {_fmt(h - 2 * clip)} re W n".encode(
+            "ascii"
+        )
+    )
+    for index in sorted(marked):
+        baseline = top - index * pitch
+        bottom = baseline - size * HELVETICA_DESCENT_EM - slack / 2.0
+        parts.append(SELECTION_FILL)
+        parts.append(
+            f"{_fmt(border)} {_fmt(bottom)} {_fmt(w - border)} {_fmt(pitch)} re f".encode(
+                "ascii"
+            )
+        )
+    parts.append(b"BT")
+    parts.append(color.encode("ascii"))
+    current = None
+    for index, (line, font) in enumerate(zip(rows, fonts)):
+        if font.name != current:
+            parts.append(f"/{font.name} {_fmt(size)} Tf".encode("ascii"))
+            current = font.name
+        tw = font.width_em(line) * size
+        if quadding == 1:
+            x = inset + (box_w - tw) / 2
+        elif quadding == 2:
+            x = inset + box_w - tw
+        else:
+            x = inset
+        x = max(x, inset)
+        parts.append(f"1 0 0 1 {_fmt(x)} {_fmt(top - index * pitch)} Tm".encode("ascii"))
+        parts.append(font.emit(line, size))
+    parts.extend([b"ET", b"Q", b"EMC"])
+
+    resources = {}
+    for font in fonts:
+        resources["/" + font.name] = font.obj
+    if not resources:
+        # An option list with no rows still needs a resource dictionary a
+        # consumer can read; the standard face is the honest empty one.
+        empty, substituted = _standard_line_font(pdf, _parse_da(da)[0])
+        resources["/" + empty.name] = empty.obj
+    stream = pdf.make_stream(b"\n".join(parts))
+    stream["/Type"] = Name.XObject
+    stream["/Subtype"] = Name.Form
+    stream["/BBox"] = pikepdf.Array([0, 0, w, h])
+    stream["/Resources"] = Dictionary(Font=Dictionary(resources))
+    widget["/AP"] = Dictionary(N=pdf.make_indirect(stream))
+    if "/AS" in widget:
+        del widget["/AS"]
+    return substituted
+
+
+def _choice_vertical_appearance(
+    pdf: pikepdf.Pdf,
+    widget,
+    rows: list[str],
+    marked: set,
+    da: str | None,
+    quadding: int,
+    font_dir: str,
+    w: float,
+    h: float,
+    size: float,
+    color: str,
+) -> None:
+    """Regenerate a VERTICAL list box's /AP /N — every option as its own
+    column.
+
+    Same door as the line case: a field states its writing mode in its /DA
+    font's CMap, and an option list whose /DA says vertical draws its rows
+    down the page rather than across it. The stacking axis carries the row
+    pitch, so `/TI` and the selection band mean what they mean for lines,
+    one axis over.
+    """
+    from engine import vertical_text
+
+    if not font_dir or not Path(font_dir).is_dir():
+        raise ValueError(
+            "this option list writes vertically and no fallback font is available"
+        )
+    vt = vertical_text.build(pdf, font_dir, " ".join(rows), family=_family_for_da(da))
+    if size <= 0:
+        size = _fit_vertical_choice_size(rows, vt, w, h)
+
+    l_left, l_right, l_top, _l_bottom = vt.box(0.0, 0.0, w, h)
+    reading = l_right - l_left
+    pitch = size * LINE_SPACING
+    centre = l_top - TEXT_PAD - vt.cross_em * size / 2.0
+
+    parts = [*_widget_chrome(widget, w, h), b"/Tx BMC", b"q"]
+    parts.append(f"1 1 {_fmt(w - 2)} {_fmt(h - 2)} re W n".encode("ascii"))
+    for index in sorted(marked):
+        band = centre - index * pitch
+        corners = [
+            vt.anchor(along, across)
+            for along in (l_left, l_right)
+            for across in (band - pitch / 2.0, band + pitch / 2.0)
+        ]
+        x0 = min(x for x, _y in corners)
+        x1 = max(x for x, _y in corners)
+        y0 = min(y for _x, y in corners)
+        y1 = max(y for _x, y in corners)
+        parts.append(SELECTION_FILL)
+        parts.append(
+            f"{_fmt(x0)} {_fmt(y0)} {_fmt(x1 - x0)} {_fmt(y1 - y0)} re f".encode("ascii")
+        )
+    parts.append(b"BT")
+    parts.append(color.encode("ascii"))
+    parts.append(f"/TxV {_fmt(size)} Tf".encode("ascii"))
+    for index, column in enumerate(rows):
+        if not column:
+            continue  # a blank row still consumes its pitch, via `index`
+        length = vt.advance_em(column) * size
+        if quadding == 1:
+            along = l_left + (reading - length) / 2.0
+        elif quadding == 2:
+            along = l_right - TEXT_PAD - length
+        else:
+            along = l_left + TEXT_PAD
+        along = max(along, l_left + TEXT_PAD)
+        parts.append(
+            vt.matrix(along, centre + vt.cross_offset_em * size - index * pitch)
+        )
+        parts.append(vt.show(column, size))
+    parts.extend([b"ET", b"Q", b"EMC"])
+
+    stream = pdf.make_stream(b"\n".join(parts))
+    stream["/Type"] = Name.XObject
+    stream["/Subtype"] = Name.Form
+    stream["/BBox"] = pikepdf.Array([0, 0, w, h])
+    stream["/Resources"] = Dictionary(Font=Dictionary({"/TxV": vt.font_obj}))
+    widget["/AP"] = Dictionary(N=pdf.make_indirect(stream))
+    if "/AS" in widget:
+        del widget["/AS"]
+
+
+def _fit_vertical_choice_size(rows: list[str], vt, w: float, h: float) -> float:
+    """Auto-size for a vertical list: the reading axis is the box's HEIGHT
+    and the row-stacking axis its WIDTH, so the shared scan runs swapped."""
+    size = min(DEFAULT_FONT_SIZE * 2, w - 2 * TEXT_PAD)
+    size = max(size, MIN_FONT_SIZE)
+    while size > MIN_FONT_SIZE:
+        needed = len(rows) * size * LINE_SPACING
+        longest = max((vt.advance_em(row) * size for row in rows), default=0.0)
+        if needed <= w - 2 * TEXT_PAD and longest <= h - 2 * TEXT_PAD:
+            return size
+        size -= 0.5
+    return MIN_FONT_SIZE
+
+
+def _selected_indices(field: _Field) -> set:
+    """The /Opt indices a list box currently shows as selected.
+
+    /I is authoritative when present (ISO 32000-2 12.7.5.4 -- it exists so a
+    list with duplicate display strings can say WHICH row is chosen); a field
+    carrying only /V falls back to matching that value's exports.
+
+    /I is read off the field's OWN dict: the format makes /FT, /Ff, /V and /DV
+    inheritable and nothing else, so an ancestor's /I says nothing about this
+    field's selection.
+    """
+    indices = field.obj.get("/I")
+    if indices is not None:
+        out = set()
+        try:
+            for entry in indices:
+                out.add(int(entry))
+        except (TypeError, ValueError):
+            return set()
+        return out
+    value = field.attr("/V")
+    if value is None:
+        return set()
+    wanted = []
+    if isinstance(value, pikepdf.Array):
+        wanted = [str(v) for v in value]
+    else:
+        wanted = [str(value)]
+    out = set()
+    for want in wanted:
+        pair = _option_export_index(field, want)
+        if pair is not None and pair[1] >= 0:
+            out.add(pair[1])
+    return out
+
+
+def _top_index(field: _Field) -> int:
+    """/TI, the /Opt index of the row drawn at the top of the box. Not an
+    inheritable entry, so it is read off the field's own dict."""
+    value = field.obj.get("/TI")
+    try:
+        return max(0, int(value)) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
 def _fmt(v: float) -> str:
     return f"{v:.2f}".rstrip("0").rstrip(".") or "0"
 
@@ -1162,6 +1645,24 @@ def _text_value_problem(
     if missing:
         pretty = " ".join(f"'{c}'" for c in sorted(set(missing)))
         return f"value for {name} contains characters no available font can render ({pretty})"
+    return None
+
+
+def _choice_labels_problem(
+    name: str, labels: list[str], da: str | None, font_dir: str, vertical: bool = False
+) -> str | None:
+    """None when every OPTION of a list box can be drawn into its appearance.
+
+    A list box's appearance draws the whole list, so what has to be
+    renderable is the labels rather than the selection. Each label is checked
+    on its OWN: the appearance picks a font per line, so a list whose Korean
+    and Greek rows no single bundled face covers still draws — asking one
+    face to cover the union would refuse work the emitter does.
+    """
+    for label in labels:
+        problem = _text_value_problem(name, label, da, font_dir, vertical)
+        if problem is not None:
+            return problem
     return None
 
 
@@ -1538,6 +2039,13 @@ def fill_form_fields(
             elif ftype == "optionlist" and isinstance(value, (list, tuple)):
                 # A multi-select list box — every element must be an option;
                 # store /V as the export array + /I as the selected indices.
+                fda = _field_da(field, acro)
+                labels_prob = _choice_labels_problem(
+                    name, _options(field), fda, font_dir, _da_writes_vertically(pdf, fda)
+                )
+                if labels_prob is not None:
+                    problems.append(labels_prob)
+                    continue
                 if len(value) == 0:
                     plan.append((field, ftype, _CLEAR))  # nothing selected
                     continue
@@ -1553,19 +2061,19 @@ def fill_form_fields(
                     opts = ", ".join(_options(field))
                     problems.append(f"optionlist {name} has no option(s) {bad} (options: {opts})")
                 else:
-                    # The appearance draws the selected exports (one per line);
-                    # coverage-check that combined text.
-                    joined = "\n".join(e for e, _i in pairs)
-                    fda = _field_da(field, acro)
-                    prob = _text_value_problem(
-                        name, joined, fda, font_dir, _da_writes_vertically(pdf, fda)
+                    plan.append((field, ftype, pairs))
+            elif ftype in ("dropdown", "optionlist"):
+                editable = bool(field.flags & FF_EDIT) and ftype == "dropdown"
+                fda = _field_da(field, acro)
+                if ftype == "optionlist":
+                    # Clearing a list box still redraws its rows, so the
+                    # labels are checked even when nothing is selected.
+                    prob = _choice_labels_problem(
+                        name, _options(field), fda, font_dir, _da_writes_vertically(pdf, fda)
                     )
                     if prob is not None:
                         problems.append(prob)
-                    else:
-                        plan.append((field, ftype, pairs))
-            elif ftype in ("dropdown", "optionlist"):
-                editable = bool(field.flags & FF_EDIT) and ftype == "dropdown"
+                        continue
                 if str(value) == "" and not editable:
                     plan.append((field, ftype, _CLEAR))  # de-select a fixed choice
                     continue
@@ -1575,9 +2083,12 @@ def fill_form_fields(
                     problems.append(f"{ftype} {name} has no option {value!r} (options: {opts})")
                 else:
                     chosen = export if export is not None else str(value)
-                    fda = _field_da(field, acro)
-                    prob = _text_value_problem(
-                        name, chosen, fda, font_dir, _da_writes_vertically(pdf, fda)
+                    prob = (
+                        None
+                        if ftype == "optionlist"
+                        else _text_value_problem(
+                            name, chosen, fda, font_dir, _da_writes_vertically(pdf, fda)
+                        )
                     )
                     if prob is not None:
                         problems.append(prob)
@@ -1744,6 +2255,11 @@ def fill_form_fields(
                             else Name("/Off")
                         )
             else:  # text / dropdown / optionlist
+                # Which /Opt rows a list box's band covers after this edit.
+                # Taken from the EDIT rather than re-read off the field: the
+                # cached inherited attributes still carry the value this fill
+                # is replacing, so a cleared list would band its old row.
+                chosen: set = set()
                 if value is _CLEAR:
                     # De-select: drop /V and /I, blank the appearance.
                     if "/V" in field.obj:
@@ -1765,8 +2281,9 @@ def fill_form_fields(
                         field.obj["/I"] = pikepdf.Array(indices)
                     elif "/I" in field.obj:
                         del field.obj["/I"]
-                    appearance_text = "\n".join(exports)  # one selected item per line
+                    appearance_text = ""  # the list emitter draws from /Opt
                     multiline = True
+                    chosen = {i for _e, i in value if i >= 0}
                 else:
                     # /V holds the RAW value and /AP draws the FORMATTED one.
                     # A fill that stored the formatted string would corrupt
@@ -1776,11 +2293,33 @@ def fill_form_fields(
                     if "/I" in field.obj:
                         del field.obj["/I"]
                     multiline = ftype == "text" and bool(field.flags & FF_MULTILINE)
+                    if ftype == "optionlist":
+                        pair = _option_export_index(field, str(value))
+                        if pair is not None and pair[1] >= 0:
+                            chosen = {pair[1]}
                 try:
                     for widget in field.widgets:
-                        if _text_appearance(
-                            pdf, widget, appearance_text, da, multiline, quadding, font_dir
-                        ):
+                        # A list box shows its whole list with the selection
+                        # highlighted, so its appearance is authored from /Opt
+                        # rather than from the value — the SAME emitter the
+                        # create-time door uses, because two authors of one
+                        # surface disagree the moment either changes.
+                        if ftype == "optionlist":
+                            drew = _choice_list_appearance(
+                                pdf,
+                                widget,
+                                _options(field),
+                                chosen,
+                                _top_index(field),
+                                da,
+                                quadding,
+                                font_dir,
+                            )
+                        else:
+                            drew = _text_appearance(
+                                pdf, widget, appearance_text, da, multiline, quadding, font_dir
+                            )
+                        if drew:
                             if field.name not in fonts_substituted:
                                 fonts_substituted.append(field.name)
                 except ValueError as exc:
