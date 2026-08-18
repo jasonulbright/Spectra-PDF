@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import {
   DEFAULT_INK_DENSITY,
   DEFAULT_TAC_LIMIT,
@@ -40,12 +40,17 @@ import {
   pointerTravel,
   readInspection,
   resolutionState,
+  convertedToProcessMessage,
+  readSkippedShadings,
   type CacheEntry,
   type InspectedObject,
   type Plate,
+  type SkippedShading,
 } from '../src/renderer/lib/separation-preview';
 import { displayPointToPdf, pdfPointToDisplay } from '../src/renderer/lib/pdfx-build';
 import { rotateNormalizedPoint } from '../src/renderer/lib/redaction';
+import i18next from '../src/renderer/i18n';
+import { PANEL_STRINGS } from '../src/renderer/i18n-panels';
 
 const CYAN: Plate = { name: 'Cyan', kind: 'process', display_rgb: [0, 174, 239], file: 'c.tif' };
 const BLACK: Plate = { name: 'Black', kind: 'process', display_rgb: [35, 31, 32], file: 'k.tif' };
@@ -709,5 +714,113 @@ describe('the ink row’s caveat', () => {
     expect(inspectInkIsAFloor(read, true)).toBe(false);
     expect(inspectInkIsAFloor(read, false)).toBe(true);
     expect(inspectInkIsAFloor(null, false)).toBe(false);
+  });
+});
+
+// The conversion reports what it actually did. A spot the engine left live in
+// a gradient still prints that plate, so a message claiming the colorant is
+// gone is a claim the file contradicts on the press.
+describe('what a spot-to-process conversion reports', () => {
+  beforeAll(async () => {
+    await i18next.changeLanguage('en');
+    // English copy's source is the typed record; `locales/en/chrome.json` is
+    // GENERATED from it and the catalog gate holds the two equal. Seeding
+    // these three rows tests the COMPOSITION rather than whether the
+    // generator has been re-run — a stale catalog is the catalog gate's
+    // finding, and reading it here would report that failure twice under a
+    // name that does not describe it.
+    i18next.addResourceBundle('en', 'chrome', {
+      'panel.inkManager.converted': PANEL_STRINGS['panel.inkManager.converted'],
+      'panel.inkManager.convertedSkipped_one':
+        PANEL_STRINGS['panel.inkManager.convertedSkipped_one'],
+      'panel.inkManager.convertedSkipped_other':
+        PANEL_STRINGS['panel.inkManager.convertedSkipped_other'],
+    }, true, true);
+  });
+
+  const SPOT_NAME = 'PANTONE 185 C';
+  const PLAIN = 'PANTONE 185 C is now process colour.';
+
+  const skipped = (over: Partial<SkippedShading> = {}): SkippedShading => ({
+    shading: 1,
+    colorants: [SPOT_NAME],
+    reason: 'the shading maps a point in the plane, not one parametric value',
+    ...over,
+  });
+
+  it('reads every skip record the engine named', () => {
+    const read = readSkippedShadings({
+      converted: 2,
+      skipped: [
+        { shading: 3, colorants: [SPOT_NAME], reason: 'a' },
+        { shading: 7, colorants: [SPOT_NAME, 'Varnish'], reason: 'b' },
+      ],
+    });
+    expect(read).toEqual([
+      { shading: 3, colorants: [SPOT_NAME], reason: 'a' },
+      { shading: 7, colorants: [SPOT_NAME, 'Varnish'], reason: 'b' },
+    ]);
+  });
+
+  it('reads a whole conversion — and a missing answer — as nothing skipped', () => {
+    expect(readSkippedShadings({ shadings: 4, skipped: [] })).toEqual([]);
+    expect(readSkippedShadings({ shadings: 4 })).toEqual([]);
+    expect(readSkippedShadings(null)).toEqual([]);
+  });
+
+  it('says exactly the plain sentence when nothing was skipped', () => {
+    expect(convertedToProcessMessage(SPOT_NAME, [])).toBe(PLAIN);
+    // The empty slot leaves the record's own sentence untouched — the added
+    // placeholder costs the whole-conversion message no character.
+    expect(convertedToProcessMessage(SPOT_NAME, [])).toBe(
+      PANEL_STRINGS['panel.inkManager.converted']
+        .replace('{{skipped}}', '')
+        .replace('{{name}}', SPOT_NAME),
+    );
+  });
+
+  it('counts one skipped gradient in the singular', () => {
+    expect(convertedToProcessMessage(SPOT_NAME, [skipped()])).toBe(
+      `${PLAIN} — 1 gradient still prints it: the conversion cannot describe its colour.`,
+    );
+  });
+
+  it('counts many skipped gradients in the plural', () => {
+    const many = [skipped({ shading: 1 }), skipped({ shading: 2 }), skipped({ shading: 5 })];
+    expect(convertedToProcessMessage(SPOT_NAME, many)).toBe(
+      `${PLAIN} — 3 gradients still print it: the conversion cannot describe their colour.`,
+    );
+  });
+
+  // The mutation guard: an implementation that ignored the skip list would
+  // return PLAIN here, which is the sentence the file disproves.
+  it('never states the plain sentence while a gradient still prints the ink', () => {
+    for (const count of [1, 2, 9]) {
+      const message = convertedToProcessMessage(
+        SPOT_NAME,
+        Array.from({ length: count }, (_, i) => skipped({ shading: i + 1 })),
+      );
+      expect(message).not.toBe(PLAIN);
+      expect(message.startsWith(PLAIN)).toBe(true);
+      expect(message).toContain(String(count));
+    }
+  });
+
+  // The reason is the engine's own English report text and reaches no surface:
+  // six causes exist and no catalog row spells any of them, so the counted
+  // clause states only what is true of all six.
+  it('states no cause the engine could contradict', () => {
+    const causes = [
+      'the shading maps a point in the plane, not one parametric value',
+      'the shading states a background colour in the colorant’s own space',
+      'the colorant’s tint transform cannot be read',
+    ];
+    const messages = causes.map((reason) =>
+      convertedToProcessMessage(SPOT_NAME, [skipped({ reason })]),
+    );
+    expect(new Set(messages).size).toBe(1);
+    for (const message of messages) {
+      for (const cause of causes) expect(message).not.toContain(cause);
+    }
   });
 });

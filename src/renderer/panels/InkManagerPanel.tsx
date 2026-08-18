@@ -12,7 +12,9 @@ import {
   MAX_INK_DENSITY,
   MIN_INK_DENSITY,
   aliasIsAllowed,
+  convertedToProcessMessage,
   orderInks,
+  readSkippedShadings,
   resolveAlias,
   type Ink,
 } from '../lib/separation-preview';
@@ -114,9 +116,9 @@ export function InkManagerPanel(): React.ReactElement {
       setBusy(true);
       setStatus(tChrome('panel.inkManager.converting'));
       try {
-        await performOperation(filePath, 'spot_to_process', { inks: [name] });
+        const result = await performOperation(filePath, 'spot_to_process', { inks: [name] });
         invalidate();
-        setStatus(tChrome('panel.inkManager.converted', { name }));
+        setStatus(convertedToProcessMessage(name, readSkippedShadings(result)));
       } catch (e: unknown) {
         setStatus(tChrome('panel.common.error', {
           message: e instanceof Error ? e.message : String(e),
