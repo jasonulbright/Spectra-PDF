@@ -39,11 +39,17 @@ A door that refuses does not stop the run: its refusal is recorded against its
 fixup and the rest still land. A run where NOTHING landed and something
 refused raises, so a caller asking for one fixup gets that fixup's own refusal
 rather than an empty success.
+
+A door may also land PARTLY. Its `changed` then counts only what the file
+actually carries, and the row names the rest under `partial` — a count that
+included what the door could not finish would report a repair the document
+does not have.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NamedTuple
 
 from engine.preflight_profiles import FIXUP_IDS, resolve_profile
 
@@ -143,6 +149,29 @@ class _Run:
         return {"id": check_id, "status": "not_applicable", "findings": []}
 
 
+class _DoorResult(NamedTuple):
+    """What a door did, when a count is not the whole answer.
+
+    A door returning a bare `int` means "this many, and nothing left over" —
+    the shape nineteen of the twenty keep. `changed` counts only what the
+    output file actually carries. `partial` records what the door edited but
+    could not finish, one entry per item, and `wrote` says an output exists:
+    a door that landed partly has written a file even when `changed` is 0, and
+    that file is what the next door in the order must read.
+    """
+
+    changed: int
+    partial: tuple = ()
+    wrote: bool = True
+
+
+def _door_result(value) -> _DoorResult:
+    if isinstance(value, _DoorResult):
+        return value
+    count = int(value)
+    return _DoorResult(count, (), count > 0)
+
+
 # ── the doors ─────────────────────────────────────────────────────────────
 
 
@@ -213,12 +242,15 @@ def _convert_to_grayscale(source: str, output: str, run: _Run) -> int:
     return 1
 
 
-def _spots_to_process(source: str, output: str, run: _Run) -> int:
+def _spots_to_process(source: str, output: str, run: _Run):
     """The named inks, or everything past the profile's own spot limit.
 
     "Everything past the limit" is resolved from the document's ink list in
     the order `list_inks` reports, which is the order the plates were found —
     a limit of two keeps the first two rather than an arbitrary two.
+
+    A colorant `spot_to_process` left live in a shading it could not describe
+    is NOT converted, so it is counted as partial rather than as a repair.
     """
     from engine.ink_manager import spot_to_process
     from engine.separations import list_inks
@@ -235,8 +267,32 @@ def _spots_to_process(source: str, output: str, run: _Run) -> int:
             named = spots[limit:] if limit >= 0 else []
     if not named:
         return 0
-    spot_to_process(source, output, inks=named)
-    return len(named)
+    result = spot_to_process(source, output, inks=named)
+    partial = _shading_residue(named, result.get("skipped", ()))
+    return _DoorResult(len(named) - len(partial), partial)
+
+
+def _shading_residue(named: list[str], skipped) -> tuple:
+    """One record per named colorant a shading kept, in the order asked for.
+
+    `spot_to_process` skips a shading whose colour its composition cannot
+    describe IN PLACE — the colorant stays live in that gradient while every
+    other occurrence of it converts. The document therefore still separates
+    that plate, which is what makes the colorant unconverted rather than
+    converted with a caveat.
+    """
+    residue: dict = {}
+    for entry in skipped:
+        reason = str(entry.get("reason", ""))
+        for colorant in entry.get("colorants", ()):
+            row = residue.setdefault(
+                str(colorant),
+                {"item": str(colorant), "shadings": [], "reasons": []},
+            )
+            row["shadings"].append(int(entry.get("shading", 0)))
+            if reason and reason not in row["reasons"]:
+                row["reasons"].append(reason)
+    return tuple(residue[name] for name in named if name in residue)
 
 
 def _profile_max_spots(run: _Run) -> int:
@@ -605,6 +661,13 @@ def apply_fixups(file: str, output: str, profile=None, profile_path: str = "",
     report}``. `order` is the sequence that actually ran, which is the
     profile's set put into the engine's order — never the profile's own
     listing.
+
+    An `applied` row is ``{fixup, changed}``, and carries `partial` when the
+    door landed some of what it was asked for and not the rest: one
+    ``{item, reasons, …}`` record per thing the output does NOT carry, keyed
+    by `item` whatever the door works in, so one reader serves every door.
+    `changed` never counts those, so a row with ``changed`` 0 and a `partial`
+    list is a door that edited the file and finished none of what it named.
     """
     from engine.preflight import preflight
 
@@ -636,14 +699,17 @@ def apply_fixups(file: str, output: str, profile=None, profile_path: str = "",
     for fixup_id in wanted:
         run = _Run(params.get(fixup_id, {}), before, gs_path, font_dir, tesseract_path)
         try:
-            count = _DOORS[fixup_id](source, str(output_path), run)
+            outcome = _door_result(_DOORS[fixup_id](source, str(output_path), run))
         except (ValueError, RuntimeError) as exc:
             refused.append({"fixup": fixup_id, "reason": str(exc)})
             continue
-        if not count:
+        if not outcome.wrote:
             skipped.append({"fixup": fixup_id, "reason": "nothing_to_repair"})
             continue
-        applied.append({"fixup": fixup_id, "changed": int(count)})
+        row = {"fixup": fixup_id, "changed": int(outcome.changed)}
+        if outcome.partial:
+            row["partial"] = [dict(entry) for entry in outcome.partial]
+        applied.append(row)
         # Every later door reads the file the previous one wrote.
         source = str(output_path)
 
