@@ -27,6 +27,27 @@ def _content(path):
         return bytes(pdf.pages[0].Contents.read_bytes())
 
 
+def _plates(path, gs_path, out_dir, resolution: int = 36):
+    """Each colorant's plate on page 1, as the separation device draws it."""
+    np = pytest.importorskip("numpy")
+    Image = pytest.importorskip("PIL.Image")
+    import subprocess
+
+    os.makedirs(out_dir, exist_ok=True)
+    subprocess.run(
+        [gs_path, "-dNOPAUSE", "-dBATCH", "-dSAFER", "-q", "-sDEVICE=tiffsep",
+         f"-r{resolution}",
+         f"-sOutputFile={os.path.join(str(out_dir), 'p')}-%d.tif", str(path)],
+        check=True, capture_output=True, stdin=subprocess.DEVNULL, timeout=300,
+    )
+    found = {}
+    for entry in sorted(Path(out_dir).glob("p-1(*).tif")):
+        name = entry.stem[len("p-1("):-1]
+        with Image.open(entry) as im:
+            found[name] = np.asarray(im.convert("L"), dtype=np.int16)
+    return found
+
+
 class TestConvertCmyk:
     def test_converts_device_rgb_to_cmyk(self, tmp_dir, gs_path):
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
@@ -234,25 +255,6 @@ class TestSpotShadings:
     survived" is only evidence when the plate is the one the source painted.
     """
 
-    def _plates(self, path, gs_path, out_dir):
-        """Each colorant's plate, as the separation device draws it."""
-        np = pytest.importorskip("numpy")
-        Image = pytest.importorskip("PIL.Image")
-        import subprocess
-
-        os.makedirs(out_dir, exist_ok=True)
-        subprocess.run(
-            [gs_path, "-dNOPAUSE", "-dBATCH", "-dSAFER", "-q", "-sDEVICE=tiffsep",
-             "-r36", f"-sOutputFile={os.path.join(str(out_dir), 'p')}-%d.tif", str(path)],
-            check=True, capture_output=True, stdin=subprocess.DEVNULL, timeout=300,
-        )
-        found = {}
-        for entry in sorted(Path(out_dir).glob("p-1(*).tif")):
-            name = entry.stem[len("p-1("):-1]
-            with Image.open(entry) as im:
-                found[name] = np.asarray(im.convert("L"), dtype=np.int16)
-        return found
-
     def _images(self, path):
         with pikepdf.open(path) as pdf:
             return sum(
@@ -294,8 +296,8 @@ class TestSpotShadings:
         ]
         assert self._inks(out) == self._inks(src)
 
-        original = self._plates(src, gs_path, tmp_path / "p-before")
-        converted = self._plates(out, gs_path, tmp_path / "p-after")
+        original = _plates(src, gs_path, tmp_path / "p-before")
+        converted = _plates(out, gs_path, tmp_path / "p-after")
         for name in ("PANTONE 185 C", "PatternSpot"):
             assert name in converted, f"{name} lost its plate"
             assert original[name].shape == converted[name].shape
@@ -418,6 +420,339 @@ class TestSpotShadings:
                 assert lost == ["Deep Black", "Warm Red"], (
                     f"X-{version} destroyed a DeviceN without naming the plates"
                 )
+
+
+class TestAppearanceShadings:
+    """The same gradients, in an annotation's APPEARANCE stream.
+
+    An `/AP` is colour-converted exactly as page content is, so a colorant
+    gradient in one is rasterized in the same way and the plate goes with it —
+    the loss the page-tier carve-out was built to stop, one tier down.
+    """
+
+    def _inks(self, path):
+        from engine.separations import list_inks
+
+        return sorted(entry["name"] for entry in list_inks(str(path))["inks"])
+
+    def _appearances(self, path):
+        """{annotation title: {face: (shadings, images)}} across every /AP."""
+        found = {}
+        with pikepdf.open(path) as pdf:
+            for page in pdf.pages:
+                for annot in list(page.obj.get("/Annots") or []):
+                    ap = annot.get("/AP")
+                    if ap is None:
+                        continue
+                    faces = {}
+                    for key in list(ap.keys()):
+                        entry = ap[key]
+                        streams = ([(key, entry)] if isinstance(entry, pikepdf.Stream)
+                                   else [(f"{key}{s}", entry[s])
+                                         for s in list(entry.keys())])
+                        for name, stream in streams:
+                            resources = stream.get("/Resources") or {}
+                            shadings = len(resources.get("/Shading") or {})
+                            shadings += sum(
+                                1 for pattern in (resources.get("/Pattern") or {}).values()
+                                if pattern.get("/Shading") is not None)
+                            images = sum(
+                                1 for xobj in (resources.get("/XObject") or {}).values()
+                                if xobj.get("/Subtype") == pikepdf.Name("/Image"))
+                            faces[name] = (shadings, images)
+                    found[str(annot.get("/T"))] = faces
+        return found
+
+    def test_a_stamps_gradient_comes_through_on_its_own_plate(
+            self, tmp_path, gs_path):
+        from separation_builders import appearance_shading_pdf
+
+        src = appearance_shading_pdf(tmp_path / "stamps.pdf")
+        out = str(tmp_path / "cmyk.pdf")
+        result = convert_cmyk(src, out, gs_path=gs_path)
+
+        assert self._inks(out) == self._inks(src), (
+            "an appearance-only colorant was destroyed by the conversion"
+        )
+        assert result["altered"] == []
+
+        # Every appearance is still a gradient, and none came back as a picture.
+        after = self._appearances(out)
+        for title, faces in after.items():
+            for face, (shadings, images) in faces.items():
+                assert images == 0, f"{title} {face} came back as a picture"
+                assert shadings == 1, f"{title} {face} stopped being a gradient"
+
+        # And the page itself did convert — the appearance carve-out is not a
+        # conversion that quietly did nothing.
+        assert b" rg" not in _content(out)
+
+    def test_the_stamp_plates_are_the_ones_the_source_painted(
+            self, tmp_path, gs_path):
+        from separation_builders import appearance_shading_pdf
+
+        src = appearance_shading_pdf(tmp_path / "stamps.pdf")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        original = _plates(src, gs_path, tmp_path / "p-before")
+        converted = _plates(out, gs_path, tmp_path / "p-after")
+        # Only an annotation the print path draws lands on a plate: 12.5.3's
+        # Print bit set and Hidden clear. That is what makes these three the
+        # measurable ones, and the flags are not what the carve-out claims by.
+        for name in ("Stamp Gradient", "NoView Gradient", "Rollover Gradient"):
+            assert name in converted, f"{name} lost its plate"
+            assert original[name].shape == converted[name].shape
+            assert int(abs(original[name] - converted[name]).max()) == 0, (
+                f"{name} band mean {original[name].mean():.2f} became "
+                f"{converted[name].mean():.2f}"
+            )
+
+    def test_the_flags_do_not_decide_which_appearance_is_claimed(
+            self, tmp_path, gs_path):
+        # ISO 32000-2 12.5.3: bit 2 (Hidden) suppresses display AND print, bit
+        # 3 (Print) governs printing otherwise, bit 6 (NoView) suppresses only
+        # display. The producer converts every appearance regardless, so a
+        # flag-aware carve-out would leave it free to destroy the plates it
+        # skipped — the ink inventory is not a rendering question.
+        from separation_builders import appearance_shading_pdf
+
+        src = appearance_shading_pdf(tmp_path / "stamps.pdf")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+        inks = self._inks(out)
+        for name in ("Hidden Gradient", "NoView Gradient", "NoPrint Gradient"):
+            assert name in inks, f"{name} lost its plate to its own flags"
+
+    def test_every_appearance_face_is_claimed(self, tmp_path, gs_path):
+        # /N is not the only face a producer rewrites, so it is not the only
+        # one a plate can die in.
+        from separation_builders import appearance_shading_pdf
+
+        src = appearance_shading_pdf(tmp_path / "stamps.pdf")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+        assert sorted(self._appearances(out)["Rollover Gradient"]) == ["/D", "/N"]
+        inks = self._inks(out)
+        assert "Rollover Gradient" in inks and "Down Gradient" in inks
+
+    def test_a_widget_appearance_comes_back_from_the_form_reattach(
+            self, tmp_path, gs_path):
+        # A widget's own appearance is put back verbatim by the form reattach,
+        # colorant space and all. The walk still claims it, because the copy
+        # the producer flattens into the page would otherwise be a process
+        # raster of a plate the document still has.
+        from separation_builders import appearance_shading_pdf
+
+        src = appearance_shading_pdf(tmp_path / "stamps.pdf")
+        out = str(tmp_path / "cmyk.pdf")
+        result = convert_cmyk(src, out, gs_path=gs_path)
+
+        def widget_appearance(path):
+            with pikepdf.open(path) as pdf:
+                for page in pdf.pages:
+                    for annot in list(page.obj.get("/Annots") or []):
+                        if annot.get("/Subtype") == pikepdf.Name("/Widget"):
+                            return bytes(annot.AP.N.read_bytes())
+            return None
+
+        assert widget_appearance(out) == widget_appearance(src)
+        assert "Widget Gradient" in self._inks(out)
+        assert result["altered"] == []
+
+    def test_an_annotation_the_producer_drops_keeps_its_plate_in_the_page(
+            self, tmp_path, gs_path):
+        # A dropped annotation's appearance is flattened into the page content
+        # it came from, so the bracket travels there and the plate is recovered
+        # at the page tier — which is why no annotation subtype is exempt from
+        # the walk.
+        from separation_builders import dropped_annotation_shading_pdf
+
+        src = dropped_annotation_shading_pdf(tmp_path / "mark.pdf")
+        out = str(tmp_path / "cmyk.pdf")
+        result = convert_cmyk(src, out, gs_path=gs_path)
+
+        with pikepdf.open(out) as pdf:
+            assert len(pdf.pages[0].obj.get("/Annots") or []) == 0, (
+                "the producer kept the annotation — the fixture proves nothing"
+            )
+        assert "Mark Gradient" in self._inks(out)
+        assert result["altered"] == []
+
+    def test_an_appearance_gradient_the_destination_cannot_describe_is_reported(
+            self, tmp_path, gs_path):
+        from separation_builders import rgb_alternate_appearance_pdf
+
+        src = rgb_alternate_appearance_pdf(tmp_path / "rgbap.pdf")
+        out = str(tmp_path / "cmyk.pdf")
+        result = convert_cmyk(src, out, gs_path=gs_path)
+
+        rows = {row["kind"]: row for row in result["altered"]}
+        assert [entry["name"] for entry in
+                rows["colorant_shadings_rasterized"]["detail"]] == [
+            "RGB Appearance Spot"]
+        assert "RGB Appearance Spot" not in self._inks(out)
+
+    def test_pdfx_does_not_claim_an_appearance_it_removes(self, tmp_path, gs_path):
+        # The conformance policy removes every annotation on the page, at every
+        # level — so nothing is staged there, and the report names the removal
+        # rather than a rasterization that did not happen.
+        from engine.prepress import convert_pdfx
+        from separation_builders import appearance_shading_pdf
+
+        src = appearance_shading_pdf(tmp_path / "stamps.pdf")
+        for version in (4, 3, 1):
+            out = str(tmp_path / f"x{version}.pdf")
+            result = convert_pdfx(src, out, version=version, gs_path=gs_path)
+            rows = {row["kind"]: row for row in result["altered"]}
+            with pikepdf.open(out) as pdf:
+                assert all(len(page.obj.get("/Annots") or []) == 0
+                           for page in pdf.pages), (
+                    f"X-{version} kept an annotation the policy removes"
+                )
+            assert "annotations_removed" in rows
+            assert "colorant_shadings_rasterized" not in rows, (
+                f"X-{version} reported a rasterization that did not happen"
+            )
+            assert sorted(entry["name"] for entry in
+                          rows["colorants_removed"]["detail"]) == self._inks(src)
+
+
+class TestAppearancePatternSpace:
+    """Where a pattern inside an annotation appearance is anchored.
+
+    ISO 32000-2 8.7.2: a pattern matrix maps pattern space to the DEFAULT user
+    space of the content stream the pattern is a resource of — for an
+    appearance, its own space. The producer rewrites the appearance's content
+    in one space and its pattern matrices in another, so the paint lands at the
+    wrong scale. None of these fixtures is in a colorant space: what breaks
+    here has nothing to do with what the conversion converts.
+    """
+
+    @pytest.mark.parametrize("kind", ["shading", "skewed"])
+    def test_a_patterned_appearance_lands_where_it_did(
+            self, kind, tmp_path, gs_path):
+        from separation_builders import appearance_pattern_pdf
+
+        src = appearance_pattern_pdf(tmp_path / f"{kind}.pdf", kind)
+        out = str(tmp_path / f"{kind}-cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        original = _plates(src, gs_path, tmp_path / f"{kind}-before")
+        converted = _plates(out, gs_path, tmp_path / f"{kind}-after")
+        # The stamp is in the page's top half; the red rectangle below it is
+        # the conversion's own business and is not what this measures.
+        for name in ("Magenta", "Yellow"):
+            band = slice(0, converted[name].shape[0] // 2)
+            assert int(abs(original[name][band] - converted[name][band]).max()) == 0, (
+                f"{kind}: the appearance's {name} paint moved"
+            )
+
+    def test_a_tiled_appearance_keeps_its_step(self, tmp_path, gs_path):
+        # The producer re-derives the pattern matrix in rounded reals, so the
+        # tile grid cannot land on the same pixels; what a wrong pattern space
+        # changes is the STEP, and that is measured as ink coverage. The tile
+        # is 10 units, so the plate is drawn fine enough to resolve one.
+        from separation_builders import appearance_pattern_pdf
+
+        src = appearance_pattern_pdf(tmp_path / "tiling.pdf", "tiling")
+        out = str(tmp_path / "tiling-cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        original = _plates(src, gs_path, tmp_path / "tiling-before", 72)
+        converted = _plates(out, gs_path, tmp_path / "tiling-after", 72)
+        for name in ("Magenta", "Yellow"):
+            band = slice(0, converted[name].shape[0] // 2)
+            covered = (converted[name][band] < 250).mean()
+            assert covered == pytest.approx(
+                (original[name][band] < 250).mean(), abs=0.001), (
+                f"the tile step moved on {name}"
+            )
+            assert int(abs(original[name][band] - converted[name][band]).max()) <= 1
+
+    def test_an_appearance_without_a_pattern_is_left_alone(self, tmp_path, gs_path):
+        # Nothing but a pattern reads a content stream's default space, so
+        # nothing but a patterned appearance is rebased.
+        from separation_builders import appearance_pattern_pdf
+
+        src = appearance_pattern_pdf(tmp_path / "plain.pdf", "plain")
+        out = str(tmp_path / "plain-cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        with pikepdf.open(out) as pdf:
+            stream = pdf.pages[0].obj.Annots[0].AP.N
+            assert b" cm" not in bytes(stream.read_bytes())
+            assert [float(v) for v in stream.BBox] != [
+                float(v) for v in pdf.pages[0].obj.Annots[0].Rect]
+
+    def test_the_rebased_appearance_declares_the_page_space_it_now_uses(
+            self, tmp_path, gs_path):
+        from separation_builders import APPEARANCE_RECT, appearance_pattern_pdf
+
+        src = appearance_pattern_pdf(tmp_path / "shading.pdf", "shading")
+        out = str(tmp_path / "shading-cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        with pikepdf.open(out) as pdf:
+            stream = pdf.pages[0].obj.Annots[0].AP.N
+            assert [float(v) for v in stream.BBox] == list(APPEARANCE_RECT)
+            assert [float(v) for v in stream.Matrix] == [1, 0, 0, 1, 0, 0]
+
+    def test_a_shared_appearance_keeps_the_space_it_had(self, tmp_path):
+        # One appearance worn by two annotations has two rectangles and so no
+        # single default space to be rebased into. The producer un-shares an
+        # appearance it rewrites, so the guard is asked of the rebase directly
+        # — a conversion cannot produce the input it exists for.
+        from engine.prepress import _rebase_appearances
+        from separation_builders import appearance_pattern_pdf
+
+        src = appearance_pattern_pdf(tmp_path / "shared.pdf", "shading")
+        with pikepdf.open(src, allow_overwriting_input=True) as pdf:
+            page = pdf.pages[0].obj
+            first = page.Annots[0]
+            second = pdf.make_indirect(pikepdf.Dictionary(
+                Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.Stamp,
+                Rect=pikepdf.Array([10, 100, 200, 150]), F=4, T="shared",
+                AP=pikepdf.Dictionary(N=first.AP.N)))
+            page.Annots = pikepdf.Array([first, second])
+            pdf.save(src)
+            before = bytes(first.AP.N.read_bytes())
+
+        _rebase_appearances(Path(src))
+        with pikepdf.open(src) as pdf:
+            stream = pdf.pages[0].obj.Annots[0].AP.N
+            assert bytes(stream.read_bytes()) == before
+            assert [float(v) for v in stream.BBox] != [
+                float(v) for v in pdf.pages[0].obj.Annots[0].Rect]
+
+    def test_the_rebase_reaches_a_pattern_under_a_nested_form(self, tmp_path):
+        # A pattern inside a form XObject under the appearance is anchored in
+        # that form's default space, which the appearance's own space decides.
+        from engine.prepress import _rebase_appearances
+        from separation_builders import appearance_pattern_pdf
+
+        src = appearance_pattern_pdf(tmp_path / "nested.pdf", "shading")
+        with pikepdf.open(src, allow_overwriting_input=True) as pdf:
+            appearance = pdf.pages[0].obj.Annots[0].AP.N
+            inner = pikepdf.Stream(pdf, bytes(appearance.read_bytes()))
+            inner.Type = pikepdf.Name.XObject
+            inner.Subtype = pikepdf.Name.Form
+            inner.BBox = pikepdf.Array(list(appearance.BBox))
+            inner.Resources = pikepdf.Dictionary(
+                Pattern=pikepdf.Dictionary(P0=pdf.make_indirect(pikepdf.Dictionary(
+                    Type=pikepdf.Name.Pattern, PatternType=2,
+                    Shading=appearance.Resources.Shading.Sh))))
+            appearance.Resources = pikepdf.Dictionary(
+                XObject=pikepdf.Dictionary(Fm0=pdf.make_indirect(inner)))
+            appearance.write(b"/Fm0 Do")
+            pdf.save(src)
+
+        _rebase_appearances(Path(src))
+        with pikepdf.open(src) as pdf:
+            stream = pdf.pages[0].obj.Annots[0].AP.N
+            assert bytes(stream.read_bytes()).startswith(b"q ")
+            assert [float(v) for v in stream.BBox] == [
+                float(v) for v in pdf.pages[0].obj.Annots[0].Rect]
 
 
 class TestDestinationProfileClass:
