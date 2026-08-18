@@ -5,6 +5,8 @@ re-run and its plates counted — rather than against this module's own report
 of what it renamed.
 """
 
+import os
+import shutil
 import subprocess
 
 import pikepdf
@@ -320,6 +322,118 @@ class TestShadingsTheCompositionCannotDescribe:
                      for key in list(table.keys())
                      if isinstance(table[key].ColorSpace, pikepdf.Array)}
         assert names == {"Warm Red"}
+
+
+class TestWritingBackOverTheInput:
+    """One path as BOTH input and output — the only shape the real callers use.
+
+    The panel hands the open document's path twice, and the preflight fixup
+    chain feeds each door the file the door before it wrote. A write that
+    refuses that shape surfaces a library refusal at the button, and inside a
+    profile run it degrades to a refusal row that reads as nothing happening.
+    """
+
+    def _pair(self, tmp_path, build, name: str):
+        """The same bytes at two paths: one converted to a fresh output, the
+        other converted over itself.
+
+        `save_pdf` derives the trailer `/ID` from the written bytes, so one
+        input has exactly one output — which makes "in place did the same
+        thing" a byte comparison rather than an assertion.
+        """
+        source = build(tmp_path / name)
+        control = tmp_path / "control.pdf"
+        subject = tmp_path / "subject.pdf"
+        shutil.copy2(source, subject)
+        return source, control, subject
+
+    def _besides(self, tmp_path, *expected: str) -> list:
+        return sorted(
+            p.name for p in tmp_path.iterdir() if p.name not in expected
+        )
+
+    def test_spot_to_process_converts_over_its_own_input(self, tmp_path):
+        source, control, subject = self._pair(
+            tmp_path, spot_in_every_paint_pdf, "source.pdf")
+        expected = spot_to_process(source, str(control), ["Warm Red"])
+        result = spot_to_process(str(subject), str(subject), ["Warm Red"])
+        assert result == expected
+        assert subject.read_bytes() == control.read_bytes()
+        assert "Warm Red" not in _colorant_names(str(subject))
+
+    def test_alias_ink_renames_over_its_own_input(self, tmp_path):
+        source, control, subject = self._pair(
+            tmp_path,
+            lambda path: two_spots_pdf(path, "PANTONE 185 C", "Pantone 185C",
+                                       (0.0, 1.0, 0.75, 0.0), (0.0, 1.0, 0.75, 0.0)),
+            "source.pdf",
+        )
+        expected = alias_ink(source, str(control), "Pantone 185C", "PANTONE 185 C")
+        result = alias_ink(str(subject), str(subject), "Pantone 185C",
+                           "PANTONE 185 C")
+        assert result == expected
+        assert subject.read_bytes() == control.read_bytes()
+        assert _colorant_names(str(subject)) == {"PANTONE 185 C"}
+
+    def test_a_partial_conversion_in_place_still_reports_what_it_kept(self, tmp_path):
+        # The shading the composition cannot describe is the case a profile run
+        # has to read as partial, and a profile run is always in place.
+        source, control, subject = self._pair(
+            tmp_path, unconvertible_shading_pdf, "source.pdf")
+        expected = spot_to_process(source, str(control), ["Warm Red"])
+        result = spot_to_process(str(subject), str(subject), ["Warm Red"])
+        assert result["skipped"] == expected["skipped"] != []
+        assert subject.read_bytes() == control.read_bytes()
+
+    def test_the_write_leaves_nothing_staged_beside_the_document(self, tmp_path):
+        source = spot_in_every_paint_pdf(tmp_path / "source.pdf")
+        spot_to_process(source, source, ["Warm Red"])
+        assert self._besides(tmp_path, "source.pdf") == []
+
+    def test_a_write_that_dies_leaves_the_input_whole_and_nothing_staged(
+        self, tmp_path, monkeypatch,
+    ):
+        from engine import ink_manager
+
+        source = tmp_path / "source.pdf"
+        spot_in_every_paint_pdf(source)
+        before = source.read_bytes()
+
+        targets: list = []
+
+        def die(_pdf, target, **_kwargs):
+            targets.append(str(target))
+            raise OSError("the volume went away mid-write")
+
+        monkeypatch.setattr(ink_manager, "save_pdf", die)
+        with pytest.raises(OSError):
+            ink_manager.spot_to_process(str(source), str(source), ["Warm Red"])
+        # The write that died was the STAGED one. Without that clause the
+        # assertions below hold for a write that never began.
+        assert targets and targets[0] != str(source)
+        # The whole point of staging: the document the user still has open is
+        # the document they had.
+        assert source.read_bytes() == before
+        assert self._besides(tmp_path, "source.pdf") == []
+
+    def test_an_output_hardlinked_to_the_input_is_recognised_as_the_input(
+        self, tmp_path,
+    ):
+        source = tmp_path / "source.pdf"
+        spot_in_every_paint_pdf(source)
+        alias = tmp_path / "alias.pdf"
+        try:
+            os.link(str(source), str(alias))
+        except (AttributeError, NotImplementedError, OSError) as exc:
+            pytest.skip(f"this filesystem does not make hard links: {exc}")
+
+        spot_to_process(str(source), str(alias), ["Warm Red"])
+        assert "Warm Red" not in _colorant_names(str(alias))
+        # Two names for one file resolve differently and ARE one file, so only
+        # the identity test reaches the staged branch. The other name still
+        # reading as it did is what says the staged file replaced the NAME
+        # rather than being written into the file pikepdf held open.
+        assert "Warm Red" in _colorant_names(str(source))
 
 
 class TestInkSettings:
