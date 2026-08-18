@@ -223,6 +223,7 @@ pub fn run() {
             tabdrag::register_strip_rect,
             tabdrag::tabdrag_track,
             tabdrag::tabdrag_cancel,
+            tabdrag::tabdrag_resolve,
             tabdrag::tabdrag_drop,
             tabdrag::move_document_to_new_window,
             snapshot::copy_image_to_clipboard,

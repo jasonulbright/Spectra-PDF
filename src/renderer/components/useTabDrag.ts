@@ -21,6 +21,7 @@ import {
   armDrag,
   cancelDrag,
   createFrameThrottle,
+  createSerialPublisher,
   hoverCssX,
   physicalPointFor,
   pinGhost,
@@ -28,6 +29,7 @@ import {
   settleDrop,
   stripRectFor,
   type FrameThrottle,
+  type SerialPublisher,
   type TabDragState,
   type ViewportRect,
 } from '../lib/tab-drag';
@@ -38,28 +40,27 @@ const ratio = (): number => window.devicePixelRatio || 1;
 /**
  * Publish this window's strip box whenever it can have changed.
  *
- * Window MOVES are not among those moments: the far side hears them first and
- * re-anchors the stored rect itself, so a rect published several frames ago
+ * The box is window-relative and no screen origin is measured here: the far
+ * side composes it with the window origin it reads itself, so no drop rect is
+ * ever assembled from two positions sampled at different moments.
+ *
+ * Window MOVES are not among those moments either — the far side hears them
+ * first and re-anchors the stored rect, so a rect published several frames ago
  * still names the right window.
  */
 export function useStripRegistration(
   stripRef: React.RefObject<HTMLElement | null>,
   relayoutKey: number,
 ): void {
-  // A publish reads the window origin asynchronously, so two in flight can
-  // land out of order; the newest ticket is the only one allowed to write.
-  const ticket = useRef(0);
-
-  const publish = useCallback(async (rect: ViewportRect | null): Promise<void> => {
-    const mine = ++ticket.current;
-    if (!rect) {
-      await tabDrag.registerStrip(EMPTY_STRIP);
-      return;
-    }
-    const origin = await tabDrag.windowOrigin();
-    if (mine !== ticket.current) return;
-    await tabDrag.registerStrip(stripRectFor(rect, origin, ratio()));
-  }, []);
+  // One publisher for the hook's whole life: it carries which publish is still
+  // outstanding, and a replacement would start again with none.
+  const publisher = useRef<SerialPublisher<ViewportRect | null> | null>(null);
+  if (publisher.current === null) {
+    publisher.current = createSerialPublisher<ViewportRect | null>(async (rect) => {
+      await tabDrag.registerStrip(rect ? stripRectFor(rect, ratio()) : EMPTY_STRIP);
+    });
+  }
+  const publish = publisher.current;
 
   const remeasure = useRef<(() => void) | null>(null);
 
@@ -68,11 +69,7 @@ export function useStripRegistration(
     if (!el) return;
     const measure = (): void => {
       const box = el.getBoundingClientRect();
-      void publish({ left: box.left, top: box.top, width: box.width, height: box.height }).catch(
-        () => {
-          // A window that cannot report its own origin simply takes no drops.
-        },
-      );
+      publish.post({ left: box.left, top: box.top, width: box.width, height: box.height });
     };
     remeasure.current = measure;
     measure();
@@ -85,7 +82,7 @@ export function useStripRegistration(
       remeasure.current = null;
       observer.disconnect();
       window.removeEventListener('resize', measure);
-      void publish(null).catch(() => {});
+      publish.post(null);
     };
   }, [stripRef, publish]);
 
@@ -148,7 +145,7 @@ export function useTabDragSource(onTabDrop: TabDropHandler): TabDragSource {
   const handlers = useRef<{
     move: (e: PointerEvent) => void;
     up: (e: PointerEvent) => void;
-    cancel: () => void;
+    cancel: (e: PointerEvent) => void;
   } | null>(null);
 
   const unlisten = useCallback((): void => {
@@ -183,11 +180,25 @@ export function useTabDragSource(onTabDrop: TabDropHandler): TabDragSource {
     session.current = null;
   }, [quiesce]);
 
-  const abandon = useCallback((): void => {
+  const abandon = useCallback(
+    (pointerId?: number): void => {
+      const outcome = cancelDrag(state.current, pointerId);
+      if (outcome.state === state.current) return;
+      state.current = outcome.state;
+      if (outcome.notify) void tabDrag.cancel().catch(() => {});
+      dissolve();
+    },
+    [dissolve],
+  );
+
+  // Unmount, or a strip that stops being rendered, mid-gesture. A drag the far
+  // side knows about has a caret painted in the hovered window, and that window
+  // is told to stop only from here — dissolving locally leaves it drawn for a
+  // drag that no longer exists.
+  const teardown = useCallback((): void => {
     const outcome = cancelDrag(state.current);
-    if (outcome.state === state.current) return;
-    state.current = outcome.state;
     if (outcome.notify) void tabDrag.cancel().catch(() => {});
+    state.current = outcome.state;
     dissolve();
   }, [dissolve]);
 
@@ -208,7 +219,7 @@ export function useTabDragSource(onTabDrop: TabDropHandler): TabDragSource {
       move: (e: PointerEvent): void => {
         const s = session.current;
         if (!s) return;
-        const step = advanceDrag(state.current, e.clientX, e.clientY);
+        const step = advanceDrag(state.current, e.pointerId, e.clientX, e.clientY);
         state.current = step.state;
         if (step.started) {
           s.ghost = buildTabGhost(s.el, s.el.getBoundingClientRect());
@@ -231,8 +242,10 @@ export function useTabDragSource(onTabDrop: TabDropHandler): TabDragSource {
       up: (e: PointerEvent): void => {
         const s = session.current;
         if (!s) return;
+        const release = releaseDrag(state.current, e.pointerId);
+        // Another pointer lifting says nothing about the one holding the tab.
+        if (release.foreign) return;
         const point = physicalPointFor(e.screenX, e.screenY, ratio());
-        const release = releaseDrag(state.current);
         state.current = release.state;
         if (!release.drop) {
           dissolve();
@@ -261,7 +274,7 @@ export function useTabDragSource(onTabDrop: TabDropHandler): TabDragSource {
           }
         })();
       },
-      cancel: (): void => abandon(),
+      cancel: (e: PointerEvent): void => abandon(e.pointerId),
     };
   }
 
@@ -282,6 +295,10 @@ export function useTabDragSource(onTabDrop: TabDropHandler): TabDragSource {
       // Anything else is a press this gesture does not own: a drop still
       // resolving, a secondary button, a tab that never travels.
       if (armed.phase !== 'armed') return;
+      // Re-arming over a live drag — a second pointer, or a gesture whose
+      // pointerup never arrived — leaves the hovered window drawing a caret
+      // nothing else will ever clear.
+      if (cancelDrag(state.current).notify) void tabDrag.cancel().catch(() => {});
       dissolve();
       state.current = armed;
       session.current = {
@@ -321,7 +338,7 @@ export function useTabDragSource(onTabDrop: TabDropHandler): TabDragSource {
     [abandon, dissolve],
   );
 
-  useEffect(() => dissolve, [dissolve]);
+  useEffect(() => teardown, [teardown]);
 
   return { onTabPointerDown, draggingPath };
 }

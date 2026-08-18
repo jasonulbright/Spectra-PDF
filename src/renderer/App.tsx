@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { AppStateProvider, useAppState, useAppDispatch } from './state/AppStateProvider';
 import { file, app, dialog, batch, tabDrag } from './lib/tauri-bridge';
 import type { PhysicalScreenPoint, TabDragResult } from './lib/tauri-bridge';
-import { tabMoved } from './lib/tab-drag';
+import { planHandOff, tabMoved } from './lib/tab-drag';
 import {
   decodeToRawSource,
   engineWantsRawFallback,
@@ -2274,12 +2274,23 @@ function AppContent(): React.ReactElement {
   // names a different physical page in the other window.
   //
   // Which means the FILE is the only channel the document travels through, and
-  // everything it is carrying has to be in it before it leaves. Pending page
-  // edits are committed — that is the shipped meaning of leaving a view — and
-  // then the working copy is written back, because the receiving window opens
-  // the path and mints a working copy of its own from whatever is on disk.
-  // Without the write, every unsaved edit is discarded at the moment of the
-  // move, with no prompt and nothing to undo.
+  // everything it is carrying has to be in it before it leaves. Two writes are
+  // involved and they are not the same write. The commit gate flushes the page
+  // tier into the WORKING copy — the shipped meaning of leaving a view, and
+  // harmless wherever the document ends up. Writing that working copy back over
+  // the user's own path is what a MOVE costs, because the receiving window opens
+  // the path and mints a working copy from whatever is on disk; without it every
+  // unsaved edit is discarded at the moment of the move, with no prompt and
+  // nothing to undo.
+  //
+  // So the order is: flush the page tier, learn where the release resolved, and
+  // only then — for a document that is actually leaving — write the file and
+  // mark it saved. A release that lands back in this window writes nothing: it
+  // is not a hand-off, and marking a document saved discards its undo history.
+  //
+  // The destination is settled before the write and the handover is resolved
+  // after it, because the receiving window is told to open the path the instant
+  // the claim moves and reads the file then.
   //
   // Ownership is handed over in one step, and the receiving window is built
   // only once it has. Releasing the claim and re-taking it around the build
@@ -2288,14 +2299,22 @@ function AppContent(): React.ReactElement {
   // nowhere to arrive, having already left the only window that could open it.
   //
   // One implementation for both gestures — the menu command and a dragged tab
-  // differ only in where the document is going.
+  // differ only in where the document is going, and an explicit menu command
+  // has no destination to resolve.
   const handOffDocument = useCallback(
-    async (path: string, hand: () => Promise<TabDragResult>): Promise<boolean> => {
+    async (
+      path: string,
+      hand: () => Promise<TabDragResult>,
+      willMove?: () => Promise<boolean>,
+    ): Promise<boolean> => {
       if (!(await commitOrAbort())) return false;
-      // Before the handover, not after: the receiving window is told to open
-      // the path the instant the claim moves, and it reads the file then.
       const handed = stateRef.current.files.get(path);
-      if (handed && isFileDirty(handed)) {
+      const plan = planHandOff(
+        willMove ? await willMove() : true,
+        !!handed && isFileDirty(handed),
+      );
+      if (!plan.hand) return false;
+      if (plan.saveFirst && handed) {
         await file.saveAs(handed.workingPath, handed.path);
         dispatch({ type: 'MARK_SAVED', path });
       }
@@ -2322,7 +2341,11 @@ function AppContent(): React.ReactElement {
   // nowhere (a new window at the drop point).
   const handleTabDrop = useCallback(
     (path: string, point: PhysicalScreenPoint) =>
-      handOffDocument(path, () => tabDrag.drop(path, point)),
+      handOffDocument(
+        path,
+        () => tabDrag.drop(path, point),
+        () => tabDrag.wouldMove(point),
+      ),
     [handOffDocument],
   );
 
