@@ -206,23 +206,6 @@ def _needs_no_transform(alt) -> bool:
     return isinstance(alt, pikepdf.Name) and str(alt) == "/DeviceCMYK"
 
 
-def _one_dimensional(shading) -> bool:
-    """Is the shading's function a single parametric value?
-
-    Composing the tint transform onto the function samples ONE input. A
-    function-based shading (type 1) maps a point in the plane instead — two
-    inputs, a four-entry `/Domain` — so its colour cannot be re-expressed that
-    way and it is left to the producer.
-    """
-    try:
-        if int(shading.get("/ShadingType") or 0) == 1:
-            return False
-        domain = shading.get("/Domain")
-        return domain is None or len(domain) == 2
-    except (TypeError, ValueError):
-        return False
-
-
 def _carve_targets(pdf):
     """(the shadings the carve-out claims, the colorants it cannot).
 
@@ -230,7 +213,7 @@ def _carve_targets(pdf):
     document walked again yields the same identifiers, which is how the
     restore pass finds the objects the staging pass rewrote.
     """
-    from .ink_manager import _shading_dicts
+    from .ink_manager import _shading_dicts, shading_skip_reason
 
     targets: list = []
     rasterized: set = set()
@@ -245,8 +228,8 @@ def _carve_targets(pdf):
         colorants, alt = entry
         function = shading.get("/Function")
         if (not _needs_no_transform(alt) or function is None
-                or len(colorspace) < 4 or not _one_dimensional(shading)
-                or shading.get("/Background") is not None):
+                or len(colorspace) < 4
+                or shading_skip_reason(shading) is not None):
             rasterized.update(colorants)
             continue
         targets.append(_Carved(
