@@ -3,6 +3,7 @@ import { useAppState } from '../state/AppStateProvider';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { invokeCommand } from '../commands/context';
 import { StatusBar } from '../components/StatusBar';
@@ -152,10 +153,14 @@ export function ScanEnhancePanel(): React.ReactElement {
     try {
       // The standard snapshot(gate) → engine → reload → UPDATE_FILE flow, so
       // the whole enhancement is ONE undo step.
-      await performOperation(filePath, 'enhance_scan', {
+      const r = await performOperation(filePath, 'enhance_scan', {
         ...params,
         ...(await toolPaths()),
       });
+      if (r === EDIT_DECLINED) {
+        setStatus('');
+        return;
+      }
       setStatus(tChrome('panel.scanEnhance.applied', { count: counts.changing }));
     } catch (e: unknown) {
       setStatus(

@@ -9,6 +9,7 @@ import { ensureGsPath } from './SettingsPanel';
 import { app } from '../lib/tauri-bridge';
 import { tChrome } from '../i18n';
 import { localizeEngineMessage } from '../lib/engine-messages';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import {
   FLATTEN_CATEGORIES,
   FLATTEN_DPI_CHOICES,
@@ -69,9 +70,13 @@ export function FlattenerPanel(): React.ReactElement {
         outline_strokes: outlines.strokes,
         font_dir: await app.getEditFontPath(),
       });
+      if (result === EDIT_DECLINED) {
+        setStatus('');
+        return;
+      }
       invalidate();
       setStatus(tChrome('panel.flattener.flattened', {
-        regions: (result as unknown as { regions?: number }).regions ?? 0,
+        regions: (result as unknown as { regions?: number } | null)?.regions ?? 0,
       }));
     } catch (e: unknown) {
       setStatus(tChrome('panel.common.error', {

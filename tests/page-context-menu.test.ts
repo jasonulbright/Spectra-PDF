@@ -25,12 +25,17 @@ function makeDoc(path: string, count: number): OpenDocument {
 const labels = (items: ReturnType<typeof buildPageContextMenu>) =>
   items.filter((i) => !i.separator).map((i) => i.label);
 
+/** The gated items ask the signed-document gate before dispatching, so the
+ * dispatch lands a turn later than the click. */
+const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
 describe('buildPageContextMenu', () => {
   const doc = makeDoc('a.pdf', 3);
   const base = {
     docs: [doc],
     docId: doc.id,
     pageId: 'a.pdf#p1',
+    confirmPageEdit: async (): Promise<boolean> => true,
     onOpen: vi.fn(),
     onExtractText: vi.fn(),
   };
@@ -55,13 +60,14 @@ describe('buildPageContextMenu', () => {
     expect(items.find((i) => i.label === 'Delete page')?.disabled).toBe(true);
   });
 
-  it('multi-select menu labels reflect the count and act on the selection', () => {
+  it('multi-select menu labels reflect the count and act on the selection', async () => {
     const dispatch = vi.fn<(a: AppAction) => void>();
     const sel = new Set(['a.pdf#p0', 'a.pdf#p1']);
     const items = buildPageContextMenu({ ...base, selectedPageIds: sel, dispatch });
     expect(labels(items)).toContain('Rotate 2 pages right 90°');
     expect(labels(items)).toContain('Delete 2 pages');
     items.find((i) => i.label === 'Delete 2 pages')!.onClick();
+    await flush();
     expect(dispatch).toHaveBeenCalledWith({ type: 'DELETE_PAGE_REFS', pageIds: ['a.pdf#p0', 'a.pdf#p1'] });
     expect(dispatch).toHaveBeenCalledWith({ type: 'UI_CLEAR_SELECTION' });
   });
@@ -73,11 +79,75 @@ describe('buildPageContextMenu', () => {
     expect(items.find((i) => i.label === 'Delete 3 pages')?.disabled).toBe(true);
   });
 
-  it('single rotate dispatches ROTATE_PAGE_REF with the accumulated rotation', () => {
+  it('single rotate dispatches ROTATE_PAGE_REF with the accumulated rotation', async () => {
     const dispatch = vi.fn<(a: AppAction) => void>();
     const items = buildPageContextMenu({ ...base, selectedPageIds: new Set(), dispatch });
     items.find((i) => i.label === 'Rotate right 90°')!.onClick();
+    await flush();
     expect(dispatch).toHaveBeenCalledWith({ type: 'ROTATE_PAGE_REF', docId: doc.id, pageId: 'a.pdf#p1', rotation: 90 });
+  });
+
+  // The page tier's signed-document gate — asked BEFORE the dispatch, with the
+  // delta class the gesture actually produces and the files it touches.
+  describe('the signed-document gate', () => {
+    it('asks with page-keys for a rotate and page-structure for a delete', async () => {
+      const asked: [readonly string[], string][] = [];
+      const deps = {
+        ...base,
+        selectedPageIds: new Set<string>(),
+        dispatch: vi.fn(),
+        confirmPageEdit: async (paths: readonly string[], delta: string) => {
+          asked.push([paths, delta]);
+          return true;
+        },
+      };
+      buildPageContextMenu(deps).find((i) => i.label === 'Rotate right 90°')!.onClick();
+      buildPageContextMenu(deps).find((i) => i.label === 'Rotate left 90°')!.onClick();
+      buildPageContextMenu(deps).find((i) => i.label === 'Delete page')!.onClick();
+      await flush();
+      expect(asked).toEqual([
+        [['a.pdf'], 'page-keys'],
+        [['a.pdf'], 'page-keys'],
+        [['a.pdf'], 'page-structure'],
+      ]);
+    });
+
+    it('a refused gate dispatches NOTHING — rotate and delete alike', async () => {
+      const dispatch = vi.fn<(a: AppAction) => void>();
+      const deps = {
+        ...base,
+        selectedPageIds: new Set<string>(),
+        dispatch,
+        confirmPageEdit: async (): Promise<boolean> => false,
+      };
+      buildPageContextMenu(deps).find((i) => i.label === 'Rotate right 90°')!.onClick();
+      buildPageContextMenu(deps).find((i) => i.label === 'Delete page')!.onClick();
+      await flush();
+      expect(dispatch).not.toHaveBeenCalled();
+    });
+
+    it('a multi-file selection names every file it touches, once each', async () => {
+      const a = makeDoc('a.pdf', 3);
+      const b = makeDoc('b.pdf', 3);
+      // A second document over the SAME file: its path must not repeat.
+      const a2: OpenDocument = { ...a, id: 'a.pdf#1' };
+      const paths: string[][] = [];
+      const items = buildPageContextMenu({
+        ...base,
+        docs: [a, a2, b],
+        docId: a.id,
+        pageId: 'a.pdf#p0',
+        selectedPageIds: new Set(['a.pdf#p0', 'b.pdf#p1']),
+        dispatch: vi.fn(),
+        confirmPageEdit: async (p: readonly string[]) => {
+          paths.push([...p]);
+          return true;
+        },
+      });
+      items.find((i) => i.label === 'Delete 2 pages')!.onClick();
+      await flush();
+      expect(paths).toEqual([['a.pdf', 'b.pdf']]);
+    });
   });
 
   it('Open hands over the page identity for the reading jump', () => {

@@ -13,6 +13,7 @@
 // document that has none, and a button whose only outcome is a refusal is
 // worse than the route to the panel that can do the work.
 import type { Check, Finding } from './accessibility-report';
+import type { OpMethod } from './op-edit-class';
 
 /** How a check is repaired. */
 export type FixKind = 'auto' | 'authored';
@@ -108,9 +109,12 @@ export function fixFor(check: Check): FixOffer | null {
   return authored ? { kind: 'authored', authored } : null;
 }
 
-/** The engine call one authored value becomes. */
+/** The engine call one authored value becomes. `method` is the operation
+ * roster's key type, not a free string: every door here runs through
+ * `performOperation`, which takes the signed-document decision from the op's
+ * own edit class — a door added without one would not compile. */
 export interface AuthoredCall {
-  method: string;
+  method: OpMethod;
   params: Record<string, unknown>;
 }
 

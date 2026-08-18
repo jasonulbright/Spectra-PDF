@@ -8,6 +8,8 @@ import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber } from '../i18n';
 import { runCommitGate } from '../lib/commit-gate';
 import { formatBytes } from '../lib/format-bytes';
+import { EDIT_DECLINED } from '../lib/edit-text';
+import type { OpMethod } from '../lib/op-edit-class';
 import { app } from '../lib/tauri-bridge';
 import {
   DEFAULT_INITIAL_VIEW,
@@ -86,7 +88,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
   useTranslation();
   const { activeFile } = useActiveFile();
   const { call, saveFile } = useEngine();
-  const { performOperation, confirmSignedEdit } = useOperations();
+  const { performOperation } = useOperations();
   const [tab, setTab] = useState<PropTab>('description');
 
   const [title, setTitle] = useState('');
@@ -276,13 +278,14 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
     }
   }, [activeFile, call, saveFile]);
 
-  /** Both catalog writes share one shape: gate on the document's signatures
-   * (a catalog edit is structural — it coalesces the file and breaks every
-   * byte range), run the op through the undoable in-place flow, then re-read
-   * so the baseline is what the file now says rather than what was typed. */
+  /** Both catalog writes share one shape: run the op through the undoable
+   * in-place flow — which takes the signed-document decision from the op's
+   * own edit class (a catalog edit is structural: it coalesces the file and
+   * breaks every byte range) — then re-read, so the baseline is what the file
+   * now says rather than what was typed. */
   const runCatalogWrite = useCallback(
     async (
-      method: string,
+      method: OpMethod,
       params: Record<string, unknown>,
       savingKey: 'dialog.props.savingView' | 'dialog.props.savingAdvanced',
     ): Promise<void> => {
@@ -290,11 +293,10 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
       setBusy(true);
       setStatus(tChrome(savingKey));
       try {
-        if (!(await confirmSignedEdit(activeFile.path, activeFile.workingPath, 'structural'))) {
+        if ((await performOperation(activeFile.path, method, params)) === EDIT_DECLINED) {
           setStatus('');
           return;
         }
-        await performOperation(activeFile.path, method, params);
         const rawView = (await call('get_initial_view', { file: activeFile.workingPath })) as unknown as Record<string, unknown>;
         const parsedView = parseInitialView(rawView);
         setView(parsedView);
@@ -310,7 +312,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
         setBusy(false);
       }
     },
-    [activeFile, call, confirmSignedEdit, performOperation],
+    [activeFile, call, performOperation],
   );
 
   const viewChanges = initialViewChanges(viewBase, view);

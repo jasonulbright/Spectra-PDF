@@ -3,7 +3,7 @@ import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { useAppState, useAppDispatch } from '../../state/AppStateProvider';
 import { usePdfProxies } from '../../hooks/usePdfProxies';
 import { logRenderError, scheduleReblit } from '../canvas/raster';
-import { getCanvasServices, pushEscapeInterceptor } from '../../commands/context';
+import { confirmPageEditNow, getCanvasServices, pushEscapeInterceptor } from '../../commands/context';
 import { buildPageContextMenu } from '../../lib/page-context-menu';
 import { computeReorderTarget } from '../../lib/page-reorder';
 import {
@@ -303,14 +303,22 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
         flatIndexAt(clientX, clientY),
       );
       if (!target) return;
-      if (s.movingIds.length === 1) {
-        const from = itemsRef.current.find((it) => it.page.id === s.movingIds[0]);
-        if (!from) return;
-        dispatch({ type: 'MOVE_PAGE', fromDocId: from.docId, toDocId: target.toDocId, pageId: s.movingIds[0], toIndex: target.toIndex });
-      } else {
-        dispatch({ type: 'MOVE_PAGES', pageIds: s.movingIds, toDocId: target.toDocId, toIndex: target.toIndex });
-      }
-      dispatch({ type: 'UI_SET_SELECTION', pageIds: s.movingIds, anchor: s.movingIds[s.movingIds.length - 1] });
+      // A reorder rewrites the page TREE — `page-structure`. This drag never
+      // leaves the active file (the guard above aborts a cross-file one), so
+      // that one path is the whole set the gate decides for.
+      const filePath = s.filePath;
+      if (!filePath) return;
+      void (async () => {
+        if (!(await confirmPageEditNow([filePath], 'page-structure'))) return;
+        if (s.movingIds.length === 1) {
+          const from = itemsRef.current.find((it) => it.page.id === s.movingIds[0]);
+          if (!from) return;
+          dispatch({ type: 'MOVE_PAGE', fromDocId: from.docId, toDocId: target.toDocId, pageId: s.movingIds[0], toIndex: target.toIndex });
+        } else {
+          dispatch({ type: 'MOVE_PAGES', pageIds: s.movingIds, toDocId: target.toDocId, toIndex: target.toIndex });
+        }
+        dispatch({ type: 'UI_SET_SELECTION', pageIds: s.movingIds, anchor: s.movingIds[s.movingIds.length - 1] });
+      })();
     },
     [dispatch, flatIndexAt],
   );
@@ -406,6 +414,7 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
             pageId: menu.pageId,
             selectedPageIds: selected,
             dispatch,
+            confirmPageEdit: confirmPageEditNow,
             onOpen: onOpenPage,
             onExtractText,
           })

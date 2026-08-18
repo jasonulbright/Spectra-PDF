@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
-import { useEngine } from '../hooks/useEngine';
-import { file, app } from '../lib/tauri-bridge';
+import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
+import { app } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
@@ -25,8 +26,8 @@ const COLORS = ['#16161a', '#5b6270', '#e0393e', '#2f6fed'];
 export function HeaderFooterPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const { activeFile, openNewFiles, dispatch } = useActiveFile();
-  const { call } = useEngine();
+  const { activeFile, openNewFiles } = useActiveFile();
+  const { performOperation } = useOperations();
   const [slots, setSlots] = useState<Record<string, string>>({});
   const [fontSize, setFontSize] = useState(10);
   const [margin, setMargin] = useState(24);
@@ -68,10 +69,10 @@ export function HeaderFooterPanel(): React.ReactElement {
     setBusy(true);
     setStatus(tChrome('panel.hf.applying'));
     try {
-      const snapshotPath = await file.snapshot(activeFile.workingPath);
-      const result = await call('add_header_footer', {
-        file: activeFile.workingPath,
-        output: activeFile.workingPath,
+      // Through performOperation, which is where the signed-document
+      // decision is taken (this stamp is structural-class in the roster) —
+      // the panel's own snapshot/reload copy asked nobody.
+      const result = await performOperation(activeFile.path, 'add_header_footer', {
         placements,
         first_page: first,
         ...(last !== undefined ? { last_page: last } : {}),
@@ -82,10 +83,11 @@ export function HeaderFooterPanel(): React.ReactElement {
         bates_digits: batesDigits,
         font_dir: await app.getEditFontPath(),
       });
-      const buffer = await file.readBuffer(activeFile.workingPath);
-      const info = await call('get_page_count', { file: activeFile.workingPath });
-      dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer, snapshotPath });
-      const n = (result as unknown as { pages_stamped: number }).pages_stamped;
+      if (result === EDIT_DECLINED) {
+        setStatus('');
+        return;
+      }
+      const n = (result as unknown as { pages_stamped: number } | null)?.pages_stamped ?? 0;
       setStatus(tChromeCount('panel.hf.stamped', n));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e);
@@ -93,7 +95,7 @@ export function HeaderFooterPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [activeFile, slots, fontSize, margin, color, pageInput, batesStart, batesDigits, call, dispatch]);
+  }, [activeFile, slots, fontSize, margin, color, pageInput, batesStart, batesDigits, performOperation]);
 
   if (!activeFile) {
     return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.hf.open')} />;
