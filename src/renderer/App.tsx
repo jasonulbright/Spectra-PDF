@@ -2544,17 +2544,28 @@ function AppContent(): React.ReactElement {
       }
       const names = dirtyFiles.map((f) => f.name).join(', ');
       const result = await showConfirm(tChrome('app.window.unsaved', { names }));
+      // Every path that leaves this window standing also calls off a quit that
+      // may have prompted it: an app Exit records the session and freezes the
+      // record before any window is asked, and the app is still running. The
+      // call is idempotent and harmless when this close was only a window ×.
       if (result === 'cancel') {
+        await app.quitCancelled();
         return;
       }
       if (result === 'save') {
         try {
           await commitRef.current();
         } catch {
+          await app.quitCancelled();
           return;
         }
-        for (const f of dirtyFiles) {
-          await file.saveAs(f.workingPath, f.path);
+        try {
+          for (const f of dirtyFiles) {
+            await file.saveAs(f.workingPath, f.path);
+          }
+        } catch (e) {
+          await app.quitCancelled();
+          throw e;
         }
       }
       await app.closeWindow(minimizeToTray);

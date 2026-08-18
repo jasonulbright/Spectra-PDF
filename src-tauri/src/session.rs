@@ -227,12 +227,15 @@ pub struct SessionState {
     /// Whether a debounce thread is already pending, so a burst of moves
     /// spawns one thread rather than one per event.
     scheduled: AtomicBool,
-    /// Set once the quit snapshot is written. Nothing may write after it: the
-    /// windows are being torn down, and a later write would record a session
-    /// that has already half-disappeared.
+    /// Set once the quit snapshot is written. Nothing may write while it
+    /// stands: the windows are being torn down, and a later write would record
+    /// a session that has already half-disappeared. An exit that is cancelled
+    /// clears it again — the tear-down it protects against never happened.
     sealed: AtomicBool,
-    /// Held across every write to the file and across the seal, so that taking
-    /// the seal and writing the snapshot it protects is one critical section.
+    /// Held across every write to the file, across the seal, and across the
+    /// unseal, so that moving the seal and writing the snapshot that goes with
+    /// it is one critical section. Taken before the geometry map is read and
+    /// never after: `geometry` is never held while this is acquired.
     writer: Mutex<()>,
 }
 
@@ -277,6 +280,31 @@ impl SessionState {
     fn seal_and_write(&self, sink: impl FnOnce()) -> bool {
         let _guard = self.writer.lock().unwrap_or_else(|e| e.into_inner());
         if self.sealed.swap(true, Ordering::SeqCst) {
+            return false;
+        }
+        sink();
+        true
+    }
+
+    /// Drop the seal and write what replaces the sealed snapshot, under one
+    /// hold of the same lock the sealer takes.
+    ///
+    /// The write is not separable from the clearing. The file still holds the
+    /// capture taken when the exit was decided, which describes windows that
+    /// have since closed; re-enabling writes without replacing it leaves that
+    /// capture on disk as if it were current until something else happens to
+    /// write, and nothing has to.
+    ///
+    /// `sink` builds inside the lock rather than before it, because a payload
+    /// built before the seal came off is a reading of the tear-down it
+    /// describes the end of.
+    ///
+    /// Returns whether the file was sealed. A quit prompted several windows
+    /// and any number of them can cancel, so every cancel calls this and only
+    /// the first one finds a seal to lift.
+    fn unseal_and_write(&self, sink: impl FnOnce()) -> bool {
+        let _guard = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        if !self.sealed.swap(false, Ordering::SeqCst) {
             return false;
         }
         sink();
@@ -537,6 +565,22 @@ fn schedule_write(app: &AppHandle) {
 pub fn capture_and_seal(app: &AppHandle) {
     app.state::<SessionState>()
         .seal_and_write(|| write(app, &snapshot_excluding(app, None)));
+}
+
+/// Return the session to live tracking after an exit that did not happen.
+///
+/// A quit seals the file before any window is asked anything, so a window that
+/// then cancels leaves the app running behind a snapshot of the moment the
+/// exit was decided: the windows that did close during the aborted exit are
+/// still in it, and every later open, close and move goes unrecorded for the
+/// rest of the run.
+///
+/// Both halves matter. The fresh snapshot replaces a record that has already
+/// stopped being true, and clearing the seal puts the ordinary debounced
+/// writes back.
+pub fn unseal(app: &AppHandle) {
+    app.state::<SessionState>()
+        .unseal_and_write(|| write(app, &snapshot_excluding(app, None)));
 }
 
 // ── Applying geometry ─────────────────────────────────────────────────────
@@ -966,6 +1010,78 @@ mod tests {
         // Every later quit path finds it already closed and writes nothing.
         assert!(!state.seal_and_write(|| writes += 1));
         assert_eq!(writes, 1);
+    }
+
+    #[test]
+    fn a_cancelled_exit_replaces_the_capture_and_lets_writes_land_again() {
+        let state = SessionState::new();
+        let windows = FakeWindows::with(&["main", "doc-1", "doc-2"]);
+
+        // File ▸ Exit records every window and closes the file.
+        assert!(state.seal_and_write(|| windows.record(windows.snapshot(None))));
+        assert_eq!(windows.written(), vec!["main", "doc-1", "doc-2"]);
+
+        // doc-1 goes through with its close before doc-2's prompt is answered.
+        windows.destroy("doc-1");
+        assert!(!state.write_checked(
+            || windows.snapshot(Some("doc-1")),
+            |session| windows.record(session),
+        ));
+
+        // doc-2 cancels. The file describes an exit that did not happen and a
+        // window that is already gone, so lifting the seal replaces it.
+        assert!(state.unseal_and_write(|| windows.record(windows.snapshot(None))));
+        assert_eq!(windows.written(), vec!["main", "doc-2"]);
+
+        // And the run carries on being recorded: an ordinary close after the
+        // cancelled exit reaches disk, which is what the seal was preventing.
+        windows.destroy("doc-2");
+        assert!(state.write_checked(
+            || windows.snapshot(Some("doc-2")),
+            |session| windows.record(session),
+        ));
+        assert_eq!(windows.written(), vec!["main"]);
+    }
+
+    #[test]
+    fn only_the_first_cancel_lifts_the_seal() {
+        let state = SessionState::new();
+        let mut unseals = 0;
+        assert!(state.seal_and_write(|| {}));
+
+        // Two windows were prompted and both cancel.
+        assert!(state.unseal_and_write(|| unseals += 1));
+        assert!(!state.unseal_and_write(|| unseals += 1));
+        assert_eq!(unseals, 1);
+
+        // A cancelled window × never belonged to a quit, so there is no seal
+        // to lift and no snapshot to replace.
+        let fresh = SessionState::new();
+        let mut spurious = 0;
+        assert!(!fresh.unseal_and_write(|| spurious += 1));
+        assert_eq!(spurious, 0);
+    }
+
+    #[test]
+    fn a_quit_after_a_cancelled_exit_seals_the_file_again() {
+        let state = SessionState::new();
+        let windows = FakeWindows::with(&["main", "doc-1"]);
+
+        assert!(state.seal_and_write(|| windows.record(windows.snapshot(None))));
+        assert!(state.unseal_and_write(|| windows.record(windows.snapshot(None))));
+
+        // The second Exit is an ordinary one: it takes the seal, records what
+        // is standing now, and every destruction that follows finds the file
+        // closed again.
+        windows.destroy("doc-1");
+        assert!(state.seal_and_write(|| windows.record(windows.snapshot(None))));
+        assert_eq!(windows.written(), vec!["main"]);
+        windows.destroy("main");
+        assert!(!state.write_checked(
+            || windows.snapshot(Some("main")),
+            |session| windows.record(session),
+        ));
+        assert_eq!(windows.written(), vec!["main"]);
     }
 
     /// The live windows a quit tears down, and the file the writes land in.
