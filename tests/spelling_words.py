@@ -12,6 +12,13 @@ dictionary, and only the second is a shipping question.
 
 `bad` words are constructed by doubling or transposing letters so that they
 are non-words in the language rather than rarer real words.
+
+`pointed` words, where a language writes optional diacritics, are the SAME
+`good` words carrying them. The word lists hold none of these spellings, so a
+checker that does not strip the marks reports every one; the gate asserts each
+stripped form is its `good` word, so a pointing that moves a consonant fails
+there instead of passing vacuously. Only the languages whose marks are
+optional carry the key.
 """
 
 # Latin-script Germanic/Romance families share a good deal of this shape, but
@@ -21,6 +28,7 @@ WORDS: dict[str, dict[str, list[str]]] = {
     "ar": {
         "good": ["كتاب", "مدرسة", "سلام", "شمس", "بيت", "ماء", "قلم", "رجل"],
         "bad": ["كتااب", "مدرصة", "سلامم"],
+        "pointed": ["كِتَاب", "مَدْرَسَة", "سَلَام", "شَمْس", "بَيْت", "مَاء", "قَلَم", "رَجُل"],
     },
     "ca": {
         "good": ["casa", "llibre", "escola", "aigua", "dona", "home", "ciutat", "treball"],
@@ -108,6 +116,7 @@ WORDS: dict[str, dict[str, list[str]]] = {
     "he_IL": {
         "good": ["בית", "ספר", "מים", "אדם", "עיר", "עבודה", "יום", "שלום"],
         "bad": ["ביתת", "ספררר", "מייםם"],
+        "pointed": ["בַּיִת", "סֵפֶר", "מַיִם", "אָדָם", "עִיר", "עֲבוֹדָה", "יוֹם", "שָׁלוֹם"],
     },
     "hu_HU": {
         "good": ["ház", "könyv", "iskola", "víz", "ember", "város", "munka", "nap"],

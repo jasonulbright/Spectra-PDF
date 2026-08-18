@@ -108,6 +108,71 @@ def _install_reader_shims() -> None:
     _literal_directive_flags()
 
 
+#: Every non-spacing mark of the Hebrew block: the points and the cantillation
+#: marks a Hebrew word may carry, none of which is a letter. The two Hebrew
+#: code points inside this span that are NOT marks — U+05BE MAQAF and U+05C0
+#: PASEQ — are punctuation and stay out, as do U+05C3 and U+05C6.
+#:
+#: The membership is hspell's, read in Unicode terms rather than restated:
+#: `hspell.c`'s `isniqqud` spans CP1255 0xC0-0xD2 less the bytes for MAQAF and
+#: PASEQ, which decodes to U+05B0-U+05C2 less those two. The span below adds
+#: the marks CP1255 could not encode — the cantillation range and the points
+#: U+05BA, U+05C4, U+05C5, U+05C7 assigned after it — and adds nothing that is
+#: not a Hebrew mark.
+_HEBREW_MARKS = "".join(
+    chr(c)
+    for lo, hi in ((0x0591, 0x05BD), (0x05BF, 0x05BF), (0x05C1, 0x05C2), (0x05C4, 0x05C5), (0x05C7, 0x05C7))
+    for c in range(lo, hi + 1)
+)
+
+_HEBREW_MARK_RE = re.compile(f"[{_HEBREW_MARKS}]")
+
+
+def _supply_hebrew_ignore(dictionary: Any, tag: str) -> None:
+    """Give a Hebrew word list the `IGNORE` table its own vocabulary implies.
+
+    `IGNORE` is hunspell's instrument for optional diacritics — it names Hebrew
+    niqqud as its purpose — and it is declared per dictionary. The shipped
+    Hebrew pair declares none, because the generator behind it (hspell) works
+    in an encoding that carries no points at all and its lexicon is written to
+    the niqqud-LESS standard; so every pointed word misses the list entirely
+    and the whole word is reported. The declaration is missing rather than
+    withheld: a list with no pointed entry has nothing to say about points.
+
+    Which is also the condition checked here. A list that DOES spell its own
+    entries with marks means them, and stripping input would make it reject its
+    own vocabulary — so the table is supplied only to a Hebrew list that
+    declares no `IGNORE` and carries no mark of its own.
+    """
+    aff = getattr(dictionary, "aff", None)
+    if aff is None or aff.IGNORE is not None:
+        return
+    if tag.split("_")[0].lower() != "he":
+        return
+    if any(_HEBREW_MARK_RE.search(stem) for stem in dictionary.dic.index):
+        return
+    from spylls.hunspell.data.aff import Ignore
+
+    aff.IGNORE = Ignore(_HEBREW_MARKS)
+
+
+def _without_ignored(dictionary: Any, word: str) -> str:
+    """`word` with the dictionary's `IGNORE` characters removed.
+
+    Hunspell strips them at the door of the suggester as well as the check
+    (`cleanword2` runs in both), so a suggestion for a word carrying optional
+    diacritics is generated from — and comes back as — the bare skeleton.
+    `spylls` strips only inside its lookup, which leaves the suggester editing
+    characters the list's `TRY` set does not contain: measured, EVERY pointed
+    Arabic and Hebrew misspelling suggested nothing at all.
+
+    A dictionary with no `IGNORE` — every list but four — returns the word
+    unchanged, so this is inert for them.
+    """
+    ignore = getattr(getattr(dictionary, "aff", None), "IGNORE", None)
+    return word.translate(ignore.tr) if ignore else word
+
+
 # ═══════════════════════ the morphological adapter ═════════════════════════
 #
 # Finnish words are GENERATED, not listed: a noun inflects into thousands of
@@ -330,6 +395,7 @@ def load_dictionary(
             dic = Dictionary.from_files(key)
         except Exception as exc:
             raise ValueError(f"The {language} dictionary could not be read: {exc}") from exc
+        _supply_hebrew_ignore(dic, base.name)
     _LOADED[key] = dic
     return dic
 
@@ -534,6 +600,12 @@ def suggest_word(dictionary: Any, word: str, limit: int = 5) -> list[str]:
     stored the way its documents are written answers exactly as before — and
     what comes back is written the way the word was, because the suggestion
     is replacement text for that document.
+
+    Diacritics the dictionary declares ignorable come off FIRST, which is
+    where hunspell takes them off too. The replacement therefore carries none:
+    a suggestion is offered only once the bare skeleton is wrong, and the
+    vocalization of a DIFFERENT skeleton is not something a niqqud-less word
+    list knows — re-pointing the answer would be inventing it.
     """
 
     def take(source: Any) -> list[str]:
@@ -545,7 +617,7 @@ def suggest_word(dictionary: Any, word: str, limit: int = 5) -> list[str]:
                 break
         return out
 
-    for form in _forms(word):
+    for form in _forms(_without_ignored(dictionary, word)):
         found = take(dictionary.suggest(form))
         if found:
             return found if form == word else [_in_the_form_of(word, c) for c in found]
