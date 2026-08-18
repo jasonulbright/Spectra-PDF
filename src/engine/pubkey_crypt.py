@@ -23,6 +23,7 @@ Permissions map from the same ``{print, copy, modify, annotate}`` contract
 the standard encrypt exposes; assistive-technology access is never blocked.
 """
 
+import io
 from pathlib import Path
 
 import pikepdf
@@ -81,6 +82,19 @@ def _permissions(perms: dict | None) -> PubKeyPermissions:
     return flags
 
 
+def _reader_over(file: str) -> PdfFileReader:
+    """A reader holding the document's BYTES rather than an open handle on
+    it.
+
+    The writer reads lazily from whatever the reader was built over, so the
+    source has to stay readable for the whole write — and an output that
+    names its own input is landed by swapping a directory entry over it,
+    which Windows refuses while any handle holds that entry open. Reading the
+    file once and handing the reader memory satisfies both.
+    """
+    return PdfFileReader(io.BytesIO(Path(file).read_bytes()))
+
+
 def _staged_write(writer, output_path: Path) -> None:
     """Write through a same-directory temp file + os.replace — atomic even
     when output overwrites the input (the unlock/redact_marks idiom)."""
@@ -124,11 +138,10 @@ def encrypt_with_certs(
         raise ValueError("At least one recipient certificate is required.")
     recipients = [_load_cert(p) for p in certs]
     output_path = Path(output)
-    with open(file, "rb") as f:
-        reader = PdfFileReader(f)
-        writer = copy_into_new_writer(reader)
-        writer.encrypt_pubkey(recipients, perms=_permissions(permissions))
-        _staged_write(writer, output_path)
+    reader = _reader_over(file)
+    writer = copy_into_new_writer(reader)
+    writer.encrypt_pubkey(recipients, perms=_permissions(permissions))
+    _staged_write(writer, output_path)
     return {
         "output": str(output_path),
         "recipients": len(recipients),
@@ -161,14 +174,13 @@ def decrypt_with_pfx(file: str, output: str, pfx: str, password: str = "") -> di
             "password."
         ) from cause
     output_path = Path(output)
-    with open(file, "rb") as f:
-        reader = PdfFileReader(f)
-        result = reader.decrypt_pubkey(credential)
-        if result.status == pyhanko_crypt.AuthStatus.FAILED:
-            raise ValueError(
-                f"The key in {Path(pfx).name} does not match any recipient "
-                "of this document."
-            )
-        writer = copy_into_new_writer(reader)
-        _staged_write(writer, output_path)
+    reader = _reader_over(file)
+    result = reader.decrypt_pubkey(credential)
+    if result.status == pyhanko_crypt.AuthStatus.FAILED:
+        raise ValueError(
+            f"The key in {Path(pfx).name} does not match any recipient "
+            "of this document."
+        )
+    writer = copy_into_new_writer(reader)
+    _staged_write(writer, output_path)
     return {"output": str(output_path), "size_bytes": output_path.stat().st_size}
