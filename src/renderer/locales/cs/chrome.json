@@ -28,6 +28,8 @@
   "app.prefs.aria": "Předvolby",
   "app.prefs.close": "Zavřít",
   "app.prefs.title": "Předvolby",
+  "app.preserve.acroformInline": "formulář dokumentu je uložen způsobem, který připojená verze nedokáže aktualizovat",
+  "app.preserve.acroformRemoved": "změna odstraňuje formulář dokumentu",
   "app.preserve.catalogChanged": "změna jde nad rámec toho, co unese připojená verze",
   "app.preserve.certifiedAnnotate": "dokument je certifikovaný a povoleno je v něm pouze vyplňování formulářů, podepisování a komentování",
   "app.preserve.certifiedFormFill": "dokument je certifikovaný a povoleno je v něm pouze vyplňování formulářů a podepisování",

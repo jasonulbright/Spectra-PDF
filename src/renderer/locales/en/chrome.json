@@ -28,6 +28,8 @@
   "app.prefs.aria": "Preferences",
   "app.prefs.close": "Close",
   "app.prefs.title": "Preferences",
+  "app.preserve.acroformInline": "the document’s form is stored in a way an appended revision cannot update",
+  "app.preserve.acroformRemoved": "the edit removes the document’s form",
   "app.preserve.catalogChanged": "the change goes further than an appended revision can carry",
   "app.preserve.certifiedAnnotate": "the document is certified to allow only form filling, signing and commenting",
   "app.preserve.certifiedFormFill": "the document is certified to allow only form filling and signing",

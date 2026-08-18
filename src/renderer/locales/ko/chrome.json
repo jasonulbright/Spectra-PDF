@@ -28,6 +28,8 @@
   "app.prefs.aria": "기본 설정",
   "app.prefs.close": "닫기",
   "app.prefs.title": "기본 설정",
+  "app.preserve.acroformInline": "문서의 양식이 덧붙이는 개정판으로는 업데이트할 수 없는 방식으로 저장되어 있습니다",
+  "app.preserve.acroformRemoved": "변경 내용이 문서의 양식을 제거합니다",
   "app.preserve.catalogChanged": "변경 내용이 덧붙이는 개정판이 담을 수 있는 범위를 넘습니다",
   "app.preserve.certifiedAnnotate": "문서가 양식 작성, 서명, 주석 달기만 허용하는 방식으로 인증되어 있습니다",
   "app.preserve.certifiedFormFill": "문서가 양식 작성과 서명만 허용하는 방식으로 인증되어 있습니다",

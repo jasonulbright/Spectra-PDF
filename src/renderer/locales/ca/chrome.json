@@ -28,6 +28,8 @@
   "app.prefs.aria": "Preferències",
   "app.prefs.close": "Tanca",
   "app.prefs.title": "Preferències",
+  "app.preserve.acroformInline": "el formulari del document està desat d'una manera que una revisió afegida no pot actualitzar",
+  "app.preserve.acroformRemoved": "el canvi elimina el formulari del document",
   "app.preserve.catalogChanged": "el canvi va més enllà del que pot dur una revisió afegida",
   "app.preserve.certifiedAnnotate": "el document està certificat i només permet omplir formularis, signar i comentar",
   "app.preserve.certifiedFormFill": "el document està certificat i només permet omplir formularis i signar",

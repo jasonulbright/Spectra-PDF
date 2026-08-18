@@ -28,6 +28,8 @@
   "app.prefs.aria": "Nastavitve",
   "app.prefs.close": "Zapri",
   "app.prefs.title": "Nastavitve",
+  "app.preserve.acroformInline": "obrazec dokumenta je shranjen tako, da ga pripeta revizija ne more posodobiti",
+  "app.preserve.acroformRemoved": "sprememba odstrani obrazec dokumenta",
   "app.preserve.catalogChanged": "sprememba presega to, kar zmore nositi pripeta revizija",
   "app.preserve.certifiedAnnotate": "dokument je potrjen in dovoljeni so le izpolnjevanje obrazcev, podpisovanje in komentiranje",
   "app.preserve.certifiedFormFill": "dokument je potrjen in dovoljena sta le izpolnjevanje obrazcev in podpisovanje",

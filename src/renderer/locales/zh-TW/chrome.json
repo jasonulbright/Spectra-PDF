@@ -28,6 +28,8 @@
   "app.prefs.aria": "偏好設定",
   "app.prefs.close": "關閉",
   "app.prefs.title": "偏好設定",
+  "app.preserve.acroformInline": "文件的表單以附加修訂版無法更新的方式儲存",
+  "app.preserve.acroformRemoved": "這項變更會移除文件的表單",
   "app.preserve.catalogChanged": "這項變更超出附加修訂版所能承載的範圍",
   "app.preserve.certifiedAnnotate": "文件以只允許填寫表單、簽章與加註的方式認證",
   "app.preserve.certifiedFormFill": "文件以只允許填寫表單與簽章的方式認證",
