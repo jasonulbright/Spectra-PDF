@@ -79,6 +79,42 @@ def _encrypted(path: Path) -> Path:
     return path
 
 
+def _annotated(path: Path) -> Path:
+    """A page carrying an annotation — `/Tabs` on a page with nothing to
+    order is refused, so a tab order needs something to order."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    note = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.Text,
+        Rect=pikepdf.Array([10, 10, 30, 30]),
+        Contents=pikepdf.String("a note"),
+    ))
+    page.obj["/Annots"] = pikepdf.Array([note])
+    pdf.save(str(path))
+    pdf.close()
+    return path
+
+
+def _accessibility_denied(path: Path) -> Path:
+    """An encrypted document that refuses assistive technology, with empty
+    passwords — the one shape granting the permission back is offered on.
+
+    The `encrypt` door cannot produce it: that door pins accessibility ON, by
+    policy. So the document is written directly, which is also how a document
+    from elsewhere arrives."""
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(200, 200))
+    pdf.save(
+        str(path),
+        encryption=pikepdf.Encryption(
+            owner="", user="", R=3, aes=False, metadata=False,
+            allow=pikepdf.Permissions(accessibility=False, extract=False),
+        ),
+    )
+    pdf.close()
+    return path
+
+
 def _text_and_figure(path: Path) -> Path:
     """A heading, two body lines and an image — enough for autotag to find
     both a heading role and a figure, which is what the ops built on it need
@@ -126,6 +162,38 @@ def _lang(path: str) -> object:
 
 def _trapped(path: str) -> object:
     return doc_properties_mod.get_advanced_properties(path)["trapped"]
+
+
+def _displayed_title(path: str) -> object:
+    with pikepdf.open(path) as pdf:
+        viewer = pdf.Root.get("/ViewerPreferences") or {}
+        return (str(pdf.docinfo.get("/Title", "")), bool(viewer.get("/DisplayDocTitle", False)))
+
+
+def _initial_view(path: str) -> object:
+    """Every field the reader exposes except the path it was read from."""
+    return {
+        k: v for k, v in doc_properties_mod.get_initial_view(path).items() if k != "file"
+    }
+
+
+def _tab_order(path: str) -> object:
+    with pikepdf.open(path) as pdf:
+        return [str(page.obj.get("/Tabs", "")) for page in pdf.pages]
+
+
+def _permissions(path: str) -> object:
+    """Whether the document is encrypted and every permission it declares —
+    the whole readable claim, for the op whose bytes cannot be compared."""
+    with pikepdf.open(path) as pdf:
+        allow = pdf.allow
+        return (
+            bool(pdf.is_encrypted),
+            {name: bool(getattr(allow, name)) for name in sorted((
+                "accessibility", "extract", "modify_annotation", "modify_assembly",
+                "modify_form", "modify_other", "print_lowres", "print_highres",
+            ))},
+        )
 
 
 def _encryption(path: str) -> object:
@@ -184,6 +252,9 @@ class Case:
     writes, so one input has more than one correct output and no byte
     comparison can be made. Such a case pins the whole readable record as its
     effect instead; it is never excluded quietly.
+
+    `doors` names the registered engine doors this case drives, which is what
+    the coverage guard in `test_inplace_staged_write` counts.
     """
 
     name: str
@@ -193,6 +264,7 @@ class Case:
     effect: Callable[[str], object]
     dies: str = "save_pdf"
     deterministic: bool = True
+    doors: tuple = ()
 
 
 CASES = (
@@ -203,6 +275,35 @@ CASES = (
         _plain,
         lambda src, out: doc_properties_mod.set_document_language(src, out, "en-GB"),
         _lang,
+        doors=("set_document_language",),
+    ),
+    Case(
+        "doc_properties_title",
+        doc_properties_mod,
+        _plain,
+        lambda src, out: doc_properties_mod.set_document_title(
+            src, out, title="After the write", display=True),
+        _displayed_title,
+        # The title lands in XMP too, and the XMP writer stamps a modify date.
+        deterministic=False,
+        doors=("set_document_title",),
+    ),
+    Case(
+        "doc_properties_initial_view",
+        doc_properties_mod,
+        _plain,
+        lambda src, out: doc_properties_mod.set_initial_view(
+            src, out, page_layout="two-page-right", page_mode="outlines"),
+        _initial_view,
+        doors=("set_initial_view",),
+    ),
+    Case(
+        "doc_properties_tab_order",
+        doc_properties_mod,
+        _annotated,
+        lambda src, out: doc_properties_mod.set_page_tab_order(src, out, order="S"),
+        _tab_order,
+        doors=("set_page_tab_order",),
     ),
     Case(
         "doc_properties_advanced",
@@ -211,13 +312,37 @@ CASES = (
         lambda src, out: doc_properties_mod.set_advanced_properties(
             src, out, trapped="true"),
         _trapped,
+        doors=("set_advanced_properties",),
     ),
     Case(
-        "encrypt",
+        "decrypt",
         encrypt_mod,
         _encrypted,
         lambda src, out: encrypt_mod.decrypt(src, out, password="pw"),
         _encryption,
+        doors=("decrypt",),
+    ),
+    Case(
+        "encrypt",
+        encrypt_mod,
+        _plain,
+        lambda src, out: encrypt_mod.encrypt(
+            src, out, owner_password="pw", permissions={"print": False}),
+        _permissions,
+        # Encryption draws a fresh file key per run, so one input has more
+        # than one correct output.
+        deterministic=False,
+        doors=("encrypt",),
+    ),
+    Case(
+        "grant_accessibility_permission",
+        encrypt_mod,
+        _accessibility_denied,
+        lambda src, out: encrypt_mod.grant_accessibility_permission(src, out),
+        _permissions,
+        # Rewriting the encryption draws a fresh file key.
+        deterministic=False,
+        doors=("grant_accessibility_permission",),
     ),
     Case(
         # The XMP writer stamps a modify date, so two runs of one input differ
@@ -228,6 +353,7 @@ CASES = (
         lambda src, out: metadata_mod.set_metadata(src, out, title="after the write"),
         _metadata_record,
         deterministic=False,
+        doors=("set_metadata",),
     ),
     Case(
         "optimize",
@@ -235,6 +361,7 @@ CASES = (
         _plain,
         lambda src, out: optimize_mod.optimize(src, out, linearize=True),
         _linearized,
+        doors=("optimize",),
     ),
     # `save` — the swap sat after the block instead, which left the same span
     # unowned.
@@ -244,6 +371,7 @@ CASES = (
         _titled,
         lambda src, out: metadata_mod.strip_metadata(src, out),
         _title,
+        doors=("strip_metadata",),
     ),
     Case(
         "autotag",
@@ -251,6 +379,7 @@ CASES = (
         _text_and_figure,
         lambda src, out: autotag_mod.autotag(src, out),
         _struct_count,
+        doors=("autotag",),
     ),
     Case(
         "sanitize",
@@ -258,6 +387,7 @@ CASES = (
         _titled,
         lambda src, out: sanitize_mod.sanitize_pdf(src, out, categories=["metadata"]),
         _title,
+        doors=("sanitize_pdf",),
     ),
     Case(
         "threads",
@@ -265,6 +395,7 @@ CASES = (
         _plain,
         lambda src, out: threads_mod.set_threads(src, out, THREAD_SPEC),
         _thread_count,
+        doors=("set_threads",),
     ),
     # `nested` — the staged bytes come from another engine op.
     Case(
@@ -275,6 +406,7 @@ CASES = (
             src, out, tag_if_untagged=True),
         _struct_count,
         dies="autotag",
+        doors=("outline_from_structure",),
     ),
 )
 
