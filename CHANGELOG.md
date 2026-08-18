@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.1.5
+
+*Released 2026-08-18*
+
+### Spell checking
+
+- Pointed Hebrew now checks against the word's letters, matching how the dictionary is written.
+- Suggestions now work for pointed Arabic and Hebrew misspellings instead of returning nothing.
+
+### Tabs
+
+- Document tabs can be reordered by dragging within a window.
+- A tab dropped into another window lands where the caret shows, not at the end.
+- Restoring a session reopens tabs in their arranged order.
+
+### Print production
+
+- Spot-colour gradients now survive conversion to CMYK instead of flattening to process plates.
+- A PDF/X conversion now names any printing plates its target level cannot carry.
+- A destination profile that does not describe CMYK output is refused by name.
+- Choosing the bundled profile no longer deletes a matching file beside the output.
+- Converting a spot ink reports any gradients that still print it.
+- The transparency flattener no longer reports an error after a successful flatten.
+- Preflight fixes that landed partly now say exactly what they left.
+- The fix for too many spot inks now works instead of failing.
+
+### Reliability
+
+- A crash during an in-place save can no longer destroy the document.
+- Combining PDFs into a portfolio works again.
+- Promoting a table's header row no longer fails.
+- Saved documents embed fonts identically on every run.
+
 ## 1.1.4
 
 *Released 2026-08-17*
