@@ -21,19 +21,18 @@ Construction — the standard "OCR under" text layer:
     overlay is appended as ``q /SpectraPDFOCR Do Q``.
 
 Fail-closed: all edits validated first (page range, rect shape, encodable
-text); output written only after every page succeeds; in-place via
-temp+rename.
+text); output written only after every page succeeds; in-place stages beside
+the document and swaps the directory entry.
 """
 
 import os
-import shutil
 import stat
-import tempfile
 from pathlib import Path
 
 import pikepdf
 from pikepdf import Dictionary, Name
 
+from engine.inplace import staged_write
 from engine.pdf_metrics import text_width_em
 from engine.pdf_save import save_pdf
 
@@ -105,7 +104,7 @@ def apply_ocr_layer(file: str, output: str, pages: list[dict]) -> dict:
 
     Args:
         file: Input PDF path.
-        output: Output PDF path (may equal input — temp+rename).
+        output: Output PDF path (may equal input — stage and replace).
         pages: ``[{page: <1-based>, words: [{text, rect: [x0,y0,x1,y1]}]}]``,
             rects in PDF user-space points (bottom-up).
     """
@@ -194,11 +193,11 @@ def apply_ocr_layer(file: str, output: str, pages: list[dict]) -> dict:
             words_applied += len(words)
 
         if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                tmp_path = tmp.name
-            save_pdf(pdf, tmp_path)
+            # The Pdf is closed inside the block: the destination cannot be
+            # replaced while it is held open.
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, str(staged))
+                pdf.close()
         else:
             # Overwriting an existing mirror output: clear a read-only
             # attribute first — fs-level copies propagate attributes, so a
@@ -208,9 +207,6 @@ def apply_ocr_layer(file: str, output: str, pages: list[dict]) -> dict:
             if output_path.exists() and not os.access(output_path, os.W_OK):
                 os.chmod(output_path, stat.S_IWRITE)
             save_pdf(pdf, output_path)
-
-    if same_file:
-        shutil.move(tmp_path, str(output_path))
 
     return {
         "output": str(output_path),
