@@ -1,7 +1,16 @@
 import { expect } from '@wdio/globals';
 import { resolve } from 'node:path';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
+import { PDFDocument } from 'pdf-lib';
 import {
   closeAllFiles,
   deleteSelectedCanvasPages,
@@ -223,6 +232,22 @@ function readSession(): SessionRecord[] {
 const holds = (record: SessionRecord, path: string): boolean =>
   record.files.some((f) => f.toLowerCase() === path.toLowerCase());
 
+/**
+ * How many pages the file ON DISK has.
+ *
+ * The discriminator every reservation-gate case turns on: a hand-off writes the
+ * source's working copy back over the user's own file between the reservation
+ * and the commit, so the document the target opens has a different page count
+ * from the one that was on disk when the gesture started.
+ */
+async function diskPageCount(path: string): Promise<number> {
+  const doc = await PDFDocument.load(readFileSync(path), {
+    ignoreEncryption: true,
+    updateMetadata: false,
+  });
+  return doc.getPageCount();
+}
+
 describe('cross-window tab drag', () => {
   let mainHandle = '';
   let secondHandle = '';
@@ -233,6 +258,12 @@ describe('cross-window tab drag', () => {
   let keepPdf = '';
   let dirtyPdf = '';
   let ghostPdf = '';
+  /** The reservation-gate block's own documents, opened after the cases above
+   * have given every earlier fixture back. */
+  let seedPdf = '';
+  let handoffPdf = '';
+  let tearPdf = '';
+  let lockedPdf = '';
 
   it('boots one workspace window holding three documents', async () => {
     await waitForHarness();
@@ -688,6 +719,213 @@ describe('cross-window tab drag', () => {
 
     await browser.execute(() => {
       void (window as any).__SPECTRA_TEST__.closeThisWindow();
+    });
+    await browser.switchToWindow(secondHandle);
+    await browser.execute(() => {
+      void (window as any).__SPECTRA_TEST__.closeThisWindow();
+    });
+    await browser.switchToWindow(mainHandle);
+    await waitForHandles(1);
+  });
+
+  // ── The reservation gate: WHAT the target opens, and WHEN ────────────────
+  //
+  // A hand-off writes the source's working copy back over the user's own file
+  // BETWEEN taking the reservation and committing it. The queued open is
+  // therefore held out of the target's drain until the commit releases it: the
+  // renderer drains on mount and on every open signal, and a drain that landed
+  // in that window would open the bytes the write was about to replace — and
+  // would take with it the queue entry a destruction rollback needs.
+  //
+  // The discriminator is the page count. Each case edits its document to a
+  // count nothing else in this spec uses, so "the target opened the pre-move
+  // bytes" and "the target opened what the move wrote" are different numbers
+  // rather than the same file read twice.
+
+  it('opens four fresh documents and places a window to hand them to', async () => {
+    await browser.switchToWindow(mainHandle);
+    await closeAllFiles();
+    await waitForFileCount(0, 'the first window never gave its earlier documents up');
+
+    const dir = mkdtempSync(resolve(tmpdir(), 'tab-drag-reserve-'));
+    seedPdf = resolve(dir, 'seed.pdf');
+    handoffPdf = resolve(dir, 'handoff.pdf');
+    tearPdf = resolve(dir, 'tear.pdf');
+    lockedPdf = resolve(dir, 'locked.pdf');
+    for (const p of [seedPdf, handoffPdf, tearPdf, lockedPdf]) copyFileSync(SAMPLE_PDF, p);
+
+    await openByPaths([seedPdf, handoffPdf, tearPdf, lockedPdf]);
+    await waitForFileCount(4, 'the reservation-gate documents never opened');
+
+    // A tear-off is still the only way to place a window somewhere this spec
+    // can aim at, for the reason the file header gives.
+    const frame = await readFrame();
+    expect(await tabDragDrop(seedPdf, contentPoint(frame, frame.innerHeight / 2))).toBe(true);
+    const handles = await waitForHandles(2);
+    secondHandle = handles.find((h) => h !== mainHandle)!;
+    await browser.switchToWindow(secondHandle);
+    await waitForHarness(30_000);
+    await waitForFileCount(1, 'the placed window never received the document that placed it');
+  });
+
+  it('a dirty document arrives in the other window as the bytes the move WROTE', async () => {
+    await browser.switchToWindow(mainHandle);
+    await openByPaths([handoffPdf]);
+    await setView('canvas');
+    const pages = async (): Promise<string[]> =>
+      (await getWorkspacePageIds()).filter((id) => id.startsWith(handoffPdf));
+    await browser.waitUntil(async () => (await pages()).length === 5, {
+      timeout: 30_000,
+      timeoutMsg: 'the document never indexed',
+    });
+
+    // Two pages, so the count the target must report is one no other case in
+    // this spec produces.
+    const ids = await pages();
+    await selectCanvasPages([ids[0], ids[1]]);
+    await deleteSelectedCanvasPages();
+    await browser.waitUntil(async () => (await pages()).length === 3, {
+      timeout: 30_000,
+      timeoutMsg: 'the page deletes never landed in the page tier',
+    });
+    // The user's own file is untouched so far: the page tier flushes into the
+    // WORKING copy, and writing that back over the path is what the MOVE costs.
+    expect(await diskPageCount(handoffPdf)).toBe(5);
+
+    await browser.switchToWindow(secondHandle);
+    const target = await readFrame();
+    await browser.switchToWindow(mainHandle);
+    const source = await readFrame();
+    const point = physical(stripCssPoint(target, 40), source.dpr);
+    expect(await tabDragDrop(handoffPdf, point)).toBe(true);
+    await waitForTabs([tearPdf, lockedPdf], 'the handed-off document never left the source window');
+
+    // The move's write landed, and what the other window is showing is that
+    // file — not the five-page document that was on disk when the drag began.
+    expect(await diskPageCount(handoffPdf)).toBe(3);
+    await browser.switchToWindow(secondHandle);
+    await waitForFileCount(2, 'the handed-off document never arrived');
+    // The arriving document is the one the window is showing.
+    await browser.waitUntil(
+      async () => {
+        const active = (await getState()).activeFile;
+        return active?.path.toLowerCase() === handoffPdf.toLowerCase() && active.pageCount === 3;
+      },
+      {
+        timeout: 30_000,
+        timeoutMsg: 'the receiving window opened bytes the hand-off had not written yet',
+      },
+    );
+  });
+
+  it('a dirty TEAR-OFF shows the edit, in a window that was built before the write', async () => {
+    // The window a tear-off delivers to is built at the RESERVATION and mounts
+    // — and drains — while the source is still writing. It is the case the
+    // gate exists for: a drain that took the entry there would open the file
+    // as it stood before the move, in a window with no way to be told.
+    await browser.switchToWindow(mainHandle);
+    await openByPaths([tearPdf]);
+    await setView('canvas');
+    const pages = async (): Promise<string[]> =>
+      (await getWorkspacePageIds()).filter((id) => id.startsWith(tearPdf));
+    await browser.waitUntil(async () => (await pages()).length === 5, {
+      timeout: 30_000,
+      timeoutMsg: 'the document never indexed',
+    });
+    await selectCanvasPages([(await pages())[0]]);
+    await deleteSelectedCanvasPages();
+    await browser.waitUntil(async () => (await pages()).length === 4, {
+      timeout: 30_000,
+      timeoutMsg: 'the page delete never landed in the page tier',
+    });
+    expect(await diskPageCount(tearPdf)).toBe(5);
+
+    const frame = await readFrame();
+    expect(await tabDragDrop(tearPdf, contentPoint(frame, frame.innerHeight * 0.75))).toBe(true);
+    const handles = await waitForHandles(3);
+    const torn = handles.find((h) => h !== mainHandle && h !== secondHandle)!;
+
+    expect(await diskPageCount(tearPdf)).toBe(4);
+    await browser.switchToWindow(torn);
+    await waitForHarness(30_000);
+    await waitForFileCount(1, 'the torn-off document never arrived in its new window');
+    await browser.waitUntil(async () => (await getState()).activeFile?.pageCount === 4, {
+      timeout: 30_000,
+      timeoutMsg: 'the torn-off window opened the file as it stood before the move',
+    });
+
+    await browser.execute(() => {
+      void (window as any).__SPECTRA_TEST__.closeThisWindow();
+    });
+    await browser.switchToWindow(mainHandle);
+    await waitForHandles(2);
+  });
+
+  it('a hand-off whose write fails delivers nothing and gives the document back', async () => {
+    // The other half of the gate. The reservation moves the claim and queues
+    // the open BEFORE the write; when the write then fails there is a document
+    // owned by a window that must never open it. Nothing may be delivered, and
+    // the source has to get its document back — which is what the release the
+    // failure path takes is for.
+    await browser.switchToWindow(mainHandle);
+    await openByPaths([lockedPdf]);
+    await setView('canvas');
+    const pages = async (): Promise<string[]> =>
+      (await getWorkspacePageIds()).filter((id) => id.startsWith(lockedPdf));
+    await browser.waitUntil(async () => (await pages()).length === 5, {
+      timeout: 30_000,
+      timeoutMsg: 'the document never indexed',
+    });
+    await selectCanvasPages([(await pages())[0]]);
+    await deleteSelectedCanvasPages();
+    await browser.waitUntil(async () => (await pages()).length === 4, {
+      timeout: 30_000,
+      timeoutMsg: 'the page delete never landed in the page tier',
+    });
+
+    // Make the write fail for real rather than stubbing it: the move copies the
+    // working copy over the user's own path, and a read-only destination is a
+    // copy the OS refuses.
+    chmodSync(lockedPdf, 0o444);
+
+    await browser.switchToWindow(secondHandle);
+    const target = await readFrame();
+    const targetFiles = (await getState()).fileCount;
+    await browser.switchToWindow(mainHandle);
+    const source = await readFrame();
+    const point = physical(stripCssPoint(target, 40), source.dpr);
+
+    let failed = '';
+    try {
+      await tabDragDrop(lockedPdf, point);
+    } catch (e) {
+      failed = String(e);
+    } finally {
+      chmodSync(lockedPdf, 0o666);
+    }
+    expect(failed).not.toBe('');
+
+    // Nothing crossed: the tab is still here with its page edits pending, and
+    // the file the write could not reach is the file it always was.
+    expect(await tabPaths()).toContain(lockedPdf);
+    expect(await pages()).toHaveLength(4);
+    expect(await diskPageCount(lockedPdf)).toBe(5);
+
+    // And the claim came back with it — the other window is refused by name,
+    // which it could not be if the reservation had left the path owned there.
+    await browser.switchToWindow(secondHandle);
+    expect((await getState()).fileCount).toBe(targetFiles);
+    await openByPaths([lockedPdf]);
+    await dismissClaimRefusal('locked.pdf');
+    await browser.switchToWindow(secondHandle);
+    expect((await getState()).fileCount).toBe(targetFiles);
+
+    // Leave the document as the rest of the file found it.
+    await browser.switchToWindow(mainHandle);
+    await pressGlobalKey('z', { ctrl: true });
+    await browser.waitUntil(async () => (await pages()).length === 5, {
+      timeout: 30_000,
+      timeoutMsg: 'the commit the failed hand-off ran could not be undone',
     });
     await browser.switchToWindow(secondHandle);
     await browser.execute(() => {
