@@ -4,7 +4,6 @@
  */
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import type {
   ScanEvent,
   ScanResult,
@@ -86,8 +85,11 @@ export interface PhysicalScreenRect extends PhysicalScreenPoint {
  * crosses — page and document ids are minted against a per-window generation
  * counter, so the same id string names a different physical page in each. */
 export const tabDrag = {
-  /** Publish this window's strip box. A box with no area forgets the strip,
-   * which is how a window with no visible strip stops taking drops. */
+  /** Publish this window's strip box, in physical pixels RELATIVE to the
+   * window: the screen origin is read on the far side, under the lock it
+   * re-anchors with, so no rect is assembled from two positions sampled at
+   * different moments. A box with no area forgets the strip, which is how a
+   * window with no visible strip stops taking drops. */
   registerStrip: (rect: PhysicalScreenRect) =>
     invoke<void>('register_strip_rect', {
       x: rect.x,
@@ -102,19 +104,18 @@ export const tabDrag = {
     invoke<string | null>('tabdrag_track', { screenX: point.x, screenY: point.y }),
   /** Abandon a drag. Nothing crosses; the caret stops being drawn. */
   cancel: () => invoke<void>('tabdrag_cancel'),
+  /** Whether a release here would take the document OUT of this window.
+   * Classification only — no claim moves and nothing is queued. Asked before
+   * the document is written back to its own path, because a release that
+   * lands in this window's own strip must not touch the file. */
+  wouldMove: (point: PhysicalScreenPoint) =>
+    invoke<boolean>('tabdrag_resolve', { screenX: point.x, screenY: point.y }),
   drop: (path: string, point: PhysicalScreenPoint) =>
     invoke<TabDragResult>('tabdrag_drop', { path, screenX: point.x, screenY: point.y }),
   /** `x` is physical pixels from THIS window's own strip's left edge. */
   onHover: (callback: (x: number) => void) =>
     listen<{ x: number }>('tabdrag://hover', (event) => callback(event.payload.x)),
   onLeave: (callback: () => void) => listen('tabdrag://leave', () => callback()),
-  /** This window's inner origin in physical screen pixels. NOT the outer
-   * origin: that includes the frame, and its title bar alone is taller than
-   * the gap between the strip and the toolbar below it. */
-  windowOrigin: async (): Promise<PhysicalScreenPoint> => {
-    const position = await getCurrentWindow().innerPosition();
-    return { x: position.x, y: position.y };
-  },
 };
 
 /** Paths and output folders this window holds. The arbiter is Rust managed

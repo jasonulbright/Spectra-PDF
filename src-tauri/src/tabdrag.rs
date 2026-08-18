@@ -8,13 +8,14 @@
 //! answer the two questions that decide the drop: whose tab strip is under the
 //! cursor, and who owns the document afterwards. Both are answered here.
 //!
-//! Strip rectangles are held in PHYSICAL SCREEN pixels, anchored to the window's
-//! `inner_position`. The outer origin includes the frame, whose title bar alone
+//! A strip is published in physical pixels RELATIVE to its window, and this
+//! side alone composes it with a screen origin. The origin is the window's
+//! `inner_position`: the outer origin includes the frame, whose title bar alone
 //! is taller than the gap between the strip and the toolbar below it, so a rect
-//! measured against it hit-tests into the wrong band. Each entry remembers the
-//! inner origin it was measured against and is re-anchored whenever the window
-//! moves or resizes, so a rect the renderer last published several frames ago
-//! still names the right window.
+//! measured against it hit-tests into the wrong band. Holding the window-local
+//! rect and the origin separately is also what keeps the two from being sampled
+//! at different moments — the origin is re-read here on every move and resize,
+//! and a window that moved between two reads can never leave the rect offset.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -42,9 +43,21 @@ impl StripRect {
 
 #[derive(Clone, Copy, Debug)]
 struct StripEntry {
-    rect: StripRect,
-    /// The window's inner origin when the rect was measured.
+    /// The strip's box inside its own window, physical pixels.
+    local: StripRect,
+    /// The window's inner origin, re-read whenever the window moves.
     origin: (i32, i32),
+}
+
+impl StripEntry {
+    fn screen(&self) -> StripRect {
+        StripRect {
+            x: self.origin.0 + self.local.x,
+            y: self.origin.1 + self.local.y,
+            width: self.local.width,
+            height: self.local.height,
+        }
+    }
 }
 
 /// Where the pointer is, in window terms.
@@ -73,27 +86,33 @@ impl StripRegistry {
         }
     }
 
-    fn set(&self, label: &str, rect: StripRect, origin: (i32, i32)) {
+    fn set(&self, label: &str, local: StripRect, origin: (i32, i32)) {
         if let Ok(mut strips) = self.strips.lock() {
-            strips.insert(label.to_string(), StripEntry { rect, origin });
+            strips.insert(label.to_string(), StripEntry { local, origin });
         }
     }
 
-    /// Move a label's rect by however far its window's inner origin has moved.
+    /// Record where a label's window is now.
     ///
-    /// Windows minimize to an off-screen origin, so a minimized window's strip
-    /// leaves the hit-testable area by the same arithmetic that follows an
-    /// ordinary drag, and comes back when the window is restored.
+    /// The stored origin is replaced rather than accumulated, so a move this
+    /// side never heard about corrects itself on the next one. Windows minimize
+    /// to an off-screen origin, which takes the strip out of the hit-testable
+    /// area by the same arithmetic that follows an ordinary drag and brings it
+    /// back when the window is restored.
     fn reanchor(&self, label: &str, origin: (i32, i32)) {
         if let Ok(mut strips) = self.strips.lock() {
             if let Some(entry) = strips.get_mut(label) {
-                entry.rect.x += origin.0 - entry.origin.0;
-                entry.rect.y += origin.1 - entry.origin.1;
                 entry.origin = origin;
             }
         }
     }
 
+    /// Stop answering for a label.
+    ///
+    /// Called from the window's own destruction, and it must run BEFORE the
+    /// claims that label held are released: this is the lock a release resolves
+    /// under, so forgetting first is what makes a transfer into a window that
+    /// no longer exists impossible rather than merely unlikely.
     fn forget(&self, label: &str) {
         if let Ok(mut strips) = self.strips.lock() {
             strips.remove(label);
@@ -110,12 +129,60 @@ impl StripRegistry {
         let Ok(strips) = self.strips.lock() else {
             return Vec::new();
         };
-        let mut out: Vec<(String, StripRect)> = strips
-            .iter()
-            .map(|(label, entry)| (label.clone(), entry.rect))
-            .collect();
-        out.sort_by(|a, b| a.0.cmp(&b.0));
-        out
+        screen_strips(&strips, None)
+    }
+
+    /// Where a release at this point would go, deciding nothing else.
+    fn resolve_at(&self, live: &[String], source: &str, x: i32, y: i32) -> DropTarget {
+        let Ok(strips) = self.strips.lock() else {
+            return DropTarget::TearOff;
+        };
+        resolve_drop(&screen_strips(&strips, Some(live)), source, x, y)
+    }
+
+    /// Resolve a release AND move the document, both under this lock.
+    ///
+    /// A window destroyed between the hit-test and the transfer would otherwise
+    /// take the claim with it: the source is told the document changed hands and
+    /// closes its tab, and the path belongs to a label nothing can ever deliver
+    /// to. Destruction forgets the strip under this same lock, so the two are
+    /// strictly ordered — either the label is still here and the whole handover
+    /// completes, or it is gone and the point falls through to a tear-off.
+    ///
+    /// The queued open is part of the same unit. A transfer whose delivery was
+    /// refused is undone rather than reported: ownership that moved with nothing
+    /// to open it is the same lost document by a different route.
+    fn resolve_release(
+        &self,
+        claims: &ClaimState,
+        registry: &WindowRegistry,
+        live: &[String],
+        source: &str,
+        path: &str,
+        x: i32,
+        y: i32,
+    ) -> HandOver {
+        // Failing closed: a drop that cannot be resolved leaves the document
+        // where it is, which is the outcome the source already knows how to
+        // undo.
+        let Ok(strips) = self.strips.lock() else {
+            return HandOver::Refused(source.to_string());
+        };
+        match resolve_drop(&screen_strips(&strips, Some(live)), source, x, y) {
+            DropTarget::Source => HandOver::Source,
+            DropTarget::TearOff => HandOver::TearOff,
+            DropTarget::Window(target) => {
+                let moved = claims.transfer(path, source, &target);
+                if !moved.granted {
+                    return HandOver::Refused(moved.owner);
+                }
+                if !app_windows::queue_open(registry, &target, vec![path.to_string()], false) {
+                    let _ = claims.transfer(path, &target, source);
+                    return HandOver::Refused(source.to_string());
+                }
+                HandOver::Moved(target)
+            }
+        }
     }
 
     fn take_hover(&self) -> Option<String> {
@@ -133,6 +200,38 @@ impl Default for StripRegistry {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// What a release did, decided under the registry lock.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HandOver {
+    /// The document belongs to this label now, and its open is queued.
+    Moved(String),
+    /// The pointer never left the dragging window's own strip.
+    Source,
+    /// No strip took it; the caller builds a window for it.
+    TearOff,
+    /// Nothing moved. This label holds the path.
+    Refused(String),
+}
+
+/// Registered strips in screen coordinates, in label order so hit-testing is
+/// deterministic. `live` restricts the answer to labels that can still take a
+/// drop; `None` asks every registered strip.
+fn screen_strips(
+    strips: &HashMap<String, StripEntry>,
+    live: Option<&[String]>,
+) -> Vec<(String, StripRect)> {
+    let mut out: Vec<(String, StripRect)> = strips
+        .iter()
+        .filter(|(label, _)| match live {
+            Some(live) => live.iter().any(|l| l == *label),
+            None => true,
+        })
+        .map(|(label, entry)| (label.clone(), entry.screen()))
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
 }
 
 // ── Pure resolution ───────────────────────────────────────────────────────
@@ -257,21 +356,22 @@ pub fn on_window_destroyed(app: &AppHandle, label: &str) {
     app.state::<StripRegistry>().forget(label);
 }
 
-/// Strips that can actually receive a drop: registered, still alive, and on
-/// screen. A window hidden to the tray keeps its rect (nothing tells this side
-/// it moved), and a document dropped into an invisible window is gone as far as
-/// the user can tell — a tear-off is the recoverable answer.
-fn droppable_strips(app: &AppHandle) -> Vec<(String, StripRect)> {
-    let windows = app.webview_windows();
-    app.state::<StripRegistry>()
-        .snapshot()
+/// Labels that can actually receive a drop: alive and on screen. A window
+/// hidden to the tray keeps its rect (nothing tells this side it moved), and a
+/// document dropped into an invisible window is gone as far as the user can
+/// tell — a tear-off is the recoverable answer.
+///
+/// Read outside the registry lock, because asking a window whether it is
+/// visible crosses to the event loop, and the event loop is where a window's
+/// destruction runs. What this list can miss — a window destroyed a moment
+/// later — the registry's own `forget` catches under the lock.
+fn droppable_labels(app: &AppHandle) -> Vec<String> {
+    app.webview_windows()
         .into_iter()
-        .filter(|(label, _)| {
-            windows
-                .get(label)
-                .map(|w| w.is_visible().unwrap_or(false))
-                .unwrap_or(false)
+        .filter(|(label, window)| {
+            app_windows::is_app_window(label) && window.is_visible().unwrap_or(false)
         })
+        .map(|(label, _)| label)
         .collect()
 }
 
@@ -300,7 +400,10 @@ fn tear_off(
     if !moved.granted {
         return TabDragResult::refused(moved.owner);
     }
-    app_windows::deliver_open(app, &label, vec![path.to_string()], false);
+    if !app_windows::deliver_open(app, &label, vec![path.to_string()], false) {
+        let _ = app.state::<ClaimState>().transfer(path, &label, from);
+        return TabDragResult::refused(from.to_string());
+    }
     // Built hidden when it has a position to take: a window that appears
     // centred and then jumps to the cursor reads as two windows opening.
     match app_windows::build_app_window(app, &label, crate::is_e2e_mode(), position.is_none()) {
@@ -326,12 +429,13 @@ fn tear_off(
 
 // ── Commands ──────────────────────────────────────────────────────────────
 
-/// Publish this window's tab-strip rectangle, in physical screen pixels.
+/// Publish this window's tab-strip rectangle, in physical pixels relative to
+/// the window.
 ///
-/// The renderer measures it (`getBoundingClientRect` scaled by its own device
-/// pixel ratio, offset by `inner_position`) because only the renderer knows
-/// where the strip sits inside the page; this side records it against the
-/// window's inner origin so it can follow the window afterwards. A strip with
+/// The renderer measures the box (`getBoundingClientRect` scaled by its own
+/// device pixel ratio) because only the renderer knows where the strip sits
+/// inside the page; the screen origin is read HERE, and only here, so a window
+/// that moves between the two never leaves the stored rect offset. A strip with
 /// no area — collapsed, or a window with no tabs — is forgotten rather than
 /// stored, so it can never take a drop.
 #[tauri::command]
@@ -405,6 +509,26 @@ pub async fn tabdrag_cancel(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Would a release here take the document out of this window?
+///
+/// Classification only: no claim moves, nothing is queued, no caret changes.
+/// The source asks before it writes its working copy back over the user's file,
+/// because that write is what a MOVE costs and a release that lands back in the
+/// dragging window is not one.
+#[tauri::command]
+pub async fn tabdrag_resolve(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    screen_x: i32,
+    screen_y: i32,
+) -> Result<bool, String> {
+    let live = droppable_labels(&app);
+    let target = app
+        .state::<StripRegistry>()
+        .resolve_at(&live, window.label(), screen_x, screen_y);
+    Ok(target != DropTarget::Source)
+}
+
 /// Resolve a release: transfer to the window under the cursor, tear off a new
 /// window where there is none, or report that the pointer never left home.
 ///
@@ -426,19 +550,29 @@ pub async fn tabdrag_drop(
     clear_hover(&app);
     let path = crate::commands::canonical_path(&path);
     let source = window.label().to_string();
-    let result = match resolve_drop(&droppable_strips(&app), &source, screen_x, screen_y) {
-        DropTarget::Source => TabDragResult::same_window(),
-        DropTarget::Window(target) => {
-            let moved = app.state::<ClaimState>().transfer(&path, &source, &target);
-            if moved.granted {
-                app_windows::deliver_open(&app, &target, vec![path.clone()], false);
-                app_windows::focus_label(&app, &target);
-                TabDragResult::moved(TabDragResult::TRANSFERRED, target)
-            } else {
-                TabDragResult::refused(moved.owner)
-            }
+    // Everything that decides ownership happens inside `resolve_release`, which
+    // holds the registry lock throughout. Only what cannot run under a lock the
+    // event loop also takes is left out here: the visibility probe above it, and
+    // building a window below it.
+    let live = droppable_labels(&app);
+    let handed = app.state::<StripRegistry>().resolve_release(
+        &app.state::<ClaimState>(),
+        &app.state::<WindowRegistry>(),
+        &live,
+        &source,
+        &path,
+        screen_x,
+        screen_y,
+    );
+    let result = match handed {
+        HandOver::Source => TabDragResult::same_window(),
+        HandOver::Refused(owner) => TabDragResult::refused(owner),
+        HandOver::Moved(target) => {
+            app_windows::signal_open(&app, &target);
+            app_windows::focus_label(&app, &target);
+            TabDragResult::moved(TabDragResult::TRANSFERRED, target)
         }
-        DropTarget::TearOff => tear_off(
+        HandOver::TearOff => tear_off(
             &app,
             &path,
             &source,
@@ -471,6 +605,7 @@ pub async fn move_document_to_new_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_windows::ClaimMode;
 
     fn strip(label: &str, x: i32, y: i32, width: i32, height: i32) -> (String, StripRect) {
         (
@@ -572,26 +707,62 @@ mod tests {
     #[test]
     fn a_moved_window_carries_its_strip_with_it() {
         let registry = StripRegistry::new();
+        // 40 across and 31 down inside a window at (900, 100).
         registry.set(
             "doc-1",
             StripRect {
-                x: 940,
-                y: 131,
+                x: 40,
+                y: 31,
                 width: 400,
                 height: 40,
             },
             (900, 100),
         );
+        assert_eq!(registry.snapshot(), vec![strip("doc-1", 940, 131, 400, 40)]);
         // Dragged 200 right and 50 up: the strip keeps its offset inside the
-        // window, which is the whole reason the origin is stored with it.
+        // window, which is the whole reason the origin is stored beside it.
         registry.reanchor("doc-1", (1100, 50));
-        assert_eq!(
-            registry.snapshot(),
-            vec![strip("doc-1", 1140, 81, 400, 40)]
-        );
+        assert_eq!(registry.snapshot(), vec![strip("doc-1", 1140, 81, 400, 40)]);
         // Re-anchoring twice must not double-count the first move.
         registry.reanchor("doc-1", (1100, 50));
         assert_eq!(registry.snapshot(), vec![strip("doc-1", 1140, 81, 400, 40)]);
+        // A move this side never heard about corrects itself on the next one:
+        // the origin is replaced, never accumulated.
+        registry.reanchor("doc-1", (900, 100));
+        assert_eq!(registry.snapshot(), vec![strip("doc-1", 940, 131, 400, 40)]);
+    }
+
+    #[test]
+    fn a_strip_republished_while_the_window_moves_is_anchored_to_one_origin_only() {
+        let registry = StripRegistry::new();
+        // The renderer measures its box; this side reads the origin. The two
+        // are never composed by different observers, so a window that moved
+        // between a measure and a publish still lands on its own strip.
+        registry.set(
+            "doc-1",
+            StripRect {
+                x: 40,
+                y: 31,
+                width: 400,
+                height: 40,
+            },
+            (900, 100),
+        );
+        registry.set(
+            "doc-1",
+            StripRect {
+                x: 40,
+                y: 31,
+                width: 400,
+                height: 40,
+            },
+            (1200, 300),
+        );
+        assert_eq!(registry.snapshot(), vec![strip("doc-1", 1240, 331, 400, 40)]);
+        assert_eq!(
+            resolve_drop(&registry.snapshot(), "main", 1300, 340),
+            DropTarget::Window("doc-1".into())
+        );
     }
 
     #[test]
@@ -651,5 +822,167 @@ mod tests {
         registry.set_hover(Some("doc-1"));
         assert_eq!(registry.take_hover().as_deref(), Some("doc-1"));
         assert_eq!(registry.take_hover(), None);
+    }
+
+    // ── Handover, and the destroyed-target interleavings ──────────────────
+
+    const DOC: &str = "C:\\docs\\a.pdf";
+
+    /// Two windows side by side, `main` holding the document.
+    fn two_windows() -> (StripRegistry, ClaimState, WindowRegistry) {
+        let strips = StripRegistry::new();
+        let square = |width, height| StripRect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        };
+        strips.set("main", square(400, 40), (0, 0));
+        strips.set("doc-1", square(400, 40), (900, 100));
+        let claims = ClaimState::new();
+        assert!(claims.claim(DOC, "main", ClaimMode::Write).granted);
+        (strips, claims, WindowRegistry::new())
+    }
+
+    fn live(labels: &[&str]) -> Vec<String> {
+        labels.iter().map(|l| l.to_string()).collect()
+    }
+
+    #[test]
+    fn a_release_over_another_window_moves_the_claim_and_queues_the_open_together() {
+        let (strips, claims, registry) = two_windows();
+        assert_eq!(
+            strips.resolve_release(
+                &claims,
+                &registry,
+                &live(&["main", "doc-1"]),
+                "main",
+                DOC,
+                950,
+                110,
+            ),
+            HandOver::Moved("doc-1".to_string())
+        );
+        assert_eq!(claims.owner(DOC).as_deref(), Some("doc-1"));
+        let queued = registry.take_pending("doc-1");
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].files, vec![DOC.to_string()]);
+        assert!(!queued[0].merge);
+    }
+
+    #[test]
+    fn a_target_destroyed_before_the_release_never_takes_the_claim_with_it() {
+        let (strips, claims, registry) = two_windows();
+        // Destruction forgets the strip under the lock the release resolves
+        // under. Had the claim moved anyway, the source would have been told
+        // the document changed hands and closed the only tab that had it,
+        // leaving the path owned by a label nothing can deliver to.
+        strips.forget("doc-1");
+        assert_eq!(
+            strips.resolve_release(
+                &claims,
+                &registry,
+                &live(&["main", "doc-1"]),
+                "main",
+                DOC,
+                950,
+                110,
+            ),
+            HandOver::TearOff
+        );
+        assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
+        assert!(registry.take_pending("doc-1").is_empty());
+    }
+
+    #[test]
+    fn a_target_the_visibility_probe_no_longer_lists_takes_no_drop() {
+        let (strips, claims, registry) = two_windows();
+        // The strip is still registered — the destroyed window's event has not
+        // been processed — but it is not among the windows that can take a
+        // drop, so the point falls through to a tear-off rather than into it.
+        assert_eq!(
+            strips.resolve_release(&claims, &registry, &live(&["main"]), "main", DOC, 950, 110),
+            HandOver::TearOff
+        );
+        assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
+        assert!(registry.take_pending("doc-1").is_empty());
+    }
+
+    #[test]
+    fn a_delivery_the_queue_refuses_hands_the_claim_straight_back() {
+        let (strips, claims, registry) = two_windows();
+        registry.poison_queue();
+        // Ownership that moved with nothing to open it is the same lost
+        // document as a transfer into a window that no longer exists.
+        assert_eq!(
+            strips.resolve_release(
+                &claims,
+                &registry,
+                &live(&["main", "doc-1"]),
+                "main",
+                DOC,
+                950,
+                110,
+            ),
+            HandOver::Refused("main".to_string())
+        );
+        assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn a_release_the_claim_state_refuses_queues_no_open() {
+        let (strips, claims, registry) = two_windows();
+        // A second holder means someone else's pending pages address positions
+        // in this file: nothing moves, and nothing is promised to the target.
+        assert_eq!(
+            strips.resolve_release(
+                &claims,
+                &registry,
+                &live(&["main", "doc-1"]),
+                "doc-1",
+                DOC,
+                10,
+                10,
+            ),
+            HandOver::Refused("main".to_string())
+        );
+        assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
+        assert!(registry.take_pending("main").is_empty());
+    }
+
+    #[test]
+    fn a_release_in_the_sources_own_strip_moves_nothing_and_promises_nothing() {
+        let (strips, claims, registry) = two_windows();
+        assert_eq!(
+            strips.resolve_release(
+                &claims,
+                &registry,
+                &live(&["main", "doc-1"]),
+                "main",
+                DOC,
+                10,
+                10,
+            ),
+            HandOver::Source
+        );
+        assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
+        assert!(registry.take_pending("main").is_empty());
+        assert!(registry.take_pending("doc-1").is_empty());
+    }
+
+    #[test]
+    fn asking_where_a_release_would_go_decides_nothing() {
+        let (strips, claims, registry) = two_windows();
+        let all = live(&["main", "doc-1"]);
+        assert_eq!(
+            strips.resolve_at(&all, "main", 950, 110),
+            DropTarget::Window("doc-1".into())
+        );
+        assert_eq!(strips.resolve_at(&all, "main", 10, 10), DropTarget::Source);
+        assert_eq!(strips.resolve_at(&all, "main", 600, 600), DropTarget::TearOff);
+        // The question the source asks before it writes the user's file must
+        // not itself move anything.
+        assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
+        assert!(registry.take_pending("doc-1").is_empty());
     }
 }
