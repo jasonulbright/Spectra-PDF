@@ -371,10 +371,15 @@ impl WindowRegistry {
             .unwrap_or_else(|_| MAIN_LABEL.to_string())
     }
 
-    pub fn push_pending(&self, label: &str, open: PendingOpen) {
-        if let Ok(mut pending) = self.pending.lock() {
-            pending.entry(label.to_string()).or_default().push(open);
-        }
+    /// Queue an open. False when the queue could not take it, which a caller
+    /// that has already moved ownership has to act on rather than report a
+    /// delivery that never happened.
+    pub fn push_pending(&self, label: &str, open: PendingOpen) -> bool {
+        let Ok(mut pending) = self.pending.lock() else {
+            return false;
+        };
+        pending.entry(label.to_string()).or_default().push(open);
+        true
     }
 
     pub fn take_pending(&self, label: &str) -> Vec<PendingOpen> {
@@ -389,6 +394,20 @@ impl WindowRegistry {
         if let Ok(mut pending) = self.pending.lock() {
             pending.remove(label);
         }
+    }
+
+    /// Leave the queue in the state a panic inside a holder leaves it, so the
+    /// paths that have to survive a refused delivery can be driven.
+    #[cfg(test)]
+    pub fn poison_queue(&self) {
+        let _ = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let _held = self.pending.lock().expect("queue was already poisoned");
+                    panic!("poisoning the queue");
+                })
+                .join()
+        });
     }
 }
 
@@ -463,11 +482,33 @@ pub fn route_open(app: &AppHandle, files: Vec<String>, merge: bool) {
     focus_label(app, &groups[0].0);
 }
 
-/// Queue an open for a label and signal the renderer to drain it.
-pub fn deliver_open(app: &AppHandle, label: &str, files: Vec<String>, merge: bool) {
-    app.state::<WindowRegistry>()
-        .push_pending(label, PendingOpen { files, merge });
+/// Queue an open for a label, without signalling.
+///
+/// Split from the signal so a handover can queue under the lock that guards it
+/// and signal after: the queue is the delivery, and the event only says a queue
+/// is worth draining.
+pub fn queue_open(
+    registry: &WindowRegistry,
+    label: &str,
+    files: Vec<String>,
+    merge: bool,
+) -> bool {
+    registry.push_pending(label, PendingOpen { files, merge })
+}
+
+/// Tell a window it has queued opens waiting.
+pub fn signal_open(app: &AppHandle, label: &str) {
     let _ = app.emit_to(label, "app:openFile", ());
+}
+
+/// Queue an open for a label and signal the renderer to drain it. False when
+/// the queue refused it and nothing was delivered.
+pub fn deliver_open(app: &AppHandle, label: &str, files: Vec<String>, merge: bool) -> bool {
+    if !queue_open(&app.state::<WindowRegistry>(), label, files, merge) {
+        return false;
+    }
+    signal_open(app, label);
+    true
 }
 
 // ── Creation ──────────────────────────────────────────────────────────────

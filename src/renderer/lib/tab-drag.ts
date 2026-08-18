@@ -40,25 +40,23 @@ export interface ViewportRect {
 export const EMPTY_STRIP: PhysicalRect = { x: 0, y: 0, width: 0, height: 0 };
 
 /**
- * A viewport rect in physical screen pixels.
+ * A viewport rect in physical pixels, still relative to the window.
  *
- * The origin is the window's INNER position: the outer origin includes the
- * frame, whose title bar alone is taller than the gap between the strip and the
- * toolbar under it, so a rect measured against it hit-tests into the wrong band.
+ * No screen origin is added here, and none crosses the boundary: the far side
+ * composes this rect with the window origin IT reads, under the same lock it
+ * re-anchors with. Two sides sampling the origin at different moments is how a
+ * window moved between the reads leaves the stored rect permanently offset.
+ *
  * A degenerate box collapses to `EMPTY_STRIP` rather than to a zero-area rect at
- * some screen position — the far side keys "forget" off the size.
+ * some offset — the far side keys "forget" off the size.
  */
-export function stripRectFor(
-  rect: ViewportRect,
-  origin: PhysicalPoint,
-  devicePixelRatio: number,
-): PhysicalRect {
+export function stripRectFor(rect: ViewportRect, devicePixelRatio: number): PhysicalRect {
   const width = Math.round(rect.width * devicePixelRatio);
   const height = Math.round(rect.height * devicePixelRatio);
   if (width <= 0 || height <= 0) return EMPTY_STRIP;
   return {
-    x: origin.x + Math.round(rect.left * devicePixelRatio),
-    y: origin.y + Math.round(rect.top * devicePixelRatio),
+    x: Math.round(rect.left * devicePixelRatio),
+    y: Math.round(rect.top * devicePixelRatio),
     width,
     height,
   };
@@ -166,12 +164,22 @@ export interface AdvanceResult {
   tracking: boolean;
 }
 
-/** Take a pointermove. Below the threshold the gesture is still a click. */
+/**
+ * Take a pointermove. Below the threshold the gesture is still a click.
+ *
+ * Scoped to the pointer that armed it: a second touch or a pen moving while a
+ * tab is held is a different input device, and letting it drive would move a
+ * document the pointer holding the tab never went near.
+ */
 export function advanceDrag(
   state: TabDragState,
+  pointerId: number,
   clientX: number,
   clientY: number,
 ): AdvanceResult {
+  if (pointerId !== state.pointerId) {
+    return { state, started: false, tracking: false };
+  }
   if (state.phase === 'dragging') {
     return { state, started: false, tracking: true };
   }
@@ -191,14 +199,23 @@ export interface ReleaseResult {
   drop: boolean;
   /** The document the drop is resolving; empty when it is not one. */
   path: string;
+  /**
+   * True when the release belonged to some other pointer. The gesture is
+   * untouched and the caller must leave it running — treating a foreign
+   * release as the end of the gesture drops a drag that is still held.
+   */
+  foreign: boolean;
 }
 
-/** Take a pointerup. */
-export function releaseDrag(state: TabDragState): ReleaseResult {
-  if (state.phase !== 'dragging') {
-    return { state: NO_DRAG, drop: false, path: '' };
+/** Take a pointerup, from the pointer that armed the gesture or another one. */
+export function releaseDrag(state: TabDragState, pointerId: number): ReleaseResult {
+  if (pointerId !== state.pointerId) {
+    return { state, drop: false, path: '', foreign: true };
   }
-  return { state: { ...state, phase: 'dropping' }, drop: true, path: state.path };
+  if (state.phase !== 'dragging') {
+    return { state: NO_DRAG, drop: false, path: '', foreign: false };
+  }
+  return { state: { ...state, phase: 'dropping' }, drop: true, path: state.path, foreign: false };
 }
 
 export interface CancelResult {
@@ -211,8 +228,18 @@ export interface CancelResult {
   notify: boolean;
 }
 
-/** Take an Escape, or a `pointercancel`. A drop in flight is past cancelling. */
-export function cancelDrag(state: TabDragState): CancelResult {
+/**
+ * Take an Escape, an unmount, or a `pointercancel`. A drop in flight is past
+ * cancelling.
+ *
+ * `pointerId` is given only where the cancel came from a pointer: another
+ * pointer's cancellation says nothing about the one holding the tab. Escape and
+ * teardown belong to the window rather than to any pointer and pass none.
+ */
+export function cancelDrag(state: TabDragState, pointerId?: number): CancelResult {
+  if (pointerId !== undefined && pointerId !== state.pointerId) {
+    return { state, notify: false };
+  }
   if (state.phase === 'dropping') return { state, notify: false };
   return { state: NO_DRAG, notify: state.phase === 'dragging' };
 }
@@ -233,6 +260,33 @@ export function settleDrop(state: TabDragState): TabDragState {
  */
 export function tabMoved(result: TabDragResult): boolean {
   return result.outcome === 'transferred' || result.outcome === 'tornOff';
+}
+
+/** What a hand-off does once the page tier has been flushed. */
+export interface HandOffPlan {
+  /** Resolve the handover with the far side at all. */
+  readonly hand: boolean;
+  /**
+   * Write the working copy back over the document's own path FIRST. The
+   * receiving window opens the path and mints a working copy from whatever is
+   * on disk, so the file is the only channel the document travels through, and
+   * it is read the instant the claim moves.
+   */
+  readonly saveFirst: boolean;
+}
+
+/**
+ * Plan a hand-off from where the release resolved and whether the document has
+ * unsaved work.
+ *
+ * A release that stays in this window is not a hand-off: it must not write the
+ * user's file and must not clear the undo history, which is what marking a
+ * document saved does. So the destination is settled BEFORE anything is
+ * written, and a document that is not going anywhere is left exactly as it was.
+ */
+export function planHandOff(willMove: boolean, dirty: boolean): HandOffPlan {
+  if (!willMove) return { hand: false, saveFirst: false };
+  return { hand: true, saveFirst: dirty };
 }
 
 // ── Ghost placement ───────────────────────────────────────────────────────
@@ -259,6 +313,45 @@ export function pinGhost(
   return {
     x: clamp(clientX - grabDX, ghost.width, viewport.width),
     y: clamp(clientY - grabDY, ghost.height, viewport.height),
+  };
+}
+
+// ── Serial publishing ─────────────────────────────────────────────────────
+
+export interface SerialPublisher<T> {
+  /** Record a value to publish. The newest one always wins. */
+  post(value: T): void;
+}
+
+/**
+ * Publish values one at a time, newest wins.
+ *
+ * Two registrations in flight at once can be applied in either order — each
+ * command runs on its own task — and the loser overwrites the current rect with
+ * a stale one that then survives until the next relayout. Waiting for each
+ * publish to be acknowledged before sending the next makes arrival order the
+ * order they were measured in; a value measured while one is in flight replaces
+ * whatever else was waiting rather than queueing behind it.
+ */
+export function createSerialPublisher<T>(send: (value: T) => Promise<void>): SerialPublisher<T> {
+  let inFlight = false;
+  let pending: { value: T } | null = null;
+  const drain = (): void => {
+    const next = pending;
+    pending = null;
+    if (!next) {
+      inFlight = false;
+      return;
+    }
+    inFlight = true;
+    void send(next.value).then(drain, drain);
+  };
+  return {
+    post(value: T): void {
+      pending = { value };
+      if (inFlight) return;
+      drain();
+    },
   };
 }
 
