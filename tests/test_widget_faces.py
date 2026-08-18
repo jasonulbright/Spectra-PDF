@@ -669,6 +669,35 @@ class TestStagingIsScaffoldingOnly:
         assert FORM_FILL_RGB in field["faces"]["/N"]
         assert field["value"] == "Hello"
 
+    def test_a_bare_field_survives_an_in_place_conversion(self, tmp_path, gs_path):
+        # The regeneration reads the input BEFORE the producer runs and writes
+        # its copy into the scratch dir, so in place the original is still the
+        # only readable source at that moment and the copy — not the file being
+        # written over — is what every later read takes.
+        from separation_builders import FORM_TEXT_GRAY, form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "bare.pdf", "bare")
+        grayscale(src, src, gs_path=gs_path)
+
+        page = _content(src)
+        assert b"(Hello)" not in page and b"Tj" not in page
+        field = _widgets(src)["bare"]
+        assert b"(Hello)" in field["faces"]["/N"]
+        assert FORM_TEXT_GRAY in field["faces"]["/N"]
+        assert field["value"] == "Hello"
+
+    def test_a_bare_field_survives_an_in_place_compression(self, tmp_path, gs_path):
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "bare.pdf", "bare")
+        compress(src, src, quality="ebook", gs_path=gs_path)
+
+        page = _content(src)
+        assert b"(Hello)" not in page and b"Tj" not in page
+        field = _widgets(src)["bare"]
+        assert b"(Hello)" in field["faces"]["/N"]
+        assert field["value"] == "Hello"
+
     def test_staging_drops_the_widget_and_adds_one_page_per_face(self, tmp_path):
         from engine.widget_faces import stage_appearances_file
         from separation_builders import form_appearance_pdf
