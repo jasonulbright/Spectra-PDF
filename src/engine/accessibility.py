@@ -1913,6 +1913,22 @@ _NESTING_DELEGATED = {
 }
 
 
+def _nesting_page(node):
+    """The page a nesting finding names.
+
+    An element carries `/Pg` only where it CHANGES the inherited page, so a
+    container whose ancestors never named one has none of its own while
+    everything inside it does. Naming no page at all in a sentence that offers
+    one is what this reads through.
+    """
+    if node.page is not None:
+        return node.page
+    for kid in node.descendants():
+        if kid.page is not None:
+            return kid.page
+    return None
+
+
 def _check_structure_nesting(check, tree):
     if not tree["tagged"]:
         check.status = NA
@@ -1923,27 +1939,42 @@ def _check_structure_nesting(check, tree):
     uncovered = 0
     findings = []
     for edge in edges:
-        verdict, _cite, _rule = struct_nesting.judge(edge)
-        if verdict == struct_nesting.UNCOVERED:
+        # Two questions per element: where it sits, and — for a type whose own
+        # entry states a content model — what it holds. An element either
+        # question reaches is judged; only one neither reaches is uncovered.
+        placement, _pcite, _prule = struct_nesting.judge(edge)
+        content, _ccite, _crule = struct_nesting.judge_content(edge)
+        if (placement == struct_nesting.UNCOVERED
+                and content == struct_nesting.UNCOVERED):
             uncovered += 1
             continue
         if edge.role in _NESTING_DELEGATED:
             delegated += 1
             continue
         judged += 1
-        if verdict != struct_nesting.VIOLATION:
+        if struct_nesting.VIOLATION not in (placement, content):
             continue
-        findings.append(
-            _finding(
-                _struct_address(edge.node),
-                "structure_nesting_violation",
-                values={
-                    "child": edge.role,
-                    "parent": edge.parent_role,
-                    "page": edge.node.page,
-                },
+        page = _nesting_page(edge.node)
+        if placement == struct_nesting.VIOLATION:
+            findings.append(
+                _finding(
+                    _struct_address(edge.node),
+                    "structure_nesting_violation",
+                    values={
+                        "child": edge.role,
+                        "parent": edge.parent_role,
+                        "page": page,
+                    },
+                )
             )
-        )
+        if content == struct_nesting.VIOLATION:
+            findings.append(
+                _finding(
+                    _struct_address(edge.node),
+                    "structure_nesting_content_model",
+                    values={"parent": edge.role, "page": page},
+                )
+            )
     # What was checked is stated alongside the verdict: a type the compiled
     # tables hold no rule for is counted, never reported as verified.
     check.data = {"judged": judged, "delegated": delegated, "uncovered": uncovered}
