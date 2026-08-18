@@ -67,6 +67,17 @@ export interface TabDragResult {
   owner: string;
 }
 
+/** A handover that has happened and not yet been reported.
+ *
+ * `outcome` is what the commit will say. The destination is decided under the
+ * far side's lock and HELD against re-resolution until the token is spent, so
+ * the document can be written back over the user's own file in between knowing
+ * where it is going. A `token` of zero holds nothing: there is no commit to
+ * make, no cancel to make, and no file to write. */
+export interface TabDragReservation extends TabDragResult {
+  token: number;
+}
+
 /** A point or box in PHYSICAL screen pixels — the only coordinate space the
  * strip registry speaks, because it is the only one every window agrees on. */
 export interface PhysicalScreenPoint {
@@ -104,18 +115,43 @@ export const tabDrag = {
     invoke<string | null>('tabdrag_track', { screenX: point.x, screenY: point.y }),
   /** Abandon a drag. Nothing crosses; the caret stops being drawn. */
   cancel: () => invoke<void>('tabdrag_cancel'),
-  /** Whether a release here would take the document OUT of this window.
-   * Classification only — no claim moves and nothing is queued. Asked before
-   * the document is written back to its own path, because a release that
-   * lands in this window's own strip must not touch the file. */
-  wouldMove: (point: PhysicalScreenPoint) =>
-    invoke<boolean>('tabdrag_resolve', { screenX: point.x, screenY: point.y }),
-  drop: (path: string, point: PhysicalScreenPoint) =>
-    invoke<TabDragResult>('tabdrag_drop', { path, screenX: point.x, screenY: point.y }),
+  /** Resolve a release and HOLD what it resolved to.
+   *
+   * The claim and the queued open move here, under the far side's lock, and
+   * stay held under the returned token: the document is written back over the
+   * user's own path between this call and the commit, and a destination
+   * re-resolved after that write would leave a document saved and its history
+   * discarded for a move that never happened. Asking twice is what made that
+   * possible, so the answer is held rather than repeated. */
+  reserve: (path: string, point: PhysicalScreenPoint) =>
+    invoke<TabDragReservation>('tabdrag_reserve', {
+      path,
+      screenX: point.x,
+      screenY: point.y,
+    }),
+  /** Pop one document into a window built for it — Window ▸ Move to New
+   * Window. The same handover, minus the drop point; the window is built
+   * hidden and appears only when the handover is committed. */
+  reserveNewWindow: (path: string) =>
+    invoke<TabDragReservation>('tabdrag_reserve_new_window', { path }),
+  /** Report a held handover and deliver it. A destination destroyed since the
+   * reservation was taken has already handed the document back, and this is
+   * where the source hears it — as a refusal, with its tab still the only
+   * copy. */
+  commit: (token: number) => invoke<TabDragResult>('tabdrag_commit', { token }),
+  /** Undo a held handover the source is not going to commit — the write a move
+   * costs failed, so the document must not arrive anywhere. */
+  release: (token: number) => invoke<TabDragResult>('tabdrag_release', { token }),
   /** `x` is physical pixels from THIS window's own strip's left edge. */
   onHover: (callback: (x: number) => void) =>
     listen<{ x: number }>('tabdrag://hover', (event) => callback(event.payload.x)),
   onLeave: (callback: () => void) => listen('tabdrag://leave', () => callback()),
+  /** A document coming back from a handover that was reported as done and then
+   * undone — the window it went to was destroyed before it ever opened it.
+   * Ownership is already back here; what arrives is the instruction to put the
+   * document on screen again. Only the path crosses. */
+  onReturned: (callback: (path: string) => void) =>
+    listen<{ path: string }>('tabdrag://returned', (event) => callback(event.payload.path)),
   /** The insertion gap this window is painting for someone else's drag,
    * derived from its OWN tabs. A drop resolves to the index last reported by
    * the window it lands in; the far side clears it with the caret. */
@@ -677,15 +713,6 @@ export const app = {
 
   /** Open an empty second workspace; resolves to its label. */
   openNewWindow: () => invoke<string>('open_new_window'),
-
-  /** Pop one document into a window built for it, handing ownership over in
-   * one step. Releasing the claim and re-taking it around the build leaves the
-   * path unowned for as long as the window takes to appear, and a third window
-   * that claimed it in that gap would leave the document with nowhere to land.
-   * Only the PATH crosses: page and document ids are minted against a
-   * per-window generation counter. */
-  moveToNewWindow: (path: string) =>
-    invoke<TabDragResult>('move_document_to_new_window', { path }),
 
   /** Raise a window by label (the "it is open over there" refusal's action). */
   focusWindow: (label: string) => invoke<void>('focus_app_window', { label }),

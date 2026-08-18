@@ -27,6 +27,7 @@ import {
   physicalPointFor,
   pinGhost,
   releaseDrag,
+  setTabOrderChannel,
   settleDrop,
   stripRectFor,
   type FrameThrottle,
@@ -103,6 +104,11 @@ export function useStripRegistration(
  * rides the same serial-publisher shape the strip rect does, for the same
  * reason: two publishes in flight can be applied in either order, and the
  * loser leaves the far side holding an order the strip has already left.
+ *
+ * The publisher is registered for `flushTabOrder`, because "the far side takes
+ * whatever arrived last" is only safe while nothing reads it at a moment that
+ * matters. A quit seals the session record, and a reorder made just before it
+ * can still be waiting behind an in-flight publish.
  */
 export function useTabOrderPublication(paths: string[]): void {
   const publisher = useRef<SerialPublisher<string[]> | null>(null);
@@ -112,6 +118,10 @@ export function useTabOrderPublication(paths: string[]): void {
     });
   }
   const publish = publisher.current;
+  useEffect(() => {
+    setTabOrderChannel(publish);
+    return () => setTabOrderChannel(null);
+  }, [publish]);
   // Keyed on the order itself rather than on the array: an open, a close, a
   // reorder and a document handed to another window all change this string,
   // and nothing else does.
