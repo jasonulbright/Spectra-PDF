@@ -287,6 +287,46 @@ def _six_spots(doc) -> None:
                              ColorSpace=spaces), b"", boxes=_full_boxes())
 
 
+def _spot_gradient(doc, planar: bool) -> None:
+    """Two colorants, the second of them also painted by a GRADIENT.
+
+    Composing a tint transform onto a shading's function samples ONE input. A
+    function-based shading (type 1) maps a point in the plane instead, so
+    `spot_to_process` leaves that colorant live in it while every other
+    occurrence converts — the partial conversion a repair has to report as
+    partial. The non-planar twin is the same page, wholly convertible.
+    """
+    whole = separation(doc, "WholeSpot")
+    gradient = separation(doc, "GradientSpot")
+    domain = [0, 1, 0, 1] if planar else [0, 1]
+    shading = Dictionary(
+        ShadingType=1 if planar else 2,
+        ColorSpace=gradient,
+        Domain=Array(domain),
+        Function=Dictionary(FunctionType=2, Domain=Array(domain), N=1,
+                            C0=Array([0.1]), C1=Array([1]), Range=Array([0, 1])),
+    )
+    if not planar:
+        shading[Name("/Coords")] = Array([20, 0, 590, 0])
+    add_page(doc, Dictionary(
+        Font=Dictionary(F1=embedded_font(doc)),
+        ColorSpace=Dictionary(CS0=whole, CS1=gradient),
+        Shading=Dictionary(Sh0=doc.make_indirect(shading)),
+    ), b"\n".join([
+        b"/CS0 cs 1 scn 20 700 180 50 re f",
+        b"/CS1 cs 1 scn 220 700 180 50 re f",
+        b"q 20 600 560 60 re W n /Sh0 sh Q",
+    ]), boxes=_full_boxes())
+
+
+def _spot_gradient_unconvertible(doc) -> None:
+    _spot_gradient(doc, True)
+
+
+def _spot_gradient_convertible(doc) -> None:
+    _spot_gradient(doc, False)
+
+
 def _spot_named_all(doc) -> None:
     """`/Separation /All` paints every plate; it is not a sixth plate."""
     spaces = Dictionary(CS0=Name.DeviceCMYK, S0=separation(doc, "All"))
@@ -641,6 +681,8 @@ BUILDERS = {
     "rgb_image_only": _rgb_image_only,
     "lab_colour": _lab_colour,
     "six_spots": _six_spots,
+    "spot_gradient_unconvertible": _spot_gradient_unconvertible,
+    "spot_gradient_convertible": _spot_gradient_convertible,
     "spot_named_all": _spot_named_all,
     "unlisted_spot": _unlisted_spot,
     "tac_360": _tac_360,

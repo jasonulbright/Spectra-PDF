@@ -27,6 +27,7 @@ from engine.preflight_fixups import (
     fixups_for_check,
 )
 from engine.preflight_profiles import FIXUP_IDS
+from engine.separations import list_inks
 import preflight_builders as builders
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
@@ -300,6 +301,7 @@ class TestRoundTrip:
             "spot_ink_count", spot_ink_count={"max_spots": 2},
         )
         assert result["applied"][0]["changed"] == 4
+        assert "partial" not in result["applied"][0]
 
     @needs_gs
     def test_convert_to_cmyk(self, tmp_path):
@@ -312,6 +314,53 @@ class TestRoundTrip:
             gs_path=GS,
         )
         assert _status(result["report"], "colour_family") in ("pass", "not_applicable")
+
+
+class TestAPartialRepairSaysSo:
+    """A fixup that could not finish reports what it did, not what it was
+    asked for. The count is the claim; the file has to carry it."""
+
+    def _convert_every_spot(self, tmp_path, kind: str) -> dict:
+        source = builders.build(kind, str(tmp_path))
+        return apply_fixups(
+            source,
+            str(tmp_path / "fixed.pdf"),
+            profile=_profile(
+                [{"id": "spots_to_process", "params": {}}],
+                spot_ink_count={"max_spots": 0},
+            ),
+            checks=["spot_ink_count"],
+        )
+
+    def test_a_colorant_left_in_a_gradient_is_not_counted_as_converted(self, tmp_path):
+        result = self._convert_every_spot(tmp_path, "spot_gradient_unconvertible")
+        row = result["applied"][0]
+        assert row["fixup"] == "spots_to_process"
+        # Two were asked for; the gradient kept one, so one converted.
+        assert row["changed"] == 1
+        assert [entry["item"] for entry in row["partial"]] == ["GradientSpot"]
+        assert row["partial"][0]["reasons"]
+        assert row["partial"][0]["shadings"]
+
+    def test_the_colorant_the_report_names_is_the_one_still_on_a_plate(self, tmp_path):
+        result = self._convert_every_spot(tmp_path, "spot_gradient_unconvertible")
+        named = {entry["item"] for entry in result["applied"][0]["partial"]}
+        left = {entry["name"] for entry in list_inks(result["output"])["inks"]}
+        # What the report calls unconverted and what the document still
+        # separates are the same set — the claim is checkable against plates.
+        assert named == left & {"WholeSpot", "GradientSpot"} == {"GradientSpot"}
+        assert _status(result["report"], "spot_ink_count") != "pass"
+        assert structural_check(result["output"])["summary"]["errors"] == 0
+
+    def test_a_wholly_convertible_document_reports_no_partial(self, tmp_path):
+        result = self._convert_every_spot(tmp_path, "spot_gradient_convertible")
+        row = result["applied"][0]
+        assert row["changed"] == 2
+        assert "partial" not in row
+        assert _status(result["report"], "spot_ink_count") in ("pass", "not_applicable")
+        assert not {
+            entry["name"] for entry in list_inks(result["output"])["inks"]
+        } & {"WholeSpot", "GradientSpot"}
 
 
 class TestNoOtherCheckRegressed:
