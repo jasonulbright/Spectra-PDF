@@ -25,6 +25,7 @@ from engine.spelling import (
     VoikkoDictionary,
     add_user_dictionary,
     check_spelling,
+    check_text,
     check_word,
     document_language,
     list_dictionaries,
@@ -345,6 +346,154 @@ class TestShippedDictionaries:
         assert suggestions
         for suggestion in suggestions:
             assert suggestion == unicodedata.normalize("NFC", suggestion)
+
+
+# ══════════════════════ optional diacritics (IGNORE) ═══════════════════════
+#
+# Arabic harakat and Hebrew niqqud are OPTIONAL decoration over a skeleton the
+# word list holds bare. Hunspell's instrument is the `IGNORE` table, which it
+# strips at the door of the check AND of the suggester (`cleanword2` runs in
+# both). Two things are wrong without the shims: the shipped Hebrew list
+# declares no `IGNORE` at all, so every pointed word is reported whole; and
+# `spylls` strips only inside its lookup, so the suggester edits characters
+# the list's `TRY` set does not contain and offers NOTHING for any word that
+# carries a mark — Arabic included, where the check has always worked.
+
+
+def _marks_of(tag: str) -> str:
+    """The marks that language's own pointed vocabulary uses."""
+    return "".join(
+        sorted({c for word in WORDS[tag]["pointed"] for c in word if unicodedata.category(c) == "Mn"})
+    )
+
+
+def _decorate(word: str, marks: str) -> str:
+    return "".join(c + marks[i % len(marks)] for i, c in enumerate(word))
+
+
+POINTED_TAGS = sorted(tag for tag in WORDS if "pointed" in WORDS[tag])
+
+
+@pytest.mark.parametrize("tag", POINTED_TAGS)
+class TestOptionalDiacritics:
+    def test_each_pointed_word_points_its_own_good_word(self, tag):
+        # Without this the rest of the class could pass vacuously: a pointing
+        # that moved a consonant would be testing a different word.
+        good = set(WORDS[tag]["good"])
+        for word in WORDS[tag]["pointed"]:
+            bare = "".join(c for c in word if unicodedata.category(c) != "Mn")
+            assert bare in good, word
+
+    def test_a_pointed_word_is_accepted(self, tag):
+        _require(tag)
+        dictionary = load_dictionary(tag, DICT_DIR)
+        rejected = [w for w in WORDS[tag]["pointed"] if not check_word(dictionary, w, set())]
+        assert rejected == []
+
+    def test_the_unpointed_form_is_still_accepted(self, tag):
+        _require(tag)
+        dictionary = load_dictionary(tag, DICT_DIR)
+        bare = ["".join(c for c in w if unicodedata.category(c) != "Mn") for w in WORDS[tag]["pointed"]]
+        rejected = [w for w in bare if not check_word(dictionary, w, set())]
+        assert rejected == []
+
+    def test_a_pointed_non_word_is_still_rejected(self, tag):
+        # Stripping the marks must not become a licence to accept anything:
+        # the planted misspellings stay wrong however they are decorated.
+        _require(tag)
+        dictionary = load_dictionary(tag, DICT_DIR)
+        marks = _marks_of(tag)
+        accepted = [w for w in WORDS[tag]["bad"] if check_word(dictionary, _decorate(w, marks), set())]
+        assert accepted == []
+
+    def test_a_pointed_misspelling_suggests_what_the_bare_one_suggests(self, tag):
+        # The measured defect: every pointed misspelling returned an empty
+        # list, so the panel reported a word it could offer no fix for.
+        _require(tag)
+        marks = _marks_of(tag)
+        wrong = WORDS[tag]["bad"][0]
+        bare = spelling_suggestions(wrong, tag, DICT_DIR)
+        pointed = spelling_suggestions(_decorate(wrong, marks), tag, DICT_DIR)
+        assert bare["correct"] is False and pointed["correct"] is False
+        assert bare["suggestions"]
+        assert pointed["suggestions"] == bare["suggestions"]
+
+    def test_a_suggestion_carries_no_points(self, tag):
+        # Hunspell strips the marks before generating candidates, so what comes
+        # back is the bare skeleton — and that is the honest answer: a
+        # suggestion is offered only once the skeleton itself is wrong, and how
+        # a DIFFERENT skeleton is vocalized is not something an unpointed word
+        # list knows. Re-pointing it would be inventing the vocalization.
+        _require(tag)
+        marks = _marks_of(tag)
+        result = spelling_suggestions(_decorate(WORDS[tag]["bad"][0], marks), tag, DICT_DIR)
+        assert result["suggestions"]
+        for suggestion in result["suggestions"]:
+            assert not any(unicodedata.category(c) == "Mn" for c in suggestion), suggestion
+
+
+class TestHebrewIgnoreTable:
+    def test_the_hebrew_list_declares_no_ignore_table_of_its_own(self):
+        # The condition the shim exists for, asserted against the shipped
+        # bytes: the generator behind this pair works in an encoding that
+        # carries no points, so the pair says nothing about them.
+        _require("he_IL")
+        with open(os.path.join(DICT_DIR, "he_IL", "he_IL.aff"), encoding="utf-8") as handle:
+            assert [line for line in handle if line.startswith("IGNORE")] == []
+
+    def test_the_supplied_table_is_hebrew_marks_and_nothing_else(self):
+        _require("he_IL")
+        chars = load_dictionary("he_IL", DICT_DIR).aff.IGNORE.chars
+        assert chars
+        for c in chars:
+            assert unicodedata.category(c) == "Mn"
+            assert 0x0591 <= ord(c) <= 0x05F4
+        # MAQAF and PASEQ sit inside the span and are punctuation, not points.
+        assert "־" not in chars and "׀" not in chars
+
+    def test_a_pointed_word_is_one_token_and_its_span_takes_the_points_with_it(self):
+        # The F6 rule, exercised on the language that made it visible: a mark
+        # left outside the reported span re-attaches to whatever replaces it.
+        _require("he_IL")
+        pointed = WORDS["he_IL"]["pointed"][0]
+        text = f"{WORDS['he_IL']['good'][1]} {pointed} {WORDS['he_IL']['good'][2]}"
+        tokens = tokenize(text)
+        assert len(tokens) == 3
+        assert tokens[1]["word"] == pointed
+        assert text[tokens[1]["start"] : tokens[1]["end"]] == pointed
+
+    def test_a_fix_spliced_over_a_pointed_span_leaves_no_orphan_mark(self):
+        _require("he_IL")
+        marks = _marks_of("he_IL")
+        wrong = _decorate(WORDS["he_IL"]["bad"][0], marks)
+        text = f"{WORDS['he_IL']['good'][0]} {wrong} {WORDS['he_IL']['good'][3]}"
+        found = check_text(text, "he_IL", DICT_DIR)["misspelled"]
+        assert [issue["word"] for issue in found] == [wrong]
+        replacement = spelling_suggestions(wrong, "he_IL", DICT_DIR)["suggestions"][0]
+        spliced = text[: found[0]["start"]] + replacement + text[found[0]["end"] :]
+        assert not any(unicodedata.category(c) == "Mn" for c in spliced)
+        assert check_text(spliced, "he_IL", DICT_DIR)["count"] == 0
+
+    def test_a_hebrew_list_that_points_its_own_entries_keeps_its_spelling(self, tmp_dir):
+        # A list whose stems carry marks MEANS them, and stripping input would
+        # make it reject its own vocabulary. The table is supplied only where
+        # the word list has nothing of its own to say about points.
+        pointed = WORDS["he_IL"]["pointed"][0]
+        tag_dir = os.path.join(tmp_dir, "he")
+        os.makedirs(tag_dir)
+        with open(os.path.join(tag_dir, "he.aff"), "w", encoding="utf-8") as handle:
+            handle.write("SET UTF-8\n")
+        with open(os.path.join(tag_dir, "he.dic"), "w", encoding="utf-8") as handle:
+            handle.write(f"1\n{pointed}\n")
+        dictionary = load_dictionary("he", tmp_dir)
+        assert dictionary.aff.IGNORE is None
+        assert check_word(dictionary, pointed, set())
+        bare = "".join(c for c in pointed if unicodedata.category(c) != "Mn")
+        assert not check_word(dictionary, bare, set())
+
+    def test_a_non_hebrew_list_is_left_alone(self):
+        _require("en_US")
+        assert load_dictionary("en_US", DICT_DIR).aff.IGNORE is None
 
 
 # ═════════════════════ the morphological dictionary ════════════════════════
