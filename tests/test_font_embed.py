@@ -10,6 +10,7 @@ a test is a defect in the comparison rather than a difference of opinion about
 what Arial measures. A machine without it skips rather than pretending.
 """
 
+import io
 import os
 
 import pikepdf
@@ -205,3 +206,29 @@ class TestSources:
                          [500] * len(CODES))
         with pytest.raises(ValueError, match="unknown font source"):
             embed_missing_fonts(path, str(tmp_path / "out.pdf"), sources=("network",))
+
+
+@needs_arial
+class TestTheEmbeddedSubsetIsNotAFunctionOfTheClock:
+    """The face's own timestamp travels, not the run's.
+
+    `fontTools` compiles the current clock into `head.modified` unless
+    `recalcTimestamp` is off, which makes the embedded program — and so the
+    whole written document — a function of the second the save ran.
+    """
+
+    def test_two_subsets_of_one_face_and_glyph_set_are_byte_identical(
+        self, monkeypatch,
+    ):
+        from fontTools.ttLib import TTFont
+        from fontTools.ttLib.tables import _h_e_a_d
+
+        from engine.font_embed import _subset
+
+        glyphs = ["A", "B", "C"]
+        first, _ = _subset(ARIAL, glyphs, False)
+        monkeypatch.setattr(_h_e_a_d, "timestampNow", lambda: 0x0BADC10C)
+        second, _ = _subset(ARIAL, glyphs, False)
+
+        assert first == second
+        assert int(TTFont(io.BytesIO(second))["head"].modified) != 0x0BADC10C
