@@ -8,12 +8,15 @@ dispatch. A second entry point is how a surface gets left behind — the repo's
 own "fixed four times at four dispatchers" lesson, applied before the fact.
 """
 
+import shutil
+import tempfile
 from pathlib import Path
 
 from . import budget
 from .acroform import reattach_forms_file
 from .inplace import is_same_file, staged_write_if
 from .validate import validate_pdf
+from .widget_faces import harvest_appearances, stage_appearances_file
 
 
 # Ghostscript quality presets map to -dPDFSETTINGS values
@@ -104,46 +107,61 @@ def compress(
     same_file = is_same_file(file, output)
     original_size = input_path.stat().st_size
 
-    with staged_write_if(same_file, output_path) as gs_target:
-        cmd = [
-            gs_path,
-            "-sDEVICE=pdfwrite",
-            "-dCompatibilityLevel=1.5",
-            "-dNOPAUSE",
-            "-dQUIET",
-            "-dBATCH",
-            "-dSAFER",
-        ]
+    scratch = Path(tempfile.mkdtemp(prefix="spectra-compress-"))
+    try:
+        # Widget appearances ride through this same pass as staged pages rather
+        # than being flattened into the page and put back alongside it
+        # (engine/widget_faces.py). Nothing is staged for a document with no
+        # form field, which leaves the producer's input the original file.
+        staged, boxes = stage_appearances_file(input_path, scratch)
+        with staged_write_if(same_file, output_path) as gs_target:
+            cmd = [
+                gs_path,
+                "-sDEVICE=pdfwrite",
+                "-dCompatibilityLevel=1.5",
+                "-dNOPAUSE",
+                "-dQUIET",
+                "-dBATCH",
+                "-dSAFER",
+            ]
 
-        if dpi is not None:
-            # Custom DPI: explicit downsample flags instead of preset
-            cmd.extend([
-                "-dDownsampleColorImages=true",
-                f"-dColorImageResolution={dpi}",
-                "-dDownsampleGrayImages=true",
-                f"-dGrayImageResolution={dpi}",
-                "-dDownsampleMonoImages=true",
-                f"-dMonoImageResolution={dpi}",
-            ])
-        else:
-            # Named preset
-            preset = QUALITY_PRESETS.get(quality, "/ebook")
-            cmd.append(f"-dPDFSETTINGS={preset}")
+            if dpi is not None:
+                # Custom DPI: explicit downsample flags instead of preset
+                cmd.extend([
+                    "-dDownsampleColorImages=true",
+                    f"-dColorImageResolution={dpi}",
+                    "-dDownsampleGrayImages=true",
+                    f"-dGrayImageResolution={dpi}",
+                    "-dDownsampleMonoImages=true",
+                    f"-dMonoImageResolution={dpi}",
+                ])
+            else:
+                # Named preset
+                preset = QUALITY_PRESETS.get(quality, "/ebook")
+                cmd.append(f"-dPDFSETTINGS={preset}")
 
-        cmd.extend([f"-sOutputFile={str(gs_target).replace('%', '%%')}", str(input_path)])  # % = gs template char (distill review)
+            cmd.extend([f"-sOutputFile={str(gs_target).replace('%', '%%')}",  # % = gs template char (distill review)
+                        str(staged if staged is not None else input_path)])
 
-        # The budget is DERIVED from the input, never the fixed 300 s that
-        # a 50 MB scan died on. stdin isolation lives in budget.run — gs
-        # must never inherit the RPC pipe (distill review).
-        result = budget.gs(cmd, what="Ghostscript (compress)", path=input_path, pages=info["pages"])
-        if result.returncode != 0:
-            raise RuntimeError(f"Ghostscript failed: {result.stderr}")
+            # The budget is DERIVED from the input, never the fixed 300 s that
+            # a 50 MB scan died on. stdin isolation lives in budget.run — gs
+            # must never inherit the RPC pipe (distill review).
+            result = budget.gs(cmd, what="Ghostscript (compress)", path=input_path, pages=info["pages"])
+            if result.returncode != 0:
+                raise RuntimeError(f"Ghostscript failed: {result.stderr}")
 
-        # gs pdfwrite drops /AcroForm and every widget annotation — compressing a
-        # filled form would silently destroy it. Transplant the original's fields
-        # back onto the regenerated pages (no-op for non-form files). Against the
-        # STAGED file when in-place — the original must still be readable here.
-        reattach_forms_file(input_path, gs_target)
+            forms_source = harvest_appearances(gs_target, input_path, scratch,
+                                               boxes, info["pages"])
+
+            # gs pdfwrite drops /AcroForm and every widget annotation — compressing a
+            # filled form would silently destroy it. Transplant the fields back onto
+            # the regenerated pages (no-op for non-form files), from the file
+            # carrying the appearances the producer just recompressed. Against the
+            # STAGED file when in-place — the original must still be readable here.
+            reattach_forms_file(forms_source if forms_source is not None
+                                else input_path, gs_target)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
     return {
         "output": str(output_path),

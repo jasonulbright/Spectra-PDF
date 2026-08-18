@@ -1,11 +1,14 @@
 """PDF grayscale conversion via Ghostscript."""
 
+import shutil
+import tempfile
 from pathlib import Path
 
 from . import budget
 from .acroform import reattach_forms_file
 from .inplace import is_same_file, staged_write_if
 from .validate import validate_pdf
+from .widget_faces import harvest_appearances, stage_appearances_file
 
 
 def grayscale(
@@ -28,34 +31,48 @@ def grayscale(
     same_file = is_same_file(file, output)
     original_size = input_path.stat().st_size
 
-    with staged_write_if(same_file, output_path) as gs_target:
-        cmd = [
-            gs_path,
-            "-sDEVICE=pdfwrite",
-            "-dCompatibilityLevel=1.5",
-            "-sColorConversionStrategy=Gray",
-            "-dProcessColorModel=/DeviceGray",
-            "-dNOPAUSE",
-            "-dQUIET",
-            "-dBATCH",
-            "-dSAFER",
-            f"-sOutputFile={str(gs_target).replace('%', '%%')}",  # % is a gs filename template char (distill review)
-            str(input_path),
-        ]
+    scratch = Path(tempfile.mkdtemp(prefix="spectra-grayscale-"))
+    try:
+        # Widget appearances ride through this same pass as staged pages rather
+        # than being flattened into the page and put back unconverted
+        # (engine/widget_faces.py). Nothing is staged for a document with no
+        # form field, which leaves the producer's input the original file.
+        staged, boxes = stage_appearances_file(input_path, scratch)
+        with staged_write_if(same_file, output_path) as gs_target:
+            cmd = [
+                gs_path,
+                "-sDEVICE=pdfwrite",
+                "-dCompatibilityLevel=1.5",
+                "-sColorConversionStrategy=Gray",
+                "-dProcessColorModel=/DeviceGray",
+                "-dNOPAUSE",
+                "-dQUIET",
+                "-dBATCH",
+                "-dSAFER",
+                f"-sOutputFile={str(gs_target).replace('%', '%%')}",  # % is a gs filename template char (distill review)
+                str(staged if staged is not None else input_path),
+            ]
 
-        # Derived budget, not a fixed 300 s (budget.run isolates stdin —
-        # gs must never inherit the RPC pipe, the distill review's finding).
-        result = budget.gs(
-            cmd, what="Ghostscript (grayscale)", path=input_path, pages=info["pages"]
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Ghostscript grayscale conversion failed: {result.stderr}")
+            # Derived budget, not a fixed 300 s (budget.run isolates stdin —
+            # gs must never inherit the RPC pipe, the distill review's finding).
+            result = budget.gs(
+                cmd, what="Ghostscript (grayscale)", path=input_path, pages=info["pages"]
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Ghostscript grayscale conversion failed: {result.stderr}")
 
-        # gs pdfwrite drops /AcroForm and every widget annotation — converting a
-        # filled form would silently destroy it. Transplant the original's fields
-        # back onto the regenerated pages (no-op for non-form files). Against the
-        # STAGED file when in-place — the original must still be readable here.
-        reattach_forms_file(input_path, gs_target)
+            forms_source = harvest_appearances(gs_target, input_path, scratch,
+                                               boxes, info["pages"])
+
+            # gs pdfwrite drops /AcroForm and every widget annotation — converting a
+            # filled form would silently destroy it. Transplant the fields back onto
+            # the regenerated pages (no-op for non-form files), from the file
+            # carrying the appearances the producer just converted. Against the
+            # STAGED file when in-place — the original must still be readable here.
+            reattach_forms_file(forms_source if forms_source is not None
+                                else input_path, gs_target)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
     return {
         "output": str(output_path),
