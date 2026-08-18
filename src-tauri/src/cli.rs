@@ -3055,6 +3055,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "mrc_verify_text": args.mrc_verify_text,
                 "mrc_lang": args.mrc_lang,
                 "tesseract_path": resolve_tesseract().to_string_lossy(),
+                "font_dir": resolve_fonts().to_string_lossy().to_string(),
             });
             if let Some(dpi) = args.dpi {
                 params["dpi"] = json!(dpi);
@@ -3458,6 +3459,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "render_intent": args.render_intent,
                     "dest_profile": profile,
                     "gs_path": gs.to_string_lossy(),
+                    "font_dir": resolve_fonts().to_string_lossy().to_string(),
                 }),
             )
         }
@@ -5036,6 +5038,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "file": abs(&args.input).to_string_lossy(),
                     "output": abs(&args.output).to_string_lossy(),
                     "gs_path": gs.to_string_lossy(),
+                    "font_dir": resolve_fonts().to_string_lossy().to_string(),
                 }),
             )
         }
@@ -5238,6 +5241,7 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
                     "mrc_verify_text": mrc_verify_text,
                     "mrc_lang": mrc_lang,
                     "tesseract_path": resolve_tesseract().to_string_lossy(),
+                    "font_dir": resolve_fonts().to_string_lossy().to_string(),
                 }),
             ),
             BatchOperation::Rotate { angle, pages } => engine.call(
@@ -5264,6 +5268,7 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
                     "file": pdf.to_string_lossy(),
                     "output": out_path.to_string_lossy(),
                     "gs_path": gs.to_string_lossy(),
+                    "font_dir": resolve_fonts().to_string_lossy().to_string(),
                 }),
             ),
             BatchOperation::Optimize { strip_metadata } => engine.call(

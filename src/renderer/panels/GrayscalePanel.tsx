@@ -4,6 +4,7 @@ import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { ensureGsPath } from './SettingsPanel';
+import { app } from '../lib/tauri-bridge';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import { suffixedOutputName } from '../lib/output-names';
@@ -22,7 +23,12 @@ export function GrayscalePanel(): React.ReactElement {
     if (!output) return;
     setBusy(true); setStatus(tChrome('panel.grayscale.converting'));
     try {
-      const r = await call('grayscale', { file: activeFile.workingPath, output, gs_path: await ensureGsPath() });
+      const r = await call('grayscale', {
+        file: activeFile.workingPath,
+        output,
+        gs_path: await ensureGsPath(),
+        font_dir: await app.getEditFontPath(),
+      });
       const orig = (r.original_size / 1024).toFixed(0);
       const out = (r.output_size / 1024).toFixed(0);
       setStatus(tChrome('panel.grayscale.result', { from: orig, to: out }));

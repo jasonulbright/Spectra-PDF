@@ -8,6 +8,17 @@ import pytest
 
 from engine.prepress import convert_cmyk
 
+# The vendored fallback faces (Rust `get_edit_font_path` at run time, threaded
+# to the engine as `font_dir`). Only the non-WinAnsi pin needs them.
+FONTS_DIR = Path(__file__).resolve().parent.parent / "resources" / "fonts"
+_HAS_CJK_FACE = (FONTS_DIR / "NotoSansCJKsc-Regular.otf").is_file()
+
+#: The bytes a PDF text string outside WinAnsi begins with (ISO 32000-2 7.9.2.2
+#: — the UTF-16BE byte order marker). The producer's synthesized appearance
+#: draws `/V` through the form's WinAnsi face, so finding them in a page's
+#: content stream IS the flattened mojibake.
+UTF16_BOM = b"\xfe\xff"
+
 
 def _rgb_pdf(path):
     """A one-page PDF with a pure-RGB red + blue fill (device RGB `rg` ops)."""
@@ -928,6 +939,33 @@ class TestFormAppearances:
         with pikepdf.open(out) as pdf:
             assert len(pdf.Root.AcroForm.Fields) == 1
             assert len(pdf.pages) == 1, "a staged appearance page was left behind"
+
+    @pytest.mark.skipif(not _HAS_CJK_FACE, reason="bundled CJK face not provisioned")
+    def test_a_bare_field_outside_winansi_needs_the_font_dir(
+            self, tmp_path, gs_path):
+        # The one case the appearance cannot be regenerated WITHOUT a bundled
+        # face: the producer then draws `/V`'s own UTF-16BE bytes (ISO 32000-2
+        # 7.9.2.2) through the form's WinAnsi Helvetica and flattens that
+        # mojibake permanently. The control below is the mutation proof —
+        # `font_dir` is the whole difference, which is why every caller of this
+        # op has to pass one.
+        from separation_builders import FORM_UNICODE_VALUE, form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "unicode.pdf", "bare-unicode")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path, font_dir=str(FONTS_DIR))
+
+        page = _content(out)
+        assert UTF16_BOM not in page
+        assert b"Tj" not in page and b"TJ" not in page
+        field = self._widgets(out)["bare"]
+        assert field["value"] == FORM_UNICODE_VALUE
+        assert b"TJ" in field["faces"]["/N"] or b"Tj" in field["faces"]["/N"]
+
+        control = str(tmp_path / "cmyk-nofonts.pdf")
+        convert_cmyk(src, control, gs_path=gs_path, font_dir="")
+        assert UTF16_BOM in _content(control)
+        assert self._widgets(control)["bare"]["faces"] == {}
 
     def test_a_bare_field_carries_no_stale_value_after_a_refill(
             self, tmp_path, gs_path):

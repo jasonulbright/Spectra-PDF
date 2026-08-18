@@ -749,6 +749,12 @@ FORM_BORDER_RGB = b"1 0 1 RG"
 FORM_BORDER_GRAY = b"0.565 G"
 FORM_BORDER_CMYK = b"0.263 0.816 0 0 K"
 
+#: The value of the `bare-unicode` fixture. It is outside WinAnsi, so the only
+#: appearance that spells it is one drawn through a bundled fallback face —
+#: without one the producer synthesizes its own from `/V` through the form's
+#: WinAnsi Helvetica and flattens that, permanently.
+FORM_UNICODE_VALUE = "機密文書"
+
 #: The options of the `bare-choice` fixture. The producer synthesizes only the
 #: SELECTED one for a list box (measured), so a list whose appearance came from
 #: that flatten is missing every row the user could scroll to.
@@ -782,10 +788,12 @@ def form_appearance_pdf(path, kind: str = "text"):
     synthesizes one from `/V` and `/DA` for — and flattens, permanently, under
     a widget the reattach then puts back over it: ``bare`` a filled text field;
     ``bare-empty`` one with an empty value and no chrome, which the producer
-    draws nothing at all for; ``bare-chrome`` a filled one stating a `/MK`
-    background and border; ``bare-choice`` a dropdown and a list box, of which
-    the producer synthesizes only the SELECTED row; ``bare-button`` a check box
-    and a radio button, which the producer synthesizes nothing for.
+    draws nothing at all for; ``bare-unicode`` one whose value is outside
+    WinAnsi, which nothing but a bundled fallback face can spell;
+    ``bare-chrome`` a filled one stating a `/MK` background and border;
+    ``bare-choice`` a dropdown and a list box, of which the producer
+    synthesizes only the SELECTED row; ``bare-button`` a check box and a radio
+    button, which the producer synthesizes nothing for.
     """
     pdf = pikepdf.new()
     page = pdf.add_blank_page(page_size=(300, 200))
@@ -823,6 +831,12 @@ def form_appearance_pdf(path, kind: str = "text"):
         widgets = [pdf.make_indirect(Dictionary(
             Type=Name.Annot, Subtype=Name.Widget, FT=Name.Tx,
             Rect=Array(list(FORM_FIELD_RECT)), F=4, T="bare", V="",
+            DA=pikepdf.String("/Helv 12 Tf " + FORM_TEXT_RGB.decode())))]
+    elif kind == "bare-unicode":
+        widgets = [pdf.make_indirect(Dictionary(
+            Type=Name.Annot, Subtype=Name.Widget, FT=Name.Tx,
+            Rect=Array(list(FORM_FIELD_RECT)), F=4, T="bare",
+            V=pikepdf.String(FORM_UNICODE_VALUE),
             DA=pikepdf.String("/Helv 12 Tf " + FORM_TEXT_RGB.decode())))]
     elif kind == "bare-chrome":
         widgets = [pdf.make_indirect(Dictionary(

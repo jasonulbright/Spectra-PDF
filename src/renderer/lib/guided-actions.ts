@@ -128,6 +128,12 @@ export const STEP_CATALOG: readonly StepDef[] = [
     op: 'compress',
     title: 'Compress',
     needsGs: true,
+    needsFontDir: true,
+    // The MRC arm an imported action file can select routes through this same
+    // op and verifies its text with the recognizer. The folder tier hands the
+    // path over, so a single-document run that resolves none runs that arm
+    // with no recognizer at all.
+    needsTesseract: true,
     params: [
       {
         key: 'quality',
@@ -188,7 +194,13 @@ export const STEP_CATALOG: readonly StepDef[] = [
       strip_metadata: String(params.strip_metadata ?? 'no') === 'yes',
     }),
   },
-  { op: 'grayscale', title: 'Convert to Grayscale', needsGs: true, params: [] },
+  {
+    op: 'grayscale',
+    title: 'Convert to Grayscale',
+    needsGs: true,
+    needsFontDir: true,
+    params: [],
+  },
   {
     op: 'convert_pdfa',
     title: 'Convert to PDF/A',
@@ -922,6 +934,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
     title: 'Create PDF from any file',
     sourceStep: true,
     needsGs: true,
+    needsSoffice: true,
     params: [
       {
         key: 'page_size',
