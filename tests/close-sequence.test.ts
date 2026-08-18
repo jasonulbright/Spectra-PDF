@@ -12,10 +12,10 @@ describe('sealBeforeClose', () => {
   it('acknowledges only AFTER the flush has resolved', async () => {
     const order: string[] = [];
     let release: (() => void) | null = null;
-    const flushing = new Promise<void>((resolve) => {
+    const flushing = new Promise<boolean>((resolve) => {
       release = () => {
         order.push('flush');
-        resolve();
+        resolve(true);
       };
     });
 
@@ -32,7 +32,7 @@ describe('sealBeforeClose', () => {
     expect(order).toEqual([]);
 
     release!();
-    await run;
+    expect(await run).toBe(true);
     expect(order).toEqual(['flush', 'ack:7']);
   });
 
@@ -40,7 +40,7 @@ describe('sealBeforeClose', () => {
     const ack = vi.fn(async () => {});
     // A flush that never settles: the quit's timeout is what answers, and it
     // answers ABORT. Nothing here may answer for it.
-    void sealBeforeClose(1, { flush: () => new Promise<void>(() => {}), ack });
+    void sealBeforeClose(1, { flush: () => new Promise<boolean>(() => {}), ack });
     await new Promise((r) => setTimeout(r, 10));
     expect(ack).not.toHaveBeenCalled();
   });
@@ -48,15 +48,15 @@ describe('sealBeforeClose', () => {
   it('flushes on a plain window close and acknowledges nothing', async () => {
     // quitId null is a window ×: no quit is waiting, and the last window
     // closing still seals the record by that route.
-    const flush = vi.fn(async () => {});
+    const flush = vi.fn(async () => true);
     const ack = vi.fn(async () => {});
-    await sealBeforeClose(null, { flush, ack });
+    expect(await sealBeforeClose(null, { flush, ack })).toBe(true);
     expect(flush).toHaveBeenCalledTimes(1);
     expect(ack).not.toHaveBeenCalled();
   });
 
   it('swallows a failed receipt — the quit timeout is the authority', async () => {
-    const flush = vi.fn(async () => {});
+    const flush = vi.fn(async () => true);
     await expect(
       sealBeforeClose(3, {
         flush,
@@ -64,7 +64,7 @@ describe('sealBeforeClose', () => {
           throw new Error('window gone');
         },
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(true);
     expect(flush).toHaveBeenCalledTimes(1);
   });
 
@@ -80,6 +80,27 @@ describe('sealBeforeClose', () => {
         ack,
       }),
     ).rejects.toThrow('publisher failed');
+    expect(ack).not.toHaveBeenCalled();
+  });
+
+  // The defect: `then(drain, drain)` swallowed a rejected publish, so the flush
+  // RESOLVED and the window acknowledged with Rust never having been told the
+  // newest order. The quit then sealed a record this window had superseded —
+  // exactly the loss the flush exists to prevent, but now with a receipt saying
+  // otherwise.
+  it('withholds the receipt when the order did not land', async () => {
+    const ack = vi.fn(async () => {});
+    // Resolved, not rejected: the publisher finished its work and is reporting
+    // that the far side never took the newest value.
+    expect(await sealBeforeClose(9, { flush: async () => false, ack })).toBe(false);
+    expect(ack).not.toHaveBeenCalled();
+  });
+
+  it('closes a plain window × even on an order that did not land', async () => {
+    // No quit is waiting, so there is no receipt to withhold — and refusing
+    // the × over a stale tab order would make the button do nothing at all.
+    const ack = vi.fn(async () => {});
+    expect(await sealBeforeClose(null, { flush: async () => false, ack })).toBe(true);
     expect(ack).not.toHaveBeenCalled();
   });
 });
