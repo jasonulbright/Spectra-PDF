@@ -88,7 +88,7 @@ import type { FormFieldValue } from './lib/forms';
 import { fillClosure, formCalculation, resolveFillTargets } from './lib/form-overlay';
 import { addFormFields } from './lib/form-authoring';
 import type { NewFieldSpec } from './lib/form-authoring';
-import { verticalFontCalls } from './lib/form-writing';
+import { choiceAppearanceFields, verticalFontCalls } from './lib/form-writing';
 import { DropZone } from './components/DropZone';
 import { OperationsProvider } from './hooks/useOperations';
 import { OperationQueue } from './components/OperationQueue';
@@ -1357,7 +1357,8 @@ function AppContent(): React.ReactElement {
       const withFields = await addFormFields(bytes, specs);
       await file.writeBuffer(f.workingPath, withFields);
       const vertical = verticalFontCalls(specs);
-      if (vertical.length > 0) {
+      const choices = choiceAppearanceFields(specs);
+      if (vertical.length > 0 || choices.length > 0) {
         const fontDir = await app.getEditFontPath();
         try {
           for (const bind of vertical) {
@@ -1366,6 +1367,17 @@ function AppContent(): React.ReactElement {
               output: f.workingPath,
               fields: bind.fields,
               script: bind.script,
+              font_dir: fontDir,
+            });
+          }
+          // After the vertical bind, never before: a list's writing mode is
+          // stated by the font its /DA names, so the appearance door has to
+          // read the /DA the bind wrote to draw rows as columns.
+          if (choices.length > 0) {
+            await call('author_choice_appearance', {
+              file: f.workingPath,
+              output: f.workingPath,
+              fields: choices,
               font_dir: fontDir,
             });
           }

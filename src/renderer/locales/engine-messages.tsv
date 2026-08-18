@@ -171,8 +171,10 @@ form_authoring.documentCertifiedAllowChanges2	exact	form_authoring	this document
 form_authoring.documentCertifiedAllowChanges3	exact	form_authoring	this document is certified to allow no changes, so setting a field action would produce a file that reports as illegally modified
 form_authoring.documentCertifiedAllowChanges4	exact	form_authoring	this document is certified to allow no changes, so setting a field description would produce a file that reports as illegally modified
 form_authoring.documentCertifiedAllowChanges5	exact	form_authoring	this document is certified to allow no changes, so setting a field's writing mode would produce a file that reports as illegally modified
+form_authoring.documentCertifiedAllowChanges6	exact	form_authoring	this document is certified to allow no changes, so redrawing an option list would produce a file that reports as illegally modified
 form_authoring.documentFormFieldNamed	pattern	form_authoring	This document has no form field named "{{name}}".
 form_authoring.documentSignedAddingForm	exact	form_authoring	this document is signed and adding form fields invalidates its signatures -- the run must state that signed documents are included before it will touch one
+form_authoring.documentSignedRedrawingOption	exact	form_authoring	this document is signed and redrawing an option list invalidates its signatures -- the run must state that signed documents are included before it will touch one
 form_authoring.documentSignedSettingField	exact	form_authoring	this document is signed and setting a field lock invalidates its signatures -- the run must state that signed documents are included before it will touch one
 form_authoring.documentSignedSettingField2	exact	form_authoring	this document is signed and setting a field action invalidates its signatures -- the run must state that signed documents are included before it will touch one
 form_authoring.documentSignedSettingField3	exact	form_authoring	this document is signed and setting a field description invalidates its signatures -- the run must state that signed documents are included before it will touch one
@@ -183,10 +185,12 @@ form_authoring.formFieldSignatureField	pattern	form_authoring	Form field "{{name
 form_authoring.nameFormFieldWhose	exact	form_authoring	Name the form field whose actions are being set.
 form_authoring.nameFormFieldWhose2	exact	form_authoring	Name the form field whose description is being set.
 form_authoring.nameFormFieldsWhose	exact	form_authoring	Name the form fields whose writing mode is being set.
+form_authoring.nameOptionListsWhose	exact	form_authoring	Name the option lists whose appearance is being drawn.
 form_authoring.nameSignatureFieldWhose	exact	form_authoring	Name the signature field whose lock is being set.
 form_authoring.signatureFieldAlreadySigned	pattern	form_authoring	Signature field "{{name}}" is already signed, so its field lock can no longer change. Its lock is part of what that signature covers.
 form_authoring.theseFormFieldsCannot	pattern	form_authoring	these form fields cannot be created: {{joined}}
 form_authoring.theseFormFieldsCannot2	pattern	form_authoring	these form fields cannot write vertically: {{joined}}
+form_authoring.theseOptionListsCannot	pattern	form_authoring	these option lists cannot be drawn: {{joined}}
 form_detect.cannotNameDetectedField	pattern	form_detect,form_prepare	cannot name the detected field {{base}}: too many fields already carry that name
 form_detect.maxCandidatesMustPositive	exact	form_detect	max_candidates must be a positive number
 form_detect.scanMustAutoNever	exact	form_detect	scan must be "auto", "never" or "always"
@@ -196,6 +200,9 @@ forms.couldnTRegenerateAppearance	pattern	forms	couldn't regenerate the appearan
 forms.fieldWritesVerticallyFallback	exact	forms	this field writes vertically and no fallback font is available
 forms.nameFormDataFile	exact	forms	Name the form-data file to import.
 forms.nameFormFieldsShow	exact	forms	Name the form fields to show or hide.
+forms.optionContainsCharactersAvailable	pattern	forms	option {{line}} contains characters no available font can render ({{pretty}})
+forms.optionListWritesVertically	exact	forms	this option list writes vertically and no fallback font is available
+forms.optionOutsideFormFont	pattern	forms	option {{line}} is outside the form font's encoding (WinAnsi) and no fallback font is available
 forms.unknownSubmissionFormatExpected	pattern	forms	unknown submission format {{fmt}}; expected one of {{v1}}
 forms.valueContainsCharactersOutside	exact	forms	value contains characters outside the form font's encoding (WinAnsi)
 glyph_outlines.fontProgramProducedCurve	exact	glyph_outlines	A font program produced a curve segment with an unexpected number of points.

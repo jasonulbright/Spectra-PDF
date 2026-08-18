@@ -140,6 +140,7 @@ from engine.watermark import watermark
 from engine.compare import compare_text, compare_visual
 from engine.form_detect import detect_form_fields
 from engine.form_authoring import (
+    author_choice_appearance,
     author_vertical_field_font,
     set_field_actions,
     set_field_description,
@@ -363,6 +364,7 @@ def main() -> None:
     server.register("prepare_form_fields", prepare_form_fields)
     server.register("set_field_lock", set_field_lock)
     server.register("author_vertical_field_font", author_vertical_field_font)
+    server.register("author_choice_appearance", author_choice_appearance)
     server.register("set_field_actions", set_field_actions)
     server.register("set_field_description", set_field_description)
     server.register("apply_ocr_layer", apply_ocr_layer)

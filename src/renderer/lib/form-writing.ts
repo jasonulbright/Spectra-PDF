@@ -1,5 +1,7 @@
-// The new-field card's writing mode, as data rather than as JSX — the
-// watermark card's `writing-mode` shape with one addition a FIELD needs.
+// What a new-field batch is, as data rather than as JSX: its writing mode,
+// its options, and which engine calls the batch still owes after pdf-lib has
+// written the fields. The writing mode is the watermark card's
+// `writing-mode` shape with one addition a FIELD needs.
 //
 // A field states its writing mode in the CMap of the font its `/DA` names
 // (ISO 32000-2 9.7.5.1), and a predefined vertical CMap is bound to exactly
@@ -20,8 +22,10 @@
 //   * pdf-lib cannot write a CID-keyed font, so a vertical field is created
 //     by pdf-lib and then BOUND by the engine. Which engine calls that costs
 //     is a property of the batch, computed once here rather than re-derived
-//     at the call site.
-import type { NewFieldSpec, NewFieldType } from './form-authoring';
+//     at the call site. The same holds for an option list whose appearance
+//     pdf-lib cannot draw.
+import { Encodings } from '@pdf-lib/standard-fonts';
+import type { NewFieldOption, NewFieldSpec, NewFieldType } from './form-authoring';
 
 export type FieldWriting = 'horizontal' | 'vertical';
 
@@ -63,6 +67,76 @@ export function fieldWritingParams(
   return effectiveFieldWriting(type, writing) === 'vertical'
     ? { writingMode: 'vertical', script }
     : {};
+}
+
+/** One choice of a radio group, dropdown or list, with its label trimmed and
+ * the empty ones dropped. The single reader of `spec.options`, so the create
+ * path and the engine-call planner cannot disagree about what a batch's
+ * options are. */
+export interface ResolvedOption {
+  label: string;
+  rect?: [number, number, number, number];
+}
+
+export function resolveOptions(
+  options: readonly NewFieldOption[] | undefined,
+): ResolvedOption[] {
+  return (options ?? [])
+    .map((o) =>
+      typeof o === 'string' ? { label: o.trim() } : { label: o.label.trim(), rect: o.rect },
+    )
+    .filter((o) => o.label.length > 0);
+}
+
+/** Whether any of these labels leaves the WinAnsi encoding.
+ *
+ * `Encodings.WinAnsi` is the same object pdf-lib's standard-font embedder
+ * assigns as its own encoding for every name but Symbol and ZapfDingbats, so
+ * this predicate cannot drift from what its appearance provider accepts. It
+ * is iterated by CODE POINT, as the encoder itself iterates: a lone surrogate
+ * half is never what it is asked to encode. */
+export function labelsLeaveWinAnsi(labels: readonly string[]): boolean {
+  const encoding = Encodings.WinAnsi;
+  for (const label of labels) {
+    for (const ch of label) {
+      if (!encoding.canEncodeUnicodeCodePoint(ch.codePointAt(0)!)) return true;
+    }
+  }
+  return false;
+}
+
+/** Whether this spec's widget appearance has to be authored by the engine.
+ *
+ * An option list's appearance lays out EVERY label, which is the one field
+ * appearance that depends on arbitrary authored text. pdf-lib's provider
+ * reaches only the WinAnsi standard fonts and cannot author a CID-keyed font
+ * at all, so a list whose labels leave WinAnsi and a list bound to a vertical
+ * font are both outside what it can draw. Every other field, and a horizontal
+ * WinAnsi list, keeps the single pdf-lib write. */
+export function needsChoiceAppearance(spec: NewFieldSpec): boolean {
+  if (spec.type !== 'optionlist') return false;
+  if (effectiveFieldWriting(spec.type, spec.writingMode ?? 'horizontal') === 'vertical') {
+    return true;
+  }
+  return labelsLeaveWinAnsi(resolveOptions(spec.options).map((o) => o.label));
+}
+
+/**
+ * The names one `author_choice_appearance` call redraws — EMPTY when no spec
+ * in the batch needs one, so the ordinary create stays the single pdf-lib
+ * write it has always been.
+ *
+ * One call for the whole batch rather than one per field: the door takes a
+ * list and every call re-saves the whole document.
+ */
+export function choiceAppearanceFields(specs: readonly NewFieldSpec[]): string[] {
+  const names: string[] = [];
+  for (const spec of specs) {
+    if (!needsChoiceAppearance(spec)) continue;
+    const name = spec.name.trim();
+    if (name) names.push(name);
+  }
+  return names;
 }
 
 /** One `author_vertical_field_font` call: the fields of one batch bound to
