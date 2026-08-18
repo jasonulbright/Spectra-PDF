@@ -231,6 +231,7 @@ def _convert_to_cmyk(source: str, output: str, run: _Run) -> int:
         render_intent=str(run.get("render_intent", "relative")),
         dest_profile=str(run.get("dest_profile", "")),
         gs_path=run.gs_path,
+        font_dir=run.font_dir,
     )
     return 1
 
@@ -238,7 +239,7 @@ def _convert_to_cmyk(source: str, output: str, run: _Run) -> int:
 def _convert_to_grayscale(source: str, output: str, run: _Run) -> int:
     from engine.grayscale import grayscale
 
-    grayscale(source, output, gs_path=run.gs_path)
+    grayscale(source, output, gs_path=run.gs_path, font_dir=run.font_dir)
     return 1
 
 
@@ -339,6 +340,7 @@ def _downsample_images(source: str, output: str, run: _Run) -> int:
         dpi=dpi,
         gs_path=run.gs_path,
         tesseract_path=run.tesseract_path,
+        font_dir=run.font_dir,
     )
     return 1
 

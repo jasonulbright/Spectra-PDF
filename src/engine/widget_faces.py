@@ -23,10 +23,11 @@ for plate). EVERY face is transformed that way rather than only the one `/AS`
 selects. The transformed pages are harvested back onto the faces, and the
 fields reattach from that file.
 
+A widget with NO appearance is given one BEFORE any of that, by
+`regenerate_appearances_file`, and then rides the staging as an ordinary
+appearance-carrying widget.
+
 Boundaries, each measured:
-  - a widget with NO appearance stays in the producer's input. The producer
-    SYNTHESIZES one from `/V` and `/DA` and flattens that, which is already a
-    single transformed painter; removing the widget would erase it.
   - one stream worn by two widgets is staged once and transformed once — the
     pairing is by face, not by widget.
   - the harvest runs BEFORE any pass that re-anchors an appearance to its
@@ -185,6 +186,45 @@ def stage_appearances(pdf) -> list:
         idents.add(face.objgen)
     _drop_staged_widgets(pdf, idents)
     return boxes
+
+
+def regenerate_appearances_file(source: Path, scratch: Path,
+                                font_dir: str = ""):
+    """A copy of `source` whose `/AP`-less widgets carry the appearance their
+    own field states, or None when there was none to give.
+
+    The producer SYNTHESIZES an appearance for a widget that carries none and
+    flattens it into the page (measured), and the field reattach then RESTORES
+    the widget over that flatten. The flatten is therefore a duplicate that
+    outlives the value it was drawn from: refill the field and the `/AP` says
+    the new value while the page content still paints the old one, for good.
+
+    Giving the widget its appearance first leaves the producer nothing to
+    synthesize, and the face then travels the op's own pass like every other
+    face — so the appearance has ONE author (the fill's own emitters) and ONE
+    transform (the op's own producer invocation), rather than one author per
+    op deciding what the destination space is.
+
+    Every path that reads the document as CONTENT reads this copy afterwards,
+    the reattach included: a widget whose appearance only the staged input
+    carried would come back bare.
+
+    A field whose value nothing available can draw keeps no appearance here and
+    so stays in the producer's input, which is the one case the flatten still
+    happens in — drawing it would need a face `font_dir` did not supply, and
+    inventing one spells the value in glyphs that mean something else.
+    """
+    with pikepdf.open(str(source)) as pdf:
+        if not has_form_fields(pdf):
+            return None
+        from .forms import regenerate_missing_appearances
+
+        drew, _undrawn = regenerate_missing_appearances(pdf, font_dir)
+        if not drew:
+            return None
+        path = Path(scratch) / "regenerated.pdf"
+        pdf.save(str(path))
+    return path
 
 
 def stage_appearances_file(source: Path, scratch: Path):

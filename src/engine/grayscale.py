@@ -8,13 +8,15 @@ from . import budget
 from .acroform import reattach_forms_file
 from .inplace import is_same_file, staged_write_if
 from .validate import validate_pdf
-from .widget_faces import harvest_appearances, stage_appearances_file
+from .widget_faces import (harvest_appearances, regenerate_appearances_file,
+                           stage_appearances_file)
 
 
 def grayscale(
     file: str,
     output: str,
     gs_path: str = "gs",
+    font_dir: str = "",
 ) -> dict:
     """Convert a PDF to grayscale using Ghostscript.
 
@@ -22,6 +24,10 @@ def grayscale(
         file: Input PDF path.
         output: Output PDF path.
         gs_path: Path to the Ghostscript executable.
+        font_dir: The bundled fallback faces, for regenerating the appearance
+            of a widget that carries none whose value is outside the form
+            font's encoding. Without it such a field keeps the appearance the
+            producer synthesizes; every other field is unaffected.
     """
     info = validate_pdf(file)
 
@@ -37,7 +43,12 @@ def grayscale(
         # than being flattened into the page and put back unconverted
         # (engine/widget_faces.py). Nothing is staged for a document with no
         # form field, which leaves the producer's input the original file.
-        staged, boxes = stage_appearances_file(input_path, scratch)
+        # A widget carrying no appearance is given one first, so the producer
+        # has none to synthesize and flatten; everything downstream that reads
+        # content reads that copy, or the reattach restores a bare widget.
+        forms_input = regenerate_appearances_file(input_path, scratch,
+                                                  font_dir) or input_path
+        staged, boxes = stage_appearances_file(forms_input, scratch)
         with staged_write_if(same_file, output_path) as gs_target:
             cmd = [
                 gs_path,
@@ -50,7 +61,7 @@ def grayscale(
                 "-dBATCH",
                 "-dSAFER",
                 f"-sOutputFile={str(gs_target).replace('%', '%%')}",  # % is a gs filename template char (distill review)
-                str(staged if staged is not None else input_path),
+                str(staged if staged is not None else forms_input),
             ]
 
             # Derived budget, not a fixed 300 s (budget.run isolates stdin —
@@ -61,7 +72,7 @@ def grayscale(
             if result.returncode != 0:
                 raise RuntimeError(f"Ghostscript grayscale conversion failed: {result.stderr}")
 
-            forms_source = harvest_appearances(gs_target, input_path, scratch,
+            forms_source = harvest_appearances(gs_target, forms_input, scratch,
                                                boxes, info["pages"])
 
             # gs pdfwrite drops /AcroForm and every widget annotation — converting a
@@ -70,7 +81,7 @@ def grayscale(
             # carrying the appearances the producer just converted. Against the
             # STAGED file when in-place — the original must still be readable here.
             reattach_forms_file(forms_source if forms_source is not None
-                                else input_path, gs_target)
+                                else forms_input, gs_target)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

@@ -738,6 +738,23 @@ FORM_DOWN_GRAY = b"0.565 g"
 
 FORM_FIELD_RECT = (20, 100, 280, 140)
 
+#: The `/MK` background and border of the `bare-chrome` fixture, and what each
+#: conversion makes of them. A widget states its chrome apart from any value
+#: (ISO 32000-2 12.5.6.19), so an appearance regenerated for a widget that had
+#: none has to carry it or the box loses the border it was authored with.
+FORM_BG_RGB = b"1 1 0 rg"
+FORM_BG_GRAY = b"0.973 g"
+FORM_BG_CMYK = b"0.055 0 0.965 0 k"
+FORM_BORDER_RGB = b"1 0 1 RG"
+FORM_BORDER_GRAY = b"0.565 G"
+FORM_BORDER_CMYK = b"0.263 0.816 0 0 K"
+
+#: The options of the `bare-choice` fixture. The producer synthesizes only the
+#: SELECTED one for a list box (measured), so a list whose appearance came from
+#: that flatten is missing every row the user could scroll to.
+FORM_OPTIONS = ("Alpha", "Beta", "Gamma")
+FORM_OPTION_CHOSEN = "Beta"
+
 
 def _form_face(pdf, body: bytes, bbox, font=None):
     stream = pikepdf.Stream(pdf, body)
@@ -759,8 +776,16 @@ def form_appearance_pdf(path, kind: str = "text"):
 
     ``text`` one filled text field; ``states`` a checkbox carrying `/N` and
     `/D` state dictionaries, only one face of which the producer ever draws;
-    ``bare`` a filled field with NO appearance, which the producer synthesizes
-    one for; ``shared`` two widgets wearing one appearance stream.
+    ``shared`` two widgets wearing one appearance stream.
+
+    The ``bare`` family carries NO appearance, which is what the producer
+    synthesizes one from `/V` and `/DA` for — and flattens, permanently, under
+    a widget the reattach then puts back over it: ``bare`` a filled text field;
+    ``bare-empty`` one with an empty value and no chrome, which the producer
+    draws nothing at all for; ``bare-chrome`` a filled one stating a `/MK`
+    background and border; ``bare-choice`` a dropdown and a list box, of which
+    the producer synthesizes only the SELECTED row; ``bare-button`` a check box
+    and a radio button, which the producer synthesizes nothing for.
     """
     pdf = pikepdf.new()
     page = pdf.add_blank_page(page_size=(300, 200))
@@ -788,10 +813,53 @@ def form_appearance_pdf(path, kind: str = "text"):
                 D=Dictionary(On=box(FORM_DOWN_RGB), Off=box(FORM_TEXT_RGB)))))
         widgets = [widget]
     elif kind == "bare":
+        # The /DA colour differs from the page's own paint, so "the value is
+        # not in the page content" is provable by operand as well as by text.
         widgets = [pdf.make_indirect(Dictionary(
             Type=Name.Annot, Subtype=Name.Widget, FT=Name.Tx,
             Rect=Array(list(FORM_FIELD_RECT)), F=4, T="bare", V="Hello",
-            DA=pikepdf.String("/Helv 12 Tf 0 0 1 rg")))]
+            DA=pikepdf.String("/Helv 12 Tf " + FORM_TEXT_RGB.decode())))]
+    elif kind == "bare-empty":
+        widgets = [pdf.make_indirect(Dictionary(
+            Type=Name.Annot, Subtype=Name.Widget, FT=Name.Tx,
+            Rect=Array(list(FORM_FIELD_RECT)), F=4, T="bare", V="",
+            DA=pikepdf.String("/Helv 12 Tf " + FORM_TEXT_RGB.decode())))]
+    elif kind == "bare-chrome":
+        widgets = [pdf.make_indirect(Dictionary(
+            Type=Name.Annot, Subtype=Name.Widget, FT=Name.Tx,
+            Rect=Array(list(FORM_FIELD_RECT)), F=4, T="bare", V="Hello",
+            MK=Dictionary(BG=Array([1, 1, 0]), BC=Array([1, 0, 1])),
+            BS=Dictionary(W=2, S=Name.S),
+            DA=pikepdf.String("/Helv 12 Tf " + FORM_TEXT_RGB.decode())))]
+    elif kind == "bare-choice":
+        options = Array([pikepdf.String(o) for o in FORM_OPTIONS])
+        widgets = [
+            pdf.make_indirect(Dictionary(
+                Type=Name.Annot, Subtype=Name.Widget, FT=Name.Ch,
+                Ff=1 << 17,  # ISO 32000-2 Table 230: Combo — a dropdown
+                Rect=Array(list(FORM_FIELD_RECT)), F=4, T="combo",
+                V=pikepdf.String(FORM_OPTION_CHOSEN), Opt=options,
+                DA=pikepdf.String("/Helv 12 Tf " + FORM_TEXT_RGB.decode()))),
+            pdf.make_indirect(Dictionary(
+                Type=Name.Annot, Subtype=Name.Widget, FT=Name.Ch,
+                Rect=Array([20, 20, 280, 90]), F=4, T="list",
+                V=pikepdf.String(FORM_OPTION_CHOSEN), Opt=options,
+                DA=pikepdf.String("/Helv 8 Tf " + FORM_TEXT_RGB.decode()))),
+        ]
+    elif kind == "bare-button":
+        widgets = [
+            pdf.make_indirect(Dictionary(
+                Type=Name.Annot, Subtype=Name.Widget, FT=Name.Btn,
+                Rect=Array([20, 100, 60, 140]), F=4, T="check",
+                V=Name("/Yes"), AS=Name("/Yes"),
+                DA=pikepdf.String("/ZaDb 0 Tf 0 g"))),
+            pdf.make_indirect(Dictionary(
+                Type=Name.Annot, Subtype=Name.Widget, FT=Name.Btn,
+                Ff=1 << 15,  # ISO 32000-2 Table 230: Radio
+                Rect=Array([80, 100, 120, 140]), F=4, T="radio",
+                V=Name("/A"), AS=Name("/A"),
+                DA=pikepdf.String("/ZaDb 0 Tf 0 g"))),
+        ]
     elif kind == "shared":
         face = text_face(FORM_FILL_RGB, FORM_TEXT_RGB)
         widgets = [pdf.make_indirect(Dictionary(
