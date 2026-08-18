@@ -56,7 +56,7 @@ def tmp_dir(tmp_path):
     return str(tmp_path)
 
 
-def _base_pdf(path, with_form=False, annots=0):
+def _base_pdf(path, with_form=False, annots=0, form_direct=False):
     pdf = pikepdf.new()
     page = pdf.add_blank_page(page_size=(612, 792))
     page.Contents = pdf.make_stream(b"0 g 10 10 100 100 re f")
@@ -82,10 +82,16 @@ def _base_pdf(path, with_form=False, annots=0):
             DA=pikepdf.String("/Helv 0 Tf 0 g"),
         ))
         entries.append(widget)
-        pdf.Root["/AcroForm"] = pdf.make_indirect(pikepdf.Dictionary(
+        # `form_direct` stores /AcroForm as a direct dictionary in the catalog.
+        # ISO 32000-2 Table 29 types the entry as a dictionary and attaches no
+        # "shall be an indirect reference" to it (the qualifier /Outlines and
+        # /Threads carry), so a direct one is a conforming file the transplant
+        # has no object to mark updated for.
+        acro = pikepdf.Dictionary(
             Fields=pikepdf.Array([widget]),
             DA=pikepdf.String("/Helv 0 Tf 0 g"),
-        ))
+        )
+        pdf.Root["/AcroForm"] = acro if form_direct else pdf.make_indirect(acro)
     if entries:
         page.obj["/Annots"] = pikepdf.Array(entries)
     pdf.save(path)
@@ -1059,9 +1065,181 @@ class TestPageTree:
         assert not os.path.exists(out)
 
 
+class TestAcroFormDelta:
+    """Every /AcroForm difference is judged HERE, and none is ignored.
+
+    The catalog guard excludes /AcroForm from its comparison, so this pass is
+    the only thing standing between a form difference and a success report. The
+    cases below are the ones where one side of the comparison is missing —
+    where "absent" reads as "nothing to do" unless something says otherwise.
+    """
+
+    def test_removing_the_form_refuses(self, tmp_dir, pki):
+        # The reported shape: a rebuild that drops /AcroForm AND adds an
+        # annotation reported applied=True, kept the original's form, and
+        # applied the annotation — half of the edit, announced as all of it.
+        signed = _signed(tmp_dir, pki, with_form=True, annots=1)
+
+        def mutate(pdf):
+            del pdf.Root["/AcroForm"]
+            _add_square(pdf, nm="acroform-gone", color=(0, 1, 0))
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is False
+        assert r["reason"] == "acroform-removed"
+        assert not os.path.exists(out)
+
+    def test_removing_the_form_alone_refuses(self, tmp_dir, pki):
+        """The removal is the delta, not a passenger on one.
+
+        Without another change to carry it the pre-fix answer was `no-delta` —
+        a refusal, but one that describes the edit as empty when it is not.
+        """
+        signed = _signed(tmp_dir, pki, with_form=True)
+
+        def mutate(pdf):
+            del pdf.Root["/AcroForm"]
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is False
+        assert r["reason"] == "acroform-removed"
+
+    def test_a_form_that_survives_still_applies(self, tmp_dir, pki):
+        # The control the refusal is measured against: the same fixture and the
+        # same annotation, with the form left alone.
+        signed = _signed(tmp_dir, pki, with_form=True, annots=1)
+
+        def mutate(pdf):
+            _add_square(pdf, nm="acroform-kept", color=(0, 1, 0))
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, r.get("reason")
+        _assert_sig_still_valid(out, pki)
+        with pikepdf.open(out) as pdf:
+            assert pdf.Root.get("/AcroForm") is not None
+
+    def test_a_direct_acroform_delta_refuses(self, tmp_dir, pki):
+        """An /AcroForm-level change to a DIRECT form dictionary.
+
+        In-place reconciliation needs an object to mark updated; a direct
+        /AcroForm lives inside the catalog, which this module never rewrites.
+        Pre-fix the whole reconciliation was skipped and the annotation landed
+        alone.
+        """
+        signed = _signed(tmp_dir, pki, with_form=True, form_direct=True)
+        with pikepdf.open(signed) as pdf:
+            assert not pdf.Root["/AcroForm"].is_indirect, "fixture is not direct"
+
+        def mutate(pdf):
+            pdf.Root["/AcroForm"]["/NeedAppearances"] = True
+            _add_square(pdf, nm="direct-form", color=(1, 0, 1))
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is False
+        assert r["reason"] == "acroform-inline"
+        assert not os.path.exists(out)
+
+    def test_an_indirect_form_takes_the_same_key_change(self, tmp_dir, pki):
+        # Control for the refusal above: only the indirection differs.
+        signed = _signed(tmp_dir, pki, with_form=True)
+
+        def mutate(pdf):
+            pdf.Root["/AcroForm"]["/NeedAppearances"] = True
+            _add_square(pdf, nm="indirect-form", color=(1, 0, 1))
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, r.get("reason")
+        assert r["fields_updated"] == 1
+        _assert_sig_still_valid(out, pki)
+        with pikepdf.open(out) as pdf:
+            assert bool(pdf.Root["/AcroForm"]["/NeedAppearances"]) is True
+
+    def test_a_direct_form_with_no_form_delta_still_applies(self, tmp_dir, pki):
+        # The direct fixture is not refused for being direct — only for a
+        # difference it cannot express.
+        signed = _signed(tmp_dir, pki, with_form=True, form_direct=True)
+
+        def mutate(pdf):
+            _add_square(pdf, nm="direct-untouched", color=(1, 1, 0))
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, r.get("reason")
+        _assert_sig_still_valid(out, pki)
+
+    def test_removing_an_acroform_level_key_is_expressed(self, tmp_dir, pki):
+        # The sibling that is NOT a refusal: an indirect /AcroForm can lose a
+        # key in the appended revision, so the removal lands rather than being
+        # ignored or refused.
+        signed = _signed(tmp_dir, pki, with_form=True)
+
+        def mutate(pdf):
+            del pdf.Root["/AcroForm"]["/DA"]
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, r.get("reason")
+        assert r["fields_updated"] == 1
+        _assert_sig_still_valid(out, pki)
+        with pikepdf.open(out) as pdf:
+            assert pdf.Root["/AcroForm"].get("/DA") is None
+
+    def test_removing_a_field_while_its_widget_stays_refuses(self, tmp_dir, pki):
+        # The bounded case of the same change: /Fields loses one entry and the
+        # page keeps drawing its widget.
+        signed = _signed(tmp_dir, pki, with_form=True)
+
+        def mutate(pdf):
+            acro = pdf.Root["/AcroForm"]
+            acro["/Fields"] = pikepdf.Array([
+                f for f in acro["/Fields"]
+                if f.get("/T") is None or str(f["/T"]) != "name"
+            ])
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is False
+        assert "removed form field" in r["reason"]
+
+
 class TestRevertProofs:
     """Each feature, switched off, must give the pre-feature answer back — with
     values the passing tests above never use, so a proof cannot be a copy."""
+
+    @staticmethod
+    def _ignore_acroform_refusal(monkeypatch, reason: str):
+        """Restore the pre-fix "missing on one side = nothing to do" answer.
+
+        Faithful for both reverted reasons because each is raised before the
+        pass has written anything and with no field-level count to discard:
+        `acroform-removed` is the function's first statement after the lookup,
+        and `acroform-inline` is reached only for fixtures whose sole
+        difference is an /AcroForm-level key.
+        """
+        real = incremental._acroform_delta
+
+        def shim(writer, orig, mod, memo_mat):
+            try:
+                return real(writer, orig, mod, memo_mat)
+            except incremental._TransplantRefusal as e:
+                if str(e) == reason:
+                    return 0
+                raise
+
+        monkeypatch.setattr(incremental, "_acroform_delta", shim)
 
     def test_without_the_ceiling_a_no_changes_document_is_violated(
         self, matrix_docs, matrix_pki, tmp_dir, monkeypatch
@@ -1132,6 +1310,54 @@ class TestRevertProofs:
             assert len(pdf.pages) == 3, (
                 "the /Kids rewrite is what carries a removal; without it the "
                 "revision claims a page it never dropped"
+            )
+
+    def test_without_the_removal_refusal_the_form_survives_the_edit(
+        self, tmp_dir, pki, monkeypatch
+    ):
+        self._ignore_acroform_refusal(monkeypatch, "acroform-removed")
+        signed = _signed(tmp_dir, pki, with_form=True, annots=2)
+
+        def mutate(pdf):
+            del pdf.Root["/AcroForm"]
+            _add_square(pdf, nm="revert-form-gone", color=(0.5, 0, 0.5))
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, "the revert did not reach the refusal"
+        with pikepdf.open(out) as pdf:
+            assert pdf.Root.get("/AcroForm") is not None, (
+                "without the refusal this file should be the half-applied "
+                "document the fix exists to stop"
+            )
+            names = {
+                str(a.get("/NM")) for a in pdf.pages[0].obj["/Annots"]
+                if a.get("/NM") is not None
+            }
+        assert "revert-form-gone" in names, (
+            "the other half of the same edit landed — success was reported for "
+            "a document carrying only one of its two changes"
+        )
+
+    def test_without_the_inline_refusal_a_direct_form_change_vanishes(
+        self, tmp_dir, pki, monkeypatch
+    ):
+        self._ignore_acroform_refusal(monkeypatch, "acroform-inline")
+        signed = _signed(tmp_dir, pki, with_form=True, annots=2, form_direct=True)
+
+        def mutate(pdf):
+            pdf.Root["/AcroForm"]["/NeedAppearances"] = True
+            _add_square(pdf, nm="revert-direct-form", color=(0, 0.5, 0.5))
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, "the revert did not reach the refusal"
+        with pikepdf.open(out) as pdf:
+            assert pdf.Root["/AcroForm"].get("/NeedAppearances") is None, (
+                "without the refusal the form half of the edit is dropped and "
+                "the annotation half is reported as the whole"
             )
 
 
