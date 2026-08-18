@@ -58,9 +58,11 @@ from pathlib import Path
 import pikepdf
 
 from . import budget, soft_proof
+from .acroform import has_form_fields
 from .color_spaces import build_resolver
 from .preflight import COLORSPACE, walk_page_resources
 from .validate import validate_pdf
+from .widget_faces import regenerate_appearances_file
 
 # The four exact spellings the separation device uses for process inks. A
 # colorant named anything else is a spot.
@@ -440,13 +442,20 @@ def _evict_old_sets(root: Path) -> None:
         shutil.rmtree(stale, ignore_errors=True)
 
 
-def _set_key(file: str, page: int, dpi: int, overprint: bool, profile: str = "") -> str:
+def _set_key(file: str, page: int, dpi: int, overprint: bool, profile: str = "",
+             font_dir: str = "") -> str:
     """The plate set's identity.
 
     `profile` is empty unless the page has to be colour-managed before it is
     separated: the device ignores the destination profile, so a page already
     made of device CMYK, spot and DeviceN plates identically under every
     press and must not have its cache split by a choice that changes nothing.
+
+    `font_dir` is empty on the same reasoning — it can only change the plates
+    of a document that carries a form field, because that is the one document
+    an appearance can be regenerated in. Where it can change them it has to be
+    in the key, or a set rendered without the fallback faces would be served
+    to a caller that supplied them.
     """
     source = Path(file)
     try:
@@ -454,9 +463,15 @@ def _set_key(file: str, page: int, dpi: int, overprint: bool, profile: str = "")
     except OSError:
         stamp = "0:0"
     digest = hashlib.sha256(
-        f"{source}\0{stamp}\0{page}\0{dpi}\0{int(overprint)}\0{profile}".encode("utf-8")
+        f"{source}\0{stamp}\0{page}\0{dpi}\0{int(overprint)}\0{profile}"
+        f"\0{font_dir}".encode("utf-8")
     ).hexdigest()
     return digest[:24]
+
+
+def _carries_form_fields(file: str) -> bool:
+    with pikepdf.open(file) as pdf:
+        return has_form_fields(pdf)
 
 
 def _stage_for_profile(file: str, page: int, profile_path: str, out_dir: Path,
@@ -490,6 +505,7 @@ def render_separations(
     overprint: bool = True,
     reuse: bool = True,
     simulation=None,
+    font_dir: str = "",
 ) -> dict:
     """Rasterize one page to one grayscale plate per separation.
 
@@ -507,11 +523,17 @@ def render_separations(
             BEFORE it is separated — the device ignores the destination
             profile, so without the staging the ink amounts would come from
             Ghostscript's compiled-in default rather than the chosen press.
+        font_dir: The bundled fallback faces, for regenerating the appearance
+            of a widget that carries none. Without it such a field rasters
+            through the device's own synthesis — `/V`'s UTF-16BE bytes drawn
+            through the form's WinAnsi face (ISO 32000-2 7.9.2.2), which is
+            mojibake for any value outside that encoding. The preview then
+            shows a value the document does not state.
 
     The plate set is cached on disk keyed by file identity, page, resolution,
-    overprint and — only where the staging applies — the profile, so an ink
-    toggle re-composites without another device run and a page that separates
-    identically on every press keeps one cache entry.
+    overprint and — only where each applies — the profile and the fallback
+    faces, so an ink toggle re-composites without another device run and a
+    page that separates identically on every press keeps one cache entry.
     """
     validate_pdf(file)
     page = int(page)
@@ -546,7 +568,10 @@ def render_separations(
     )
 
     root = _cache_root()
-    out_dir = root / _set_key(file, page, dpi, overprint, profile.digest if stage else "")
+    out_dir = root / _set_key(
+        file, page, dpi, overprint, profile.digest if stage else "",
+        font_dir if _carries_form_fields(file) else "",
+    )
     marker = out_dir / "plates.done"
     if reuse and marker.is_file():
         os.utime(out_dir, None)
@@ -555,11 +580,19 @@ def render_separations(
     shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # A widget carrying no appearance is given one BEFORE either arm reads
+    # this document as content: the preview then rasters what the fill would
+    # draw rather than what the device synthesizes from `/V` and flattens.
+    # The regenerated copy stays beside the plates because the coverage
+    # measurement has to describe the same document the plates came from.
+    prepared = regenerate_appearances_file(Path(file), out_dir, font_dir) or Path(file)
+
     if stage:
-        rastered = _stage_for_profile(file, page, profile.path, out_dir, gs_path)
+        rastered = _stage_for_profile(str(prepared), page, profile.path, out_dir,
+                                      gs_path)
         first = 1
     else:
-        rastered = Path(file)
+        rastered = prepared
         first = page
 
     max_spots = min(MAX_SPOTS_CEILING, max(_MIN_SPOT_REQUEST, len(spots)))
@@ -652,8 +685,11 @@ def _describe_set(out_dir: Path, inks: list[dict], file: str, page: int,
     # measured on the staged page: under a press profile the figure IS a
     # number about that press.
     staged = out_dir / "staged.pdf"
+    regenerated = out_dir / "regenerated.pdf"
     if staged.is_file():
         measured, measured_page = str(staged), 1
+    elif regenerated.is_file():
+        measured, measured_page = str(regenerated), page
     else:
         measured, measured_page = file, page
     return {

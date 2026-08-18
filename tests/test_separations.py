@@ -6,6 +6,7 @@ so an `isdir` check would pass on a box with no Ghostscript at all.
 """
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -25,6 +26,7 @@ from separation_builders import (
     cmyk_spot_pdf,
     cropped_page_pdf,
     device_rgb_pdf,
+    form_appearance_pdf,
     inks_everywhere_pdf,
     many_spots_pdf,
     nested_separation_spot_pdf,
@@ -33,6 +35,11 @@ from separation_builders import (
     tac_ladder_pdf,
     unreadable_colorspace_table_pdf,
 )
+
+# The vendored fallback faces (Rust `get_edit_font_path` at run time, threaded
+# to the engine as `font_dir`). Only the non-WinAnsi pins need them.
+FONTS_DIR = Path(__file__).resolve().parent.parent / "resources" / "fonts"
+_HAS_CJK_FACE = (FONTS_DIR / "NotoSansCJKsc-Regular.otf").is_file()
 from transparency_builders import (
     over_depth_forms_pdf,
     unreadable_child_subtype_pdf,
@@ -899,6 +906,155 @@ class TestStagedSeparation:
             src, page=1, dpi=36, gs_path=gs_path, simulation={"source": "bundled"})
         for name in ("Cyan", "Magenta", "Yellow", "Black"):
             assert np.abs(_plate(plain, name) - _plate(staged, name)).max() <= 2 / 255
+
+
+class TestThePreviewRastersTheAppearanceTheFillWouldDraw:
+    """A widget carrying no `/AP` gets one BEFORE the device reads the page.
+
+    Without that, the device synthesizes an appearance from `/V` through the
+    form's own WinAnsi Helvetica (ISO 32000-2 7.9.2.2) and rasters THAT — which
+    for a value outside WinAnsi is the string's UTF-16BE bytes read as Latin
+    glyphs. The plates then describe ink the document never states, and every
+    figure measured off them describes it too.
+
+    The instrument is a band compare against a CONTROL whose field carries a
+    real appearance, drawn by the same emitters through the same face: the
+    fixed preview has to reproduce it, not merely differ from the defect.
+    """
+
+    #: The fixture's page is 300x200 pt and its field rect is (20, 100, 280,
+    #: 140). At 72 dpi one point is one pixel, so the band is stated in rows.
+    BAND = (60, 100)
+
+    def _band(self, result):
+        """Each plate's ink over the field band, by ink name."""
+        return {plate["name"]: _plate(result, plate["name"])[self.BAND[0]:self.BAND[1]]
+                for plate in result["plates"]}
+
+    @classmethod
+    def _delta(cls, first, second):
+        """Total mean absolute ink difference over the band, plate for plate.
+
+        Zero is "these two rasters carry the same ink in the same places",
+        which is the only claim strong enough to say the preview draws what
+        the fill would draw.
+        """
+        assert set(first) == set(second)
+        return sum(float(np.abs(first[name] - second[name]).mean()) for name in first)
+
+    def _control(self, tmp_path, src):
+        """The same document with the appearance already authored."""
+        from engine.widget_faces import regenerate_appearances_file
+
+        regenerated = regenerate_appearances_file(
+            Path(src), tmp_path, str(FONTS_DIR))
+        assert regenerated is not None
+        return str(regenerated)
+
+    @pytest.mark.skipif(not _HAS_CJK_FACE, reason="bundled CJK face not provisioned")
+    def test_the_plates_match_a_real_appearance(self, tmp_path, gs_path):
+        src = form_appearance_pdf(tmp_path / "bare-unicode.pdf", "bare-unicode")
+        control = self._control(tmp_path, src)
+
+        fixed = render_separations(src, page=1, dpi=72, gs_path=gs_path,
+                                   font_dir=str(FONTS_DIR))
+        wanted = self._band(render_separations(control, page=1, dpi=72,
+                                               gs_path=gs_path))
+        assert self._delta(self._band(fixed), wanted) == 0.0
+
+    @pytest.mark.skipif(not _HAS_CJK_FACE, reason="bundled CJK face not provisioned")
+    def test_the_profiled_arm_stages_the_same_document(self, tmp_path, gs_path):
+        # The staged arm reads the page a second time, through the press
+        # conversion. Preparing only the arm that rasters directly would leave
+        # the soft proof showing the synthesis on its own.
+        src = form_appearance_pdf(tmp_path / "bare-unicode.pdf", "bare-unicode")
+        control = self._control(tmp_path, src)
+        simulation = {"source": "bundled"}
+
+        fixed = render_separations(src, page=1, dpi=72, gs_path=gs_path,
+                                   simulation=simulation, font_dir=str(FONTS_DIR))
+        assert os.path.isfile(os.path.join(fixed["dir"], "staged.pdf"))
+        wanted = self._band(render_separations(control, page=1, dpi=72,
+                                               gs_path=gs_path,
+                                               simulation=simulation))
+        assert self._delta(self._band(fixed), wanted) == 0.0
+
+    @pytest.mark.skipif(not _HAS_CJK_FACE, reason="bundled CJK face not provisioned")
+    def test_without_a_font_dir_the_device_synthesis_is_what_ships(
+        self, tmp_path, gs_path
+    ):
+        # The degenerate is MEASURED, not hidden: no face can spell this value,
+        # so the widget keeps no appearance and the plates carry the device's
+        # own synthesis — exactly what the preview showed before the fix. The
+        # same assertion is the mutation proof for the test above.
+        src = form_appearance_pdf(tmp_path / "bare-unicode.pdf", "bare-unicode")
+        wanted = self._band(render_separations(
+            self._control(tmp_path, src), page=1, dpi=72, gs_path=gs_path))
+
+        bare = render_separations(src, page=1, dpi=72, gs_path=gs_path, font_dir="")
+        assert self._delta(self._band(bare), wanted) > 0.01
+
+    @pytest.mark.skipif(not _HAS_CJK_FACE, reason="bundled CJK face not provisioned")
+    def test_a_different_font_dir_is_a_different_plate_set(self, tmp_path, gs_path):
+        # A set rendered without the fallback faces must not be served to a
+        # caller that supplied them — the plates differ, so the cache entry has
+        # to as well.
+        src = form_appearance_pdf(tmp_path / "bare-unicode.pdf", "bare-unicode")
+        without = render_separations(src, page=1, dpi=72, gs_path=gs_path,
+                                     font_dir="")
+        with_faces = render_separations(src, page=1, dpi=72, gs_path=gs_path,
+                                        font_dir=str(FONTS_DIR))
+        assert without["dir"] != with_faces["dir"]
+        assert self._delta(self._band(without), self._band(with_faces)) > 0.01
+
+    def test_a_document_with_no_form_field_keeps_one_cache_entry(
+        self, tmp_path, gs_path
+    ):
+        # An appearance can only be regenerated in a document that carries a
+        # form field, so on every other document the parameter changes nothing
+        # and must not split the cache by a choice that changes nothing.
+        src = tac_ladder_pdf(tmp_path / "tac.pdf")
+        plain = render_separations(src, page=1, dpi=36, gs_path=gs_path)
+        with_faces = render_separations(src, page=1, dpi=36, gs_path=gs_path,
+                                        font_dir=str(FONTS_DIR))
+        assert plain["dir"] == with_faces["dir"]
+
+    def test_a_field_that_already_has_an_appearance_rasters_identically(
+        self, tmp_path, gs_path
+    ):
+        # The acceptance the fix must not disturb: there is nothing to
+        # regenerate, so every plate comes back pixel for pixel. The compare
+        # is on the RASTER rather than the file — the device writes its own
+        # clock into the TIFF's DateTime tag, so two runs a second apart
+        # differ in bytes over identical ink.
+        src = form_appearance_pdf(tmp_path / "text.pdf", "text")
+        plain = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        with_faces = render_separations(src, page=1, dpi=72, gs_path=gs_path,
+                                        font_dir=str(FONTS_DIR))
+        assert [p["name"] for p in plain["plates"]] == [
+            p["name"] for p in with_faces["plates"]]
+        for name in [p["name"] for p in plain["plates"]]:
+            assert np.array_equal(_plate(plain, name), _plate(with_faces, name)), name
+        assert plain["coverage"] == with_faces["coverage"]
+
+    @pytest.mark.skipif(not _HAS_CJK_FACE, reason="bundled CJK face not provisioned")
+    def test_the_coverage_describes_the_document_the_plates_came_from(
+        self, tmp_path, gs_path
+    ):
+        # Coverage is measured on the prepared copy, not the original: the
+        # panel prints it beside the plates, and a figure taken from a file
+        # the device never read is a number about a different page.
+        src = form_appearance_pdf(tmp_path / "bare-unicode.pdf", "bare-unicode")
+        control = render_separations(self._control(tmp_path, src), page=1,
+                                     dpi=72, gs_path=gs_path)
+
+        result = render_separations(src, page=1, dpi=72, gs_path=gs_path,
+                                    font_dir=str(FONTS_DIR))
+        assert os.path.isfile(os.path.join(result["dir"], "regenerated.pdf"))
+        assert result["coverage"] == control["coverage"]
+
+        bare = render_separations(src, page=1, dpi=72, gs_path=gs_path, font_dir="")
+        assert bare["coverage"] != control["coverage"]
 
 
 @pytest.mark.usefixtures("gs_path")

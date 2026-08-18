@@ -1,13 +1,17 @@
 // The fallback-face funnel, enforced mechanically.
 //
-// Three whole-file ops regenerate the appearance of a widget that carries
-// none before their Ghostscript producer ever sees the document
-// (`engine/widget_faces.py` `regenerate_appearances_file`). They can only do
-// it for a value the form's own WinAnsi face cannot spell when the caller
-// hands them `font_dir` — the bundled fallback faces. Without it the producer
-// synthesizes its own appearance from `/V`'s UTF-16BE bytes (ISO 32000-2
-// 7.9.2.2), flattens that mojibake into the page content, and the field
-// reattach restores the bare widget over it. The flatten is permanent.
+// Several ops regenerate the appearance of a widget that carries none before
+// their producer ever sees the document (`engine/widget_faces.py`
+// `regenerate_appearances_file`). They can only do it for a value the form's
+// own WinAnsi face cannot spell when the caller hands them `font_dir` — the
+// bundled fallback faces. Without it the producer synthesizes its own
+// appearance from `/V`'s UTF-16BE bytes (ISO 32000-2 7.9.2.2), flattens that
+// mojibake into the page content, and the field reattach restores the bare
+// widget over it. The flatten is permanent.
+//
+// The separation preview is the same class with no file written: its plates
+// carry the device's synthesis instead, so the Output Preview shows a value
+// the document does not state.
 //
 // The parameter was threaded through the engine and through
 // `engine/preflight_fixups.py` while every renderer call site still omitted
@@ -28,8 +32,19 @@ const RENDERER = join(__dirname, '..', 'src', 'renderer');
 
 /** The ops whose engine door takes `font_dir` for this purpose. Grown when
  * another op starts regenerating appearances, never trimmed to make a red
- * go away. */
-const OPS: readonly string[] = ['compress', 'grayscale', 'convert_cmyk'];
+ * go away.
+ *
+ * `ocr_file` takes it too and is deliberately absent: no renderer call site
+ * names it literally — it is reached only through the guided-actions step
+ * catalog, whose own cross-language pins already hold it — and the scan below
+ * asserts every op here HAS a site. */
+const OPS: readonly string[] = [
+  'compress',
+  'grayscale',
+  'convert_cmyk',
+  'render_separations',
+  'batch_ocr',
+];
 
 /** The engine bridges. `call` runs the commit gate; `callRaw` does not, and
  * both reach the same engine op. */
@@ -183,7 +198,7 @@ describe('every appearance-regenerating op is handed the fallback faces', () => 
   it('finds the call sites at all', () => {
     // A matcher that matches nothing would pass every assertion below while
     // proving nothing about the tree.
-    expect(SITES.length).toBeGreaterThanOrEqual(4);
+    expect(SITES.length).toBeGreaterThanOrEqual(6);
     expect(new Set(SITES.map((s) => s.op))).toEqual(new Set(OPS));
   });
 

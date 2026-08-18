@@ -146,6 +146,7 @@
         "language"
       ],
       "tools": [
+        "font_dir",
         "gs_path",
         "tesseract_path"
       ]

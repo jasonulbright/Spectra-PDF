@@ -412,6 +412,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         mrc_verify_text: mrcVerify,
         enhance,
         enhance_orientation: enhanceOrientation,
+        font_dir: await app.getEditFontPath(),
       })) as unknown as BatchReport & { logPath?: string };
       setReport(rep);
       setLogPath(rep.logPath ?? null);
