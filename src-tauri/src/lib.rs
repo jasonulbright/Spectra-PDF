@@ -82,6 +82,7 @@ pub fn run() {
         .manage(app_windows::ClaimState::new())
         .manage(tabdrag::StripRegistry::new())
         .manage(session::SessionState::new())
+        .manage(session::QuitAcks::new())
         .manage(scanner::ScannerSessions::new())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -212,6 +213,7 @@ pub fn run() {
             commands::confirm_close,
             commands::close_window,
             commands::request_quit,
+            commands::quit_ack,
             commands::quit_cancelled,
             commands::set_tab_order,
             commands::hide_to_tray,
@@ -303,7 +305,7 @@ pub fn run() {
                         // Before the exit, not after: every window is still
                         // standing and still holding the documents the session
                         // records.
-                        session::capture_and_seal(app);
+                        let _ = session::capture_and_seal(app);
                         QUITTING.store(true, Ordering::SeqCst);
                         app.exit(0);
                     }
@@ -372,8 +374,13 @@ pub fn run() {
                     api.prevent_close();
                     // Addressed, not broadcast: the other window's renderer
                     // would run the same unsaved-changes flow and close a
-                    // window nobody asked to close.
-                    let _ = app.emit_to(window.label(), "app:beforeClose", ());
+                    // window nobody asked to close. No quit id: a window ×
+                    // closes one window, and nothing is waiting on a receipt.
+                    let _ = app.emit_to(
+                        window.label(),
+                        "app:beforeClose",
+                        session::BeforeClose { quit_id: None },
+                    );
                 }
                 tauri::WindowEvent::Focused(true) => {
                     app_windows::on_window_focused(app, window.label());

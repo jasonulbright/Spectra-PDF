@@ -15,10 +15,11 @@
 //! display scaling.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
@@ -37,6 +38,17 @@ const WRITE_DEBOUNCE: Duration = Duration::from_millis(600);
 /// has shrunk, and the window would open where nobody can reach it.
 const MIN_VISIBLE_NUMERATOR: i64 = 1;
 const MIN_VISIBLE_DENOMINATOR: i64 = 4;
+
+/// How long an app-level quit waits for the windows it asked to close to
+/// acknowledge the request before calling the quit off.
+///
+/// A window whose listener is installed answers in a round trip across the IPC
+/// boundary — under a millisecond. The only reason to wait longer is a window
+/// whose renderer has not finished mounting, which is the case this gate exists
+/// for, and a cold webview boot on a loaded machine stays well inside this.
+/// Past it the wait is indistinguishable from a renderer that will never
+/// answer, and holding Exit open any longer reads as a hung app.
+const QUIT_ACK_TIMEOUT: Duration = Duration::from_secs(3);
 
 // ── Records ───────────────────────────────────────────────────────────────
 
@@ -184,11 +196,25 @@ pub struct LaunchPlan {
 /// With the preference off a launch is indistinguishable from a first run
 /// except that the main window comes back where it was left: no document
 /// opens and no second window appears.
+///
+/// A launch always has a main window, so one record always lands on it. When
+/// the session was saved with the main window already closed there is no record
+/// of that kind, and the first record takes the slot instead — treating every
+/// record as an extra would open an empty main window beside the ones that were
+/// actually saved. Which record adopts the slot is structural rather than
+/// preferential: the preference gates documents and additional windows, so with
+/// it off the adopting record still contributes the geometry and nothing else.
 pub fn plan_launch(session: &Session, restore_windows: bool) -> LaunchPlan {
-    let main = session
+    let adopted = session
         .windows
         .iter()
-        .find(|w| w.label_kind == LabelKind::Main);
+        .position(|w| w.label_kind == LabelKind::Main)
+        .or(if session.windows.is_empty() {
+            None
+        } else {
+            Some(0)
+        });
+    let main = adopted.map(|i| &session.windows[i]);
     LaunchPlan {
         main: main.map(|w| w.placement()),
         main_files: if restore_windows {
@@ -200,8 +226,9 @@ pub fn plan_launch(session: &Session, restore_windows: bool) -> LaunchPlan {
             session
                 .windows
                 .iter()
-                .filter(|w| w.label_kind == LabelKind::Doc)
-                .cloned()
+                .enumerate()
+                .filter(|(i, _)| Some(*i) != adopted)
+                .map(|(_, w)| w.clone())
                 .collect()
         } else {
             Vec::new()
@@ -210,6 +237,19 @@ pub fn plan_launch(session: &Session, restore_windows: bool) -> LaunchPlan {
 }
 
 // ── Live state ────────────────────────────────────────────────────────────
+
+/// What became of one attempt to put the record on disk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WriteOutcome {
+    /// The snapshot replaced the file.
+    Written,
+    /// The seal state refused the call: nothing was attempted and nothing on
+    /// disk changed.
+    Refused,
+    /// The write was attempted and did not land. The previous record is still
+    /// the file's contents.
+    Failed,
+}
 
 #[derive(Clone, Debug)]
 struct Geometry {
@@ -270,32 +310,51 @@ impl SessionState {
     /// inside the lock, because a writer that read it unsealed can be
     /// descheduled for arbitrarily long and the last thing on disk after a
     /// quit has to be the quit snapshot.
-    fn write_checked<T>(&self, build: impl FnOnce() -> T, sink: impl FnOnce(T)) -> bool {
+    fn write_checked<T>(
+        &self,
+        build: impl FnOnce() -> T,
+        sink: impl FnOnce(T) -> std::io::Result<()>,
+    ) -> WriteOutcome {
         if self.sealed.load(Ordering::SeqCst) {
-            return false;
+            return WriteOutcome::Refused;
         }
         let payload = build();
         let _guard = self.writer.lock().unwrap_or_else(|e| e.into_inner());
         if self.sealed.load(Ordering::SeqCst) {
-            return false;
+            return WriteOutcome::Refused;
         }
-        sink(payload);
-        true
+        match sink(payload) {
+            Ok(()) => WriteOutcome::Written,
+            // A debounced write that failed is not lost work: the record it
+            // describes is still live, and the next change schedules another.
+            Err(_) => WriteOutcome::Failed,
+        }
     }
 
     /// Take the seal and write the quit snapshot under it. The first caller
     /// wins and every later quit path finds the file closed.
     ///
+    /// The seal stands only over a snapshot that actually reached disk. A write
+    /// that failed leaves the previous record as the file's contents and the
+    /// windows still standing, so holding the file closed on top of it would
+    /// treat a lost snapshot as the durable one and silence every write for the
+    /// rest of the run; the seal comes off instead and live tracking continues.
+    /// The retry is what makes that rare: the destination cannot be replaced
+    /// while another process holds it open, which is transient by nature.
+    ///
     /// A poisoned lock is recovered rather than propagated: it guards a unit,
     /// and refusing the quit snapshot because an unrelated thread panicked
     /// would lose the session the user is quitting with.
-    fn seal_and_write(&self, sink: impl FnOnce()) -> bool {
+    fn seal_and_write(&self, sink: impl Fn() -> std::io::Result<()>) -> WriteOutcome {
         let _guard = self.writer.lock().unwrap_or_else(|e| e.into_inner());
         if self.sealed.swap(true, Ordering::SeqCst) {
-            return false;
+            return WriteOutcome::Refused;
         }
-        sink();
-        true
+        if sink().or_else(|_| sink()).is_ok() {
+            return WriteOutcome::Written;
+        }
+        self.sealed.store(false, Ordering::SeqCst);
+        WriteOutcome::Failed
     }
 
     /// Drop the seal and write what replaces the sealed snapshot, under one
@@ -314,13 +373,22 @@ impl SessionState {
     /// Returns whether the file was sealed. A quit prompted several windows
     /// and any number of them can cancel, so every cancel calls this and only
     /// the first one finds a seal to lift.
-    fn unseal_and_write(&self, sink: impl FnOnce()) -> bool {
+    fn unseal_and_write(&self, sink: impl FnOnce() -> std::io::Result<()>) -> WriteOutcome {
         let _guard = self.writer.lock().unwrap_or_else(|e| e.into_inner());
         if !self.sealed.swap(false, Ordering::SeqCst) {
-            return false;
+            return WriteOutcome::Refused;
         }
-        sink();
-        true
+        match sink() {
+            Ok(()) => WriteOutcome::Written,
+            // The seal is off either way — that half is what puts the run back
+            // under live tracking, and the stale capture the write meant to
+            // replace is now replaceable by the next debounced write.
+            Err(_) => WriteOutcome::Failed,
+        }
+    }
+
+    pub fn is_sealed(&self) -> bool {
+        self.sealed.load(Ordering::SeqCst)
     }
 
     fn remember(&self, label: &str, geometry: Geometry) {
@@ -383,6 +451,148 @@ impl SessionState {
             map.remove(label);
         }
         self.revision.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+// ── The quit gate ─────────────────────────────────────────────────────────
+
+/// What a quit is told to do once the windows it asked have answered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuitGate {
+    /// Every prompted window acknowledged; the initiator may close.
+    Proceed,
+    /// At least one window never answered. The quit is off: nothing closes and
+    /// the session goes back to live tracking.
+    Abort,
+}
+
+/// The payload of `app:beforeClose`.
+///
+/// A window × carries no quit id, because no quit is waiting on it. A quit
+/// carries its own, so a receipt names the quit it belongs to rather than
+/// merely the window it came from: a receipt that arrives after its quit was
+/// called off must not satisfy the next quit's expectation of that window.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeforeClose {
+    pub quit_id: Option<u64>,
+}
+
+struct PendingQuit {
+    id: u64,
+    /// The windows that have not yet acknowledged.
+    outstanding: Vec<String>,
+}
+
+/// The receipts an app-level quit is waiting on.
+///
+/// The quit sequence is fail-closed on delivery: the session is captured and
+/// the file sealed before any window is asked to close, so a request that never
+/// reaches a renderer would leave that window standing behind a frozen record —
+/// the initiator closes, the survivor does not, and nothing the user does for
+/// the rest of the run is ever written. A request is therefore not assumed
+/// delivered because the emit returned; each window says so, and a window that
+/// does not say so calls the quit off.
+pub struct QuitAcks {
+    pending: Mutex<Option<PendingQuit>>,
+    answered: Condvar,
+    /// Quit ids are minted from 1, so 0 never names one.
+    next_id: AtomicU64,
+}
+
+impl QuitAcks {
+    pub fn new() -> Self {
+        Self {
+            pending: Mutex::new(None),
+            answered: Condvar::new(),
+            next_id: AtomicU64::new(0),
+        }
+    }
+
+    /// Open a quit waiting on `labels`, replacing any quit still in flight —
+    /// which can only be one that was already abandoned, since a live quit
+    /// either closes the app or is called off before another can start.
+    pub fn begin(&self, labels: Vec<String>) -> u64 {
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        *pending = Some(PendingQuit {
+            id,
+            outstanding: labels,
+        });
+        self.answered.notify_all();
+        id
+    }
+
+    /// Record one window's receipt. Returns whether it was one the quit named:
+    /// a receipt for a quit that is over, or from a window that was never
+    /// prompted, changes nothing.
+    pub fn ack(&self, id: u64, label: &str) -> bool {
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(quit) = pending.as_mut() else {
+            return false;
+        };
+        if quit.id != id {
+            return false;
+        }
+        let before = quit.outstanding.len();
+        quit.outstanding.retain(|l| l != label);
+        if quit.outstanding.len() == before {
+            return false;
+        }
+        self.answered.notify_all();
+        true
+    }
+
+    /// Call a quit off without waiting it out. Returns whether it was still the
+    /// quit in flight.
+    pub fn abort(&self, id: u64) -> bool {
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        if pending.as_ref().is_some_and(|quit| quit.id == id) {
+            *pending = None;
+            self.answered.notify_all();
+            return true;
+        }
+        false
+    }
+
+    /// Block until every prompted window has answered, or `timeout` runs out.
+    ///
+    /// Either way the quit is closed out before this returns, so a receipt that
+    /// arrives afterwards finds nothing to satisfy. A quit that prompted no
+    /// window — the only window is the one that asked — is already answered and
+    /// never waits.
+    pub fn wait(&self, id: u64, timeout: Duration) -> QuitGate {
+        let deadline = Instant::now() + timeout;
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            match pending.as_ref() {
+                Some(quit) if quit.id == id => {
+                    if quit.outstanding.is_empty() {
+                        *pending = None;
+                        return QuitGate::Proceed;
+                    }
+                }
+                // Called off, or replaced by a later quit: either way this one
+                // is not the quit that may proceed.
+                _ => return QuitGate::Abort,
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                *pending = None;
+                return QuitGate::Abort;
+            }
+            let (guard, _) = self
+                .answered
+                .wait_timeout(pending, deadline - now)
+                .unwrap_or_else(|e| e.into_inner());
+            pending = guard;
+        }
+    }
+}
+
+impl Default for QuitAcks {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -567,19 +777,54 @@ pub fn load(app: &AppHandle) -> Session {
     serde_json::from_str(&contents).unwrap_or_default()
 }
 
-fn write(app: &AppHandle, session: &Session) {
-    let Some(path) = session_path(app) else {
-        return;
-    };
-    let Ok(json) = serde_json::to_string(session) else {
-        return;
-    };
-    let _ = std::fs::write(&path, json);
+/// Where a write stages its bytes: beside the file, so landing them is a
+/// directory-entry swap on one volume rather than a copy. Per process, because
+/// two processes writing the same record must not share a staging name.
+fn staging_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(SESSION_FILE);
+    path.with_file_name(format!("{}.{}.tmp", name, std::process::id()))
 }
 
-fn write_now(app: &AppHandle, gone: Option<&str>) {
+/// Replace the record in one step.
+///
+/// A write straight over the file has a window in which the file is neither
+/// the old session nor the new one, and a death inside it loses both. The bytes
+/// go to a staging name, are flushed, and take the file's name by rename — so
+/// the file is only ever one whole record or the other. A failure takes the
+/// staged bytes with it rather than leaving them beside the record.
+fn write_staged(path: &Path, json: &str) -> std::io::Result<()> {
+    let staged = staging_path(path);
+    let landed = (|| {
+        let mut file = std::fs::File::create(&staged)?;
+        file.write_all(json.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&staged, path)
+    })();
+    if landed.is_err() {
+        let _ = std::fs::remove_file(&staged);
+    }
+    landed
+}
+
+fn write(app: &AppHandle, session: &Session) -> std::io::Result<()> {
+    let Some(path) = session_path(app) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "no app data directory",
+        ));
+    };
+    let json = serde_json::to_string(session)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    write_staged(&path, &json)
+}
+
+fn write_now(app: &AppHandle, gone: Option<&str>) -> WriteOutcome {
     app.state::<SessionState>()
-        .write_checked(|| snapshot_excluding(app, gone), |s| write(app, &s));
+        .write_checked(|| snapshot_excluding(app, gone), |s| write(app, &s))
 }
 
 /// Write after the moving stops.
@@ -605,7 +850,7 @@ fn schedule_write(app: &AppHandle) {
         if state.revision.load(Ordering::SeqCst) != seen {
             continue;
         }
-        write_now(&app, None);
+        let _ = write_now(&app, None);
         state.scheduled.store(false, Ordering::SeqCst);
         if state.revision.load(Ordering::SeqCst) == seen {
             return;
@@ -627,9 +872,11 @@ fn schedule_write(app: &AppHandle) {
 /// exit is DECIDED rather than at the point the last window dies — a snapshot
 /// taken any later describes whichever window happened to close last and
 /// nothing else.
-pub fn capture_and_seal(app: &AppHandle) {
+/// A capture that could not be written leaves the file unsealed, and the
+/// outcome says so: the record on disk is the previous one, not this quit's.
+pub fn capture_and_seal(app: &AppHandle) -> WriteOutcome {
     app.state::<SessionState>()
-        .seal_and_write(|| write(app, &snapshot_excluding(app, None)));
+        .seal_and_write(|| write(app, &snapshot_excluding(app, None)))
 }
 
 /// Return the session to live tracking after an exit that did not happen.
@@ -643,9 +890,30 @@ pub fn capture_and_seal(app: &AppHandle) {
 /// Both halves matter. The fresh snapshot replaces a record that has already
 /// stopped being true, and clearing the seal puts the ordinary debounced
 /// writes back.
-pub fn unseal(app: &AppHandle) {
+pub fn unseal(app: &AppHandle) -> WriteOutcome {
     app.state::<SessionState>()
-        .unseal_and_write(|| write(app, &snapshot_excluding(app, None)));
+        .unseal_and_write(|| write(app, &snapshot_excluding(app, None)))
+}
+
+/// Wait out a quit's receipts, putting the session back under live tracking
+/// when the quit is called off.
+///
+/// The unseal is the same one a cancelled prompt runs: an exit that does not
+/// happen has to leave the record following the windows that are still there,
+/// and an unanswered request is an exit that does not happen.
+pub fn await_quit_acks(app: &AppHandle, id: u64) -> QuitGate {
+    let gate = app.state::<QuitAcks>().wait(id, QUIT_ACK_TIMEOUT);
+    if gate == QuitGate::Abort {
+        unseal(app);
+    }
+    gate
+}
+
+/// Call a quit off before it was ever waited on — a request that could not be
+/// delivered is one that will never be answered.
+pub fn abandon_quit(app: &AppHandle, id: u64) {
+    app.state::<QuitAcks>().abort(id);
+    unseal(app);
 }
 
 // ── Applying geometry ─────────────────────────────────────────────────────
@@ -750,7 +1018,7 @@ pub fn on_window_destroyed(app: &AppHandle, label: &str) {
         capture_and_seal(app);
         return;
     }
-    write_now(app, Some(label));
+    let _ = write_now(app, Some(label));
     app.state::<SessionState>().forget(label);
 }
 
@@ -798,6 +1066,7 @@ pub fn apply_launch(app: &AppHandle, restore_windows: bool, e2e: bool, show: boo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
     use std::sync::{mpsc, Arc};
 
     fn rect(x: i32, y: i32, width: i32, height: i32) -> Rect {
@@ -1002,28 +1271,101 @@ mod tests {
         );
     }
 
+    fn doc_record(x: i32, file: &str) -> WindowRecord {
+        WindowRecord {
+            label_kind: LabelKind::Doc,
+            x,
+            y: 10,
+            width: 800,
+            height: 600,
+            maximized: false,
+            monitor: String::new(),
+            files: vec![file.to_string()],
+        }
+    }
+
     #[test]
-    fn a_session_with_no_main_record_restores_the_doc_windows_regardless() {
+    fn a_session_saved_with_no_main_window_restores_onto_the_main_window() {
+        // Last quit with the main window already closed and one document
+        // window open. The launch builds a main window regardless, so that
+        // record has to land ON it — restoring it as an extra would leave an
+        // empty main window open beside it.
         let session = Session {
             version: SESSION_VERSION,
-            windows: vec![WindowRecord {
-                label_kind: LabelKind::Doc,
-                x: 10,
-                y: 10,
-                width: 800,
-                height: 600,
-                maximized: false,
-                monitor: String::new(),
-                files: vec!["C:\\c.pdf".into()],
-            }],
+            windows: vec![doc_record(10, "C:\\c.pdf")],
         };
         let plan = plan_launch(&session, true);
-        assert_eq!(plan.main, None);
-        assert!(plan.main_files.is_empty());
-        assert_eq!(plan.extra.len(), 1);
+        assert_eq!(
+            plan.main,
+            Some(Placement {
+                rect: rect(10, 10, 800, 600),
+                maximized: false,
+            })
+        );
+        assert_eq!(plan.main_files, vec!["C:\\c.pdf".to_string()]);
+        assert!(plan.extra.is_empty(), "{:?}", plan.extra);
 
         // And an empty session asks a launch to do nothing at all.
         assert_eq!(plan_launch(&Session::default(), true), LaunchPlan::default());
+    }
+
+    #[test]
+    fn only_the_first_record_adopts_the_main_window() {
+        let session = Session {
+            version: SESSION_VERSION,
+            windows: vec![doc_record(10, "C:\\c.pdf"), doc_record(500, "C:\\d.pdf")],
+        };
+        let plan = plan_launch(&session, true);
+        assert_eq!(plan.main_files, vec!["C:\\c.pdf".to_string()]);
+        assert_eq!(plan.extra.len(), 1);
+        assert_eq!(plan.extra[0].files, vec!["C:\\d.pdf".to_string()]);
+        assert_eq!(plan.extra[0].x, 500);
+    }
+
+    #[test]
+    fn the_adopting_record_still_only_contributes_geometry_with_the_preference_off() {
+        let session = Session {
+            version: SESSION_VERSION,
+            windows: vec![doc_record(10, "C:\\c.pdf"), doc_record(500, "C:\\d.pdf")],
+        };
+        let plan = plan_launch(&session, false);
+        // Where the last window was is still where the app opens; which
+        // documents it held is what the preference gates.
+        assert_eq!(
+            plan.main,
+            Some(Placement {
+                rect: rect(10, 10, 800, 600),
+                maximized: false,
+            })
+        );
+        assert!(plan.main_files.is_empty());
+        assert!(plan.extra.is_empty());
+    }
+
+    #[test]
+    fn a_saved_main_record_takes_the_slot_wherever_it_sits() {
+        // The control: a session that HAS a main record is unaffected by the
+        // adoption, including when it is not the first record in the file.
+        let session = Session {
+            version: SESSION_VERSION,
+            windows: vec![
+                doc_record(500, "C:\\d.pdf"),
+                WindowRecord {
+                    label_kind: LabelKind::Main,
+                    x: 100,
+                    y: 80,
+                    width: 1200,
+                    height: 800,
+                    maximized: false,
+                    monitor: String::new(),
+                    files: vec!["C:\\a.pdf".into()],
+                },
+            ],
+        };
+        let plan = plan_launch(&session, true);
+        assert_eq!(plan.main_files, vec!["C:\\a.pdf".to_string()]);
+        assert_eq!(plan.extra.len(), 1);
+        assert_eq!(plan.extra[0].files, vec!["C:\\d.pdf".to_string()]);
     }
 
     #[test]
@@ -1151,11 +1493,68 @@ mod tests {
     #[test]
     fn the_seal_is_taken_once() {
         let state = SessionState::new();
-        let mut writes = 0;
-        assert!(state.seal_and_write(|| writes += 1));
+        let writes = Cell::new(0);
+        let count = || {
+            writes.set(writes.get() + 1);
+            Ok(())
+        };
+        assert_eq!(state.seal_and_write(count), WriteOutcome::Written);
         // Every later quit path finds it already closed and writes nothing.
-        assert!(!state.seal_and_write(|| writes += 1));
-        assert_eq!(writes, 1);
+        assert_eq!(state.seal_and_write(count), WriteOutcome::Refused);
+        assert_eq!(writes.get(), 1);
+        assert!(state.is_sealed());
+    }
+
+    #[test]
+    fn a_quit_snapshot_that_did_not_land_leaves_the_file_open() {
+        let state = SessionState::new();
+        let attempts = Cell::new(0);
+        let fail = || {
+            attempts.set(attempts.get() + 1);
+            Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "x"))
+        };
+        assert_eq!(state.seal_and_write(fail), WriteOutcome::Failed);
+        // Retried once — the destination being held open by another process is
+        // the failure this path actually meets, and it does not last.
+        assert_eq!(attempts.get(), 2);
+        // Sealing over a snapshot that never reached disk would silence every
+        // write for the rest of the run in exchange for nothing.
+        assert!(!state.is_sealed());
+        assert_eq!(
+            state.write_checked(|| (), |()| Ok(())),
+            WriteOutcome::Written
+        );
+    }
+
+    #[test]
+    fn a_snapshot_that_lands_on_the_retry_still_seals() {
+        let state = SessionState::new();
+        let attempts = Cell::new(0);
+        let flaky = || {
+            attempts.set(attempts.get() + 1);
+            if attempts.get() == 1 {
+                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "x"));
+            }
+            Ok(())
+        };
+        assert_eq!(state.seal_and_write(flaky), WriteOutcome::Written);
+        assert!(state.is_sealed());
+        assert_eq!(
+            state.write_checked(|| (), |()| Ok(())),
+            WriteOutcome::Refused
+        );
+    }
+
+    #[test]
+    fn a_debounced_write_that_fails_is_reported_rather_than_counted_as_written() {
+        let state = SessionState::new();
+        assert_eq!(
+            state.write_checked(
+                || (),
+                |()| Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "x")),
+            ),
+            WriteOutcome::Failed
+        );
     }
 
     #[test]
@@ -1164,48 +1563,70 @@ mod tests {
         let windows = FakeWindows::with(&["main", "doc-1", "doc-2"]);
 
         // File ▸ Exit records every window and closes the file.
-        assert!(state.seal_and_write(|| windows.record(windows.snapshot(None))));
+        assert_eq!(
+            state.seal_and_write(|| windows.record(windows.snapshot(None))),
+            WriteOutcome::Written
+        );
         assert_eq!(windows.written(), vec!["main", "doc-1", "doc-2"]);
 
         // doc-1 goes through with its close before doc-2's prompt is answered.
         windows.destroy("doc-1");
-        assert!(!state.write_checked(
-            || windows.snapshot(Some("doc-1")),
-            |session| windows.record(session),
-        ));
+        assert_eq!(
+            state.write_checked(
+                || windows.snapshot(Some("doc-1")),
+                |session| windows.record(session),
+            ),
+            WriteOutcome::Refused
+        );
 
         // doc-2 cancels. The file describes an exit that did not happen and a
         // window that is already gone, so lifting the seal replaces it.
-        assert!(state.unseal_and_write(|| windows.record(windows.snapshot(None))));
+        assert_eq!(
+            state.unseal_and_write(|| windows.record(windows.snapshot(None))),
+            WriteOutcome::Written
+        );
         assert_eq!(windows.written(), vec!["main", "doc-2"]);
 
         // And the run carries on being recorded: an ordinary close after the
         // cancelled exit reaches disk, which is what the seal was preventing.
         windows.destroy("doc-2");
-        assert!(state.write_checked(
-            || windows.snapshot(Some("doc-2")),
-            |session| windows.record(session),
-        ));
+        assert_eq!(
+            state.write_checked(
+                || windows.snapshot(Some("doc-2")),
+                |session| windows.record(session),
+            ),
+            WriteOutcome::Written
+        );
         assert_eq!(windows.written(), vec!["main"]);
     }
 
     #[test]
     fn only_the_first_cancel_lifts_the_seal() {
         let state = SessionState::new();
-        let mut unseals = 0;
-        assert!(state.seal_and_write(|| {}));
+        let unseals = Cell::new(0);
+        let count = || {
+            unseals.set(unseals.get() + 1);
+            Ok(())
+        };
+        assert_eq!(state.seal_and_write(|| Ok(())), WriteOutcome::Written);
 
         // Two windows were prompted and both cancel.
-        assert!(state.unseal_and_write(|| unseals += 1));
-        assert!(!state.unseal_and_write(|| unseals += 1));
-        assert_eq!(unseals, 1);
+        assert_eq!(state.unseal_and_write(count), WriteOutcome::Written);
+        assert_eq!(state.unseal_and_write(count), WriteOutcome::Refused);
+        assert_eq!(unseals.get(), 1);
 
         // A cancelled window × never belonged to a quit, so there is no seal
         // to lift and no snapshot to replace.
         let fresh = SessionState::new();
-        let mut spurious = 0;
-        assert!(!fresh.unseal_and_write(|| spurious += 1));
-        assert_eq!(spurious, 0);
+        let spurious = Cell::new(0);
+        assert_eq!(
+            fresh.unseal_and_write(|| {
+                spurious.set(spurious.get() + 1);
+                Ok(())
+            }),
+            WriteOutcome::Refused
+        );
+        assert_eq!(spurious.get(), 0);
     }
 
     #[test]
@@ -1213,20 +1634,32 @@ mod tests {
         let state = SessionState::new();
         let windows = FakeWindows::with(&["main", "doc-1"]);
 
-        assert!(state.seal_and_write(|| windows.record(windows.snapshot(None))));
-        assert!(state.unseal_and_write(|| windows.record(windows.snapshot(None))));
+        assert_eq!(
+            state.seal_and_write(|| windows.record(windows.snapshot(None))),
+            WriteOutcome::Written
+        );
+        assert_eq!(
+            state.unseal_and_write(|| windows.record(windows.snapshot(None))),
+            WriteOutcome::Written
+        );
 
         // The second Exit is an ordinary one: it takes the seal, records what
         // is standing now, and every destruction that follows finds the file
         // closed again.
         windows.destroy("doc-1");
-        assert!(state.seal_and_write(|| windows.record(windows.snapshot(None))));
+        assert_eq!(
+            state.seal_and_write(|| windows.record(windows.snapshot(None))),
+            WriteOutcome::Written
+        );
         assert_eq!(windows.written(), vec!["main"]);
         windows.destroy("main");
-        assert!(!state.write_checked(
-            || windows.snapshot(Some("main")),
-            |session| windows.record(session),
-        ));
+        assert_eq!(
+            state.write_checked(
+                || windows.snapshot(Some("main")),
+                |session| windows.record(session),
+            ),
+            WriteOutcome::Refused
+        );
         assert_eq!(windows.written(), vec!["main"]);
     }
 
@@ -1260,8 +1693,9 @@ mod tests {
             self.live.lock().unwrap().retain(|l| l != label);
         }
 
-        fn record(&self, session: Vec<String>) {
+        fn record(&self, session: Vec<String>) -> std::io::Result<()> {
             *self.file.lock().unwrap() = session;
+            Ok(())
         }
 
         fn written(&self) -> Vec<String> {
@@ -1276,17 +1710,23 @@ mod tests {
 
         // File ▸ Exit records the whole window list before any window is told
         // to close.
-        assert!(state.seal_and_write(|| windows.record(windows.snapshot(None))));
+        assert_eq!(
+            state.seal_and_write(|| windows.record(windows.snapshot(None))),
+            WriteOutcome::Written
+        );
 
         // Each window then runs its own close flow, and its destruction writes
         // that window out of the record. Every one of those finds the file
         // sealed and leaves the exit capture standing.
         for label in ["doc-1", "doc-2", "main"] {
             windows.destroy(label);
-            assert!(!state.write_checked(
-                || windows.snapshot(Some(label)),
-                |session| windows.record(session),
-            ));
+            assert_eq!(
+                state.write_checked(
+                    || windows.snapshot(Some(label)),
+                    |session| windows.record(session),
+                ),
+                WriteOutcome::Refused
+            );
         }
 
         assert_eq!(windows.written(), vec!["main", "doc-1", "doc-2"]);
@@ -1302,14 +1742,20 @@ mod tests {
         let windows = FakeWindows::with(&["main", "doc-1", "doc-2"]);
         for (label, left) in [("doc-1", vec!["main", "doc-2"]), ("doc-2", vec!["main"])] {
             windows.destroy(label);
-            assert!(state.write_checked(
-                || windows.snapshot(Some(label)),
-                |session| windows.record(session),
-            ));
+            assert_eq!(
+                state.write_checked(
+                    || windows.snapshot(Some(label)),
+                    |session| windows.record(session),
+                ),
+                WriteOutcome::Written
+            );
             assert_eq!(windows.written(), left);
         }
         // The last window seals while it is still standing.
-        assert!(state.seal_and_write(|| windows.record(windows.snapshot(None))));
+        assert_eq!(
+            state.seal_and_write(|| windows.record(windows.snapshot(None))),
+            WriteOutcome::Written
+        );
         assert_eq!(windows.written(), vec!["main"]);
     }
 
@@ -1333,19 +1779,167 @@ mod tests {
                         go_rx.recv().unwrap();
                         "debounced"
                     },
-                    |payload| file.lock().unwrap().push(payload),
+                    |payload| {
+                        file.lock().unwrap().push(payload);
+                        Ok(())
+                    },
                 )
             })
         };
 
         // The quit runs to completion inside that window.
         built_rx.recv().unwrap();
-        assert!(state.seal_and_write(|| file.lock().unwrap().push("quit")));
+        assert_eq!(
+            state.seal_and_write(|| {
+                file.lock().unwrap().push("quit");
+                Ok(())
+            }),
+            WriteOutcome::Written
+        );
         go_tx.send(()).unwrap();
 
         // The stale writer wakes into a sealed file and writes nothing, so the
         // quit snapshot is what a relaunch reads.
-        assert!(!writer.join().unwrap());
+        assert_eq!(writer.join().unwrap(), WriteOutcome::Refused);
         assert_eq!(*file.lock().unwrap(), vec!["quit"]);
+    }
+
+    // ── The file itself ───────────────────────────────────────────────────
+
+    #[test]
+    fn a_record_replaces_the_one_before_it_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SESSION_FILE);
+
+        write_staged(&path, "{\"version\":1}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"version\":1}");
+        // A second write lands over the first: the swap replaces an existing
+        // destination rather than refusing it.
+        write_staged(&path, "{\"version\":2}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"version\":2}");
+        // And nothing is left beside the record.
+        assert!(!staging_path(&path).exists());
+    }
+
+    #[test]
+    fn a_write_that_fails_leaves_the_previous_record_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SESSION_FILE);
+        write_staged(&path, "{\"version\":1}").unwrap();
+
+        // Staging cannot be created. A write straight over the record would
+        // have truncated it first and left neither session on disk.
+        std::fs::create_dir(staging_path(&path)).unwrap();
+        assert!(write_staged(&path, "{\"version\":2}").is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"version\":1}");
+    }
+
+    // ── The quit gate ─────────────────────────────────────────────────────
+
+    #[test]
+    fn a_quit_proceeds_once_every_prompted_window_answers() {
+        let acks = QuitAcks::new();
+        let id = acks.begin(paths(&["doc-1", "doc-2"]));
+        assert!(acks.ack(id, "doc-1"));
+        assert!(acks.ack(id, "doc-2"));
+        assert_eq!(acks.wait(id, Duration::from_millis(50)), QuitGate::Proceed);
+    }
+
+    #[test]
+    fn a_receipt_that_arrives_during_the_wait_releases_it() {
+        let acks = Arc::new(QuitAcks::new());
+        let id = acks.begin(paths(&["doc-1"]));
+        let waiter = {
+            let acks = Arc::clone(&acks);
+            std::thread::spawn(move || acks.wait(id, Duration::from_secs(10)))
+        };
+        assert!(acks.ack(id, "doc-1"));
+        assert_eq!(waiter.join().unwrap(), QuitGate::Proceed);
+    }
+
+    #[test]
+    fn a_window_that_never_answers_calls_the_quit_off() {
+        let acks = QuitAcks::new();
+        let id = acks.begin(paths(&["doc-1"]));
+        let started = Instant::now();
+        assert_eq!(acks.wait(id, Duration::from_millis(50)), QuitGate::Abort);
+        // Waited it out rather than giving up on the first look.
+        assert!(started.elapsed() >= Duration::from_millis(50));
+        // And the quit is closed out, so the window that finally answers finds
+        // nothing left to satisfy.
+        assert!(!acks.ack(id, "doc-1"));
+    }
+
+    #[test]
+    fn a_quit_with_no_other_window_to_ask_never_waits() {
+        let acks = QuitAcks::new();
+        let id = acks.begin(Vec::new());
+        let started = Instant::now();
+        assert_eq!(acks.wait(id, Duration::from_secs(10)), QuitGate::Proceed);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_receipt_for_an_abandoned_quit_cannot_answer_the_next_one() {
+        let acks = QuitAcks::new();
+        let first = acks.begin(paths(&["doc-1"]));
+        assert!(acks.abort(first));
+        // Only the call that found it in flight calls it off.
+        assert!(!acks.abort(first));
+
+        let second = acks.begin(paths(&["doc-1"]));
+        assert_ne!(first, second);
+        // doc-1 finally answers the FIRST request. A receipt names the quit it
+        // belongs to, so it cannot stand in for the one the live quit is
+        // waiting on — otherwise the window that proved nothing would let a
+        // second quit through.
+        assert!(!acks.ack(first, "doc-1"));
+        assert_eq!(acks.wait(second, Duration::from_millis(50)), QuitGate::Abort);
+    }
+
+    #[test]
+    fn a_receipt_from_a_window_the_quit_did_not_prompt_changes_nothing() {
+        let acks = QuitAcks::new();
+        let id = acks.begin(paths(&["doc-1"]));
+        assert!(!acks.ack(id, "doc-9"));
+        assert!(!acks.ack(id + 1, "doc-1"));
+        assert_eq!(acks.wait(id, Duration::from_millis(50)), QuitGate::Abort);
+    }
+
+    #[test]
+    fn an_unanswered_quit_puts_the_session_back_under_live_tracking() {
+        let state = SessionState::new();
+        let acks = QuitAcks::new();
+        let windows = FakeWindows::with(&["main", "doc-1"]);
+
+        // File ▸ Exit records every window and closes the file before doc-1 is
+        // asked anything.
+        assert_eq!(
+            state.seal_and_write(|| windows.record(windows.snapshot(None))),
+            WriteOutcome::Written
+        );
+        let id = acks.begin(paths(&["doc-1"]));
+
+        // doc-1 has no listener installed — a window built moments ago, or one
+        // whose renderer stopped answering — so no receipt comes back.
+        assert_eq!(acks.wait(id, Duration::from_millis(50)), QuitGate::Abort);
+
+        // Which makes it an exit that did not happen: both windows are still
+        // standing, and the record has to follow them again or everything the
+        // user does for the rest of the run goes unwritten.
+        assert_eq!(
+            state.unseal_and_write(|| windows.record(windows.snapshot(None))),
+            WriteOutcome::Written
+        );
+        assert!(!state.is_sealed());
+        windows.destroy("doc-1");
+        assert_eq!(
+            state.write_checked(
+                || windows.snapshot(Some("doc-1")),
+                |session| windows.record(session),
+            ),
+            WriteOutcome::Written
+        );
+        assert_eq!(windows.written(), vec!["main"]);
     }
 }

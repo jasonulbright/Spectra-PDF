@@ -1592,7 +1592,7 @@ pub async fn close_window(
         // The session is captured while this window still stands: its geometry
         // and its claims are read from managed state, and destroying it is what
         // releases them.
-        crate::session::capture_and_seal(&app);
+        let _ = crate::session::capture_and_seal(&app);
         // Set the quitting flag so ExitRequested handler allows exit
         crate::QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = window.destroy();
@@ -1612,19 +1612,65 @@ pub async fn confirm_close(app: AppHandle, window: tauri::WebviewWindow) -> Resu
 /// Ask every OTHER workspace window to run its own close flow. Each answers by
 /// closing itself, and whichever closes last exits the process — so a window
 /// that cancels keeps both itself and the app alive.
+///
+/// Returns whether the caller may go on and close itself. The request is not
+/// assumed delivered: a renderer that has not installed its listener yet — a
+/// window created or restored moments ago — never hears it and never closes,
+/// and the initiator that closed anyway would leave that window standing behind
+/// a session record sealed at the moment the exit was decided, so nothing the
+/// user did afterwards would ever be written. Every prompted window therefore
+/// acknowledges receipt, and a request that is not acknowledged calls the quit
+/// off: the windows stay and the record goes back to following them.
 #[tauri::command]
-pub async fn request_quit(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+pub async fn request_quit(app: AppHandle, window: tauri::WebviewWindow) -> Result<bool, String> {
+    let peers: Vec<String> = crate::app_windows::app_window_labels(&app)
+        .into_iter()
+        .filter(|l| l != window.label())
+        .collect();
     // The session is recorded here, while every window is still standing and
     // still holding its documents. Each window's destruction writes that
     // window out of the record, so a capture taken after the first one has
     // gone can only ever describe the window that closed last.
     crate::session::capture_and_seal(&app);
-    for label in crate::app_windows::app_window_labels(&app) {
-        if label == window.label() {
-            continue;
+    let quit_id = app.state::<crate::session::QuitAcks>().begin(peers.clone());
+    for label in &peers {
+        let payload = crate::session::BeforeClose {
+            quit_id: Some(quit_id),
+        };
+        if app.emit_to(label.as_str(), "app:beforeClose", payload).is_err() {
+            crate::session::abandon_quit(&app, quit_id);
+            return Ok(false);
         }
-        let _ = app.emit_to(label.as_str(), "app:beforeClose", ());
     }
+    let waiter = app.clone();
+    let gate = tauri::async_runtime::spawn_blocking(move || {
+        crate::session::await_quit_acks(&waiter, quit_id)
+    })
+    .await;
+    match gate {
+        Ok(crate::session::QuitGate::Proceed) => Ok(true),
+        Ok(crate::session::QuitGate::Abort) => Ok(false),
+        // A gate whose answer never arrived is not an answer of yes.
+        Err(_) => {
+            crate::session::abandon_quit(&app, quit_id);
+            Ok(false)
+        }
+    }
+}
+
+/// Acknowledge an `app:beforeClose` that belongs to a quit.
+///
+/// Receipt, not consent: it says the request reached a renderer that is running
+/// its close flow, which is the thing an emit cannot tell the quit on its own.
+/// Whether that window then closes or cancels is the close flow's own answer.
+#[tauri::command]
+pub async fn quit_ack(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    quit_id: u64,
+) -> Result<(), String> {
+    app.state::<crate::session::QuitAcks>()
+        .ack(quit_id, window.label());
     Ok(())
 }
 
@@ -1636,7 +1682,7 @@ pub async fn request_quit(app: AppHandle, window: tauri::WebviewWindow) -> Resul
 /// are left. Idempotent — every prompted window can cancel.
 #[tauri::command]
 pub async fn quit_cancelled(app: AppHandle) -> Result<(), String> {
-    crate::session::unseal(&app);
+    let _ = crate::session::unseal(&app);
     Ok(())
 }
 
