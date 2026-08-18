@@ -3,11 +3,17 @@ import { resolve } from 'node:path';
 import { copyFileSync, existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
+  deleteSelectedCanvasPages,
   getState,
+  getWorkspacePageIds,
+  invokeAppCommand,
   openByPaths,
   pressGlobalKey,
+  selectCanvasPages,
+  setView,
   tabDragDrop,
   tabDragTrack,
+  waitForDisplayedSelector,
   waitForHarness,
   type PhysicalScreenPoint,
 } from '../support/harness.js';
@@ -46,6 +52,8 @@ const SESSION_FILE = resolve(process.env.APPDATA ?? '', 'com.spectrapdf.app', 's
 
 const TAB_STRIP = '[data-testid="tab-strip"]';
 const DROP_CARET = '[data-testid="tab-drop-caret"]';
+const CONFIRM_MESSAGE = '[data-testid="confirm-message"]';
+const CONFIRM_CANCEL = '[data-testid="confirm-cancel"]';
 
 interface SessionRecord {
   labelKind: 'main' | 'doc';
@@ -436,13 +444,70 @@ describe('tab reorder', () => {
     await waitForTabOrder([alpha, charlie], 'the drop did not land where the caret promised');
   });
 
-  it('leaves one window standing', async () => {
+  it('gives the second window unsaved work, so an Exit has something to wait on', async () => {
+    // The seal is only observable while the app is still running, and only a
+    // window with a question to ask keeps it running: the initiating window
+    // closes itself the moment the request is acknowledged.
     await browser.switchToWindow(secondHandle);
-    await browser.execute(() => {
-      void (window as any).__SPECTRA_TEST__.closeThisWindow();
+    await setView('canvas');
+    const pages = async (): Promise<string[]> =>
+      (await getWorkspacePageIds()).filter((id) => id.startsWith(alpha));
+    await browser.waitUntil(async () => (await pages()).length === 5, {
+      timeout: 30_000,
+      timeoutMsg: 'the moved document never indexed in the window it arrived in',
     });
+    await selectCanvasPages([(await pages())[0]]);
+    await deleteSelectedCanvasPages();
+    await browser.waitUntil(async () => (await pages()).length === 4, {
+      timeout: 30_000,
+      timeoutMsg: 'the page delete never landed in the page tier',
+    });
+  });
+
+  it('an Exit taken straight after a reorder seals the order the user just made', async () => {
+    // The defect: the order publishes through a serial channel that nothing
+    // waits on, and Exit SEALS the session record. A reorder still waiting
+    // behind an in-flight publish was therefore sealed over, and the restored
+    // session arranged the tabs the way they were before the drag. Nothing
+    // waits between the drag and the Exit here — no session poll, no pause —
+    // because the wait is the bug.
     await browser.switchToWindow(mainHandle);
+    const before = await tabPaths();
+    expect(before).toHaveLength(2);
+    const frame = await readFrame();
+    const toClientX = pastMidpoint(frame, 1);
+    await dragTabTo(before[0], toClientX, stripCssPoint(frame, toClientX));
+    await releaseDragAt(toClientX, stripCssPoint(frame, toClientX));
+    const arranged = [before[1], before[0]];
+    await waitForTabOrder(arranged, 'the reorder before the exit never landed');
+
+    expect(await invokeAppCommand('file.exit')).toBe(true);
+
+    // Off the initiating window before anything else is awaited: it is clean,
+    // so it closes itself, and a driver command against a closed handle is an
+    // error rather than a slow answer.
+    await browser.switchToWindow(secondHandle);
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, { timeout: 30_000 });
     await waitForHandles(1);
-    expect(await labelOfCurrentWindow()).toBe('main');
+
+    // Read once, not polled: the record is frozen at the moment the exit was
+    // decided, so a later write cannot rescue an order that was not in it.
+    const sealed = readSession();
+    const main = sealed.find((w) => w.labelKind === 'main');
+    expect(main).toBeDefined();
+    expect(lower(main!.files)).toEqual(lower(arranged));
+    expect(lower(main!.files)).not.toEqual(lower(before));
+  });
+
+  it('leaves one window standing', async () => {
+    // Cancelled, so the app survives the spec: the window that asked keeps
+    // itself and everything else that was still open.
+    await waitForDisplayedSelector(CONFIRM_CANCEL, { timeout: 15_000 });
+    await $(CONFIRM_CANCEL).click();
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, { timeout: 15_000, reverse: true });
+    // Undone, so the rest of the battery and the teardown see a clean document
+    // rather than a second prompt.
+    await pressGlobalKey('z', { ctrl: true });
+    expect((await labelOfCurrentWindow()).startsWith('doc-')).toBe(true);
   });
 });
