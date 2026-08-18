@@ -1,3 +1,4 @@
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRef } from 'pdf-lib';
 import { buildPdf, buildPdfx, stripExtension } from './pdfx-format';
 import { carriesManifest } from './doc-names';
 import type { ExportPage } from './pdfx-format';
@@ -182,6 +183,76 @@ export async function buildCommitBytes(plan: CommitFilePlan): Promise<Uint8Array
     : buildPdf(plan.documents[0].pages, plan.ownBytes, plan.path);
 }
 
+const NAME_ACROFORM = PDFName.of('AcroForm');
+const NAME_FIELDS = PDFName.of('Fields');
+const NAME_KIDS = PDFName.of('Kids');
+const NAME_FT = PDFName.of('FT');
+const NAME_SIG = PDFName.of('Sig');
+const NAME_V = PDFName.of('V');
+const MAX_FIELD_DEPTH = 32;
+
+/** Whether these bytes carry at least one FILLED signature field — a terminal
+ * `/FT /Sig` (inheritable) with a `/V`. An empty signature field is not a
+ * signature, and reporting one lost would be a false alarm.
+ *
+ * The engine owns this answer (`has_live_signatures`) and is asked for it on
+ * every ordinary commit. This is the same rule read off the document's own
+ * pre-commit bytes, for the one case where the engine could not answer at all:
+ * without it a failed transplant either says nothing (a signature silently
+ * lost) or says it for every unsigned file in the commit.
+ */
+export async function carriesLiveSignature(bytes: Uint8Array): Promise<boolean> {
+  try {
+    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+    const resolve = (value: unknown): unknown =>
+      value instanceof PDFRef ? doc.context.lookup(value) : value;
+    const asDict = (value: unknown): PDFDict | null => {
+      const r = resolve(value);
+      return r instanceof PDFDict ? r : null;
+    };
+    const asArray = (value: unknown): PDFArray | null => {
+      const r = resolve(value);
+      return r instanceof PDFArray ? r : null;
+    };
+    // Depth-bounded: a /Kids cycle in a damaged field tree would otherwise
+    // recur forever.
+    const walk = (field: PDFDict, inheritedFt: unknown, depth: number): boolean => {
+      if (depth > MAX_FIELD_DEPTH) return false;
+      const own = field.get(NAME_FT);
+      const ft = own === undefined ? inheritedFt : own;
+      const kids = asArray(field.get(NAME_KIDS));
+      if (!kids || kids.size() === 0) {
+        return ft === NAME_SIG && field.get(NAME_V) !== undefined;
+      }
+      for (let i = 0; i < kids.size(); i++) {
+        const kid = asDict(kids.get(i));
+        if (kid && walk(kid, ft, depth + 1)) return true;
+      }
+      return false;
+    };
+    const acro = asDict(doc.catalog.get(NAME_ACROFORM));
+    const fields = acro && asArray(acro.get(NAME_FIELDS));
+    if (!fields) return false;
+    for (let i = 0; i < fields.size(); i++) {
+      const field = asDict(fields.get(i));
+      if (field && walk(field, undefined, 0)) return true;
+    }
+    return false;
+  } catch {
+    // Asked only after a transplant already failed, and the notice is the
+    // user's only record of it: a document this build cannot read through is
+    // reported rather than passed over.
+    return true;
+  }
+}
+
+/** An exception's own text, carried to the notice verbatim — the transplant's
+ * refusal reasons are engine English already, and a thrown one is no more
+ * translatable than a returned one. */
+function failureDetail(err: unknown): string {
+  return err instanceof Error && err.message ? err.message : String(err);
+}
+
 interface CommitDeps {
   workspace: Workspace;
   files: Map<string, OpenFile>;
@@ -278,21 +349,43 @@ export async function commitPageEdits({
         // incremental append instead of the pdf-lib rewrite, so the
         // signature keeps verifying. Failure here (engine down, refusal)
         // NEVER blocks the commit — the rewrite is the standing behavior
-        // and the fallback for every out-of-scope delta.
+        // and the fallback for every out-of-scope delta — but a signed file
+        // pays for that fallback with its signatures, so it is REPORTED.
         if (preserveSignatures && readBack) {
+          let outcome: PreserveOutcome | null = null;
+          // The one fact that makes the staged file's content unknown: either
+          // call can fail after the engine has already replaced the temp.
+          let failed = false;
+          let failure: unknown;
           try {
-            const outcome = await preserveSignatures(plans[i].workingPath, tmp);
-            if (outcome.applied) {
-              built[i] = await readBack(tmp);
-            } else {
-              // The rewrite proceeds — it always has — but a signed file whose
-              // append refused loses its signatures to it, and that is the
-              // fact the old boolean discarded.
-              const reason = preserveReason(outcome);
-              if (reason) signatureRefusals.push({ path: plans[i].path, reason });
-            }
+            outcome = await preserveSignatures(plans[i].workingPath, tmp);
+            if (outcome.applied) built[i] = await readBack(tmp);
           } catch (err) {
-            console.warn('signature-preserving commit unavailable:', err);
+            failed = true;
+            failure = err;
+          }
+          if (failed) {
+            // The staged temp may hold the appended revision already — the
+            // engine replaces its output before it answers — so the rewrite is
+            // re-staged over it. What lands has to be what gets dispatched,
+            // and only bytes this run holds are known.
+            await writeBuffer(tmp, built[i]);
+            // A transplant that APPLIED proves the file was signed; otherwise
+            // the document's own pre-commit bytes answer, because an engine
+            // that could not run cannot be asked.
+            if (outcome?.applied || (await carriesLiveSignature(plans[i].ownBytes))) {
+              signatureRefusals.push({
+                path: plans[i].path,
+                reason: { key: 'app.preserve.unrecognized', detail: failureDetail(failure) },
+              });
+            }
+          } else if (outcome && !outcome.applied) {
+            // The rewrite proceeds — it always has — but a signed file whose
+            // append refused loses its signatures to it, and that is the
+            // fact the old boolean discarded. A refusal writes nothing, so
+            // the staged bytes are still the ones already in `built`.
+            const reason = preserveReason(outcome);
+            if (reason) signatureRefusals.push({ path: plans[i].path, reason });
           }
         }
       }
