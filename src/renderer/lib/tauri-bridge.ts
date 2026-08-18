@@ -680,12 +680,16 @@ export const app = {
   /** Close THIS window, quitting only when it was the last one. The count is
    * taken in Rust: a renderer knows nothing about another window's unsaved
    * work, and destroying a fixed label discards whichever window did not ask. */
-  confirmClose: () => invoke('confirm_close'),
+  confirmClose: () => invoke<boolean>('confirm_close'),
 
   /** The window × : close, or hide to tray when this is the only window left.
    * Tray residency is an app-level state, so a second window's × closes that
-   * window rather than hiding the app. */
-  closeWindow: (minimizeToTray: boolean) => invoke('close_window', { minimizeToTray }),
+   * window rather than hiding the app.
+   *
+   * False means the window is still standing: the last window out captures the
+   * session, and a capture that did not reach disk calls the teardown off
+   * rather than exiting with an older run's record on the file. */
+  closeWindow: (minimizeToTray: boolean) => invoke<boolean>('close_window', { minimizeToTray }),
 
   /** Ask every other window to run its own close flow. Each answers by closing
    * itself and the last one out exits, so a window that cancels keeps the app.
@@ -724,6 +728,18 @@ export const app = {
     return listen<{ quitId: number | null }>('app:beforeClose', (event) =>
       callback(event.payload?.quitId ?? null),
     );
+  },
+
+  /** Listen for the round that runs BEFORE a quit captures the session.
+   * Each peer finishes publishing what it has measured and acknowledges; only
+   * once every one of them has is the record taken and sealed. Without it a
+   * reorder made in this window was sealed over whenever another one exited —
+   * the capture ran before anybody was asked anything. */
+  onPrepareClose: (callback: (quitId: number) => void) => {
+    return listen<{ quitId: number | null }>('app:prepareClose', (event) => {
+      const quitId = event.payload?.quitId;
+      if (typeof quitId === 'number') callback(quitId);
+    });
   },
 
   /** Listen for the open signal (CLI args, second instance, context menu,

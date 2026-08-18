@@ -1574,38 +1574,46 @@ pub async fn send_to_engine(
 /// The count is taken here rather than inferred by a renderer: a renderer
 /// knows its own state and nothing about the other window's unsaved work, and
 /// destroying a fixed label would discard whichever window did not ask.
+///
+/// Returns whether the window actually closed. The last window's destruction is
+/// the app's exit, so it is gated on its own session snapshot reaching disk: a
+/// capture that failed leaves the previous run's record on the file and the seal
+/// already lifted, and destroying the window then would exit having thrown this
+/// session away with nothing left standing to capture it from.
 #[tauri::command]
 pub async fn close_window(
     app: AppHandle,
     window: tauri::WebviewWindow,
     minimize_to_tray: bool,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let others = crate::app_windows::app_window_labels(&app)
         .into_iter()
         .filter(|l| l != window.label())
         .count();
     if others == 0 && minimize_to_tray {
         let _ = window.hide();
-        return Ok(());
+        return Ok(true);
     }
     if others == 0 {
         // The session is captured while this window still stands: its geometry
         // and its claims are read from managed state, and destroying it is what
         // releases them.
-        let _ = crate::session::capture_and_seal(&app);
+        if !crate::session::teardown_permitted(crate::session::capture_and_seal(&app)) {
+            return Ok(false);
+        }
         // Set the quitting flag so ExitRequested handler allows exit
         crate::QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = window.destroy();
         app.exit(0);
-        return Ok(());
+        return Ok(true);
     }
     let _ = window.destroy();
     crate::engine::publish_activity(&app);
-    Ok(())
+    Ok(true)
 }
 
 #[tauri::command]
-pub async fn confirm_close(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+pub async fn confirm_close(app: AppHandle, window: tauri::WebviewWindow) -> Result<bool, String> {
     close_window(app, window, false).await
 }
 
@@ -1621,38 +1629,76 @@ pub async fn confirm_close(app: AppHandle, window: tauri::WebviewWindow) -> Resu
 /// user did afterwards would ever be written. Every prompted window therefore
 /// acknowledges receipt, and a request that is not acknowledged calls the quit
 /// off: the windows stay and the record goes back to following them.
+/// The round that asks every peer to flush what it has measured, before the
+/// record is captured.
+const PREPARE_CLOSE_EVENT: &str = "app:prepareClose";
+/// The round that asks every peer to run its own close flow.
+const BEFORE_CLOSE_EVENT: &str = "app:beforeClose";
+
+/// Ask every peer one question and wait for its receipt.
+///
+/// `sealed` names which round this is. The close round runs behind the seal, so
+/// an abort there has to put the record back under live tracking; the prepare
+/// round has captured nothing and has nothing to undo — unsealing there would
+/// write a snapshot for a quit that never took one.
+///
+/// A quit that prompted no peer answers immediately: `wait` finds nothing
+/// outstanding.
+fn ack_round(
+    app: &AppHandle,
+    peers: &[String],
+    event: &str,
+    sealed: bool,
+) -> crate::session::QuitGate {
+    let quit_id = app.state::<crate::session::QuitAcks>().begin(peers.to_vec());
+    for label in peers {
+        let payload = crate::session::BeforeClose {
+            quit_id: Some(quit_id),
+        };
+        if app.emit_to(label.as_str(), event, payload).is_err() {
+            if sealed {
+                crate::session::abandon_quit(app, quit_id);
+            } else {
+                crate::session::abandon_prepare(app, quit_id);
+            }
+            return crate::session::QuitGate::Abort;
+        }
+    }
+    if sealed {
+        crate::session::await_quit_acks(app, quit_id)
+    } else {
+        crate::session::await_prepare_acks(app, quit_id)
+    }
+}
+
 #[tauri::command]
 pub async fn request_quit(app: AppHandle, window: tauri::WebviewWindow) -> Result<bool, String> {
     let peers: Vec<String> = crate::app_windows::app_window_labels(&app)
         .into_iter()
         .filter(|l| l != window.label())
         .collect();
-    // The session is recorded here, while every window is still standing and
-    // still holding its documents. Each window's destruction writes that
-    // window out of the record, so a capture taken after the first one has
-    // gone can only ever describe the window that closed last.
-    crate::session::capture_and_seal(&app);
-    let quit_id = app.state::<crate::session::QuitAcks>().begin(peers.clone());
-    for label in &peers {
-        let payload = crate::session::BeforeClose {
-            quit_id: Some(quit_id),
-        };
-        if app.emit_to(label.as_str(), "app:beforeClose", payload).is_err() {
-            crate::session::abandon_quit(&app, quit_id);
-            return Ok(false);
-        }
-    }
-    let waiter = app.clone();
-    let gate = tauri::async_runtime::spawn_blocking(move || {
-        crate::session::await_quit_acks(&waiter, quit_id)
+    let runner = app.clone();
+    // Two rounds with the capture between them. Every peer publishes its tab
+    // order through a channel nothing waits on, so an order changed seconds
+    // before Exit can still be in flight: the prepare round is where each one
+    // finishes publishing and says so, and only then is the record taken. The
+    // whole sequence runs on one blocking thread because each round's wait is
+    // a condvar the main loop must stay free of.
+    let sequenced = tauri::async_runtime::spawn_blocking(move || {
+        crate::session::sequence_quit(
+            || ack_round(&runner, &peers, PREPARE_CLOSE_EVENT, false),
+            || crate::session::capture_and_seal(&runner),
+            || ack_round(&runner, &peers, BEFORE_CLOSE_EVENT, true),
+        )
     })
     .await;
-    match gate {
-        Ok(crate::session::QuitGate::Proceed) => Ok(true),
-        Ok(crate::session::QuitGate::Abort) => Ok(false),
-        // A gate whose answer never arrived is not an answer of yes.
+    match sequenced {
+        Ok(proceed) => Ok(proceed),
+        // A sequence whose answer never arrived is not an answer of yes, and
+        // whatever it had taken has to come off: the run would otherwise carry
+        // on behind a record frozen at the moment Exit was chosen.
         Err(_) => {
-            crate::session::abandon_quit(&app, quit_id);
+            crate::session::unseal(&app);
             Ok(false)
         }
     }
