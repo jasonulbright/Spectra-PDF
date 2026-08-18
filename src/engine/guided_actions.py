@@ -186,7 +186,13 @@ _STEPS: dict = {
         ),
         frozenset({"font_dir"}),
     ),
-    "ocr_file": (ocr_file, frozenset({"language"}), frozenset({"gs_path", "tesseract_path"})),
+    "ocr_file": (
+        ocr_file,
+        frozenset({"language"}),
+        # `font_dir` reaches the MRC tail, which prepares its source the same
+        # way the Ghostscript-backed ops prepare theirs.
+        frozenset({"gs_path", "tesseract_path", "font_dir"}),
+    ),
     # Deskew, despeckle, whiten and re-orient the scanned pages. Its ORDER
     # against the other two scan steps is enforced in validate_steps.
     "enhance_scan": (

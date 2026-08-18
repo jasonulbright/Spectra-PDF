@@ -1,5 +1,6 @@
 """The batch-OCR tails: supplied passwords and image sources."""
 
+import io
 import os
 import shutil
 
@@ -271,6 +272,122 @@ class TestBatchMrc:
                           out, tesseract_path=TESS, gs_path=GS, mrc=True)
         assert result["mrcApplied"] is True
         assert "MRC compressed" in result["mrc"]
+
+
+class TestTheMrcTailSharesOnePreparation:
+    """MRC reads its source as CONTENT, so it reads the prepared copy.
+
+    The MRC pass keeps the page object and drops no widget, so today this
+    changes nothing about any output — which is exactly why it is pinned by
+    the SHAPE rather than by a byte diff: what the shared preparation buys is
+    that the tail and the Ghostscript-backed ops cannot drift apart, so a
+    later change to what MRC does with a page cannot silently re-open the
+    class. The measurement of the no-change is the second test: without a
+    bare field there is nothing to prepare and MRC is handed the original
+    path, and that argument is the only thing the preparation can touch.
+    """
+
+    _HAS_CJK_FACE = os.path.isfile(os.path.join(FONTS, "NotoSansCJKsc-Regular.otf"))
+
+    def _captured(self, monkeypatch):
+        """(path, bytes) for every `compress` call the tail makes.
+
+        The bytes are read at the call: the prepared copy is scaffolding and
+        is gone by the time the step returns, which is its own pin below.
+        """
+        seen = []
+
+        def fake_compress(file, output, **kwargs):
+            seen.append((str(file), open(file, "rb").read()))
+            raise ValueError("nothing to separate")
+
+        monkeypatch.setattr("engine.batch_ocr.compress", fake_compress)
+        return seen
+
+    def _bare_unicode(self, tmp_dir, name="bare.pdf"):
+        from separation_builders import form_appearance_pdf
+
+        return form_appearance_pdf(os.path.join(tmp_dir, name), "bare-unicode")
+
+    @pytest.mark.skipif(not _HAS_CJK_FACE, reason="bundled CJK face not provisioned")
+    def test_a_bare_field_is_given_its_appearance_before_mrc_reads_the_file(
+        self, tmp_dir, monkeypatch
+    ):
+        from engine.batch_ocr import _mrc_step
+
+        seen = self._captured(monkeypatch)
+        src = self._bare_unicode(tmp_dir)
+        applied, note = _mrc_step(src, os.path.join(tmp_dir, "out.pdf"),
+                                  "balanced", False, "eng", GS, TESS, FONTS)
+        assert applied is False and "nothing to separate" in note
+        assert len(seen) == 1 and seen[0][0] != src
+        with pikepdf.open(io.BytesIO(seen[0][1])) as prepared:
+            assert prepared.pages[0].Annots[0].get("/AP") is not None
+
+    @pytest.mark.skipif(not _HAS_CJK_FACE, reason="bundled CJK face not provisioned")
+    def test_the_scratch_copy_does_not_outlive_the_step(self, tmp_dir, monkeypatch):
+        # It is scaffolding: a batch run over a thousand files would otherwise
+        # leave a thousand copies behind.
+        from engine.batch_ocr import _mrc_step
+
+        seen = self._captured(monkeypatch)
+        _mrc_step(self._bare_unicode(tmp_dir), os.path.join(tmp_dir, "out.pdf"),
+                  "balanced", False, "eng", GS, TESS, FONTS)
+        assert not os.path.exists(seen[0][0])
+
+    def test_a_document_with_nothing_to_prepare_hands_over_its_own_path(
+        self, tmp_dir, monkeypatch
+    ):
+        # The measured no-change, on both halves of the condition: no form
+        # field at all, and a form field that already carries an appearance.
+        from separation_builders import form_appearance_pdf
+
+        from engine.batch_ocr import _mrc_step
+
+        cases = [_typed_pdf(tmp_dir),
+                 form_appearance_pdf(os.path.join(tmp_dir, "text.pdf"), "text")]
+        for src in cases:
+            seen = self._captured(monkeypatch)
+            _mrc_step(src, os.path.join(tmp_dir, "out.pdf"), "balanced", False,
+                      "eng", GS, TESS, FONTS)
+            assert [path for path, _ in seen] == [src]
+
+    @pytest.mark.skipif(not _HAS_CJK_FACE, reason="bundled CJK face not provisioned")
+    def test_without_a_font_dir_nothing_is_prepared(self, tmp_dir, monkeypatch):
+        # The degenerate stays measured: no face can spell this value, so the
+        # widget keeps no appearance and MRC reads the file as it stands.
+        from engine.batch_ocr import _mrc_step
+
+        seen = self._captured(monkeypatch)
+        src = self._bare_unicode(tmp_dir)
+        _mrc_step(src, os.path.join(tmp_dir, "out.pdf"), "balanced", False,
+                  "eng", GS, TESS, "")
+        assert [path for path, _ in seen] == [src]
+
+    @pytest.mark.skipif(not _HAS_CJK_FACE, reason="bundled CJK face not provisioned")
+    def test_both_doors_carry_the_parameter_to_the_tail(self, tmp_dir, monkeypatch):
+        # The thread, end to end: neither door reaches MRC with a font_dir it
+        # was handed but never passed on. Both fixtures paint no raster, so
+        # nothing is recognised and the tail is the only pass that runs.
+        source = os.path.join(tmp_dir, "tree")
+        os.makedirs(source)
+        self._bare_unicode(source, "bare.pdf")
+
+        def carries_an_appearance(seen):
+            assert len(seen) == 1
+            with pikepdf.open(io.BytesIO(seen[0][1])) as read:
+                return read.pages[0].Annots[0].get("/AP") is not None
+
+        seen = self._captured(monkeypatch)
+        batch_ocr(source=source, dest=os.path.join(tmp_dir, "mirror"), gs_path=GS,
+                  tesseract_path=TESS, mrc=True, font_dir=FONTS)
+        assert carries_an_appearance(seen)
+
+        seen = self._captured(monkeypatch)
+        ocr_file(self._bare_unicode(tmp_dir, "one.pdf"),
+                 os.path.join(tmp_dir, "one-out.pdf"), tesseract_path=TESS,
+                 gs_path=GS, mrc=True, font_dir=FONTS)
+        assert carries_an_appearance(seen)
 
 
 class TestBatchEnhance:

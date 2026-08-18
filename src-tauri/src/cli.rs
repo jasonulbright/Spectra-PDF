@@ -4007,6 +4007,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "mrc_verify_text": args.mrc_verify_text,
                     "enhance": args.enhance,
                     "enhance_orientation": !args.no_orientation,
+                    "font_dir": resolve_fonts().to_string_lossy().to_string(),
                 }),
             )
         }
@@ -5127,6 +5128,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "mrc_verify_text": args.mrc_verify_text,
                     "enhance": args.enhance,
                     "enhance_orientation": !args.no_enhance_orientation,
+                    "font_dir": resolve_fonts().to_string_lossy().to_string(),
                     "passwords": args
                         .passwords
                         .iter()
