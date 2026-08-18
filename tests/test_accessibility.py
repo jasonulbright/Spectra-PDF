@@ -1147,6 +1147,103 @@ class TestStructureNesting:
         assert row["status"] == "fail", json.dumps(row, indent=2)
         assert row["findings"][0]["values"]["child"] == "Caption"
 
+    @pytest.mark.parametrize(
+        "name,container",
+        [
+            ("ruby_annotation_before_base_fails", "Ruby"),
+            ("ruby_two_bases_fails", "Ruby"),
+            ("warichu_unclosed_fails", "Warichu"),
+        ],
+    )
+    def test_a_content_model_names_the_container_it_is_stated_on(
+        self, tmp_dir, name, container
+    ):
+        """ISO 32000-2 Table 369 states each assembly as a sequence, so the
+        order and the count are as binding as the membership — and neither can
+        be read off one child, which is why the finding names the container."""
+        row = self._nesting(tmp_dir, name)
+        assert row["status"] == "fail", json.dumps(row, indent=2)
+        assert [f["detail_key"] for f in row["findings"]] == [
+            "structure_nesting_content_model"
+        ]
+        finding = row["findings"][0]
+        assert finding["values"] == {"parent": container, "page": 1}
+        assert finding["address"]["path"] == [0, 1]
+
+    def test_the_conforming_content_models_report_what_they_checked(self, tmp_dir):
+        """The false-failure twins: both ruby sequences Table 369 admits and
+        the warichu one. A reading that took the shorter ruby for the whole
+        rule would fail the four-child form."""
+        for name in ("ruby_rb_rt_ok", "ruby_four_child_ok", "warichu_wp_wt_wp_ok"):
+            row = self._nesting(tmp_dir, name)
+            assert row["status"] == "pass", (name, json.dumps(row, indent=2))
+            assert row["data"]["judged"] > 0, name
+
+    def test_a_child_the_model_excludes_is_reported_once(self, tmp_dir):
+        """Membership is a claim about the child and the sequence is a claim
+        about the container. A `P` inside a `Ruby` breaks both, and the check
+        that sees the child reports it: one defect, one finding."""
+
+        def build(pdf, page, root, doc):
+            stray = B.elem(pdf, "P", doc, page=page)
+            ruby = B.elem(pdf, "Ruby", doc, kids=[stray])
+            doc[Name.K] = Array(list(doc[Name.K]) + [ruby])
+
+        row = _check(self._tree(tmp_dir, "ruby_foreign", build), "structure_nesting")
+        assert [f["detail_key"] for f in row["findings"]] == [
+            "structure_nesting_violation"
+        ], json.dumps(row, indent=2)
+        assert row["findings"][0]["values"]["child"] == "P"
+
+    def _deep_ruby(self, tmp_dir, name, depth, tags):
+        """A ruby assembly `depth` levels down, reached through `Div`s.
+
+        `Div` is read through by Table 365, so the assembly's content is the
+        same list at any depth — the only thing depth changes is whether the
+        walk reached the children at all.
+        """
+        src = os.path.join(tmp_dir, f"{name}.pdf")
+        pdf = B.new_pdf()
+        page = pdf.pages[0]
+        B.draw(
+            pdf, page,
+            "/P <</MCID 0>> BDC BT /F1 11 Tf 40 740 Td (Body copy.) Tj ET EMC",
+        )
+        root = B.struct_root(pdf)
+        doc = B.elem(pdf, "Document", root)
+        para = B.elem(pdf, "P", doc, page=page, mcid=0)
+        # `depth` counts the `Document` as the first level and the `Ruby` as
+        # the last, which is the numbering the walk's own cap is stated in.
+        chain = [B.elem(pdf, "Div", doc) for _ in range(depth - 2)]
+        kids = [B.elem(pdf, tag, doc, page=page) for tag in tags]
+        node = B.elem(pdf, "Ruby", doc, kids=kids)
+        for div in reversed(chain):
+            div[Name.K] = Array([node])
+            node = div
+        doc[Name.K] = Array([para, node])
+        root[Name.K] = doc
+        B.parent_tree(pdf, root, page, [para])
+        B.make_conformant(pdf, page)
+        return _check(check_accessibility(B.save(pdf, src)), "structure_nesting")
+
+    def test_a_container_whose_children_were_not_read_is_not_failed(self, tmp_dir):
+        """A sequence judged over a partial sequence would fail a document for
+        the reader's own depth cap."""
+        from engine.struct_tree import _MAX_DEPTH
+
+        row = self._deep_ruby(tmp_dir, "deep_ruby", _MAX_DEPTH, ["RT", "RB"])
+        assert row["status"] == "needs_review", json.dumps(row, indent=2)
+        assert [f["detail_key"] for f in row["findings"]] == [
+            "structure_truncated"
+        ], json.dumps(row, indent=2)
+
+    def test_the_shallow_twin_of_the_unread_container_still_fails(self, tmp_dir):
+        """The control: the same out-of-order assembly, within reach."""
+        row = self._deep_ruby(tmp_dir, "shallow_ruby", 4, ["RT", "RB"])
+        assert [f["detail_key"] for f in row["findings"]] == [
+            "structure_nesting_content_model"
+        ], json.dumps(row, indent=2)
+
     def test_a_caption_at_the_end_of_the_list_is_not(self, tmp_dir):
         """The false-failure twin: the same caption as the list's last child."""
         src = os.path.join(tmp_dir, "caption_last.pdf")
@@ -1183,10 +1280,25 @@ class TestTheCompiledTable:
         for role, rule in CONTAINMENT.items():
             assert rule.cite, role
             assert (rule.parents is None) != (not rule.ancestor), role
-        for role, (allowed, cite) in CONTENT_MODEL.items():
-            assert allowed and cite, role
+        for role, (sequences, cite) in CONTENT_MODEL.items():
+            assert sequences and cite, role
+            for sequence in sequences:
+                assert sequence and isinstance(sequence, tuple), role
         for role, (category, cite) in CATEGORY.items():
             assert category and cite, role
+
+    def test_the_membership_set_is_the_sequences_own(self):
+        """One reading of Table 369 answers both questions it is asked: which
+        children a container admits, and in what order. Two hand-written sets
+        would let the child-side check and the container-side check disagree
+        about the same sentence."""
+        from engine.struct_nesting import CONTENT_MODEL, CONTENT_MODEL_MEMBERS
+
+        assert set(CONTENT_MODEL_MEMBERS) == set(CONTENT_MODEL)
+        for role, (sequences, _cite) in CONTENT_MODEL.items():
+            assert CONTENT_MODEL_MEMBERS[role] == {
+                child for sequence in sequences for child in sequence
+            }, role
 
     def test_the_annex_whitelist_agrees_with_the_per_type_statements(self):
         """Two readings of one standard: Table 370 and Table 371 name the

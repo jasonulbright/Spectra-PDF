@@ -17,7 +17,9 @@ of them state placement:
     Table 371's six table types. These are the only child-side placement
     statements in 14.8.4, and they are what `CONTAINMENT` holds.
   * a content model on the container — Table 369's `Ruby` and `Warichu`, each
-    of which `shall contain` a stated sequence. `CONTENT_MODEL` holds those.
+    of which `shall contain` a stated sequence. `CONTENT_MODEL` holds every
+    sequence each sentence admits, so ORDER and COUNT are judged, not
+    membership alone.
   * a positional rule — Table 372's `Caption`, restated for `L` in Table 370
     and for `Table` in Table 371. `CAPTION_PARENTS` and the predicate below.
   * an inheritance rule — Table 365's `Part`, `Div` and `NonStruct` each
@@ -105,12 +107,22 @@ CONTAINMENT = {
 
 # Container-side content models: a type whose own entry states what it shall
 # contain. ISO 32000-2 Table 369 — `Ruby` shall contain one `RB` followed by
-# either an `RT` or the sequence `RP`, `RT`, `RP`; `Warichu` shall contain the
-# sequence `WP`, `WT`, `WP`. Only membership is compiled: the ORDER those
-# sentences also state is a separate question this table does not answer.
+# either an `RT` or a three-element sequence consisting of `RP`, `RT`, `RP`;
+# `Warichu` shall contain a three-element sequence consisting of `WP`, `WT`,
+# `WP`. Each sentence fixes the order and the count as well as the membership,
+# so every sequence it admits is compiled whole and the container's children
+# are matched against the set.
 CONTENT_MODEL = {
-    "Ruby": (frozenset({"RB", "RT", "RP"}), "t369"),
-    "Warichu": (frozenset({"WP", "WT"}), "t369"),
+    "Ruby": ((("RB", "RT"), ("RB", "RP", "RT", "RP")), "t369"),
+    "Warichu": ((("WP", "WT", "WP"),), "t369"),
+}
+
+# What each model admits as a child at all, derived so the membership question
+# and the sequence question can never be answered from two different readings
+# of Table 369.
+CONTENT_MODEL_MEMBERS = {
+    role: frozenset(child for sequence in sequences for child in sequence)
+    for role, (sequences, _cite) in CONTENT_MODEL.items()
 }
 
 # The two parents whose own entries restate Table 372's position rule, which is
@@ -302,7 +314,7 @@ def judge(edge) -> tuple[str, str, str]:
 
     model = CONTENT_MODEL.get(parent)
     if model is not None:
-        if role not in model[0]:
+        if role not in CONTENT_MODEL_MEMBERS[parent]:
             return VIOLATION, model[1], "content_model"
         reached = (model[1], "content_model")
 
@@ -337,6 +349,35 @@ def judge(edge) -> tuple[str, str, str]:
     if role in CATEGORY:
         return UNCOVERED, CATEGORY[role][1], "category_only"
     return UNCOVERED, "", "not_a_standard_type"
+
+
+def judge_content(edge) -> tuple[str, str, str]:
+    """(verdict, citation, rule) for a content-model container's own content.
+
+    Table 369 states each container's content as a sequence, which is a claim
+    about the CONTAINER rather than about any one of its children: neither the
+    order nor the count can be read off a single parent edge. So the container
+    is where the sequence is judged and where a violation is reported, and
+    `judge` — which sees one child at a time — answers membership alone.
+
+    A container holding a child its model does not admit is left to `judge`,
+    which reports that child: the same defect stated twice reads as two.
+    """
+    model = CONTENT_MODEL.get(edge.role)
+    if model is None:
+        return UNCOVERED, "", "no_content_model"
+    sequences, cite = model
+    if not namespace_kind(edge.ns):
+        return UNCOVERED, "", "namespace"
+    if edge.content_roles is None:
+        # A sequence rule cannot be judged over a subtree that was not read.
+        return UNCOVERED, cite, "unread"
+    members = CONTENT_MODEL_MEMBERS[edge.role]
+    if any(role not in members for role in edge.content_roles):
+        return UNCOVERED, cite, "foreign_child"
+    if tuple(edge.content_roles) in sequences:
+        return OK, cite, "content_model"
+    return VIOLATION, cite, "content_model"
 
 
 def _judge_caption(edge, parent: str) -> tuple:

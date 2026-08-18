@@ -32,7 +32,12 @@ from engine.derived_nav import (
     _resolve_role,
     _role_map,
 )
-from engine.struct_nesting import ROOT as _ROOT_ROLE, effective_parent
+from engine.struct_nesting import (
+    CONTENT_MODEL as _CONTENT_MODEL,
+    ROOT as _ROOT_ROLE,
+    TRANSPARENT as _TRANSPARENT,
+    effective_parent,
+)
 from engine.struct_tree import _is_elem, _kids, _MAX_DEPTH, _page_map, _page_no
 
 # Table attributes, wherever they are spelled. The key is the PDF name; the
@@ -440,13 +445,18 @@ class Edge:
     ancestor a rule addresses is the nearest one outside that set. `index` and
     `sibling_roles` are taken from the DIRECT parent, because the positional
     rules are stated over the parent element's own children.
+
+    `content_roles` is the other direction: the roles this element CONTAINS,
+    read through the same inherited-containment set, for the types whose own
+    entry states a content model. It is `None` where no model applies and
+    where the subtree was not read; the two are told apart by the role.
     """
 
     __slots__ = ("node", "role", "ns", "parent_role", "ancestor_roles", "index",
-                 "sibling_roles")
+                 "sibling_roles", "content_roles")
 
     def __init__(self, node, role, ns, parent_role, ancestor_roles, index,
-                 sibling_roles):
+                 sibling_roles, content_roles=None):
         self.node = node
         self.role = role
         self.ns = ns
@@ -454,6 +464,31 @@ class Edge:
         self.ancestor_roles = ancestor_roles
         self.index = index
         self.sibling_roles = sibling_roles
+        self.content_roles = content_roles
+
+
+def _content_roles(node, truncated: set):
+    """The roles a content model reaches inside `node`, in document order.
+
+    The mirror of `effective_parent`: ISO 32000-2 Table 365 makes `Part`, `Div`
+    and `NonStruct` inherit their parent's containment, so a container's
+    content is the same list read from either end. `None` when the walk met an
+    element whose own children were not read — a sequence rule judged over a
+    partial sequence would fail a document for the reader's limit.
+    """
+    if tuple(node.path) in truncated:
+        return None
+    roles: list = []
+    stack = list(reversed(node.children))
+    while stack:
+        child = stack.pop()
+        if child.role in _TRANSPARENT:
+            if tuple(child.path) in truncated:
+                return None
+            stack.extend(reversed(child.children))
+            continue
+        roles.append(child.role)
+    return roles
 
 
 def nesting_edges(tree: dict) -> tuple:
@@ -467,6 +502,7 @@ def nesting_edges(tree: dict) -> tuple:
     """
     edges: list = []
     unread = list(tree.get("ns_unread") or [])
+    truncated = {tuple(t["path"]) for t in tree.get("truncated") or []}
     for node in tree.get("nodes") or []:
         if node.ns is None:
             continue
@@ -486,6 +522,7 @@ def nesting_edges(tree: dict) -> tuple:
                 ancestors,
                 index,
                 [child.role for child in siblings],
+                _content_roles(node, truncated) if node.role in _CONTENT_MODEL else None,
             )
         )
     return edges, unread
