@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pikepdf
 
-from .inplace import finish_staged, is_same_file, staging_target
+from .inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 
 
@@ -66,11 +66,12 @@ def set_metadata(
                 meta["pdf:Keywords"] = keywords
 
         output_path = Path(output)
-        # pikepdf cannot save over its own open input (engine/inplace.py).
+        # pikepdf cannot save over its own open input (engine/inplace.py), and
+        # the destination cannot be replaced while the Pdf still holds it open.
         if is_same_file(file, output):
-            staged = staging_target(output_path)
-            save_pdf(pdf, staged)
-            finish_staged(staged, output_path)
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, staged)
+                pdf.close()
         else:
             save_pdf(pdf, output_path)
 
@@ -102,15 +103,16 @@ def strip_metadata(file: str, output: str) -> dict:
         if pikepdf.Name.Info in pdf.trailer:
             del pdf.trailer[pikepdf.Name.Info]
         if same_file:
-            staged = staging_target(output_path)
-            save_pdf(pdf, staged)
+            # The rebrand runs against the STAGED file, before the swap: the
+            # document is still the one the user has.
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, staged)
+                pdf.close()
+                _rebrand_xmptk(staged)
         else:
             save_pdf(pdf, output_path)
 
-    if same_file:
-        _rebrand_xmptk(staged)
-        finish_staged(staged, output_path)
-    else:
+    if not same_file:
         _rebrand_xmptk(output_path)
 
     return {
