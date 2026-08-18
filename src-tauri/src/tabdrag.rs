@@ -366,11 +366,14 @@ impl StripRegistry {
         }
         // A window destroyed while it was the SOURCE of a handover will never
         // commit it. The document is already the target's, so the delivery it
-        // was holding open is completed on its behalf rather than left queued.
+        // was holding open is completed on its behalf rather than left queued —
+        // including the release the commit would have done, without which the
+        // queued open stays invisible to the window it belongs to.
         for reservation in self.take_reservations_from(label) {
             if reservation.void {
                 continue;
             }
+            registry.release_pending(&reservation.target, reservation.token);
             sweep.deliver.push(reservation);
         }
         sweep
@@ -988,6 +991,12 @@ pub async fn tabdrag_reserve_new_window(
 /// A destination destroyed since the reservation was taken has already handed
 /// the document back, and this is where the source hears it — as a refusal,
 /// with its tab still open and still the only copy.
+///
+/// This is also the moment the queued open becomes drainable. Until it, the
+/// entry is held out of the target's drain: the source writes its working copy
+/// back over the user's own file between the reservation and this call, and a
+/// target that opened the path before that write would read the bytes the write
+/// replaces — and take the entry the rollback needs with it.
 #[tauri::command]
 pub async fn tabdrag_commit(
     app: AppHandle,
@@ -1004,6 +1013,8 @@ pub async fn tabdrag_commit(
     if reservation.void {
         return Ok(TabDragResult::refused(reservation.from));
     }
+    app.state::<WindowRegistry>()
+        .release_pending(&reservation.target, token);
     if reservation.tear_off {
         show_torn_off(&app, &reservation);
         app_windows::signal_open(&app, &reservation.target);
@@ -1622,6 +1633,44 @@ mod tests {
 
     // ── Destruction, on both sides of the report ──────────────────────────
 
+    // ── The reservation gate on the queue ─────────────────────────────────
+
+    #[test]
+    fn a_target_draining_before_the_commit_takes_nothing_and_leaves_the_rollback_its_entry() {
+        let (strips, claims, registry) = two_windows();
+        let token = reserve_onto_doc1(&strips, &claims, &registry);
+        // The receiving window drains on mount and on every open signal, and
+        // both can land here — between the reservation and the commit, while
+        // the source is still writing its working copy over the user's file.
+        // An open taken now reads the bytes that write replaces.
+        assert!(registry.take_deliverable("doc-1").is_empty());
+
+        // And the entry is still there, which is the other half: a drain that
+        // removed it would leave the destruction rollback nothing to give back.
+        let sweep = strips.sweep_destroyed(&claims, &registry, "doc-1", &live(&["main"]));
+        assert_eq!(sweep, DestroySweep::default());
+        assert_eq!(claims.owner(DOC).as_deref(), Some("main"));
+        let voided = strips.take_reservation(token, "main").expect("held");
+        assert!(voided.void);
+    }
+
+    #[test]
+    fn a_commit_makes_the_handover_drainable_by_a_window_that_already_drained() {
+        let (strips, claims, registry) = two_windows();
+        let token = reserve_onto_doc1(&strips, &claims, &registry);
+        assert!(registry.take_deliverable("doc-1").is_empty());
+
+        // What `tabdrag_commit` does before it signals: the file has been
+        // written, so the entry becomes visible and the target is nudged to
+        // drain again — a window that already looked and found nothing.
+        assert!(strips.take_reservation(token, "main").is_some());
+        assert!(registry.release_pending("doc-1", token));
+        let drained = registry.take_deliverable("doc-1");
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].files, vec![DOC.to_string()]);
+        assert_eq!(claims.owner(DOC).as_deref(), Some("doc-1"));
+    }
+
     #[test]
     fn a_target_destroyed_before_the_commit_voids_the_reservation_and_returns_nothing() {
         let (strips, claims, registry) = two_windows();
@@ -1695,7 +1744,10 @@ mod tests {
         assert_eq!(sweep.deliver[0].target, "doc-1");
         assert!(sweep.returned.is_empty());
         assert_eq!(claims.owner(DOC).as_deref(), Some("doc-1"));
-        assert_eq!(registry.take_pending("doc-1").len(), 1);
+        // Finished for it INCLUDES the release the commit would have done:
+        // an entry left reserved is one no drain can ever take, and the
+        // window that owns the document would never open it.
+        assert_eq!(registry.take_deliverable("doc-1").len(), 1);
         // The reservation goes with the window that made it, so no later
         // destruction can void a handover nobody is waiting on.
         assert_eq!(strips.take_reservation(token, "main"), None);

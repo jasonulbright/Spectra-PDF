@@ -2405,8 +2405,17 @@ function AppContent(): React.ReactElement {
     // reorder made in the seconds before Exit can still be behind an in-flight
     // publish, and the restored session would then arrange this window's tabs
     // the way they were before the user moved them. Flushed here, ahead of the
-    // seal, because a post-seal publish is correctly ignored.
-    await flushTabOrder();
+    // seal, because a post-seal publish is correctly ignored. (Every OTHER
+    // window flushes in the quit's own prepare round, which also precedes the
+    // capture.)
+    //
+    // An order that did not land is not flushed: exiting on it would record an
+    // arrangement this window has already superseded, so the exit is called off
+    // the same way an unanswered peer calls it off.
+    if (!(await flushTabOrder())) {
+      await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
+      return;
+    }
     // Every other window runs its own close flow and closes itself; whichever
     // window closes last exits the process. A window that cancels keeps both
     // itself and the app, which is what a cancel means.
@@ -2423,7 +2432,13 @@ function AppContent(): React.ReactElement {
       await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
       return;
     }
-    await app.confirmClose();
+    // The last window out captures the session on its way down. A capture that
+    // did not reach disk leaves this window standing rather than exiting with
+    // an older run's record on the file — said out loud for the same reason the
+    // abort above is.
+    if (!(await app.confirmClose())) {
+      await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
+    }
   }, [state.files, isFileDirty, showConfirm, commitOrAbort, showNotice]);
 
   // Hand a document to another window. A hand-off MOVES: the document leaves
@@ -2726,6 +2741,36 @@ function AppContent(): React.ReactElement {
   const pageDirtyRef = useRef(state.pageDirtyPaths);
   pageDirtyRef.current = state.pageDirtyPaths;
 
+  // Close this window, and say so when it did not close.
+  //
+  // The last window out captures the session on its way down, and a capture
+  // that did not reach disk calls the teardown off: the file still holds the
+  // previous run's record, and destroying the window would exit having thrown
+  // this session away with nothing left standing to capture it from. Silence
+  // there reads as a dead close button.
+  const closeOrReport = useCallback(
+    async (minimizeToTray: boolean): Promise<void> => {
+      if (await app.closeWindow(minimizeToTray)) return;
+      await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
+    },
+    [showNotice],
+  );
+
+  // The quit's PREPARE round: finish publishing this window's tab order and
+  // say so, before the record is captured.
+  //
+  // The capture used to run first, so only the initiating window's own flush
+  // was ever waited on and a reorder made HERE was sealed over whenever another
+  // window hit Exit. This is the same flush-then-acknowledge prologue the close
+  // request runs — nothing closes here, and a flush that did not land withholds
+  // the receipt, which aborts the quit inside its own bounded wait.
+  useEffect(() => {
+    const unlisten = app.onPrepareClose(async (quitId) => {
+      await sealBeforeClose(quitId, { flush: flushTabOrder, ack: app.quitAck });
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
+
   // Handle window close — Rust intercepts CloseRequested and emits app:beforeClose
   useEffect(() => {
     const unlisten = app.onBeforeClose(async (quitId) => {
@@ -2741,7 +2786,12 @@ function AppContent(): React.ReactElement {
       // minutes, and a receipt queued behind one reads to the quit as a dead
       // renderer. The flush is bounded by this window's own in-flight publish,
       // which is why it is the one thing allowed in front of it.
-      await sealBeforeClose(quitId, { flush: flushTabOrder, ack: app.quitAck });
+      //
+      // False means the order did not land. The receipt is withheld rather than
+      // given over a record this window has already superseded, and this window
+      // stays open — the quit aborts on its own bounded wait. A plain window ×
+      // is never refused this way: it has no quit to withhold from.
+      if (!(await sealBeforeClose(quitId, { flush: flushTabOrder, ack: app.quitAck }))) return;
       const minimizeToTray = getSettings().minimizeToTray === true;
       const dirtyFiles = Array.from(filesRef.current.values()).filter(
         (f) => f.dirty || pageDirtyRef.current.includes(f.path),
@@ -2751,7 +2801,7 @@ function AppContent(): React.ReactElement {
       // state, so a second window's × closes that window rather than hiding
       // the app behind the first window's unsaved work.
       if (dirtyFiles.length === 0) {
-        await app.closeWindow(minimizeToTray);
+        await closeOrReport(minimizeToTray);
         return;
       }
       const names = dirtyFiles.map((f) => f.name).join(', ');
@@ -2780,10 +2830,10 @@ function AppContent(): React.ReactElement {
           throw e;
         }
       }
-      await app.closeWindow(minimizeToTray);
+      await closeOrReport(minimizeToTray);
     });
     return () => { unlisten.then((fn) => fn()); };
-  }, [showConfirm]);
+  }, [showConfirm, closeOrReport]);
 
   // Leaving doc-tab-land commits pending page edits (the "in-memory edits
   // exist only while a document tab is focused" invariant — the Tools panels

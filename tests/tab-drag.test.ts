@@ -634,15 +634,87 @@ describe('serial publisher', () => {
     publisher.post(1);
     const done = publisher.flush();
     (fail as unknown as (reason: Error) => void)(new Error('no window'));
-    // A window that cannot answer must not hold the quit open.
-    await done;
+    // A window that cannot answer must not hold the quit open — and must not
+    // report the order as delivered either.
+    expect(await done).toBe(false);
+  });
+
+  // The defect: `then(drain, drain)` treated a rejection exactly like a
+  // success, so the flush resolved and the caller acknowledged a quit whose
+  // seal then took an order the far side never received.
+  it('reports a rejected publish as an order that did not land', async () => {
+    const sent: number[] = [];
+    const publisher = createSerialPublisher<number>((value) => {
+      sent.push(value);
+      return Promise.reject(new Error('no window'));
+    });
+    publisher.post(1);
+    await Promise.resolve();
+    // One retry, then the honest answer.
+    expect(await publisher.flush()).toBe(false);
+    expect(sent).toEqual([1, 1]);
+    // And it stays false: the retry is per posted value, not per flush, so a
+    // second flush cannot keep re-sending a value the far side will not take.
+    expect(await publisher.flush()).toBe(false);
+    expect(sent).toEqual([1, 1]);
+  });
+
+  it('retries once and reports the order landed when the retry succeeds', async () => {
+    const sent: number[] = [];
+    const publisher = createSerialPublisher<number>((value) => {
+      sent.push(value);
+      // The failure this path meets is a transient refusal of the command
+      // channel; reporting it as lost would abort an Exit the user must repeat.
+      return sent.length === 1 ? Promise.reject(new Error('busy')) : Promise.resolve();
+    });
+    publisher.post(7);
+    await Promise.resolve();
+    expect(await publisher.flush()).toBe(true);
+    expect(sent).toEqual([7, 7]);
+  });
+
+  it('reports the newest value, not an older one that happened to succeed', async () => {
+    const sent: number[] = [];
+    const settle: Array<() => void> = [];
+    const reject: Array<() => void> = [];
+    const publisher = createSerialPublisher<number>((value) => {
+      sent.push(value);
+      return new Promise<void>((resolve, fail) => {
+        settle.push(() => resolve());
+        reject.push(() => fail(new Error('no window')));
+      });
+    });
+    publisher.post(1);
+    publisher.post(2);
+    const done = publisher.flush();
+    // The first publish lands; the second — the one the far side would have to
+    // hold for this flush to mean anything — does not. Reporting true off the
+    // first would be reporting that a superseded order arrived.
+    settle[0]();
+    await Promise.resolve();
+    expect(sent).toEqual([1, 2]);
+    reject[1]();
+    expect(await done).toBe(false);
+  });
+
+  it('reports a landed order once nothing is outstanding', async () => {
+    const { send, sent, settle } = deferred();
+    const publisher = createSerialPublisher(send);
+    // An idle publisher that has never posted has lost nothing.
+    expect(await publisher.flush()).toBe(true);
+    publisher.post(1);
+    settle[0]();
+    expect(await publisher.flush()).toBe(true);
+    expect(sent).toEqual([1]);
   });
 });
 
 describe('the tab order flush', () => {
   it('is a no-op for a window whose strip never registered one', async () => {
     setTabOrderChannel(null);
-    await flushTabOrder();
+    // Nothing published means nothing lost: a window with no strip must not
+    // withhold a receipt and abort the quit.
+    expect(await flushTabOrder()).toBe(true);
   });
 
   it('drains the strip publisher the exit path cannot reach itself', async () => {
