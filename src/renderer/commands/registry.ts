@@ -74,6 +74,21 @@ export function hasSelection(state: AppState): boolean {
   return state.ui.selectedPageIds.size > 0;
 }
 
+/** The FILES a page selection touches, deduplicated in workspace order.
+ *
+ * A selection is a set of page ids and a page id says nothing about which
+ * document owns it, so the signed-document gate — which decides per file,
+ * against that file's own policy — needs the owning paths resolved first.
+ * Exported because the resolution is the testable part; the dispatch is not. */
+export function selectedPagePaths(state: AppState): string[] {
+  const paths: string[] = [];
+  for (const doc of state.workspace.documents) {
+    if (paths.includes(doc.path)) continue;
+    if (doc.pages.some((p) => state.ui.selectedPageIds.has(p.id))) paths.push(doc.path);
+  }
+  return paths;
+}
+
 /** The tab-bearing files' PATHS. Named apart from the selector's `tabFiles`
  * (which returns the files themselves) on purpose: two exported functions with
  * the same name and different shapes is how an importer picks the wrong one. */
@@ -886,10 +901,20 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) => ctx.app !== null,
     run: (ctx) => void ctx.app!.combineFiles(),
   },
+  // The three page-tier selection commands take the signed-document gate
+  // BEFORE they dispatch: the page tier's write is the commit's, so a
+  // dispatch already made is an edit the user would have to undo rather than
+  // one they were asked about. Each is gated on `app` because the gate lives
+  // there — a command that cannot consult it must be unavailable, not
+  // silently ungated.
   'document.deleteSelection': {
     title: 'Delete Selected Pages',
-    when: (ctx) => hasSelection(ctx.state),
-    run: ({ state, dispatch }) => {
+    when: (ctx) => hasSelection(ctx.state) && ctx.app !== null,
+    run: async ({ state, dispatch, app }) => {
+      // A delete rewrites the page TREE — `page-structure`, which no
+      // certification permits. A selection can span files, so the gate is
+      // asked about every file it touches.
+      if (!(await app!.confirmPageEdit(selectedPagePaths(state), 'page-structure'))) return;
       // Same pair the keyboard path has always run: batched delete, then clear —
       // unconditionally, so a reducer-rejected batch (stale id / would empty
       // a file) still drops the hazardous stale selection.
@@ -899,15 +924,22 @@ export const COMMANDS: Record<CommandId, Command> = {
   },
   'document.rotateSelectionCW': {
     title: 'Rotate Selection Right 90°',
-    when: (ctx) => hasSelection(ctx.state),
-    run: ({ state, dispatch }) =>
-      dispatch({ type: 'ROTATE_PAGE_REFS', pageIds: [...state.ui.selectedPageIds], delta: 90 }),
+    when: (ctx) => hasSelection(ctx.state) && ctx.app !== null,
+    run: async ({ state, dispatch, app }) => {
+      // `page-keys`: /Rotate is a single-key appendable change, so on an
+      // approval-signed document this raises no dialog and the signature
+      // survives the commit.
+      if (!(await app!.confirmPageEdit(selectedPagePaths(state), 'page-keys'))) return;
+      dispatch({ type: 'ROTATE_PAGE_REFS', pageIds: [...state.ui.selectedPageIds], delta: 90 });
+    },
   },
   'document.rotateSelectionCCW': {
     title: 'Rotate Selection Left 90°',
-    when: (ctx) => hasSelection(ctx.state),
-    run: ({ state, dispatch }) =>
-      dispatch({ type: 'ROTATE_PAGE_REFS', pageIds: [...state.ui.selectedPageIds], delta: 270 }),
+    when: (ctx) => hasSelection(ctx.state) && ctx.app !== null,
+    run: async ({ state, dispatch, app }) => {
+      if (!(await app!.confirmPageEdit(selectedPagePaths(state), 'page-keys'))) return;
+      dispatch({ type: 'ROTATE_PAGE_REFS', pageIds: [...state.ui.selectedPageIds], delta: 270 });
+    },
   },
   'document.applyPageEdits': {
     title: 'Apply Page Edits',

@@ -200,6 +200,19 @@ export interface AppCommandHandlers {
     appearance: Record<string, unknown>,
   ): Promise<boolean>;
   removeLink(path: string, page: number, index: number): Promise<boolean>;
+  /** The page tier's signed-document gate, taken BEFORE the gesture.
+   *
+   * Delta-aware rather than a bare signed check: the page tier's write
+   * happens at commit time, where the incremental append either carries the
+   * change (rotate and the page boundaries on an approval-signed document,
+   * and the page tree with it) or refuses and the rebuild lands. A delta that
+   * survives raises no dialog at all; one that does not is decided exactly as
+   * a whole-file structural edit is. Resolves false when the edit is refused
+   * or the user declined, and the gesture must then dispatch nothing. */
+  confirmPageEdit(
+    paths: readonly string[],
+    delta: import('../lib/page-edit-gate').PageDelta,
+  ): Promise<boolean>;
 }
 
 /**

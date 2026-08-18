@@ -1,5 +1,7 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import type { NewFieldSpec } from '../lib/form-authoring';
+import type { EDIT_DECLINED } from '../lib/edit-text';
+import type { OpMethod } from '../lib/op-edit-class';
 import type { EditClass } from '../lib/signatures';
 import type { EngineResult } from './useEngine';
 
@@ -14,12 +16,22 @@ import type { EngineResult } from './useEngine';
  * reports what it could not do — a partial conversion, a count of what changed
  * — has no other way to reach the surface that must say so, and a caller
  * holding only `void` can state only what it asked for. `null` means the path
- * named no open file, so no operation ran. */
+ * named no open file, so no operation ran.
+ *
+ * `EDIT_DECLINED` means the SIGNED-DOCUMENT decision stopped it: this flow
+ * takes that decision itself, from the op's own class (`lib/op-edit-class`),
+ * so no surface has to remember to ask and none can forget. Distinct from
+ * `null` and from a throw because a caller showing "Applying…" has to know
+ * which of the three happened — a silent return is visually indistinguishable
+ * from success.
+ *
+ * `method` is the roster's key type, not `string`: an operation added without
+ * an edit class does not compile. */
 export type PerformOperation = (
   filePath: string,
-  method: string,
+  method: OpMethod,
   params: Record<string, unknown>,
-) => Promise<EngineResult | null>;
+) => Promise<EngineResult | null | typeof EDIT_DECLINED>;
 
 /** Author N form fields as ONE undoable act — App's `handleAddFormFields`, the
  * same instance the canvas placement card calls. Field creation is renderer-side

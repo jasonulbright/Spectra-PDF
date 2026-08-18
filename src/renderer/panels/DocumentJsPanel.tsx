@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerDocumentJsHandler } from '../testHarness';
@@ -123,10 +124,14 @@ export function DocumentJsPanel(): React.ReactElement {
     setError(null);
     setStatus(tChrome('panel.docjs.saving'));
     try {
-      await performOperation(activeFile.path, 'set_document_js', {
+      const r = await performOperation(activeFile.path, 'set_document_js', {
         scripts: scripts.map((s) => ({ name: s.name.trim(), js: s.js })),
       });
       setStatus('');
+      // A declined signed-document edit wrote nothing, and re-reading would
+      // reseed the editor from the file — discarding the draft the user was
+      // asked about and chose to keep.
+      if (r === EDIT_DECLINED) return;
       await load(); // re-read the now-updated working copy → new baseline
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));

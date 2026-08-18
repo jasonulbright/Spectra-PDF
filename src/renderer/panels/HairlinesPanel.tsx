@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
@@ -97,11 +98,15 @@ export function HairlinesPanel(): React.ReactElement {
     setBusy(true);
     setStatus(tChrome('panel.hairlines.fixing'));
     try {
-      await performOperation(filePath, 'fix_hairlines', {
+      const r = await performOperation(filePath, 'fix_hairlines', {
         threshold_pt: threshold,
         replacement_pt: replacement,
         include_annotations: includeAnnotations,
       });
+      if (r === EDIT_DECLINED) {
+        setStatus('');
+        return;
+      }
       setStatus(tChrome('panel.hairlines.fixed', { width: replacement }));
     } catch (e: unknown) {
       setStatus(tChrome('panel.common.error', {

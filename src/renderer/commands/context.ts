@@ -36,6 +36,23 @@ export function registerCanvasServices(services: CanvasServices | null): void {
   drainPendingFind(services, tab && isDocTab(tab) ? tab.doc : null);
 }
 
+/**
+ * The page tier's signed-document gate, for the surfaces that need it outside
+ * a command — the page context menu, which the board and the Pages panel both
+ * build from one definition.
+ *
+ * Fail-closed when App has not registered yet: a gate that cannot be
+ * consulted has not said yes. (Unreachable from user input — the registration
+ * effect runs before any surface that could raise the menu is mounted — which
+ * is why refusing costs nothing and assuming would cost a signature.)
+ */
+export function confirmPageEditNow(
+  paths: readonly string[],
+  delta: import('../lib/page-edit-gate').PageDelta,
+): Promise<boolean> {
+  return appHandlers ? appHandlers.confirmPageEdit(paths, delta) : Promise.resolve(false);
+}
+
 /** The board's live canvas services (camera + find), or null when the board
  * isn't mounted. Nav-pane panels use it to drive centerOn navigation. */
 export function getCanvasServices(): CanvasServices | null {

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import { app } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
@@ -85,7 +86,7 @@ export function PrinterMarksPanel(): React.ReactElement {
     setBusy(true);
     setStatus(tChrome('panel.printerMarks.adding'));
     try {
-      await performOperation(filePath, 'add_printer_marks', {
+      const r = await performOperation(filePath, 'add_printer_marks', {
         marks: kinds,
         style,
         weight,
@@ -93,6 +94,10 @@ export function PrinterMarksPanel(): React.ReactElement {
         length,
         font_dir: await app.getEditFontPath(),
       });
+      if (r === EDIT_DECLINED) {
+        setStatus('');
+        return;
+      }
       setStatus(tChrome('panel.printerMarks.added', { growth: markGrowth(offset, length) }));
     } catch (e: unknown) {
       setStatus(tChrome('panel.common.error', {
@@ -108,7 +113,11 @@ export function PrinterMarksPanel(): React.ReactElement {
     setBusy(true);
     setStatus(tChrome('panel.printerMarks.removing'));
     try {
-      await performOperation(filePath, 'remove_printer_marks', {});
+      const r = await performOperation(filePath, 'remove_printer_marks', {});
+      if (r === EDIT_DECLINED) {
+        setStatus('');
+        return;
+      }
       setStatus(tChrome('panel.printerMarks.removed'));
     } catch (e: unknown) {
       setStatus(tChrome('panel.common.error', {
