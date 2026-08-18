@@ -21,6 +21,7 @@ from separation_builders import (
     cmyk_spot_pdf,
     spot_in_every_paint_pdf,
     two_spots_pdf,
+    unconvertible_shading_pdf,
 )
 
 np = pytest.importorskip("numpy")
@@ -42,6 +43,18 @@ def _render_rgb(src, dest, gs_path):
 def _plate_names(src, gs_path):
     result = render_separations(src, page=1, dpi=36, gs_path=gs_path, reuse=False)
     return sorted(p["name"] for p in result["plates"])
+
+
+def _shading_bytes(path):
+    """Each first-page shading serialised, keyed by its resource name.
+
+    The fixture's unconvertible shadings are built out of DIRECT objects, so
+    the serialisation carries the whole shading and a difference is a content
+    difference rather than a renumbering.
+    """
+    with pikepdf.open(path) as pdf:
+        table = pdf.pages[0].obj.Resources.Shading
+        return {str(key): bytes(table[key].unparse()) for key in list(table.keys())}
 
 
 def _colorant_names(path):
@@ -196,6 +209,9 @@ class TestSpotToProcess:
         assert result["paints"] >= 2
         assert result["images"] == 1
         assert result["shadings"] == 1
+        # The control on the report: every route on this page converts, so a
+        # whole conversion says so by naming nothing.
+        assert result["skipped"] == []
         with pikepdf.open(out) as pdf:
             page = pdf.pages[0]
             content = bytes(page.Contents.read_bytes())
@@ -243,6 +259,67 @@ class TestSpotToProcess:
         src = spot_in_every_paint_pdf(tmp_path / "spot.pdf")
         with pytest.raises(ValueError, match="at least one ink"):
             spot_to_process(src, str(tmp_path / "o.pdf"), [])
+
+
+class TestShadingsTheCompositionCannotDescribe:
+    """Composing the tint transform onto a shading's function samples ONE
+    input. Where that does not describe the shading's colour, the shading is
+    left exactly as it was and named — the alternative measured here is a
+    conversion that invents colour and says nothing.
+    """
+
+    def test_a_function_based_shading_survives_byte_identical(self, tmp_path):
+        src = unconvertible_shading_pdf(tmp_path / "planar.pdf")
+        out = str(tmp_path / "process.pdf")
+        spot_to_process(src, out, ["Warm Red"])
+        assert _shading_bytes(out)["/ShPlanar"] == _shading_bytes(src)["/ShPlanar"]
+
+    def test_a_background_carrier_survives_byte_identical(self, tmp_path):
+        # Converting it would leave a one-component /Background in a
+        # four-component space: components naming a colorant that is gone.
+        src = unconvertible_shading_pdf(tmp_path / "background.pdf")
+        out = str(tmp_path / "process.pdf")
+        spot_to_process(src, out, ["Warm Red"])
+        assert _shading_bytes(out)["/ShBg"] == _shading_bytes(src)["/ShBg"]
+
+    def test_both_are_named_in_the_report_with_their_colorant(self, tmp_path):
+        src = unconvertible_shading_pdf(tmp_path / "both.pdf")
+        result = spot_to_process(src, str(tmp_path / "process.pdf"), ["Warm Red"])
+        assert [entry["colorants"] for entry in result["skipped"]] == [
+            ["Warm Red"], ["Warm Red"],
+        ]
+        assert sorted(entry["reason"] for entry in result["skipped"]) == sorted([
+            "the shading maps a point in the plane, not one parametric value",
+            "the shading states a background colour in the colorant's own space",
+        ])
+        assert len({entry["shading"] for entry in result["skipped"]}) == 2
+
+    def test_the_convertible_shading_beside_them_still_converts(self, tmp_path):
+        # The partial-success shape: one gradient that cannot convert costs
+        # that gradient and nothing else.
+        src = unconvertible_shading_pdf(tmp_path / "partial.pdf")
+        out = str(tmp_path / "process.pdf")
+        result = spot_to_process(src, out, ["Warm Red"])
+        assert result["shadings"] == 1
+        assert result["paints"] >= 1
+        with pikepdf.open(out) as pdf:
+            table = pdf.pages[0].obj.Resources.Shading
+            assert str(table["/ShOk"].ColorSpace) == "/DeviceCMYK"
+            assert str(table["/ShPlanar"].ColorSpace[0]) == "/Separation"
+            assert str(table["/ShBg"].ColorSpace[0]) == "/Separation"
+
+    def test_the_colorant_stays_live_in_what_was_skipped(self, tmp_path):
+        # The ink is not reported converted out of a document that still
+        # paints with it.
+        src = unconvertible_shading_pdf(tmp_path / "live.pdf")
+        out = str(tmp_path / "process.pdf")
+        spot_to_process(src, out, ["Warm Red"])
+        with pikepdf.open(out) as pdf:
+            table = pdf.pages[0].obj.Resources.Shading
+            names = {str(table[key].ColorSpace[1]).lstrip("/")
+                     for key in list(table.keys())
+                     if isinstance(table[key].ColorSpace, pikepdf.Array)}
+        assert names == {"Warm Red"}
 
 
 class TestInkSettings:

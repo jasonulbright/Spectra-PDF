@@ -468,6 +468,64 @@ def spot_shading_pdf(path, spot: str = "PANTONE 185 C",
     return str(path)
 
 
+def _direct_separation_space(ink: str, alternate_cmyk):
+    """`separation_space` with nothing made indirect.
+
+    A shading built out of direct objects serialises whole, so a byte compare
+    of it reads a content change rather than a renumbering.
+    """
+    return Array([Name.Separation, Name("/" + ink), Name.DeviceCMYK, Dictionary(
+        FunctionType=2, Domain=Array([0, 1]), N=1,
+        C0=Array([0, 0, 0, 0]), C1=Array(list(alternate_cmyk)),
+        Range=Array([0, 1, 0, 1, 0, 1, 0, 1]),
+    )])
+
+
+def unconvertible_shading_pdf(path, spot: str = "Warm Red"):
+    """One colorant painted by three gradients: one the tint transform composes
+    onto, one function-based, and one carrying a `/Background`.
+
+    The function-based shading's own function takes ONE input, so a composition
+    driven by that input SUCCEEDS and yields colour the shading does not have —
+    the wrongness the guard exists to stop. A function the composition could
+    not evaluate would be left alone for a different reason and would prove
+    nothing about the guard.
+    """
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(400, 400))
+    space = separation_space(pdf, spot, (0.0, 0.9, 0.8, 0.0))
+
+    convertible = pdf.make_indirect(Dictionary(
+        ShadingType=2, ColorSpace=space, Coords=Array([10, 0, 390, 0]),
+        Function=Dictionary(FunctionType=2, Domain=Array([0, 1]), N=1,
+                            C0=Array([0.2]), C1=Array([1]), Range=Array([0, 1])),
+        Extend=Array([True, True])))
+    planar = Dictionary(
+        ShadingType=1, ColorSpace=_direct_separation_space(spot, (0.0, 0.9, 0.8, 0.0)),
+        Domain=Array([0, 1, 0, 1]),
+        Function=Dictionary(FunctionType=2, Domain=Array([0, 1, 0, 1]), N=1,
+                            C0=Array([0.1]), C1=Array([1]), Range=Array([0, 1])))
+    background = Dictionary(
+        ShadingType=2, ColorSpace=_direct_separation_space(spot, (0.0, 0.9, 0.8, 0.0)),
+        Coords=Array([10, 0, 390, 0]), Background=Array([0.4]),
+        Function=Dictionary(FunctionType=2, Domain=Array([0, 1]), N=1,
+                            C0=Array([0.2]), C1=Array([1]), Range=Array([0, 1])),
+        Extend=Array([False, False]))
+
+    page.Resources = Dictionary(
+        ColorSpace=Dictionary(CS0=space),
+        Shading=Dictionary(ShOk=convertible, ShPlanar=planar, ShBg=background))
+    page.Contents = pdf.make_stream(b"\n".join([
+        b"/CS0 cs 1 scn 10 340 380 50 re f",
+        b"q 10 250 380 60 re W n /ShOk sh Q",
+        b"q 10 160 380 60 re W n /ShPlanar sh Q",
+        b"q 10 70 380 60 re W n /ShBg sh Q",
+    ]))
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
 def rgb_alternate_shading_pdf(path, spot: str = "RGB Spot"):
     """A GRADIENT in a spot whose alternate is DeviceRGB.
 
