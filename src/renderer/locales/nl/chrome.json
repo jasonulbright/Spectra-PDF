@@ -2999,6 +2999,7 @@
   "panel.a11y.detail.same_label_different_targets": "Dezelfde linktekst leidt naar {{count}} verschillende doelen: {{targets}}.",
   "panel.a11y.detail.script_site": "Een {{kind}}-script met de naam {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "Een script in dit document kon niet worden gelezen, dus deze controle heeft niet gezien wat het uitvoert.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{parent}} op pagina {{page}} bevat zijn onderliggende tags niet in de volgorde die de norm ervoor voorschrijft.",
   "panel.a11y.detail.structure_nesting_unreadable": "De naamruimte van een structuurelement kon niet worden gelezen: {{reason}}. De nesting ervan is niet gecontroleerd.",
   "panel.a11y.detail.structure_nesting_violation": "{{child}} staat op pagina {{page}} in {{parent}}, waar de norm dat niet toestaat.",
   "panel.a11y.detail.structure_tree_empty": "De structuurboom van het document bevat geen elementen, dus er is daarin niets getagd.",

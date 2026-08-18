@@ -2933,6 +2933,7 @@
   "panel.a11y.detail.same_label_different_targets": "같은 링크 텍스트가 서로 다른 {{count}}개 대상으로 이어집니다: {{targets}}.",
   "panel.a11y.detail.script_site": "{{name}}(이)라는 이름의 {{kind}} 스크립트입니다.",
   "panel.a11y.detail.scripts_unreadable": "이 문서의 스크립트를 읽지 못해 이 검사는 그것이 무엇을 실행하는지 보지 못했습니다.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{page}}쪽의 {{parent}}이(가) 하위 태그를 표준이 요구하는 순서로 담고 있지 않습니다.",
   "panel.a11y.detail.structure_nesting_unreadable": "구조 요소의 이름 공간을 읽지 못했습니다: {{reason}}. 그 중첩은 검사하지 않았습니다.",
   "panel.a11y.detail.structure_nesting_violation": "{{page}}쪽의 {{parent}} 안에 {{child}}이(가) 있으며, 표준은 이를 허용하지 않습니다.",
   "panel.a11y.detail.structure_tree_empty": "문서의 구조 트리에 요소가 없어 그 안에 태그가 붙은 것이 없습니다.",

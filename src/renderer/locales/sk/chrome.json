@@ -3131,6 +3131,7 @@
   "panel.a11y.detail.same_label_different_targets": "Ten istý text odkazu vedie k {{count}} rôznym cieľom: {{targets}}.",
   "panel.a11y.detail.script_site": "Skript {{kind}} s názvom {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "Skript v tomto dokumente sa nepodarilo prečítať, takže táto kontrola nevidela, čo spúšťa.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{parent}} na strane {{page}} neobsahuje svoje podradené značky v poradí, ktoré preň norma vyžaduje.",
   "panel.a11y.detail.structure_nesting_unreadable": "Menný priestor prvku štruktúry sa nepodarilo prečítať: {{reason}}. Jeho vnorenie sa nekontrolovalo.",
   "panel.a11y.detail.structure_nesting_violation": "{{child}} je vnútri {{parent}} na strane {{page}}, kde to norma nedovoľuje.",
   "panel.a11y.detail.structure_tree_empty": "Strom štruktúry dokumentu neobsahuje žiadne prvky, takže v ňom nie je nič označkované.",

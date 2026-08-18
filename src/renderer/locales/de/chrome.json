@@ -2999,6 +2999,7 @@
   "panel.a11y.detail.same_label_different_targets": "Derselbe Linktext führt zu {{count}} verschiedenen Zielen: {{targets}}.",
   "panel.a11y.detail.script_site": "Ein {{kind}}-Skript namens {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "Ein Skript in diesem Dokument war nicht lesbar, deshalb hat diese Prüfung nicht gesehen, was es ausführt.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{parent}} auf Seite {{page}} enthält seine untergeordneten Tags nicht in der Reihenfolge, die die Norm dafür verlangt.",
   "panel.a11y.detail.structure_nesting_unreadable": "Der Namensraum eines Strukturelements war nicht lesbar: {{reason}}. Seine Verschachtelung wurde nicht geprüft.",
   "panel.a11y.detail.structure_nesting_violation": "{{child}} steht auf Seite {{page}} in {{parent}}, wo die Norm es nicht erlaubt.",
   "panel.a11y.detail.structure_tree_empty": "Der Strukturbaum des Dokuments enthält keine Elemente, deshalb ist darin nichts getaggt.",
