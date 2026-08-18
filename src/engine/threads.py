@@ -31,7 +31,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
-from engine.inplace import finish_staged, is_same_file, staging_target
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 
 MAX_THREADS = 512
@@ -236,12 +236,13 @@ def set_threads(file: str, output: str, threads) -> dict:
             for page_no, objs in per_page.items():
                 pdf.pages[page_no - 1].obj["/B"] = Array(objs)
 
+        # The Pdf is closed inside the block: the destination cannot be
+        # replaced while it is held open.
         if same_file:
-            staged = staging_target(output_path)
-            save_pdf(pdf, staged)
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, staged)
+                pdf.close()
         else:
             save_pdf(pdf, output_path)
 
-    if same_file:
-        finish_staged(staged, output_path)
     return {"output": str(output_path), "count": len(cleaned), "beads": bead_total}

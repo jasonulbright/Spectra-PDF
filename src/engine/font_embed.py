@@ -43,7 +43,7 @@ from pikepdf import Array, Dictionary, Name
 
 from engine.font_embedding import font_embedded
 from engine.font_inventory import _descendants, walk_document_fonts
-from engine.inplace import finish_staged, is_same_file, staging_target
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_fonts import (
     _declared_simple_widths,
     _simple_encoding_map,
@@ -545,16 +545,19 @@ def embed_missing_fonts(file: str, output: str, sources=("system",),
             # rather than handed an empty success.
             raise ValueError(refused[0]["reason"])
 
-        staged = None
         if embedded:
             save_kwargs: dict = {}
             if raised:
                 save_kwargs["min_version"] = max(raised)
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            staged = staging_target(output_path) if same_file else None
-            save_pdf(pdf, staged or output_path, **save_kwargs)
-    if staged is not None:
-        finish_staged(staged, output_path)
+            # The Pdf is closed inside the block: the destination cannot be
+            # replaced while it is held open.
+            if same_file:
+                with staged_write(output_path) as staged:
+                    save_pdf(pdf, staged, **save_kwargs)
+                    pdf.close()
+            else:
+                save_pdf(pdf, output_path, **save_kwargs)
     if not embedded and not same_file:
         # Every font already carried its program, and the caller asked for a
         # copy: an output that does not exist would report a success that

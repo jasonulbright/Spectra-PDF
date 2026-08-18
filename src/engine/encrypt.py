@@ -4,8 +4,22 @@ from pathlib import Path
 
 import pikepdf
 
-from .inplace import finish_staged, is_same_file, staging_target
+from .inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
+
+
+def _save(pdf, file: str, output_path: Path, encryption=None) -> None:
+    """A same-file write stages beside the document and swaps the directory
+    entry, so a write that dies leaves the input whole. The Pdf is closed
+    inside the block because the destination cannot be replaced while it is
+    held open."""
+    kwargs = {} if encryption is None else {"encryption": encryption}
+    if is_same_file(file, str(output_path)):
+        with staged_write(output_path) as staged:
+            save_pdf(pdf, staged, **kwargs)
+            pdf.close()
+    else:
+        save_pdf(pdf, output_path, **kwargs)
 
 
 # User-facing permission categories → pikepdf.Permissions flags. Accessibility
@@ -60,13 +74,7 @@ def encrypt(
 
     with pikepdf.open(file) as pdf:
         output_path = Path(output)
-        # pikepdf cannot save over its own open input (engine/inplace.py).
-        if is_same_file(file, output):
-            staged = staging_target(output_path)
-            save_pdf(pdf, staged, encryption=pikepdf.Encryption(**enc_kwargs))
-            finish_staged(staged, output_path)
-        else:
-            save_pdf(pdf, output_path, encryption=pikepdf.Encryption(**enc_kwargs))
+        _save(pdf, file, output_path, encryption=pikepdf.Encryption(**enc_kwargs))
 
     return {
         "output": str(output_path),
@@ -132,12 +140,7 @@ def grant_accessibility_permission(file: str, output: str) -> dict:
         if revision < 4:
             enc_kwargs["metadata"] = False
         encryption = pikepdf.Encryption(**enc_kwargs)
-        if is_same_file(file, output):
-            staged = staging_target(output_path)
-            save_pdf(pdf, staged, encryption=encryption)
-            finish_staged(staged, output_path)
-        else:
-            save_pdf(pdf, output_path, encryption=encryption)
+        _save(pdf, file, output_path, encryption=encryption)
     return {"output": str(output_path), "revision": revision}
 
 
@@ -151,13 +154,7 @@ def decrypt(file: str, output: str, password: str = "") -> dict:
     """
     with pikepdf.open(file, password=password) as pdf:
         output_path = Path(output)
-        # pikepdf cannot save over its own open input (engine/inplace.py).
-        if is_same_file(file, output):
-            staged = staging_target(output_path)
-            save_pdf(pdf, staged)
-            finish_staged(staged, output_path)
-        else:
-            save_pdf(pdf, output_path)
+        _save(pdf, file, output_path)
 
     return {
         "output": str(output_path),

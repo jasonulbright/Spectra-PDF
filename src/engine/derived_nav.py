@@ -40,7 +40,7 @@ from pathlib import Path
 import pikepdf
 
 from engine.autotag import autotag
-from engine.inplace import finish_staged, is_same_file, staging_target
+from engine.inplace import is_same_file, staged_write
 from engine.outline import _count, get_outline, set_outline
 from engine.redact import IDENTITY, _resolve_resources
 from engine.struct_tree import _is_elem, _kids, _page_map, _page_no
@@ -460,9 +460,8 @@ def outline_from_structure(
         # Tag INTO the output and carry on from there, so the tags the
         # headings were read from are the tags the saved file carries.
         if same_file:
-            staged = staging_target(output_path)
-            autotag(file, str(staged))
-            finish_staged(staged, output_path)
+            with staged_write(output_path) as staged:
+                autotag(file, str(staged))
         else:
             autotag(file, str(output_path))
         working = str(output_path)

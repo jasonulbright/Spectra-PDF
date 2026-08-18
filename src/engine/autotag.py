@@ -41,7 +41,7 @@ from pathlib import Path
 
 import pikepdf
 
-from engine.inplace import finish_staged, is_same_file, staging_target
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 
 _H1_RATIO = 1.6
@@ -356,14 +356,14 @@ def autotag(file: str, output: str) -> dict:
         pdf.Root[pikepdf.Name.StructTreeRoot] = root
         pdf.Root[pikepdf.Name.MarkInfo] = pikepdf.Dictionary(Marked=True)
 
+        # The Pdf is closed inside the block: the destination cannot be
+        # replaced while it is held open.
         if same_file:
-            staged = staging_target(output_path)
-            save_pdf(pdf, staged)
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, staged)
+                pdf.close()
         else:
             save_pdf(pdf, output_path)
-
-    if same_file:
-        finish_staged(staged, output_path)
 
     return {
         "pages": next_key,
