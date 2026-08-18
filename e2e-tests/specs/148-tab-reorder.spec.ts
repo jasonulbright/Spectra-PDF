@@ -510,4 +510,80 @@ describe('tab reorder', () => {
     await pressGlobalKey('z', { ctrl: true });
     expect((await labelOfCurrentWindow()).startsWith('doc-')).toBe(true);
   });
+
+  it('a reorder made in ANOTHER window is in the record the exit seals', async () => {
+    // The case above is the initiating window's own flush. This is the half it
+    // could not reach: the capture used to run before any peer was asked
+    // anything, so a reorder made in window B was sealed over whenever window A
+    // hit Exit — B only ever flushed when it heard the CLOSE request, which the
+    // seal already preceded.
+    //
+    // The quit is two rounds now with the capture between them, and this is
+    // what the first round is for: every peer finishes publishing what it has
+    // measured and says so, and only then is the record taken.
+    const peer = await browser.getWindowHandles();
+    expect(peer).toHaveLength(1);
+    const peerHandle = peer[0];
+
+    // Unsaved work in the peer, so the app is still up when the sealed record
+    // is read: the initiating window is clean and closes itself the moment its
+    // request is acknowledged.
+    await setView('canvas');
+    const pages = async (): Promise<string[]> =>
+      (await getWorkspacePageIds()).filter((id) => id.startsWith(alpha));
+    await browser.waitUntil(async () => (await pages()).length === 5, {
+      timeout: 30_000,
+      timeoutMsg: 'the peer document never indexed',
+    });
+    await selectCanvasPages([(await pages())[0]]);
+    await deleteSelectedCanvasPages();
+    await browser.waitUntil(async () => (await pages()).length === 4, {
+      timeout: 30_000,
+      timeoutMsg: 'the page delete never landed in the page tier',
+    });
+
+    // The window the Exit comes from. It holds nothing, so nothing stops it.
+    expect(await invokeAppCommand('window.newWindow')).toBe(true);
+    const handles = await waitForHandles(2);
+    const initiator = handles.find((h) => h !== peerHandle)!;
+    await browser.switchToWindow(initiator);
+    await waitForHarness(30_000);
+
+    // Back in the peer: reorder, and then leave. Nothing is awaited between the
+    // reorder and the Exit but the switch itself — the wait is the bug.
+    await browser.switchToWindow(peerHandle);
+    await setView('canvas');
+    const before = await tabPaths();
+    expect(before).toHaveLength(2);
+    const frame = await readFrame();
+    const toClientX = pastMidpoint(frame, 1);
+    await dragTabTo(before[0], toClientX, stripCssPoint(frame, toClientX));
+    await releaseDragAt(toClientX, stripCssPoint(frame, toClientX));
+    const arranged = [before[1], before[0]];
+    await waitForTabOrder(arranged, 'the peer reorder never landed');
+
+    await browser.switchToWindow(initiator);
+    expect(await invokeAppCommand('file.exit')).toBe(true);
+
+    // Off the initiating window before anything else is awaited: it closes
+    // itself, and a driver command against a closed handle is an error rather
+    // than a slow answer.
+    await browser.switchToWindow(peerHandle);
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, { timeout: 30_000 });
+    await waitForHandles(1);
+
+    // Read once, not polled: the record is frozen at the moment the exit was
+    // decided, so a later write cannot rescue an order that was not in it.
+    const sealed = readSession();
+    const held = sealed.find((w) => w.files.length === arranged.length);
+    expect(held).toBeDefined();
+    expect(lower(held!.files)).toEqual(lower(arranged));
+    expect(lower(held!.files)).not.toEqual(lower(before));
+
+    // Cancelled, so the app survives the spec.
+    await waitForDisplayedSelector(CONFIRM_CANCEL, { timeout: 15_000 });
+    await $(CONFIRM_CANCEL).click();
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, { timeout: 15_000, reverse: true });
+    await pressGlobalKey('z', { ctrl: true });
+  });
 });

@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { copyFileSync, existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
+  breakTabOrderPublish,
   deleteSelectedCanvasPages,
   getState,
   getWorkspacePageIds,
@@ -261,6 +262,61 @@ describe('cancelled exit', () => {
     await waitForSession(
       (w) => someWindowHolds(w, dirtyPdf) && someWindowHolds(w, laterPdf),
       'session writes never resumed after the cancelled exit',
+    );
+  });
+
+  it('an Exit no peer acknowledges is called off BEFORE anything is captured', async () => {
+    // The quit is two rounds with the capture strictly between them: every peer
+    // is asked to finish publishing what it has measured and to say so, and
+    // only once all of them have is the record taken and sealed. A peer that
+    // does not answer therefore aborts the quit with NOTHING captured and
+    // nothing sealed — which is the difference this case reads: the record goes
+    // on following the app afterwards.
+    //
+    // A peer that does not answer is the one shape this suite cannot produce by
+    // ordinary means — a renderer it can reach is a renderer that answers — so
+    // the seam sits where the failure is: this window's tab-order flush reports
+    // that the order did not land, and a window in that state withholds its
+    // receipt rather than acknowledging over an order the far side never got.
+    await breakTabOrderPublish();
+
+    // A second window to exit FROM: the prepare round goes to the peers, so the
+    // window that withholds must not be the one that asks.
+    expect(await invokeAppCommand('window.newWindow')).toBe(true);
+    const handles = await waitForHandles(2);
+    const initiator = handles.find((h) => h !== secondHandle)!;
+    await browser.switchToWindow(initiator);
+    await waitForHarness(30_000);
+
+    // With teeth: the record is describing BOTH windows right now, so a sealed
+    // record and a live one differ in what happens next.
+    await waitForSession((w) => w.length === 2, 'the second window was never recorded');
+
+    expect(await invokeAppCommand('file.exit')).toBe(true);
+    // Fail-closed and said out loud: the quit unsealed nothing because it
+    // captured nothing, and the user is told rather than watching Exit do
+    // nothing at all.
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, {
+      timeout: 30_000,
+      timeoutMsg: 'an Exit no peer acknowledged reported nothing',
+    });
+    expect(await $(CONFIRM_MESSAGE).getText()).toContain('nothing was closed');
+    await $('[data-testid="notice-ok"]').click();
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, { timeout: 15_000, reverse: true });
+
+    // Nothing closed.
+    expect(await browser.getWindowHandles()).toHaveLength(2);
+
+    // And the record was never frozen: this window's own destruction still
+    // writes it out, which a sealed file would have refused.
+    await browser.execute(() => {
+      void (window as any).__SPECTRA_TEST__.closeThisWindow();
+    });
+    await browser.switchToWindow(secondHandle);
+    await waitForHandles(1);
+    await waitForSession(
+      (w) => w.length === 1 && holds(w[0], dirtyPdf),
+      'the aborted exit left the session record sealed',
     );
   });
 });
