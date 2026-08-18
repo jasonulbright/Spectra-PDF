@@ -976,7 +976,8 @@ def _text_appearance(
         lines = [layout_value.replace("\n", " ")]
         y = (h - size * GLYPH_HEIGHT_EM) / 2 + size * HELVETICA_DESCENT_EM
 
-    parts = [b"/Tx BMC", b"q", f"1 1 {_fmt(w - 2)} {_fmt(h - 2)} re W n".encode("ascii"), b"BT"]
+    parts = [*_widget_chrome(widget, w, h), b"/Tx BMC", b"q",
+             f"1 1 {_fmt(w - 2)} {_fmt(h - 2)} re W n".encode("ascii"), b"BT"]
     parts.append(color.encode("ascii"))
     parts.append(f"/{font_name} {_fmt(size)} Tf".encode("ascii"))
     first = True
@@ -1076,7 +1077,8 @@ def _vertical_appearance(
     across = (
         l_top - TEXT_PAD - vt.cross_em * size / 2.0 + vt.cross_offset_em * size
     )
-    parts = [b"/Tx BMC", b"q", f"1 1 {_fmt(w - 2)} {_fmt(h - 2)} re W n".encode("ascii"), b"BT"]
+    parts = [*_widget_chrome(widget, w, h), b"/Tx BMC", b"q",
+             f"1 1 {_fmt(w - 2)} {_fmt(h - 2)} re W n".encode("ascii"), b"BT"]
     parts.append(color.encode("ascii"))
     parts.append(f"/TxV {_fmt(size)} Tf".encode("ascii"))
     for index, column in enumerate(columns):
@@ -1659,6 +1661,97 @@ def _top_index(field: _Field) -> int:
 
 def _fmt(v: float) -> str:
     return f"{v:.2f}".rstrip("0").rstrip(".") or "0"
+
+
+# ── Appearances a widget does not carry ───────────────────────────────────
+
+
+def _states_a_look(widget, drawn: bool) -> bool:
+    """Whether a widget with no `/AP` has anything an appearance would paint.
+
+    `drawn` is whether the field's own value puts marks in the box. `/MK`
+    `/BG` and `/BC` are the background and border a widget carries
+    independently of any value (ISO 32000-2 12.5.6.19), so a box that shows
+    nothing still has a look to state.
+    """
+    if drawn:
+        return True
+    try:
+        mk = widget.get("/MK")
+    except (AttributeError, TypeError):
+        return False
+    if mk is None:
+        return False
+    return mk.get("/BG") is not None or mk.get("/BC") is not None
+
+
+def regenerate_missing_appearances(
+    pdf: pikepdf.Pdf, font_dir: str = ""
+) -> tuple[list[str], list[str]]:
+    """Give every widget carrying no `/AP` the appearance its field states.
+
+    ISO 32000-2 12.5.5 maps a widget's appearance stream onto its rectangle,
+    so a widget carrying none describes no appearance at all, and 12.7.4.3's
+    `/NeedAppearances` is the format's own instruction to construct one. It is
+    constructed here through the emitters the fill uses, so one document never
+    holds two answers to what one field looks like.
+
+    Only a field whose look FOLLOWS from its value is regenerated. A check box
+    or radio button draws through the `/AP` states it was authored with and
+    states nothing a value could be drawn from, so one carrying none is left
+    alone rather than given an invented mark.
+
+    Returns (the fields given an appearance, the fields whose appearance could
+    not be built). The second is a value outside the form font's encoding with
+    no bundled face to embed: that field's appearance stays absent rather than
+    drawn in glyphs that spell something else.
+    """
+    acro = _acroform(pdf)
+    if acro is None:
+        return [], []
+    drew: list[str] = []
+    undrawn: list[str] = []
+    for field in _all_fields(pdf):
+        ftype = _classify(field)
+        if ftype not in ("text", "dropdown", "optionlist"):
+            continue
+        bare = [widget for widget in field.widgets if widget.get("/AP") is None]
+        if not bare:
+            continue
+        da = _field_da(field, acro)
+        q = field.attr("/Q")
+        try:
+            quadding = int(q) if q is not None else 0
+        except (TypeError, ValueError):
+            quadding = 0
+        labels = _options(field) if ftype == "optionlist" else []
+        selected = _selected_indices(field) if ftype == "optionlist" else set()
+        top = _top_index(field) if ftype == "optionlist" else 0
+        if ftype == "optionlist":
+            rows, _marked = _visible_rows(labels, selected, top)
+            value, drawn = "", any(rows)
+        else:
+            value = str(_field_value(field, ftype) or "")
+            drawn = bool(flatten_control_chars(value, keep_newline=False))
+        for widget in bare:
+            if not _states_a_look(widget, drawn):
+                continue
+            try:
+                if ftype == "optionlist":
+                    _choice_list_appearance(pdf, widget, labels, selected, top,
+                                            da, quadding, font_dir)
+                else:
+                    _text_appearance(
+                        pdf, widget, value, da,
+                        ftype == "text" and bool(field.flags & FF_MULTILINE),
+                        quadding, font_dir)
+            except (ValueError, OSError):
+                if field.name not in undrawn:
+                    undrawn.append(field.name)
+                continue
+            if field.name not in drew:
+                drew.append(field.name)
+    return drew, undrawn
 
 
 # ── Fill ──────────────────────────────────────────────────────────────────

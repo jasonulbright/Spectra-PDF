@@ -30,7 +30,8 @@ from .acroform import reattach_forms_file
 from .trapping import DEFAULT_TRAPPED, TRAPPED_VALUES
 from .validate import validate_pdf
 from .widget_faces import (IDENTITY, box_of, compose, face_box,
-                           harvest_appearances, matrix_of, stage_appearances)
+                           harvest_appearances, matrix_of,
+                           regenerate_appearances_file, stage_appearances)
 
 # The resource walk, the colorant-space predicates and the colorant naming are
 # `ink_manager`'s: one walk addresses paints, shadings and patterns per
@@ -678,6 +679,7 @@ def convert_cmyk(
     render_intent: str = "relative",
     dest_profile: str = "",
     gs_path: str = "gs",
+    font_dir: str = "",
 ) -> dict:
     """Convert a PDF's colour to DeviceCMYK using Ghostscript's ICC engine.
 
@@ -689,6 +691,10 @@ def convert_cmyk(
         dest_profile: Optional destination ICC profile — a .icc file path, or a
             bare gs ROM-filesystem profile name. Empty = gs's compiled default.
         gs_path: Path to the Ghostscript executable.
+        font_dir: The bundled fallback faces, for regenerating the appearance
+            of a widget that carries none whose value is outside the form
+            font's encoding. Without it such a field keeps the appearance the
+            producer synthesizes; every other field is unaffected.
     """
     info = validate_pdf(file)
     intent = _RENDER_INTENTS.get(str(render_intent).strip().lower())
@@ -746,12 +752,19 @@ def convert_cmyk(
     source_inks = _ink_names(input_path)
     scratch = Path(tempfile.mkdtemp(prefix="spectra-prepress-"))
     try:
+        # A widget carrying no appearance is given one before anything reads
+        # this document as content, so the producer has none to synthesize and
+        # flatten. Every read below takes that copy — the carve-out's ident
+        # order is re-derived from the same file the staging walked, and the
+        # reattach would otherwise restore a bare widget.
+        forms_input = regenerate_appearances_file(input_path, scratch,
+                                                  font_dir) or input_path
         staged, claimed, rasterized, boxes = _stage_carve_out(
-            input_path, scratch, annotations=True, forms=True)
-        result = run(staged if staged is not None else input_path)
-        rasterized = _after_restore(output_path, input_path, claimed, rasterized,
+            forms_input, scratch, annotations=True, forms=True)
+        result = run(staged if staged is not None else forms_input)
+        rasterized = _after_restore(output_path, forms_input, claimed, rasterized,
                                     annotations=True)
-        forms_source = harvest_appearances(output_path, input_path,
+        forms_source = harvest_appearances(output_path, forms_input,
                                            scratch, boxes, info["pages"])
         _rebase_appearances(output_path)
         # gs pdfwrite drops /AcroForm and every widget annotation — converting a
@@ -760,7 +773,7 @@ def convert_cmyk(
         # grayscale/compress do, from the file carrying the appearances the
         # producer just converted.
         reattach_forms_file(forms_source if forms_source is not None
-                            else input_path, output_path)
+                            else forms_input, output_path)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
