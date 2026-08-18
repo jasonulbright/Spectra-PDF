@@ -648,6 +648,12 @@ export const app = {
    * itself and the last one out exits, so a window that cancels keeps the app. */
   requestQuit: () => invoke('request_quit'),
 
+  /** Report that this window's close prompt was cancelled, so the quit the
+   * prompt belonged to is off. The quit recorded the session and froze the
+   * record before prompting; the app is still running, so the record goes back
+   * to following the windows that are left. Safe to call unprompted. */
+  quitCancelled: () => invoke('quit_cancelled'),
+
   /** Hide this window to the system tray instead of closing. */
   hideToTray: () => invoke('hide_to_tray'),
 

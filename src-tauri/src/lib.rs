@@ -212,6 +212,7 @@ pub fn run() {
             commands::confirm_close,
             commands::close_window,
             commands::request_quit,
+            commands::quit_cancelled,
             commands::hide_to_tray,
             app_windows::open_new_window,
             app_windows::claim_document,
