@@ -271,6 +271,8 @@ export const PANEL_STRINGS = {
   'panel.standards.row.outline_removed': 'Bookmarks removed',
   'panel.standards.row.encryption_removed': 'Encryption removed',
   'panel.standards.row.page_content_rasterized': 'Page content replaced by an image',
+  'panel.standards.row.colorants_removed': 'Printing plates the conversion did not carry',
+  'panel.standards.row.colorant_shadings_rasterized': 'Gradients converted to process colour',
   'panel.standards.row.images_removed': 'Images removed',
   'panel.standards.row.fonts_substituted': 'Fonts replaced with metric-compatible substitutes',
   'panel.standards.row.producer_removed_feature': 'Content the standard does not permit, removed',

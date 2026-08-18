@@ -221,3 +221,293 @@ class TestConvertPdfx:
         with pytest.raises(ValueError, match="not found"):
             convert_cmyk(src, out, dest_profile=os.path.join(tmp_dir, "nope/x.icc"),
                          gs_path=gs_path)
+
+
+class TestSpotShadings:
+    """Gradients in a colorant space, through the CMYK conversion.
+
+    Ghostscript rasterizes a shading it must colour-convert: the gradient
+    comes back as a DeviceCMYK picture of itself and the plate is gone, with
+    nothing said. The measured acceptance table is asserted here — the inks in
+    and out, the per-plate band means against the ORIGINAL document, the RGB
+    control, and the absence of any rasterized image — because "the spot
+    survived" is only evidence when the plate is the one the source painted.
+    """
+
+    def _plates(self, path, gs_path, out_dir):
+        """Each colorant's plate, as the separation device draws it."""
+        np = pytest.importorskip("numpy")
+        Image = pytest.importorskip("PIL.Image")
+        import subprocess
+
+        os.makedirs(out_dir, exist_ok=True)
+        subprocess.run(
+            [gs_path, "-dNOPAUSE", "-dBATCH", "-dSAFER", "-q", "-sDEVICE=tiffsep",
+             "-r36", f"-sOutputFile={os.path.join(str(out_dir), 'p')}-%d.tif", str(path)],
+            check=True, capture_output=True, stdin=subprocess.DEVNULL, timeout=300,
+        )
+        found = {}
+        for entry in sorted(Path(out_dir).glob("p-1(*).tif")):
+            name = entry.stem[len("p-1("):-1]
+            with Image.open(entry) as im:
+                found[name] = np.asarray(im.convert("L"), dtype=np.int16)
+        return found
+
+    def _images(self, path):
+        with pikepdf.open(path) as pdf:
+            return sum(
+                1 for page in pdf.pages
+                for xobj in (page.obj.get("/Resources", {}).get("/XObject") or {}).values()
+                if xobj.get("/Subtype") == pikepdf.Name("/Image"))
+
+    def _shadings(self, path):
+        """Gradients still carried AS gradients. Ghostscript re-expresses a
+        bare `sh` as a shading-pattern fill — it does that to a DeviceCMYK
+        shading too — so the operator count is not the measurement; the
+        shading objects that survive are."""
+        seen = 0
+        with pikepdf.open(path) as pdf:
+            for page in pdf.pages:
+                resources = page.obj.get("/Resources") or {}
+                seen += len(resources.get("/Shading") or {})
+                for pattern in (resources.get("/Pattern") or {}).values():
+                    if pattern.get("/Shading") is not None:
+                        seen += 1
+        return seen
+
+    def _inks(self, path):
+        from engine.separations import list_inks
+
+        return sorted(entry["name"] for entry in list_inks(str(path))["inks"])
+
+    def test_colorant_gradients_come_through_on_their_own_plates(self, tmp_path, gs_path):
+        from separation_builders import spot_shading_pdf
+
+        src = spot_shading_pdf(tmp_path / "spots.pdf")
+        out = str(tmp_path / "cmyk.pdf")
+        result = convert_cmyk(src, out, gs_path=gs_path)
+
+        # Four inks in, four out — a colorant used ONLY in a gradient is the
+        # one the rasterization used to delete.
+        assert self._inks(src) == [
+            "Deep Black", "PANTONE 185 C", "PatternSpot", "Warm Red",
+        ]
+        assert self._inks(out) == self._inks(src)
+
+        original = self._plates(src, gs_path, tmp_path / "p-before")
+        converted = self._plates(out, gs_path, tmp_path / "p-after")
+        for name in ("PANTONE 185 C", "PatternSpot"):
+            assert name in converted, f"{name} lost its plate"
+            assert original[name].shape == converted[name].shape
+            assert int(abs(original[name] - converted[name]).max()) == 0, (
+                f"{name} band mean {original[name].mean():.2f} became "
+                f"{converted[name].mean():.2f}"
+            )
+
+        content = _content(out)
+        assert b" rg" not in content, "the DeviceRGB control did not convert"
+        assert b" k" in content
+
+        assert self._images(out) == 0, "a gradient came back as a picture"
+        assert self._shadings(out) >= 3, "a gradient stopped being a gradient"
+        assert result["altered"] == []
+
+    def test_a_gradient_the_destination_cannot_describe_is_reported(self, tmp_path, gs_path):
+        # A colorant whose alternate is DeviceRGB genuinely needs the
+        # transform, so it goes through the producer — and says so.
+        from separation_builders import rgb_alternate_shading_pdf
+
+        src = rgb_alternate_shading_pdf(tmp_path / "rgbspot.pdf")
+        out = str(tmp_path / "cmyk.pdf")
+        result = convert_cmyk(src, out, gs_path=gs_path)
+
+        rows = {row["kind"]: row for row in result["altered"]}
+        assert "colorant_shadings_rasterized" in rows, (
+            "a rasterized colorant gradient was not reported"
+        )
+        named = [entry["name"] for entry in rows["colorant_shadings_rasterized"]["detail"]]
+        assert named == ["RGB Spot"]
+        assert "RGB Spot" not in self._inks(out)
+        assert [entry["name"] for entry in rows["colorants_removed"]["detail"]] == ["RGB Spot"]
+
+    def test_a_gradient_whose_colour_is_not_one_dimensional_is_reported(
+            self, tmp_path, gs_path):
+        # A function-based shading maps a POINT in the plane, so composing the
+        # tint transform onto one sampled input would invent its colour. It is
+        # left to the producer and named, never quietly re-coloured.
+        src = str(tmp_path / "type1.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(200, 200))
+        tint = pdf.make_indirect(pikepdf.Dictionary(
+            FunctionType=2, Domain=pikepdf.Array([0, 1]), N=1,
+            C0=pikepdf.Array([0, 0, 0, 0]), C1=pikepdf.Array([0, 1, 0.75, 0]),
+            Range=pikepdf.Array([0, 1] * 4)))
+        space = pdf.make_indirect(pikepdf.Array([
+            pikepdf.Name("/Separation"), pikepdf.Name("/Planar Spot"),
+            pikepdf.Name("/DeviceCMYK"), tint]))
+        shading = pdf.make_indirect(pikepdf.Dictionary(
+            ShadingType=1, ColorSpace=space,
+            Domain=pikepdf.Array([0, 1, 0, 1]),
+            Function=pikepdf.Dictionary(
+                FunctionType=2, Domain=pikepdf.Array([0, 1, 0, 1]), N=1,
+                C0=pikepdf.Array([0.1]), C1=pikepdf.Array([1]),
+                Range=pikepdf.Array([0, 1]))))
+        page.Resources = pikepdf.Dictionary(Shading=pikepdf.Dictionary(Sh=shading))
+        page.Contents = pdf.make_stream(b"q 10 10 180 180 re W n /Sh sh Q")
+        pdf.save(src)
+        pdf.close()
+
+        result = convert_cmyk(src, str(tmp_path / "cmyk.pdf"), gs_path=gs_path)
+        rows = {row["kind"]: row for row in result["altered"]}
+        assert [entry["name"] for entry in
+                rows["colorant_shadings_rasterized"]["detail"]] == ["Planar Spot"]
+
+    def test_the_preserve_flags_are_pinned_on_both_conversions(self, tmp_path, gs_path):
+        # Both DEFAULT to true and both are load-bearing: setting either false
+        # flattens every colorant paint in the same pass. An undeclared default
+        # is a behaviour nothing states, so the command states it.
+        from engine import prepress
+        from engine.prepress import convert_pdfx
+        from separation_builders import spot_shading_pdf
+
+        seen = []
+        real = prepress.budget.gs
+
+        def capture(cmd, **kwargs):
+            seen.append(list(cmd))
+            return real(cmd, **kwargs)
+
+        src = spot_shading_pdf(tmp_path / "spots.pdf")
+        try:
+            prepress.budget.gs = capture
+            convert_cmyk(src, str(tmp_path / "cmyk.pdf"), gs_path=gs_path)
+            convert_pdfx(src, str(tmp_path / "x3.pdf"), gs_path=gs_path)
+        finally:
+            prepress.budget.gs = real
+        assert len(seen) >= 2
+        for cmd in seen:
+            assert "-dPreserveSeparation=true" in cmd
+            assert "-dPreserveDeviceN=true" in cmd
+
+    def test_pdfx_levels_carry_the_gradients_and_name_what_they_force_out(
+            self, tmp_path, gs_path):
+        # X-4 keeps a /DeviceN; X-1a and X-3 flatten one whatever the preserve
+        # flags say. The carve-out applies through all three, so what is left
+        # is the level's OWN forced loss, and it is reported with the plates
+        # named rather than dropped in silence.
+        from engine.prepress import convert_pdfx
+        from separation_builders import spot_shading_pdf
+
+        src = spot_shading_pdf(tmp_path / "spots.pdf")
+        for version, devicen_survives in ((4, True), (3, False), (1, False)):
+            out = str(tmp_path / f"x{version}.pdf")
+            result = convert_pdfx(src, out, version=version, gs_path=gs_path)
+            inks = self._inks(out)
+            assert "PANTONE 185 C" in inks, f"X-{version} lost the spot gradient"
+            assert "PatternSpot" in inks, f"X-{version} lost the pattern gradient"
+            assert self._images(out) == 0, f"X-{version} rasterized a gradient"
+
+            rows = {row["kind"]: row for row in result["altered"]}
+            lost = [entry["name"] for entry in
+                    rows.get("colorants_removed", {"detail": []})["detail"]]
+            if devicen_survives:
+                assert "Warm Red" in inks and "Deep Black" in inks
+                assert lost == []
+            else:
+                assert "Warm Red" not in inks and "Deep Black" not in inks
+                assert lost == ["Deep Black", "Warm Red"], (
+                    f"X-{version} destroyed a DeviceN without naming the plates"
+                )
+
+
+class TestDestinationProfileClass:
+    """The destination profile has to be able to BE the destination.
+
+    Ghostscript converts to whatever `-sOutputICCProfile` names, so a
+    one-channel profile turns "Convert to CMYK" into a greyscale conversion
+    and reports nothing. The header carries the answer at fixed offsets.
+    """
+
+    def test_a_greyscale_profile_is_refused_by_name(self, tmp_dir, gs_path):
+        from engine.prepress import _extract_rom_profile
+
+        elsewhere = Path(tmp_dir) / "profiles"
+        elsewhere.mkdir()
+        grey = _extract_rom_profile(gs_path, "default_gray.icc", elsewhere)
+        src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
+        with pytest.raises(ValueError, match='describes "GRAY" colour'):
+            convert_cmyk(src, os.path.join(tmp_dir, "out.pdf"),
+                         dest_profile=str(grey), gs_path=gs_path)
+
+    def test_a_bare_rom_name_is_read_the_same_way(self, tmp_dir, gs_path):
+        # The ROM set holds greyscale and RGB profiles too, and a bare name
+        # reaches the same flag, so it is read the same way.
+        src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
+        with pytest.raises(ValueError, match="not CMYK"):
+            convert_cmyk(src, os.path.join(tmp_dir, "out.pdf"),
+                         dest_profile="default_rgb.icc", gs_path=gs_path)
+        convert_cmyk(src, os.path.join(tmp_dir, "ok.pdf"),
+                     dest_profile="default_cmyk.icc", gs_path=gs_path)
+
+    def test_a_file_that_is_not_a_profile_is_refused(self, tmp_dir, gs_path):
+        bogus = Path(tmp_dir) / "bogus.icc"
+        bogus.write_bytes(b"not an icc profile" * 16)
+        src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
+        with pytest.raises(ValueError, match="is not an ICC profile"):
+            convert_cmyk(src, os.path.join(tmp_dir, "out.pdf"),
+                         dest_profile=str(bogus), gs_path=gs_path)
+
+    def test_a_profile_class_that_is_not_an_output_condition_is_refused(
+            self, tmp_dir, gs_path):
+        # A device link's data colour space is its INPUT space, so the space
+        # check alone would let one through; the class is what refuses it.
+        from engine.prepress import _extract_rom_profile
+
+        elsewhere = Path(tmp_dir) / "profiles"
+        elsewhere.mkdir()
+        profile = _extract_rom_profile(gs_path, "default_cmyk.icc", elsewhere)
+        data = bytearray(profile.read_bytes())
+        data[12:16] = b"link"
+        linked = Path(tmp_dir) / "link.icc"
+        linked.write_bytes(bytes(data))
+        src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
+        with pytest.raises(ValueError, match='is a "link" profile'):
+            convert_cmyk(src, os.path.join(tmp_dir, "out.pdf"),
+                         dest_profile=str(linked), gs_path=gs_path)
+
+    def test_the_pdfx_door_reads_the_same_header(self, tmp_dir, gs_path):
+        from engine.prepress import _extract_rom_profile, convert_pdfx
+
+        elsewhere = Path(tmp_dir) / "profiles"
+        elsewhere.mkdir()
+        grey = _extract_rom_profile(gs_path, "default_gray.icc", elsewhere)
+        src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
+        with pytest.raises(ValueError, match="not CMYK"):
+            convert_pdfx(src, os.path.join(tmp_dir, "x.pdf"),
+                         dest_profile=str(grey), gs_path=gs_path)
+
+
+class TestOutputDirectoryIsNotScratch:
+    def test_the_rom_extraction_never_deletes_a_file_beside_the_output(
+            self, tmp_dir, gs_path):
+        # The extraction used to write <output dir>/<name> and unlink it, so a
+        # user's own default_cmyk.icc sitting beside the output was deleted by
+        # asking for the bundled profile (measured repro).
+        from engine.prepress import convert_pdfx
+
+        src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
+        outputs = Path(tmp_dir) / "outputs"
+        outputs.mkdir()
+        victim = outputs / "default_cmyk.icc"
+        victim.write_bytes(b"USER FILE - must survive\n" * 4)
+        before = victim.read_bytes()
+
+        result = convert_pdfx(src, str(outputs / "x3.pdf"),
+                              dest_profile="default_cmyk.icc", gs_path=gs_path)
+        assert result["embedded_profile"] is True
+        assert victim.is_file(), "the user's profile was deleted"
+        assert victim.read_bytes() == before, "the user's profile was overwritten"
+        # And the conversion's own scratch left nothing beside the output.
+        assert sorted(p.name for p in outputs.iterdir()) == [
+            "default_cmyk.icc", "x3.pdf",
+        ]

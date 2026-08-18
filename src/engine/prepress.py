@@ -17,16 +17,25 @@ PDFX_def.ps against the bundled template's contract. Soft-proofing remains a
 distinct capability.
 """
 
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 import pikepdf
+from pikepdf import Dictionary, Name
 
 from . import budget, standards_report
 from .acroform import reattach_forms_file
 from .trapping import DEFAULT_TRAPPED, TRAPPED_VALUES
 from .validate import validate_pdf
+
+# The resource walk, the colorant-space predicates and the colorant naming are
+# `ink_manager`'s: one walk addresses paints, shadings and patterns per
+# colorant for the whole engine, and a second one would drift from it in
+# exactly the places a spot colour hides. Imported ON USE — `separations`
+# reaches back here for the soft-proof staging, so a module-level import
+# closes a cycle.
 
 # Ghostscript render intent for the colour transform. Relative colorimetric
 # (1) is the prepress default — it maps in-gamut colours exactly and clips the
@@ -60,6 +69,476 @@ def _permit_profile_read(dest_profile: str) -> list[str]:
     return [f"--permit-file-read={p}"]
 
 
+# ── the destination profile's own class ────────────────────────────────────
+
+#: ICC.1 clause 7.2 fixed header offsets: the profile/device class at 12, the
+#: data colour space at 16, the 'acsp' file signature at 36. Four-byte
+#: signatures at fixed positions, so reading them costs no dependency.
+_ICC_CLASS = slice(12, 16)
+_ICC_SPACE = slice(16, 20)
+_ICC_SIGNATURE = slice(36, 40)
+_ICC_HEADER_BYTES = 128
+
+#: Profile classes that can describe an OUTPUT condition. A device link
+#: ('link') carries a baked-in input space, an abstract profile ('abst')
+#: transforms within one space and a named-colour profile ('nmcl') holds a
+#: swatch list — none of the three names a destination a conversion can
+#: target, whatever their data colour space says.
+_OUTPUT_CLASSES = frozenset({"prtr", "mntr", "scnr", "spac"})
+
+
+def _icc_header(data: bytes) -> tuple[str, str] | None:
+    """(profile class, data colour space) or None when this is not a profile."""
+    if len(data) < _ICC_HEADER_BYTES or data[_ICC_SIGNATURE] != b"acsp":
+        return None
+    return (
+        data[_ICC_CLASS].decode("latin-1", "replace").strip(),
+        data[_ICC_SPACE].decode("latin-1", "replace").strip(),
+    )
+
+
+def _require_cmyk_profile(label: str, data: bytes) -> None:
+    """Refuse a destination profile that cannot be this op's output space.
+
+    Ghostscript accepts whatever `-sOutputICCProfile` names and converts to
+    THAT space, so a one-channel profile turns "Convert to CMYK" into a
+    greyscale conversion and says nothing (measured). The op's name is a
+    promise about the output space, so the profile is checked against it.
+    """
+    header = _icc_header(data)
+    if header is None:
+        raise ValueError(f'"{label}" is not an ICC profile.')
+    profile_class, space = header
+    if profile_class not in _OUTPUT_CLASSES:
+        raise ValueError(
+            f'The destination profile "{label}" is a "{profile_class}" profile, '
+            "which does not describe an output condition."
+        )
+    if space != "CMYK":
+        raise ValueError(
+            f'The destination profile "{label}" describes "{space}" colour, '
+            "not CMYK."
+        )
+
+
+def _validate_dest_profile(dest_profile: str, gs_path: str) -> None:
+    """Read the destination profile's header before anything converts.
+
+    A bare name is one of Ghostscript's own ROM-filesystem profiles and is
+    read the only way it can be — extracted and inspected — because that set
+    holds greyscale and RGB profiles too.
+    """
+    p = str(dest_profile).strip()
+    if not p:
+        return
+    path = Path(p)
+    if path.is_file():
+        _require_cmyk_profile(path.name, path.read_bytes()[:_ICC_HEADER_BYTES])
+        return
+    if "/" in p or "\\" in p:
+        raise ValueError(f"Destination ICC profile not found: {p}")
+    scratch = Path(tempfile.mkdtemp(prefix="spectra-icc-"))
+    try:
+        extracted = _extract_rom_profile(gs_path, p, scratch)
+        _require_cmyk_profile(p, extracted.read_bytes()[:_ICC_HEADER_BYTES])
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+# ── the colorant-shading carve-out ─────────────────────────────────────────
+#
+# Ghostscript will not carry a shading it must colour-convert: a `/Separation`
+# or `/DeviceN` `sh`, and a shading pattern in one, come back as a DeviceCMYK
+# image and the plate is gone — while a DeviceCMYK shading in the same pass
+# survives AS a shading (measured). A colorant whose ALTERNATE is already
+# DeviceCMYK needs no transform at all, so its shading is staged as its own
+# DeviceCMYK equivalent — the alternate space, with the tint transform composed
+# onto the shading's function — and the colorant space is put back on the
+# object afterwards. Geometry, clip, z-order and coordinate space stay the
+# producer's own work, which is why nothing here reconstructs them.
+#
+# The paints are bracketed in marked content so the staged objects can be found
+# again: a bracket survives the rewrite (measured), a resource NAME does not.
+# A colorant whose alternate is anything else genuinely needs the transform,
+# goes through the producer, and is REPORTED — as is one whose bracket did not
+# survive, which costs the plate and never the colour, because the staged
+# shading paints exactly what the transform would have painted.
+
+_MARK_TAG = Name("/SpectraShading")
+_MARK_ID = "/SpectraId"
+
+_PATH_PAINTING = frozenset({"S", "s", "f", "F", "f*", "B", "B*", "b", "b*", "n"})
+_TEXT_SHOWING = frozenset({"Tj", "TJ", "'", '"'})
+_CONSUMING = _PATH_PAINTING | _TEXT_SHOWING | {"Do", "sh", "EI", "INLINE IMAGE"}
+
+
+class _Carved:
+    """One shading the carve-out claims, and its way back."""
+
+    __slots__ = ("ident", "colorants", "shading", "colorspace", "function",
+                 "staged_function")
+
+    def __init__(self, ident, colorants, shading, colorspace, function):
+        self.ident = ident
+        self.colorants = colorants
+        self.shading = shading
+        self.colorspace = colorspace
+        self.function = function
+        # The composed function the staging installed. A shading worn by a
+        # pattern can be a DIRECT dictionary and so has no object number of
+        # its own; the function this pass creates always has one, so it is
+        # what names the shading while the staged file is being written.
+        self.staged_function = None
+
+
+def _colorant_alternate(cs):
+    """(colorant names, alternate space) for a colorant space, else None."""
+    from .ink_manager import _colorant_names, _is_devicen, _is_separation
+
+    if not (_is_separation(cs) or _is_devicen(cs)):
+        return None
+    return _colorant_names(cs), (cs[2] if len(cs) >= 3 else None)
+
+
+def _needs_no_transform(alt) -> bool:
+    """DeviceCMYK already describes the tint in the destination's own space,
+    so the composed shading IS what the conversion would have produced."""
+    return isinstance(alt, pikepdf.Name) and str(alt) == "/DeviceCMYK"
+
+
+def _one_dimensional(shading) -> bool:
+    """Is the shading's function a single parametric value?
+
+    Composing the tint transform onto the function samples ONE input. A
+    function-based shading (type 1) maps a point in the plane instead — two
+    inputs, a four-entry `/Domain` — so its colour cannot be re-expressed that
+    way and it is left to the producer.
+    """
+    try:
+        if int(shading.get("/ShadingType") or 0) == 1:
+            return False
+        domain = shading.get("/Domain")
+        return domain is None or len(domain) == 2
+    except (TypeError, ValueError):
+        return False
+
+
+def _carve_targets(pdf):
+    """(the shadings the carve-out claims, the colorants it cannot).
+
+    The order is the resource walk's, and it is what names them: the same
+    document walked again yields the same identifiers, which is how the
+    restore pass finds the objects the staging pass rewrote.
+    """
+    from .ink_manager import _shading_dicts
+
+    targets: list = []
+    rasterized: set = set()
+    for shading in _shading_dicts(pdf, annotations=False):
+        try:
+            colorspace = shading.get("/ColorSpace")
+            entry = _colorant_alternate(colorspace)
+        except Exception:  # noqa: BLE001 — an unreadable shading is not one
+            continue
+        if entry is None:
+            continue
+        colorants, alt = entry
+        function = shading.get("/Function")
+        if (not _needs_no_transform(alt) or function is None
+                or len(colorspace) < 4 or not _one_dimensional(shading)
+                or shading.get("/Background") is not None):
+            rasterized.update(colorants)
+            continue
+        targets.append(_Carved(
+            len(targets) + 1, colorants, shading,
+            pdf.make_indirect(colorspace), pdf.make_indirect(function)))
+    return targets, rasterized
+
+
+def _apply_staging(pdf, targets) -> set:
+    """Rewrite each target into the destination space; the idents that took."""
+    from .color_spaces import build_function
+    from .ink_manager import _compose_shading_function
+
+    done: set = set()
+    for item in targets:
+        tint = build_function(item.colorspace[3])
+        replacement = (_compose_shading_function(pdf, item.shading, tint, 4)
+                       if tint is not None else None)
+        if replacement is None:
+            continue
+        staged = pdf.make_indirect(replacement)
+        item.shading["/ColorSpace"] = item.colorspace[2]
+        item.shading["/Function"] = staged
+        item.staged_function = staged.objgen
+        done.add(item.ident)
+    return done
+
+
+def _shading_of(entry, group: str):
+    """The shading a `/Shading` or `/Pattern` resource entry paints."""
+    try:
+        return entry if group == "/Shading" else entry.get("/Shading")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _selected_shading(resources, operator: str, operands):
+    """The shading a selecting operator names, or None."""
+    if operator == "sh" and operands:
+        group, key = "/Shading", operands[0]
+    elif operator in ("scn", "SCN", "sc", "SC") and operands and isinstance(
+            operands[-1], pikepdf.Name):
+        group, key = "/Pattern", operands[-1]
+    else:
+        return None
+    table = resources.get(group) if resources is not None else None
+    if not isinstance(table, pikepdf.Dictionary):
+        return None
+    try:
+        entry = table[key]
+    except Exception:  # noqa: BLE001
+        return None
+    return _shading_of(entry, group)
+
+
+def _staged_key(shading):
+    """The staged shading's identity: its composed function's object number."""
+    if shading is None:
+        return None
+    try:
+        function = shading.get("/Function")
+    except Exception:  # noqa: BLE001
+        return None
+    return function.objgen if getattr(function, "is_indirect", False) else None
+
+
+def _bracket_owner(pdf, owner, ids) -> None:
+    """Bracket every paint of a staged shading in this stream.
+
+    The bracket runs from the operator that SELECTS the shading to the one
+    that consumes it: the producer rewrites that pair together, and a bracket
+    around the selector alone can be hoisted out from under the paint.
+    """
+    resources = owner.get("/Resources")
+    if resources is None:
+        return
+    try:
+        instructions = list(pikepdf.parse_content_stream(owner))
+    except Exception:  # noqa: BLE001 — an unparseable stream brackets nothing
+        return
+    opens: dict = {}
+    closes: dict = {}
+    pending = None
+
+    def close_at(index: int) -> None:
+        closes[index] = closes.get(index, 0) + 1
+
+    for index, instruction in enumerate(instructions):
+        operator = str(instruction.operator)
+        shading = _selected_shading(resources, operator, list(instruction.operands))
+        ident = ids.get(_staged_key(shading))
+        if ident is not None:
+            if pending is not None:
+                close_at(pending)
+                pending = None
+            opens[index] = ident
+            if operator == "sh":
+                close_at(index)
+            else:
+                pending = index
+            continue
+        if pending is not None and operator in _CONSUMING:
+            close_at(index)
+            pending = None
+    if pending is not None:
+        close_at(pending)
+    if not opens:
+        return
+    out = []
+    for index, instruction in enumerate(instructions):
+        if index in opens:
+            out.append(pikepdf.ContentStreamInstruction(
+                [_MARK_TAG, Dictionary({_MARK_ID: opens[index]})],
+                pikepdf.Operator("BDC")))
+        out.append(instruction)
+        for _ in range(closes.get(index, 0)):
+            out.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("EMC")))
+    data = pikepdf.unparse_content_stream(out)
+    if isinstance(owner, pikepdf.Stream):
+        owner.write(data)
+    else:
+        owner["/Contents"] = pdf.make_stream(data)
+
+
+def _stage_carve_out(source: Path, scratch: Path):
+    """(the staged input or None, {ident: colorants}, the rasterized colorants).
+
+    None means nothing was staged and the conversion runs on the original.
+    """
+    from .ink_manager import _content_owners
+
+    with pikepdf.open(str(source)) as pdf:
+        targets, rasterized = _carve_targets(pdf)
+        staged = _apply_staging(pdf, targets)
+        rasterized.update(name for item in targets if item.ident not in staged
+                          for name in item.colorants)
+        if not staged:
+            return None, {}, sorted(rasterized)
+        ids = {item.staged_function: item.ident for item in targets
+               if item.ident in staged}
+        for owner in _content_owners(pdf, annotations=False):
+            _bracket_owner(pdf, owner, ids)
+        path = scratch / "staged.pdf"
+        pdf.save(str(path))
+        claimed = {item.ident: item.colorants for item in targets
+                   if item.ident in staged}
+    return path, claimed, sorted(rasterized)
+
+
+def _marker_ident(operand, properties):
+    entry = operand
+    if isinstance(operand, pikepdf.Name):
+        if properties is None:
+            return None
+        try:
+            entry = properties[operand]
+        except Exception:  # noqa: BLE001
+            return None
+    if not isinstance(entry, pikepdf.Dictionary):
+        return None
+    try:
+        return int(entry.get(_MARK_ID))
+    except (TypeError, ValueError):
+        return None
+
+
+def _swap_owner(pdf, owner, by_ident, swapped) -> None:
+    """Put the colorant space back on every shading a bracket names.
+
+    Marked content nests, so a paint belongs to the innermost open bracket.
+    The producer moves `Q` around freely and that changes nothing here: the
+    bracket carries the identity, not the graphics state.
+    """
+    resources = owner.get("/Resources")
+    try:
+        instructions = list(pikepdf.parse_content_stream(owner))
+    except Exception:  # noqa: BLE001
+        return
+    properties = resources.get("/Properties") if resources is not None else None
+    stack: list = []
+    ours = 0
+    keep: list = []
+    for instruction in instructions:
+        operator = str(instruction.operator)
+        operands = list(instruction.operands)
+        if operator in ("BDC", "BMC"):
+            ident = (_marker_ident(operands[1] if len(operands) > 1 else None,
+                                   properties)
+                     if operands and operands[0] == _MARK_TAG else None)
+            stack.append(ident)
+            if ident is not None:
+                ours += 1
+                continue
+        elif operator == "EMC":
+            ident = stack.pop() if stack else None
+            if ident is not None:
+                continue
+        else:
+            open_ident = next((i for i in reversed(stack) if i is not None), None)
+            item = by_ident.get(open_ident) if open_ident is not None else None
+            if item is not None:
+                shading = _selected_shading(resources, operator, operands)
+                # Only a shading still in the destination space is put back:
+                # two staged shadings the producer merged into one object
+                # cannot both be, and the second would relabel the first's
+                # plate rather than recover its own.
+                if shading is not None and _needs_no_transform(
+                        shading.get("/ColorSpace")):
+                    shading["/ColorSpace"] = item.colorspace
+                    shading["/Function"] = item.function
+                    swapped.add(item.ident)
+        keep.append(instruction)
+    if not ours or stack:
+        # An unbalanced bracket set is left in place: the swap has already
+        # happened and an inert mark costs nothing, where a mis-cut content
+        # stream costs the page.
+        return
+    data = pikepdf.unparse_content_stream(keep)
+    if isinstance(owner, pikepdf.Stream):
+        owner.write(data)
+    else:
+        owner["/Contents"] = pdf.make_stream(data)
+    if isinstance(properties, pikepdf.Dictionary):
+        for key in list(properties.keys()):
+            entry = properties[key]
+            if isinstance(entry, pikepdf.Dictionary) and _MARK_ID in entry:
+                del properties[key]
+
+
+def _restore_carve_out(output: Path, source: Path, idents: set) -> set:
+    """Put every staged shading's colorant space back on the converted file.
+
+    Returns the idents that were found. One that was not costs its plate and
+    never its colour — the staged shading paints what the transform would have
+    painted — so the caller reports it instead of converting a second time.
+    """
+    from .ink_manager import _content_owners
+
+    swapped: set = set()
+    if not idents:
+        return swapped
+    with pikepdf.open(str(source)) as src:
+        targets, _rasterized = _carve_targets(src)
+        by_ident = {item.ident: item for item in targets if item.ident in idents}
+        if set(by_ident) != set(idents):
+            return swapped
+        with pikepdf.open(str(output), allow_overwriting_input=True) as converted:
+            for item in by_ident.values():
+                item.colorspace = converted.copy_foreign(item.colorspace)
+                item.function = converted.copy_foreign(item.function)
+            for owner in _content_owners(converted, annotations=False):
+                _swap_owner(converted, owner, by_ident, swapped)
+            if swapped:
+                converted.save(str(output))
+    return swapped
+
+
+def _after_restore(output: Path, source: Path, claimed: dict, rasterized: list) -> list:
+    """Restore the claimed shadings, and name whatever the restore could not."""
+    if not claimed:
+        return rasterized
+    missing = set(claimed) - _restore_carve_out(output, source, set(claimed))
+    if not missing:
+        return rasterized
+    return sorted(set(rasterized) | {name for ident in missing
+                                     for name in claimed[ident]})
+
+
+def _ink_names(path: Path) -> list:
+    from .separations import list_inks
+
+    return [entry["name"] for entry in list_inks(str(path))["inks"]]
+
+
+def _colour_report(source_inks, output_path: Path, rasterized, *streams) -> dict:
+    """What the conversion cost the document's colorants, plus the producer's
+    own diagnostics — the two halves `standards_report` builds a PDF/X report
+    from, over the one fact a colour conversion can destroy."""
+    rows = [
+        row for row in (
+            standards_report.colorant_shadings_lost(rasterized),
+            standards_report.colorants_lost(source_inks, _ink_names(output_path)),
+        ) if row is not None
+    ]
+    named, unmatched = standards_report.classify(standards_report.notices(*streams))
+    report = {"altered": rows + named,
+              "producer_notices": unmatched[:standards_report.NOTICE_CAP]}
+    if len(unmatched) > standards_report.NOTICE_CAP:
+        report["notices_truncated"] = True
+    return report
+
+
 def convert_cmyk(
     file: str,
     output: str,
@@ -87,38 +566,58 @@ def convert_cmyk(
 
     input_path = Path(file)
     output_path = Path(output)
+    _validate_dest_profile(dest_profile, gs_path)
 
-    cmd = [
-        gs_path,
-        "-sDEVICE=pdfwrite",
-        "-dCompatibilityLevel=1.5",
-        "-sColorConversionStrategy=CMYK",
-        "-dProcessColorModel=/DeviceCMYK",
-        # Honour the chosen rendering intent for the ICC transform. NB: we do
-        # NOT pass -dOverrideICC — that would REPLACE a source object's own
-        # embedded ICC profile with gs's default, discarding the accurate source
-        # colour description; honouring embedded profiles is the point of a
-        # colour-managed conversion.
-        f"-dRenderIntent={intent}",
-        *_dest_profile_flag(dest_profile),
-        # -dSAFER blocks the profile READ, so a destination profile given as a
-        # path fails without an explicit permit — every path a file picker can
-        # produce. A bare ROM-filesystem name is not a file and needs none.
-        *_permit_profile_read(dest_profile),
-        "-dNOPAUSE",
-        "-dQUIET",
-        "-dBATCH",
-        "-dSAFER",
-        # % is a gs filename template char (distill review).
-        f"-sOutputFile={str(output_path).replace('%', '%%')}",
-        str(input_path),
-    ]
+    def command(source: Path) -> list:
+        return [
+            gs_path,
+            "-sDEVICE=pdfwrite",
+            "-dCompatibilityLevel=1.5",
+            "-sColorConversionStrategy=CMYK",
+            "-dProcessColorModel=/DeviceCMYK",
+            # Both DEFAULT to true and both are load-bearing: setting either
+            # false flattens every /Separation and /DeviceN paint on the page
+            # to process in the same pass (measured control). An undeclared
+            # default that the whole spot-colour path rests on is pinned here.
+            "-dPreserveSeparation=true",
+            "-dPreserveDeviceN=true",
+            # Honour the chosen rendering intent for the ICC transform. NB: we do
+            # NOT pass -dOverrideICC — that would REPLACE a source object's own
+            # embedded ICC profile with gs's default, discarding the accurate source
+            # colour description; honouring embedded profiles is the point of a
+            # colour-managed conversion.
+            f"-dRenderIntent={intent}",
+            *_dest_profile_flag(dest_profile),
+            # -dSAFER blocks the profile READ, so a destination profile given as a
+            # path fails without an explicit permit — every path a file picker can
+            # produce. A bare ROM-filesystem name is not a file and needs none.
+            *_permit_profile_read(dest_profile),
+            "-dNOPAUSE",
+            "-dQUIET",
+            "-dBATCH",
+            "-dSAFER",
+            # % is a gs filename template char (distill review).
+            f"-sOutputFile={str(output_path).replace('%', '%%')}",
+            str(source),
+        ]
 
-    # Derived budget (budget.run keeps the stdin isolation — gs must
-    # never inherit the RPC pipe, the distill review's finding).
-    result = budget.gs(cmd, what="Ghostscript (CMYK conversion)", path=input_path, pages=info["pages"])
-    if result.returncode != 0:
-        raise RuntimeError(f"Ghostscript CMYK conversion failed: {result.stderr}")
+    def run(source: Path):
+        # Derived budget (budget.run keeps the stdin isolation — gs must
+        # never inherit the RPC pipe, the distill review's finding).
+        outcome = budget.gs(command(source), what="Ghostscript (CMYK conversion)",
+                            path=input_path, pages=info["pages"])
+        if outcome.returncode != 0:
+            raise RuntimeError(f"Ghostscript CMYK conversion failed: {outcome.stderr}")
+        return outcome
+
+    source_inks = _ink_names(input_path)
+    scratch = Path(tempfile.mkdtemp(prefix="spectra-prepress-"))
+    try:
+        staged, claimed, rasterized = _stage_carve_out(input_path, scratch)
+        result = run(staged if staged is not None else input_path)
+        rasterized = _after_restore(output_path, input_path, claimed, rasterized)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
     # gs pdfwrite drops /AcroForm and every widget annotation — converting a
     # filled form would silently destroy it. Transplant the original's fields
@@ -131,6 +630,8 @@ def convert_cmyk(
         "render_intent": str(render_intent).strip().lower(),
         "original_size": input_path.stat().st_size,
         "output_size": output_path.stat().st_size,
+        **_colour_report(source_inks, output_path, rasterized,
+                         result.stdout, result.stderr),
     }
 
 
@@ -273,54 +774,71 @@ def convert_pdfx(
 
     input_path = Path(file)
     output_path = Path(output)
+    _validate_dest_profile(profile, gs_path)
 
-    extracted: Path | None = None
-    if profile and not Path(profile).is_file():
-        if "/" in profile or "\\" in profile:
-            raise ValueError(f"Destination ICC profile not found: {profile}")
-        # A bare gs ROM-filesystem name (default_cmyk.icc …): the EMBED needs
-        # a real file, so copy it out of the DLL first.
-        extracted = _extract_rom_profile(gs_path, profile, output_path.parent)
-        profile = str(extracted)
-
-    source_facts = standards_report.census(input_path)
-
-    def_fd, def_path = tempfile.mkstemp(suffix=".ps", dir=str(output_path.parent))
+    # Every scratch file this conversion writes lives here, and the user's
+    # output directory is never written to except by Ghostscript's own
+    # -sOutputFile. Extraction used to land the profile beside the output and
+    # unlink it afterwards, which deleted a user's own default_cmyk.icc.
+    scratch = Path(tempfile.mkdtemp(prefix="spectra-pdfx-"))
     try:
-        with open(def_fd, "w", encoding="ascii") as f:
+        if profile and not Path(profile).is_file():
+            if "/" in profile or "\\" in profile:
+                raise ValueError(f"Destination ICC profile not found: {profile}")
+            # A bare gs ROM-filesystem name (default_cmyk.icc …): the EMBED
+            # needs a real file, so copy it out of the DLL first.
+            profile = str(_extract_rom_profile(gs_path, profile, scratch))
+
+        source_facts = standards_report.census(input_path)
+        source_inks = _ink_names(input_path)
+
+        def_path = str(scratch / "pdfx-def.ps")
+        with open(def_path, "w", encoding="ascii") as f:
             f.write(_pdfx_def_ps(version, condition, identifier, info, profile, trapped))
-        cmd = [
-            gs_path,
-            "-sDEVICE=pdfwrite",
-            f"-dPDFX={version}" if version != 3 else "-dPDFX",
-            f"-dCompatibilityLevel={_PDFX_VERSIONS[version]}",
-            "-sColorConversionStrategy=CMYK",
-            "-dProcessColorModel=/DeviceCMYK",
-            *(_dest_profile_flag(profile)),
-            # The def file READS the profile to embed it — -dSAFER blocks
-            # that without an explicit permit (live test catch).
-            *([f"--permit-file-read={profile}"] if profile else []),
-            "-dNOPAUSE",
-            "-dBATCH",
-            "-dSAFER",
-            # Without this the default policy keeps the offending content and
-            # drops the standard, leaving the preamble's version key as the
-            # only surviving claim.
-            "-dPDFACompatibilityPolicy=1",
-            f"-sOutputFile={str(output_path).replace('%', '%%')}",
-            def_path,
-            str(input_path),
-        ]
-        # Derived budget; the floor stays at this call's own 600 s.
-        result = budget.gs(
-            cmd, what="Ghostscript (PDF/X conversion)", path=input_path, base=600.0
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Ghostscript PDF/X conversion failed: {result.stderr}")
+
+        def command(source: Path) -> list:
+            return [
+                gs_path,
+                "-sDEVICE=pdfwrite",
+                f"-dPDFX={version}" if version != 3 else "-dPDFX",
+                f"-dCompatibilityLevel={_PDFX_VERSIONS[version]}",
+                "-sColorConversionStrategy=CMYK",
+                "-dProcessColorModel=/DeviceCMYK",
+                # The same measured control convert_cmyk pins. It does not
+                # decide the X-level's own constraints: X-4 keeps a /DeviceN
+                # either way, X-1a and X-3 flatten one either way, and that
+                # forced loss is reported by name rather than hidden.
+                "-dPreserveSeparation=true",
+                "-dPreserveDeviceN=true",
+                *(_dest_profile_flag(profile)),
+                # The def file READS the profile to embed it — -dSAFER blocks
+                # that without an explicit permit (live test catch).
+                *([f"--permit-file-read={profile}"] if profile else []),
+                "-dNOPAUSE",
+                "-dBATCH",
+                "-dSAFER",
+                # Without this the default policy keeps the offending content and
+                # drops the standard, leaving the preamble's version key as the
+                # only surviving claim.
+                "-dPDFACompatibilityPolicy=1",
+                f"-sOutputFile={str(output_path).replace('%', '%%')}",
+                def_path,
+                str(source),
+            ]
+
+        def run(source: Path):
+            # Derived budget; the floor stays at this call's own 600 s.
+            outcome = budget.gs(command(source), what="Ghostscript (PDF/X conversion)",
+                                path=input_path, base=600.0)
+            if outcome.returncode != 0:
+                raise RuntimeError(f"Ghostscript PDF/X conversion failed: {outcome.stderr}")
+            return outcome
+
+        staged, claimed, rasterized = _stage_carve_out(input_path, scratch)
+        result = run(staged if staged is not None else input_path)
+        rasterized = _after_restore(output_path, input_path, claimed, rasterized)
     finally:
-        Path(def_path).unlink(missing_ok=True)
-        if extracted is not None:
-            extracted.unlink(missing_ok=True)
+        shutil.rmtree(scratch, ignore_errors=True)
 
     report = standards_report.build(
         source_facts, output_path, result.stdout, result.stderr
@@ -334,6 +852,16 @@ def convert_pdfx(
         )
         output_path.unlink(missing_ok=True)
         raise RuntimeError(f"PDF/X conversion abandoned the standard: {said}")
+
+    # A colorant loss is invisible to the structural census — the marks stay,
+    # they simply print on the wrong plates — so the two ink lists are the
+    # only evidence, and they lead the report.
+    report["altered"] = [
+        row for row in (
+            standards_report.colorant_shadings_lost(rasterized),
+            standards_report.colorants_lost(source_inks, _ink_names(output_path)),
+        ) if row is not None
+    ] + report["altered"]
 
     # The claim is checkable — check it (never ship a silent non-conformance).
     with pikepdf.open(output_path) as pdf:
