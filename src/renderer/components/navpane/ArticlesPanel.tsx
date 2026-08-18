@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useEngine } from '../../hooks/useEngine';
+import { useOperations } from '../../hooks/useOperations';
 import { useAppDispatch, useAppState } from '../../state/AppStateProvider';
 import { file } from '../../lib/tauri-bridge';
 import { getCanvasServices } from '../../commands/context';
@@ -33,6 +34,7 @@ import { tChrome } from '../../i18n';
 export function ArticlesPanel({ activeFile }: NavPanelComponentProps): React.ReactElement {
   useTranslation();
   const { call } = useEngine();
+  const { confirmSignedEdit } = useOperations();
   const dispatch = useAppDispatch();
   const state = useAppState();
   const tool = state.ui.tool;
@@ -207,6 +209,17 @@ export function ArticlesPanel({ activeFile }: NavPanelComponentProps): React.Rea
     setBusy(true);
     setStatus(tChrome('nav.articles.saving'));
     try {
+      // `set_threads` rewrites the catalog's /Threads, which coalesces the
+      // file — structural, whatever a certification permits. Asked before the
+      // snapshot: `file.snapshot` runs the commit gate, so a decision taken
+      // after it would have flushed pending page edits on the way to refusing.
+      // Kept here rather than routed through `performOperation` because the
+      // save advances `loadedBuffer` to the EXACT bytes it dispatched, which
+      // is what stops the reload effect from self-reloading.
+      if (!(await confirmSignedEdit(target.path, target.workingPath, 'structural'))) {
+        setStatus('');
+        return;
+      }
       const snapshotPath = await file.snapshot(target.workingPath);
       await call('set_threads', {
         file: target.workingPath,
@@ -233,7 +246,7 @@ export function ArticlesPanel({ activeFile }: NavPanelComponentProps): React.Rea
     } finally {
       setBusy(false);
     }
-  }, [call, dispatch]);
+  }, [call, dispatch, confirmSignedEdit]);
 
   const saveRef = useRef(save);
   saveRef.current = save;

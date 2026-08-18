@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEngine } from '../../hooks/useEngine';
+import { useOperations } from '../../hooks/useOperations';
+import { EDIT_DECLINED } from '../../lib/edit-text';
 import { useAppDispatch } from '../../state/AppStateProvider';
 import { file } from '../../lib/tauri-bridge';
 import { getCanvasServices, pushEscapeInterceptor } from '../../commands/context';
@@ -63,6 +65,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
   const { call } = useEngine();
+  const { performOperation, confirmSignedEdit } = useOperations();
   const dispatch = useAppDispatch();
   const [nodes, setNodes] = useState<OutlineNode[]>([]);
   // The buffer reference whose real outline currently populates `nodes`. Every
@@ -185,6 +188,22 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
       const stillShown = () => activeFileRef.current?.path === target.path;
       if (stillShown()) setStatus(tChrome('nav.bookmarks.saving'));
       try {
+        // `set_outline` rewrites the catalog's /Outlines: the file coalesces,
+        // so it is structural whatever a certification permits. Asked before
+        // the snapshot, whose commit gate would otherwise flush pending page
+        // edits on the way to refusing this one. Kept off `performOperation`
+        // because the success path advances `loadedBuffer` to the EXACT bytes
+        // dispatched — that identity is what stops the reload effect from
+        // self-reloading. A decline drops `loadedBuffer`, which is the same
+        // revert the failure path takes: the optimistic tree goes back to
+        // whatever the file actually holds.
+        if (!(await confirmSignedEdit(target.path, target.workingPath, 'structural'))) {
+          if (stillShown()) {
+            setStatus('');
+            setLoadedBuffer(null);
+          }
+          return;
+        }
         const snapshotPath = await file.snapshot(target.workingPath);
         await call('set_outline', {
           file: target.workingPath,
@@ -214,7 +233,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
         }
       }
     },
-    [call, dispatch],
+    [call, dispatch, confirmSignedEdit],
   );
   const persistRef = useRef(persist);
   persistRef.current = persist;
@@ -507,22 +526,15 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
       setDeriving(true);
       setStatus(tChrome('nav.bookmarks.derive.building'));
       try {
-        const snapshotPath = await file.snapshot(target.workingPath);
-        const res = await call('outline_from_structure', {
-          file: target.workingPath,
-          output: target.workingPath,
+        const res = await performOperation(target.path, 'outline_from_structure', {
           mode: deriveMode,
           tag_if_untagged: tagFirst,
         });
+        if (res === EDIT_DECLINED) {
+          setStatus('');
+          return;
+        }
         const payload = res as unknown as { added: number; source: string };
-        const buffer = await file.readBuffer(target.workingPath);
-        dispatch({
-          type: 'UPDATE_FILE',
-          path: target.path,
-          pageCount: target.pageCount,
-          buffer,
-          snapshotPath,
-        });
         setDerive(null);
         // The buffer changed, so the reload effect refetches the real tree —
         // deliberately NOT set here: the engine authored it, and reading it
@@ -541,7 +553,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
         setDeriving(false);
       }
     },
-    [call, dispatch, deriveMode, mutableTarget],
+    [performOperation, deriveMode, mutableTarget],
   );
 
   const flat = useMemo(() => flattenOutline(nodes), [nodes]);

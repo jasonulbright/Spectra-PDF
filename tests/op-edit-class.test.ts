@@ -62,6 +62,53 @@ describe('OP_EDIT_CLASS', () => {
     }
   });
 
+  it('classes the panel ops the first migration missed', () => {
+    // The stragglers: surfaces that snapshot and rewrite the working copy
+    // directly. Each reached a signed document with no question asked because
+    // the first sweep enumerated the whole-file TREATMENT panels and these are
+    // page-geometry, catalog and object-list surfaces.
+    for (const method of [
+      'rotate',
+      'delete',
+      'set_page_boxes',
+      'content_crop',
+      'set_outline',
+      'outline_from_structure',
+      'set_threads',
+      'add_attachment',
+      'remove_attachment',
+      'make_portfolio',
+      'update_portfolio_member',
+      'set_layer_visibility',
+      'add_struct_node',
+      'delete_struct_node',
+      'move_struct_node',
+      'autotag',
+    ] as const) {
+      expect(opEditClass(method), method).toBe('structural');
+    }
+  });
+
+  it('classes a panel rotate as structural, not as the page tier would', () => {
+    // The page TIER routes /Rotate through the commit's transplant, which
+    // carries it onto an approval-signed document with no dialog. This panel
+    // does not: it calls the engine on the working copy, which rewrites the
+    // whole file and breaks every byte range. Same word, different tier —
+    // a `page-keys` class here would warn about nothing while the file is
+    // rewritten underneath the signature.
+    expect(opEditClass('rotate')).toBe('structural');
+    expect(opEditClass('delete')).toBe('structural');
+  });
+
+  it('classes annotation-only comment ops as annotate', () => {
+    // Both move only /Annots. Deleting annotations is annotation MODIFICATION
+    // in the certification table's terms — collapsing them into structural
+    // would refuse a comment sweep a /P 3 certification permits.
+    expect(opEditClass('import_xfdf')).toBe('annotate');
+    expect(opEditClass('delete_all_annotations')).toBe('annotate');
+    expect(opEditClass('create_links_from_urls')).toBe('annotate');
+  });
+
   it('exempts exactly the two ops that own their own decision', () => {
     const exempt = Object.entries(OP_EDIT_CLASS)
       .filter(([, cls]) => cls === 'none')
