@@ -396,6 +396,51 @@ describe('cross-window tab drag', () => {
     expect(await tabPaths()).toContain(movedPdf);
   });
 
+  it("a drop back on this window's own strip writes nothing and keeps the undo", async () => {
+    // A drag that ends where it started is not a hand-off. It used to run the
+    // whole move anyway — the working copy written over the user's own file and
+    // the document marked saved, which discards its undo and redo history —
+    // because the destination was only learned after the write.
+    await browser.switchToWindow(mainHandle);
+    await openByPaths([dirtyPdf]);
+    await setView('canvas');
+    const pages = async (): Promise<string[]> =>
+      (await getWorkspacePageIds()).filter((id) => id.startsWith(dirtyPdf));
+    await browser.waitUntil(async () => (await pages()).length === 5, {
+      timeout: 30_000,
+      timeoutMsg: 'the document never indexed',
+    });
+    const onDisk = readFileSync(dirtyPdf).length;
+
+    await selectCanvasPages([(await pages())[0]]);
+    await deleteSelectedCanvasPages();
+    await browser.waitUntil(async () => (await pages()).length === 4, {
+      timeout: 30_000,
+      timeoutMsg: 'the page delete never landed in the page tier',
+    });
+
+    const own = await readFrame();
+    expect(await tabDragDrop(dirtyPdf, physical(stripCssPoint(own, 40), own.dpr))).toBe(false);
+
+    // The tab is still here, the file on disk is untouched, and the commit the
+    // gate ran is still undoable. The page tier flushes into the WORKING copy,
+    // which is a different write from overwriting the user's own file — only
+    // the second one is what a move costs.
+    expect(await tabPaths()).toContain(dirtyPdf);
+    expect(readFileSync(dirtyPdf).length).toBe(onDisk);
+    expect((await getState()).activeFile?.dirty).toBe(true);
+    await pressGlobalKey('z', { ctrl: true });
+    await browser.waitUntil(async () => (await pages()).length === 5, {
+      timeout: 30_000,
+      timeoutMsg: 'the commit the drag ran could not be undone',
+    });
+    // Left open, clean and whole, which is where the next case starts.
+    await browser.waitUntil(async () => (await getState()).activeFile?.dirty === false, {
+      timeout: 30_000,
+      timeoutMsg: 'the undo never took the document back to its saved state',
+    });
+  });
+
   it('a dirty page tier commits into the moved document; a refused commit keeps it here', async () => {
     await browser.switchToWindow(mainHandle);
     await openByPaths([dirtyPdf]);

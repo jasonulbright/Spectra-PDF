@@ -15,9 +15,11 @@ import {
   armDrag,
   cancelDrag,
   createFrameThrottle,
+  createSerialPublisher,
   hoverCssX,
   physicalPointFor,
   pinGhost,
+  planHandOff,
   releaseDrag,
   settleDrop,
   stripRectFor,
@@ -27,9 +29,14 @@ import {
 } from '../src/renderer/lib/tab-drag';
 import type { TabDragResult } from '../src/renderer/lib/tauri-bridge';
 
+/** The pointer that arms every gesture here. */
+const POINTER = 7;
+/** A second input device — another finger, a pen — touching the same window. */
+const OTHER_POINTER = 9;
+
 const press = (over: Partial<ArmRequest> = {}): ArmRequest => ({
   path: 'C:\\docs\\a.pdf',
-  pointerId: 7,
+  pointerId: POINTER,
   button: 0,
   clientX: 100,
   clientY: 10,
@@ -42,7 +49,7 @@ const press = (over: Partial<ArmRequest> = {}): ArmRequest => ({
 /** Arm and travel far enough to be a drag. */
 const dragging = (): TabDragState => {
   const armed = armDrag(NO_DRAG, press());
-  return advanceDrag(armed, 100 + TAB_DRAG_THRESHOLD_PX, 10).state;
+  return advanceDrag(armed, POINTER, 100 + TAB_DRAG_THRESHOLD_PX, 10).state;
 };
 
 describe('arm state machine', () => {
@@ -64,12 +71,12 @@ describe('arm state machine', () => {
 
   it('stays a click below the threshold and becomes a drag at it', () => {
     const armed = armDrag(NO_DRAG, press());
-    const short = advanceDrag(armed, 100 + TAB_DRAG_THRESHOLD_PX - 1, 10);
+    const short = advanceDrag(armed, POINTER, 100 + TAB_DRAG_THRESHOLD_PX - 1, 10);
     expect(short.state.phase).toBe('armed');
     expect(short.started).toBe(false);
     expect(short.tracking).toBe(false);
 
-    const far = advanceDrag(armed, 100 + TAB_DRAG_THRESHOLD_PX, 10);
+    const far = advanceDrag(armed, POINTER, 100 + TAB_DRAG_THRESHOLD_PX, 10);
     expect(far.state.phase).toBe('dragging');
     expect(far.started).toBe(true);
     expect(far.tracking).toBe(true);
@@ -78,23 +85,78 @@ describe('arm state machine', () => {
   it('measures travel in both axes, not one', () => {
     const armed = armDrag(NO_DRAG, press());
     // 3px across and 3px down is 4.24px of travel — still a click.
-    expect(advanceDrag(armed, 103, 13).state.phase).toBe('armed');
+    expect(advanceDrag(armed, POINTER, 103, 13).state.phase).toBe('armed');
     // 5px and 5px is 7.07px — a drag.
-    expect(advanceDrag(armed, 105, 15).state.phase).toBe('dragging');
+    expect(advanceDrag(armed, POINTER, 105, 15).state.phase).toBe('dragging');
   });
 
   it('reports the start exactly once', () => {
-    const first = advanceDrag(armDrag(NO_DRAG, press()), 200, 10);
+    const first = advanceDrag(armDrag(NO_DRAG, press()), POINTER, 200, 10);
     expect(first.started).toBe(true);
-    const second = advanceDrag(first.state, 300, 10);
+    const second = advanceDrag(first.state, POINTER, 300, 10);
     expect(second.started).toBe(false);
     expect(second.tracking).toBe(true);
   });
 
   it('ignores moves that never armed', () => {
-    const idle = advanceDrag(NO_DRAG, 900, 900);
+    const idle = advanceDrag(NO_DRAG, POINTER, 900, 900);
     expect(idle.state).toBe(NO_DRAG);
     expect(idle.tracking).toBe(false);
+  });
+});
+
+describe('the armed pointer owns the gesture', () => {
+  // A tab held under one finger while a second finger moves elsewhere on the
+  // screen: the second finger's events must not drive the first one's drag.
+  it('a foreign move neither arms the drag nor reports a position', () => {
+    const armed = armDrag(NO_DRAG, press());
+    const foreign = advanceDrag(armed, OTHER_POINTER, 900, 900);
+    expect(foreign.state).toBe(armed);
+    expect(foreign.started).toBe(false);
+    expect(foreign.tracking).toBe(false);
+  });
+
+  it('a foreign move does not track a drag that is already running', () => {
+    const live = dragging();
+    const foreign = advanceDrag(live, OTHER_POINTER, 900, 900);
+    expect(foreign.tracking).toBe(false);
+    // And the pointer that owns it still does.
+    expect(advanceDrag(live, POINTER, 900, 900).tracking).toBe(true);
+  });
+
+  it('a foreign release leaves the gesture running rather than dropping it', () => {
+    const live = dragging();
+    const foreign = releaseDrag(live, OTHER_POINTER);
+    expect(foreign.foreign).toBe(true);
+    expect(foreign.drop).toBe(false);
+    expect(foreign.state).toBe(live);
+    // The gesture is still there for the pointer that owns it.
+    expect(releaseDrag(live, POINTER).drop).toBe(true);
+  });
+
+  it('a foreign release does not dissolve an armed press either', () => {
+    const armed = armDrag(NO_DRAG, press());
+    const foreign = releaseDrag(armed, OTHER_POINTER);
+    expect(foreign.foreign).toBe(true);
+    expect(foreign.state).toBe(armed);
+  });
+
+  it('a foreign pointercancel cancels nothing', () => {
+    const live = dragging();
+    const foreign = cancelDrag(live, OTHER_POINTER);
+    expect(foreign.state).toBe(live);
+    expect(foreign.notify).toBe(false);
+    // The owning pointer's cancellation still ends it, and still tells the
+    // window drawing a caret to stop.
+    const mine = cancelDrag(live, POINTER);
+    expect(mine.state).toBe(NO_DRAG);
+    expect(mine.notify).toBe(true);
+  });
+
+  it('a cancel that belongs to no pointer — Escape, teardown — always applies', () => {
+    const cancelled = cancelDrag(dragging());
+    expect(cancelled.state).toBe(NO_DRAG);
+    expect(cancelled.notify).toBe(true);
   });
 });
 
@@ -115,8 +177,10 @@ describe('pointercancel', () => {
     const again = armDrag(dissolved, press({ pointerId: 8 }));
     expect(again.phase).toBe('armed');
     expect(again.pointerId).toBe(8);
-    // And that second press can still become a real drag.
-    expect(advanceDrag(again, 400, 10).state.phase).toBe('dragging');
+    // And that second press can still become a real drag — under its own
+    // pointer, which is now the one the gesture answers to.
+    expect(advanceDrag(again, 8, 400, 10).state.phase).toBe('dragging');
+    expect(advanceDrag(again, POINTER, 400, 10).state.phase).toBe('armed');
   });
 
   it('clears the far side when the drag had already started', () => {
@@ -126,14 +190,14 @@ describe('pointercancel', () => {
   });
 
   it('cannot cancel a drop already resolving', () => {
-    const dropping = releaseDrag(dragging()).state;
+    const dropping = releaseDrag(dragging(), POINTER).state;
     const cancelled = cancelDrag(dropping);
     expect(cancelled.state).toBe(dropping);
     expect(cancelled.notify).toBe(false);
   });
 
   it('cannot re-arm over a drop already resolving', () => {
-    const dropping = releaseDrag(dragging()).state;
+    const dropping = releaseDrag(dragging(), POINTER).state;
     // The commit gate and the handover are running against this path; a press
     // on another tab must not steal the state they are using.
     const state = armDrag(dropping, press({ path: 'C:\\docs\\b.pdf' }));
@@ -144,21 +208,23 @@ describe('pointercancel', () => {
 
 describe('release', () => {
   it('resolves a drop and names the document', () => {
-    const released = releaseDrag(dragging());
+    const released = releaseDrag(dragging(), POINTER);
     expect(released.drop).toBe(true);
     expect(released.path).toBe('C:\\docs\\a.pdf');
     expect(released.state.phase).toBe('dropping');
+    expect(released.foreign).toBe(false);
   });
 
   it('lets an untravelled press through as an ordinary click', () => {
-    const released = releaseDrag(armDrag(NO_DRAG, press()));
+    const released = releaseDrag(armDrag(NO_DRAG, press()), POINTER);
     expect(released.drop).toBe(false);
     expect(released.path).toBe('');
     expect(released.state).toBe(NO_DRAG);
+    expect(released.foreign).toBe(false);
   });
 
   it('settles only what was dropping', () => {
-    expect(settleDrop(releaseDrag(dragging()).state)).toBe(NO_DRAG);
+    expect(settleDrop(releaseDrag(dragging(), POINTER).state)).toBe(NO_DRAG);
     const armed = armDrag(NO_DRAG, press());
     expect(settleDrop(armed)).toBe(armed);
   });
@@ -184,29 +250,49 @@ describe('drop outcomes', () => {
 });
 
 describe('strip rect', () => {
-  it('anchors the CSS box to the window inner origin in physical pixels', () => {
-    // The origin the probe recorded: inner (128, 151) for an outer (120, 120).
-    const rect = stripRectFor(
-      { left: 0, top: 64, width: 884, height: 32 },
-      { x: 128, y: 151 },
-      1,
-    );
-    expect(rect).toEqual({ x: 128, y: 215, width: 884, height: 32 });
+  it('scales the CSS box and carries no screen origin at all', () => {
+    // The origin is read on the far side, under the lock it re-anchors with.
+    // Composing here from a separately sampled origin is what leaves the drop
+    // rect offset for good when the window moves between the two reads.
+    expect(stripRectFor({ left: 0, top: 64, width: 884, height: 32 }, 1)).toEqual({
+      x: 0,
+      y: 64,
+      width: 884,
+      height: 32,
+    });
   });
 
-  it('scales the box but not the origin — the origin is already physical', () => {
-    const rect = stripRectFor({ left: 10, top: 20, width: 400, height: 32 }, { x: 200, y: 300 }, 1.5);
-    expect(rect).toEqual({ x: 215, y: 330, width: 600, height: 48 });
+  it('scales every side by the publishing window ratio', () => {
+    expect(stripRectFor({ left: 10, top: 20, width: 400, height: 32 }, 1.5)).toEqual({
+      x: 15,
+      y: 30,
+      width: 600,
+      height: 48,
+    });
   });
 
   it('collapses a strip with no area so it can never take a drop', () => {
     // Reading mode unmounts the strip; a hidden element measures zero.
-    expect(stripRectFor({ left: 0, top: 0, width: 884, height: 0 }, { x: 128, y: 151 }, 1)).toBe(
-      EMPTY_STRIP,
-    );
-    expect(stripRectFor({ left: 0, top: 0, width: 0, height: 32 }, { x: 128, y: 151 }, 1)).toBe(
-      EMPTY_STRIP,
-    );
+    expect(stripRectFor({ left: 0, top: 0, width: 884, height: 0 }, 1)).toBe(EMPTY_STRIP);
+    expect(stripRectFor({ left: 0, top: 0, width: 0, height: 32 }, 1)).toBe(EMPTY_STRIP);
+  });
+});
+
+describe('hand-off plan', () => {
+  // The defect this pins: a drag that ended where it started used to run the
+  // full move — the working copy written over the user's own file and the
+  // document marked saved, which discards its undo and redo history.
+  it('writes nothing at all when the release stays in this window', () => {
+    expect(planHandOff(false, true)).toEqual({ hand: false, saveFirst: false });
+    expect(planHandOff(false, false)).toEqual({ hand: false, saveFirst: false });
+  });
+
+  it('writes the file back only for a document that is actually leaving', () => {
+    expect(planHandOff(true, true)).toEqual({ hand: true, saveFirst: true });
+  });
+
+  it('hands over a clean document without writing it', () => {
+    expect(planHandOff(true, false)).toEqual({ hand: true, saveFirst: false });
   });
 });
 
@@ -243,6 +329,68 @@ describe('ghost pinning', () => {
 
   it('pins to the origin when the ghost is wider than the window', () => {
     expect(pinGhost(500, 20, 40, 8, { width: 2000, height: 900 }, viewport)).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe('serial publisher', () => {
+  const deferred = () => {
+    const settle: Array<() => void> = [];
+    const sent: number[] = [];
+    const send = (value: number): Promise<void> => {
+      sent.push(value);
+      return new Promise<void>((resolve) => settle.push(resolve));
+    };
+    return { send, sent, settle };
+  };
+
+  it('keeps one publish outstanding at a time', async () => {
+    const { send, sent, settle } = deferred();
+    const publisher = createSerialPublisher(send);
+    publisher.post(1);
+    publisher.post(2);
+    // Two in flight can be applied in either order, and the loser leaves a
+    // stale rect standing until the next relayout.
+    expect(sent).toEqual([1]);
+    settle[0]();
+    await Promise.resolve();
+    expect(sent).toEqual([1, 2]);
+  });
+
+  it('publishes only the newest value that was waiting', async () => {
+    const { send, sent, settle } = deferred();
+    const publisher = createSerialPublisher(send);
+    publisher.post(1);
+    publisher.post(2);
+    publisher.post(3);
+    settle[0]();
+    await Promise.resolve();
+    expect(sent).toEqual([1, 3]);
+  });
+
+  it('publishes straight away once nothing is outstanding', async () => {
+    const { send, sent, settle } = deferred();
+    const publisher = createSerialPublisher(send);
+    publisher.post(1);
+    settle[0]();
+    await Promise.resolve();
+    publisher.post(2);
+    expect(sent).toEqual([1, 2]);
+  });
+
+  it('keeps publishing after one is rejected', async () => {
+    const sent: number[] = [];
+    let fail: ((reason: Error) => void) | null = null;
+    const publisher = createSerialPublisher<number>((value) => {
+      sent.push(value);
+      return value === 1 ? new Promise<void>((_, reject) => (fail = reject)) : Promise.resolve();
+    });
+    publisher.post(1);
+    publisher.post(2);
+    (fail as unknown as (reason: Error) => void)(new Error('no window origin'));
+    await Promise.resolve();
+    // A window that could not take one rect must still take the next: the
+    // last one published is what says the strip is gone.
+    expect(sent).toEqual([1, 2]);
   });
 });
 
