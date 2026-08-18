@@ -1,18 +1,32 @@
 """Incremental-append editing of SIGNED documents.
 
-The property under test is singular: after an annotate/fill/add-page edit
-lands through the transplant, the output STARTS WITH the signed original's
-bytes verbatim (so the /ByteRange digest still verifies) AND the edit is
-present. Structural edits refuse rather than half-append. The PKI reuses
+Two properties are under test, and they are separate questions (ISO 32000-2,
+12.8.2.2.2 validates them in that order):
+
+  MECHANICS   after an edit lands through the transplant, the output STARTS
+              WITH the signed original's bytes verbatim (so the /ByteRange
+              digest still verifies) AND the edit is present. Edits that
+              cannot be expressed as an append refuse rather than half-apply.
+  PERMISSION  a delta the document's own certification forbids REFUSES, so no
+              output ever carries a preserved byte range under a policy that
+              calls the change illegal.
+
+``TestVerdictMatrix`` is the second property as a table: every (signature
+situation x delta class) cell asserts the transplant's own verdict AND what
+``verify_signatures`` says about the file it produced. The PKI reuses
 test_pades' local CA fixture pattern.
 """
 
 import os
+import re
 
 import pikepdf
 import pytest
 
+import engine.incremental as incremental
 from engine.incremental import (
+    DELTA_CLASSES,
+    _ceiling_refusal,
     finalize_preserving_signatures,
     has_live_signatures,
     transplant_incremental,
@@ -427,3 +441,800 @@ class TestWrappedOps:
         r = fill_form_fields(signed, out, {"name": "X"}, flatten=True)
         assert r["flattened"] is True
         assert "signatures_preserved" not in r
+
+
+# ---------------------------------------------------------------------------
+# The verdict matrix: (signature situation x delta class), measured twice —
+# once as the transplant's own verdict, once as what the OUTPUT verifies as.
+# ---------------------------------------------------------------------------
+
+#: Ceiling fixtures. The names carry the wire level names
+#: `certification_of_file` reports, so a refusal reason reads back against the
+#: row that produced it.
+_SITUATIONS = {
+    "approval": {},
+    "certified-none": {"certify": True, "certify_level": "none"},
+    "certified-form-fill": {"certify": True, "certify_level": "form-fill"},
+    "certified-annotate": {"certify": True, "certify_level": "annotate"},
+}
+
+
+def _matrix_base(path):
+    """Three distinguishable pages; page 1 carries an annotation AND the form.
+
+    Every page draws a different rectangle, so a reorder is observable in the
+    output rather than merely reported, and pairing cannot succeed by accident.
+    """
+    pdf = pikepdf.new()
+    for i in range(3):
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.Contents = pdf.make_stream(
+            f"0 g 10 {10 + 20 * i} 100 100 re f".encode()
+        )
+        page.obj["/Resources"] = pikepdf.Dictionary(
+            ProcSet=pikepdf.Array([pikepdf.Name("/PDF")])
+        )
+    ap = pdf.make_stream(b"1 0 0 rg 0 0 40 40 re f")
+    ap.stream_dict["/Type"] = pikepdf.Name("/XObject")
+    ap.stream_dict["/Subtype"] = pikepdf.Name("/Form")
+    ap.stream_dict["/BBox"] = pikepdf.Array([0, 0, 40, 40])
+    square = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/Square"),
+        Rect=pikepdf.Array([400, 600, 440, 640]), F=4,
+        NM=pikepdf.String("base-square"), AP=pikepdf.Dictionary(N=ap),
+    ))
+    widget = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/Widget"),
+        FT=pikepdf.Name("/Tx"), T=pikepdf.String("name"),
+        Rect=pikepdf.Array([50, 500, 250, 530]), F=4,
+        V=pikepdf.String("old value"), DA=pikepdf.String("/Helv 0 Tf 0 g"),
+    ))
+    pdf.pages[0].obj["/Annots"] = pikepdf.Array([square, widget])
+    pdf.Root["/AcroForm"] = pdf.make_indirect(pikepdf.Dictionary(
+        Fields=pikepdf.Array([widget]), DA=pikepdf.String("/Helv 0 Tf 0 g"),
+    ))
+    pdf.save(str(path))
+
+
+@pytest.fixture(scope="module")
+def matrix_pki(tmp_path_factory):
+    global _PKI
+    if _PKI is None:
+        _PKI = _build_pki(str(tmp_path_factory.mktemp("incr-pki")))
+    return _PKI
+
+
+@pytest.fixture(scope="module")
+def matrix_docs(tmp_path_factory, matrix_pki):
+    """One signed fixture per certification situation, built once.
+
+    Read-only for every test: each transplant writes to its own tmp output, so
+    the four signings are amortized across the whole matrix.
+    """
+    root = tmp_path_factory.mktemp("incr-matrix")
+    base = root / "base.pdf"
+    _matrix_base(base)
+    out = {}
+    for label, kw in _SITUATIONS.items():
+        signed = root / f"signed-{label}.pdf"
+        sign_pdf(str(base), str(signed), pfx_path=matrix_pki["pfx"],
+                 password="pw", **kw)
+        out[label] = str(signed)
+    return out
+
+
+def _m_annot_add(pdf):
+    ap = pdf.make_stream(b"0 0 1 rg 0 0 50 50 re f")
+    ap.stream_dict["/Type"] = pikepdf.Name("/XObject")
+    ap.stream_dict["/Subtype"] = pikepdf.Name("/Form")
+    ap.stream_dict["/BBox"] = pikepdf.Array([0, 0, 50, 50])
+    existing = list(pdf.pages[0].obj.get("/Annots") or [])
+    pdf.pages[0].obj["/Annots"] = pikepdf.Array(existing + [pdf.make_indirect(
+        pikepdf.Dictionary(
+            Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/Square"),
+            Rect=pikepdf.Array([200, 300, 250, 350]), F=4,
+            NM=pikepdf.String("matrix-add"), AP=pikepdf.Dictionary(N=ap),
+        ))])
+
+
+def _m_form_fill(pdf):
+    for f in pdf.Root.AcroForm.Fields:
+        if f.get("/T") is not None and str(f["/T"]) == "name":
+            f["/V"] = pikepdf.String("filled by the matrix")
+    pdf.Root.AcroForm["/NeedAppearances"] = True
+
+
+def _m_insert_end(pdf):
+    page = pdf.add_blank_page(page_size=(612, 792))
+    page.Contents = pdf.make_stream(b"0 g 20 20 200 200 re f")
+
+
+def _m_insert_start(pdf):
+    page = pdf.add_blank_page(page_size=(612, 792))
+    page.Contents = pdf.make_stream(b"0 g 30 30 200 200 re f")
+    p = pdf.pages[3]
+    del pdf.pages[3]
+    pdf.pages.insert(0, p)
+
+
+def _m_page_remove(pdf):
+    del pdf.pages[1]
+
+
+def _m_page_reorder(pdf):
+    p = pdf.pages[1]
+    del pdf.pages[1]
+    pdf.pages.insert(2, p)
+
+
+def _m_page_rotate(pdf):
+    pdf.pages[1].obj["/Rotate"] = 90
+
+
+def _m_page_crop(pdf):
+    pdf.pages[1].obj["/CropBox"] = pikepdf.Array([50, 50, 562, 742])
+
+
+def _m_content_edit(pdf):
+    pdf.pages[1].Contents = pdf.make_stream(b"0 g 200 200 300 300 re f")
+
+
+def _m_resource_swap(pdf):
+    font = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name("/Font"), Subtype=pikepdf.Name("/Type1"),
+        BaseFont=pikepdf.Name("/Helvetica"),
+    ))
+    pdf.pages[1].obj["/Resources"] = pikepdf.Dictionary(
+        ProcSet=pikepdf.Array([pikepdf.Name("/PDF"), pikepdf.Name("/Text")]),
+        Font=pikepdf.Dictionary(F1=font),
+    )
+
+
+#: delta name -> (mutation, its class, the modification level the OUTPUT
+#: reports when the delta is carried).
+_DELTAS = {
+    "annot-add": (_m_annot_add, "annotations", "ANNOTATIONS"),
+    "form-fill": (_m_form_fill, "form-fill", "FORM_FILLING"),
+    "page-insert-end": (_m_insert_end, "page-structure", "OTHER"),
+    "page-insert-start": (_m_insert_start, "page-structure", "OTHER"),
+    "page-remove": (_m_page_remove, "page-structure", "OTHER"),
+    "page-reorder": (_m_page_reorder, "page-structure", "OTHER"),
+    "page-rotate": (_m_page_rotate, "page-keys", "OTHER"),
+    "page-crop": (_m_page_crop, "page-keys", "OTHER"),
+}
+
+#: Deltas no signature situation can carry: the page they touch has no twin,
+#: which is what content and resource drift LOOKS like and what the DocMDP
+#: transform exists to detect.
+_UNAPPENDABLE = {
+    "content-edit": _m_content_edit,
+    "resource-swap": _m_resource_swap,
+}
+
+
+def _verdict(path, pki):
+    sig = verify_signatures(path, trust_roots=[pki["ca_pem"]])["signatures"][0]
+    return {
+        "intact": sig["intact"],
+        "modification_level": sig["modification_level"],
+        "policy_ok": sig["policy_ok"],
+        "policy_judged": sig["policy_judged"],
+    }
+
+
+def _permits(situation: str, delta_class: str) -> bool:
+    """Table 257 as the TEST's own reading, spelled out rather than imported
+    from the module under test — a table that agrees with itself proves
+    nothing."""
+    if situation == "approval":
+        return True
+    if situation == "certified-none":
+        return False
+    if situation == "certified-form-fill":
+        return delta_class == "form-fill"
+    if situation == "certified-annotate":
+        return delta_class in ("form-fill", "annotations")
+    raise AssertionError(f"unknown situation {situation}")
+
+
+class TestVerdictMatrix:
+    @pytest.mark.parametrize("situation", sorted(_SITUATIONS))
+    @pytest.mark.parametrize("delta", sorted(_DELTAS))
+    def test_cell(self, situation, delta, matrix_docs, matrix_pki, tmp_dir):
+        mutate, delta_class, expect_level = _DELTAS[delta]
+        signed = matrix_docs[situation]
+        orig_bytes = open(signed, "rb").read()
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+
+        r = transplant_incremental(signed, modified, out)
+
+        if not _permits(situation, delta_class):
+            level = situation[len("certified-"):]
+            assert r["applied"] is False
+            assert r["reason"] == f"certified-{level}-forbids-{delta_class}"
+            assert r["certification_level"] == level
+            assert delta_class in r["forbidden_classes"]
+            assert not os.path.exists(out), "a refusal wrote a file"
+            return
+
+        assert r["applied"] is True, r.get("reason")
+        assert r["delta_classes"] == [delta_class], r["delta_classes"]
+        result = open(out, "rb").read()
+        assert result[: len(orig_bytes)] == orig_bytes
+        v = _verdict(out, matrix_pki)
+        assert v["intact"] is True
+        assert v["policy_judged"] is True
+        assert v["modification_level"] == expect_level, v
+        assert v["policy_ok"] is True, (
+            "the transplant emitted a file its own verifier calls a policy "
+            f"violation: {v}"
+        )
+
+    @pytest.mark.parametrize("situation", sorted(_SITUATIONS))
+    @pytest.mark.parametrize("delta", sorted(_UNAPPENDABLE))
+    def test_unappendable_cell(self, situation, delta, matrix_docs, tmp_dir):
+        modified = _rewrite_with(
+            matrix_docs[situation], tmp_dir, _UNAPPENDABLE[delta]
+        )
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(matrix_docs[situation], modified, out)
+        assert r["applied"] is False
+        assert "no structural match" in r["reason"]
+        assert not os.path.exists(out)
+
+    def test_no_delta_is_not_a_ceiling_refusal(self, matrix_docs, tmp_dir):
+        # A certification that forbids everything still has nothing to forbid
+        # when the rebuild changed nothing — the two must not be conflated.
+        signed = matrix_docs["certified-none"]
+        modified = _rewrite_with(signed, tmp_dir, lambda pdf: None)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r == {"applied": False, "reason": "no-delta"}
+
+
+class TestCeilingTable:
+    """The ceiling as a pure function, including the level no fixture can be
+    signed at."""
+
+    def test_uncertified_has_no_ceiling(self):
+        certification = {"certified": False, "level": None}
+        assert _ceiling_refusal(certification, set(DELTA_CLASSES)) is None
+
+    def test_unreadable_permission_value_permits_nothing(self):
+        # certification_of_pdf reports certified=True with level None for a /P
+        # outside 1-3: an unknown policy is not an absent one.
+        certification = {"certified": True, "level": None, "level_value": 9}
+        for cls in DELTA_CLASSES:
+            r = _ceiling_refusal(certification, {cls})
+            assert r["reason"] == f"certified-unknown-forbids-{cls}"
+            assert r["certification_level"] == "unknown"
+
+    def test_mixture_names_one_class_but_reports_all(self):
+        certification = {"certified": True, "level": "annotate"}
+        r = _ceiling_refusal(
+            certification, {"annotations", "page-keys", "page-structure"}
+        )
+        assert r["reason"] == "certified-annotate-forbids-page-keys"
+        assert r["forbidden_classes"] == ["page-keys", "page-structure"]
+        assert r["delta_classes"] == ["annotations", "page-keys", "page-structure"]
+
+    def test_permitted_mixture_passes(self):
+        certification = {"certified": True, "level": "annotate"}
+        assert _ceiling_refusal(
+            certification, {"annotations", "form-fill"}
+        ) is None
+
+    def test_empty_delta_never_refuses(self):
+        assert _ceiling_refusal({"certified": True, "level": "none"}, set()) is None
+
+
+class TestPageKeys:
+    """The widened page-key reach: /Rotate and the six boundaries."""
+
+    def test_every_carried_key_lands_at_once(self, matrix_docs, matrix_pki, tmp_dir):
+        signed = matrix_docs["approval"]
+        orig_bytes = open(signed, "rb").read()
+
+        def mutate(pdf):
+            page = pdf.pages[2].obj
+            page["/Rotate"] = 270
+            page["/MediaBox"] = pikepdf.Array([0, 0, 595, 842])
+            page["/CropBox"] = pikepdf.Array([10, 10, 585, 832])
+            page["/BleedBox"] = pikepdf.Array([5, 5, 590, 837])
+            page["/TrimBox"] = pikepdf.Array([15, 15, 580, 827])
+            page["/ArtBox"] = pikepdf.Array([20, 20, 575, 822])
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, r.get("reason")
+        assert r["page_keys_updated"] == 1
+        assert r["delta_classes"] == ["page-keys"]
+        assert open(out, "rb").read()[: len(orig_bytes)] == orig_bytes
+        _assert_sig_still_valid(out, matrix_pki)
+        with pikepdf.open(out) as pdf:
+            page = pdf.pages[2].obj
+            assert int(page["/Rotate"]) == 270
+            assert [float(v) for v in page["/MediaBox"]] == [0, 0, 595, 842]
+            assert [float(v) for v in page["/ArtBox"]] == [20, 20, 575, 822]
+
+    def test_materializing_an_inherited_value_is_not_a_delta(self, tmp_dir, pki):
+        # A rebuild that copies the page tree's own /MediaBox down onto each
+        # page changes the dict without changing the page (7.7.3.4). Comparing
+        # dict membership would manufacture a delta out of that.
+        src = os.path.join(tmp_dir, "inherited-base.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.Contents = pdf.make_stream(b"0 g 10 10 100 100 re f")
+        del page.obj["/MediaBox"]
+        pdf.Root.Pages["/MediaBox"] = pikepdf.Array([0, 0, 612, 792])
+        pdf.save(src)
+        signed = os.path.join(tmp_dir, "inherited-signed.pdf")
+        sign_pdf(src, signed, pfx_path=pki["pfx"], password="pw")
+
+        def mutate(p):
+            p.pages[0].obj["/MediaBox"] = pikepdf.Array([0, 0, 612, 792])
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r == {"applied": False, "reason": "no-delta"}
+
+    def test_removing_an_uninherited_box_is_expressible(self, tmp_dir, pki):
+        src = os.path.join(tmp_dir, "cropped-base.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.Contents = pdf.make_stream(b"0 g 10 10 100 100 re f")
+        page.obj["/CropBox"] = pikepdf.Array([20, 20, 592, 772])
+        pdf.save(src)
+        signed = os.path.join(tmp_dir, "cropped-signed.pdf")
+        sign_pdf(src, signed, pfx_path=pki["pfx"], password="pw")
+
+        def mutate(p):
+            del p.pages[0].obj["/CropBox"]
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, r.get("reason")
+        assert r["delta_classes"] == ["page-keys"]
+        _assert_sig_still_valid(out, pki)
+        with pikepdf.open(out) as result:
+            assert "/CropBox" not in result.pages[0].obj
+
+    @staticmethod
+    def _override_fixture(tmp_dir, pki, name):
+        """A page whose own /CropBox overrides an ancestor's."""
+        src = os.path.join(tmp_dir, f"{name}-base.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.Contents = pdf.make_stream(b"0 g 10 10 100 100 re f")
+        page.obj["/CropBox"] = pikepdf.Array([20, 20, 592, 772])
+        pdf.Root.Pages["/CropBox"] = pikepdf.Array([40, 40, 572, 752])
+        pdf.save(src)
+        signed = os.path.join(tmp_dir, f"{name}-signed.pdf")
+        sign_pdf(src, signed, pfx_path=pki["pfx"], password="pw")
+        return signed
+
+    def test_removing_a_box_an_ancestor_still_supplies_refuses(
+        self, tmp_dir, pki
+    ):
+        # Deleting the page's own entry would expose the node's rectangle, not
+        # the /MediaBox default the edit reached. Expressing it would take a
+        # rewrite of the page-tree node, which this module does not do.
+        # qpdf's flattening hides the node's entry from the READER, so this is
+        # exactly the case a reader-only judgement gets wrong.
+        signed = self._override_fixture(tmp_dir, pki, "inh-crop")
+
+        def mutate(p):
+            del p.pages[0].obj["/CropBox"]
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r == {
+            "applied": False, "reason": "page-key-removal-inherited-cropbox",
+        }
+        assert not os.path.exists(out)
+
+    def test_removing_a_box_the_page_never_owned_refuses(self, tmp_dir, pki):
+        # The value lives on the node in the FILE; the reader shows it on the
+        # page. Deleting the page's entry would be a no-op the result would
+        # nonetheless report as applied.
+        src = os.path.join(tmp_dir, "node-crop-base.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.Contents = pdf.make_stream(b"0 g 10 10 100 100 re f")
+        pdf.Root.Pages["/CropBox"] = pikepdf.Array([30, 30, 582, 762])
+        pdf.save(src)
+        signed = os.path.join(tmp_dir, "node-crop-signed.pdf")
+        sign_pdf(src, signed, pfx_path=pki["pfx"], password="pw")
+
+        def mutate(p):
+            del p.pages[0].obj["/CropBox"]
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r == {
+            "applied": False, "reason": "page-key-removal-inherited-cropbox",
+        }
+        assert not os.path.exists(out)
+
+
+class TestPageTree:
+    """Removal, reordering and insert-anywhere on an approval-signed document."""
+
+    def _order(self, path):
+        with pikepdf.open(path) as pdf:
+            return [
+                bytes(p.obj["/Contents"].read_bytes()).decode("latin-1")
+                for p in pdf.pages
+            ]
+
+    def test_remove_drops_exactly_one_page(self, matrix_docs, matrix_pki, tmp_dir):
+        signed = matrix_docs["approval"]
+        before = self._order(signed)
+        modified = _rewrite_with(signed, tmp_dir, _m_page_remove)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, r.get("reason")
+        assert r["pages_removed"] == 1
+        assert r["pages_inserted"] == 0
+        assert self._order(out) == [before[0], before[2]]
+        with pikepdf.open(out) as pdf:
+            assert int(pdf.Root.Pages["/Count"]) == 2
+        _assert_sig_still_valid(out, matrix_pki)
+
+    def test_reorder_permutes_without_touching_pages(
+        self, matrix_docs, matrix_pki, tmp_dir
+    ):
+        signed = matrix_docs["approval"]
+        before = self._order(signed)
+        modified = _rewrite_with(signed, tmp_dir, _m_page_reorder)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, r.get("reason")
+        assert r["pages_reordered"] is True
+        assert r["pages_removed"] == 0 and r["pages_inserted"] == 0
+        assert self._order(out) == [before[0], before[2], before[1]]
+        _assert_sig_still_valid(out, matrix_pki)
+
+    def test_insert_before_the_first_page(self, matrix_docs, matrix_pki, tmp_dir):
+        # The old refusal read pyHanko's "there are no pages yet" branch as a
+        # missing slot; measured, `after=-1` prepends into the root's /Kids.
+        signed = matrix_docs["approval"]
+        before = self._order(signed)
+        modified = _rewrite_with(signed, tmp_dir, _m_insert_start)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, r.get("reason")
+        assert r["pages_inserted"] == 1
+        assert self._order(out) == ["0 g 30 30 200 200 re f"] + before
+        with pikepdf.open(out) as pdf:
+            assert int(pdf.Root.Pages["/Count"]) == 4
+        _assert_sig_still_valid(out, matrix_pki)
+
+    def test_remove_plus_insert_is_ambiguous_and_refuses(
+        self, matrix_docs, tmp_dir
+    ):
+        def mutate(pdf):
+            del pdf.pages[1]
+            page = pdf.add_blank_page(page_size=(612, 792))
+            page.Contents = pdf.make_stream(b"0 g 40 40 200 200 re f")
+
+        modified = _rewrite_with(matrix_docs["approval"], tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(matrix_docs["approval"], modified, out)
+        assert r["applied"] is False
+        assert "no structural match" in r["reason"]
+        assert not os.path.exists(out)
+
+    def test_removing_a_page_that_carries_a_widget_refuses(
+        self, matrix_docs, tmp_dir
+    ):
+        # Page 1 of the fixture owns the form. Re-listing the survivors while
+        # /AcroForm still registers the field would leave a phantom.
+        def mutate(pdf):
+            del pdf.pages[0]
+            acro = pdf.Root["/AcroForm"]
+            acro["/Fields"] = pikepdf.Array([
+                f for f in acro["/Fields"]
+                if f.get("/T") is None or str(f["/T"]) != "name"
+            ])
+
+        modified = _rewrite_with(matrix_docs["approval"], tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(matrix_docs["approval"], modified, out)
+        assert r["applied"] is False
+        assert "removed form field" in r["reason"]
+
+    def test_an_inserted_page_costs_the_same_whatever_it_joins(self, tmp_dir, pki):
+        """The revision carries the new page — not the source's page tree.
+
+        A page dict's /Parent reaches the rewrite's whole tree, so following it
+        appended an unreachable copy of every page and content stream in the
+        document. The cost of one insertion must not depend on how many pages
+        the signed document already has.
+        """
+        def measure(page_count, tag):
+            src = os.path.join(tmp_dir, f"{tag}-base.pdf")
+            pdf = pikepdf.new()
+            for i in range(page_count):
+                page = pdf.add_blank_page(page_size=(612, 792))
+                page.Contents = pdf.make_stream(
+                    (f"0 g 10 {10 + i} 100 100 re f" + " " * 400).encode()
+                )
+            pdf.save(src)
+            signed = os.path.join(tmp_dir, f"{tag}-signed.pdf")
+            sign_pdf(src, signed, pfx_path=pki["pfx"], password="pw")
+            with pikepdf.open(signed) as before:
+                objects_before = int(before.trailer["/Size"])
+            modified = _rewrite_with(
+                signed, tmp_dir, _m_insert_end, name=f"{tag}-mod.pdf"
+            )
+            out = os.path.join(tmp_dir, f"{tag}-out.pdf")
+            r = transplant_incremental(signed, modified, out)
+            assert r["applied"] is True, r.get("reason")
+            with pikepdf.open(out) as after:
+                objects_after = int(after.trailer["/Size"])
+            return objects_after - objects_before, r["bytes_appended"]
+
+        small_objects, small_bytes = measure(2, "cost-small")
+        large_objects, large_bytes = measure(10, "cost-large")
+        assert small_objects == large_objects, (
+            "the insertion's object cost scales with the document — the source "
+            f"page tree is travelling ({small_objects} vs {large_objects})"
+        )
+        assert large_bytes - small_bytes < 400, (
+            f"appended bytes scale with the document ({small_bytes} vs "
+            f"{large_bytes}) — only the cross-reference table may grow"
+        )
+
+    def test_one_intermediate_node_carries_the_removal(self, tmp_dir, pki):
+        # All pages under a single branch: the branch's /Kids is rewritten and
+        # /Count moves at BOTH levels — an unadjusted root would report a page
+        # count the newest revision contradicts.
+        src = os.path.join(tmp_dir, "branch-base.pdf")
+        pdf = pikepdf.new()
+        for i in range(3):
+            page = pdf.add_blank_page(page_size=(612, 792))
+            page.Contents = pdf.make_stream(
+                f"0 g 10 {10 + 20 * i} 80 80 re f".encode()
+            )
+        root = pdf.Root.Pages
+        kids = list(root["/Kids"])
+        branch = pdf.make_indirect(pikepdf.Dictionary(
+            Type=pikepdf.Name("/Pages"), Parent=root,
+            Kids=pikepdf.Array(kids), Count=3,
+        ))
+        for kid in kids:
+            kid["/Parent"] = branch
+        root["/Kids"] = pikepdf.Array([branch])
+        pdf.save(src)
+        signed = os.path.join(tmp_dir, "branch-signed.pdf")
+        sign_pdf(src, signed, pfx_path=pki["pfx"], password="pw")
+
+        before = self._order(signed)
+        modified = _rewrite_with(signed, tmp_dir, _m_page_remove)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, r.get("reason")
+        assert r["pages_removed"] == 1
+        assert self._order(out) == [before[0], before[2]]
+        with pikepdf.open(out) as result:
+            assert int(result.Root.Pages["/Count"]) == 2
+            assert int(result.Root.Pages["/Kids"][0]["/Count"]) == 2
+        _assert_sig_still_valid(out, pki)
+
+    def test_a_multi_parent_page_tree_refuses(self, tmp_dir, pki):
+        # Flattening a deeper tree onto one /Kids would orphan the nodes whose
+        # attributes the pages inherit (7.7.3.4).
+        src = os.path.join(tmp_dir, "nested-base.pdf")
+        pdf = pikepdf.new()
+        for i in range(3):
+            page = pdf.add_blank_page(page_size=(612, 792))
+            page.Contents = pdf.make_stream(
+                f"0 g 10 {10 + 20 * i} 90 90 re f".encode()
+            )
+        root = pdf.Root.Pages
+        kids = list(root["/Kids"])
+        branch = pdf.make_indirect(pikepdf.Dictionary(
+            Type=pikepdf.Name("/Pages"), Parent=root,
+            Kids=pikepdf.Array(kids[1:]), Count=2,
+        ))
+        for kid in kids[1:]:
+            kid["/Parent"] = branch
+        root["/Kids"] = pikepdf.Array([kids[0], branch])
+        pdf.save(src)
+        signed = os.path.join(tmp_dir, "nested-signed.pdf")
+        sign_pdf(src, signed, pfx_path=pki["pfx"], password="pw")
+
+        modified = _rewrite_with(signed, tmp_dir, _m_page_remove)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is False
+        assert r["reason"] == "page-tree-multi-parent"
+        assert not os.path.exists(out)
+
+
+class TestRevertProofs:
+    """Each feature, switched off, must give the pre-feature answer back — with
+    values the passing tests above never use, so a proof cannot be a copy."""
+
+    def test_without_the_ceiling_a_no_changes_document_is_violated(
+        self, matrix_docs, matrix_pki, tmp_dir, monkeypatch
+    ):
+        monkeypatch.setattr(
+            incremental, "_CERTIFIED_PERMITS",
+            {k: frozenset(DELTA_CLASSES)
+             for k in ("none", "form-fill", "annotate", "unknown")},
+        )
+
+        def mutate(pdf):
+            ap = pdf.make_stream(b"0 1 0 rg 0 0 30 30 re f")
+            ap.stream_dict["/Type"] = pikepdf.Name("/XObject")
+            ap.stream_dict["/Subtype"] = pikepdf.Name("/Form")
+            ap.stream_dict["/BBox"] = pikepdf.Array([0, 0, 30, 30])
+            existing = list(pdf.pages[2].obj.get("/Annots") or [])
+            pdf.pages[2].obj["/Annots"] = pikepdf.Array(
+                existing + [pdf.make_indirect(pikepdf.Dictionary(
+                    Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/Circle"),
+                    Rect=pikepdf.Array([100, 100, 130, 130]), F=4,
+                    NM=pikepdf.String("revert-circle"),
+                    AP=pikepdf.Dictionary(N=ap),
+                ))]
+            )
+
+        signed = matrix_docs["certified-none"]
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, "the revert did not reach the ceiling"
+        v = _verdict(out, matrix_pki)
+        assert v["intact"] is True, "the mechanics were never the problem"
+        assert v["policy_ok"] is False, (
+            "without the ceiling this file should be the policy violation the "
+            "feature exists to stop"
+        )
+
+    def test_without_the_widened_skip_a_rotation_refuses(
+        self, matrix_docs, tmp_dir, monkeypatch
+    ):
+        monkeypatch.setattr(incremental, "_PAGE_SKIP", frozenset({"/Annots"}))
+
+        def mutate(pdf):
+            pdf.pages[0].obj["/Rotate"] = 180
+
+        modified = _rewrite_with(matrix_docs["approval"], tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(matrix_docs["approval"], modified, out)
+        assert r["applied"] is False
+        assert "no structural match" in r["reason"]
+
+    def test_without_the_kids_rewrite_a_removal_does_not_land(
+        self, matrix_docs, tmp_dir, monkeypatch
+    ):
+        monkeypatch.setattr(
+            incremental, "_rewrite_page_tree",
+            lambda writer, orig, mod, plan, page_refs, memo: 0,
+        )
+
+        def mutate(pdf):
+            del pdf.pages[2]
+
+        modified = _rewrite_with(matrix_docs["approval"], tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(matrix_docs["approval"], modified, out)
+        assert r["applied"] is True
+        with pikepdf.open(out) as pdf:
+            assert len(pdf.pages) == 3, (
+                "the /Kids rewrite is what carries a removal; without it the "
+                "revision claims a page it never dropped"
+            )
+
+
+class TestEmissionDeterminism:
+    """The shipped emission path, pinned.
+
+    A cross-version byte pin cannot live here — it needs the pre-change module,
+    which `o5b-byte-identity.local.py` loads out of git and compares against
+    (measured: identical for annotate / fill / insert-at-end / insert-in-middle
+    / annotation-removal on an approval document). What pytest CAN hold is the
+    property that made that comparison meaningful: the writer's only
+    run-to-run difference is the trailer's second /ID string, which pyHanko
+    re-mints on every write.
+    """
+
+    _ID = re.compile(rb"(/ID \[ <[0-9a-fA-F]+> )<[0-9a-fA-F]+>")
+
+    def _normalized(self, path):
+        return self._ID.sub(rb"\1<ID>", open(path, "rb").read())
+
+    @pytest.mark.parametrize("delta", ["annot-add", "form-fill", "page-insert-end"])
+    def test_two_runs_differ_only_in_the_document_id(
+        self, delta, matrix_docs, tmp_dir
+    ):
+        signed = matrix_docs["approval"]
+        modified = _rewrite_with(signed, tmp_dir, _DELTAS[delta][0])
+        a = os.path.join(tmp_dir, "a.pdf")
+        b = os.path.join(tmp_dir, "b.pdf")
+        assert transplant_incremental(signed, modified, a)["applied"] is True
+        assert transplant_incremental(signed, modified, b)["applied"] is True
+        assert open(a, "rb").read() != open(b, "rb").read()
+        assert self._normalized(a) == self._normalized(b)
+
+
+class TestHardLinkAliases:
+    """Both same-file refusals answer the FILESYSTEM, not the string.
+
+    A hard link is one physical file under two spellings that resolve
+    differently, so a resolved-path comparison lets an alias through the very
+    guard that exists to keep the input's bytes intact.
+    """
+
+    @staticmethod
+    def _hardlink(src, dst):
+        try:
+            os.link(src, dst)
+        except (OSError, NotImplementedError, AttributeError) as exc:
+            pytest.skip(f"hard links unavailable on this filesystem: {exc}")
+        if not os.path.samefile(src, dst):
+            pytest.skip("the filesystem did not produce a real hard link")
+
+    def test_transplant_refuses_an_aliased_original(self, tmp_dir, pki):
+        signed = _signed(tmp_dir, pki)
+        modified = _rewrite_with(signed, tmp_dir, _add_square)
+        alias = os.path.join(tmp_dir, "alias-out.pdf")
+        self._hardlink(signed, alias)
+        assert os.path.realpath(alias) != os.path.realpath(signed)
+        with pytest.raises(ValueError, match="original"):
+            transplant_incremental(signed, modified, alias)
+
+    def test_transplant_alias_refusal_is_the_guard_not_luck(
+        self, tmp_dir, pki, monkeypatch
+    ):
+        # Revert proof: with a resolved-spelling predicate back in place, the
+        # alias walks straight through the refusal.
+        monkeypatch.setattr(
+            incremental, "is_same_file",
+            lambda a, b: os.path.abspath(a) == os.path.abspath(b),
+        )
+        signed = _signed(tmp_dir, pki)
+        modified = _rewrite_with(signed, tmp_dir, _add_square)
+        alias = os.path.join(tmp_dir, "alias-out.pdf")
+        self._hardlink(signed, alias)
+        r = transplant_incremental(signed, modified, alias)
+        assert r["applied"] is True, (
+            "the reverted predicate should let the alias through — if it does "
+            "not, this test is no longer proving the guard"
+        )
+
+    def test_sign_refuses_an_aliased_output(self, tmp_dir, pki):
+        from engine import signatures
+
+        src = os.path.join(tmp_dir, "plain.pdf")
+        _base_pdf(src)
+        alias = os.path.join(tmp_dir, "plain-alias.pdf")
+        self._hardlink(src, alias)
+        with pytest.raises(ValueError, match="different file"):
+            signatures.sign_pdf(src, alias, pfx_path=pki["pfx"], password="pw")
+
+    def test_sign_alias_refusal_is_the_guard_not_luck(
+        self, tmp_dir, pki, monkeypatch
+    ):
+        from engine import signatures
+
+        monkeypatch.setattr(
+            signatures, "is_same_file",
+            lambda a, b: os.path.abspath(a) == os.path.abspath(b),
+        )
+        src = os.path.join(tmp_dir, "plain.pdf")
+        _base_pdf(src)
+        alias = os.path.join(tmp_dir, "plain-alias.pdf")
+        self._hardlink(src, alias)
+        signatures.sign_pdf(src, alias, pfx_path=pki["pfx"], password="pw")
+        assert has_live_signatures(alias), (
+            "the reverted predicate should have signed straight over the alias"
+        )
