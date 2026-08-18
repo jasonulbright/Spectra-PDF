@@ -526,6 +526,213 @@ def unconvertible_shading_pdf(path, spot: str = "Warm Red"):
     return str(path)
 
 
+def _appearance_stream(pdf, space, rect):
+    """A form XObject painting a colorant gradient across its whole BBox."""
+    width, height = rect[2] - rect[0], rect[3] - rect[1]
+    shading = pdf.make_indirect(Dictionary(
+        ShadingType=2, ColorSpace=space, Coords=Array([0, 0, width, 0]),
+        Function=Dictionary(FunctionType=2, Domain=Array([0, 1]), N=1,
+                            C0=Array([0.2]), C1=Array([1])),
+        Extend=Array([True, True])))
+    stream = pikepdf.Stream(
+        pdf, f"q 0 0 {width} {height} re W n /Sh sh Q".encode("ascii"))
+    stream.Type = Name.XObject
+    stream.Subtype = Name.Form
+    stream.BBox = Array([0, 0, width, height])
+    stream.Resources = Dictionary(Shading=Dictionary(Sh=shading))
+    return pdf.make_indirect(stream)
+
+
+#: Each appearance gets its OWN alternate: identical staged shadings merge into
+#: one object in the producer's output, where only the first can be put back
+#: (the swap's documented guard), and the fixture would then measure the merge.
+APPEARANCE_GRADIENTS = {
+    "Stamp Gradient": (0.0, 1.0, 0.75, 0.0),
+    "Hidden Gradient": (0.0, 0.4, 1.0, 0.0),
+    "NoView Gradient": (1.0, 0.0, 0.3, 0.0),
+    "NoPrint Gradient": (0.2, 0.0, 1.0, 0.1),
+    "Rollover Gradient": (0.3, 1.0, 0.0, 0.0),
+    "Down Gradient": (0.6, 0.0, 0.9, 0.0),
+    "Widget Gradient": (0.0, 0.7, 0.2, 0.0),
+}
+
+#: ISO 32000-2 12.5.3 annotation flags, by bit position.
+ANNOT_PRINT = 4
+ANNOT_HIDDEN = 2
+ANNOT_NOVIEW = 32
+
+
+def appearance_shading_pdf(path):
+    """Colorant gradients that live only in annotation APPEARANCE streams.
+
+    A printable stamp (the plain case), the same thing behind each flag
+    setting whose rendering differs — Hidden, NoView, no Print — a stamp
+    carrying `/N`, `/R` and `/D`, and a form field whose widget appearance the
+    conversion reattaches from the original instead of converting. The page
+    itself paints a DeviceRGB rectangle, the control that says the conversion
+    ran at all.
+    """
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(400, 460))
+    page.Resources = Dictionary()
+    page.Contents = pdf.make_stream(b"1 0 0 rg 10 10 380 30 re f")
+
+    def stamp(ink, flags, rect, faces=None):
+        space = separation_space(pdf, ink, APPEARANCE_GRADIENTS[ink])
+        appearance = Dictionary(N=_appearance_stream(pdf, space, rect))
+        for face, face_ink in (faces or {}).items():
+            appearance[face] = _appearance_stream(
+                pdf, separation_space(pdf, face_ink,
+                                      APPEARANCE_GRADIENTS[face_ink]), rect)
+        return pdf.make_indirect(Dictionary(
+            Type=Name.Annot, Subtype=Name.Stamp, Rect=Array(list(rect)),
+            F=flags, T=ink, AP=appearance))
+
+    annots = [
+        stamp("Stamp Gradient", ANNOT_PRINT, (10, 400, 390, 450)),
+        stamp("Hidden Gradient", ANNOT_HIDDEN | ANNOT_PRINT, (10, 340, 390, 390)),
+        stamp("NoView Gradient", ANNOT_NOVIEW | ANNOT_PRINT, (10, 280, 390, 330)),
+        stamp("NoPrint Gradient", 0, (10, 220, 390, 270)),
+        stamp("Rollover Gradient", ANNOT_PRINT, (10, 160, 390, 210),
+              faces={"/D": "Down Gradient"}),
+    ]
+    widget_rect = (10, 100, 390, 150)
+    widget = pdf.make_indirect(Dictionary(
+        Type=Name.Annot, Subtype=Name.Widget, FT=Name.Tx,
+        Rect=Array(list(widget_rect)), F=ANNOT_PRINT, T="field1", V="",
+        DA="/Helv 0 Tf 0 g",
+        AP=Dictionary(N=_appearance_stream(
+            pdf, separation_space(pdf, "Widget Gradient",
+                                  APPEARANCE_GRADIENTS["Widget Gradient"]),
+            widget_rect))))
+    annots.append(widget)
+    pdf.Root.AcroForm = pdf.make_indirect(Dictionary(
+        Fields=Array([widget]), DA="/Helv 0 Tf 0 g", DR=Dictionary()))
+    page.Annots = Array(annots)
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
+def dropped_annotation_shading_pdf(path, spot: str = "Mark Gradient"):
+    """A `/PrinterMark` whose appearance paints a colorant gradient.
+
+    The producer does not carry this annotation into its output at all — it
+    flattens the appearance into the page content it came from — so the plate
+    survives or dies at the page tier, on the strength of the bracket the
+    appearance was staged with.
+    """
+    rect = (10, 300, 190, 350)
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(400, 400))
+    page.Resources = Dictionary()
+    page.Contents = pdf.make_stream(b"1 0 0 rg 10 10 180 20 re f")
+    page.Annots = Array([pdf.make_indirect(Dictionary(
+        Type=Name.Annot, Subtype=Name.PrinterMark, Rect=Array(list(rect)),
+        F=ANNOT_PRINT, T=spot,
+        AP=Dictionary(N=_appearance_stream(
+            pdf, separation_space(pdf, spot, (0.0, 1.0, 0.75, 0.0)), rect))))])
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
+#: The stamp rectangle every `appearance_pattern_pdf` variant uses.
+APPEARANCE_RECT = (10, 300, 390, 350)
+
+
+def appearance_pattern_pdf(path, kind: str):
+    """A stamp appearance that paints through a pattern, in process colour.
+
+    Nothing here is in a colorant space, so a colour conversion has nothing to
+    carry and nothing to lose: what these measure is the appearance's own
+    coordinate space, which a pattern matrix is stated in (ISO 32000-2 8.7.2).
+
+    ``shading`` a DeviceCMYK gradient, ``tiling`` a DeviceCMYK tile, ``skewed``
+    a gradient under a non-uniform BBox-to-Rect map and an internal `cm` (so
+    the appearance's space, the page's and the paint's are three different
+    spaces), and ``plain`` a flat fill that uses no pattern at all.
+    """
+    rect = APPEARANCE_RECT
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(400, 400))
+    page.Resources = Dictionary()
+    page.Contents = pdf.make_stream(b"1 0 0 rg 10 10 380 20 re f")
+    width, height = rect[2] - rect[0], rect[3] - rect[1]
+
+    def gradient(span):
+        return pdf.make_indirect(Dictionary(
+            ShadingType=2, ColorSpace=Name.DeviceCMYK,
+            Coords=Array([0, 0, span, 0]),
+            Function=Dictionary(FunctionType=2, Domain=Array([0, 1]), N=1,
+                                C0=Array([0, 0, 0, 0]),
+                                C1=Array([0, 1, 0.75, 0])),
+            Extend=Array([True, True])))
+
+    if kind == "shading":
+        body = f"q 0 0 {width} {height} re W n /Sh sh Q".encode("ascii")
+        bbox, resources = (0, 0, width, height), Dictionary(
+            Shading=Dictionary(Sh=gradient(width)))
+    elif kind == "skewed":
+        body = b"q 2 0 0 2 0 0 cm 0 0 50 50 re W n /Sh sh Q"
+        bbox, resources = (0, 0, 100, 100), Dictionary(
+            Shading=Dictionary(Sh=gradient(50)))
+    elif kind == "tiling":
+        cell = pikepdf.Stream(pdf, b"0 1 0.75 0 k 0 0 5 5 re f")
+        cell.Type = Name.Pattern
+        cell.PatternType = 1
+        cell.PaintType = 1
+        cell.TilingType = 1
+        cell.BBox = Array([0, 0, 10, 10])
+        cell.XStep = 10
+        cell.YStep = 10
+        cell.Resources = Dictionary()
+        body = b"/Pattern cs /P0 scn 0 0 100 100 re f"
+        bbox, resources = (0, 0, 100, 100), Dictionary(
+            Pattern=Dictionary(P0=pdf.make_indirect(cell)))
+    elif kind == "plain":
+        body = f"0 1 0.75 0 k 0 0 {width} {height} re f".encode("ascii")
+        bbox, resources = (0, 0, width, height), Dictionary()
+    else:
+        raise ValueError(f"unknown appearance kind: {kind}")
+
+    ap = pikepdf.Stream(pdf, body)
+    ap.Type = Name.XObject
+    ap.Subtype = Name.Form
+    ap.BBox = Array(list(bbox))
+    ap.Resources = resources
+    page.Annots = Array([pdf.make_indirect(Dictionary(
+        Type=Name.Annot, Subtype=Name.Stamp, Rect=Array(list(rect)),
+        F=ANNOT_PRINT, T=kind, AP=Dictionary(N=pdf.make_indirect(ap))))])
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
+def rgb_alternate_appearance_pdf(path, spot: str = "RGB Appearance Spot"):
+    """A stamp appearance whose gradient is in a spot with a DeviceRGB
+    alternate — the appearance-tier twin of `rgb_alternate_shading_pdf`, the
+    branch that must go through the producer and REPORT the loss."""
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    page.Resources = Dictionary()
+    page.Contents = pdf.make_stream(b"1 0 0 rg 10 10 180 20 re f")
+    fn = pdf.make_indirect(Dictionary(
+        FunctionType=2, Domain=Array([0, 1]), N=1,
+        C0=Array([1, 1, 1]), C1=Array([0.9, 0.1, 0.15]),
+        Range=Array([0, 1, 0, 1, 0, 1])))
+    space = pdf.make_indirect(Array([
+        Name.Separation, Name("/" + spot), Name.DeviceRGB, fn]))
+    rect = (10, 100, 190, 160)
+    page.Annots = Array([pdf.make_indirect(Dictionary(
+        Type=Name.Annot, Subtype=Name.Stamp, Rect=Array(list(rect)),
+        F=ANNOT_PRINT, T=spot,
+        AP=Dictionary(N=_appearance_stream(pdf, space, rect))))])
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
 def rgb_alternate_shading_pdf(path, spot: str = "RGB Spot"):
     """A GRADIENT in a spot whose alternate is DeviceRGB.
 
