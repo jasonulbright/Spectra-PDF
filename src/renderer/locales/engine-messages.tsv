@@ -15,7 +15,7 @@ accessibility.unknownAccessibilityCategoryExpected	pattern	accessibility	unknown
 accessibility_fixes.automaticAccessibilityFixExists	pattern	accessibility_fixes	no automatic accessibility fix exists for {{v0}} (the automatic ones are: {{v1}})
 accessibility_fixes.thereNothingHereFix	exact	accessibility_fixes	There is nothing here for that fix to repair.
 acroform.containsXmlFormXfa	pattern	acroform	{{v0}} contains an XML form (XFA). Page operations would detach the form from its pages, so {{operation}} is not available for this document. Fill the form, or flatten it with another tool first.
-acroform.regeneratedFileSPage	exact	acroform	The regenerated file's page count differs from the original; cannot reattach its form fields.
+acroform.regeneratedFileSPage	exact	acroform,prepress	The regenerated file's page count differs from the original; cannot reattach its form fields.
 annotations.commentAnnotationSubtype	pattern	annotations	not a comment annotation subtype: {{v0}}
 attachments.attachmentNamed	pattern	attachments	no attachment named {{name}}
 attachments.attachmentNamedAlreadyExists	pattern	attachments	an attachment named {{attach_name}} already exists
