@@ -1640,6 +1640,23 @@ pub async fn quit_cancelled(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Publish a window's tab order, so the session record arranges its documents
+/// the way the user did.
+///
+/// Sent whenever the order changes — an open, a close, a reorder, a document
+/// handed to another window. Nothing is read back and nothing waits on it: the
+/// quit capture uses whatever arrived last, which is what keeps it unwedgeable
+/// by a renderer that has stopped answering.
+#[tauri::command]
+pub async fn set_tab_order(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    crate::session::publish_tab_order(&app, window.label(), paths);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn hide_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
     let _ = window.hide();

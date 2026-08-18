@@ -116,6 +116,13 @@ export const tabDrag = {
   onHover: (callback: (x: number) => void) =>
     listen<{ x: number }>('tabdrag://hover', (event) => callback(event.payload.x)),
   onLeave: (callback: () => void) => listen('tabdrag://leave', () => callback()),
+  /** The insertion gap this window is painting for someone else's drag,
+   * derived from its OWN tabs. A drop resolves to the index last reported by
+   * the window it lands in; the far side clears it with the caret. */
+  hoverIndex: (index: number) => invoke<void>('tabdrag_hover_index', { index }),
+  /** This window's tab order, published whenever it changes. Data only: the
+   * quit capture reads the LAST published order and never waits for one. */
+  setTabOrder: (paths: string[]) => invoke<void>('set_tab_order', { paths }),
 };
 
 /** Paths and output folders this window holds. The arbiter is Rust managed
@@ -685,9 +692,11 @@ export const app = {
     return listen('app:openFile', () => callback());
   },
 
-  /** Take (and clear) the opens queued for this window. */
+  /** Take (and clear) the opens queued for this window. `index` is the tab
+   * position the first file lands at when the open came from a gesture that
+   * named one (a dropped tab); null for every other open, which appends. */
   takePendingOpens: () =>
-    invoke<{ files: string[]; merge: boolean }[]>('take_pending_opens'),
+    invoke<{ files: string[]; merge: boolean; index: number | null }[]>('take_pending_opens'),
 
   /** Listen for tray actions (Quick Merge). */
   onTrayAction: (callback: (action: string) => void) => {

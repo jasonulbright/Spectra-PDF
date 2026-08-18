@@ -16,15 +16,22 @@ import {
   cancelDrag,
   createFrameThrottle,
   createSerialPublisher,
+  gapIndexFor,
+  gapOffsetFor,
   hoverCssX,
+  ownStripX,
   physicalPointFor,
   pinGhost,
   planHandOff,
   releaseDrag,
+  reorderIndexFor,
   settleDrop,
   stripRectFor,
+  tabGapFor,
   tabMoved,
   type ArmRequest,
+  type OwnStripFrame,
+  type TabBox,
   type TabDragState,
 } from '../src/renderer/lib/tab-drag';
 import type { TabDragResult } from '../src/renderer/lib/tauri-bridge';
@@ -309,6 +316,127 @@ describe('screen coordinates', () => {
     // factor never has to travel with the drag.
     expect(hoverCssX(220, 1)).toBe(220);
     expect(hoverCssX(220, 2)).toBe(110);
+  });
+});
+
+describe('insertion gaps', () => {
+  /**
+   * A real strip, measured out of the running app: the Home button then four
+   * doc tabs, in CSS pixels from the strip's own left edge.
+   *
+   * Snapshot rather than round numbers, because the arithmetic has to hold for
+   * the boxes the app actually produces — tabs are not a uniform width (a name
+   * is as wide as it is, up to the cap) and the lane does not start at zero.
+   */
+  const STRIP: TabBox[] = [
+    { left: 89, width: 132 },
+    { left: 221, width: 96 },
+    { left: 317, width: 220 },
+    { left: 537, width: 104 },
+  ];
+
+  it('names the gap the pointer has passed the midpoint of', () => {
+    // Before the first tab, and anywhere left of the lane.
+    expect(gapIndexFor(STRIP, 0)).toBe(0);
+    expect(gapIndexFor(STRIP, 89)).toBe(0);
+    expect(gapIndexFor(STRIP, 154)).toBe(0);
+    // The midpoint itself belongs to the gap after the tab, so a pointer
+    // sitting exactly on it names one gap rather than flickering between two.
+    expect(gapIndexFor(STRIP, 155)).toBe(1);
+    expect(gapIndexFor(STRIP, 268)).toBe(1);
+    expect(gapIndexFor(STRIP, 269)).toBe(2);
+    expect(gapIndexFor(STRIP, 427)).toBe(3);
+    expect(gapIndexFor(STRIP, 589)).toBe(4);
+    // Past the last tab, and past the strip.
+    expect(gapIndexFor(STRIP, 9000)).toBe(4);
+  });
+
+  it('paints the caret on the boundary the gap names', () => {
+    expect(gapOffsetFor(STRIP, 0)).toBe(89);
+    expect(gapOffsetFor(STRIP, 1)).toBe(221);
+    expect(gapOffsetFor(STRIP, 3)).toBe(537);
+    expect(gapOffsetFor(STRIP, 4)).toBe(641);
+    // An index past either end still has to paint somewhere on the strip.
+    expect(gapOffsetFor(STRIP, 40)).toBe(641);
+    expect(gapOffsetFor(STRIP, -1)).toBe(89);
+  });
+
+  it('has an answer for a strip with no tabs at all', () => {
+    // The window a last tab was dragged out of, and the window a tear-off
+    // built: both take drops.
+    expect(gapIndexFor([], 400)).toBe(0);
+    expect(gapOffsetFor([], 0)).toBe(0);
+    expect(tabGapFor([], 400)).toEqual({ index: 0, offset: 0 });
+  });
+
+  it('resolves a pointer to a gap and its caret in one step', () => {
+    expect(tabGapFor(STRIP, 400)).toEqual({ index: 2, offset: 317 });
+  });
+
+  it('corrects for the dragged tab still being in the list', () => {
+    // A gap counts the tabs before it, and the tab being dragged is one of
+    // them: released past its own place, every tab it passed has already
+    // shifted left by one. Dropped in either gap it already touches, it does
+    // not move at all.
+    expect(reorderIndexFor(0, 0)).toBe(0);
+    expect(reorderIndexFor(0, 1)).toBe(0);
+    expect(reorderIndexFor(0, 4)).toBe(3);
+    expect(reorderIndexFor(3, 0)).toBe(0);
+    expect(reorderIndexFor(2, 2)).toBe(2);
+    expect(reorderIndexFor(2, 3)).toBe(2);
+    expect(reorderIndexFor(2, 4)).toBe(3);
+    // A document arriving from another window is not in the list yet, which is
+    // why its gap IS its index and it never comes through here.
+  });
+});
+
+describe('a point over this window own strip', () => {
+  // A 1200×800 window at (100, 60) whose strip is 32 CSS px tall, 64 down.
+  const frame = (over: Partial<OwnStripFrame> = {}): OwnStripFrame => ({
+    originX: 100,
+    originY: 60,
+    devicePixelRatio: 1,
+    strip: { left: 0, top: 64, width: 1200, height: 32 },
+    ...over,
+  });
+
+  it('measures from the strip left edge', () => {
+    expect(ownStripX({ x: 100, y: 130 }, frame())).toBe(0);
+    expect(ownStripX({ x: 400, y: 130 }, frame())).toBe(300);
+  });
+
+  it('answers null for a point that is not over the strip', () => {
+    // Above the strip is the window frame; below it is the toolbar, and a
+    // release there is a hand-off the far side resolves.
+    expect(ownStripX({ x: 400, y: 100 }, frame())).toBeNull();
+    expect(ownStripX({ x: 400, y: 400 }, frame())).toBeNull();
+    // Another monitor entirely.
+    expect(ownStripX({ x: -900, y: 130 }, frame())).toBeNull();
+  });
+
+  it('is half-open on the far edges, exactly as the far side is', () => {
+    // Two strips that abut share no point, so a release can never be inside
+    // this one and inside the next.
+    expect(ownStripX({ x: 100, y: 124 }, frame())).toBe(0);
+    expect(ownStripX({ x: 1299, y: 155 }, frame())).toBe(1199);
+    expect(ownStripX({ x: 1300, y: 130 }, frame())).toBeNull();
+    expect(ownStripX({ x: 400, y: 156 }, frame())).toBeNull();
+    expect(ownStripX({ x: 99, y: 130 }, frame())).toBeNull();
+    expect(ownStripX({ x: 400, y: 123 }, frame())).toBeNull();
+  });
+
+  it('divides the physical point by this window own ratio', () => {
+    // The point crosses in physical pixels precisely so no window's scale has
+    // to travel with the drag.
+    const scaled = frame({ devicePixelRatio: 2 });
+    expect(ownStripX({ x: 800, y: 260 }, scaled)).toBe(300);
+    expect(ownStripX({ x: 800, y: 200 }, scaled)).toBeNull();
+  });
+
+  it('cannot be over a strip with no area', () => {
+    // Reading mode unmounts the strip; a hidden element measures zero, and the
+    // far side has already forgotten this window.
+    expect(ownStripX({ x: 400, y: 130 }, frame({ strip: { left: 0, top: 64, width: 0, height: 0 } }))).toBeNull();
   });
 });
 
