@@ -1628,6 +1628,18 @@ pub async fn request_quit(app: AppHandle, window: tauri::WebviewWindow) -> Resul
     Ok(())
 }
 
+/// Report that a window prompted by `request_quit` is not closing after all.
+///
+/// The quit recorded the session and closed the file to further writes before
+/// asking anything; the app is still running, so that record is no longer a
+/// description of anything and the file goes back to tracking the windows that
+/// are left. Idempotent — every prompted window can cancel.
+#[tauri::command]
+pub async fn quit_cancelled(app: AppHandle) -> Result<(), String> {
+    crate::session::unseal(&app);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn hide_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
     let _ = window.hide();
