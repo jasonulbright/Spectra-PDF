@@ -1614,6 +1614,11 @@ pub async fn confirm_close(app: AppHandle, window: tauri::WebviewWindow) -> Resu
 /// that cancels keeps both itself and the app alive.
 #[tauri::command]
 pub async fn request_quit(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    // The session is recorded here, while every window is still standing and
+    // still holding its documents. Each window's destruction writes that
+    // window out of the record, so a capture taken after the first one has
+    // gone can only ever describe the window that closed last.
+    crate::session::capture_and_seal(&app);
     for label in crate::app_windows::app_window_labels(&app) {
         if label == window.label() {
             continue;

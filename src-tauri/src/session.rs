@@ -231,6 +231,9 @@ pub struct SessionState {
     /// windows are being torn down, and a later write would record a session
     /// that has already half-disappeared.
     sealed: AtomicBool,
+    /// Held across every write to the file and across the seal, so that taking
+    /// the seal and writing the snapshot it protects is one critical section.
+    writer: Mutex<()>,
 }
 
 impl SessionState {
@@ -240,7 +243,44 @@ impl SessionState {
             revision: AtomicU64::new(0),
             scheduled: AtomicBool::new(false),
             sealed: AtomicBool::new(false),
+            writer: Mutex::new(()),
         }
+    }
+
+    /// Write unless the file is sealed.
+    ///
+    /// `build` runs outside the lock: a snapshot reads the window manager and
+    /// the claim table, and holding the file against that would queue every
+    /// debounced write behind an unrelated one. The seal is then read AGAIN
+    /// inside the lock, because a writer that read it unsealed can be
+    /// descheduled for arbitrarily long and the last thing on disk after a
+    /// quit has to be the quit snapshot.
+    fn write_checked<T>(&self, build: impl FnOnce() -> T, sink: impl FnOnce(T)) -> bool {
+        if self.sealed.load(Ordering::SeqCst) {
+            return false;
+        }
+        let payload = build();
+        let _guard = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        if self.sealed.load(Ordering::SeqCst) {
+            return false;
+        }
+        sink(payload);
+        true
+    }
+
+    /// Take the seal and write the quit snapshot under it. The first caller
+    /// wins and every later quit path finds the file closed.
+    ///
+    /// A poisoned lock is recovered rather than propagated: it guards a unit,
+    /// and refusing the quit snapshot because an unrelated thread panicked
+    /// would lose the session the user is quitting with.
+    fn seal_and_write(&self, sink: impl FnOnce()) -> bool {
+        let _guard = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        if self.sealed.swap(true, Ordering::SeqCst) {
+            return false;
+        }
+        sink();
+        true
     }
 
     fn remember(&self, label: &str, geometry: Geometry) {
@@ -445,11 +485,8 @@ fn write(app: &AppHandle, session: &Session) {
 }
 
 fn write_now(app: &AppHandle, gone: Option<&str>) {
-    if app.state::<SessionState>().sealed.load(Ordering::SeqCst) {
-        return;
-    }
-    let session = snapshot_excluding(app, gone);
-    write(app, &session);
+    app.state::<SessionState>()
+        .write_checked(|| snapshot_excluding(app, gone), |s| write(app, &s));
 }
 
 /// Write after the moving stops.
@@ -491,12 +528,15 @@ fn schedule_write(app: &AppHandle) {
 /// Called before anything is torn down, from every path that decides the app
 /// is exiting. Idempotent: the first caller wins and the destroy events that
 /// follow find the file sealed.
+///
+/// An app-level Exit closes windows one at a time and each destruction writes
+/// the closing window out of the record, so this has to run at the point the
+/// exit is DECIDED rather than at the point the last window dies — a snapshot
+/// taken any later describes whichever window happened to close last and
+/// nothing else.
 pub fn capture_and_seal(app: &AppHandle) {
-    if app.state::<SessionState>().sealed.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    let session = snapshot_excluding(app, None);
-    write(app, &session);
+    app.state::<SessionState>()
+        .seal_and_write(|| write(app, &snapshot_excluding(app, None)));
 }
 
 // ── Applying geometry ─────────────────────────────────────────────────────
@@ -635,6 +675,7 @@ pub fn apply_launch(app: &AppHandle, restore_windows: bool, e2e: bool, show: boo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{mpsc, Arc};
 
     fn rect(x: i32, y: i32, width: i32, height: i32) -> Rect {
         Rect {
@@ -920,8 +961,129 @@ mod tests {
     #[test]
     fn the_seal_is_taken_once() {
         let state = SessionState::new();
-        assert!(!state.sealed.swap(true, Ordering::SeqCst));
+        let mut writes = 0;
+        assert!(state.seal_and_write(|| writes += 1));
         // Every later quit path finds it already closed and writes nothing.
-        assert!(state.sealed.swap(true, Ordering::SeqCst));
+        assert!(!state.seal_and_write(|| writes += 1));
+        assert_eq!(writes, 1);
+    }
+
+    /// The live windows a quit tears down, and the file the writes land in.
+    /// The real snapshot reads the window manager and the claim table; this
+    /// stands in for both so the write ORDER can be driven without them.
+    struct FakeWindows {
+        live: Mutex<Vec<String>>,
+        file: Mutex<Vec<String>>,
+    }
+
+    impl FakeWindows {
+        fn with(labels: &[&str]) -> Self {
+            Self {
+                live: Mutex::new(labels.iter().map(|l| l.to_string()).collect()),
+                file: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn snapshot(&self, gone: Option<&str>) -> Vec<String> {
+            self.live
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|l| Some(l.as_str()) != gone)
+                .cloned()
+                .collect()
+        }
+
+        fn destroy(&self, label: &str) {
+            self.live.lock().unwrap().retain(|l| l != label);
+        }
+
+        fn record(&self, session: Vec<String>) {
+            *self.file.lock().unwrap() = session;
+        }
+
+        fn written(&self) -> Vec<String> {
+            self.file.lock().unwrap().clone()
+        }
+    }
+
+    #[test]
+    fn an_exit_capture_outlives_every_window_that_closes_after_it() {
+        let state = SessionState::new();
+        let windows = FakeWindows::with(&["main", "doc-1", "doc-2"]);
+
+        // File ▸ Exit records the whole window list before any window is told
+        // to close.
+        assert!(state.seal_and_write(|| windows.record(windows.snapshot(None))));
+
+        // Each window then runs its own close flow, and its destruction writes
+        // that window out of the record. Every one of those finds the file
+        // sealed and leaves the exit capture standing.
+        for label in ["doc-1", "doc-2", "main"] {
+            windows.destroy(label);
+            assert!(!state.write_checked(
+                || windows.snapshot(Some(label)),
+                |session| windows.record(session),
+            ));
+        }
+
+        assert_eq!(windows.written(), vec!["main", "doc-1", "doc-2"]);
+    }
+
+    #[test]
+    fn a_capture_taken_after_the_first_close_names_only_the_last_window() {
+        // The sequence the exit capture exists to prevent, and the ordinary
+        // one-window-at-a-time close it must not disturb: each destruction
+        // rewrites the file without the window that died, so a snapshot taken
+        // at the end describes the last window and nothing else.
+        let state = SessionState::new();
+        let windows = FakeWindows::with(&["main", "doc-1", "doc-2"]);
+        for (label, left) in [("doc-1", vec!["main", "doc-2"]), ("doc-2", vec!["main"])] {
+            windows.destroy(label);
+            assert!(state.write_checked(
+                || windows.snapshot(Some(label)),
+                |session| windows.record(session),
+            ));
+            assert_eq!(windows.written(), left);
+        }
+        // The last window seals while it is still standing.
+        assert!(state.seal_and_write(|| windows.record(windows.snapshot(None))));
+        assert_eq!(windows.written(), vec!["main"]);
+    }
+
+    #[test]
+    fn a_writer_that_started_before_the_seal_cannot_land_after_it() {
+        let state = Arc::new(SessionState::new());
+        let file = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+        let (built_tx, built_rx) = mpsc::channel();
+        let (go_tx, go_rx) = mpsc::channel();
+
+        // A debounced writer passes the open-file check and builds its
+        // snapshot, and is held there — the exact window in which the file
+        // can be sealed under it.
+        let writer = {
+            let state = Arc::clone(&state);
+            let file = Arc::clone(&file);
+            std::thread::spawn(move || {
+                state.write_checked(
+                    || {
+                        built_tx.send(()).unwrap();
+                        go_rx.recv().unwrap();
+                        "debounced"
+                    },
+                    |payload| file.lock().unwrap().push(payload),
+                )
+            })
+        };
+
+        // The quit runs to completion inside that window.
+        built_rx.recv().unwrap();
+        assert!(state.seal_and_write(|| file.lock().unwrap().push("quit")));
+        go_tx.send(()).unwrap();
+
+        // The stale writer wakes into a sealed file and writes nothing, so the
+        // quit snapshot is what a relaunch reads.
+        assert!(!writer.join().unwrap());
+        assert_eq!(*file.lock().unwrap(), vec!["quit"]);
     }
 }
