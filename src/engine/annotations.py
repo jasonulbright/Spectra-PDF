@@ -12,13 +12,12 @@ Form fields (/Widget) and links (/Link) are not comments and are kept.
 """
 
 import re
-import shutil
-import tempfile
 from pathlib import Path
 from typing import NamedTuple
 
 import pikepdf
 from pikepdf import Array, Name
+from engine.inplace import staged_write
 from engine.pdf_save import save_pdf
 
 # Subtypes that count as a "comment"/markup annotation (everything except the
@@ -222,6 +221,11 @@ def delete_all_annotations(file: str, output: str, subtypes: list | None = None,
     output_path = Path(output)
     same_file = input_path.resolve() == output_path.resolve()
 
+    # On a signed input the landed bytes become an incremental append
+    # (original verbatim + one revision), so sweeping comments never breaks
+    # the signature. The staged/landed rewrite stands when not applicable.
+    from engine.incremental import finalize_preserving_signatures
+
     wanted = _sweep_set(subtypes)
     removed = 0
     with pikepdf.open(file) as pdf:
@@ -269,22 +273,15 @@ def delete_all_annotations(file: str, output: str, subtypes: list | None = None,
                 del page.obj["/Annots"]
 
         if same_file:
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, dir=str(input_path.parent)) as tmp:
-                tmp_path = tmp.name
-            save_pdf(pdf, tmp_path)
+            # The preservation reads the input at its own path, so it runs
+            # against the staged bytes before the swap.
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, str(staged))
+                pdf.close()
+                preserved = finalize_preserving_signatures(str(input_path), str(staged))
         else:
             save_pdf(pdf, output_path)
-
-    # On a signed input the landed bytes become an incremental append
-    # (original verbatim + one revision), so sweeping comments never breaks
-    # the signature. The staged/landed rewrite stands when not applicable.
-    from engine.incremental import finalize_preserving_signatures
-
-    landed = tmp_path if same_file else str(output_path)
-    preserved = finalize_preserving_signatures(str(input_path), landed)
-
-    if same_file:
-        shutil.move(tmp_path, str(output_path))
+            preserved = finalize_preserving_signatures(str(input_path), str(output_path))
 
     out = {"output": str(output_path), "removed": removed}
     if preserved.get("preserved"):

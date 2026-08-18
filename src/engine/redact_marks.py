@@ -22,13 +22,12 @@ cannot disagree about what the document carries.
 """
 
 import math
-import shutil
-import tempfile
 from pathlib import Path
 
 import pikepdf
 
 from .incremental import finalize_preserving_signatures
+from .inplace import staged_write
 from .redact import properties_of
 from .validate import validate_pdf
 from engine.pdf_save import save_pdf
@@ -299,18 +298,15 @@ def save_redaction_marks(file: str, output: str, regions: list) -> dict:
             added += 1
 
         if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                tmp_path = tmp.name
-            save_pdf(pdf, tmp_path)
+            # The preservation reads the input at its own path, so it runs
+            # against the staged bytes before the swap.
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, str(staged))
+                pdf.close()
+                preserved = finalize_preserving_signatures(str(input_path), str(staged))
         else:
             save_pdf(pdf, output_path)
-
-    landed = tmp_path if same_file else str(output_path)
-    preserved = finalize_preserving_signatures(str(input_path), landed)
-    if same_file:
-        shutil.move(tmp_path, str(output_path))
+            preserved = finalize_preserving_signatures(str(input_path), str(output_path))
 
     out = {"output": str(output_path), "saved": added, "removed_previous": removed}
     if preserved.get("preserved"):

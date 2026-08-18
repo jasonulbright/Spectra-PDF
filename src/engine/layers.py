@@ -12,12 +12,11 @@ names aren't guaranteed unique). Membership tests are by object identity
 (objgen), never by name.
 """
 
-import shutil
-import tempfile
 from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Name
+from engine.inplace import staged_write
 from engine.pdf_save import save_pdf
 
 
@@ -108,13 +107,10 @@ def set_layer_visibility(file: str, output: str, index: int, visible: bool) -> d
         d[Name.OFF] = rebuilt("/OFF", keep_target=not visible)
 
         if same_file:
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, dir=str(input_path.parent)) as tmp:
-                tmp_path = tmp.name
-            save_pdf(pdf, tmp_path)
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, str(staged))
+                pdf.close()
         else:
             save_pdf(pdf, output_path)
-
-    if same_file:
-        shutil.move(tmp_path, str(output_path))
 
     return {"output": str(output_path), "index": int(index), "visible": bool(visible)}

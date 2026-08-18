@@ -40,8 +40,6 @@ An XFA document REFUSES. A dynamic form's fields live in the XML, not in
 destroys the form when a consumer drops the XML.
 """
 
-import shutil
-import tempfile
 from pathlib import Path
 
 import pikepdf
@@ -64,6 +62,7 @@ from engine.forms import (
     _all_fields,
 )
 from engine.incremental import signature_policy, signed_edit_decision
+from engine.inplace import staged_write
 from engine.pdf_save import save_pdf
 from engine.validate import validate_pdf
 
@@ -104,6 +103,20 @@ class FieldSpecError(ValueError):
     def __init__(self, message: str, problems: list[str]):
         super().__init__(message)
         self.problems = list(problems)
+
+
+def _save(pdf, output_path: Path, same_file: bool) -> None:
+    """Land every authoring edit in this module: a same-file write stages
+    beside the document and swaps the directory entry; a distinct output has
+    its parent directory created first. The Pdf is closed inside the block
+    because the destination cannot be replaced while it is held open."""
+    if same_file:
+        with staged_write(output_path) as staged:
+            save_pdf(pdf, str(staged))
+            pdf.close()
+    else:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        save_pdf(pdf, output_path)
 
 
 # ── Names already in the document ─────────────────────────────────────────
@@ -1054,17 +1067,7 @@ def add_form_fields(
             # A document that can hold signatures advertises it.
             acro["/SigFlags"] = int(acro.get("/SigFlags", 0)) | 1
         _write_order(pdf, specs)
-        if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                staged = tmp.name
-            save_pdf(pdf, staged)
-        else:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            save_pdf(pdf, output_path)
-    if same_file:
-        shutil.move(staged, str(output_path))
+        _save(pdf, output_path, same_file)
     return {"output": str(output_path), "created": len(specs), "names": names}
 
 
@@ -1154,17 +1157,7 @@ def author_vertical_field_font(
         for _name, target in targets:
             _requested, size, color = _parse_da(_field_appearance(target, pdf))
             target["/DA"] = String(f"/{resource} {_fmt_size(size)} Tf {color}")
-        if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                staged = tmp.name
-            save_pdf(pdf, staged)
-        else:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            save_pdf(pdf, output_path)
-    if same_file:
-        shutil.move(staged, str(output_path))
+        _save(pdf, output_path, same_file)
     return {
         "output": str(output_path),
         "fields": [name for name, _target in targets],
@@ -1286,17 +1279,7 @@ def author_choice_appearance(
             raise FieldSpecError(
                 f"these option lists cannot be drawn: {joined}", problems
             )
-        if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                staged = tmp.name
-            save_pdf(pdf, staged)
-        else:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            save_pdf(pdf, output_path)
-    if same_file:
-        shutil.move(staged, str(output_path))
+        _save(pdf, output_path, same_file)
     return {
         "output": str(output_path),
         "fields": [name for name, _target in targets],
@@ -1422,17 +1405,7 @@ def set_field_lock(
                 del target["/Lock"]
         else:
             target["/Lock"] = lock_dictionary(pdf, seed)
-        if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                staged = tmp.name
-            save_pdf(pdf, staged)
-        else:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            save_pdf(pdf, output_path)
-    if same_file:
-        shutil.move(staged, str(output_path))
+        _save(pdf, output_path, same_file)
     return {"output": str(output_path), "field": name, "lock": seed}
 
 
@@ -1486,17 +1459,7 @@ def set_field_description(
             target[Name.TU] = String(text)
         elif "/TU" in target:
             del target["/TU"]
-        if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                staged = tmp.name
-            save_pdf(pdf, staged)
-        else:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            save_pdf(pdf, output_path)
-    if same_file:
-        shutil.move(staged, str(output_path))
+        _save(pdf, output_path, same_file)
     return {"output": str(output_path), "field": name, "description": text}
 
 
@@ -1639,17 +1602,7 @@ def set_field_actions(
         if writes_actions:
             fieldactions.write_actions(pdf, target, data_actions)
         write_calculation_order(pdf, new_order)
-        if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                staged = tmp.name
-            save_pdf(pdf, staged)
-        else:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            save_pdf(pdf, output_path)
-    if same_file:
-        shutil.move(staged, str(output_path))
+        _save(pdf, output_path, same_file)
     return {
         "output": str(output_path),
         "field": name,

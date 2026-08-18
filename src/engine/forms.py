@@ -28,7 +28,6 @@ reported at once); output is written only after the full fill succeeds.
 """
 
 import shutil
-import tempfile
 from pathlib import Path
 
 import pikepdf
@@ -40,6 +39,7 @@ from engine.afscript import recognize
 from engine.content_walk import IDENTITY, as_matrix, bbox_of_corners_under_matrix
 from engine.document_js import decode_js
 from engine.fieldmdp import lock_of_field_dict
+from engine.inplace import staged_write
 from engine.pdf_metrics import (
     GLYPH_HEIGHT_EM,
     HELVETICA_DESCENT_EM,
@@ -1957,16 +1957,12 @@ def set_widget_visibility(
                 "this document has no form field named " + ", ".join(missing)
             )
         if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                staged = tmp.name
-            save_pdf(pdf, staged)
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, str(staged))
+                pdf.close()
         else:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             save_pdf(pdf, output_path)
-    if same_file:
-        shutil.move(staged, str(output_path))
     out = {"output": str(output_path), "changed": changed, "hidden": bool(hide)}
     if missing:
         out["missing"] = missing
@@ -2053,7 +2049,7 @@ def fill_form_fields(
 
     Args:
         file: Input PDF path.
-        output: Output PDF path (may equal input — temp+rename).
+        output: Output PDF path (may equal input — stage and replace).
         edits: {fully-qualified field name: value} — str for text/choice,
             bool (or true/false/yes/no/on/off strings) for checkboxes.
         flatten: Bake appearances into page content and remove all fields.
@@ -2066,6 +2062,14 @@ def fill_form_fields(
     input_path = Path(file)
     output_path = Path(output)
     same_file = input_path.resolve() == output_path.resolve()
+
+    # Filling a SIGNED document lands as an incremental append —
+    # original bytes verbatim + one revision carrying the value/appearance
+    # updates, so existing signatures keep verifying. Flatten removes widgets,
+    # which the
+    # transplant refuses by design; that path keeps today's rewrite (a
+    # flatten inherently destroys what the signature covers).
+    from engine.incremental import finalize_preserving_signatures
 
     with pikepdf.open(file) as pdf:
         fields = {f.name: f for f in _all_fields(pdf)}
@@ -2418,27 +2422,15 @@ def fill_form_fields(
             flattened = True
 
         if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                tmp_path = tmp.name
-            save_pdf(pdf, tmp_path)
+            # The preservation reads the input at its own path, so it runs
+            # against the staged bytes before the swap.
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, str(staged))
+                pdf.close()
+                preserved = finalize_preserving_signatures(str(input_path), str(staged))
         else:
             save_pdf(pdf, output_path)
-
-    # Filling a SIGNED document lands as an incremental append —
-    # original bytes verbatim + one revision carrying the value/appearance
-    # updates, so existing signatures keep verifying. Flatten removes widgets,
-    # which the
-    # transplant refuses by design; that path keeps today's rewrite (a
-    # flatten inherently destroys what the signature covers).
-    from engine.incremental import finalize_preserving_signatures
-
-    landed = tmp_path if same_file else str(output_path)
-    preserved = finalize_preserving_signatures(str(input_path), landed)
-
-    if same_file:
-        shutil.move(tmp_path, str(output_path))
+            preserved = finalize_preserving_signatures(str(input_path), str(output_path))
 
     result = {
         "output": str(output_path),

@@ -34,14 +34,13 @@ copies no page, so no widget's field registration moves.
 
 from __future__ import annotations
 
-import shutil
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name
 
+from engine.inplace import staged_write
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import walk_inheritable
 from engine.preflight import COLORSPACE, walk_page_resources
@@ -748,16 +747,11 @@ def add_printer_marks(
             })
 
         if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                tmp_path = tmp.name
-            save_pdf(pdf, tmp_path)
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, str(staged))
+                pdf.close()
         else:
             save_pdf(pdf, output_path)
-
-    if same_file:
-        shutil.move(tmp_path, str(output_path))
 
     return {
         "output": str(output_path),
@@ -795,16 +789,11 @@ def remove_printer_marks(file: str, output: str, pages: list | None = None) -> d
                 unmarked.append(index)
 
         if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                tmp_path = tmp.name
-            save_pdf(pdf, tmp_path)
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, str(staged))
+                pdf.close()
         else:
             save_pdf(pdf, output_path)
-
-    if same_file:
-        shutil.move(tmp_path, str(output_path))
 
     return {"output": str(output_path), "removed": removed, "unmarked": unmarked}
 
