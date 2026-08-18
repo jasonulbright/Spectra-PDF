@@ -513,3 +513,50 @@ class TestVerticalFaceGate:
                 build_vertical_font(pdf, FONT, "Abc")
         finally:
             pdf.close()
+
+
+class TestTheEmbeddedSubsetIsNotAFunctionOfTheClock:
+    """Two saves of one request embed one byte string.
+
+    `fontTools` compiles the CURRENT clock into `head.modified` unless
+    `recalcTimestamp` is off, which made an authored document's bytes depend on
+    the second the save ran: an op run twice over one input landed two
+    different files whenever the pair straddled a second boundary, and the
+    in-place-versus-distinct-output comparison went red only under a loaded
+    suite.
+    """
+
+    @staticmethod
+    def _modified(data: bytes) -> int:
+        import io
+
+        from fontTools.ttLib import TTFont
+
+        return int(TTFont(io.BytesIO(data))["head"].modified)
+
+    def _move_the_clock(self, monkeypatch) -> None:
+        """Make the ambient clock answer a value nothing in the face holds, so
+        a leak into the output is visible without waiting for a real second."""
+        from fontTools.ttLib.tables import _h_e_a_d
+
+        monkeypatch.setattr(_h_e_a_d, "timestampNow", lambda: 0x0BADC10C)
+
+    def test_the_subset_keeps_the_faces_own_timestamp(self, monkeypatch):
+        from fontTools.ttLib import TTFont
+
+        from engine.font_fallback import _subset_font
+
+        self._move_the_clock(monkeypatch)
+        data, _ = _subset_font(FONT, "Authored line")
+
+        assert self._modified(data) == int(TTFont(FONT)["head"].modified)
+        assert self._modified(data) != 0x0BADC10C
+
+    def test_two_subsets_of_one_request_are_byte_identical(self, monkeypatch):
+        from engine.font_fallback import _subset_font
+
+        first, _ = _subset_font(FONT, "Authored line")
+        self._move_the_clock(monkeypatch)
+        second, _ = _subset_font(FONT, "Authored line")
+
+        assert first == second
