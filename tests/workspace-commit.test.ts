@@ -1,10 +1,15 @@
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, PDFName, PDFString } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { planCommit, buildCommitBytes, commitPageEdits } from '../src/renderer/lib/workspace-commit';
+import {
+  planCommit,
+  buildCommitBytes,
+  commitPageEdits,
+  carriesLiveSignature,
+} from '../src/renderer/lib/workspace-commit';
 import { rotateAnnotationRect } from '../src/renderer/state/reducer';
 import { readManifest } from '../src/renderer/lib/pdfx-format';
 import { carriesManifest } from '../src/renderer/lib/doc-names';
@@ -30,6 +35,24 @@ async function makeSourcePdf(pageCount: number, widthBase: number): Promise<Uint
   for (let i = 0; i < pageCount; i++) {
     doc.addPage([widthBase + i, 400]);
   }
+  return doc.save();
+}
+
+// A document carrying one FILLED signature field — the shape
+// `carriesLiveSignature` answers to, and the only shape a real transplant is
+// ever attempted against.
+async function withLiveSignature(bytes: Uint8Array, filled = true): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(bytes);
+  const ctx = doc.context;
+  const field = ctx.obj({
+    FT: 'Sig',
+    T: PDFString.of('Signature1'),
+    ...(filled
+      ? { V: ctx.register(ctx.obj({ Type: 'Sig', SubFilter: 'adbe.pkcs7.detached' })) }
+      : {}),
+  });
+  const acro = ctx.obj({ Fields: [ctx.register(field)], SigFlags: 3 });
+  doc.catalog.set(PDFName.of('AcroForm'), ctx.register(acro));
   return doc.save();
 }
 
@@ -429,6 +452,20 @@ describe('commitPageEdits (transactional)', () => {
     removed: string[];
     snapshots: string[];
     dispatched: AppAction[];
+    /** What each path actually holds — the disk side of the buffer/disk
+     * identity these tests pin. */
+    contents: Map<string, Uint8Array>;
+  }
+
+  function emptyFs(): FakeFs {
+    return {
+      writes: [],
+      renames: [],
+      removed: [],
+      snapshots: [],
+      dispatched: [],
+      contents: new Map(),
+    };
   }
 
   function makeDeps(fs: FakeFs, opts: { failWriteAt?: number } = {}) {
@@ -439,16 +476,21 @@ describe('commitPageEdits (transactional)', () => {
         fs.snapshots.push(workingPath);
         return `${workingPath}.snap`;
       },
-      writeBuffer: async (filePath: string) => {
+      writeBuffer: async (filePath: string, bytes: Uint8Array) => {
         writeCount++;
         if (opts.failWriteAt === writeCount) throw new Error('disk full');
         fs.writes.push(filePath);
+        fs.contents.set(filePath, bytes);
       },
       rename: async (fromPath: string, toPath: string) => {
         fs.renames.push([fromPath, toPath]);
+        const bytes = fs.contents.get(fromPath);
+        if (bytes) fs.contents.set(toPath, bytes);
+        fs.contents.delete(fromPath);
       },
       remove: async (filePath: string) => {
         fs.removed.push(filePath);
+        fs.contents.delete(filePath);
       },
     };
   }
@@ -466,11 +508,29 @@ describe('commitPageEdits (transactional)', () => {
     return { files, workspace, dirtyPaths: ['a.pdf', 'b.pdf'] };
   }
 
+  // Same shape, with a live signature on a.pdf only: whether a lost signature
+  // is worth reporting is a property of the file, not of the failure.
+  async function signedState() {
+    const { files, workspace, dirtyPaths } = await crossFileState();
+    const a = files.get('a.pdf')!;
+    const signed = await withLiveSignature(a.buffer as Uint8Array);
+    files.set('a.pdf', { ...a, buffer: signed });
+    return {
+      files,
+      workspace: {
+        documents: workspace.documents.map((d) =>
+          d.path === 'a.pdf' ? { ...d, buffer: signed } : d,
+        ),
+      },
+      dirtyPaths,
+    };
+  }
+
   const TMP = /\.commit-tmp-\d+$/;
 
   it('stages all temps, then snapshots+renames, then dispatches one atomic update', async () => {
     const { files, workspace, dirtyPaths } = await crossFileState();
-    const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+    const fs = emptyFs();
     await commitPageEdits({ workspace, files, dirtyPaths, ...makeDeps(fs) });
     expect(fs.writes).toHaveLength(2);
     expect(fs.writes[0]).toMatch(/^a\.pdf\.working\.commit-tmp-\d+$/);
@@ -494,7 +554,7 @@ describe('commitPageEdits (transactional)', () => {
 
   it('a mid-stage failure removes temps, dispatches nothing, and leaves a clean retry', async () => {
     const { files, workspace, dirtyPaths } = await crossFileState();
-    const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+    const fs = emptyFs();
     await expect(
       commitPageEdits({ workspace, files, dirtyPaths, ...makeDeps(fs, { failWriteAt: 2 }) }),
     ).rejects.toThrow('disk full');
@@ -506,7 +566,7 @@ describe('commitPageEdits (transactional)', () => {
     expect(fs.removed[0]).toMatch(TMP);
 
     // Retry from the same (unchanged) state: byte-identical plans succeed.
-    const retryFs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+    const retryFs = emptyFs();
     await commitPageEdits({ workspace, files, dirtyPaths, ...makeDeps(retryFs) });
     expect(retryFs.dispatched).toHaveLength(1);
     const retryAction = retryFs.dispatched[0];
@@ -522,8 +582,8 @@ describe('commitPageEdits (transactional)', () => {
 
   it('uses distinct temp names across runs so leftovers can never be renamed in', async () => {
     const { files, workspace, dirtyPaths } = await crossFileState();
-    const first: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
-    const second: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+    const first = emptyFs();
+    const second = emptyFs();
     await commitPageEdits({ workspace, files, dirtyPaths, ...makeDeps(first) });
     await commitPageEdits({ workspace, files, dirtyPaths, ...makeDeps(second) });
     expect(first.writes[0]).not.toBe(second.writes[0]);
@@ -531,13 +591,13 @@ describe('commitPageEdits (transactional)', () => {
 
   it('rejects concurrent entry loudly instead of corrupting the staged files', async () => {
     const { files, workspace, dirtyPaths } = await crossFileState();
-    const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+    const fs = emptyFs();
     const deps = makeDeps(fs);
     const slowDeps = {
       ...deps,
-      writeBuffer: async (filePath: string) => {
+      writeBuffer: async (filePath: string, bytes: Uint8Array) => {
         await new Promise((r) => setTimeout(r, 20));
-        return deps.writeBuffer(filePath);
+        return deps.writeBuffer(filePath, bytes);
       },
     };
     const first = commitPageEdits({ workspace, files, dirtyPaths, ...slowDeps });
@@ -550,7 +610,7 @@ describe('commitPageEdits (transactional)', () => {
 
   it('clears the tier without touching disk when there is nothing to plan', async () => {
     const { files } = await setup();
-    const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+    const fs = emptyFs();
     await commitPageEdits({
       workspace: { documents: [] },
       files,
@@ -568,7 +628,7 @@ describe('commitPageEdits (transactional)', () => {
   describe('signature-preserving transplant dep', () => {
     it('replaces the dispatched buffer with the read-back bytes when applied', async () => {
       const { files, workspace, dirtyPaths } = await crossFileState();
-      const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+      const fs = emptyFs();
       const transplanted = new Uint8Array([9, 9, 9, 9]);
       const calls: [string, string][] = [];
       await commitPageEdits({
@@ -596,7 +656,7 @@ describe('commitPageEdits (transactional)', () => {
 
     it('keeps the rebuilt bytes when the transplant does not apply', async () => {
       const { files, workspace, dirtyPaths } = await crossFileState();
-      const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+      const fs = emptyFs();
       let readBackCalled = false;
       await commitPageEdits({
         workspace, files, dirtyPaths, ...makeDeps(fs),
@@ -612,7 +672,7 @@ describe('commitPageEdits (transactional)', () => {
 
     it('a throwing transplant degrades to the plain rewrite instead of failing the commit', async () => {
       const { files, workspace, dirtyPaths } = await crossFileState();
-      const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+      const fs = emptyFs();
       await commitPageEdits({
         workspace, files, dirtyPaths, ...makeDeps(fs),
         preserveSignatures: async () => {
@@ -626,13 +686,153 @@ describe('commitPageEdits (transactional)', () => {
       expect(fs.dispatched[0].type).toBe('COMMIT_PAGE_EDITS');
     });
 
+    // Every path through the preserve attempt ends with the staged temp and
+    // the buffer about to be dispatched holding the SAME bytes — checked at
+    // the end, on what the rename phase actually published.
+    function expectBufferMatchesDisk(fs: FakeFs) {
+      const action = fs.dispatched[0];
+      expect(action.type).toBe('COMMIT_PAGE_EDITS');
+      if (action.type !== 'COMMIT_PAGE_EDITS') return;
+      for (const update of action.updates) {
+        const landed = fs.contents.get(`${update.path}.working`);
+        expect(landed, `nothing landed at ${update.path}.working`).toBeDefined();
+        expect(
+          Array.from(update.buffer as Uint8Array),
+          `state buffer for ${update.path} differs from the bytes on disk`,
+        ).toEqual(Array.from(landed!));
+      }
+    }
+
+    const TRANSPLANTED = new Uint8Array([9, 9, 9, 9]);
+
+    it('an engine exception on a SIGNED file is reported, not swallowed', async () => {
+      const { files, workspace, dirtyPaths } = await signedState();
+      const fs = emptyFs();
+      const outcome = await commitPageEdits({
+        workspace, files, dirtyPaths, ...makeDeps(fs),
+        // a.pdf carries a live signature; b.pdf does not.
+        preserveSignatures: async () => {
+          throw new Error('engine unavailable');
+        },
+        readBack: async () => TRANSPLANTED,
+      });
+      expect(outcome.signatureRefusals).toEqual([
+        {
+          path: 'a.pdf',
+          reason: { key: 'app.preserve.unrecognized', detail: 'engine unavailable' },
+        },
+      ]);
+      // …and the rewrite still landed, which is what the notice reports on.
+      expect(fs.dispatched).toHaveLength(1);
+      expectBufferMatchesDisk(fs);
+    });
+
+    it('an engine exception on an unsigned file reports no lost signature', async () => {
+      const { files, workspace, dirtyPaths } = await crossFileState();
+      const fs = emptyFs();
+      const outcome = await commitPageEdits({
+        workspace, files, dirtyPaths, ...makeDeps(fs),
+        preserveSignatures: async () => {
+          throw new Error('engine unavailable');
+        },
+        readBack: async () => TRANSPLANTED,
+      });
+      expect(outcome.signatureRefusals).toEqual([]);
+      expectBufferMatchesDisk(fs);
+    });
+
+    // The desync: the engine replaced the staged temp before it failed to
+    // answer, so the transplanted file is what the rename publishes — a
+    // commit that dispatched the rewrite bytes would leave the state buffer
+    // describing a file that no longer exists.
+    it('a transplant that landed but could not be answered for does not desync the buffer', async () => {
+      const { files, workspace, dirtyPaths } = await signedState();
+      const fs = emptyFs();
+      const deps = makeDeps(fs);
+      const outcome = await commitPageEdits({
+        workspace, files, dirtyPaths, ...deps,
+        preserveSignatures: async (_workingPath, stagedPath) => {
+          // the engine's own stage-and-swap: the temp already holds the
+          // appended revision when the answer is lost in transit.
+          await deps.writeBuffer(stagedPath, TRANSPLANTED);
+          throw new Error('engine exited');
+        },
+        readBack: async (filePath: string) => fs.contents.get(filePath)!,
+      });
+      expectBufferMatchesDisk(fs);
+      expect(outcome.signatureRefusals).toEqual([
+        {
+          path: 'a.pdf',
+          reason: { key: 'app.preserve.unrecognized', detail: 'engine exited' },
+        },
+      ]);
+    });
+
+    // The read-back failure: the transplant APPLIED, so the temp holds the
+    // appended revision — dispatching the rebuild's bytes instead would pin
+    // the state buffer to bytes no file has.
+    it('a read-back failure after an applied transplant does not desync the buffer', async () => {
+      const { files, workspace, dirtyPaths } = await signedState();
+      const fs = emptyFs();
+      const deps = makeDeps(fs);
+      const outcome = await commitPageEdits({
+        workspace, files, dirtyPaths, ...deps,
+        preserveSignatures: async (workingPath, stagedPath) => {
+          if (workingPath !== 'a.pdf.working') return { applied: false, reason: 'not-signed' };
+          await deps.writeBuffer(stagedPath, TRANSPLANTED);
+          return { applied: true };
+        },
+        readBack: async () => {
+          throw new Error('read failed');
+        },
+      });
+      expect(fs.dispatched).toHaveLength(1);
+      expectBufferMatchesDisk(fs);
+      expect(outcome.signatureRefusals).toEqual([
+        { path: 'a.pdf', reason: { key: 'app.preserve.unrecognized', detail: 'read failed' } },
+      ]);
+    });
+
+    it('an applied transplant leaves the buffer equal to the bytes that landed', async () => {
+      const { files, workspace, dirtyPaths } = await signedState();
+      const fs = emptyFs();
+      const deps = makeDeps(fs);
+      await commitPageEdits({
+        workspace, files, dirtyPaths, ...deps,
+        preserveSignatures: async (workingPath, stagedPath) => {
+          if (workingPath !== 'a.pdf.working') return { applied: false, reason: 'not-signed' };
+          await deps.writeBuffer(stagedPath, TRANSPLANTED);
+          return { applied: true };
+        },
+        readBack: async (filePath: string) => fs.contents.get(filePath)!,
+      });
+      const action = fs.dispatched[0];
+      if (action.type === 'COMMIT_PAGE_EDITS') {
+        expect(Array.from(action.updates[0].buffer as Uint8Array)).toEqual(
+          Array.from(TRANSPLANTED),
+        );
+      }
+      expectBufferMatchesDisk(fs);
+    });
+
+    it('a refusal writes nothing, so the rebuilt bytes are the bytes on disk', async () => {
+      const { files, workspace, dirtyPaths } = await signedState();
+      const fs = emptyFs();
+      await commitPageEdits({
+        workspace, files, dirtyPaths, ...makeDeps(fs),
+        preserveSignatures: async () => ({ applied: false, reason: 'catalog-changed' }),
+        readBack: async () => TRANSPLANTED,
+      });
+      expectBufferMatchesDisk(fs);
+    });
+
     // The reason, not the boolean. A signed file whose append refused is
     // rewritten — it always was — and the difference between that and an
     // unsigned file is the only thing that tells the user a signature is gone.
     describe('the refusal reason', () => {
       it('reports a refused signed file and names it by its own path', async () => {
         const { files, workspace, dirtyPaths } = await crossFileState();
-        const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+        const fs = emptyFs();
         const outcome = await commitPageEdits({
           workspace, files, dirtyPaths, ...makeDeps(fs),
           preserveSignatures: async (workingPath) =>
@@ -654,7 +854,7 @@ describe('commitPageEdits (transactional)', () => {
 
       it('reports nothing when every transplant applied', async () => {
         const { files, workspace, dirtyPaths } = await crossFileState();
-        const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+        const fs = emptyFs();
         const outcome = await commitPageEdits({
           workspace, files, dirtyPaths, ...makeDeps(fs),
           preserveSignatures: async () => ({ applied: true }),
@@ -665,14 +865,14 @@ describe('commitPageEdits (transactional)', () => {
 
       it('reports nothing when no transplant dep is supplied at all', async () => {
         const { files, workspace, dirtyPaths } = await crossFileState();
-        const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+        const fs = emptyFs();
         const outcome = await commitPageEdits({ workspace, files, dirtyPaths, ...makeDeps(fs) });
         expect(outcome.signatureRefusals).toEqual([]);
       });
 
       it('collects one entry per refusing file, in commit order', async () => {
         const { files, workspace, dirtyPaths } = await crossFileState();
-        const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+        const fs = emptyFs();
         const outcome = await commitPageEdits({
           workspace, files, dirtyPaths, ...makeDeps(fs),
           preserveSignatures: async (workingPath) => ({
@@ -689,7 +889,7 @@ describe('commitPageEdits (transactional)', () => {
 
       it('a plan with nothing to commit still answers with an empty report', async () => {
         const { files } = await setup();
-        const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+        const fs = emptyFs();
         const outcome = await commitPageEdits({
           workspace: { documents: [] },
           files,
@@ -699,6 +899,41 @@ describe('commitPageEdits (transactional)', () => {
         expect(outcome.signatureRefusals).toEqual([]);
       });
     });
+  });
+});
+
+describe('carriesLiveSignature', () => {
+  it('is false for a document with no form at all', async () => {
+    expect(await carriesLiveSignature(await makeSourcePdf(1, 100))).toBe(false);
+  });
+
+  it('is false for an EMPTY signature field — a field is not a signature', async () => {
+    const bytes = await withLiveSignature(await makeSourcePdf(1, 100), false);
+    expect(await carriesLiveSignature(bytes)).toBe(false);
+  });
+
+  it('is true for a filled signature field', async () => {
+    const bytes = await withLiveSignature(await makeSourcePdf(1, 100));
+    expect(await carriesLiveSignature(bytes)).toBe(true);
+  });
+
+  it('is true when the filled field hangs off a parent that owns the /FT', async () => {
+    const doc = await PDFDocument.load(await makeSourcePdf(1, 100));
+    const ctx = doc.context;
+    const kid = ctx.obj({
+      T: PDFString.of('inner'),
+      V: ctx.register(ctx.obj({ Type: 'Sig' })),
+    });
+    const parent = ctx.obj({ FT: 'Sig', T: PDFString.of('outer'), Kids: [ctx.register(kid)] });
+    doc.catalog.set(
+      PDFName.of('AcroForm'),
+      ctx.register(ctx.obj({ Fields: [ctx.register(parent)] })),
+    );
+    expect(await carriesLiveSignature(await doc.save())).toBe(true);
+  });
+
+  it('reports an unreadable document as signed rather than staying quiet', async () => {
+    expect(await carriesLiveSignature(new Uint8Array([1, 2, 3]))).toBe(true);
   });
 });
 
