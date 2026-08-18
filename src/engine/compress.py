@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import budget
 from .acroform import reattach_forms_file
-from .inplace import finish_staged, is_same_file, staging_target
+from .inplace import is_same_file, staged_write_if
 from .validate import validate_pdf
 
 
@@ -103,49 +103,47 @@ def compress(
     # output and rename over it after the form reattach (engine/inplace.py).
     same_file = is_same_file(file, output)
     original_size = input_path.stat().st_size
-    gs_target = staging_target(output_path) if same_file else output_path
 
-    cmd = [
-        gs_path,
-        "-sDEVICE=pdfwrite",
-        "-dCompatibilityLevel=1.5",
-        "-dNOPAUSE",
-        "-dQUIET",
-        "-dBATCH",
-        "-dSAFER",
-    ]
+    with staged_write_if(same_file, output_path) as gs_target:
+        cmd = [
+            gs_path,
+            "-sDEVICE=pdfwrite",
+            "-dCompatibilityLevel=1.5",
+            "-dNOPAUSE",
+            "-dQUIET",
+            "-dBATCH",
+            "-dSAFER",
+        ]
 
-    if dpi is not None:
-        # Custom DPI: explicit downsample flags instead of preset
-        cmd.extend([
-            "-dDownsampleColorImages=true",
-            f"-dColorImageResolution={dpi}",
-            "-dDownsampleGrayImages=true",
-            f"-dGrayImageResolution={dpi}",
-            "-dDownsampleMonoImages=true",
-            f"-dMonoImageResolution={dpi}",
-        ])
-    else:
-        # Named preset
-        preset = QUALITY_PRESETS.get(quality, "/ebook")
-        cmd.append(f"-dPDFSETTINGS={preset}")
+        if dpi is not None:
+            # Custom DPI: explicit downsample flags instead of preset
+            cmd.extend([
+                "-dDownsampleColorImages=true",
+                f"-dColorImageResolution={dpi}",
+                "-dDownsampleGrayImages=true",
+                f"-dGrayImageResolution={dpi}",
+                "-dDownsampleMonoImages=true",
+                f"-dMonoImageResolution={dpi}",
+            ])
+        else:
+            # Named preset
+            preset = QUALITY_PRESETS.get(quality, "/ebook")
+            cmd.append(f"-dPDFSETTINGS={preset}")
 
-    cmd.extend([f"-sOutputFile={str(gs_target).replace('%', '%%')}", str(input_path)])  # % = gs template char (distill review)
+        cmd.extend([f"-sOutputFile={str(gs_target).replace('%', '%%')}", str(input_path)])  # % = gs template char (distill review)
 
-    # The budget is DERIVED from the input, never the fixed 300 s that
-    # a 50 MB scan died on. stdin isolation lives in budget.run — gs
-    # must never inherit the RPC pipe (distill review).
-    result = budget.gs(cmd, what="Ghostscript (compress)", path=input_path, pages=info["pages"])
-    if result.returncode != 0:
-        raise RuntimeError(f"Ghostscript failed: {result.stderr}")
+        # The budget is DERIVED from the input, never the fixed 300 s that
+        # a 50 MB scan died on. stdin isolation lives in budget.run — gs
+        # must never inherit the RPC pipe (distill review).
+        result = budget.gs(cmd, what="Ghostscript (compress)", path=input_path, pages=info["pages"])
+        if result.returncode != 0:
+            raise RuntimeError(f"Ghostscript failed: {result.stderr}")
 
-    # gs pdfwrite drops /AcroForm and every widget annotation — compressing a
-    # filled form would silently destroy it. Transplant the original's fields
-    # back onto the regenerated pages (no-op for non-form files). Against the
-    # STAGED file when in-place — the original must still be readable here.
-    reattach_forms_file(input_path, gs_target)
-    if same_file:
-        finish_staged(gs_target, output_path)
+        # gs pdfwrite drops /AcroForm and every widget annotation — compressing a
+        # filled form would silently destroy it. Transplant the original's fields
+        # back onto the regenerated pages (no-op for non-form files). Against the
+        # STAGED file when in-place — the original must still be readable here.
+        reattach_forms_file(input_path, gs_target)
 
     return {
         "output": str(output_path),

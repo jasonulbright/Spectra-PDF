@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pikepdf
 
-from engine.inplace import finish_staged, is_same_file, staging_target
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 
 
@@ -55,11 +55,12 @@ def optimize(
 
         # pikepdf cannot save over its own open input (engine/inplace.py), and
         # the Compress panel's second step optimizes the file the first step
-        # just wrote.
+        # just wrote. The destination cannot be replaced while the Pdf still
+        # holds it open.
         if is_same_file(file, output):
-            staged = staging_target(output_path)
-            save_pdf(pdf, staged, linearize=linearize, object_stream_mode=stream_mode)
-            finish_staged(staged, output_path)
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, staged, linearize=linearize, object_stream_mode=stream_mode)
+                pdf.close()
         else:
             save_pdf(pdf, output_path, linearize=linearize, object_stream_mode=stream_mode)
 
