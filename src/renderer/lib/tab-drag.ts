@@ -10,7 +10,7 @@
  * either side, which is also the part worth testing.
  */
 
-import type { TabDragResult } from './tauri-bridge';
+import type { TabDragReservation, TabDragResult } from './tauri-bridge';
 
 /** Travel that separates a drag from the click that focuses a tab. */
 export const TAB_DRAG_THRESHOLD_PX = 6;
@@ -356,6 +356,18 @@ export function tabMoved(result: TabDragResult): boolean {
   return result.outcome === 'transferred' || result.outcome === 'tornOff';
 }
 
+/**
+ * Whether a reservation is holding a document somewhere.
+ *
+ * The same two outcomes, read one step earlier. A reservation that holds
+ * nothing — the release stayed in this window, or the claim was refused — has
+ * no token to commit and nothing to undo, and the document must not be written
+ * back over the user's file for it.
+ */
+export function reservationHolds(reserved: TabDragReservation): boolean {
+  return tabMoved(reserved) && reserved.token !== 0;
+}
+
 /** What a hand-off does once the page tier has been flushed. */
 export interface HandOffPlan {
   /** Resolve the handover with the far side at all. */
@@ -370,16 +382,17 @@ export interface HandOffPlan {
 }
 
 /**
- * Plan a hand-off from where the release resolved and whether the document has
+ * Plan a hand-off from what the reservation holds and whether the document has
  * unsaved work.
  *
  * A release that stays in this window is not a hand-off: it must not write the
  * user's file and must not clear the undo history, which is what marking a
- * document saved does. So the destination is settled BEFORE anything is
- * written, and a document that is not going anywhere is left exactly as it was.
+ * document saved does. So the destination is settled — and HELD — before
+ * anything is written, and a document that is not going anywhere is left
+ * exactly as it was.
  */
-export function planHandOff(willMove: boolean, dirty: boolean): HandOffPlan {
-  if (!willMove) return { hand: false, saveFirst: false };
+export function planHandOff(reserved: boolean, dirty: boolean): HandOffPlan {
+  if (!reserved) return { hand: false, saveFirst: false };
   return { hand: true, saveFirst: dirty };
 }
 
@@ -415,6 +428,16 @@ export function pinGhost(
 export interface SerialPublisher<T> {
   /** Record a value to publish. The newest one always wins. */
   post(value: T): void;
+  /**
+   * Resolve once nothing is outstanding and nothing is waiting.
+   *
+   * A serial publisher is unwedgeable precisely because nothing waits on it,
+   * which is also why the newest value can still be in the queue when something
+   * reads the far side. Anywhere a reader has to see the last thing this window
+   * knew — the session record a quit seals — the flush is what makes "last
+   * published" mean "last measured".
+   */
+  flush(): Promise<void>;
 }
 
 /**
@@ -430,11 +453,18 @@ export interface SerialPublisher<T> {
 export function createSerialPublisher<T>(send: (value: T) => Promise<void>): SerialPublisher<T> {
   let inFlight = false;
   let pending: { value: T } | null = null;
+  let waiting: Array<() => void> = [];
+  const settle = (): void => {
+    const woken = waiting;
+    waiting = [];
+    for (const resolve of woken) resolve();
+  };
   const drain = (): void => {
     const next = pending;
     pending = null;
     if (!next) {
       inFlight = false;
+      settle();
       return;
     }
     inFlight = true;
@@ -446,7 +476,48 @@ export function createSerialPublisher<T>(send: (value: T) => Promise<void>): Ser
       if (inFlight) return;
       drain();
     },
+    flush(): Promise<void> {
+      // Idle is idle: a flush that nothing is outstanding for must not wait for
+      // a publish that may never be posted.
+      if (!inFlight && pending === null) return Promise.resolve();
+      // A value posted while this is waiting extends the wait rather than
+      // slipping past it — the point is that the far side holds the newest
+      // order, not that some publish finished.
+      return new Promise<void>((resolve) => waiting.push(resolve));
+    },
   };
+}
+
+// ── The tab order this window last measured ───────────────────────────────
+
+/** What `flushTabOrder` needs of a publisher, and nothing more. */
+export interface TabOrderChannel {
+  flush(): Promise<void>;
+}
+
+/**
+ * The strip's own publisher, for the one caller that is not the strip.
+ *
+ * Per module scope, which is per WINDOW: each renderer has exactly one tab
+ * strip, and a second window is a second module scope with its own. Nothing
+ * about ownership lives here — only the handle on a publisher that a window
+ * closing has to drain before the session record is sealed.
+ */
+let tabOrder: TabOrderChannel | null = null;
+
+export function setTabOrderChannel(channel: TabOrderChannel | null): void {
+  tabOrder = channel;
+}
+
+/**
+ * Finish publishing this window's tab order.
+ *
+ * Awaited before a quit, because the seal takes whatever arrived last: a
+ * reorder made in the seconds before Exit is still waiting behind an in-flight
+ * publish, and the session would restore the arrangement the user just changed.
+ */
+export function flushTabOrder(): Promise<void> {
+  return tabOrder ? tabOrder.flush() : Promise.resolve();
 }
 
 // ── Frame throttle ────────────────────────────────────────────────────────

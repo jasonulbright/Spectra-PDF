@@ -328,6 +328,20 @@ impl Default for ClaimState {
 
 // ── Registry: labels, focus, queued opens ─────────────────────────────────
 
+/// A queued open that carries a document's OWNERSHIP with it.
+///
+/// The claim moved when the open was queued, so until the receiving window
+/// drains it the document exists in no window at all: the source has been told
+/// to close its tab and the target has not opened one. The token names the
+/// handover, so the commit that reports it, the cancel that undoes it and the
+/// destruction of the receiving window all address the same queue entry; `from`
+/// is where the document goes back to when that window dies still holding it.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Handover {
+    pub token: u64,
+    pub from: String,
+}
+
 /// One inbound open, held until the window it was routed to asks for it.
 ///
 /// Queued rather than carried on the event, because a window created for this
@@ -347,6 +361,9 @@ pub struct PendingOpen {
     /// windows. A stale one clamps on arrival, so nothing has to be agreed.
     #[serde(default)]
     pub index: Option<u32>,
+    /// Set only on an open that came with the document's ownership.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handover: Option<Handover>,
 }
 
 pub struct WindowRegistry {
@@ -390,6 +407,28 @@ impl WindowRegistry {
         };
         pending.entry(label.to_string()).or_default().push(open);
         true
+    }
+
+    /// Drop a queued handover by token.
+    ///
+    /// False when it is no longer there to drop — drained by the window it was
+    /// routed to, or reclaimed by that window's destruction. Either way the
+    /// caller is undoing something that already happened to somebody else, and
+    /// the answer says so rather than reporting a removal that did not occur.
+    pub fn revoke_pending(&self, label: &str, token: u64) -> bool {
+        let Ok(mut pending) = self.pending.lock() else {
+            return false;
+        };
+        let Some(queue) = pending.get_mut(label) else {
+            return false;
+        };
+        let held = |open: &PendingOpen| open.handover.as_ref().map(|h| h.token) == Some(token);
+        let found = queue.iter().any(held);
+        queue.retain(|open| !held(open));
+        if queue.is_empty() {
+            pending.remove(label);
+        }
+        found
     }
 
     pub fn take_pending(&self, label: &str) -> Vec<PendingOpen> {
@@ -503,28 +542,39 @@ pub fn queue_open(
     files: Vec<String>,
     merge: bool,
 ) -> bool {
-    queue_open_at(registry, label, files, merge, None)
-}
-
-/// Queue an open that names where it lands in the receiving window's strip.
-///
-/// Only a released tab has a position to name: it was dropped at a gap the
-/// target window itself measured and painted a caret in. Every other open —
-/// a shell association, a second instance, a restored session, a tear-off into
-/// a window with no tabs at all — appends.
-pub fn queue_open_at(
-    registry: &WindowRegistry,
-    label: &str,
-    files: Vec<String>,
-    merge: bool,
-    index: Option<u32>,
-) -> bool {
     registry.push_pending(
         label,
         PendingOpen {
             files,
             merge,
+            index: None,
+            handover: None,
+        },
+    )
+}
+
+/// Queue an open that carries ownership, and may name where it lands in the
+/// receiving window's strip.
+///
+/// Only a released tab has a position to name: it was dropped at a gap the
+/// target window itself measured and painted a caret in. Every other open —
+/// a shell association, a second instance, a restored session, a tear-off into
+/// a window with no tabs at all — appends. Nothing handed over ever merges:
+/// the document arrives as itself, in a window that may have none.
+pub fn queue_handover(
+    registry: &WindowRegistry,
+    label: &str,
+    files: Vec<String>,
+    index: Option<u32>,
+    handover: Handover,
+) -> bool {
+    registry.push_pending(
+        label,
+        PendingOpen {
+            files,
+            merge: false,
             index,
+            handover: Some(handover),
         },
     )
 }
@@ -604,6 +654,12 @@ pub fn on_window_focused(app: &AppHandle, label: &str) {
     }
 }
 
+/// Drop everything a destroyed window held.
+///
+/// `tabdrag::on_window_destroyed` runs BEFORE this (`lib.rs`): a document handed
+/// to this window and never opened is still owned by it here, and releasing the
+/// claim into the pool is what makes it unrecoverable. The sweep there hands
+/// those back first, so what this releases is only what the window actually had.
 pub fn on_window_destroyed(app: &AppHandle, label: &str) {
     if !is_app_window(label) {
         return;
@@ -928,26 +984,19 @@ mod tests {
     #[test]
     fn queued_opens_drain_once() {
         let registry = WindowRegistry::new();
-        registry.push_pending(
-            "doc-1",
-            PendingOpen {
-                files: vec!["C:\\a.pdf".into()],
-                merge: false,
-                index: None,
-            },
-        );
-        registry.push_pending(
-            "doc-1",
-            PendingOpen {
-                files: vec!["C:\\b.pdf".into()],
-                merge: true,
-                index: None,
-            },
-        );
+        assert!(queue_open(&registry, "doc-1", vec!["C:\\a.pdf".into()], false));
+        assert!(queue_open(&registry, "doc-1", vec!["C:\\b.pdf".into()], true));
         let drained = registry.take_pending("doc-1");
         assert_eq!(drained.len(), 2);
         assert!(drained[1].merge);
         assert!(registry.take_pending("doc-1").is_empty());
+    }
+
+    fn handover(token: u64) -> Handover {
+        Handover {
+            token,
+            from: "main".to_string(),
+        }
     }
 
     #[test]
@@ -956,12 +1005,12 @@ mod tests {
         // A released tab: it was dropped at a gap the receiving window itself
         // measured, and the index is what makes the drop land where the caret
         // promised instead of at the end of the lane.
-        assert!(queue_open_at(
+        assert!(queue_handover(
             &registry,
             "doc-1",
             vec!["C:\\a.pdf".into()],
-            false,
             Some(2),
+            handover(1),
         ));
         // Everything else appends, and says so rather than guessing a position.
         assert!(queue_open(&registry, "doc-1", vec!["C:\\b.pdf".into()], false));
@@ -971,11 +1020,48 @@ mod tests {
     }
 
     #[test]
+    fn a_revoked_handover_leaves_the_queue_it_was_the_only_entry_of_empty() {
+        let registry = WindowRegistry::new();
+        assert!(queue_handover(&registry, "doc-1", vec!["C:\\a.pdf".into()], None, handover(7)));
+        assert!(queue_open(&registry, "doc-1", vec!["C:\\b.pdf".into()], false));
+
+        // Only the named handover goes: an ordinary open queued to the same
+        // window is nobody's to cancel.
+        assert!(registry.revoke_pending("doc-1", 7));
+        let left = registry.take_pending("doc-1");
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].files, vec!["C:\\b.pdf".to_string()]);
+
+        // A token that is no longer queued reports the removal it did not make,
+        // so a cancel racing a drain cannot undo a delivery that happened.
+        assert!(!registry.revoke_pending("doc-1", 7));
+        assert!(!registry.revoke_pending("doc-9", 7));
+    }
+
+    #[test]
+    fn a_handover_carries_its_token_over_the_wire_and_an_ordinary_open_carries_none() {
+        let registry = WindowRegistry::new();
+        assert!(queue_handover(&registry, "doc-1", vec!["C:\\a.pdf".into()], None, handover(3)));
+        let drained = registry.take_pending("doc-1");
+        assert_eq!(drained[0].handover, Some(handover(3)));
+
+        let plain = PendingOpen {
+            files: vec!["C:\\a.pdf".into()],
+            merge: false,
+            index: None,
+            handover: None,
+        };
+        let json = serde_json::to_string(&plain).unwrap();
+        assert!(!json.contains("handover"), "{json}");
+    }
+
+    #[test]
     fn a_queued_position_survives_the_wire_and_an_older_record_has_none() {
         let queued = PendingOpen {
             files: vec!["C:\\a.pdf".into()],
             merge: false,
             index: Some(0),
+            handover: None,
         };
         let json = serde_json::to_string(&queued).unwrap();
         assert_eq!(
