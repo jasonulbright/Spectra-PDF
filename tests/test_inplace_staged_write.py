@@ -46,6 +46,8 @@ from engine import printer_marks as printer_marks_mod
 from engine import redact as redact_mod
 from engine import redact_marks as redact_marks_mod
 from engine import rotate as rotate_mod
+from engine import struct_audit as struct_audit_mod
+from engine import struct_fix as struct_fix_mod
 from engine import struct_tree as struct_tree_mod
 from engine import watermark as watermark_mod
 from engine import xfdf as xfdf_mod
@@ -115,6 +117,16 @@ def _tagged(path: Path) -> Path:
     pdf.Root[Name.MarkInfo] = Dictionary(Marked=True)
     pdf.save(str(path))
     pdf.close()
+    return path
+
+
+def _tagged_table(path: Path) -> Path:
+    """A tagged table whose first row is ordinary cells — what promoting a
+    header row is offered on. Built by the accessibility fixtures so the
+    document the fix runs against here is the one it runs against there."""
+    import a11y_builders
+
+    a11y_builders.table_no_headers(str(path))
     return path
 
 
@@ -294,6 +306,25 @@ def _types(nodes) -> list:
     return [(node["type"], _types(node.get("children", []))) for node in nodes]
 
 
+def _promote_header_row(src: str, out: str) -> dict:
+    with pikepdf.open(src) as pdf:
+        table = struct_audit_mod.tables(struct_audit_mod.audit_tree(pdf)["nodes"])[0]["table"]
+        path = [int(v) for v in table.path]
+    return struct_fix_mod.set_table_headers(src, out, path)
+
+
+def _first_row_cells(path: str) -> object:
+    with pikepdf.open(path) as pdf:
+        found = struct_audit_mod.tables(struct_audit_mod.audit_tree(pdf)["nodes"])
+        return [
+            [
+                (cell.role, str(cell.attrs.get("Scope", "")))
+                for cell in struct_audit_mod.row_cells(table["rows"][0])
+            ]
+            for table in found
+        ]
+
+
 def _link_targets(path: str) -> object:
     return [row["target"] for row in links_mod.list_links(path)["links"]]
 
@@ -391,6 +422,17 @@ CASES = (
         _tagged,
         lambda src, out: struct_tree_mod.delete_struct_node(src, out, [0, 0]),
         _tag_types,
+    ),
+    Case(
+        # `struct_fix` writes through `struct_tree._save`, so the module whose
+        # `save_pdf` the death test replaces is `struct_tree`. A case per
+        # WRITING module would leave this door uncovered, and a change to
+        # `_save` that misses this caller crashes only here.
+        "struct_fix",
+        struct_tree_mod,
+        _tagged_table,
+        lambda src, out: _promote_header_row(src, out),
+        _first_row_cells,
     ),
     Case(
         "links",
