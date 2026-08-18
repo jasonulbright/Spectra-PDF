@@ -42,11 +42,12 @@ from __future__ import annotations
 
 import os
 import stat
-import tempfile
 from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name
+
+from engine.inplace import staged_write
 
 from .color_spaces import build_function
 from .separations import PROCESS_INKS, ink_kind, list_inks
@@ -108,16 +109,9 @@ def _save(pdf, file: str, output: str) -> None:
         save_pdf(pdf, str(output_path))
         return
 
-    fd, tmp_path = tempfile.mkstemp(suffix=".pdf", dir=str(input_path.parent))
-    os.close(fd)
-    try:
-        save_pdf(pdf, tmp_path)
+    with staged_write(output_path) as staged:
+        save_pdf(pdf, str(staged))
         pdf.close()
-        os.replace(tmp_path, str(output_path))
-    except Exception:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise
 
 
 # ── the resource walk ──────────────────────────────────────────────────────
