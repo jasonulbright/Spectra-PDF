@@ -14,11 +14,10 @@ actions and /OpenAction are separate action sites — a later extension,
 not this module's scope.
 """
 
-import os
-import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.inplace import staged_write
 from engine.pdf_save import save_pdf
 
 # The PDF text-string UTF-16BE byte-order mark. `/JS` is a "text string or
@@ -123,11 +122,12 @@ def set_document_js(file: str, output: str, scripts: list | None = None) -> dict
 
     # In-place (output == input) is the normal case here: the renderer routes
     # through the undoable workspace flow, which passes the working copy as both
-    # file and output. pikepdf refuses to save over the file it opened, so save
-    # to a temp beside the target and atomically replace — never a half-written
-    # working copy (mirrors redact.py).
+    # file and output. pikepdf refuses to save over the file it opened, so the
+    # write stages beside the target and lands by swapping the directory entry.
+    # The scope owns the span: a save that dies takes the staged file with it
+    # rather than leaving it beside the user's document.
     same_file = Path(file).resolve() == Path(output).resolve()
-    tmp_path: str | None = None
+    output_path = Path(output)
     with pikepdf.open(file) as pdf:
         names = pdf.Root.get("/Names")
         if not cleaned:
@@ -150,19 +150,10 @@ def set_document_js(file: str, output: str, scripts: list | None = None) -> dict
                 name_tree[name] = action
             names["/JavaScript"] = tree
         if same_file:
-            fd, tmp_path = tempfile.mkstemp(suffix=".pdf", dir=str(Path(output).parent))
-            os.close(fd)
-            save_pdf(pdf, tmp_path)
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, str(staged))
+                pdf.close()
         else:
             save_pdf(pdf, output)
-    if same_file and tmp_path is not None:
-        try:
-            os.replace(tmp_path, output)
-        except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
 
     return {"output": output, "count": len(cleaned)}

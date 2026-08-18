@@ -119,7 +119,7 @@ def make_portfolio(file: str, output: str) -> dict:
         pdf.Root.Collection = pdf.make_indirect(
             Dictionary(Type=Name.Collection, View=Name.D)
         )
-        _save(pdf, input_path, output_path, same_file)
+        _save(pdf, output_path, same_file)
     count = list_attachments(str(output_path))["count"]
     return {"output": str(output_path), "count": count}
 
@@ -150,7 +150,7 @@ def update_portfolio_member(
         pdf.attachments[name] = pikepdf.AttachedFileSpec(
             pdf, data, filename=name, description=kept, mime_type=mime
         )
-        _save(pdf, input_path, output_path, same_file)
+        _save(pdf, output_path, same_file)
     return {"output": str(output_path), "name": name, "size": len(data)}
 
 
