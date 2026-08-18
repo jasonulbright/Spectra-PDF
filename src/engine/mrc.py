@@ -62,6 +62,7 @@ from pikepdf import Dictionary, Name
 
 from . import budget
 from . import mrc_verify
+from .inplace import staged_write
 from .mrc_codecs import (
     CCITT_G4,
     JBIG2_GENERIC,
@@ -1279,21 +1280,16 @@ def mrc_compress(
 
 def _save(pdf, input_path: Path, output_path: Path) -> None:
     """`page_images._save`'s semantics, verbatim: identity-aware, and the Pdf
-    is CLOSED before the rename — Windows refuses to replace an open file."""
-    import shutil
+    is CLOSED before the swap — Windows refuses to replace an open file."""
     import stat
 
     same = input_path.resolve() == output_path.resolve() or (
         output_path.exists() and os.path.samefile(str(input_path), str(output_path))
     )
     if same:
-        with tempfile.NamedTemporaryFile(
-            suffix=".pdf", delete=False, dir=str(input_path.parent)
-        ) as tmp:
-            tmp_path = tmp.name
-        save_pdf(pdf, tmp_path)
-        pdf.close()
-        shutil.move(tmp_path, str(output_path))
+        with staged_write(output_path) as staged:
+            save_pdf(pdf, str(staged))
+            pdf.close()
     else:
         if output_path.exists() and not os.access(output_path, os.W_OK):
             os.chmod(output_path, stat.S_IWRITE)

@@ -8,11 +8,10 @@ and page-labels editors.
 """
 
 import mimetypes
-import shutil
-import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.inplace import staged_write
 from engine.pdf_save import save_pdf
 
 
@@ -73,7 +72,7 @@ def add_attachment(
             pdf, data, filename=attach_name, description=description or "", mime_type=mime
         )
         pdf.attachments[attach_name] = spec
-        _save(pdf, input_path, output_path, same_file)
+        _save(pdf, output_path, same_file)
 
     return {"output": str(output_path), "name": attach_name, "size": len(data), "mime": mime}
 
@@ -98,16 +97,19 @@ def remove_attachment(file: str, output: str, name: str) -> dict:
         if name not in pdf.attachments:
             raise ValueError(f"no attachment named {name!r}")
         del pdf.attachments[name]
-        _save(pdf, input_path, output_path, same_file)
+        _save(pdf, output_path, same_file)
 
     return {"output": str(output_path), "name": name}
 
 
-def _save(pdf, input_path: Path, output_path: Path, same_file: bool) -> None:
+def _save(pdf, output_path: Path, same_file: bool) -> None:
+    """A same-file write stages beside the document and swaps the directory
+    entry, so a write that dies leaves the input whole. The Pdf is closed
+    inside the block because the destination cannot be replaced while it is
+    held open."""
     if same_file:
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, dir=str(input_path.parent)) as tmp:
-            tmp_path = tmp.name
-        save_pdf(pdf, tmp_path)
-        shutil.move(tmp_path, str(output_path))
+        with staged_write(output_path) as staged:
+            save_pdf(pdf, str(staged))
+            pdf.close()
     else:
         save_pdf(pdf, output_path)

@@ -38,12 +38,11 @@ tree, the ParentTree, /A attribute payloads, OBJR targets and annotation
 survive every engine path too — pikepdf edits the tree in place.
 """
 
-import shutil
-import tempfile
 from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
+from engine.inplace import staged_write
 from engine.pdf_save import save_pdf
 
 # Deep enough for any real document's nesting; combined with the visited-set
@@ -359,7 +358,7 @@ def set_struct_props(file: str, output: str, path: list, props: dict) -> dict:
                     _set_table_attr(pdf, elem, pdf_key, Name("/" + text) if text else None)
                 else:
                     _set_table_attr(pdf, elem, pdf_key, String(text) if text else None)
-        _save(pdf, input_path, output_path, same_file)
+        _save(pdf, output_path, same_file)
     return {"output": str(output_path), "path": list(path)}
 
 
@@ -433,7 +432,7 @@ def move_struct_node(file: str, output: str, path: list, direction: str, index=N
             gp_kids.insert(parent_pos + 1, elem)
             _write_kids(grandparent, gp_kids)
             elem[Name.P] = grandparent
-        _save(pdf, input_path, output_path, same_file)
+        _save(pdf, output_path, same_file)
     return {"output": str(output_path), "path": list(path), "direction": direction}
 
 
@@ -509,7 +508,7 @@ def delete_struct_node(file: str, output: str, path: list) -> dict:
         pt = st.get("/ParentTree")
         if pt is not None and dead:
             _prune_parent_tree(pt, dead, set())
-        _save(pdf, input_path, output_path, same_file)
+        _save(pdf, output_path, same_file)
     return {"output": str(output_path), "path": list(path), "removed": len(dead) or 1}
 
 
@@ -538,15 +537,18 @@ def add_struct_node(file: str, output: str, parent_path: list, stype: str, index
             kids.insert(positions[idx], elem)
             new_idx = idx
         _write_kids(parent, kids)
-        _save(pdf, input_path, output_path, same_file)
+        _save(pdf, output_path, same_file)
     return {"output": str(output_path), "path": [*list(parent_path), new_idx], "type": new_type}
 
 
-def _save(pdf, input_path: Path, output_path: Path, same_file: bool) -> None:
+def _save(pdf, output_path: Path, same_file: bool) -> None:
+    """A same-file write stages beside the document and swaps the directory
+    entry, so a write that dies leaves the input whole. The Pdf is closed
+    inside the block because the destination cannot be replaced while it is
+    held open."""
     if same_file:
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, dir=str(input_path.parent)) as tmp:
-            tmp_path = tmp.name
-        save_pdf(pdf, tmp_path)
-        shutil.move(tmp_path, str(output_path))
+        with staged_write(output_path) as staged:
+            save_pdf(pdf, str(staged))
+            pdf.close()
     else:
         save_pdf(pdf, output_path)
