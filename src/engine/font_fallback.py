@@ -502,7 +502,11 @@ def _subset_font(font_path: str, text: str, glyphs=None, retain_gids=False) -> t
         subsetter.populate(glyphs=sorted(glyphs))
     else:
         subsetter.populate(text=text or " ")
-    font = TTFont(font_path)
+    # `recalcTimestamp` defaults ON, which compiles the CURRENT clock into
+    # `head.modified`: the embedded bytes would be a function of the second the
+    # save ran, so two saves of one request straddling a second boundary would
+    # embed different fonts. Off, `modified` comes from the source face.
+    font = TTFont(font_path, recalcTimestamp=False)
     subsetter.subset(font)
     buf = io.BytesIO()
     font.save(buf)
