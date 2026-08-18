@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.1.6
+
+*Released 2026-08-18*
+
+### Editing signed documents
+
+- Rotating or cropping pages of a signed document now keeps its signatures intact.
+- Adding, removing or reordering pages keeps an approval-signed document's signatures.
+- An edit a certification forbids is refused before anything is written.
+- Every operation that rewrites a signed document now asks first.
+- When signatures cannot be kept, the commit says so instead of proceeding silently.
+- Removing a document's form can no longer slip through a signature-preserving save.
+
+### Windows and exit
+
+- Exiting records every window only after each one has answered.
+- A window that cannot answer stops the exit instead of being closed over.
+- A failed session write leaves windows open rather than losing the record.
+- Tab reorders made in any window survive an exit from another window.
+- A tab moved between windows always arrives with its latest edits.
+
+### Converting documents
+
+- Form fields keep a single, converted appearance through colour and grayscale conversion.
+- Fields without a stored appearance no longer leave old values printed on the page.
+- Gradients inside stamps and annotations survive conversion to CMYK.
+- Filling a field no longer erases its background and border.
+- Non-Latin field values convert correctly instead of producing unreadable text.
+
+### Reliability
+
+- In-place saves recognize two names for the same file in every case.
+- An interrupted save never leaves a stray copy beside the document.
+
 ## 1.1.5
 
 *Released 2026-08-18*
