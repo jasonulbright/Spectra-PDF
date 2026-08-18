@@ -419,6 +419,25 @@ def _action_problems(spec: dict, kind: str) -> list:
     return problems
 
 
+def _drawable_problems(options: list, font_dir: str) -> list[str]:
+    """Every option label a list box's appearance could not draw.
+
+    Each label on its OWN: the emitter picks a font per row, so a list whose
+    Korean and Greek rows no single bundled face covers still draws.
+    """
+    from engine.forms import _text_value_problem
+
+    problems: list[str] = []
+    for option in options:
+        label = str(option.get("label", ""))
+        if _text_value_problem("this option list", label, DEFAULT_DA, font_dir) is not None:
+            problems.append(
+                f"option {label!r} is outside the built-in font's encoding and no "
+                "font is available to embed for it"
+            )
+    return problems
+
+
 def _validate(pdf: pikepdf.Pdf, specs: list, font_dir: str = "") -> None:
     problems: list[str] = []
     taken = _top_level_names(pdf)
@@ -475,6 +494,14 @@ def _validate(pdf: pikepdf.Pdf, specs: list, font_dir: str = "") -> None:
                 if not box or box[2] - box[0] <= 0 or box[3] - box[1] <= 0:
                     problem("an option's rectangle needs a positive width and height")
                     break
+            if kind == "optionlist":
+                # A list box's appearance draws EVERY label, so a label the
+                # standard face has no code for needs an embedded one. Checked
+                # before anything is written, so a batch that cannot be drawn
+                # refuses whole rather than half-writing then raising from
+                # inside the emitter.
+                for text in _drawable_problems(options, font_dir):
+                    problem(text)
         if kind == "text":
             max_length = spec.get("max_length")
             if max_length is not None and int(max_length) <= 0:
@@ -910,7 +937,18 @@ def _create_choice(
     field["/DA"] = String(_default_appearance(pdf, spec, font_dir))
     field["/Opt"] = Array([String(o["label"]) for o in options])
     field["/Ff"] = FF_COMBO if spec["type"] == "dropdown" else FF_MULTISELECT
-    field["/AP"] = Dictionary(N=_text_ap(pdf, w, h))
+    if spec["type"] == "optionlist":
+        # A list box's appearance IS its list, so a created one is drawn
+        # rather than left as an empty box a viewer may or may not fill in.
+        # The same emitter the fill and the appearance door use.
+        from engine.forms import _choice_list_appearance
+
+        _choice_list_appearance(
+            pdf, field, [o["label"] for o in options], set(), 0,
+            str(field["/DA"]), 0, font_dir,
+        )
+    else:
+        field["/AP"] = Dictionary(N=_text_ap(pdf, w, h))
     _apply_actions(pdf, field, spec)
     return pdf.make_indirect(field)
 
@@ -1136,6 +1174,142 @@ def author_vertical_field_font(
         "ordering": ordering,
         "supplement": supplement,
     }
+
+
+def author_choice_appearance(
+    file: str,
+    output: str,
+    fields=None,
+    font_dir: str = "",
+    allow_signed: bool = False,
+) -> dict:
+    """Redraw EXISTING option lists' widget appearances, and write ``output``.
+
+    Returns ``{output, fields, embedded}`` -- ``embedded`` names the fields
+    whose appearance had to embed a font because some label leaves WinAnsi.
+
+    The appearance half of option-list authoring, for the tiers that create
+    the field itself with something that can only draw the standard WinAnsi
+    faces. A list box's appearance lays out EVERY label, so it is the one
+    field kind whose appearance depends on arbitrary authored text; this door
+    rebuilds each widget's ``/AP /N`` through the engine's own per-line font
+    ladder, so a Korean row embeds a subset and a Latin row beside it keeps
+    the standard face.
+
+    A list bound to a vertical font (its ``/DA`` font's CMap says so) draws
+    its rows as columns through the same emitter -- one door, not two.
+
+    Every problem is reported at once and nothing is written when any of them
+    fails, which is the posture the create path already takes.
+    """
+    from engine.forms import (
+        _acroform as _forms_acroform,
+        _all_fields,
+        _choice_list_appearance,
+        _classify,
+        _encodes_winansi,
+        _field_da,
+        _options,
+        _selected_indices,
+        _top_index,
+    )
+
+    names = [str(name).strip() for name in (fields or []) if str(name).strip()]
+    if not names:
+        raise ValueError("Name the option lists whose appearance is being drawn.")
+    validate_pdf(file)
+    decision = signed_edit_decision(signature_policy(file), "structural")
+    if decision["kind"] == "refuse":
+        raise RuntimeError(
+            "this document is certified to allow no changes, so redrawing an option "
+            "list would produce a file that reports as illegally modified"
+        )
+    if decision["kind"] == "warn" and not allow_signed:
+        raise RuntimeError(
+            "this document is signed and redrawing an option list invalidates its "
+            "signatures -- the run must state that signed documents are "
+            "included before it will touch one"
+        )
+
+    input_path = Path(file)
+    output_path = Path(output)
+    same_file = input_path.resolve() == output_path.resolve()
+    with pikepdf.open(file) as pdf:
+        refuse_if_xfa(pdf, input_path, "redrawing an option list")
+        terminals = {field.name: field for field in _all_fields(pdf)}
+        acro = _forms_acroform(pdf)
+        problems: list[str] = []
+        targets = []
+        for name in names:
+            target = terminals.get(name)
+            if target is None:
+                problems.append(
+                    f"{name}: this document has no form field with that name"
+                )
+                continue
+            kind = _classify(target)
+            if kind != "optionlist":
+                problems.append(
+                    f"{name}: a {kind} field draws no list of options, so it has no "
+                    "list appearance"
+                )
+                continue
+            targets.append((name, target))
+        if problems:
+            joined = "; ".join(problems)
+            raise FieldSpecError(
+                f"these option lists cannot be drawn: {joined}", problems
+            )
+        embedded: list[str] = []
+        for name, target in targets:
+            labels = _options(target)
+            da = _field_da(target, acro)
+            quadding = _quadding_of(target)
+            if any(not _encodes_winansi(label) for label in labels):
+                embedded.append(name)
+            try:
+                for widget in target.widgets:
+                    _choice_list_appearance(
+                        pdf,
+                        widget,
+                        labels,
+                        _selected_indices(target),
+                        _top_index(target),
+                        da,
+                        quadding,
+                        font_dir,
+                    )
+            except ValueError as exc:
+                problems.append(f"{name}: {exc}")
+        if problems:
+            joined = "; ".join(problems)
+            raise FieldSpecError(
+                f"these option lists cannot be drawn: {joined}", problems
+            )
+        if same_file:
+            with tempfile.NamedTemporaryFile(
+                suffix=".pdf", delete=False, dir=str(input_path.parent)
+            ) as tmp:
+                staged = tmp.name
+            save_pdf(pdf, staged)
+        else:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            save_pdf(pdf, output_path)
+    if same_file:
+        shutil.move(staged, str(output_path))
+    return {
+        "output": str(output_path),
+        "fields": [name for name, _target in targets],
+        "embedded": embedded,
+    }
+
+
+def _quadding_of(field) -> int:
+    value = field.attr("/Q")
+    try:
+        return int(value) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 def _field_appearance(field, pdf: pikepdf.Pdf) -> str | None:

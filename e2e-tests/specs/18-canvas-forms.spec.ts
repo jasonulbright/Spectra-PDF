@@ -62,6 +62,41 @@ async function fieldValues(path: string): Promise<Map<string, unknown>> {
   return map;
 }
 
+/** What a list box's widget appearance actually draws: how many rows it
+ * places, and which faces its /Resources name. Read with pdf-lib rather than
+ * pdf.js, which reports a field's value but never its appearance stream. */
+async function optionListAppearance(
+  path: string,
+  name: string,
+): Promise<{ rows: number; fonts: { subtype: string; embedded: boolean }[] }> {
+  const { PDFName, PDFDict, PDFArray, PDFRawStream, decodePDFRawStream } = await import('pdf-lib');
+  const doc = await PDFDocument.load(new Uint8Array(readFileSync(path)), {
+    ignoreEncryption: true,
+  });
+  const widget = doc.getForm().getField(name).acroField.getWidgets()[0];
+  const normal = widget.getAppearances()?.normal;
+  if (!(normal instanceof PDFRawStream)) throw new Error(`no /AP /N stream for ${name}`);
+  const body = Array.from(decodePDFRawStream(normal).decode(), (b) =>
+    String.fromCharCode(b),
+  ).join('');
+  const resources = normal.dict.lookupMaybe(PDFName.of('Resources'), PDFDict);
+  const table = resources?.lookupMaybe(PDFName.of('Font'), PDFDict);
+  const fonts: { subtype: string; embedded: boolean }[] = [];
+  for (const key of table?.keys() ?? []) {
+    const font = table!.lookup(key, PDFDict);
+    const subtype = String(font.get(PDFName.of('Subtype')));
+    const descendants = font.lookupMaybe(PDFName.of('DescendantFonts'), PDFArray);
+    const descriptor = (
+      descendants ? descendants.lookup(0, PDFDict) : font
+    ).lookupMaybe(PDFName.of('FontDescriptor'), PDFDict);
+    const embedded = ['FontFile', 'FontFile2', 'FontFile3'].some(
+      (k) => descriptor?.get(PDFName.of(k)) !== undefined,
+    );
+    fonts.push({ subtype, embedded });
+  }
+  return { rows: (body.match(/ Tm\b/g) ?? []).length, fonts };
+}
+
 describe('on-canvas form filling', () => {
   let tmp: string;
   let source: string;
@@ -230,5 +265,36 @@ describe('on-canvas form filling', () => {
     expect(message).toContain('pending page changes');
     expect(existsSync(resolve(tmp, 'should-not-exist.pdf'))).toBe(false);
     await commitPendingEdits(); // leave the workspace clean for later specs
+  });
+
+  it('creates an option list with non-Latin labels and selects one', async () => {
+    // F28 end to end through the real create chain: pdf-lib authors the field
+    // with its appearance suppressed to the box, the engine door draws every
+    // row, the fill re-draws them with the band moved. What the reopened file
+    // must show is the VALUE and every LABEL — a list that dropped the rows it
+    // could not encode would still read back its value.
+    const labels = ['US', '한국', 'Ελλάδα', 'Россия'];
+    await placeNewField({ x: 0.05, y: 0.05, w: 0.45, h: 0.22 });
+    await createPlacedField(
+      { name: 'country_i18n', type: 'optionlist', options: labels },
+      { path: source },
+    );
+
+    expect(await setCanvasFormValue(source, 'country_i18n', ['한국'])).toBe(true);
+    await applyCanvasFormValues();
+
+    const dest = resolve(tmp, 'optionlist-i18n.pdf');
+    await saveActiveAs(dest);
+
+    const vals = await fieldValues(dest);
+    expect(vals.get('country_i18n')).toEqual(['한국']);
+
+    const { rows, fonts } = await optionListAppearance(dest, 'country_i18n');
+    // One placement per row: nothing was dropped for being unencodable.
+    expect(rows).toBe(labels.length);
+    // The Latin row draws through the standard face and the others through
+    // embedded subsets — the per-ROW ladder, visible in the /Resources.
+    expect(fonts.some((f) => f.subtype === '/Type1')).toBe(true);
+    expect(fonts.filter((f) => f.embedded).length).toBeGreaterThanOrEqual(1);
   });
 });

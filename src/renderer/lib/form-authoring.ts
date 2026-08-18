@@ -20,8 +20,16 @@ import {
   PDFName,
   PDFRef,
   PDFString,
+  adjustDimsForRotation,
+  componentsToColor,
+  degrees,
+  drawRectangle,
+  reduceRotation,
+  rotateInPlace,
+  type PDFOperator,
+  type PDFOptionList,
+  type PDFWidgetAnnotation,
 } from 'pdf-lib';
-import { Encodings } from '@pdf-lib/standard-fonts';
 import type { PdfBuffer } from '../state/types';
 import type { FieldLock, LockAction } from './signatures';
 import {
@@ -40,7 +48,13 @@ import {
   type FieldFormat,
   type FieldValidate,
 } from './af-emit';
-import { effectiveFieldWriting, writesTextRun, type FieldScript } from './form-writing';
+import {
+  effectiveFieldWriting,
+  needsChoiceAppearance,
+  resolveOptions,
+  writesTextRun,
+  type FieldScript,
+} from './form-writing';
 // The spec problems are USER-FACING copy, so they resolve
 // through the catalog. i18n is itself a data module (catalogs + i18next), so
 // this file stays pure over bytes and unit-testable with no DOM.
@@ -130,50 +144,6 @@ const EMIT_KEY = {
   sfnEmpty: 'refusal.field.sfnEmpty',
   sfnUnreadable: 'refusal.field.sfnUnreadable',
 } as const satisfies Record<EmitProblem, UiKey>;
-
-interface ResolvedOption {
-  label: string;
-  rect?: [number, number, number, number];
-}
-
-/** Beyond this many distinct unencodable characters the list is elided: a label
- * pasted from another script contributes one entry per character, and a refusal
- * naming forty of them says nothing the first few did not. */
-const MAX_REPORTED_CHARS = 8;
-
-/** The characters in these labels the standard font has no WinAnsi code for,
- * distinct and in first-seen order. Each is shown with its code point: a
- * character no font of ours can draw usually has nothing to show.
- *
- * `Encodings.WinAnsi` is the same object pdf-lib's standard-font embedder
- * assigns as its own encoding for every name but Symbol and ZapfDingbats, so
- * this predicate cannot drift from what the appearance provider accepts. */
-function winAnsiGaps(labels: readonly string[]): string[] {
-  const encoding = Encodings.WinAnsi;
-  const seen = new Set<number>();
-  const out: string[] = [];
-  for (const label of labels) {
-    // Iterated by CODE POINT, as the encoder itself iterates: a lone surrogate
-    // half is never what it is asked to encode.
-    for (const ch of label) {
-      const code = ch.codePointAt(0)!;
-      if (seen.has(code) || encoding.canEncodeUnicodeCodePoint(code)) continue;
-      seen.add(code);
-      if (out.length < MAX_REPORTED_CHARS) {
-        out.push(`"${ch}" (U+${code.toString(16).toUpperCase().padStart(4, '0')})`);
-      } else if (out.length === MAX_REPORTED_CHARS) {
-        out.push('…');
-      }
-    }
-  }
-  return out;
-}
-
-function resolveOptions(options: readonly NewFieldOption[] | undefined): ResolvedOption[] {
-  return (options ?? [])
-    .map((o) => (typeof o === 'string' ? { label: o.trim() } : { label: o.label.trim(), rect: o.rect }))
-    .filter((o) => o.label.length > 0);
-}
 
 /** One validation problem, held as its KEY plus its values rather than as a
  * rendered sentence — see FieldSpecError. `field` names the spec it belongs to,
@@ -396,17 +366,6 @@ function validateSpecs(doc: PDFDocument, specs: readonly NewFieldSpec[]): void {
       if (placed > 0 && placed !== options.length) {
         push('refusal.field.optionRectsPartial');
       }
-      // An option list's appearance lays out EVERY label, so the create runs
-      // each one through the standard font's WinAnsi encoder, which throws on
-      // a character it has no code for. Refused here, before anything is
-      // written: the encoder is reached from inside the appearance provider,
-      // where the throw is an internal message and the document already
-      // carries part of the batch. A dropdown draws only its selected value
-      // and a new field has none, so the same labels are fine there.
-      if (spec.type === 'optionlist') {
-        const gaps = winAnsiGaps(options.map((o) => o.label));
-        if (gaps.length > 0) push('refusal.field.optionListWinAnsi', { chars: gaps.join(', ') });
-      }
     }
     if (spec.type === 'text') {
       if (spec.comb) {
@@ -582,6 +541,45 @@ function addSignatureField(doc: PDFDocument, spec: NewFieldSpec): void {
   acro.set(PDFName.of('SigFlags'), doc.context.obj(1));
 }
 
+/** The `/DA` an engine-drawn option list carries: the standard face at auto
+ * size, so the door resolves the size that fits the rows it lays out. The
+ * appearance names its own fonts in its own /Resources — a /DA cannot name the
+ * per-row subsets a mixed-script list embeds. */
+const ENGINE_DRAWN_DA = '0 g\n/Helv 0 Tf';
+
+/**
+ * An option list appearance that draws the widget's box and nothing else.
+ *
+ * pdf-lib's own provider minus the text and the selection band — same
+ * background, border and rotation handling, so the box an engine-drawn list
+ * sits in is the box every other list sits in.
+ */
+function boxOnlyOptionListAppearance(
+  _field: PDFOptionList,
+  widget: PDFWidgetAnnotation,
+): PDFOperator[] {
+  const rectangle = widget.getRectangle();
+  const characteristics = widget.getAppearanceCharacteristics();
+  const borderWidth = widget.getBorderStyle()?.getWidth() ?? 0;
+  const rotation = reduceRotation(characteristics?.getRotation());
+  const { width, height } = adjustDimsForRotation(rectangle, rotation);
+  return [
+    ...rotateInPlace({ ...rectangle, rotation }),
+    ...drawRectangle({
+      x: borderWidth / 2,
+      y: borderWidth / 2,
+      width: width - borderWidth,
+      height: height - borderWidth,
+      borderWidth,
+      color: componentsToColor(characteristics?.getBackgroundColor()),
+      borderColor: componentsToColor(characteristics?.getBorderColor()),
+      rotate: degrees(0),
+      xSkew: degrees(0),
+      ySkew: degrees(0),
+    }),
+  ];
+}
+
 function toBox(rect: readonly [number, number, number, number]): {
   x: number;
   y: number;
@@ -728,9 +726,24 @@ function createField(doc: PDFDocument, spec: NewFieldSpec): void {
     }
     case 'optionlist': {
       const field = form.createOptionList(name);
-      field.setOptions(options.map((o) => o.label));
+      const labels = options.map((o) => o.label);
+      const engineDrawn = needsChoiceAppearance(spec);
+      // `addToPage` runs the default appearance provider with no way to pass
+      // another, and that provider lays out every /Opt entry through the
+      // standard font's WinAnsi encoder. An engine-drawn list therefore gets
+      // its options AFTER the widget exists, so the provider sees an empty
+      // list and draws the box alone; the door then authors the rows.
+      if (!engineDrawn) field.setOptions(labels);
       field.enableMultiselect();
       field.addToPage(page, box);
+      if (engineDrawn) {
+        field.setOptions(labels);
+        // Re-drawn through the box-only provider, which also marks the field
+        // clean — `save()` re-runs the DEFAULT provider over every field it
+        // still considers dirty, and that is the encoder throw again.
+        field.updateAppearances(form.getDefaultFont(), boxOnlyOptionListAppearance);
+        field.acroField.setDefaultAppearance(ENGINE_DRAWN_DA);
+      }
       applyActions(doc, field.acroField.dict, spec);
       break;
     }
