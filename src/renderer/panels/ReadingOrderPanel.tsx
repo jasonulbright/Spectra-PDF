@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
-import { file } from '../lib/tauri-bridge';
+import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { getDocumentProxy } from '../lib/pdfDocCache';
@@ -25,8 +26,9 @@ import { tChrome } from '../i18n';
 export function ReadingOrderPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const { activeFile, openNewFiles, dispatch } = useActiveFile();
+  const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
+  const { performOperation } = useOperations();
   const [tree, setTree] = useState<StructTree | null>(null);
   const [page, setPage] = useState(1);
   const [texts, setTexts] = useState<Map<number, Map<number, string>>>(() => new Map());
@@ -92,17 +94,15 @@ export function ReadingOrderPanel(): React.ReactElement {
       setBusy(true);
       setStatus(tChrome('panel.common.working'));
       try {
-        const snapshotPath = await file.snapshot(activeFile.workingPath);
-        await call('move_struct_node', {
-          file: activeFile.workingPath,
-          output: activeFile.workingPath,
+        const r = await performOperation(activeFile.path, 'move_struct_node', {
           path: entry.node.path,
           direction: 'to',
           index: neighbor.node.path[neighbor.node.path.length - 1],
         });
-        const buf = await file.readBuffer(activeFile.workingPath);
-        const info = await call('get_page_count', { file: activeFile.workingPath });
-        dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer: buf, snapshotPath });
+        if (r === EDIT_DECLINED) {
+          setStatus('');
+          return;
+        }
         setStatus(tChrome('panel.order.updated'));
       } catch (e: unknown) {
         setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
@@ -110,7 +110,7 @@ export function ReadingOrderPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [entries, activeFile, call, dispatch],
+    [entries, activeFile, performOperation],
   );
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.order.open')} />;
