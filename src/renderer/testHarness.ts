@@ -27,6 +27,7 @@ import {
   removeSymbolSet,
 } from './lib/symbol-library';
 import { importSymbolSetFromPath } from './lib/symbol-set-io';
+import { setTabOrderChannel } from './lib/tab-drag';
 import type { FocusedTab } from './state/types';
 
 export interface TestStateSnapshot {
@@ -1919,6 +1920,20 @@ export interface TestHarness {
    * drawing an insertion caret, or null. That window paints it from its own
    * event, so read the caret in the window that should have it. */
   tabDragTrack: (point: { x: number; y: number }) => Promise<string | null>;
+  /**
+   * Make this window's tab-order flush report that the order did NOT land.
+   *
+   * The seam sits exactly where the failure it stands in for occurs: the
+   * publisher's own send rejecting. A window in this state withholds its quit
+   * receipt rather than acknowledging over an order the far side never got,
+   * which is the only way a spec can produce a peer that does not answer — a
+   * renderer this suite can reach is otherwise a renderer that answers.
+   *
+   * One-way for the lifetime of the strip: the real publisher is registered by
+   * `useTabOrderPublication`'s mount effect and comes back when the strip
+   * remounts.
+   */
+  breakTabOrderPublish: () => void;
   /** Watermark panel (panel must be mounted): select the PDF source and set
    * the file and page a native picker would have set. Apply is still clicked. */
   watermarkSetPdfSource: (path: string, page?: number) => void;
@@ -3387,6 +3402,9 @@ export function installTestHarness(deps: TestHarnessDeps): void {
         throw new Error(msg);
       }
       return tabDragSeam.track(point);
+    },
+    breakTabOrderPublish: () => {
+      setTabOrderChannel({ flush: async () => false });
     },
     watermarkSetPdfSource: (path, page) => {
       if (!watermarkPanel) {
