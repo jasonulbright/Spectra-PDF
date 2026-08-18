@@ -1057,11 +1057,12 @@ class TestRightToLeftFill:
 # ── Vertical fields ───────────────────────────────────────────────────────
 
 
-def _make_vertical_form(path: str) -> None:
+def _make_vertical_form(path: str, extra=()) -> None:
     """A form whose /DA names a VERTICAL /DR font — the shape a column-set
     Japanese form arrives in, and the only place the format states that a
     field writes down the page. `plain` shares the page under the ordinary
-    horizontal /DA so both arms are exercised against one document."""
+    horizontal /DA so both arms are exercised against one document; every
+    other field, `extra` included, is bound to the vertical font."""
     from engine.font_fallback import build_vertical_font, resolve_vertical_font
     from engine.form_authoring import add_form_fields
 
@@ -1077,7 +1078,9 @@ def _make_vertical_form(path: str) -> None:
              "rect": [400, 400, 460, 700]},
             {"name": "plain", "type": "text", "page_index": 0,
              "rect": [100, 100, 300, 130]},
+            *extra,
         ],
+        font_dir=FONTS_DIR,
     )
     with pikepdf.open(path, allow_overwriting_input=True) as pdf:
         face = resolve_vertical_font(FONTS_DIR, "機密文書")
@@ -1085,7 +1088,7 @@ def _make_vertical_form(path: str) -> None:
             pdf, face, "機密文書"
         )[0]
         for entry in pdf.Root["/AcroForm"]["/Fields"]:
-            if str(entry.get("/T")) == "note":
+            if str(entry.get("/T")) != "plain":
                 entry["/DA"] = pikepdf.String("/VJp 0 Tf 0 g")
         pdf.save(path)
 
@@ -1156,3 +1159,34 @@ class TestVerticalFieldAppearance:
         with pytest.raises(ValueError, match="writes vertically and no available font"):
             fill_form_fields(src, out, {"note": "ABC"}, font_dir="")
         assert not os.path.exists(out)
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+    @pytest.mark.parametrize("name,value", [("note", "機密文書"), ("pick", "機密")])
+    def test_clearing_a_vertical_field_round_trips(self, tmp_dir, name, value):
+        # INVERTED: an empty value reached the column builder, which refuses
+        # an empty subset by name, so clearing ANY vertical field failed the
+        # whole fill. Nothing drawn has no direction and nothing to embed;
+        # /DA still states the writing mode, so the next value is columns
+        # again — byte for byte the appearance the first fill wrote.
+        src = os.path.join(tmp_dir, "v.pdf")
+        filled = os.path.join(tmp_dir, "v_filled.pdf")
+        cleared = os.path.join(tmp_dir, "v_cleared.pdf")
+        refilled = os.path.join(tmp_dir, "v_refilled.pdf")
+        _make_vertical_form(src, extra=[
+            {"name": "pick", "type": "dropdown", "page_index": 0,
+             "rect": [100, 400, 130, 560], "options": ["機密", "公開"]},
+        ])
+        fill_form_fields(src, filled, {name: value}, font_dir=FONTS_DIR)
+        column = _appearance_body(filled, name)
+        assert b"/TxV" in column
+
+        r = fill_form_fields(filled, cleared, {name: ""}, font_dir=FONTS_DIR)
+        assert r["filled"] == 1
+        empty = _appearance_body(cleared, name)
+        # The cleared appearance is the ordinary empty one: no column embed,
+        # and the /DA font stays the resource nothing draws through.
+        assert b"/TxV" not in empty
+        assert b"() Tj" in empty and b"/VJp" in empty
+
+        fill_form_fields(cleared, refilled, {name: value}, font_dir=FONTS_DIR)
+        assert _appearance_body(refilled, name) == column
