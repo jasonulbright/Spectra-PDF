@@ -23,8 +23,6 @@ Permissions map from the same ``{print, copy, modify, annotate}`` contract
 the standard encrypt exposes; assistive-technology access is never blocked.
 """
 
-import os
-import tempfile
 from pathlib import Path
 
 import pikepdf
@@ -34,6 +32,8 @@ from pyhanko.pdf_utils import crypt as pyhanko_crypt
 from pyhanko.pdf_utils.crypt.permissions import PubKeyPermissions
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.pdf_utils.writer import copy_into_new_writer
+
+from engine.inplace import staged_write
 
 
 def _load_cert(path: str) -> asn1_x509.Certificate:
@@ -84,16 +84,9 @@ def _permissions(perms: dict | None) -> PubKeyPermissions:
 def _staged_write(writer, output_path: Path) -> None:
     """Write through a same-directory temp file + os.replace — atomic even
     when output overwrites the input (the unlock/redact_marks idiom)."""
-    fd, tmp_path = tempfile.mkstemp(suffix=".pdf", dir=str(output_path.parent))
-    os.close(fd)
-    try:
-        with open(tmp_path, "wb") as f:
+    with staged_write(output_path) as staged:
+        with open(str(staged), "wb") as f:
             writer.write(f)
-        os.replace(tmp_path, output_path)
-    except Exception:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise
 
 
 def classify_encryption(file: str) -> str:

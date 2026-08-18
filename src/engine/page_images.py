@@ -48,10 +48,8 @@ the security-critical redactor.
 """
 
 import os
-import shutil
 import stat
 import struct
-import tempfile
 import zlib
 from pathlib import Path
 
@@ -59,6 +57,7 @@ import pikepdf
 from pikepdf import Dictionary, Name
 
 from engine.content_walk import ClipTracker, GraphicsTextState
+from engine.inplace import staged_write
 from engine.pdf_save import save_pdf
 from engine.redact import (
     IDENTITY,
@@ -1258,19 +1257,17 @@ def _finalize_page_rewrite(page, kept, superseded_forms: set) -> None:
 
 
 def _save(pdf, input_path: Path, output_path: Path) -> None:
-    """Same save semantics as ocr_layer: identity-aware same-file takes
-    temp+rename; a distinct read-only output is made writable first."""
+    """Same save semantics as ocr_layer: identity-aware same-file stages
+    beside the document and swaps the directory entry; a distinct read-only
+    output is made writable first. The Pdf is closed before the swap because
+    the destination cannot be replaced while it is held open."""
     same_file = input_path.resolve() == output_path.resolve() or (
         output_path.exists() and os.path.samefile(input_path, output_path)
     )
     if same_file:
-        with tempfile.NamedTemporaryFile(
-            suffix=".pdf", delete=False, dir=str(input_path.parent)
-        ) as tmp:
-            tmp_path = tmp.name
-        save_pdf(pdf, tmp_path)
-        pdf.close()
-        shutil.move(tmp_path, str(output_path))
+        with staged_write(output_path) as staged:
+            save_pdf(pdf, str(staged))
+            pdf.close()
     else:
         if output_path.exists() and not os.access(output_path, os.W_OK):
             os.chmod(output_path, stat.S_IWRITE)
