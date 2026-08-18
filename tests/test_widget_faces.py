@@ -9,6 +9,14 @@ original appearance back beside it. Both halves were live defects here:
     DeviceRGB, so "convert to grayscale" returned a document with red in it;
   - compress left the field painted twice.
 
+A widget carrying NO appearance was the same defect one step further along:
+the producer synthesized one from `/V` and `/DA` and flattened THAT, and the
+reattach restored the widget over it — so the flatten outlived the value it
+was drawn from, and a later fill left the page painting the old value for
+good. `regenerate_appearances_file` gives such a widget its appearance first,
+through the emitters the fill uses, and it then rides the staging like any
+other face: one author, one transform.
+
 The prepress side of the same mechanism is pinned in `test_prepress.py`
 (`TestFormAppearances`).
 """
@@ -173,22 +181,145 @@ class TestGrayscaleWidgetFaces:
         with pikepdf.open(out) as pdf:
             assert len(pdf.pages) == 1, "four staged pages, none removed"
 
-    def test_a_field_with_no_appearance_keeps_the_producers_own(
+    def test_a_field_with_no_appearance_is_given_one_and_the_page_stays_clean(
             self, tmp_path, gs_path):
-        # A widget with no /AP is left in the producer's input on purpose: the
-        # producer SYNTHESIZES an appearance from /V and /DA and flattens that,
-        # which is already one converted painter, and taking the widget out
-        # would erase it.
+        # The widget is given the appearance its own field states BEFORE the
+        # pass, so the producer has none to synthesize and flatten. What used
+        # to be two painters — a flattened copy in the page and a restored
+        # widget over it — is one, and it is the converted one.
+        from separation_builders import (FORM_PAGE_GRAY, FORM_TEXT_GRAY,
+                                         FORM_TEXT_RGB, form_appearance_pdf)
+
+        src = form_appearance_pdf(tmp_path / "bare.pdf", "bare")
+        out = _gray(src, tmp_path / "gray.pdf", gs_path)
+
+        page = _content(out)
+        assert FORM_PAGE_GRAY in page
+        assert b"(Hello)" not in page, "the value is still flattened into the page"
+        assert b"Tj" not in page
+        assert b"/Tx BMC" not in page
+
+        field = _widgets(out)["bare"]
+        assert list(field["faces"]) == ["/N"]
+        assert b"(Hello)" in field["faces"]["/N"]
+        # The one painter went through the pass: the /DA colour arrives as the
+        # producer's gray, never as the DeviceRGB it was written in.
+        assert FORM_TEXT_GRAY in field["faces"]["/N"]
+        assert FORM_TEXT_RGB not in field["faces"]["/N"]
+        assert b" rg" not in field["faces"]["/N"]
+        assert field["value"] == "Hello"
+        with pikepdf.open(out) as pdf:
+            assert len(pdf.Root.AcroForm.Fields) == 1
+            assert len(pdf.pages) == 1, "a staged appearance page was left behind"
+
+    def test_a_bare_field_carries_no_stale_value_after_a_refill(
+            self, tmp_path, gs_path):
+        # The defect this replaces: the producer flattened the value the field
+        # held AT CONVERSION TIME, and the reattach restored the widget over
+        # it, so the flatten outlived the value it was drawn from. Refilling
+        # moved the /AP and left the page painting the old one for good.
+        from engine.forms import fill_form_fields
         from separation_builders import form_appearance_pdf
 
         src = form_appearance_pdf(tmp_path / "bare.pdf", "bare")
         out = _gray(src, tmp_path / "gray.pdf", gs_path)
 
+        filled = str(tmp_path / "filled.pdf")
+        fill_form_fields(out, filled, {"bare": "Ashgray"})
+
+        page = _content(filled)
+        assert b"(Hello)" not in page, "the page still paints the value it converted"
+        assert b"(Ashgray)" not in page
+        assert b"Tj" not in page
+        field = _widgets(filled)["bare"]
+        assert field["value"] == "Ashgray"
+        assert b"(Ashgray)" in field["faces"]["/N"]
+
+    def test_a_bare_field_with_nothing_to_show_is_left_alone(
+            self, tmp_path, gs_path):
+        # An empty value and no chrome is nothing to draw, and the producer
+        # synthesizes nothing for it (measured) — so there is no flatten to
+        # replace and no appearance worth inventing.
+        from engine.forms import fill_form_fields
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "empty.pdf", "bare-empty")
+        out = _gray(src, tmp_path / "gray.pdf", gs_path)
+
+        assert b"Tj" not in _content(out)
         field = _widgets(out)["bare"]
-        assert field["faces"] == {}, "a synthesized appearance was harvested back"
-        assert field["value"] == "Hello"
+        assert field["faces"] == {}
+        assert field["value"] == ""
+
+        filled = str(tmp_path / "filled.pdf")
+        fill_form_fields(out, filled, {"bare": "Ashgray"})
+        assert b"Tj" not in _content(filled), "the empty field left a painter behind"
+        assert b"(Ashgray)" in _widgets(filled)["bare"]["faces"]["/N"]
+
+    def test_a_bare_field_keeps_the_chrome_the_flatten_carried(
+            self, tmp_path, gs_path):
+        # /MK states a background and a border independently of any value
+        # (ISO 32000-2 12.5.6.19), and the producer flattens those too. An
+        # appearance regenerated without them would take the widget out of the
+        # producer's input and lose the box it was authored with.
+        from separation_builders import (FORM_BG_GRAY, FORM_BORDER_GRAY,
+                                         FORM_TEXT_GRAY, form_appearance_pdf)
+
+        src = form_appearance_pdf(tmp_path / "chrome.pdf", "bare-chrome")
+        out = _gray(src, tmp_path / "gray.pdf", gs_path)
+
+        assert b"Tj" not in _content(out)
+        face = _widgets(out)["bare"]["faces"]["/N"]
+        assert FORM_BG_GRAY in face, "the background the producer flattened is gone"
+        assert FORM_BORDER_GRAY in face, "the border the producer flattened is gone"
+        assert FORM_TEXT_GRAY in face
+        assert b" rg" not in face and b" RG" not in face
+
+    def test_a_bare_choice_draws_every_row_the_flatten_never_had(
+            self, tmp_path, gs_path):
+        # The producer synthesizes only the SELECTED row of a list box
+        # (measured), so an appearance taken from that flatten is missing every
+        # row the user can scroll to. The field's own emitter draws the list.
+        from separation_builders import (FORM_OPTIONS, FORM_TEXT_GRAY,
+                                         form_appearance_pdf)
+
+        src = form_appearance_pdf(tmp_path / "choice.pdf", "bare-choice")
+        out = _gray(src, tmp_path / "gray.pdf", gs_path)
+
         page = _content(out)
-        assert b"(Hello)" in page and b" rg" not in page
+        widgets = _widgets(out)
+        for option in FORM_OPTIONS:
+            assert f"({option})".encode("ascii") not in page
+        assert b"(Beta)" in widgets["combo"]["faces"]["/N"]
+        rows = widgets["list"]["faces"]["/N"]
+        for option in FORM_OPTIONS:
+            assert f"({option})".encode("ascii") in rows, f"{option} is not drawn"
+        assert FORM_TEXT_GRAY in rows
+        assert b" rg" not in rows
+
+    def test_bare_buttons_keep_the_producers_own_nothing(
+            self, tmp_path, gs_path):
+        # A check box or radio button draws through the /AP states it was
+        # authored with and states nothing a value could be drawn from. The
+        # producer synthesizes nothing for one carrying none (measured), so
+        # there is no flatten here and no appearance to invent.
+        from engine.forms import fill_form_fields
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "buttons.pdf", "bare-button")
+        out = _gray(src, tmp_path / "gray.pdf", gs_path)
+
+        assert b"Tj" not in _content(out)
+        widgets = _widgets(out)
+        assert widgets["check"]["faces"] == {}
+        assert widgets["radio"]["faces"] == {}
+        assert widgets["check"]["value"] == "/Yes"
+        assert widgets["radio"]["value"] == "/A"
+
+        filled = str(tmp_path / "filled.pdf")
+        fill_form_fields(out, filled, {"check": False})
+        assert b"Tj" not in _content(filled)
+        assert _widgets(filled)["check"]["value"] == "/Off"
 
     def test_a_shared_appearance_is_converted_once(self, tmp_path, gs_path):
         # Two widgets wearing one stream is one appearance: staged once,
@@ -307,17 +438,116 @@ class TestCompressWidgetFaces:
         with pikepdf.open(out) as pdf:
             assert len(pdf.pages) == 1, "four staged pages, none removed"
 
-    def test_a_field_with_no_appearance_keeps_the_producers_own(
+    def test_a_field_with_no_appearance_is_given_one_and_the_page_stays_clean(
             self, tmp_path, gs_path):
+        from separation_builders import (FORM_PAGE_RGB, FORM_TEXT_RGB,
+                                         form_appearance_pdf)
+
+        src = form_appearance_pdf(tmp_path / "bare.pdf", "bare")
+        out = _small(src, tmp_path / "small.pdf", gs_path)
+
+        page = _content(out)
+        assert FORM_PAGE_RGB in page
+        assert b"(Hello)" not in page, "the value is still flattened into the page"
+        assert b"Tj" not in page
+        assert b"/Tx BMC" not in page
+
+        field = _widgets(out)["bare"]
+        assert list(field["faces"]) == ["/N"]
+        assert b"(Hello)" in field["faces"]["/N"]
+        # Compress converts nothing, so the /DA colour comes back in its own
+        # space — the single painter is the point here, not a changed operand.
+        assert FORM_TEXT_RGB in field["faces"]["/N"]
+        assert field["value"] == "Hello"
+        with pikepdf.open(out) as pdf:
+            assert len(pdf.Root.AcroForm.Fields) == 1
+            assert len(pdf.pages) == 1, "a staged appearance page was left behind"
+
+    def test_a_bare_field_carries_no_stale_value_after_a_refill(
+            self, tmp_path, gs_path):
+        from engine.forms import fill_form_fields
         from separation_builders import form_appearance_pdf
 
         src = form_appearance_pdf(tmp_path / "bare.pdf", "bare")
         out = _small(src, tmp_path / "small.pdf", gs_path)
 
+        filled = str(tmp_path / "filled.pdf")
+        fill_form_fields(out, filled, {"bare": "Squeezed"})
+
+        page = _content(filled)
+        assert b"(Hello)" not in page, "the page still paints the value it compressed"
+        assert b"(Squeezed)" not in page
+        assert b"Tj" not in page
+        field = _widgets(filled)["bare"]
+        assert field["value"] == "Squeezed"
+        assert b"(Squeezed)" in field["faces"]["/N"]
+
+    def test_a_bare_field_with_nothing_to_show_is_left_alone(
+            self, tmp_path, gs_path):
+        from engine.forms import fill_form_fields
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "empty.pdf", "bare-empty")
+        out = _small(src, tmp_path / "small.pdf", gs_path)
+
+        assert b"Tj" not in _content(out)
         field = _widgets(out)["bare"]
-        assert field["faces"] == {}, "a synthesized appearance was harvested back"
-        assert field["value"] == "Hello"
-        assert b"(Hello)" in _content(out)
+        assert field["faces"] == {}
+        assert field["value"] == ""
+
+        filled = str(tmp_path / "filled.pdf")
+        fill_form_fields(out, filled, {"bare": "Squeezed"})
+        assert b"Tj" not in _content(filled), "the empty field left a painter behind"
+        assert b"(Squeezed)" in _widgets(filled)["bare"]["faces"]["/N"]
+
+    def test_a_bare_field_keeps_the_chrome_the_flatten_carried(
+            self, tmp_path, gs_path):
+        from separation_builders import (FORM_BG_RGB, FORM_BORDER_RGB,
+                                         form_appearance_pdf)
+
+        src = form_appearance_pdf(tmp_path / "chrome.pdf", "bare-chrome")
+        out = _small(src, tmp_path / "small.pdf", gs_path)
+
+        assert b"Tj" not in _content(out)
+        face = _widgets(out)["bare"]["faces"]["/N"]
+        assert FORM_BG_RGB in face, "the background the producer flattened is gone"
+        assert FORM_BORDER_RGB in face, "the border the producer flattened is gone"
+
+    def test_a_bare_choice_draws_every_row_the_flatten_never_had(
+            self, tmp_path, gs_path):
+        from separation_builders import FORM_OPTIONS, form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "choice.pdf", "bare-choice")
+        out = _small(src, tmp_path / "small.pdf", gs_path)
+
+        page = _content(out)
+        widgets = _widgets(out)
+        for option in FORM_OPTIONS:
+            assert f"({option})".encode("ascii") not in page
+        assert b"(Beta)" in widgets["combo"]["faces"]["/N"]
+        rows = widgets["list"]["faces"]["/N"]
+        for option in FORM_OPTIONS:
+            assert f"({option})".encode("ascii") in rows, f"{option} is not drawn"
+
+    def test_bare_buttons_keep_the_producers_own_nothing(
+            self, tmp_path, gs_path):
+        from engine.forms import fill_form_fields
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "buttons.pdf", "bare-button")
+        out = _small(src, tmp_path / "small.pdf", gs_path)
+
+        assert b"Tj" not in _content(out)
+        widgets = _widgets(out)
+        assert widgets["check"]["faces"] == {}
+        assert widgets["radio"]["faces"] == {}
+        assert widgets["check"]["value"] == "/Yes"
+        assert widgets["radio"]["value"] == "/A"
+
+        filled = str(tmp_path / "filled.pdf")
+        fill_form_fields(out, filled, {"check": False})
+        assert b"Tj" not in _content(filled)
+        assert _widgets(filled)["check"]["value"] == "/Off"
 
     def test_a_shared_appearance_comes_through_once(self, tmp_path, gs_path):
         from separation_builders import FORM_FILL_RGB, form_appearance_pdf
@@ -362,13 +592,53 @@ class TestStagingIsScaffoldingOnly:
         assert staged is None and boxes == []
         assert not (tmp_path / "staged.pdf").exists()
 
-    def test_a_form_with_no_appearance_stages_nothing(self, tmp_path):
-        from engine.widget_faces import stage_appearances_file
+    def test_a_form_with_no_appearance_stages_nothing_until_it_has_one(
+            self, tmp_path):
+        # Staging pairs pages back to FACES, so a widget carrying none has
+        # nothing to stage. Regenerating first is what gives it one — the two
+        # steps are ordered, not merged, because the regenerated file is also
+        # what every later read of the document takes.
+        from engine.widget_faces import (regenerate_appearances_file,
+                                         stage_appearances_file)
         from separation_builders import form_appearance_pdf
 
         src = form_appearance_pdf(tmp_path / "bare.pdf", "bare")
         staged, boxes = stage_appearances_file(Path(src), tmp_path)
         assert staged is None and boxes == []
+
+        regenerated = regenerate_appearances_file(Path(src), tmp_path)
+        assert regenerated is not None
+        staged, boxes = stage_appearances_file(regenerated, tmp_path)
+        assert staged is not None and len(boxes) == 1
+
+    def test_a_document_with_no_form_regenerates_nothing(self, tmp_path):
+        from engine.widget_faces import regenerate_appearances_file
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "form.pdf")
+        _without_form(src, tmp_path / "noform.pdf")
+        assert regenerate_appearances_file(
+            Path(tmp_path / "noform.pdf"), tmp_path) is None
+        assert not (tmp_path / "regenerated.pdf").exists()
+
+    def test_a_widget_that_already_has_an_appearance_regenerates_nothing(
+            self, tmp_path):
+        # The regeneration is for the widget that states no appearance at all.
+        # One that has an /AP already has its author, and re-authoring it would
+        # replace the document's own drawing with this app's idea of it.
+        from engine.widget_faces import regenerate_appearances_file
+        from separation_builders import form_appearance_pdf
+
+        for kind in ("text", "states", "shared"):
+            src = form_appearance_pdf(tmp_path / f"{kind}.pdf", kind)
+            assert regenerate_appearances_file(Path(src), tmp_path) is None, kind
+
+    def test_a_bare_button_regenerates_nothing(self, tmp_path):
+        from engine.widget_faces import regenerate_appearances_file
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "buttons.pdf", "bare-button")
+        assert regenerate_appearances_file(Path(src), tmp_path) is None
 
     def test_grayscale_in_place_harvests_and_keeps_the_form(self, tmp_path, gs_path):
         # In-place, the producer writes a STAGED target and the original stays

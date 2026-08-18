@@ -900,23 +900,148 @@ class TestFormAppearances:
         with pikepdf.open(out) as pdf:
             assert len(pdf.pages) == 1, "four staged pages, none removed"
 
-    def test_a_field_with_no_appearance_keeps_the_producers_own(
+    def test_a_field_with_no_appearance_is_given_one_and_the_page_stays_clean(
             self, tmp_path, gs_path):
-        # A widget with no /AP is left in the producer's input on purpose: the
-        # producer SYNTHESIZES an appearance from /V and /DA and flattens that
-        # (measured), which is already one converted painter, and taking the
-        # widget out would erase it.
+        # The widget is given the appearance its own field states BEFORE the
+        # conversion, so the producer has none to synthesize and flatten. What
+        # used to be two painters — a flattened copy in the page and a restored
+        # widget over it — is one, and it is the converted one.
+        from separation_builders import (FORM_PAGE_CMYK, FORM_TEXT_CMYK,
+                                         form_appearance_pdf)
+
+        src = form_appearance_pdf(tmp_path / "bare.pdf", "bare")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        page = _content(out)
+        assert FORM_PAGE_CMYK in page
+        assert b"(Hello)" not in page, "the value is still flattened into the page"
+        assert b"Tj" not in page
+        assert b"/Tx BMC" not in page
+
+        field = self._widgets(out)["bare"]
+        assert list(field["faces"]) == ["/N"]
+        assert b"(Hello)" in field["faces"]["/N"]
+        assert FORM_TEXT_CMYK in field["faces"]["/N"]
+        assert b" rg" not in field["faces"]["/N"]
+        assert field["value"] == "Hello"
+        with pikepdf.open(out) as pdf:
+            assert len(pdf.Root.AcroForm.Fields) == 1
+            assert len(pdf.pages) == 1, "a staged appearance page was left behind"
+
+    def test_a_bare_field_carries_no_stale_value_after_a_refill(
+            self, tmp_path, gs_path):
+        # The defect this replaces: the producer flattened the value the field
+        # held AT CONVERSION TIME, and the reattach restored the widget over
+        # it, so the flatten outlived the value it was drawn from. Refilling
+        # moved the /AP and left the page painting the old one for good.
+        from engine.forms import fill_form_fields
         from separation_builders import form_appearance_pdf
 
         src = form_appearance_pdf(tmp_path / "bare.pdf", "bare")
         out = str(tmp_path / "cmyk.pdf")
         convert_cmyk(src, out, gs_path=gs_path)
 
+        filled = str(tmp_path / "filled.pdf")
+        fill_form_fields(out, filled, {"bare": "Inked"})
+
+        page = _content(filled)
+        assert b"(Hello)" not in page, "the page still paints the value it converted"
+        assert b"(Inked)" not in page
+        assert b"Tj" not in page
+        field = self._widgets(filled)["bare"]
+        assert field["value"] == "Inked"
+        assert b"(Inked)" in field["faces"]["/N"]
+
+    def test_a_bare_field_with_nothing_to_show_is_left_alone(
+            self, tmp_path, gs_path):
+        # An empty value and no chrome is nothing to draw, and the producer
+        # synthesizes nothing for it (measured) — so there is no flatten to
+        # replace and no appearance worth inventing.
+        from engine.forms import fill_form_fields
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "empty.pdf", "bare-empty")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        assert b"Tj" not in _content(out)
         field = self._widgets(out)["bare"]
-        assert field["faces"] == {}, "a synthesized appearance was harvested back"
-        assert field["value"] == "Hello"
+        assert field["faces"] == {}
+        assert field["value"] == ""
+
+        filled = str(tmp_path / "filled.pdf")
+        fill_form_fields(out, filled, {"bare": "Inked"})
+        assert b"Tj" not in _content(filled), "the empty field left a painter behind"
+        assert b"(Inked)" in self._widgets(filled)["bare"]["faces"]["/N"]
+
+    def test_a_bare_field_keeps_the_chrome_the_flatten_carried(
+            self, tmp_path, gs_path):
+        # /MK states a background and a border independently of any value
+        # (ISO 32000-2 12.5.6.19), and the producer flattens those too. An
+        # appearance regenerated without them would take the widget out of the
+        # producer's input and lose the box it was authored with.
+        from separation_builders import (FORM_BG_CMYK, FORM_BORDER_CMYK,
+                                         FORM_TEXT_CMYK, form_appearance_pdf)
+
+        src = form_appearance_pdf(tmp_path / "chrome.pdf", "bare-chrome")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        assert b"Tj" not in _content(out)
+        face = self._widgets(out)["bare"]["faces"]["/N"]
+        assert FORM_BG_CMYK in face, "the background the producer flattened is gone"
+        assert FORM_BORDER_CMYK in face, "the border the producer flattened is gone"
+        assert FORM_TEXT_CMYK in face
+        assert b" rg" not in face and b" RG" not in face
+
+    def test_a_bare_choice_draws_every_row_the_flatten_never_had(
+            self, tmp_path, gs_path):
+        # The producer synthesizes only the SELECTED row of a list box
+        # (measured), so an appearance taken from that flatten is missing every
+        # row the user can scroll to. The field's own emitter draws the list.
+        from separation_builders import (FORM_OPTIONS, FORM_TEXT_CMYK,
+                                         form_appearance_pdf)
+
+        src = form_appearance_pdf(tmp_path / "choice.pdf", "bare-choice")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
         page = _content(out)
-        assert b"(Hello)" in page and b" rg" not in page
+        widgets = self._widgets(out)
+        for option in FORM_OPTIONS:
+            assert f"({option})".encode("ascii") not in page
+        assert b"(Beta)" in widgets["combo"]["faces"]["/N"]
+        rows = widgets["list"]["faces"]["/N"]
+        for option in FORM_OPTIONS:
+            assert f"({option})".encode("ascii") in rows, f"{option} is not drawn"
+        assert FORM_TEXT_CMYK in rows
+        assert b" rg" not in rows
+
+    def test_bare_buttons_keep_the_producers_own_nothing(
+            self, tmp_path, gs_path):
+        # A check box or radio button draws through the /AP states it was
+        # authored with and states nothing a value could be drawn from. The
+        # producer synthesizes nothing for one carrying none (measured), so
+        # there is no flatten here and no appearance to invent.
+        from engine.forms import fill_form_fields
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "buttons.pdf", "bare-button")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        assert b"Tj" not in _content(out)
+        widgets = self._widgets(out)
+        assert widgets["check"]["faces"] == {}
+        assert widgets["radio"]["faces"] == {}
+        assert widgets["check"]["value"] == "/Yes"
+        assert widgets["radio"]["value"] == "/A"
+
+        filled = str(tmp_path / "filled.pdf")
+        fill_form_fields(out, filled, {"check": False})
+        assert b"Tj" not in _content(filled)
+        assert self._widgets(filled)["check"]["value"] == "/Off"
 
     def test_a_shared_appearance_is_converted_once(self, tmp_path, gs_path):
         # Two widgets wearing one stream is one appearance: staged once,
