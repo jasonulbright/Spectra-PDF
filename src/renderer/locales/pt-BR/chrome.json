@@ -3065,6 +3065,7 @@
   "panel.a11y.detail.same_label_different_targets": "O mesmo texto de link leva a {{count}} destinos diferentes: {{targets}}.",
   "panel.a11y.detail.script_site": "Um script {{kind}} chamado {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "Um script deste documento não pôde ser lido, então esta verificação não viu o que ele executa.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{parent}} na página {{page}} não contém suas marcas filhas na sequência que o padrão exige para ele.",
   "panel.a11y.detail.structure_nesting_unreadable": "Não foi possível ler o espaço de nomes de um elemento de estrutura: {{reason}}. O aninhamento dele não foi verificado.",
   "panel.a11y.detail.structure_nesting_violation": "{{child}} está dentro de {{parent}} na página {{page}}, onde o padrão não permite.",
   "panel.a11y.detail.structure_tree_empty": "A árvore de estrutura do documento não contém nenhum elemento, então nada nela está marcado.",
