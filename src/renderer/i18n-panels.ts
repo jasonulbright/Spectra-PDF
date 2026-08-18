@@ -1888,6 +1888,8 @@ export const PANEL_STRINGS = {
   'panel.a11y.detail.script_site': 'A {{kind}} script named {{name}}.',
   'panel.a11y.detail.scripts_unreadable':
     'A script in this document could not be read, so this check did not see what it runs.',
+  'panel.a11y.detail.structure_nesting_content_model':
+    '{{parent}} on page {{page}} does not hold its child tags in the sequence the standard requires for it.',
   'panel.a11y.detail.structure_nesting_unreadable':
     'A structure element’s namespace could not be read: {{reason}}. Its nesting was not checked.',
   'panel.a11y.detail.structure_nesting_violation':

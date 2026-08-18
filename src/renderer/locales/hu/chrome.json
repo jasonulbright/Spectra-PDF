@@ -2999,6 +2999,7 @@
   "panel.a11y.detail.same_label_different_targets": "Ugyanaz a hivatkozásszöveg {{count}} különböző célra vezet: {{targets}}.",
   "panel.a11y.detail.script_site": "Egy {{name}} nevű {{kind}} parancsfájl.",
   "panel.a11y.detail.scripts_unreadable": "A dokumentum egyik parancsfájlját nem lehetett elolvasni, így ez az ellenőrzés nem látta, mit futtat.",
+  "panel.a11y.detail.structure_nesting_content_model": "A(z) {{parent}} a(z) {{page}}. oldalon nem a szabvány által megkövetelt sorrendben tartalmazza a gyermekcímkéit.",
   "panel.a11y.detail.structure_nesting_unreadable": "Egy szerkezeti elem névterét nem lehetett elolvasni: {{reason}}. A beágyazása nem lett ellenőrizve.",
   "panel.a11y.detail.structure_nesting_violation": "A(z) {{child}} a(z) {{parent}} elemen belül található a(z) {{page}}. oldalon, ahol ezt a szabvány nem engedi meg.",
   "panel.a11y.detail.structure_tree_empty": "A dokumentum szerkezeti fája egyetlen elemet sem tartalmaz, így semmi sincs benne címkézve.",

@@ -2999,6 +2999,7 @@
   "panel.a11y.detail.same_label_different_targets": "Το ίδιο κείμενο συνδέσμου οδηγεί σε {{count}} διαφορετικούς προορισμούς: {{targets}}.",
   "panel.a11y.detail.script_site": "Ένα σενάριο {{kind}} με όνομα {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "Ένα σενάριο αυτού του εγγράφου δεν διαβάστηκε, οπότε αυτός ο έλεγχος δεν είδε τι εκτελεί.",
+  "panel.a11y.detail.structure_nesting_content_model": "Το {{parent}} στη σελίδα {{page}} δεν περιέχει τις θυγατρικές ετικέτες του με τη σειρά που απαιτεί το πρότυπο γι’ αυτό.",
   "panel.a11y.detail.structure_nesting_unreadable": "Ο χώρος ονομάτων ενός στοιχείου δομής δεν διαβάστηκε: {{reason}}. Η ένθεσή του δεν ελέγχθηκε.",
   "panel.a11y.detail.structure_nesting_violation": "Το {{child}} βρίσκεται μέσα στο {{parent}} στη σελίδα {{page}}, όπου το πρότυπο δεν το επιτρέπει.",
   "panel.a11y.detail.structure_tree_empty": "Το δέντρο δομής του εγγράφου δεν περιέχει κανένα στοιχείο, οπότε τίποτα σε αυτό δεν φέρει ετικέτα.",

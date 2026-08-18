@@ -3065,6 +3065,7 @@
   "panel.a11y.detail.same_label_different_targets": "אותו טקסט קישור מוביל אל {{count}} יעדים שונים: {{targets}}.",
   "panel.a11y.detail.script_site": "סקריפט מסוג {{kind}} בשם {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "לא ניתן היה לקרוא סקריפט במסמך הזה, ולכן הבדיקה הזו לא ראתה מה הוא מריץ.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{parent}} בעמוד {{page}} אינו מכיל את תגי הצאצא שלו ברצף שהתקן דורש עבורו.",
   "panel.a11y.detail.structure_nesting_unreadable": "לא ניתן היה לקרוא את מרחב השמות של רכיב מבנה: {{reason}}. הקינון שלו לא נבדק.",
   "panel.a11y.detail.structure_nesting_violation": "{{child}} נמצא בתוך {{parent}} בעמוד {{page}}, שם התקן אינו מתיר זאת.",
   "panel.a11y.detail.structure_tree_empty": "עץ המבנה של המסמך אינו מכיל רכיבים, ולכן שום דבר בו אינו מתויג.",

@@ -3065,6 +3065,7 @@
   "panel.a11y.detail.same_label_different_targets": "Le même texte de lien mène à {{count}} cibles différentes : {{targets}}.",
   "panel.a11y.detail.script_site": "Un script {{kind}} nommé {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "Un script de ce document n’a pas pu être lu : cette vérification n’a donc pas vu ce qu’il exécute.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{parent}} à la page {{page}} ne contient pas ses balises enfants dans l’ordre que la norme lui impose.",
   "panel.a11y.detail.structure_nesting_unreadable": "L’espace de noms d’un élément de structure n’a pas pu être lu : {{reason}}. Son imbrication n’a pas été vérifiée.",
   "panel.a11y.detail.structure_nesting_violation": "{{child}} se trouve dans {{parent}} à la page {{page}}, où la norme ne l’autorise pas.",
   "panel.a11y.detail.structure_tree_empty": "L’arbre de structure du document ne contient aucun élément : rien n’y est donc balisé.",

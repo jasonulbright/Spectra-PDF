@@ -2999,6 +2999,7 @@
   "panel.a11y.detail.same_label_different_targets": "Den samme linktekst fører til {{count}} forskellige mål: {{targets}}.",
   "panel.a11y.detail.script_site": "Et {{kind}}-script med navnet {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "Et script i dette dokument kunne ikke læses, så denne kontrol så ikke, hvad det kører.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{parent}} på side {{page}} indeholder ikke sine underordnede tags i den rækkefølge, standarden kræver for det.",
   "panel.a11y.detail.structure_nesting_unreadable": "Navnerummet for et strukturelement kunne ikke læses: {{reason}}. Dets indlejring blev ikke kontrolleret.",
   "panel.a11y.detail.structure_nesting_violation": "{{child}} ligger inde i {{parent}} på side {{page}}, hvor standarden ikke tillader det.",
   "panel.a11y.detail.structure_tree_empty": "Dokumentets strukturtræ indeholder ingen elementer, så intet i det er tagget.",

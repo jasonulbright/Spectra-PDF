@@ -3131,6 +3131,7 @@
   "panel.a11y.detail.same_label_different_targets": "Ten sam tekst odsyłacza prowadzi do {{count}} różnych celów: {{targets}}.",
   "panel.a11y.detail.script_site": "Skrypt {{kind}} o nazwie {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "Nie udało się odczytać skryptu w tym dokumencie, więc ta kontrola nie zobaczyła, co on uruchamia.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{parent}} na stronie {{page}} nie zawiera swoich znaczników podrzędnych w kolejności, jakiej wymaga dla niego norma.",
   "panel.a11y.detail.structure_nesting_unreadable": "Nie udało się odczytać przestrzeni nazw elementu struktury: {{reason}}. Jego zagnieżdżenie nie zostało sprawdzone.",
   "panel.a11y.detail.structure_nesting_violation": "{{child}} znajduje się wewnątrz {{parent}} na stronie {{page}}, gdzie norma na to nie pozwala.",
   "panel.a11y.detail.structure_tree_empty": "Drzewo struktury dokumentu nie zawiera żadnych elementów, więc nic w nim nie jest oznakowane.",

@@ -3065,6 +3065,7 @@
   "panel.a11y.detail.same_label_different_targets": "Același text de legătură duce la {{count}} ținte diferite: {{targets}}.",
   "panel.a11y.detail.script_site": "Un script {{kind}} numit {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "Un script din acest document nu a putut fi citit, așa că această verificare nu a văzut ce execută.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{parent}} de la pagina {{page}} nu conține etichetele sale copil în ordinea pe care standardul o cere pentru el.",
   "panel.a11y.detail.structure_nesting_unreadable": "Spațiul de nume al unui element de structură nu a putut fi citit: {{reason}}. Imbricarea lui nu a fost verificată.",
   "panel.a11y.detail.structure_nesting_violation": "{{child}} se află în {{parent}} la pagina {{page}}, unde standardul nu permite acest lucru.",
   "panel.a11y.detail.structure_tree_empty": "Arborele de structură al documentului nu conține niciun element, așa că nimic din el nu este etichetat.",

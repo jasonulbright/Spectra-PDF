@@ -2933,6 +2933,7 @@
   "panel.a11y.detail.same_label_different_targets": "同じリンク文字列が {{count}} 個の異なるリンク先に導きます：{{targets}}。",
   "panel.a11y.detail.script_site": "{{name}} という名前の {{kind}} スクリプトです。",
   "panel.a11y.detail.scripts_unreadable": "この文書のスクリプトを読み取れなかったため、この確認はそれが何を実行するかを見ていません。",
+  "panel.a11y.detail.structure_nesting_content_model": "{{page}} ページの {{parent}} は、子タグを規格が求める順序で保持していません。",
   "panel.a11y.detail.structure_nesting_unreadable": "構造要素の名前空間を読み取れませんでした: {{reason}}。その入れ子は確認していません。",
   "panel.a11y.detail.structure_nesting_violation": "{{page}} ページの {{parent}} の中に {{child}} があり、規格はこれを認めていません。",
   "panel.a11y.detail.structure_tree_empty": "文書の構造ツリーに要素がないため、その中にタグ付けされたものはありません。",
