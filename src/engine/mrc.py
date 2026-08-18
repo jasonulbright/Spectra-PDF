@@ -62,7 +62,7 @@ from pikepdf import Dictionary, Name
 
 from . import budget
 from . import mrc_verify
-from .inplace import staged_write
+from .inplace import is_same_file, staged_write
 from .mrc_codecs import (
     CCITT_G4,
     JBIG2_GENERIC,
@@ -1283,10 +1283,7 @@ def _save(pdf, input_path: Path, output_path: Path) -> None:
     is CLOSED before the swap — Windows refuses to replace an open file."""
     import stat
 
-    same = input_path.resolve() == output_path.resolve() or (
-        output_path.exists() and os.path.samefile(str(input_path), str(output_path))
-    )
-    if same:
+    if is_same_file(str(input_path), str(output_path)):
         with staged_write(output_path) as staged:
             save_pdf(pdf, str(staged))
             pdf.close()

@@ -17,7 +17,7 @@ from typing import NamedTuple
 
 import pikepdf
 from pikepdf import Array, Name
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 
 # Subtypes that count as a "comment"/markup annotation (everything except the
@@ -219,7 +219,7 @@ def delete_all_annotations(file: str, output: str, subtypes: list | None = None,
     """
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
 
     # On a signed input the landed bytes become an incremental append
     # (original verbatim + one revision), so sweeping comments never breaks

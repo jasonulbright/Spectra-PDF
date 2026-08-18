@@ -17,10 +17,23 @@ from typing import Iterator
 
 
 def is_same_file(file: str, output: str) -> bool:
-    """Resolved-identity comparison; a not-yet-existing output is never
-    "same" (resolve(strict=False) still normalizes the spelling)."""
+    """Whether ``output`` names the physical file ``file`` names.
+
+    Sameness is the filesystem's, not the string's: one physical file has
+    several spellings no normalization reconciles (UNC versus mapped letter,
+    hard links), so `os.path.samefile` — volume serial plus file index — is the
+    authority and the resolved-spelling comparison is only a cheap first test
+    that needs no stat. A resolved comparison alone answers False for a hard
+    link, which routes a same-file write down the direct-write branch and into
+    the bytes the reader still holds open.
+
+    A not-yet-existing output is never "same": it names nothing to be identical
+    to, and `samefile` on it raises.
+    """
     try:
-        return Path(file).resolve() == Path(output).resolve()
+        if Path(file).resolve() == Path(output).resolve():
+            return True
+        return os.path.exists(output) and os.path.samefile(file, output)
     except OSError:
         return False
 
@@ -52,13 +65,16 @@ def finish_staged(staged: Path, output: Path) -> None:
     caller whose output is its own still-open input closes that handle before
     landing. Staging in the output's own directory keeps the swap on one
     volume, where it is a rename rather than a copy. A swap that fails takes
-    the staged file with it, so nothing is left beside the document.
+    the staged file with it, so nothing is left beside the document — cleanup
+    hangs off `finally` rather than off an `except`, because a swap interrupted
+    by `KeyboardInterrupt` or `SystemExit` raises neither `Exception` nor
+    anything an `except` clause here may swallow. A swap that succeeded left
+    nothing at the staged name, so the same statement is a no-op.
     """
     try:
         os.replace(str(staged), str(output))
-    except Exception:
+    finally:
         _discard(staged)
-        raise
 
 
 @contextmanager
@@ -70,14 +86,22 @@ def staged_write(output: Path) -> Iterator[Path]:
     producer that dies between the staging and the swap leaves a temp file
     beside the user's document unless something owns that span, so the staging
     and the swap are never written as loose statements.
+
+    The scope owns the span for EVERY way out of it, which is why the cleanup
+    hangs off `finally` and a flag rather than off an `except`: a cancellation
+    mid-write — `KeyboardInterrupt`, `SystemExit` — is not an `Exception`, and
+    an `except BaseException` that discards is one edit away from swallowing
+    the interrupt it was written to survive.
     """
     staged = staging_target(output)
+    landed = False
     try:
         yield staged
         finish_staged(staged, output)
-    except Exception:
-        _discard(staged)
-        raise
+        landed = True
+    finally:
+        if not landed:
+            _discard(staged)
 
 
 @contextmanager

@@ -62,7 +62,7 @@ from engine.forms import (
     _all_fields,
 )
 from engine.incremental import signature_policy, signed_edit_decision
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 from engine.validate import validate_pdf
 
@@ -1048,7 +1048,7 @@ def add_form_fields(
 
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     names = []
     with pikepdf.open(file) as pdf:
         refuse_if_xfa(pdf, input_path, "adding form fields")
@@ -1118,7 +1118,7 @@ def author_vertical_field_font(
 
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         refuse_if_xfa(pdf, input_path, "setting a field's writing mode")
         forest = form_field_forest(pdf)
@@ -1226,7 +1226,7 @@ def author_choice_appearance(
 
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         refuse_if_xfa(pdf, input_path, "redrawing an option list")
         terminals = {field.name: field for field in _all_fields(pdf)}
@@ -1382,7 +1382,7 @@ def set_field_lock(
 
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         refuse_if_xfa(pdf, input_path, "setting a field lock")
         forest = form_field_forest(pdf)
@@ -1448,7 +1448,7 @@ def set_field_description(
 
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         refuse_if_xfa(pdf, input_path, "setting a field description")
         forest = form_field_forest(pdf)
@@ -1521,7 +1521,7 @@ def set_field_actions(
 
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     dropped = set(clear or ())
     with pikepdf.open(file) as pdf:
         refuse_if_xfa(pdf, input_path, "setting a field action")

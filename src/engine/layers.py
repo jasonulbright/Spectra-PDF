@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Name
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 
 
@@ -72,7 +72,7 @@ def set_layer_visibility(file: str, output: str, index: int, visible: bool) -> d
     """Show or hide one layer by moving its OCG between /D /ON and /D /OFF."""
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
 
     with pikepdf.open(file) as pdf:
         ocgs = _ocgs(pdf)

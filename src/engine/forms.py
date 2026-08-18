@@ -39,7 +39,7 @@ from engine.afscript import recognize
 from engine.content_walk import IDENTITY, as_matrix, bbox_of_corners_under_matrix
 from engine.document_js import decode_js
 from engine.fieldmdp import lock_of_field_dict
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_metrics import (
     GLYPH_HEIGHT_EM,
     HELVETICA_DESCENT_EM,
@@ -1939,7 +1939,7 @@ def set_widget_visibility(
         raise ValueError("Name the form fields to show or hide.")
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     changed = 0
     missing: list[str] = []
     with pikepdf.open(file) as pdf:
@@ -2061,7 +2061,7 @@ def fill_form_fields(
     """
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
 
     # Filling a SIGNED document lands as an incremental append —
     # original bytes verbatim + one revision carrying the value/appearance

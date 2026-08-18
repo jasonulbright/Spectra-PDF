@@ -57,7 +57,7 @@ import pikepdf
 from pikepdf import Dictionary, Name
 
 from engine.content_walk import ClipTracker, GraphicsTextState
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 from engine.redact import (
     IDENTITY,
@@ -1261,9 +1261,7 @@ def _save(pdf, input_path: Path, output_path: Path) -> None:
     beside the document and swaps the directory entry; a distinct read-only
     output is made writable first. The Pdf is closed before the swap because
     the destination cannot be replaced while it is held open."""
-    same_file = input_path.resolve() == output_path.resolve() or (
-        output_path.exists() and os.path.samefile(input_path, output_path)
-    )
+    same_file = is_same_file(str(input_path), str(output_path))
     if same_file:
         with staged_write(output_path) as staged:
             save_pdf(pdf, str(staged))

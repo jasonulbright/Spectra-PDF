@@ -38,6 +38,7 @@ from pikepdf import Dictionary, Name
 
 from engine.attachments import _save, list_attachments
 from engine.fs_names import safe_file_name, unique_name, unique_path
+from engine.inplace import is_same_file
 from engine.pdf_metrics import text_width_em
 from engine.pdf_save import save_pdf
 from engine.watermark import _escape_pdf_text, _n
@@ -72,13 +73,12 @@ def create_portfolio(output: str, sources: list, title: str = "") -> dict:
     if not sources:
         raise ValueError("a portfolio needs at least one member file")
     out_path = Path(output)
-    resolved_out = out_path.resolve()
     src_paths = []
     for s in sources:
         p = Path(s)
         if not p.is_file():
             raise ValueError(f"member source not found: {s}")
-        if p.resolve() == resolved_out:
+        if is_same_file(str(p), str(out_path)):
             raise ValueError("the portfolio output cannot be one of its own members")
         src_paths.append(p)
 
@@ -112,7 +112,7 @@ def make_portfolio(file: str, output: str) -> dict:
     """Add `/Collection` to an existing document; its attachments become members."""
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         if pdf.Root.get("/Collection") is not None:
             raise ValueError("this document is already a portfolio")
@@ -138,7 +138,7 @@ def update_portfolio_member(
         raise ValueError(f"source file not found: {source}")
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
 
     data = src.read_bytes()
     mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
