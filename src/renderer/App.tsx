@@ -90,7 +90,7 @@ import { addFormFields } from './lib/form-authoring';
 import type { NewFieldSpec } from './lib/form-authoring';
 import { choiceAppearanceFields, verticalFontCalls } from './lib/form-writing';
 import { DropZone } from './components/DropZone';
-import { OperationsProvider } from './hooks/useOperations';
+import { OperationsProvider, type PerformOperation } from './hooks/useOperations';
 import { OperationQueue } from './components/OperationQueue';
 import { QueueProvider, useOperationQueue } from './hooks/useOperationQueue';
 import { SearchProvider } from './search/SearchProvider';
@@ -1042,20 +1042,23 @@ function AppContent(): React.ReactElement {
     [importFilesIntoDoc],
   );
 
-  // Snapshot + perform operation + reload
-  const performOperation = useCallback(async (
+  // Snapshot + perform operation + reload. The engine's answer is RETURNED —
+  // an operation that reports a partial result can only reach the surface
+  // that must say so through this value.
+  const performOperation = useCallback<PerformOperation>(async (
     filePath: string,
     method: string,
     params: Record<string, unknown>,
   ) => {
     const f = state.files.get(filePath);
-    if (!f) return;
+    if (!f) return null;
     const snapshotPath = await file.snapshot(f.workingPath);
-    await call(method, { ...params, file: f.workingPath, output: f.workingPath });
-    const result = await reloadFile(filePath);
-    if (result) {
-      dispatch({ type: 'UPDATE_FILE', path: filePath, pageCount: result.pageCount, buffer: result.buffer, snapshotPath });
+    const answer = await call(method, { ...params, file: f.workingPath, output: f.workingPath });
+    const reloaded = await reloadFile(filePath);
+    if (reloaded) {
+      dispatch({ type: 'UPDATE_FILE', path: filePath, pageCount: reloaded.pageCount, buffer: reloaded.buffer, snapshotPath });
     }
+    return answer;
   }, [state.files, call, reloadFile, dispatch]);
 
   // Applying redactions REWRITES the page content, so it is a structural-class

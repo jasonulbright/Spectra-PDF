@@ -1,18 +1,25 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import type { NewFieldSpec } from '../lib/form-authoring';
 import type { EditClass } from '../lib/signatures';
+import type { EngineResult } from './useEngine';
 
 /** An undoable in-place workspace operation: snapshot the working copy, run the
  * engine op writing back to it, reload, and push an UPDATE_FILE undo entry.
  * This is App's `performOperation` — the SAME instance the canvas edit handlers
  * use — exposed to panels (which take no props) so an in-place op like
  * signing routes through the ONE flow instead of duplicating the snapshot/
- * commit choreography (and drifting from it). */
+ * commit choreography (and drifting from it).
+ *
+ * Resolves with the ENGINE's own answer, not with nothing: an operation that
+ * reports what it could not do — a partial conversion, a count of what changed
+ * — has no other way to reach the surface that must say so, and a caller
+ * holding only `void` can state only what it asked for. `null` means the path
+ * named no open file, so no operation ran. */
 export type PerformOperation = (
   filePath: string,
   method: string,
   params: Record<string, unknown>,
-) => Promise<void>;
+) => Promise<EngineResult | null>;
 
 /** Author N form fields as ONE undoable act — App's `handleAddFormFields`, the
  * same instance the canvas placement card calls. Field creation is renderer-side
