@@ -28,6 +28,8 @@
   "app.prefs.aria": "Einstellungen",
   "app.prefs.close": "Schließen",
   "app.prefs.title": "Einstellungen",
+  "app.preserve.acroformInline": "das Formular des Dokuments ist so gespeichert, dass eine angehängte Überarbeitung es nicht aktualisieren kann",
+  "app.preserve.acroformRemoved": "die Änderung entfernt das Formular des Dokuments",
   "app.preserve.catalogChanged": "die Änderung geht weiter, als eine angehängte Überarbeitung tragen kann",
   "app.preserve.certifiedAnnotate": "das Dokument ist zertifiziert; erlaubt sind nur das Ausfüllen von Formularen, das Signieren und das Kommentieren",
   "app.preserve.certifiedFormFill": "das Dokument ist zertifiziert; erlaubt sind nur das Ausfüllen von Formularen und das Signieren",

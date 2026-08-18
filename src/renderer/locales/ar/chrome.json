@@ -28,6 +28,8 @@
   "app.prefs.aria": "التفضيلات",
   "app.prefs.close": "إغلاق",
   "app.prefs.title": "التفضيلات",
+  "app.preserve.acroformInline": "نموذج المستند مخزَّن بطريقة لا تستطيع مراجعة مُلحقة تحديثها",
+  "app.preserve.acroformRemoved": "التغيير يزيل نموذج المستند",
   "app.preserve.catalogChanged": "التغيير يتجاوز ما تستطيع مراجعة مُلحقة أن تحمله",
   "app.preserve.certifiedAnnotate": "المستند معتمد ولا يسمح إلا بتعبئة النماذج والتوقيع والتعليق",
   "app.preserve.certifiedFormFill": "المستند معتمد ولا يسمح إلا بتعبئة النماذج والتوقيع",

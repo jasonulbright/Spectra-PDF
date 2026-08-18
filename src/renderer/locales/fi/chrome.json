@@ -28,6 +28,8 @@
   "app.prefs.aria": "Asetukset",
   "app.prefs.close": "Sulje",
   "app.prefs.title": "Asetukset",
+  "app.preserve.acroformInline": "asiakirjan lomake on tallennettu tavalla, jota liitetty versio ei voi päivittää",
+  "app.preserve.acroformRemoved": "muutos poistaa asiakirjan lomakkeen",
   "app.preserve.catalogChanged": "muutos menee pidemmälle kuin liitetty versio voi kantaa",
   "app.preserve.certifiedAnnotate": "asiakirja on sertifioitu, ja vain lomakkeiden täyttäminen, allekirjoittaminen ja kommentointi on sallittua",
   "app.preserve.certifiedFormFill": "asiakirja on sertifioitu, ja vain lomakkeiden täyttäminen ja allekirjoittaminen on sallittua",

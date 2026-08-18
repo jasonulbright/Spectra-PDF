@@ -28,6 +28,8 @@
   "app.prefs.aria": "首选项",
   "app.prefs.close": "关闭",
   "app.prefs.title": "首选项",
+  "app.preserve.acroformInline": "文档的表单以追加修订无法更新的方式存储",
+  "app.preserve.acroformRemoved": "此更改会移除文档的表单",
   "app.preserve.catalogChanged": "此更改超出了追加修订所能承载的范围",
   "app.preserve.certifiedAnnotate": "文档的认证仅允许填写表单、签名和批注",
   "app.preserve.certifiedFormFill": "文档的认证仅允许填写表单和签名",

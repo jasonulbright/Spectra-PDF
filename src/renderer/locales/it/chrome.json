@@ -28,6 +28,8 @@
   "app.prefs.aria": "Preferenze",
   "app.prefs.close": "Chiudi",
   "app.prefs.title": "Preferenze",
+  "app.preserve.acroformInline": "il modulo del documento è memorizzato in un modo che una revisione accodata non può aggiornare",
+  "app.preserve.acroformRemoved": "la modifica rimuove il modulo del documento",
   "app.preserve.catalogChanged": "la modifica va oltre ciò che una revisione accodata può portare",
   "app.preserve.certifiedAnnotate": "il documento è certificato e sono consentite solo la compilazione dei moduli, la firma e i commenti",
   "app.preserve.certifiedFormFill": "il documento è certificato e sono consentite solo la compilazione dei moduli e la firma",

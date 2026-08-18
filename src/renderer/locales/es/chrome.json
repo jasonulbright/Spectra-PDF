@@ -28,6 +28,8 @@
   "app.prefs.aria": "Preferencias",
   "app.prefs.close": "Cerrar",
   "app.prefs.title": "Preferencias",
+  "app.preserve.acroformInline": "el formulario del documento está almacenado de un modo que una revisión añadida no puede actualizar",
+  "app.preserve.acroformRemoved": "el cambio elimina el formulario del documento",
   "app.preserve.catalogChanged": "el cambio va más allá de lo que puede llevar una revisión añadida",
   "app.preserve.certifiedAnnotate": "el documento está certificado y solo permite rellenar formularios, firmar y comentar",
   "app.preserve.certifiedFormFill": "el documento está certificado y solo permite rellenar formularios y firmar",

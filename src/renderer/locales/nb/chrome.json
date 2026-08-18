@@ -28,6 +28,8 @@
   "app.prefs.aria": "Innstillinger",
   "app.prefs.close": "Lukk",
   "app.prefs.title": "Innstillinger",
+  "app.preserve.acroformInline": "dokumentets skjema er lagret på en måte som en tilføyd revisjon ikke kan oppdatere",
+  "app.preserve.acroformRemoved": "endringen fjerner dokumentets skjema",
   "app.preserve.catalogChanged": "endringen går lenger enn det en tilføyd revisjon kan bære",
   "app.preserve.certifiedAnnotate": "dokumentet er sertifisert, og bare utfylling av skjemaer, signering og kommentering er tillatt",
   "app.preserve.certifiedFormFill": "dokumentet er sertifisert, og bare utfylling av skjemaer og signering er tillatt",

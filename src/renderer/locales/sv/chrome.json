@@ -28,6 +28,8 @@
   "app.prefs.aria": "Inställningar",
   "app.prefs.close": "Stäng",
   "app.prefs.title": "Inställningar",
+  "app.preserve.acroformInline": "dokumentets formulär är lagrat på ett sätt som en tillagd revision inte kan uppdatera",
+  "app.preserve.acroformRemoved": "ändringen tar bort dokumentets formulär",
   "app.preserve.catalogChanged": "ändringen går längre än vad en tillagd revision kan bära",
   "app.preserve.certifiedAnnotate": "dokumentet är certifierat, och bara ifyllning av formulär, signering och kommentering är tillåtet",
   "app.preserve.certifiedFormFill": "dokumentet är certifierat, och bara ifyllning av formulär och signering är tillåtet",

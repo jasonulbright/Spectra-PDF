@@ -28,6 +28,8 @@
   "app.prefs.aria": "Preferințe",
   "app.prefs.close": "Închidere",
   "app.prefs.title": "Preferințe",
+  "app.preserve.acroformInline": "formularul documentului este stocat într-un mod pe care o revizie adăugată nu îl poate actualiza",
+  "app.preserve.acroformRemoved": "modificarea elimină formularul documentului",
   "app.preserve.catalogChanged": "modificarea depășește ceea ce poate duce o revizie adăugată",
   "app.preserve.certifiedAnnotate": "documentul este certificat și sunt permise doar completarea formularelor, semnarea și comentarea",
   "app.preserve.certifiedFormFill": "documentul este certificat și sunt permise doar completarea formularelor și semnarea",
