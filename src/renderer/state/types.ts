@@ -556,7 +556,14 @@ export interface AppState {
 }
 
 export type AppAction =
-  | { type: 'OPEN_FILE'; path: string; workingPath: string; name: string; pageCount: number; buffer: PdfBuffer }
+  // `index` is a position in TAB space (byte-only import sources are not in
+  // it). Absent, the file appends, which is what every open but a dropped tab
+  // does; given, it lands at that position, clamped.
+  | { type: 'OPEN_FILE'; path: string; workingPath: string; name: string; pageCount: number; buffer: PdfBuffer; index?: number }
+  // Move an open document's TAB to an index. View arrangement, not a document
+  // edit: nothing is dirtied, no history is touched, and the files Map's
+  // insertion order stays the one authority on tab order.
+  | { type: 'REORDER_FILE'; path: string; index: number }
   // Register a file's bytes WITHOUT a strip, as an import source. Not a
   // page edit (doesn't touch the page-tier undo history or activeFileId);
   // idempotent. Its pages are then spliced into a real document via IMPORT_PAGES.

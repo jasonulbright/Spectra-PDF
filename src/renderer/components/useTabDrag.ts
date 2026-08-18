@@ -1,6 +1,7 @@
-// Wiring for the cross-window tab drag: the source window's pointer gesture,
-// the strip rectangle every window publishes, and the insertion caret a target
-// window paints for a drag it is not running.
+// Wiring for the tab drag: the source window's pointer gesture, the strip
+// rectangle and tab order every window publishes, the insertion caret a target
+// window paints for a drag it is not running, and the caret a window paints for
+// its own drag over its own strip — which is a reorder, resolved locally.
 //
 // The gesture is pointer-event based with WINDOW-level listeners, like the
 // canvas drag: HTML5 drag-and-drop cannot complete in the webview while native
@@ -31,6 +32,7 @@ import {
   type FrameThrottle,
   type SerialPublisher,
   type TabDragState,
+  type TabGap,
   type ViewportRect,
 } from '../lib/tab-drag';
 import { buildTabGhost, moveTabGhost, removeTabGhost, snapTabGhostBack } from '../lib/tab-drag-ghost';
@@ -95,20 +97,84 @@ export function useStripRegistration(
 }
 
 /**
- * The insertion caret this window paints for someone else's drag, in CSS
- * pixels from its own strip's left edge. Null when no drag is over it.
+ * Publish this window's tab order whenever it changes.
+ *
+ * The order is what a session snapshot arranges a window's documents by. It
+ * rides the same serial-publisher shape the strip rect does, for the same
+ * reason: two publishes in flight can be applied in either order, and the
+ * loser leaves the far side holding an order the strip has already left.
  */
-export function useTabDropCaret(): number | null {
-  const [caret, setCaret] = useState<number | null>(null);
+export function useTabOrderPublication(paths: string[]): void {
+  const publisher = useRef<SerialPublisher<string[]> | null>(null);
+  if (publisher.current === null) {
+    publisher.current = createSerialPublisher<string[]>(async (order) => {
+      await tabDrag.setTabOrder(order);
+    });
+  }
+  const publish = publisher.current;
+  // Keyed on the order itself rather than on the array: an open, a close, a
+  // reorder and a document handed to another window all change this string,
+  // and nothing else does.
+  const key = paths.join('\n');
   useEffect(() => {
-    const hover = tabDrag.onHover((x) => setCaret(hoverCssX(x, ratio())));
-    const leave = tabDrag.onLeave(() => setCaret(null));
+    publish.post(key.length === 0 ? [] : key.split('\n'));
+  }, [key, publish]);
+}
+
+/** What this window is painting for someone else's drag. */
+export interface ForeignCaret {
+  /** The offset the far side reported, in this window's CSS pixels. Published
+   * on the strip as the one place a device-pixel-ratio disagreement between
+   * two windows would show up. */
+  x: number | null;
+  /** Where that offset lands among THIS window's tabs. Null when no drag is
+   * over the strip. */
+  gap: TabGap | null;
+}
+
+/**
+ * The insertion caret this window paints for someone else's drag.
+ *
+ * The far side sends an offset into this strip and nothing more; the gap is
+ * derived here, from this window's own tabs, and reported back so a release
+ * lands where the caret promised. Nothing about the other window's layout or
+ * scale is involved in either direction.
+ */
+export function useTabDropCaret(resolveGap: (x: number) => TabGap | null): ForeignCaret {
+  const [x, setX] = useState<number | null>(null);
+  const [gap, setGap] = useState<TabGap | null>(null);
+  const resolve = useRef(resolveGap);
+  resolve.current = resolveGap;
+
+  const publisher = useRef<SerialPublisher<number> | null>(null);
+  if (publisher.current === null) {
+    publisher.current = createSerialPublisher<number>(async (index) => {
+      await tabDrag.hoverIndex(index);
+    });
+  }
+  const publish = publisher.current;
+
+  useEffect(() => {
+    const hover = tabDrag.onHover((physicalX) => {
+      const css = hoverCssX(physicalX, ratio());
+      setX(css);
+      const next = resolve.current(css);
+      setGap(next);
+      // Only a live gap is published. The far side drops the index with the
+      // caret on leave and on cancel, so a window that stopped hovering has
+      // nothing left to retract.
+      if (next) publish.post(next.index);
+    });
+    const leave = tabDrag.onLeave(() => {
+      setX(null);
+      setGap(null);
+    });
     return () => {
       void hover.then((fn) => fn());
       void leave.then((fn) => fn());
     };
-  }, []);
-  return caret;
+  }, [publish]);
+  return { x, gap };
 }
 
 interface DragSession {
@@ -126,19 +192,43 @@ interface DragSession {
 /** Resolves true when the document changed hands (the tab is gone). */
 export type TabDropHandler = (path: string, point: PhysicalScreenPoint) => Promise<boolean>;
 
+/**
+ * A released drag, with the gap it landed in when the release never left this
+ * window's own strip (`reorderTo` is the index the tab takes, already
+ * corrected for the tab's own place in the list). Null for every other point,
+ * which is a hand-off the far side resolves.
+ */
+export type TabReleaseHandler = (
+  path: string,
+  point: PhysicalScreenPoint,
+  reorderTo: number | null,
+) => Promise<boolean>;
+
 export interface TabDragSource {
   onTabPointerDown: (path: string, draggable: boolean, e: React.PointerEvent<HTMLElement>) => void;
   /** The tab currently being dragged out, for the strip's own styling. */
   draggingPath: string | null;
+  /** Where a release would put the dragged tab, while the pointer is over this
+   * window's own strip. Null while it is anywhere else. */
+  ownGap: TabGap | null;
 }
 
-export function useTabDragSource(onTabDrop: TabDropHandler): TabDragSource {
+const sameGap = (a: TabGap | null, b: TabGap | null): boolean =>
+  a === b || (a !== null && b !== null && a.index === b.index && a.offset === b.offset);
+
+export function useTabDragSource(
+  onTabDrop: TabDropHandler,
+  ownGapAt: (point: PhysicalScreenPoint) => TabGap | null,
+): TabDragSource {
   const dropRef = useRef(onTabDrop);
   dropRef.current = onTabDrop;
+  const gapRef = useRef(ownGapAt);
+  gapRef.current = ownGapAt;
 
   const state = useRef<TabDragState>(NO_DRAG);
   const session = useRef<DragSession | null>(null);
   const [draggingPath, setDraggingPath] = useState<string | null>(null);
+  const [ownGap, setOwnGap] = useState<TabGap | null>(null);
 
   // Stable identities: the same function objects have to be handed to
   // addEventListener and removeEventListener across the whole gesture.
@@ -170,6 +260,7 @@ export function useTabDragSource(onTabDrop: TabDropHandler): TabDragSource {
       // already released, or the tab is gone
     }
     setDraggingPath(null);
+    setOwnGap(null);
   }, [unlisten]);
 
   const dissolve = useCallback((): void => {
@@ -237,7 +328,15 @@ export function useTabDragSource(onTabDrop: TabDropHandler): TabDragSource {
           );
           moveTabGhost(s.ghost, at.x, at.y);
         }
-        s.throttle.post(physicalPointFor(e.screenX, e.screenY, ratio()));
+        const point = physicalPointFor(e.screenX, e.screenY, ratio());
+        // The caret for a drag over its OWN strip is resolved here rather than
+        // round-tripped: the far side would answer from a rectangle this
+        // window published about geometry this window measured. The gap moves
+        // only when the pointer crosses a tab's midpoint, so the strip
+        // re-renders on a crossing rather than on a move.
+        const gap = gapRef.current(point);
+        setOwnGap((previous) => (sameGap(previous, gap) ? previous : gap));
+        s.throttle.post(point);
       },
       up: (e: PointerEvent): void => {
         const s = session.current;
@@ -340,5 +439,5 @@ export function useTabDragSource(onTabDrop: TabDropHandler): TabDragSource {
 
   useEffect(() => teardown, [teardown]);
 
-  return { onTabPointerDown, draggingPath };
+  return { onTabPointerDown, draggingPath, ownGap };
 }
