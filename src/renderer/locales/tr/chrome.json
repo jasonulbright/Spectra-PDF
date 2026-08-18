@@ -28,6 +28,8 @@
   "app.prefs.aria": "Tercihler",
   "app.prefs.close": "Kapat",
   "app.prefs.title": "Tercihler",
+  "app.preserve.acroformInline": "belgenin formu, eklenen bir düzeltmenin güncelleyemeyeceği bir biçimde saklanıyor",
+  "app.preserve.acroformRemoved": "değişiklik, belgenin formunu kaldırıyor",
   "app.preserve.catalogChanged": "değişiklik, eklenen bir düzeltmenin taşıyabileceğinin ötesine geçiyor",
   "app.preserve.certifiedAnnotate": "belge, yalnızca form doldurmaya, imzalamaya ve yorum yazmaya izin verecek şekilde sertifikalanmış",
   "app.preserve.certifiedFormFill": "belge, yalnızca form doldurmaya ve imzalamaya izin verecek şekilde sertifikalanmış",

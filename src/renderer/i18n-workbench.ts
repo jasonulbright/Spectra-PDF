@@ -274,6 +274,9 @@ export const WORKBENCH_STRINGS = {
   'app.preserve.encrypted': 'the document is encrypted',
   'app.preserve.catalogChanged': 'the change goes further than an appended revision can carry',
   'app.preserve.noDelta': 'no appendable change could be identified',
+  'app.preserve.acroformRemoved': 'the edit removes the document’s form',
+  'app.preserve.acroformInline':
+    'the document’s form is stored in a way an appended revision cannot update',
   'app.preserve.certifiedNoChanges': 'the document is certified to allow no changes at all',
   'app.preserve.certifiedFormFill':
     'the document is certified to allow only form filling and signing',

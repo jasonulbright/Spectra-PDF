@@ -28,6 +28,8 @@
   "app.prefs.aria": "Beállítások",
   "app.prefs.close": "Bezárás",
   "app.prefs.title": "Beállítások",
+  "app.preserve.acroformInline": "a dokumentum űrlapja úgy van tárolva, hogy egy hozzáfűzött változat nem tudja frissíteni",
+  "app.preserve.acroformRemoved": "a módosítás eltávolítja a dokumentum űrlapját",
   "app.preserve.catalogChanged": "a módosítás túlmutat azon, amit egy hozzáfűzött változat elbír",
   "app.preserve.certifiedAnnotate": "a dokumentum úgy van tanúsítva, hogy csak az űrlapkitöltés, az aláírás és a megjegyzés engedélyezett",
   "app.preserve.certifiedFormFill": "a dokumentum úgy van tanúsítva, hogy csak az űrlapkitöltés és az aláírás engedélyezett",

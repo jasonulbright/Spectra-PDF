@@ -28,6 +28,8 @@
   "app.prefs.aria": "環境設定",
   "app.prefs.close": "閉じる",
   "app.prefs.title": "環境設定",
+  "app.preserve.acroformInline": "文書のフォームが、追記されるリビジョンでは更新できない形で保存されています",
+  "app.preserve.acroformRemoved": "変更によって文書のフォームが削除されます",
   "app.preserve.catalogChanged": "変更が、追記されるリビジョンで運べる範囲を超えています",
   "app.preserve.certifiedAnnotate": "文書がフォーム入力、署名、注釈だけを許可する設定で証明されています",
   "app.preserve.certifiedFormFill": "文書がフォーム入力と署名だけを許可する設定で証明されています",

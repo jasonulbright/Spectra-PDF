@@ -28,6 +28,8 @@
   "app.prefs.aria": "Voorkeuren",
   "app.prefs.close": "Sluiten",
   "app.prefs.title": "Voorkeuren",
+  "app.preserve.acroformInline": "het formulier van het document is zo opgeslagen dat een aangehangen revisie het niet kan bijwerken",
+  "app.preserve.acroformRemoved": "de wijziging verwijdert het formulier van het document",
   "app.preserve.catalogChanged": "de wijziging gaat verder dan een aangehangen revisie kan dragen",
   "app.preserve.certifiedAnnotate": "het document is gecertificeerd en alleen formulieren invullen, ondertekenen en van opmerkingen voorzien is toegestaan",
   "app.preserve.certifiedFormFill": "het document is gecertificeerd en alleen formulieren invullen en ondertekenen is toegestaan",

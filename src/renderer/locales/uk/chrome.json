@@ -28,6 +28,8 @@
   "app.prefs.aria": "Параметри",
   "app.prefs.close": "Закрити",
   "app.prefs.title": "Параметри",
+  "app.preserve.acroformInline": "форма документа зберігається так, що дописана версія не може її оновити",
+  "app.preserve.acroformRemoved": "зміна вилучає форму документа",
   "app.preserve.catalogChanged": "зміна виходить за межі того, що може вмістити дописана версія",
   "app.preserve.certifiedAnnotate": "документ сертифіковано, і в ньому дозволено лише заповнення форм, підписання та коментування",
   "app.preserve.certifiedFormFill": "документ сертифіковано, і в ньому дозволено лише заповнення форм і підписання",

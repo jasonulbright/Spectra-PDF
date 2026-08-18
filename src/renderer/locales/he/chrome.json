@@ -28,6 +28,8 @@
   "app.prefs.aria": "העדפות",
   "app.prefs.close": "סגור",
   "app.prefs.title": "העדפות",
+  "app.preserve.acroformInline": "הטופס של המסמך שמור באופן שמהדורה מצורפת אינה יכולה לעדכן",
+  "app.preserve.acroformRemoved": "השינוי מסיר את הטופס של המסמך",
   "app.preserve.catalogChanged": "השינוי חורג ממה שמהדורה מצורפת יכולה לשאת",
   "app.preserve.certifiedAnnotate": "המסמך מאושר ומותר בו רק למלא טפסים, לחתום ולהוסיף הערות",
   "app.preserve.certifiedFormFill": "המסמך מאושר ומותר בו רק למלא טפסים ולחתום",

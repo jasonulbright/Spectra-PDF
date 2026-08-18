@@ -28,6 +28,8 @@
   "app.prefs.aria": "Preferencje",
   "app.prefs.close": "Zamknij",
   "app.prefs.title": "Preferencje",
+  "app.preserve.acroformInline": "formularz dokumentu jest zapisany w sposób, którego dopisana wersja nie może zaktualizować",
+  "app.preserve.acroformRemoved": "zmiana usuwa formularz dokumentu",
   "app.preserve.catalogChanged": "zmiana wykracza poza to, co może unieść dopisana wersja",
   "app.preserve.certifiedAnnotate": "dokument jest certyfikowany i dozwolone są w nim tylko wypełnianie formularzy, podpisywanie i komentowanie",
   "app.preserve.certifiedFormFill": "dokument jest certyfikowany i dozwolone są w nim tylko wypełnianie formularzy i podpisywanie",

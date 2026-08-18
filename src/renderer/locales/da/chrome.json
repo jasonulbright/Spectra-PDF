@@ -28,6 +28,8 @@
   "app.prefs.aria": "Indstillinger",
   "app.prefs.close": "Luk",
   "app.prefs.title": "Indstillinger",
+  "app.preserve.acroformInline": "dokumentets formular er gemt på en måde, som en tilføjet revision ikke kan opdatere",
+  "app.preserve.acroformRemoved": "ændringen fjerner dokumentets formular",
   "app.preserve.catalogChanged": "ændringen rækker videre, end en tilføjet revision kan bære",
   "app.preserve.certifiedAnnotate": "dokumentet er certificeret, og kun udfyldning af formularer, underskrivning og kommentering er tilladt",
   "app.preserve.certifiedFormFill": "dokumentet er certificeret, og kun udfyldning af formularer og underskrivning er tilladt",
