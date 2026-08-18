@@ -8,24 +8,40 @@ import { tabFilePaths } from '../commands/registry';
 import { ChromeIcon } from './chrome-icons';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
-import { useStripRegistration, useTabDragSource, useTabDropCaret, type TabDropHandler } from './useTabDrag';
+import {
+  useStripRegistration,
+  useTabDragSource,
+  useTabDropCaret,
+  useTabOrderPublication,
+  type TabReleaseHandler,
+} from './useTabDrag';
+import {
+  ownStripX,
+  reorderIndexFor,
+  tabGapFor,
+  type OwnStripFrame,
+  type TabBox,
+  type TabGap,
+} from '../lib/tab-drag';
 import { TEST_HARNESS_ENABLED, registerTabDrag } from '../testHarness';
-import { tabDrag } from '../lib/tauri-bridge';
+import { tabDrag, type PhysicalScreenPoint } from '../lib/tauri-bridge';
 
 // The tab strip: Home | Tools | one tab per open
 // document. A 1:1 evolution of the old Home/Tools/Canvas switcher + the
 // Tools-rail file list (both retire). Doc tabs carry a dirty dot, a close ×
 // (also middle-click), and an overflow dropdown when they don't fit.
 //
-// A doc tab also drags to another window. This side owns only the gesture and
-// its own caret: the strip publishes its box to Rust, which hit-tests every
-// window's box and tells whichever one is hovered to draw a caret. A window
-// never paints into another.
+// A doc tab drags to another window, and within this one it reorders. Across
+// windows this side owns only the gesture: the strip publishes its box to Rust,
+// which hit-tests every window's box and tells whichever one is hovered to draw
+// a caret. A window never paints into another. Within one window nothing
+// crosses at all — the strip is right here, so the gap a release names is
+// measured off this DOM, by the same arithmetic the hovered window uses.
 
 interface TabStripProps {
   onCloseFile: (path: string) => void;
   /** Resolve a released drag; true when the document changed hands. */
-  onTabDrop: TabDropHandler;
+  onTabDrop: TabReleaseHandler;
 }
 
 const tabBase =
@@ -79,14 +95,86 @@ export function TabStrip({ onCloseFile, onTabDrop }: TabStripProps): React.React
   // inside the window or the tab count relaid it out.
   const stripRef = useRef<HTMLDivElement>(null);
   useStripRegistration(stripRef, docPaths.length);
-  const { onTabPointerDown, draggingPath } = useTabDragSource(onTabDrop);
-  const caret = useTabDropCaret();
+  // What a session snapshot arranges this window's documents by.
+  useTabOrderPublication(docPaths);
+
+  // Measured on demand rather than held in state: a strip that scrolled, a
+  // window that moved and a tab that was closed all change these numbers
+  // without re-rendering anything, and a drag reads them at most once a frame.
+  const measureFrame = useCallback((): OwnStripFrame | null => {
+    const el = stripRef.current;
+    if (!el) return null;
+    const box = el.getBoundingClientRect();
+    return {
+      originX: window.screenX,
+      originY: window.screenY,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      strip: { left: box.left, top: box.top, width: box.width, height: box.height },
+    };
+  }, []);
+
+  /** Every doc tab's box, in the strip's own space. Includes the tab being
+   * dragged: it still occupies its place until the release moves it. */
+  const tabBoxes = useCallback((stripLeft: number): TabBox[] => {
+    const lane = laneRef.current;
+    if (!lane) return [];
+    return Array.from(lane.querySelectorAll<HTMLElement>('[data-tab-path]')).map((el) => {
+      const box = el.getBoundingClientRect();
+      return { left: box.left - stripLeft, width: box.width };
+    });
+  }, []);
+
+  /** The gap an offset into this strip names. */
+  const gapAtX = useCallback(
+    (x: number): TabGap | null => {
+      const frame = measureFrame();
+      return frame ? tabGapFor(tabBoxes(frame.strip.left), x) : null;
+    },
+    [measureFrame, tabBoxes],
+  );
+
+  /** The gap a physical screen point names, or null when the point is not over
+   * this window's own strip — where the release is a hand-off instead. */
+  const ownGapAt = useCallback(
+    (point: PhysicalScreenPoint): TabGap | null => {
+      const frame = measureFrame();
+      if (!frame) return null;
+      const x = ownStripX(point, frame);
+      return x === null ? null : tabGapFor(tabBoxes(frame.strip.left), x);
+    },
+    [measureFrame, tabBoxes],
+  );
+
+  const pathsRef = useRef(docPaths);
+  pathsRef.current = docPaths;
+  const handlerRef = useRef(onTabDrop);
+  handlerRef.current = onTabDrop;
+
+  // Where a release goes, decided before anything else runs: a point over this
+  // window's own strip is a reorder and asks the far side nothing, and every
+  // other point is the hand-off it has always been.
+  const releaseDragAt = useCallback(
+    async (path: string, point: PhysicalScreenPoint): Promise<boolean> => {
+      const gap = ownGapAt(point);
+      const from = pathsRef.current.indexOf(path);
+      if (gap === null || from === -1) return handlerRef.current(path, point, null);
+      return handlerRef.current(path, point, reorderIndexFor(from, gap.index));
+    },
+    [ownGapAt],
+  );
+
+  const { onTabPointerDown, draggingPath, ownGap } = useTabDragSource(releaseDragAt, ownGapAt);
+  const caret = useTabDropCaret(gapAtX);
+  // A drag of this window's own tab and a drag hovering in from another cannot
+  // both be live: the far side never reports a hover to the window holding the
+  // pointer.
+  const gap = ownGap ?? caret.gap;
 
   // The e2e seam sits directly above the pointer gesture — a real drag between
   // two windows needs OS-level input — so the drop it calls is the one
   // pointerup calls, and nothing below it is bypassed.
-  const dropRef = useRef(onTabDrop);
-  dropRef.current = onTabDrop;
+  const dropRef = useRef(releaseDragAt);
+  dropRef.current = releaseDragAt;
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     registerTabDrag({
@@ -100,12 +188,16 @@ export function TabStrip({ onCloseFile, onTabDrop }: TabStripProps): React.React
     <div
       ref={stripRef}
       data-testid="tab-strip"
-      // The hover offset in this window's own CSS pixels. Published so the
+      // The hover offset in this window's own CSS pixels, RAW — where the
+      // pointer is, not where the caret snapped to. Published so the
       // cross-window hit-test can be checked against where this window says
       // its strip is — the one place a device-pixel-ratio disagreement
       // between windows would show up.
-      data-tabdrag-x={caret === null ? undefined : Math.round(caret)}
-      className="app-shell-bar app-tabstrip flex items-stretch h-8 border-b border-neutral-800 shrink-0 overflow-hidden"
+      data-tabdrag-x={caret.x === null ? undefined : Math.round(caret.x)}
+      // The insertion gap that offset resolves to among THIS window's tabs,
+      // for either caret. What a release actually honours.
+      data-tabdrag-gap={gap === null ? undefined : gap.index}
+      className="app-shell-bar app-tabstrip relative flex items-stretch h-8 border-b border-neutral-800 shrink-0 overflow-hidden"
     >
       <button
         type="button"
@@ -165,17 +257,19 @@ export function TabStrip({ onCloseFile, onTabDrop }: TabStripProps): React.React
             </div>
           );
         })}
-        {/* Where the incoming tab will actually land. Doc tabs carry no order
-            of their own — the order is open order — so the caret marks the end
-            of the strip rather than following the pointer to a gap the drop
-            would not honour. */}
-        {caret !== null && (
-          <div
-            data-testid="tab-drop-caret"
-            className="self-stretch w-0.5 bg-blue-400 shrink-0"
-          />
-        )}
       </div>
+
+      {/* Where the tab will actually land — the gap the release honours,
+          whether the drag belongs to this window or is hovering in from
+          another. Positioned against the strip rather than laid out in the
+          lane, so it can mark a gap BETWEEN two tabs without moving them. */}
+      {gap !== null && (
+        <div
+          data-testid="tab-drop-caret"
+          className="absolute top-0 bottom-0 w-0.5 bg-blue-400 pointer-events-none"
+          style={{ left: `${gap.offset}px` }}
+        />
+      )}
 
       {overflowing && (
         <DropdownMenu.Root>

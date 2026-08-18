@@ -7,6 +7,7 @@ import { toolById, toolForOp, armedModeOf, type ToolDef } from '../commands/tool
 // Pure math only (no DOM, no storage) — the count tier's sequence allocation
 // lives here because the reducer is the only place that holds a whole document.
 import { countContents, countMarksOf, groupOf, nextSequence } from '../lib/count-marks';
+import { placeTabAt } from './selectors';
 
 // Re-project a display-normalized annotation rect when its page's display
 // rotates by `delta` quarter-turns clockwise: annotation coords always live
@@ -406,7 +407,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const base = state.files.has(action.path)
         ? pruneSelectionForPaths(state, [action.path], false)
         : state;
-      const files = new Map(state.files);
+      let files = new Map(state.files);
       files.set(action.path, {
         path: action.path,
         workingPath: action.workingPath,
@@ -417,6 +418,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         undoStack: [],
         redoStack: [],
       });
+      // A tab dropped from another window lands at the gap its caret marked.
+      // Every other open appends, and a stale index — the strip changed while
+      // the document was being opened — clamps rather than failing: an insert
+      // that cannot fail is what lets the index travel without a handshake.
+      if (action.index !== undefined) files = placeTabAt(files, action.path, action.index);
       return {
         ...base,
         files,
@@ -442,6 +448,15 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         pageUndoStack: [],
         pageRedoStack: [],
       };
+    }
+    case 'REORDER_FILE': {
+      // Arrangement, not an edit. No file becomes dirty, nothing enters the
+      // page-edit tier or the snapshot history, and which document is active
+      // does not change — a user who rearranges tabs has not touched a
+      // document, and an undo here would undo their last real edit instead.
+      const files = placeTabAt(state.files, action.path, action.index);
+      if (files === state.files) return state;
+      return { ...state, files };
     }
     case 'REGISTER_IMPORT_SOURCE': {
       // Byte-only source for IMPORT_PAGES: register its bytes so imported

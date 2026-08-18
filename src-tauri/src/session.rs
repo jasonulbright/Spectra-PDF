@@ -221,6 +221,17 @@ struct Geometry {
 /// file behind it.
 pub struct SessionState {
     geometry: Mutex<HashMap<String, Geometry>>,
+    /// The tab order each window last published.
+    ///
+    /// DATA, not a question asked of a renderer: the capture reads whatever
+    /// was published last and never waits, so a window that stopped answering
+    /// costs a stale arrangement rather than a delayed quit. It arranges only
+    /// — which documents a window holds is the claim table's answer, and a
+    /// stale order can neither add a path nor lose one.
+    ///
+    /// A leaf lock like `geometry`: taken under `writer` while a snapshot is
+    /// built, and never while `geometry` is held.
+    orders: Mutex<HashMap<String, Vec<String>>>,
     /// Bumped on every change. The debounce thread writes only after a sleep
     /// during which this did not move.
     revision: AtomicU64,
@@ -243,6 +254,7 @@ impl SessionState {
     pub fn new() -> Self {
         Self {
             geometry: Mutex::new(HashMap::new()),
+            orders: Mutex::new(HashMap::new()),
             revision: AtomicU64::new(0),
             scheduled: AtomicBool::new(false),
             sealed: AtomicBool::new(false),
@@ -345,12 +357,65 @@ impl SessionState {
         self.geometry.lock().ok()?.get(label).cloned()
     }
 
+    /// Last write wins: the newest statement of a window's arrangement is the
+    /// only one worth keeping, and the publisher on the other side already
+    /// sends them one at a time.
+    fn set_order(&self, label: &str, paths: Vec<String>) {
+        if let Ok(mut map) = self.orders.lock() {
+            map.insert(label.to_string(), paths);
+        }
+        self.revision.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn order(&self, label: &str) -> Vec<String> {
+        self.orders
+            .lock()
+            .ok()
+            .and_then(|map| map.get(label).cloned())
+            .unwrap_or_default()
+    }
+
     fn forget(&self, label: &str) {
         if let Ok(mut map) = self.geometry.lock() {
             map.remove(label);
         }
+        if let Ok(mut map) = self.orders.lock() {
+            map.remove(label);
+        }
         self.revision.fetch_add(1, Ordering::SeqCst);
     }
+}
+
+/// Windows spells one file many ways and both sides hold the canonical
+/// spelling, so this compares two spellings of the same path rather than
+/// deciding identity — which is the raw string, settled at the boundary.
+fn same_path(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
+/// A window's documents, arranged by the order it last published.
+///
+/// Membership is the claim table's answer and arrangement is the renderer's,
+/// so the two are combined rather than one trusted for both: a path the window
+/// holds but never named appends (it opened after the last publish, or the
+/// strip was not mounted to publish at all), and a path named but no longer
+/// held drops out (it was closed, or handed to another window). A window that
+/// never published anything keeps the claim table's own order.
+fn arrange(order: &[String], claimed: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(claimed.len());
+    for named in order {
+        if let Some(path) = claimed.iter().find(|p| same_path(p, named)) {
+            if !out.iter().any(|p| same_path(p, path)) {
+                out.push(path.clone());
+            }
+        }
+    }
+    for path in claimed {
+        if !out.iter().any(|p| same_path(p, &path)) {
+            out.push(path);
+        }
+    }
+    out
 }
 
 impl Default for SessionState {
@@ -473,7 +538,7 @@ fn snapshot_excluding(app: &AppHandle, gone: Option<&str>) -> Session {
             height: placement.rect.height,
             maximized: placement.maximized,
             monitor,
-            files: claims.write_claims(&label),
+            files: arrange(&state.order(&label), claims.write_claims(&label)),
         });
     }
     // The main window first, so a reader that wants it does not have to search.
@@ -633,6 +698,20 @@ pub fn on_window_geometry_changed(app: &AppHandle, label: &str) {
     };
     app.state::<SessionState>()
         .observe(label, placement, read_monitor(&window));
+    schedule_write(app);
+}
+
+/// Record a window's tab order and let the file catch up.
+///
+/// The write is scheduled rather than immediate for the same reason a move's
+/// is: an open changes the order once per document, and the record only has to
+/// be right when it is read. A sealed file refuses it like any other write, so
+/// a publish arriving during a quit cannot reopen the record.
+pub fn publish_tab_order(app: &AppHandle, label: &str, paths: Vec<String>) {
+    if !app_windows::is_app_window(label) {
+        return;
+    }
+    app.state::<SessionState>().set_order(label, paths);
     schedule_write(app);
 }
 
@@ -986,6 +1065,69 @@ mod tests {
         assert!(!known.placement.maximized);
     }
 
+    fn paths(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
+    #[test]
+    fn a_windows_documents_are_recorded_in_the_order_it_published() {
+        // The claim table answers alphabetically; the strip is whatever the
+        // user arranged, and that is what a restore has to reproduce.
+        assert_eq!(
+            arrange(&paths(&["C:\\c.pdf", "C:\\a.pdf", "C:\\b.pdf"]), paths(&["C:\\a.pdf", "C:\\b.pdf", "C:\\c.pdf"])),
+            paths(&["C:\\c.pdf", "C:\\a.pdf", "C:\\b.pdf"])
+        );
+    }
+
+    #[test]
+    fn ownership_decides_membership_and_the_published_order_only_arranges() {
+        // Opened after the last publish, or opened while no strip was mounted
+        // to publish at all: held, so recorded — at the end, where an append
+        // puts it.
+        assert_eq!(
+            arrange(&paths(&["C:\\b.pdf"]), paths(&["C:\\a.pdf", "C:\\b.pdf"])),
+            paths(&["C:\\b.pdf", "C:\\a.pdf"])
+        );
+        // Closed, or handed to another window, after the last publish: not
+        // held, so not recorded — restoring it would open a document the
+        // window does not have and, being a claim, could not open anyway.
+        assert_eq!(
+            arrange(&paths(&["C:\\a.pdf", "C:\\gone.pdf", "C:\\b.pdf"]), paths(&["C:\\a.pdf", "C:\\b.pdf"])),
+            paths(&["C:\\a.pdf", "C:\\b.pdf"])
+        );
+        // A window that never published keeps the claim table's own order.
+        assert_eq!(arrange(&[], paths(&["C:\\a.pdf"])), paths(&["C:\\a.pdf"]));
+        assert!(arrange(&paths(&["C:\\a.pdf"]), Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn a_repeated_path_is_recorded_once_and_in_its_own_spelling() {
+        // The record is read back into the open funnel, where one path twice
+        // is one open — but a duplicate would still make the file lie about
+        // what a window holds.
+        assert_eq!(
+            arrange(&paths(&["C:\\a.pdf", "C:\\a.pdf"]), paths(&["C:\\a.pdf"])),
+            paths(&["C:\\a.pdf"])
+        );
+        // Both sides hold the canonical spelling; a case-differing pair is the
+        // same file, and treating it as a different one would append the
+        // document a second time.
+        assert_eq!(
+            arrange(&paths(&["c:\\A.PDF"]), paths(&["C:\\a.pdf"])),
+            paths(&["C:\\a.pdf"])
+        );
+    }
+
+    #[test]
+    fn the_last_published_order_is_the_one_that_is_kept() {
+        let state = SessionState::new();
+        state.set_order("main", paths(&["C:\\a.pdf", "C:\\b.pdf"]));
+        state.set_order("main", paths(&["C:\\b.pdf", "C:\\a.pdf"]));
+        assert_eq!(state.order("main"), paths(&["C:\\b.pdf", "C:\\a.pdf"]));
+        // A window nobody published for arranges nothing.
+        assert!(state.order("doc-9").is_empty());
+    }
+
     #[test]
     fn a_forgotten_label_stops_contributing_geometry() {
         let state = SessionState::new();
@@ -998,8 +1140,12 @@ mod tests {
             String::new(),
         );
         assert!(state.get("doc-1").is_some());
+        state.set_order("doc-1", paths(&["C:\\a.pdf"]));
         state.forget("doc-1");
         assert!(state.get("doc-1").is_none());
+        // A label is minted fresh every run, so an order left behind by a
+        // destroyed window would be inherited by an unrelated one.
+        assert!(state.order("doc-1").is_empty());
     }
 
     #[test]

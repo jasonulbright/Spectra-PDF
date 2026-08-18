@@ -5,6 +5,10 @@
     "moduleResolution": "Bundler",
     "esModuleInterop": true,
     "strict": true,
+    // This project is only ever type-CHECKED — the specs run through wdio's
+    // own transpiler. Without this a bare `tsc -p` writes a .js beside every
+    // .ts it reads, and the tree keeps them.
+    "noEmit": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "types": ["node", "@wdio/globals/types", "@wdio/mocha-framework"]
