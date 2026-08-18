@@ -1943,7 +1943,7 @@
   "engine.incremental.incrementalTransplantFailed": "Incremental transplant failed: {{e}}",
   "engine.incremental.incrementalWriteDidPreserve": "Incremental write did not preserve the original bytes verbatim — refusing to emit a signature-breaking file",
   "engine.incremental.objectGraphTooDeep": "Object graph too deep to materialize",
-  "engine.incremental.pageSignedOriginalStructural": "Page {{v0}} of the signed original has no structural match in the edited file (removed, reordered, or its content changed) — that edit cannot be appended without invalidating",
+  "engine.incremental.pageSignedOriginalStructural": "Page {{v0}} of the signed original has no structural match in the edited file, which also adds unmatched pages — a rewritten page cannot be told apart from a delete plus an insert, so that edit cannot be appended without invalidating",
   "engine.incremental.refusingOverwriteSignedOriginal": "Refusing to overwrite the signed original in place",
   "engine.incremental.unsupportedObjectTypeTransplant": "Unsupported object type for transplant: {{v0}}",
   "engine.ink_manager.describeDifferentColoursAliasing": "\"{{source}}\" and \"{{target}}\" describe different colours; aliasing them will change the document's appearance.",

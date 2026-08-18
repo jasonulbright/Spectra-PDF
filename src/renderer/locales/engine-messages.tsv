@@ -253,7 +253,7 @@ incremental.editClassMustForm	exact	incremental	edit class must be "form-fill", 
 incremental.incrementalTransplantFailed	pattern	incremental	Incremental transplant failed: {{e}}
 incremental.incrementalWriteDidPreserve	exact	incremental	Incremental write did not preserve the original bytes verbatim — refusing to emit a signature-breaking file
 incremental.objectGraphTooDeep	exact	incremental	Object graph too deep to materialize
-incremental.pageSignedOriginalStructural	pattern	incremental	Page {{v0}} of the signed original has no structural match in the edited file (removed, reordered, or its content changed) — that edit cannot be appended without invalidating
+incremental.pageSignedOriginalStructural	pattern	incremental	Page {{v0}} of the signed original has no structural match in the edited file, which also adds unmatched pages — a rewritten page cannot be told apart from a delete plus an insert, so that edit cannot be appended without invalidating
 incremental.refusingOverwriteSignedOriginal	exact	incremental	Refusing to overwrite the signed original in place
 incremental.unsupportedObjectTypeTransplant	pattern	incremental	Unsupported object type for transplant: {{v0}}
 ink_manager.describeDifferentColoursAliasing	pattern	ink_manager	"{{source}}" and "{{target}}" describe different colours; aliasing them will change the document's appearance.
