@@ -244,6 +244,11 @@ class TestConvertPdfx:
                          gs_path=gs_path)
 
 
+def _ident(obj):
+    """An object's identity, indirect or not."""
+    return obj.objgen if getattr(obj, "is_indirect", False) else id(obj)
+
+
 class TestSpotShadings:
     """Gradients in a colorant space, through the CMYK conversion.
 
@@ -452,14 +457,22 @@ class TestAppearanceShadings:
                                          for s in list(entry.keys())])
                         for name, stream in streams:
                             resources = stream.get("/Resources") or {}
-                            shadings = len(resources.get("/Shading") or {})
-                            shadings += sum(
-                                1 for pattern in (resources.get("/Pattern") or {}).values()
-                                if pattern.get("/Shading") is not None)
+                            # One gradient reachable two ways is ONE gradient:
+                            # the producer can name a shading in /Shading and
+                            # also paint it through a /Pattern that points at
+                            # the same object (measured), so they are counted
+                            # by object identity rather than by resource entry.
+                            shadings = set()
+                            for entry in (resources.get("/Shading") or {}).values():
+                                shadings.add(_ident(entry))
+                            for pattern in (resources.get("/Pattern") or {}).values():
+                                inner = pattern.get("/Shading")
+                                if inner is not None:
+                                    shadings.add(_ident(inner))
                             images = sum(
                                 1 for xobj in (resources.get("/XObject") or {}).values()
                                 if xobj.get("/Subtype") == pikepdf.Name("/Image"))
-                            faces[name] = (shadings, images)
+                            faces[name] = (len(shadings), images)
                     found[str(annot.get("/T"))] = faces
         return found
 
@@ -536,12 +549,12 @@ class TestAppearanceShadings:
         inks = self._inks(out)
         assert "Rollover Gradient" in inks and "Down Gradient" in inks
 
-    def test_a_widget_appearance_comes_back_from_the_form_reattach(
+    def test_a_widget_appearance_keeps_its_plate_through_the_form_reattach(
             self, tmp_path, gs_path):
-        # A widget's own appearance is put back verbatim by the form reattach,
-        # colorant space and all. The walk still claims it, because the copy
-        # the producer flattens into the page would otherwise be a process
-        # raster of a plate the document still has.
+        # A widget's appearance is converted on a staged page of its own and
+        # harvested back onto the face the reattach transplants, so the plate
+        # survives a tier the page-level carve-out never reaches — and the
+        # appearance that comes back is the CONVERTED one, not the original.
         from separation_builders import appearance_shading_pdf
 
         src = appearance_shading_pdf(tmp_path / "stamps.pdf")
@@ -556,7 +569,9 @@ class TestAppearanceShadings:
                             return bytes(annot.AP.N.read_bytes())
             return None
 
-        assert widget_appearance(out) == widget_appearance(src)
+        assert widget_appearance(out) != widget_appearance(src), (
+            "the reattach put the unconverted appearance back"
+        )
         assert "Widget Gradient" in self._inks(out)
         assert result["altered"] == []
 
@@ -753,6 +768,215 @@ class TestAppearancePatternSpace:
             assert bytes(stream.read_bytes()).startswith(b"q ")
             assert [float(v) for v in stream.BBox] == [
                 float(v) for v in pdf.pages[0].obj.Annots[0].Rect]
+
+
+class TestFormAppearances:
+    """A form field comes out painted ONCE, by an appearance that converted.
+
+    The producer drops every widget annotation and flattens its appearance into
+    the page content, while the field reattach puts the widget back wearing the
+    appearance the ORIGINAL had. Together that painted the field twice and left
+    the surviving `/AP` in the source's colour — an RGB paint inside a widget
+    appearance came out of "Convert to CMYK" still RGB. Both were live defects;
+    these are the pins that keep them dead.
+    """
+
+    def _widgets(self, path):
+        """{field name: {"value", "faces", "idents"}} — read out of the file
+        rather than held open, so every assertion is about bytes on disk."""
+        found = {}
+        with pikepdf.open(path) as pdf:
+            for page in pdf.pages:
+                for annot in list(page.obj.get("/Annots") or []):
+                    if annot.get("/Subtype") != pikepdf.Name("/Widget"):
+                        continue
+                    faces, idents = {}, {}
+                    ap = annot.get("/AP")
+                    for key in list((ap or {}).keys()):
+                        entry = ap[key]
+                        streams = ([(key, entry)] if isinstance(entry, pikepdf.Stream)
+                                   else [(f"{key}{s}", entry[s])
+                                         for s in list(entry.keys())])
+                        for name, stream in streams:
+                            faces[name] = bytes(stream.read_bytes())
+                            idents[name] = _ident(stream)
+                    found[str(annot.get("/T"))] = {
+                        "value": str(annot.get("/V")),
+                        "faces": faces,
+                        "idents": idents,
+                    }
+        return found
+
+    def _without_form(self, src, dest):
+        """The same document with no /AcroForm — so nothing is staged and
+        nothing is reattached, which is the producer's own output: the control
+        for what the converted field is supposed to look like."""
+        import warnings
+
+        with pikepdf.open(src) as pdf:
+            del pdf.Root["/AcroForm"]
+            with warnings.catch_warnings():
+                # The orphan widget left behind is the POINT of this control.
+                warnings.simplefilter("ignore", pikepdf.PageCopyWarning)
+                pdf.save(str(dest))
+        return str(dest)
+
+    def test_the_field_is_painted_once_and_in_the_destinations_colour(
+            self, tmp_path, gs_path):
+        from separation_builders import (FORM_FILL_CMYK, FORM_FILL_RGB,
+                                         FORM_PAGE_CMYK, FORM_TEXT_CMYK,
+                                         FORM_TEXT_RGB, form_appearance_pdf)
+
+        src = form_appearance_pdf(tmp_path / "form.pdf")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        page = _content(out)
+        # The page converted — the control that says the conversion ran.
+        assert FORM_PAGE_CMYK in page
+        # …and it carries no copy of the field. The flattened copy used to sit
+        # here, under the appearance's own /Tx marked content.
+        assert FORM_FILL_CMYK not in page, "the field is painted twice"
+        assert FORM_TEXT_CMYK not in page, "the field is painted twice"
+        assert b"/Tx BMC" not in page
+
+        field = self._widgets(out)["field1"]
+        faces = field["faces"]
+        assert list(faces) == ["/N"]
+        # The one painter left carries the destination's own operands, and none
+        # of the source's: this is the half that used to come back verbatim.
+        assert FORM_FILL_CMYK in faces["/N"]
+        assert FORM_TEXT_CMYK in faces["/N"]
+        assert FORM_FILL_RGB not in faces["/N"]
+        assert FORM_TEXT_RGB not in faces["/N"]
+        assert b" rg" not in faces["/N"]
+        # And it is still a field.
+        assert field["value"] == "Hello"
+        with pikepdf.open(out) as pdf:
+            assert len(pdf.Root.AcroForm.Fields) == 1
+            assert len(pdf.pages) == 1, "a staged appearance page was left behind"
+
+    def test_the_appearance_lands_where_the_producer_put_it(
+            self, tmp_path, gs_path):
+        # The producer's own flattened output is the reference rendering of the
+        # converted field: same command, same transform, no staging and no
+        # reattach. Every plate must match it exactly — a harvested appearance
+        # that moved, scaled or changed colour shows up here.
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "form.pdf")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+        control = str(tmp_path / "flat-cmyk.pdf")
+        convert_cmyk(self._without_form(src, tmp_path / "noform.pdf"), control,
+                     gs_path=gs_path)
+
+        produced = _plates(out, gs_path, tmp_path / "p-after", 72)
+        reference = _plates(control, gs_path, tmp_path / "p-control", 72)
+        assert sorted(produced) == sorted(reference)
+        for name, plate in reference.items():
+            assert produced[name].shape == plate.shape
+            assert int(abs(produced[name] - plate).max()) == 0, (
+                f"the converted field's {name} plate is not the producer's"
+            )
+
+    def test_every_face_is_converted_not_only_the_drawn_one(
+            self, tmp_path, gs_path):
+        # The producer flattens only the face /AS selects (measured), so a
+        # mechanism built on the flatten alone would leave every other face in
+        # the source's colour. Each face is converted on a page of its own.
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "states.pdf", "states")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        faces = self._widgets(out)["check"]["faces"]
+        assert sorted(faces) == ["/D/Off", "/D/On", "/N/Off", "/N/On"]
+        for name, body in faces.items():
+            assert b" rg" not in body, f"{name} was never converted"
+            assert b" k" in body, f"{name} paints nothing in the destination"
+        assert b" rg" not in _content(out)
+        with pikepdf.open(out) as pdf:
+            assert len(pdf.pages) == 1, "four staged pages, none removed"
+
+    def test_a_field_with_no_appearance_keeps_the_producers_own(
+            self, tmp_path, gs_path):
+        # A widget with no /AP is left in the producer's input on purpose: the
+        # producer SYNTHESIZES an appearance from /V and /DA and flattens that
+        # (measured), which is already one converted painter, and taking the
+        # widget out would erase it.
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "bare.pdf", "bare")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        field = self._widgets(out)["bare"]
+        assert field["faces"] == {}, "a synthesized appearance was harvested back"
+        assert field["value"] == "Hello"
+        page = _content(out)
+        assert b"(Hello)" in page and b" rg" not in page
+
+    def test_a_shared_appearance_is_converted_once(self, tmp_path, gs_path):
+        # Two widgets wearing one stream is one appearance: staged once,
+        # converted once, and still one object afterwards.
+        from separation_builders import FORM_FILL_CMYK, form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "shared.pdf", "shared")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        widgets = self._widgets(out)
+        assert sorted(widgets) == ["first", "second"]
+        assert (widgets["first"]["idents"]["/N"]
+                == widgets["second"]["idents"]["/N"])
+        assert FORM_FILL_CMYK in widgets["first"]["faces"]["/N"]
+        assert FORM_FILL_CMYK not in _content(out)
+
+    def test_the_field_still_fills_after_the_conversion(self, tmp_path, gs_path):
+        from engine.forms import fill_form_fields
+        from separation_builders import form_appearance_pdf
+
+        src = form_appearance_pdf(tmp_path / "form.pdf")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        filled = str(tmp_path / "filled.pdf")
+        fill_form_fields(out, filled, {"field1": "Goodbye"})
+        field = self._widgets(filled)["field1"]
+        assert field["value"] == "Goodbye"
+        assert b"(Goodbye)" in field["faces"]["/N"]
+
+    def test_a_patterned_appearance_keeps_the_space_it_was_written_in(
+            self, tmp_path, gs_path):
+        # A harvested face's content came from a PAGE, so the pattern matrices
+        # in it (ISO 32000-2 8.7.2) are already stated in that face's own
+        # default space. Re-anchoring it to the annotation rectangle would
+        # break them, so the rebase runs before the reattach and never sees it.
+        from separation_builders import (FORM_FIELD_RECT,
+                                         form_pattern_appearance_pdf)
+
+        src = form_pattern_appearance_pdf(tmp_path / "pattern.pdf")
+        out = str(tmp_path / "cmyk.pdf")
+        convert_cmyk(src, out, gs_path=gs_path)
+
+        with pikepdf.open(out) as pdf:
+            face = pdf.pages[0].obj.Annots[0].AP.N
+            assert [float(v) for v in face.BBox] != list(FORM_FIELD_RECT)
+            assert [float(v) for v in face.Matrix] == [1, 0, 0, 1, 0, 0]
+            resources = face.Resources
+            assert len(resources.get("/Pattern") or {}) == 1
+
+        control = str(tmp_path / "flat-cmyk.pdf")
+        convert_cmyk(self._without_form(src, tmp_path / "noform.pdf"), control,
+                     gs_path=gs_path)
+        produced = _plates(out, gs_path, tmp_path / "p-after", 72)
+        reference = _plates(control, gs_path, tmp_path / "p-control", 72)
+        for name, plate in reference.items():
+            assert int(abs(produced[name] - plate).max()) == 0, (
+                f"the patterned appearance's {name} plate moved"
+            )
 
 
 class TestDestinationProfileClass:

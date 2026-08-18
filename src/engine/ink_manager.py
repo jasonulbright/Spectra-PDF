@@ -47,7 +47,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Dictionary, Name
 
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 
 from .color_spaces import build_function
 from .separations import PROCESS_INKS, ink_kind, list_inks
@@ -87,9 +87,8 @@ def _name_text(obj) -> str:
 def _save(pdf, file: str, output: str) -> None:
     """Write `pdf` to `output`, which may name the file it was opened from.
 
-    Sameness is the filesystem's, not the string's: one physical file has
-    several unresolvable spellings (UNC versus mapped letter, hard links), so
-    `samefile` compares volume serial and file index.
+    Sameness is `inplace.is_same_file`'s, so "is this the same file" has one
+    answer across the engine rather than one per module.
 
     A same-file write stages beside the original and `os.replace`s it, which
     swaps a directory entry rather than rewriting bytes in place — a write
@@ -98,12 +97,8 @@ def _save(pdf, file: str, output: str) -> None:
     is closed before the swap because the destination cannot be replaced while
     it is held open.
     """
-    input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve() or (
-        output_path.exists() and os.path.samefile(str(input_path), str(output_path))
-    )
-    if not same_file:
+    if not is_same_file(file, output):
         if output_path.exists() and not os.access(output_path, os.W_OK):
             os.chmod(output_path, stat.S_IWRITE)
         save_pdf(pdf, str(output_path))
@@ -126,8 +121,9 @@ def _content_owners(pdf, annotations: bool = True):
 
     `annotations=False` stops at the page tier. An appearance stream is not
     reachable from page content, so a caller that rewrites page content and
-    then reads the result back cannot see one; the prepress carve-out asks for
-    exactly that boundary.
+    then reads the result back cannot see one; the PDF/X conversion asks for
+    exactly that boundary, because its conformance policy deletes every
+    annotation it would otherwise have staged into.
     """
     seen: set = set()
     out: list = []
