@@ -19,6 +19,13 @@ composed onto its function. This is exact and it preserves vectors — unlike
 the document-wide colour conversion, which is a different capability and stays
 one.
 
+**Composing onto a shading's function samples ONE input, so a shading whose
+colour is not a function of one input cannot be converted that way.** Such a
+shading is skipped IN PLACE — the colorant stays live in it — and named in the
+result's `skipped` list, so the caller reads a partial conversion as partial.
+One shading that cannot convert never refuses the whole operation, and it is
+never converted anyway with colour the composition invented.
+
 **A DeviceN converts whole or not at all.** Its components are painted
 together through one transform, so there is no operator that could route one
 component through the alternate and leave the rest in DeviceN. Converting any
@@ -52,6 +59,15 @@ _SHADING_SAMPLES = 1024
 
 _DEVICE_COMPONENTS = {"/DeviceGray": 1, "/DeviceRGB": 3, "/DeviceCMYK": 4}
 _DEVICE_OPERATORS = {1: ("g", "G"), 3: ("rg", "RG"), 4: ("k", "K")}
+
+# Why composing a tint transform onto a shading's function would not describe
+# the shading's colour. Reported verbatim; they are report text, not refusals.
+SHADING_PLANAR = "the shading maps a point in the plane, not one parametric value"
+SHADING_BACKGROUND = "the shading states a background colour in the colorant's own space"
+SHADING_UNREADABLE = "the shading's type or domain cannot be read"
+SHADING_NO_TRANSFORM = "the colorant's tint transform cannot be read"
+SHADING_NO_ALTERNATE = "the alternate colour space has no component count"
+SHADING_NO_COMPOSE = "the shading's function cannot be composed with the tint transform"
 
 
 def _name_text(obj) -> str:
@@ -170,6 +186,33 @@ def _shading_dicts(pdf, annotations: bool = True):
                 if shading is not None:
                     add(shading)
     return out
+
+
+def shading_skip_reason(shading) -> str | None:
+    """Why the tint transform cannot be composed onto this shading's function,
+    or None when it can.
+
+    Composing samples ONE input. A function-based shading (type 1) maps a point
+    in the plane instead — two inputs, a four-entry `/Domain` — so a composition
+    driven by one input does not describe its colour; it invents one. A
+    `/Background` is stated in the shading's OWN colour space and the
+    composition does not reach it, so replacing that space would leave
+    components naming a colorant the shading no longer has.
+
+    One predicate for both callers: the spot-to-process rewrite skips what it
+    reports, and the prepress carve-out hands the same shadings to the producer.
+    """
+    try:
+        if int(shading.get("/ShadingType") or 0) == 1:
+            return SHADING_PLANAR
+        domain = shading.get("/Domain")
+        if domain is not None and len(domain) != 2:
+            return SHADING_PLANAR
+        if shading.get("/Background") is not None:
+            return SHADING_BACKGROUND
+    except (TypeError, ValueError):
+        return SHADING_UNREADABLE
+    return None
 
 
 def _images(pdf):
@@ -652,26 +695,50 @@ def _compose_shading_function(pdf, shading, tint, out_components: int):
     )
 
 
-def _convert_shadings(pdf, target_names: set[str]) -> int:
+def _convert_shadings(pdf, target_names: set[str]):
+    """(shadings converted, a record per shading left alone).
+
+    A shading the composition cannot describe is left exactly as it was — the
+    colorant stays live in it — and recorded. `shading` is the resource walk's
+    position, which is stable for one document: walking it again yields the
+    same numbering.
+    """
     converted = 0
-    for shading in _shading_dicts(pdf):
+    skipped: list[dict] = []
+    for index, shading in enumerate(_shading_dicts(pdf), start=1):
         cs = shading.get("/ColorSpace")
         if cs is None or not (_is_separation(cs) or _is_devicen(cs)):
             continue
-        if not (set(_colorant_names(cs)) & target_names):
+        colorants = sorted(set(_colorant_names(cs)) & target_names)
+        if not colorants:
+            continue
+
+        def skip(reason: str, _index=index, _colorants=colorants) -> None:
+            skipped.append({
+                "shading": _index, "colorants": _colorants, "reason": reason,
+            })
+
+        reason = shading_skip_reason(shading)
+        if reason is not None:
+            skip(reason)
             continue
         tint = build_function(cs[3])
+        if tint is None:
+            skip(SHADING_NO_TRANSFORM)
+            continue
         alt = cs[2]
         _, out_components = _alternate_operand(alt)
-        if tint is None or out_components is None:
+        if out_components is None:
+            skip(SHADING_NO_ALTERNATE)
             continue
         replacement = _compose_shading_function(pdf, shading, tint, out_components)
         if replacement is None:
+            skip(SHADING_NO_COMPOSE)
             continue
         shading["/ColorSpace"] = alt
         shading["/Function"] = pdf.make_indirect(replacement)
         converted += 1
-    return converted
+    return converted, skipped
 
 
 def _names_selecting(resources, key: str) -> bool:
@@ -735,6 +802,12 @@ def spot_to_process(
     the colorant's own tint transform, so the result is exact and stays
     vector. A DeviceN converts whole — its components paint together through
     one transform — and the result names every colorant that went with it.
+
+    `skipped` names each shading the composition could not describe, with the
+    colorants still live in it and the reason. A shading is skipped in place
+    and the conversion proceeds: one gradient that cannot convert costs that
+    gradient, not the whole operation, and the caller can tell a whole
+    conversion from a partial one without reading the file back.
     """
     validate_pdf(file)
     wanted = {str(name) for name in inks}
@@ -796,7 +869,7 @@ def spot_to_process(
                 _drop_converted_spaces(resources, table, targets)
 
         changed_images = _convert_images(pdf, wanted)
-        changed_shadings = _convert_shadings(pdf, wanted)
+        changed_shadings, skipped_shadings = _convert_shadings(pdf, wanted)
         save_pdf(pdf, output)
 
     return {
@@ -806,6 +879,7 @@ def spot_to_process(
         "paints": changed_paints,
         "images": changed_images,
         "shadings": changed_shadings,
+        "skipped": skipped_shadings,
         "pages": pages,
     }
 
