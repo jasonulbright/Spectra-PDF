@@ -43,6 +43,8 @@ export const ALTERATION_KINDS: readonly string[] = [
   'outline_removed',
   'encryption_removed',
   'page_content_rasterized',
+  'colorants_removed',
+  'colorant_shadings_rasterized',
   'images_removed',
   'fonts_substituted',
   'producer_removed_feature',

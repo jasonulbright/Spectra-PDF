@@ -62,12 +62,17 @@ def _name_text(obj) -> str:
 # ── the resource walk ──────────────────────────────────────────────────────
 
 
-def _content_owners(pdf):
+def _content_owners(pdf, annotations: bool = True):
     """Every object that owns a content stream and a `/Resources`.
 
     Pages, Form XObjects, tiling patterns and annotation appearance streams
     all paint, so all four must be rewritten — an ink that survives in a
     pattern is an ink the user was told had been converted.
+
+    `annotations=False` stops at the page tier. An appearance stream is not
+    reachable from page content, so a caller that rewrites page content and
+    then reads the result back cannot see one; the prepress carve-out asks for
+    exactly that boundary.
     """
     seen: set = set()
     out: list = []
@@ -101,7 +106,7 @@ def _content_owners(pdf):
     for page in pdf.pages:
         out.append(page.obj)
         visit(page.obj, page.obj.get("/Resources"), 0)
-        annots = page.obj.get("/Annots")
+        annots = page.obj.get("/Annots") if annotations else None
         if annots is None:
             continue
         for annot in list(annots):
@@ -137,7 +142,7 @@ def _colorspace_dicts(pdf):
     return out
 
 
-def _shading_dicts(pdf):
+def _shading_dicts(pdf, annotations: bool = True):
     """Every shading, whether named in `/Shading` or worn by a pattern."""
     out = []
     seen: set = set()
@@ -149,7 +154,7 @@ def _shading_dicts(pdf):
         seen.add(ident)
         out.append(obj)
 
-    for owner in _content_owners(pdf):
+    for owner in _content_owners(pdf, annotations):
         resources = owner.get("/Resources")
         if resources is None:
             continue
@@ -578,15 +583,18 @@ def _convert_images(pdf, target_names: set[str]) -> int:
     return converted
 
 
-def _compose_shading_function(shading, tint, out_components: int):
+def _compose_shading_function(pdf, shading, tint, out_components: int):
     """The shading's own function, followed by the tint transform.
 
     Two straight lines compose to a straight line, so that case is written
     exactly as a type-2 function. Anything else is written as a sampled
     function — which is what the interpolation on the other side does with it
     regardless.
+
+    The owning `pdf` is passed in: a sampled result is a STREAM, and a stream
+    needs the document it will belong to — a pikepdf object cannot name its
+    own owner.
     """
-    pdf = shading.obj.owner if hasattr(shading, "obj") else None
     fn_obj = shading.get("/Function")
     if fn_obj is None:
         return None
@@ -638,7 +646,7 @@ def _compose_shading_function(shading, tint, out_components: int):
         for component in value[:out_components]:
             samples.append(max(0, min(255, int(round(float(component) * 255.0)))))
     return pikepdf.Stream(
-        pdf if pdf is not None else shading.owner, bytes(samples),
+        pdf, bytes(samples),
         FunctionType=0, Domain=Array(domain), Range=Array([0, 1] * out_components),
         Size=Array([_SHADING_SAMPLES]), BitsPerSample=8,
     )
@@ -657,7 +665,7 @@ def _convert_shadings(pdf, target_names: set[str]) -> int:
         _, out_components = _alternate_operand(alt)
         if tint is None or out_components is None:
             continue
-        replacement = _compose_shading_function(shading, tint, out_components)
+        replacement = _compose_shading_function(pdf, shading, tint, out_components)
         if replacement is None:
             continue
         shading["/ColorSpace"] = alt
