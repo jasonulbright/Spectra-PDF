@@ -2091,7 +2091,7 @@ _ENGLISH = {
         "A description on a tag wrapping an annotation replaces the annotation's own.",
     ),
     "other_elements_alt": (
-        "Links, forms and formulas are described",
+        "Links, forms and annotations are described",
         "These elements need a description of their own or one on the object they name.",
     ),
     "table_rows": (
