@@ -68,6 +68,7 @@ export function ConfirmDialog({ open, message, onResult, kind = 'unsaved', title
               </button>
             )}
             <button
+              data-testid="confirm-cancel"
               onClick={() => onResult('cancel')}
               className="px-3 py-1.5 text-xs font-medium text-neutral-300 bg-neutral-700 hover:bg-neutral-600 rounded transition-colors"
               autoFocus={kind === 'proceed'}
