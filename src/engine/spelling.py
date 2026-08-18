@@ -361,8 +361,43 @@ _INNER = "'’-‐"
 _DOTTED = re.compile(r"(?<![\w.])[\w\-]*[A-Za-z][\w\-]*(?:\.[\w\-]+)+\.?(?![\w])", re.UNICODE)
 
 
-def _skip_spans(text: str) -> list[tuple[int, int]]:
-    """Code-point ranges no token inside may be offered from."""
+def _is_mark(c: str) -> bool:
+    """A combining mark — the tail of a decomposed character, never a
+    character of its own.
+
+    Text arriving from a document is not normalized: a file authored on a
+    platform that writes NFD spells `ö` as `o` plus U+0308. A mark answers
+    False to `isalpha`, `isdigit` and `\\w` alike, so every rule written in
+    those terms treats one letter as two characters with punctuation between
+    them unless it asks this as well.
+    """
+    return not c.isascii() and unicodedata.category(c)[0] == "M"
+
+
+def _mark_folded(chars: list[str]) -> tuple[str, list[int]]:
+    """The text as NFC spells it, ONE code point per base-plus-marks cluster,
+    with the index in the original each stands for.
+
+    Composing rather than dropping the marks is what makes a decomposed run
+    match the same patterns its composed spelling does — dropping them would
+    leave `e` where NFC has `é`, and `[A-Za-z]` tells those apart.
+    """
+    folded: list[str] = []
+    index: list[int] = []
+    i = 0
+    n = len(chars)
+    while i < n:
+        start = i
+        i += 1
+        while i < n and _is_mark(chars[i]):
+            i += 1
+        composed = unicodedata.normalize("NFC", "".join(chars[start:i]))
+        folded.append(composed if len(composed) == 1 else chars[start])
+        index.append(start)
+    return "".join(folded), index
+
+
+def _matches(text: str) -> list[tuple[int, int]]:
     spans: list[tuple[int, int]] = []
     for pattern_id in ("url", "email"):
         for m in text_match.compiled_pattern(pattern_id).finditer(text):
@@ -372,8 +407,29 @@ def _skip_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _skip_spans(text: str) -> list[tuple[int, int]]:
+    """Code-point ranges no token inside may be offered from.
+
+    Decomposed text is matched through `_mark_folded` and the spans mapped
+    back, so `työ.fi` is one identifier however the document spells it. Text
+    carrying no mark — every ASCII document, and every document in NFC — takes
+    neither the fold nor the map and matches exactly what it always did.
+    """
+    if text.isascii() or not any(_is_mark(c) for c in text):
+        return _matches(text)
+    chars = list(text)
+    folded, index = _mark_folded(chars)
+    n = len(chars)
+    # A span ends at the start of the next cluster, never at the end of the
+    # last one: the marks between the two belong to the character inside.
+    return [(index[s], index[e] if e < len(index) else n) for s, e in _matches(folded)]
+
+
 def _is_acronym(word: str) -> bool:
-    return len(word) > 1 and word == word.upper() and word != word.lower()
+    # Counted in base characters: a decomposed `É` is two code points and a
+    # length taken in code points would read one capital letter as an acronym.
+    letters = [c for c in word if not _is_mark(c)]
+    return len(letters) > 1 and word == word.upper() and word != word.lower()
 
 
 def tokenize(
@@ -388,6 +444,12 @@ def tokenize(
     editor's style spans and the engine's own string slicing both use — a
     UTF-16 offset handed back to a fix retargets it after any astral
     character.
+
+    A word RUN carries its combining marks. A boundary drawn between a base
+    character and its mark would hand the NFC/NFD lookup ladder a fragment it
+    can normalize into nothing, and the span reported for it splices a
+    replacement in front of an orphaned mark, which then attaches to the
+    replacement.
     """
     chars = list(text)
     skips = _skip_spans(text)
@@ -401,7 +463,7 @@ def tokenize(
         start = i
         while i < n:
             c = chars[i]
-            if c.isalpha() or c.isdigit():
+            if c.isalpha() or c.isdigit() or _is_mark(c):
                 i += 1
             elif c in _INNER and i + 1 < n and chars[i + 1].isalpha():
                 i += 1

@@ -155,6 +155,110 @@ class TestTokenize:
         assert tokenize("--- ... ,,,") == []
 
 
+# ═══════════════════════ the tokenizer on decomposed text ══════════════════
+#
+# A document authored on a platform that writes NFD spells `ö` as `o` plus a
+# combining mark, and a mark is neither `isalpha` nor `\w`. Every rule written
+# in those terms reads one word as several, which happens BEFORE the NFC/NFD
+# lookup ladder is ever consulted — so the ladder never sees a whole word and
+# the fix offered for a fragment splices in front of an orphaned mark.
+
+
+class TestTokenizeDecomposed:
+    SENTENCES = [
+        "Uusi työpöytä on pöydällä.",
+        "Le café était très élégant.",
+        "Die Tür war größer.",
+        "El niño comió mañana.",
+        "Ψιλή ἔμφασις καί.",
+        "한국 사람 학교",
+    ]
+
+    @pytest.mark.parametrize("sentence", SENTENCES)
+    def test_decomposed_text_tokenizes_to_the_same_words_as_composed(self, sentence):
+        composed = [t["word"] for t in tokenize(unicodedata.normalize("NFC", sentence))]
+        decomposed = [t["word"] for t in tokenize(unicodedata.normalize("NFD", sentence))]
+        assert [unicodedata.normalize("NFC", w) for w in decomposed] == composed
+
+    @pytest.mark.parametrize("sentence", SENTENCES)
+    def test_a_decomposed_token_is_spelled_the_way_the_text_spells_it(self, sentence):
+        text = unicodedata.normalize("NFD", sentence)
+        for token in tokenize(text):
+            assert token["word"] == unicodedata.normalize("NFD", token["word"])
+
+    def test_a_decomposed_word_is_one_token_not_one_per_base_letter(self):
+        text = unicodedata.normalize("NFD", "työpöytä")
+        assert [t["word"] for t in tokenize(text)] == [text]
+
+    @pytest.mark.parametrize("sentence", SENTENCES)
+    def test_a_decomposed_span_addresses_the_original_text_exactly(self, sentence):
+        text = unicodedata.normalize("NFD", sentence)
+        chars = list(text)
+        for token in tokenize(text):
+            assert "".join(chars[token["start"] : token["end"]]) == token["word"]
+
+    @pytest.mark.parametrize("sentence", SENTENCES)
+    def test_a_replacement_spliced_over_a_decomposed_span_leaves_the_rest_whole(
+        self, sentence
+    ):
+        # A span ending between a base character and its mark leaves the mark
+        # behind, where it attaches to the replacement instead: replacing
+        # `tyo` in decomposed `työpöytä` yields `Ẍpöytä`, not `Xpöytä`.
+        text = unicodedata.normalize("NFD", sentence)
+        for token in tokenize(text):
+            spliced = text[: token["start"]] + "X" + text[token["end"] :]
+            assert spliced.count("X") == 1
+            assert unicodedata.normalize("NFC", spliced).count("X") == 1
+            assert spliced.replace("X", "") == text[: token["start"]] + text[token["end"] :]
+
+    def test_a_decomposed_identifier_is_skipped_like_its_composed_spelling(self):
+        # The skip patterns are written over `\w`, which excludes marks, so a
+        # decomposed identifier matched none of them and was offered as words.
+        # The last two put a mark BEFORE the skipped run, so a span found on
+        # the folded copy has to be mapped back across an offset shift.
+        cases = {
+            "open työ.pdf now": ["open", "now"],
+            "see www.työ.fi today": ["see", "today"],
+            "työstä jsmth@exampl.com nyt": ["työstä", "nyt"],
+            "työstä v1.0.25 nyt": ["työstä", "nyt"],
+        }
+        for text, expected in cases.items():
+            for form in ("NFC", "NFD"):
+                tokens = tokenize(unicodedata.normalize(form, text))
+                assert [unicodedata.normalize("NFC", t["word"]) for t in tokens] == expected
+
+    def test_a_single_decomposed_capital_is_not_an_acronym(self):
+        # Decomposed `É` is two code points, and a length counted in code
+        # points reads one capital letter as an acronym and skips the word.
+        text = unicodedata.normalize("NFD", "É la vie")
+        assert [unicodedata.normalize("NFC", t["word"]) for t in tokenize(text)] == [
+            "É",
+            "la",
+            "vie",
+        ]
+
+    def test_a_decomposed_acronym_is_still_an_acronym(self):
+        text = unicodedata.normalize("NFD", "Die ÖPNV Regel")
+        assert [unicodedata.normalize("NFC", t["word"]) for t in tokenize(text)] == [
+            "Die",
+            "Regel",
+        ]
+
+    def test_ascii_tokenizing_is_untouched_by_the_mark_rules(self):
+        # The revert proof for the fast path: values chosen to differ from
+        # every other case in this file, exercising each rule at once.
+        text = "Ship v2.4.1 to ops@exampl.io — well-known ISO don't 3.14 files."
+        assert [t["word"] for t in tokenize(text)] == [
+            "Ship",
+            "to",
+            "well-known",
+            "don't",
+            "files",
+        ]
+        for token in tokenize(text):
+            assert "".join(list(text)[token["start"] : token["end"]]) == token["word"]
+
+
 # ═══════════════════════════ the shipped set ═══════════════════════════════
 
 
@@ -614,6 +718,78 @@ class TestDocumentWalk:
         result = check_spelling(src, DICT_DIR, "en_US", sources=["text"], max_issues=1)
         assert len(result["issues"]) == 1
         assert result["truncated"] is True
+
+
+# ═════════════════ the document walk over decomposed text ══════════════════
+#
+# A PDF text string carries whatever normalization the authoring platform
+# wrote, so the walk must reach the same verdict on both spellings of the same
+# sentence. Three shapes the lookup ladder already handles are checked
+# together: a morphological analyser, a composed word list, and a decomposed
+# one.
+
+#: (tag, correct sentence, one misspelling) — the misspelling is REJECTED in
+#: both normalizations and every other word ACCEPTED in both.
+DECOMPOSED_LANGUAGES = [
+    ("fi", "Uusi työpöytä on pöydällä", "hyvvää"),
+    ("fr_FR", "Le café était très élégant", "élégnat"),
+    ("de_DE", "Die Tür war größer", "grösserr"),
+    ("ko_KR", "한국 사람 학교", "한구국"),
+]
+
+
+class TestDocumentWalkDecomposed:
+    def _commented(self, tmp_dir, text: str, name: str) -> str:
+        src = _build(tmp_dir, CORRECT, name=name)
+        with pikepdf.open(src, allow_overwriting_input=True) as pdf:
+            pdf.pages[0].obj["/Annots"] = pikepdf.Array(
+                [
+                    pdf.make_indirect(
+                        Dictionary(
+                            Type=Name("/Annot"),
+                            Subtype=Name("/Text"),
+                            Rect=pikepdf.Array([10, 10, 30, 30]),
+                            Contents=pikepdf.String(text),
+                        )
+                    )
+                ]
+            )
+            pdf.save()
+        return src
+
+    @pytest.mark.parametrize("tag,good,bad", DECOMPOSED_LANGUAGES)
+    @pytest.mark.parametrize("form", ["NFC", "NFD"])
+    def test_a_decomposed_document_reaches_the_same_verdict_as_a_composed_one(
+        self, tmp_dir, tag, good, bad, form
+    ):
+        _require(tag)
+        text = unicodedata.normalize(form, f"{good} {bad}")
+        src = self._commented(tmp_dir, text, f"{tag}-{form}.pdf")
+        result = check_spelling(src, DICT_DIR, tag, sources=["comments"])
+        words = [unicodedata.normalize("NFC", i["word"]) for i in result["issues"]]
+        assert words == [unicodedata.normalize("NFC", bad)]
+
+    @pytest.mark.parametrize("tag,good,bad", DECOMPOSED_LANGUAGES)
+    def test_a_hit_in_a_decomposed_document_addresses_its_own_text(
+        self, tmp_dir, tag, good, bad
+    ):
+        # The fix splices over `annotation_text` by code-point range, so the
+        # offsets must address the string the walk actually read — which is
+        # decomposed, not the composed form the dictionary answered about.
+        _require(tag)
+        text = unicodedata.normalize("NFD", f"{good} {bad}")
+        src = self._commented(tmp_dir, text, f"{tag}-span.pdf")
+        issues = check_spelling(src, DICT_DIR, tag, sources=["comments"])["issues"]
+        assert issues
+        for issue in issues:
+            carried = issue["annotation_text"]
+            chars = list(carried)
+            assert "".join(chars[issue["start"] : issue["end"]]) == issue["word"]
+            spliced = "".join(chars[: issue["start"]]) + "X" + "".join(chars[issue["end"] :])
+            assert unicodedata.normalize("NFC", spliced).count("X") == 1
+            assert unicodedata.normalize("NFC", spliced) == unicodedata.normalize(
+                "NFC", f"{good} X"
+            )
 
 
 # ═════════════════════════ user dictionaries ═══════════════════════════════
