@@ -53,13 +53,12 @@ import io
 import math
 import os
 import re
-import shutil
-import tempfile
 from pathlib import Path
 
 import pikepdf
 from pikepdf import Dictionary, Name
 
+from engine.inplace import staged_write
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import walk_inheritable
 
@@ -1167,16 +1166,11 @@ def watermark(
             pages_watermarked += 1
 
         if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                tmp_path = tmp.name
-            save_pdf(pdf, tmp_path)
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, str(staged))
+                pdf.close()
         else:
             save_pdf(pdf, output_path)
-
-    if same_file:
-        shutil.move(tmp_path, str(output_path))
 
     return {
         "output": str(output_path),

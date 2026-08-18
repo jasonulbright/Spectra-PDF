@@ -1,10 +1,9 @@
 """PDF page rotation operations using pikepdf."""
 
-import shutil
-import tempfile
 from pathlib import Path
 
 import pikepdf
+from engine.inplace import staged_write
 from engine.pdf_save import save_pdf
 
 
@@ -33,14 +32,11 @@ def rotate(file: str, pages: list[int] | str, angle: int, output: str) -> dict:
             page["/Rotate"] = (current + angle) % 360
 
         if same_file:
-            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False, dir=str(input_path.parent)) as tmp:
-                tmp_path = tmp.name
-            save_pdf(pdf, tmp_path)
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, str(staged))
+                pdf.close()
         else:
             save_pdf(pdf, output_path)
-
-    if same_file:
-        shutil.move(tmp_path, str(output_path))
 
     return {
         "output": str(output_path),
