@@ -206,6 +206,13 @@ def run_preflight_sweep(
                     )
                 os.replace(out_path, abs_path)
             row["applied"] = [entry["fixup"] for entry in outcome["applied"]]
+            # A fixup that landed on part of what it was asked for is named
+            # here as well as in `applied`: the id alone would read as a
+            # repair the file does not carry.
+            row["partial"] = [
+                {"fixup": entry["fixup"], "partial": entry["partial"]}
+                for entry in outcome["applied"] if entry.get("partial")
+            ]
             row["refused"] = outcome["refused"]
             row["order"] = outcome["order"]
             # The re-check `apply_fixups` already ran IS the after state; a
@@ -296,6 +303,9 @@ def _write_sweep_log(started_at: datetime, finished_at: datetime, report: dict,
         )
         if row.get("applied"):
             verdict += f" — fixed: {', '.join(row['applied'])}"
+        for entry in row.get("partial", []):
+            left = ", ".join(str(item["item"]) for item in entry["partial"])
+            verdict += f" — {entry['fixup']} left: {left}"
         for refusal in row.get("refused", []):
             verdict += f" — {refusal['fixup']} refused: {refusal['reason']}"
         lines.append(f"{tag}{row['rel']} — {verdict}")

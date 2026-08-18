@@ -126,6 +126,42 @@ class TestFixMode:
         _source, _files, report = self._fix(tmp_path)
         assert report["clean"] == 3
 
+    def test_a_fixup_that_landed_partly_is_named_in_the_row_and_the_log(
+        self, tmp_path, monkeypatch,
+    ):
+        """`applied` is a list of fixup IDS, so a door that finished part of
+        what it was asked for reads there as a door that finished. What it
+        could not do is named beside it, in the row and in the log.
+
+        The door is substituted because what is under test is how the sweep
+        RENDERS a partial landing, not which engine op produces one; a real
+        one is pinned against the document in `tests/test_preflight_fixups.py`.
+        """
+        from engine import preflight_fixups
+
+        def partly(_source, _output, _run):
+            return preflight_fixups._DoorResult(
+                0, ({"item": "Warm Red", "reasons": ["a reason"]},),
+            )
+
+        monkeypatch.setitem(preflight_fixups._DOORS, "remove_attachments", partly)
+        source = tmp_path / "in"
+        _tree(source)
+        report = run_preflight_sweep(
+            str(source), str(tmp_path / "out"),
+            profile=_profile(
+                [{"id": "remove_attachments", "params": {}}],
+                embedded_files={"allow": False},
+            ),
+            mode="fix", write_log=True, log_dir=str(tmp_path / "logs"),
+        )
+        row = next(r for r in report["results"] if r["rel"] == "failing.pdf")
+        assert row["applied"] == ["remove_attachments"]
+        assert [entry["fixup"] for entry in row["partial"]] == ["remove_attachments"]
+        assert [i["item"] for i in row["partial"][0]["partial"]] == ["Warm Red"]
+        log = pathlib.Path(report["log_path"]).read_text(encoding="utf8")
+        assert "remove_attachments left: Warm Red" in log
+
 
 class TestRefusals:
     def test_check_mode_refuses_in_place(self, tmp_path):
