@@ -86,7 +86,7 @@ _STEPS: dict = {
                 "mrc_lang",
             }
         ),
-        frozenset({"gs_path", "jbig2_path", "tesseract_path"}),
+        frozenset({"gs_path", "jbig2_path", "tesseract_path", "font_dir"}),
     ),
     # The pair the single-document panel already offers as one flow ("then
     # optimize"). Lossless and Ghostscript-free, so it composes after any
@@ -97,7 +97,7 @@ _STEPS: dict = {
         frozenset({"linearize", "strip_metadata", "compress_streams"}),
         frozenset(),
     ),
-    "grayscale": (grayscale, frozenset(), frozenset({"gs_path"})),
+    "grayscale": (grayscale, frozenset(), frozenset({"gs_path", "font_dir"})),
     "convert_pdfa": (convert_pdfa, frozenset({"level"}), frozenset({"gs_path"})),
     "strip_metadata": (strip_metadata, frozenset(), frozenset()),
     # Authoring navigation over a whole tree is where these two stop being a

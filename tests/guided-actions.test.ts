@@ -22,6 +22,7 @@ import {
   validateRunValues,
   watermarkSource,
   type GuidedAction,
+  type StepDef,
 } from '../src/renderer/lib/guided-actions';
 
 describe('step catalog integrity', () => {
@@ -551,10 +552,38 @@ describe('the create_pdf source step', () => {
 describe('the two step catalogs are pinned against each other', () => {
   const fixture = JSON.parse(
     readFileSync(resolve(__dirname, 'fixtures/guided-step-catalog.json'), 'utf8'),
-  ) as { steps: Record<string, { params: string[] }> };
+  ) as { steps: Record<string, { params: string[]; tools: string[] }> };
 
   it('offers exactly the ops the engine dispatches, in both directions', () => {
     expect([...STEP_CATALOG].map((d) => d.op).sort()).toEqual(Object.keys(fixture.steps).sort());
+  });
+
+  it('flags exactly the tool paths its engine op is handed', () => {
+    // The runner resolves a tool path only for the flag the step declares, so
+    // a flag missing here is a path the engine op never receives — it runs
+    // with the parameter's default and silently loses whatever it enables.
+    // `font_dir` on `compress` and `grayscale` is the instance this pin exists
+    // for: an /AP-less field whose value leaves WinAnsi comes back with
+    // mojibake baked into the page.
+    // `jbig2_path` is the one engine tool path with no flag: the panel
+    // never resolves it, so the MRC arm of a guided compress takes the
+    // encoder the engine finds for itself.
+    const FLAGS: Record<string, (d: StepDef) => boolean> = {
+      gs_path: (d) => d.needsGs === true,
+      font_dir: (d) => d.needsFontDir === true,
+      tesseract_path: (d) => d.needsTesseract === true,
+      soffice_path: (d) => d.needsSoffice === true,
+    };
+    for (const def of STEP_CATALOG) {
+      const tools = new Set(fixture.steps[def.op].tools);
+      for (const [tool, flagged] of Object.entries(FLAGS)) {
+        expect(flagged(def), `${def.op}.${tool}`).toBe(tools.has(tool));
+      }
+      expect(
+        fixture.steps[def.op].tools.filter((t) => !(t in FLAGS)),
+        `${def.op} takes a tool path the editor has no flag for`,
+      ).toEqual(def.op === 'compress' ? ['jbig2_path'] : []);
+    }
   });
 
   it('every param a step EMITS is one its engine op accepts', () => {

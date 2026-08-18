@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useEngine } from '../hooks/useEngine';
 import { useAppModal } from '../hooks/useAppModal';
-import { dialog, batch } from '../lib/tauri-bridge';
+import { app, dialog, batch } from '../lib/tauri-bridge';
 import { recognizePage, tesseractPath, ghostscriptPath } from '../lib/ocr-recognize';
 import type { BatchPdfEntry } from '../lib/tauri-bridge';
 import { OCR_LANGUAGES, DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
@@ -469,6 +469,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             mrc_lang: lang,
             gs_path: await ghostscriptPath(),
             tesseract_path: await tesseractPath(),
+            font_dir: await app.getEditFontPath(),
           })) as unknown as MrcReport,
         // Runs BEFORE the source is read, which is what makes the
         // enhance-then-recognise order structural. `callRaw` for the same
