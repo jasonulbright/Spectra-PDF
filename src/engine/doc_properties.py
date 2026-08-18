@@ -22,9 +22,23 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 
-from .inplace import finish_staged, is_same_file, staging_target
+from .inplace import is_same_file, staged_write
 from engine.incremental import signature_policy, signed_edit_decision
 from engine.pdf_save import save_pdf
+
+
+def _save(pdf, file: str, output_path: Path) -> None:
+    """A same-file write stages beside the document and swaps the directory
+    entry, so a write that dies leaves the input whole. The Pdf is closed
+    inside the block because the destination cannot be replaced while it is
+    held open."""
+    if is_same_file(file, str(output_path)):
+        with staged_write(output_path) as staged:
+            save_pdf(pdf, staged)
+            pdf.close()
+    else:
+        save_pdf(pdf, output_path)
+
 
 # panel value → /PageLayout name. "default" is the absent key.
 _PAGE_LAYOUTS = {
@@ -405,13 +419,7 @@ def set_initial_view(
             direction,
         )
 
-        # pikepdf cannot save over its own open input (engine/inplace.py).
-        if is_same_file(file, output):
-            staged = staging_target(output_path)
-            save_pdf(pdf, staged)
-            finish_staged(staged, output_path)
-        else:
-            save_pdf(pdf, output_path)
+        _save(pdf, file, output_path)
 
     return {"output": str(output_path)}
 
@@ -574,12 +582,7 @@ def set_document_language(
             pdf.Root[Name.Lang] = String(text)
         elif "/Lang" in pdf.Root:
             del pdf.Root["/Lang"]
-        if is_same_file(file, output):
-            staged = staging_target(output_path)
-            save_pdf(pdf, staged)
-            finish_staged(staged, output_path)
-        else:
-            save_pdf(pdf, output_path)
+        _save(pdf, file, output_path)
     return {"output": str(output_path), "lang": text}
 
 
@@ -629,12 +632,7 @@ def set_document_title(
                 meta["dc:title"] = str(title)
         if display is not None:
             _apply_viewer_preferences(pdf, {"display_doc_title": bool(display)}, None)
-        if is_same_file(file, output):
-            staged = staging_target(output_path)
-            save_pdf(pdf, staged)
-            finish_staged(staged, output_path)
-        else:
-            save_pdf(pdf, output_path)
+        _save(pdf, file, output_path)
     return {"output": str(output_path), "title": title, "display_doc_title": display}
 
 
@@ -710,12 +708,7 @@ def set_page_tab_order(
                 "No page here carries an annotation, so there is no tab order to "
                 "declare: /Tabs on a page with nothing to order says nothing."
             )
-        if is_same_file(file, output):
-            staged = staging_target(output_path)
-            save_pdf(pdf, staged)
-            finish_staged(staged, output_path)
-        else:
-            save_pdf(pdf, output_path)
+        _save(pdf, file, output_path)
     return {"output": str(output_path), "pages": written, "skipped": skipped, "order": value}
 
 
@@ -855,12 +848,6 @@ def set_advanced_properties(
             elif "/URI" in pdf.Root:
                 del pdf.Root["/URI"]
 
-        # pikepdf cannot save over its own open input (engine/inplace.py).
-        if is_same_file(file, output):
-            staged = staging_target(output_path)
-            save_pdf(pdf, staged)
-            finish_staged(staged, output_path)
-        else:
-            save_pdf(pdf, output_path)
+        _save(pdf, file, output_path)
 
     return {"output": str(output_path)}
