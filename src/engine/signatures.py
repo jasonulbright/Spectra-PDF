@@ -68,6 +68,7 @@ from engine import eutl, os_trust
 from engine.acroform import form_field_forest
 from engine.docmdp import LEVEL_BY_VALUE, VALUE_BY_LEVEL, certification_of_file
 from engine.docmdp_policy import DIFF_POLICY, LockedFieldModification
+from engine.inplace import is_same_file
 from engine.fieldmdp import (
     ACTION_BY_NAME,
     lock_of_field_dict,
@@ -1093,7 +1094,9 @@ def sign_pdf(
     # before the write below, so writing back is byte-safe. The write is atomic
     # (temp → verify → os.replace), so a failed write OR a failed self-verify
     # can never leave a half-written or reported-failed-but-signed file.
-    if input_path.resolve() == output_path.resolve() and not allow_in_place:
+    # Same file, not same spelling: a hard link resolves to two names and would
+    # otherwise slip past the opt-in and overwrite the working copy.
+    if is_same_file(str(input_path), str(output_path)) and not allow_in_place:
         raise ValueError("The signed output must be a different file from the input.")
 
     if existing_field is not None and appearance is not None:
