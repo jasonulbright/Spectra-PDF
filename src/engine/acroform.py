@@ -98,6 +98,13 @@ def _fields_of(pdf: pikepdf.Pdf):
     return fields
 
 
+def has_form_fields(pdf: pikepdf.Pdf) -> bool:
+    """Whether the document registers a form field — the one condition under
+    which :func:`reattach_forms_file` rewrites anything."""
+    fields = _fields_of(pdf)
+    return fields is not None and len(fields) > 0
+
+
 def _is_widget(obj) -> bool:
     try:
         return obj.get("/Subtype") == Name.Widget
@@ -662,8 +669,7 @@ def reattach_forms_file(original_path, regenerated_path) -> bool:
     ``regenerated_path``, saving it in place. Returns True when the file was
     rewritten (i.e. the original actually had fields)."""
     with pikepdf.open(original_path) as orig:
-        fields = _fields_of(orig)
-        if fields is None or len(fields) == 0:
+        if not has_form_fields(orig):
             return False
         with pikepdf.open(regenerated_path, allow_overwriting_input=True) as regen:
             if not reattach_acroform(orig, regen):

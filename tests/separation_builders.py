@@ -709,6 +709,144 @@ def appearance_pattern_pdf(path, kind: str):
     return str(path)
 
 
+#: The page's own paint in every `form_appearance_pdf`, and what a CMYK
+#: conversion makes of it: the control that says the conversion ran.
+FORM_PAGE_RGB = b"0 0 1 rg"
+FORM_PAGE_CMYK = b"0.875 0.769 0 0 k"
+
+#: The field appearance's own paints, and their converted operands. A flattened
+#: copy of the appearance is found by looking for these in the PAGE content —
+#: which is exactly where they used to be.
+FORM_FILL_RGB = b"1 0 0 rg"
+FORM_FILL_CMYK = b"0 0.996 1 0 k"
+FORM_TEXT_RGB = b"0 1 0 rg"
+FORM_TEXT_CMYK = b"0.624 0 1 0 k"
+
+#: The `/D` and `/Off` faces of the `states` fixture, which the producer never
+#: flattens because they are not the face `/AS` selects.
+FORM_OFF_RGB = b"0 1 1 rg"
+FORM_DOWN_RGB = b"1 0 1 rg"
+
+FORM_FIELD_RECT = (20, 100, 280, 140)
+
+
+def _form_face(pdf, body: bytes, bbox, font=None):
+    stream = pikepdf.Stream(pdf, body)
+    stream.Type = Name.XObject
+    stream.Subtype = Name.Form
+    stream.BBox = Array(list(bbox))
+    stream.Resources = (Dictionary(Font=Dictionary(Helv=font)) if font is not None
+                        else Dictionary())
+    return pdf.make_indirect(stream)
+
+
+def form_appearance_pdf(path, kind: str = "text"):
+    """A form field whose appearance paints in DeviceRGB.
+
+    The producer drops the widget and flattens its appearance into the page,
+    and the field reattach puts the widget back — so a conversion that does not
+    account for both paints the field twice, the second time in the colour it
+    was told to convert away from.
+
+    ``text`` one filled text field; ``states`` a checkbox carrying `/N` and
+    `/D` state dictionaries, only one face of which the producer ever draws;
+    ``bare`` a filled field with NO appearance, which the producer synthesizes
+    one for; ``shared`` two widgets wearing one appearance stream.
+    """
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(300, 200))
+    page.Resources = Dictionary()
+    page.Contents = pdf.make_stream(FORM_PAGE_RGB + b" 10 10 280 20 re f")
+    helv = pdf.make_indirect(Dictionary(
+        Type=Name.Font, Subtype=Name.Type1, BaseFont=Name.Helvetica,
+        Encoding=Name.WinAnsiEncoding))
+
+    def text_face(fill: bytes, text: bytes):
+        return _form_face(pdf, (
+            b"/Tx BMC q " + fill + b" 0 0 260 40 re f BT /Helv 12 Tf "
+            + text + b" 2 14 Td (Hello) Tj ET Q EMC"), (0, 0, 260, 40), helv)
+
+    if kind == "states":
+        def box(fill: bytes):
+            return _form_face(pdf, fill + b" 0 0 40 40 re f", (0, 0, 40, 40))
+
+        widget = pdf.make_indirect(Dictionary(
+            Type=Name.Annot, Subtype=Name.Widget, FT=Name.Btn,
+            Rect=Array([20, 100, 60, 140]), F=4, T="check", V=Name("/On"),
+            AS=Name("/On"),
+            AP=Dictionary(
+                N=Dictionary(On=box(FORM_FILL_RGB), Off=box(FORM_OFF_RGB)),
+                D=Dictionary(On=box(FORM_DOWN_RGB), Off=box(FORM_TEXT_RGB)))))
+        widgets = [widget]
+    elif kind == "bare":
+        widgets = [pdf.make_indirect(Dictionary(
+            Type=Name.Annot, Subtype=Name.Widget, FT=Name.Tx,
+            Rect=Array(list(FORM_FIELD_RECT)), F=4, T="bare", V="Hello",
+            DA=pikepdf.String("/Helv 12 Tf 0 0 1 rg")))]
+    elif kind == "shared":
+        face = text_face(FORM_FILL_RGB, FORM_TEXT_RGB)
+        widgets = [pdf.make_indirect(Dictionary(
+            Type=Name.Annot, Subtype=Name.Widget, FT=Name.Tx,
+            Rect=Array(list(rect)), F=4, T=name, V="Hello",
+            DA=pikepdf.String("/Helv 12 Tf 0 1 0 rg"), AP=Dictionary(N=face)))
+            for name, rect in (("first", FORM_FIELD_RECT),
+                               ("second", (20, 50, 280, 90)))]
+    elif kind == "text":
+        widgets = [pdf.make_indirect(Dictionary(
+            Type=Name.Annot, Subtype=Name.Widget, FT=Name.Tx,
+            Rect=Array(list(FORM_FIELD_RECT)), F=4, T="field1", V="Hello",
+            DA=pikepdf.String("/Helv 12 Tf 0 1 0 rg"),
+            AP=Dictionary(N=text_face(FORM_FILL_RGB, FORM_TEXT_RGB))))]
+    else:
+        raise ValueError(f"unknown form appearance kind: {kind}")
+
+    page.Annots = Array(widgets)
+    pdf.Root.AcroForm = pdf.make_indirect(Dictionary(
+        Fields=Array(widgets), DA=pikepdf.String("/Helv 0 Tf 0 g"),
+        DR=Dictionary(Font=Dictionary(Helv=helv))))
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
+def form_pattern_appearance_pdf(path):
+    """A field whose appearance paints through a shading pattern.
+
+    The gradient is DeviceCMYK, which the producer carries AS a gradient — a
+    gradient it must colour-convert comes back a picture instead (the whole
+    reason the colorant carve-out exists), and a picture measures nothing about
+    coordinate space. What this measures is that a converted appearance stays
+    anchored in the space the producer wrote its pattern matrix in (ISO 32000-2
+    8.7.2), which is not the annotation rectangle's.
+    """
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(300, 200))
+    page.Resources = Dictionary()
+    page.Contents = pdf.make_stream(FORM_PAGE_RGB + b" 10 10 280 20 re f")
+    shading = pdf.make_indirect(Dictionary(
+        ShadingType=2, ColorSpace=Name.DeviceCMYK, Coords=Array([0, 0, 260, 0]),
+        Function=Dictionary(FunctionType=2, Domain=Array([0, 1]), N=1,
+                            C0=Array([0, 0, 0, 0]), C1=Array([0, 1, 0.75, 0])),
+        Extend=Array([True, True])))
+    face = pikepdf.Stream(pdf, b"q 0 0 260 40 re W n /Sh sh Q")
+    face.Type = Name.XObject
+    face.Subtype = Name.Form
+    face.BBox = Array([0, 0, 260, 40])
+    face.Resources = Dictionary(Shading=Dictionary(Sh=shading))
+    widget = pdf.make_indirect(Dictionary(
+        Type=Name.Annot, Subtype=Name.Widget, FT=Name.Tx,
+        Rect=Array(list(FORM_FIELD_RECT)), F=4, T="patterned", V="",
+        DA=pikepdf.String("/Helv 0 Tf 0 g"),
+        AP=Dictionary(N=pdf.make_indirect(face))))
+    page.Annots = Array([widget])
+    pdf.Root.AcroForm = pdf.make_indirect(Dictionary(
+        Fields=Array([widget]), DA=pikepdf.String("/Helv 0 Tf 0 g"),
+        DR=Dictionary()))
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
 def rgb_alternate_appearance_pdf(path, spot: str = "RGB Appearance Spot"):
     """A stamp appearance whose gradient is in a spot with a DeviceRGB
     alternate — the appearance-tier twin of `rgb_alternate_shading_pdf`, the
