@@ -51,14 +51,13 @@ until the bundle script has been run.
 import contextlib
 import io
 import math
-import os
 import re
 from pathlib import Path
 
 import pikepdf
 from pikepdf import Dictionary, Name
 
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import walk_inheritable
 
@@ -474,23 +473,6 @@ def _embed_image(pdf: pikepdf.Pdf, path: str) -> tuple[pikepdf.Object, int, int,
             if value is not None:
                 image[key] = _plain(value)
     return pdf.make_indirect(image), px_w, px_h, frames
-
-
-def _same_path(a: str, b: str) -> bool:
-    """Whether two paths name the same file ON DISK.
-
-    Identity, never a string compare: two spellings of one file (a junction, a
-    short name, a differently-cased drive letter) are the same file, and the
-    recursion guard exists to catch exactly that. `samefile` needs both to
-    exist, so a not-yet-written output falls back to the resolved paths.
-    """
-    try:
-        return os.path.samefile(a, b)
-    except OSError:
-        try:
-            return Path(a).resolve() == Path(b).resolve()
-        except OSError:
-            return False
 
 
 def _page_content_bytes(page: pikepdf.Page) -> bytes:
@@ -936,7 +918,7 @@ def watermark(
 
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
 
     source_path = ""
     page_number = 1
@@ -955,9 +937,9 @@ def watermark(
         # The recursion guard, by IDENTITY: a document whose every page carries
         # a copy of itself is nobody's request, and a source that IS the output
         # is about to be overwritten by the thing that reads it.
-        if _same_path(source_path, str(input_path)):
+        if is_same_file(source_path, str(input_path)):
             raise ValueError(f"a PDF cannot be its own watermark source: {source_path}")
-        if _same_path(source_path, str(output_path)):
+        if is_same_file(source_path, str(output_path)):
             raise ValueError(
                 f"the watermark PDF and the output are the same file: {source_path}"
             )

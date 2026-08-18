@@ -40,7 +40,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Dictionary, Name
 
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import walk_inheritable
 from engine.preflight import COLORSPACE, walk_page_resources
@@ -652,7 +652,7 @@ def add_printer_marks(
 
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     wanted = None if pages is None else {int(p) for p in pages}
 
     marked = 0
@@ -774,7 +774,7 @@ def remove_printer_marks(file: str, output: str, pages: list | None = None) -> d
     validate_pdf(file)
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     wanted = None if pages is None else {int(p) for p in pages}
 
     removed = 0

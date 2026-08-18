@@ -32,7 +32,7 @@ import pikepdf
 from pikepdf import Array
 
 from engine.content_walk import IDENTITY
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.page_boxes import MIN_EXTENT, box_key, effective_box
 from engine.pdf_save import save_pdf
 from engine.redact import _resolve_resources
@@ -237,7 +237,7 @@ def content_crop(
 
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve() if not preview else False
+    same_file = (not preview) and is_same_file(str(input_path), str(output_path))
 
     changed = 0
     measured: list[dict] = []

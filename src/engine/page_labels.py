@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 
 _STYLES = {"D", "r", "R", "a", "A"}
@@ -131,7 +131,7 @@ def set_page_labels(file: str, output: str, ranges: list[dict]) -> dict:
     """Write the /PageLabels number tree. An empty `ranges` removes it."""
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
 
     with pikepdf.open(file) as pdf:
         total = len(pdf.pages)

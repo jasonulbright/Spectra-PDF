@@ -420,6 +420,16 @@ def _besides(directory: Path, *expected: str) -> list:
     return sorted(p.name for p in directory.iterdir() if p.name not in expected)
 
 
+def _hardlink(source: Path, alias: Path) -> Path:
+    """A second name for one physical file, or a skip where the filesystem
+    has no such thing."""
+    try:
+        os.link(str(source), str(alias))
+    except (AttributeError, NotImplementedError, OSError) as exc:
+        pytest.skip(f"this filesystem does not make hard links: {exc}")
+    return alias
+
+
 class TestWritingBackOverTheInput:
     def test_in_place_does_what_a_distinct_output_does(self, case, tmp_path):
         """Byte-identity is the pin wherever the op is deterministic; where a
@@ -482,16 +492,65 @@ class TestWritingBackOverTheInput:
         """
         source = case.build(tmp_path / "source.pdf")
         before = source.read_bytes()
-        alias = tmp_path / "alias.pdf"
-        try:
-            os.link(str(source), str(alias))
-        except (AttributeError, NotImplementedError, OSError) as exc:
-            pytest.skip(f"this filesystem does not make hard links: {exc}")
+        alias = _hardlink(source, tmp_path / "alias.pdf")
 
         case.run(str(source), str(source))
 
         assert source.read_bytes() != before
         assert alias.read_bytes() == before
+
+    def test_a_write_cancelled_mid_flight_leaves_nothing_staged(
+        self, case, tmp_path, monkeypatch,
+    ):
+        """Cancellation is not an `Exception`. A scope that cleans up on
+        `except Exception` lets `KeyboardInterrupt` past with the completed
+        temp file still sitting beside the user's document — and the interrupt
+        itself must still arrive, so the caller stops."""
+        source = case.build(tmp_path / "source.pdf")
+        before = source.read_bytes()
+
+        def cancel(_first, target, *_args, **_kwargs):
+            Path(target).write_bytes(b"%PDF-1.7\n% staged and then cancelled\n")
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(case.module, case.dies, cancel)
+        with pytest.raises(KeyboardInterrupt):
+            case.run(str(source), str(source))
+
+        assert source.read_bytes() == before
+        assert _besides(tmp_path, "source.pdf") == []
+
+
+class TestOnePhysicalFileUnderTwoNames:
+    """Which BRANCH an op takes when its output is its input under another
+    name — the half the alias tests above do not reach.
+
+    Those hand the op one path twice, so the same-file test answers yes on the
+    spelling alone and the alias only READS. Handing the op the alias as its
+    output is the routing question: the op is given two different strings for
+    one physical file, and a same-file test made of resolved strings answers
+    no. The direct-write branch it then takes writes through the link into the
+    bytes the reader still holds open, which is where
+    `set_document_language` raised `Cannot overwrite input file`.
+    """
+
+    def test_an_output_hardlinked_to_the_input_routes_through_staging(
+        self, case, tmp_path,
+    ):
+        source = case.build(tmp_path / "source.pdf")
+        before_bytes = source.read_bytes()
+        before = case.effect(str(source))
+        alias = _hardlink(source, tmp_path / "alias.pdf")
+
+        case.run(str(source), str(alias))
+
+        # The op landed at the name it was given.
+        assert case.effect(str(alias)) != before
+        # The staged file replaced that NAME. The other name still reading as
+        # it did is what says the write did not go through the link and into
+        # the bytes the op held open.
+        assert source.read_bytes() == before_bytes
+        assert _besides(tmp_path, "source.pdf", "alias.pdf") == []
 
 
 class TestTheDestinationIsClosedBeforeTheSwap:
@@ -545,16 +604,30 @@ class TestTheProducerShapedStaging:
     ):
         source = _text_and_figure(tmp_path / "source.pdf")
         before = source.read_bytes()
-        alias = tmp_path / "alias.pdf"
-        try:
-            os.link(str(source), str(alias))
-        except (AttributeError, NotImplementedError, OSError) as exc:
-            pytest.skip(f"this filesystem does not make hard links: {exc}")
+        alias = _hardlink(source, tmp_path / "alias.pdf")
 
         grayscale_mod.grayscale(str(source), str(source), gs_path=gs_path)
 
         assert source.read_bytes() != before
         assert alias.read_bytes() == before
+
+    def test_an_output_hardlinked_to_the_input_routes_through_staging(
+        self, tmp_path, gs_path,
+    ):
+        """The conditional staging branches on the same-file test, so an
+        output that is the input under another name must reach the staged
+        branch — Ghostscript reads its input for the whole run, and a direct
+        write through the link truncates what it is still reading."""
+        source = _text_and_figure(tmp_path / "source.pdf")
+        before_bytes = source.read_bytes()
+        before = _gray(str(source))
+        alias = _hardlink(source, tmp_path / "alias.pdf")
+
+        grayscale_mod.grayscale(str(source), str(alias), gs_path=gs_path)
+
+        assert _gray(str(alias)) != before
+        assert source.read_bytes() == before_bytes
+        assert _besides(tmp_path, "source.pdf", "alias.pdf") == []
 
     def test_a_refused_run_leaves_the_input_whole_and_nothing_staged(
         self, tmp_path, monkeypatch,
@@ -626,3 +699,112 @@ class TestFinishStaged:
 
         assert not staged.exists()
         assert destination.read_bytes() == b"old"
+
+    def test_a_swap_cancelled_mid_flight_leaves_nothing_staged(
+        self, tmp_path, monkeypatch,
+    ):
+        """`KeyboardInterrupt` is not an `Exception`, so cleanup written as an
+        `except Exception` never runs for it."""
+        import engine.inplace as inplace_mod
+        from engine.inplace import finish_staged
+
+        destination = tmp_path / "destination.bin"
+        destination.write_bytes(b"old")
+        staged = tmp_path / "staged.bin"
+        staged.write_bytes(b"new")
+
+        def cancel(*_args, **_kwargs):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(inplace_mod.os, "replace", cancel)
+        with pytest.raises(KeyboardInterrupt):
+            finish_staged(staged, destination)
+
+        assert not staged.exists()
+        assert destination.read_bytes() == b"old"
+
+
+class TestTheStagedScope:
+    """The scope that owns the span between the staging and the swap."""
+
+    @pytest.mark.parametrize("cancellation", [KeyboardInterrupt, SystemExit])
+    def test_a_producer_cancelled_mid_write_leaves_nothing_staged(
+        self, tmp_path, cancellation,
+    ):
+        """The temp file exists from the moment the scope opens, so a producer
+        that is cancelled part-way leaves it beside the user's document unless
+        the scope removes it on EVERY way out — and the cancellation has to
+        arrive, or the interrupt the user asked for is swallowed."""
+        from engine.inplace import staged_write
+
+        destination = tmp_path / "destination.bin"
+        destination.write_bytes(b"old")
+
+        with pytest.raises(cancellation):
+            with staged_write(destination) as staged:
+                staged.write_bytes(b"most of a document")
+                raise cancellation
+
+        assert destination.read_bytes() == b"old"
+        assert _besides(tmp_path, "destination.bin") == []
+
+    def test_a_clean_run_still_lands(self, tmp_path):
+        """The cleanup is scoped to a run that did not land; a run that landed
+        must not have its result removed."""
+        from engine.inplace import staged_write
+
+        destination = tmp_path / "destination.bin"
+        destination.write_bytes(b"old")
+
+        with staged_write(destination) as staged:
+            staged.write_bytes(b"new")
+
+        assert destination.read_bytes() == b"new"
+        assert _besides(tmp_path, "destination.bin") == []
+
+
+class TestOneFileUnderTwoNamesIsOneFile:
+    """The predicate every conditional staging branches on."""
+
+    def test_a_hard_link_is_the_same_file(self, tmp_path):
+        """Two names for one physical file resolve to two different strings —
+        only volume serial and file index say they are one file."""
+        from engine.inplace import is_same_file
+
+        source = _plain(tmp_path / "source.pdf")
+        alias = _hardlink(source, tmp_path / "alias.pdf")
+
+        assert os.path.samefile(str(source), str(alias))
+        assert Path(source).resolve() != Path(alias).resolve()
+        assert is_same_file(str(source), str(alias))
+
+    def test_the_same_path_is_the_same_file(self, tmp_path):
+        from engine.inplace import is_same_file
+
+        source = _plain(tmp_path / "source.pdf")
+        assert is_same_file(str(source), str(source))
+
+    def test_a_spelling_of_the_same_path_is_the_same_file(self, tmp_path):
+        """The resolved comparison is the branch that answers before any stat,
+        and it has to keep answering."""
+        from engine.inplace import is_same_file
+
+        source = _plain(tmp_path / "source.pdf")
+        spelled = tmp_path / "sub" / ".." / "source.pdf"
+        (tmp_path / "sub").mkdir()
+
+        assert is_same_file(str(source), str(spelled))
+
+    def test_a_distinct_output_is_not_the_same_file(self, tmp_path):
+        from engine.inplace import is_same_file
+
+        source = _plain(tmp_path / "source.pdf")
+        other = _plain(tmp_path / "other.pdf")
+        assert not is_same_file(str(source), str(other))
+
+    def test_an_output_that_does_not_exist_yet_is_not_the_same_file(self, tmp_path):
+        """It names nothing to be identical to, and `samefile` on it raises."""
+        from engine.inplace import is_same_file
+
+        source = _plain(tmp_path / "source.pdf")
+        assert not is_same_file(str(source), str(tmp_path / "not-yet.pdf"))

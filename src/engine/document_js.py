@@ -17,7 +17,7 @@ not this module's scope.
 from pathlib import Path
 
 import pikepdf
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 
 # The PDF text-string UTF-16BE byte-order mark. `/JS` is a "text string or
@@ -126,7 +126,7 @@ def set_document_js(file: str, output: str, scripts: list | None = None) -> dict
     # write stages beside the target and lands by swapping the directory entry.
     # The scope owns the span: a save that dies takes the staged file with it
     # rather than leaving it beside the user's document.
-    same_file = Path(file).resolve() == Path(output).resolve()
+    same_file = is_same_file(file, output)
     output_path = Path(output)
     with pikepdf.open(file) as pdf:
         names = pdf.Root.get("/Names")
