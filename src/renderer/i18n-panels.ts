@@ -1774,7 +1774,7 @@ export const PANEL_STRINGS = {
   'panel.a11y.check.alt_hides_annotation': 'Alternate text does not hide an annotation',
   'panel.a11y.explain.alt_hides_annotation':
     'A description on a tag wrapping an annotation replaces the annotation’s own.',
-  'panel.a11y.check.other_elements_alt': 'Links, forms and formulas are described',
+  'panel.a11y.check.other_elements_alt': 'Links, forms and annotations are described',
   'panel.a11y.explain.other_elements_alt':
     'These elements need a description of their own or one on the object they name.',
   'panel.a11y.check.table_rows': 'Rows are inside a table',
