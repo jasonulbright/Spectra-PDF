@@ -2274,7 +2274,12 @@ function AppContent(): React.ReactElement {
     // Every other window runs its own close flow and closes itself; whichever
     // window closes last exits the process. A window that cancels keeps both
     // itself and the app, which is what a cancel means.
-    await app.requestQuit();
+    //
+    // Nothing closes until every other window has acknowledged the request. A
+    // window that never answers has not heard it and will not close, and this
+    // window closing anyway would leave it standing behind a session record
+    // that stopped being written the moment Exit was chosen.
+    if (!(await app.requestQuit())) return;
     await app.confirmClose();
   }, [state.files, isFileDirty, showConfirm, commitOrAbort]);
 
@@ -2565,7 +2570,11 @@ function AppContent(): React.ReactElement {
 
   // Handle window close — Rust intercepts CloseRequested and emits app:beforeClose
   useEffect(() => {
-    const unlisten = app.onBeforeClose(async () => {
+    const unlisten = app.onBeforeClose(async (quitId) => {
+      // Receipt first, before any prompt: the quit that sent this is waiting
+      // for it and calls itself off without one, so it cannot queue behind a
+      // dialog the user may take minutes to answer.
+      if (quitId !== null) app.quitAck(quitId).catch(() => {});
       const minimizeToTray = getSettings().minimizeToTray === true;
       const dirtyFiles = Array.from(filesRef.current.values()).filter(
         (f) => f.dirty || pageDirtyRef.current.includes(f.path),

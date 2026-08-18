@@ -652,8 +652,19 @@ export const app = {
   closeWindow: (minimizeToTray: boolean) => invoke('close_window', { minimizeToTray }),
 
   /** Ask every other window to run its own close flow. Each answers by closing
-   * itself and the last one out exits, so a window that cancels keeps the app. */
-  requestQuit: () => invoke('request_quit'),
+   * itself and the last one out exits, so a window that cancels keeps the app.
+   *
+   * Resolves to whether this window may now close. The request is not assumed
+   * delivered: a window whose renderer has not installed its listener never
+   * hears it and never closes, and closing anyway would leave it standing
+   * behind a session record frozen at the moment Exit was chosen. False means
+   * the quit is off — nothing closed, and the record is live again. */
+  requestQuit: () => invoke<boolean>('request_quit'),
+
+  /** Acknowledge a beforeClose that belongs to a quit. Receipt only: it says
+   * this renderer heard the request and is running its close flow, which is
+   * what an emit cannot report on its own. */
+  quitAck: (quitId: number) => invoke('quit_ack', { quitId }),
 
   /** Report that this window's close prompt was cancelled, so the quit the
    * prompt belonged to is off. The quit recorded the session and froze the
@@ -679,9 +690,13 @@ export const app = {
   /** Raise a window by label (the "it is open over there" refusal's action). */
   focusWindow: (label: string) => invoke<void>('focus_app_window', { label }),
 
-  /** Listen for close-requested event (Rust intercepted the window close). */
-  onBeforeClose: (callback: () => void) => {
-    return listen('app:beforeClose', () => callback());
+  /** Listen for close-requested event (Rust intercepted the window close).
+   * The quit id names the app-level quit this request belongs to, and is null
+   * for a window × — which no quit is waiting on. */
+  onBeforeClose: (callback: (quitId: number | null) => void) => {
+    return listen<{ quitId: number | null }>('app:beforeClose', (event) =>
+      callback(event.payload?.quitId ?? null),
+    );
   },
 
   /** Listen for the open signal (CLI args, second instance, context menu,
