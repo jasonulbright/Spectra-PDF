@@ -1054,6 +1054,85 @@ class TestRightToLeftFill:
         assert fields["notes"]["value"] == value
 
 
+# ── Rotated widgets (/MK /R) ──────────────────────────────────────────────
+
+#: A 40 x 100 box, so a quarter turn is unmistakable in the numbers.
+TALL_RECT = [72, 600, 112, 700]
+
+
+def _pins_for(w: float, h: float, degrees: int) -> tuple[list, list]:
+    """The (/BBox, /Matrix) a `w` x `h` widget must carry at /MK /R `degrees`.
+
+    The frame is the rect with its axes swapped for a quarter turn, and the
+    matrix is the pure rotation that turns that frame back onto the rect — no
+    translation, because ISO 32000-2 12.5.5 maps the TRANSFORMED /BBox onto
+    /Rect and the offset the turn produces is taken out there.
+    """
+    return {
+        90: ([0, 0, h, w], [0, 1, -1, 0, 0, 0]),
+        180: ([0, 0, w, h], [-1, 0, 0, -1, 0, 0]),
+        270: ([0, 0, h, w], [0, -1, 1, 0, 0, 0]),
+    }[degrees]
+
+
+ROTATION_PINS = {degrees: _pins_for(40, 100, degrees) for degrees in (90, 180, 270)}
+
+
+def _make_rotated_form(path: str, extra=()) -> None:
+    """A single-line text field, a multiline text field and a dropdown, each
+    40 x 100 — the three surfaces `_text_appearance` draws."""
+    from engine.form_authoring import add_form_fields
+
+    blank = path + ".blank.pdf"
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    pdf.save(blank)
+    pdf.close()
+    add_form_fields(
+        blank, path,
+        fields=[
+            {"name": "note", "type": "text", "page_index": 0, "rect": TALL_RECT},
+            {"name": "memo", "type": "text", "page_index": 0,
+             "rect": [200, 600, 240, 700], "multiline": True},
+            {"name": "pick", "type": "dropdown", "page_index": 0,
+             "rect": [300, 600, 340, 700], "options": ["Red", "Blue"]},
+            *extra,
+        ],
+    )
+
+
+def _turn_widgets(path: str, degrees) -> None:
+    """State `degrees` as every widget's /MK /R."""
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        for entry in pdf.Root["/AcroForm"]["/Fields"]:
+            if entry.get("/MK") is None:
+                entry["/MK"] = Dictionary()
+            entry["/MK"]["/R"] = degrees
+        pdf.save(path)
+
+
+def _appearance_frame(path: str, name: str):
+    """(/BBox, /Matrix) of a widget's /AP /N; the matrix is None when the
+    appearance carries no turn."""
+    with pikepdf.open(path) as pdf:
+        for entry in pdf.Root["/AcroForm"]["/Fields"]:
+            if str(entry.get("/T")) == name:
+                ap = entry["/AP"]["/N"]
+                return (
+                    [float(v) for v in ap["/BBox"]],
+                    None if "/Matrix" not in ap else [float(v) for v in ap["/Matrix"]],
+                )
+    raise AssertionError(f"no field named {name}")
+
+
+def _drawn_lines(body: bytes) -> list[bytes]:
+    """The WinAnsi strings an appearance shows, in the order it shows them."""
+    return re.findall(rb"\((.*?)\) Tj", body)
+
+
+VALUES = {"note": "Hello", "memo": "one two three four five six", "pick": "Red"}
+
+
 # ── Vertical fields ───────────────────────────────────────────────────────
 
 
@@ -1190,3 +1269,156 @@ class TestVerticalFieldAppearance:
 
         fill_form_fields(cleared, refilled, {name: value}, font_dir=FONTS_DIR)
         assert _appearance_body(refilled, name) == column
+
+    @pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+    @pytest.mark.parametrize("degrees", sorted(ROTATION_PINS))
+    def test_a_turned_vertical_field_composes_both_turns(self, tmp_dir, degrees):
+        # INVERTED with the horizontal arm: the column emitter wrote the raw
+        # rect and no /Matrix, so a turned vertical field came back upright.
+        #
+        # The writing mode is the TEXT's axes and /MK /R is the ANNOTATION's,
+        # so the two COMPOSE rather than one cancelling the other: the columns
+        # are laid out in the frame the turn swaps, and the turn maps that
+        # frame onto the rect. A 60 x 300 field at /R 90 therefore fits its
+        # column against a 60 pt reading axis, not the 300 pt one it had
+        # upright — a turned copy of the upright layout would keep 24 pt.
+        src = os.path.join(tmp_dir, "v.pdf")
+        filled = os.path.join(tmp_dir, "v_filled.pdf")
+        cleared = os.path.join(tmp_dir, "v_cleared.pdf")
+        refilled = os.path.join(tmp_dir, "v_refilled.pdf")
+        _make_vertical_form(src)
+        _turn_widgets(src, degrees)
+        fill_form_fields(src, filled, {"note": "機密文書"}, font_dir=FONTS_DIR)
+        want_bbox, want_matrix = _pins_for(60, 300, degrees)
+        assert _appearance_frame(filled, "note") == (want_bbox, want_matrix)
+        column = _appearance_body(filled, "note")
+        assert b"/TxV" in column
+        if degrees == 180:
+            # No axis swap, so the column is placed exactly as it is upright.
+            assert b"/TxV 24 Tf" in column and b"1 0 0 1 46 298 Tm" in column
+        else:
+            # Reading axis 60 - 2 pad, stacking axis 300: the fit drops to 14
+            # and the column's centre line sits half its width in from 300.
+            assert b"/TxV 14 Tf" in column and b"1 0 0 1 291 58 Tm" in column
+
+        # A cleared field keeps the turn — /MK /R is the widget's property,
+        # not the value's — and the next value lands byte for byte.
+        fill_form_fields(filled, cleared, {"note": ""}, font_dir=FONTS_DIR)
+        assert _appearance_frame(cleared, "note") == (want_bbox, want_matrix)
+        assert b"/TxV" not in _appearance_body(cleared, "note")
+        fill_form_fields(cleared, refilled, {"note": "機密文書"}, font_dir=FONTS_DIR)
+        assert _appearance_body(refilled, "note") == column
+
+
+class TestRotatedWidgetAppearance:
+    @pytest.mark.parametrize("degrees", sorted(ROTATION_PINS))
+    @pytest.mark.parametrize("name", ["note", "pick"])
+    def test_a_turned_field_keeps_its_quarter_turn(self, tmp_dir, degrees, name):
+        # INVERTED: the text/dropdown emitter always wrote the raw rect as its
+        # /BBox with no /Matrix, so a widget carrying /MK /R came back upright
+        # — the value ran across a box the document had turned on its side,
+        # while an option list on the same page turned correctly.
+        src = os.path.join(tmp_dir, "r.pdf")
+        out = os.path.join(tmp_dir, "r_out.pdf")
+        _make_rotated_form(src)
+        _turn_widgets(src, degrees)
+        fill_form_fields(src, out, VALUES)
+        want_bbox, want_matrix = ROTATION_PINS[degrees]
+        assert _appearance_frame(out, name) == (want_bbox, want_matrix)
+        # The clip runs in that frame too, so the layout below it does.
+        fw, fh = want_bbox[2], want_bbox[3]
+        assert f"1 1 {fw - 2:g} {fh - 2:g} re W n".encode("ascii") in _appearance_body(out, name)
+
+    @pytest.mark.parametrize("degrees", [0, 45, 90.5])
+    def test_a_field_stating_no_quarter_turn_is_byte_identical(self, tmp_dir, degrees):
+        # /R shall be a multiple of 90 (ISO 32000-2 12.5.6.19), so zero and a
+        # value that is not one state no quarter turn — and an appearance with
+        # nothing to turn is what it always was, down to the byte, with no
+        # /Matrix key it does not need.
+        plain = os.path.join(tmp_dir, "plain_out.pdf")
+        src = os.path.join(tmp_dir, "plain.pdf")
+        _make_rotated_form(src)
+        fill_form_fields(src, plain, VALUES)
+        stated = os.path.join(tmp_dir, "stated.pdf")
+        out = os.path.join(tmp_dir, "stated_out.pdf")
+        _make_rotated_form(stated)
+        _turn_widgets(stated, degrees)
+        fill_form_fields(stated, out, VALUES)
+        for name in ("note", "memo", "pick"):
+            assert _appearance_frame(out, name)[1] is None
+            assert _appearance_body(out, name) == _appearance_body(plain, name)
+
+    def test_a_turned_field_auto_sizes_to_the_turned_frame(self, tmp_dir):
+        # Laying out IN the turned frame, not turning a copy of the upright
+        # layout: /DA size 0 auto-fits, and the fit reads the frame the turn
+        # produces — a 40 pt-wide box measures a different fit from a 100 pt
+        # one for the same value.
+        src = os.path.join(tmp_dir, "r.pdf")
+        upright = os.path.join(tmp_dir, "up.pdf")
+        _make_rotated_form(src)
+        fill_form_fields(src, upright, VALUES)
+        turned_src = os.path.join(tmp_dir, "t.pdf")
+        turned = os.path.join(tmp_dir, "t_out.pdf")
+        _make_rotated_form(turned_src)
+        _turn_widgets(turned_src, 90)
+        fill_form_fields(turned_src, turned, VALUES)
+        assert b"/Helv 15.5 Tf" in _appearance_body(upright, "note")
+        assert b"/Helv 24 Tf" in _appearance_body(turned, "note")
+
+    def test_a_turned_multiline_field_wraps_in_the_turned_frame(self, tmp_dir):
+        # The decisive half of the same point: wrapping is measured against
+        # the frame, so the value that stacks six lines down a 40 pt-wide box
+        # becomes two lines across a 100 pt-wide one. A turned copy of the
+        # upright layout would still carry six.
+        src = os.path.join(tmp_dir, "r.pdf")
+        upright = os.path.join(tmp_dir, "up.pdf")
+        _make_rotated_form(src)
+        fill_form_fields(src, upright, VALUES)
+        turned_src = os.path.join(tmp_dir, "t.pdf")
+        turned = os.path.join(tmp_dir, "t_out.pdf")
+        _make_rotated_form(turned_src)
+        _turn_widgets(turned_src, 90)
+        fill_form_fields(turned_src, turned, VALUES)
+        assert _drawn_lines(_appearance_body(upright, "memo")) == [
+            b"one", b"two", b"three", b"four", b"five", b"six",
+        ]
+        assert _drawn_lines(_appearance_body(turned, "memo")) == [
+            b"one two three", b"four five six",
+        ]
+
+    @pytest.mark.parametrize("degrees", sorted(ROTATION_PINS))
+    def test_a_turned_field_round_trips_fill_clear_refill(self, tmp_dir, degrees):
+        # /MK /R is the widget's property, not the value's, so a cleared field
+        # keeps its turn and the next value lands byte for byte where the
+        # first one did.
+        src = os.path.join(tmp_dir, "r.pdf")
+        filled = os.path.join(tmp_dir, "filled.pdf")
+        cleared = os.path.join(tmp_dir, "cleared.pdf")
+        refilled = os.path.join(tmp_dir, "refilled.pdf")
+        _make_rotated_form(src)
+        _turn_widgets(src, degrees)
+        fill_form_fields(src, filled, VALUES)
+        fill_form_fields(filled, cleared, {"note": "", "memo": "", "pick": ""})
+        for name in ("note", "memo", "pick"):
+            assert _appearance_frame(cleared, name) == ROTATION_PINS[degrees]
+            assert _drawn_lines(_appearance_body(cleared, name)) == [b""]
+        fill_form_fields(cleared, refilled, VALUES)
+        for name in ("note", "memo", "pick"):
+            assert _appearance_body(refilled, name) == _appearance_body(filled, name)
+
+    def test_flattening_a_turned_field_stamps_it_turned(self, tmp_dir):
+        # /MK /R only means anything if what reads the appearance honours the
+        # /Matrix: the flatten maps the TRANSFORMED /BBox onto /Rect, so the
+        # stamp scales by one rather than squashing a 100 x 40 frame into
+        # 40 x 100. Rect [72 600 112 700]; the transformed box is 40 x 100
+        # already, so the stamp is a pure translation onto the rect.
+        src = os.path.join(tmp_dir, "r.pdf")
+        filled = os.path.join(tmp_dir, "filled.pdf")
+        flat = os.path.join(tmp_dir, "flat.pdf")
+        _make_rotated_form(src)
+        _turn_widgets(src, 90)
+        fill_form_fields(src, filled, VALUES)
+        fill_form_fields(filled, flat, {}, flatten=True)
+        with pikepdf.open(flat) as pdf:
+            content = bytes(pdf.pages[0].Contents.read_bytes()).decode("latin-1")
+        assert "q 1 0 0 1 112 600 cm /FlatW0x0 Do Q" in content
