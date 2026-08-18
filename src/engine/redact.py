@@ -63,7 +63,7 @@ from typing import NamedTuple
 import pikepdf
 from pikepdf import Name
 
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import walk_inheritable
 from engine.content_walk import (
@@ -1131,7 +1131,7 @@ def redact(file: str, output: str, regions: list[dict], font_dir: str = "") -> d
     """
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
 
     by_page: dict[int, list[dict]] = {}
     for region in regions:

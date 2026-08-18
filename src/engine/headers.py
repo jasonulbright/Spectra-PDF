@@ -35,7 +35,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Dictionary, Name
 
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_metrics import (
     GLYPH_HEIGHT_EM as _GLYPH_HEIGHT_EM,
     flatten_control_chars as _flatten_control_chars,
@@ -175,7 +175,7 @@ def add_header_footer(
 
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
 
     stamped = 0
     with pikepdf.open(file) as pdf:

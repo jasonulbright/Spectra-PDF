@@ -17,7 +17,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array
 
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 from engine.pdf_tree import walk_inheritable
 
@@ -79,7 +79,7 @@ def set_page_boxes(
 
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
 
     wanted = None if pages is None else {int(p) for p in pages}
 

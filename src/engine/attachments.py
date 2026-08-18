@@ -11,7 +11,7 @@ import mimetypes
 from pathlib import Path
 
 import pikepdf
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 
 
@@ -63,7 +63,7 @@ def add_attachment(
 
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
 
     with pikepdf.open(file) as pdf:
         if attach_name in pdf.attachments:
@@ -91,7 +91,7 @@ def remove_attachment(file: str, output: str, name: str) -> dict:
     """Delete an embedded file from the document."""
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
 
     with pikepdf.open(file) as pdf:
         if name not in pdf.attachments:

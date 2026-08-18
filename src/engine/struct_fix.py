@@ -18,6 +18,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Name
 
+from engine.inplace import is_same_file
 from engine.struct_audit import audit_tree, row_cells, tables
 from engine.struct_tree import _save, _set_table_attr, _SCOPES
 
@@ -65,7 +66,7 @@ def set_table_headers(
         raise ValueError("path must name a table, not the tree root")
 
     input_path, output_path = Path(file), Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         tree = audit_tree(pdf)
         if not tree["tagged"]:
