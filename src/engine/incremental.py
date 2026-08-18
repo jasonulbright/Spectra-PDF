@@ -18,18 +18,47 @@ revision carrying the delta. The signed byte range is untouched by
 construction; the module asserts the prefix property before replacing
 anything.
 
-Scope — what may differ between original and modified under the DocMDP P=3
-ceiling, plus page addition as permitted by ISO 32000 incremental updates:
+Two independent questions decide whether a delta lands, and they are NOT
+the same question (ISO 32000-2, 12.8.2.2.2: a validator verifies the byte
+range digest FIRST, then verifies that the modifications are permitted by
+the transform parameters):
 
-  - per-page /Annots membership, order, and annotation content (add,
-    modify, remove — appearance streams included),
-  - /AcroForm and field content (fill: /V, widget /AP//AS, NeedAppearances,
-    /DA//DR additions),
-  - page INSERTIONS (a wholly new page between preserved ones).
+  1. MECHANICS — can the delta be expressed as an append at all? That is
+     what the delta computation below answers.
+  2. PERMISSION — does the document's own certification allow a change of
+     that kind? That is what the ceiling answers, from Table 257.
 
-Anything else — page removal or reordering, content-stream or resource
-drift, encryption changes — refuses with ``applied=False`` and a reason;
-the caller falls back to the rewrite path it was already on. Document
+Nothing in the file format restricts what an incremental update may
+contain; a page addition is APPENDABLE always and PERMITTED by DocMDP
+never — Table 257's P=2 admits page-template instantiation as its only
+page-adding change, and no template machinery exists here (recorded gap:
+whether an arbitrary insertion could be expressed as an instantiation is
+not decided by the clause text). Emitting a preserved byte range under a
+certification that forbids the change would be a file our own verifier
+calls a policy violation, so such deltas REFUSE and the caller's rewrite
+stands.
+
+Delta classes (what the computation reports, and what the ceiling judges):
+
+  - ``annotations`` — per-page /Annots membership, order, and annotation
+    content (add, modify, remove — appearance streams included),
+  - ``form-fill`` — /AcroForm and field content (/V, widget /AP//AS,
+    NeedAppearances, /DA//DR additions),
+  - ``page-keys`` — a page's own /Rotate and box geometry,
+  - ``page-structure`` — page insertion, removal and reordering.
+
+Ceiling, per ISO 32000-2 Table 257 (clause 12.8.2.2): an uncertified
+(approval-signature-only) document has none — every class above is
+carried. A certification at /P 1 permits no change and refuses every
+class; /P 2 permits form filling and signing, so only ``form-fill``
+survives; /P 3 adds annotation creation, deletion and modification, so
+``annotations`` survives too. A certification whose /P is outside 1–3 is
+an unknown policy and permits nothing. Field locks (FieldMDP) keep their
+existing enforcement at the caller's decision table.
+
+Anything else — content-stream or resource drift, encryption changes,
+form structure changes — refuses with ``applied=False`` and a reason; the
+caller falls back to the rewrite path it was already on. Document
 metadata (/Info, XMP) is deliberately IGNORED rather than transplanted:
 incidental Producer/ModDate churn from a rebuild must neither block the
 transplant nor masquerade as a user edit.
@@ -56,19 +85,51 @@ import pikepdf
 from pyhanko.pdf_utils import generic
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 
-from .docmdp import certification_of_file
+from .docmdp import certification_of_file, certification_of_pdf
 from .fieldmdp import locked_fields, locks_of_file
+from .inplace import is_same_file
 from .validate import validate_pdf
 
 MAX_FIELD_DEPTH = 32
 _NUM_EPS = 1e-6
 
+# Page-dict keys the transplant reconciles onto the original page object:
+# /Rotate and the six page boundaries (ISO 32000-2 Table 31; boundary
+# semantics in 14.11.2). Each is a wholly appendable single-key change.
+_PAGE_CARRY = (
+    "/Rotate", "/MediaBox", "/CropBox", "/BleedBox", "/TrimBox", "/ArtBox",
+)
+# Of those, the ones Table 31 marks inheritable (7.7.3.4): omitting one from a
+# page dict does not remove its value, it exposes an ancestor's. /BleedBox,
+# /TrimBox and /ArtBox are not inheritable and default to /CropBox.
+_PAGE_INHERITABLE = frozenset({"/Rotate", "/MediaBox", "/CropBox"})
+# The page-tree back-pointer: never copied from a source page, and written
+# only by whichever code puts the page into a tree.
+_PAGE_PARENT = frozenset({"/Parent"})
 # Page-dict keys whose difference the transplant HANDLES (everything else
-# differing at page level refuses). /Annots is the delta itself.
-_PAGE_SKIP = frozenset({"/Annots"})
+# differing at page level refuses). /Annots is the annotation delta itself;
+# the carried keys are reconciled by _apply_page_key_delta.
+_PAGE_SKIP = frozenset({"/Annots", *_PAGE_CARRY})
 # Keys ignored when comparing stream dicts — encoding details of the same
 # decoded bytes.
 _STREAM_SKIP = frozenset({"/Length", "/Filter", "/DecodeParms"})
+
+#: What a computed delta can consist of. Ordered so a refusal names the same
+#: class for the same delta on every run.
+DELTA_CLASSES = ("form-fill", "annotations", "page-keys", "page-structure")
+
+#: ISO 32000-2 Table 257 (clause 12.8.2.2): /P 1 permits no change; /P 2
+#: permits filling in forms, instantiating page templates and signing; /P 3
+#: permits everything /P 2 does plus annotation creation, deletion and
+#: modification. Page-template instantiation is the only page-adding change
+#: any level admits and no template machinery exists in this product, so
+#: `page-structure` and `page-keys` appear in no row.
+_CERTIFIED_PERMITS: dict[str, frozenset[str]] = {
+    "none": frozenset(),
+    "form-fill": frozenset({"form-fill"}),
+    "annotate": frozenset({"form-fill", "annotations"}),
+    "unknown": frozenset(),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +300,38 @@ def signed_edit_decision(policy: dict, edit_class: str, fields=None, typed=None)
     return {"kind": "warn", "reason": "certified-" + key}
 
 
+def _ceiling_refusal(certification: dict, classes) -> dict | None:
+    """The certification's verdict on a computed delta, or None when it permits.
+
+    Consulted on the DELTA, not on the caller's intent: a rebuild that renames
+    nothing and moves nothing still carries whatever it carries, and Table 257
+    judges the change rather than the gesture that produced it. An uncertified
+    document has no ceiling — an approval signature records who signed what,
+    not what may follow it, which is why every append verifies clean there.
+
+    The reason names the certification level AND the class it forbids, so a
+    caller reports which policy stopped which change without re-deriving
+    either. It is a RESULT: the caller's rewrite path is still valid, and the
+    difference between "the format cannot express this" and "the author
+    forbade it" must stay visible to the surface that warns about it.
+    """
+    if not certification.get("certified"):
+        return None
+    level = certification.get("level")
+    named = level if level in _CERTIFIED_PERMITS and level != "unknown" else "unknown"
+    permitted = _CERTIFIED_PERMITS[named]
+    forbidden = [c for c in DELTA_CLASSES if c in classes and c not in permitted]
+    if not forbidden:
+        return None
+    return {
+        "applied": False,
+        "reason": f"certified-{named}-forbids-{forbidden[0]}",
+        "certification_level": named,
+        "delta_classes": [c for c in DELTA_CLASSES if c in classes],
+        "forbidden_classes": forbidden,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Structural bisimulation over pikepdf objects
 # ---------------------------------------------------------------------------
@@ -357,7 +450,15 @@ def _materialize(obj, writer: IncrementalPdfFileWriter, memo: dict, depth: int =
     return _materialize_direct(obj, writer, memo, depth)
 
 
-def _materialize_direct(obj, writer, memo, depth):
+def _materialize_direct(obj, writer, memo, depth, skip=frozenset()):
+    """``skip`` drops keys of THIS object before the walk descends.
+
+    A page dict's /Parent is the one entry that must never be followed: it
+    reaches the modified file's page tree, and from there every page and every
+    content stream in it, so a single inserted page would append a copy of the
+    whole document as objects nothing references. Deleting the key after the
+    fact does not undo the copy — it only hides it.
+    """
     if isinstance(obj, pikepdf.Stream):
         dict_data = {}
         for k in obj.stream_dict.keys():
@@ -373,6 +474,8 @@ def _materialize_direct(obj, writer, memo, depth):
     if isinstance(obj, pikepdf.Dictionary):
         out = generic.DictionaryObject()
         for k in obj.keys():
+            if str(k) in skip:
+                continue
             out[generic.pdf_name(str(k))] = _materialize(
                 obj.get(k), writer, memo, depth + 1
             )
@@ -400,11 +503,24 @@ def _writer_ref(objgen, writer):
     return generic.IndirectObject(objgen[0], objgen[1], writer)
 
 
+def _resolved(value):
+    """A writer-side value with any indirect reference followed.
+
+    ``DictionaryObject`` subclasses ``dict``, so ``.get`` hands back the RAW
+    entry while ``[]`` resolves it — a walk that uses ``.get`` and then tests
+    the result's type sees a reference where a dictionary is, and silently
+    stops.
+    """
+    return value.get_object() if isinstance(value, generic.IndirectObject) else value
+
+
 class _TransplantRefusal(Exception):
     """A delta outside the append-safe tier — reported, never raised out."""
 
 
-def _update_in_place(ref, orig_obj, mod_obj, writer, memo, depth: int = 0) -> bool:
+def _update_in_place(
+    ref, orig_obj, mod_obj, writer, memo, depth: int = 0, only=None
+) -> bool:
     """Reconcile ONE existing original object toward its modified twin,
     preserving every reference that did not change.
 
@@ -417,6 +533,14 @@ def _update_in_place(ref, orig_obj, mod_obj, writer, memo, depth: int = 0) -> bo
     into per-kid reconciliation (radio groups: parent /V + kid /AS both
     land as small in-place updates); only genuinely-new values materialize.
     Returns whether anything changed (and marks the update if so).
+
+    ``only`` confines BOTH halves — the write pass and the removal sweep — to
+    a named key set, which is how a page object is reconciled: its /Contents
+    and /Resources must stay refused, so the whole-dict form of this call
+    would be the wrong tool for it. ``mod_obj`` may then be a plain mapping
+    carrying the values to reach (an inherited page attribute has no entry in
+    the modified page's own dict, and the value that must land there is the
+    effective one, not the absent one).
     """
     if depth > MAX_FIELD_DEPTH:
         raise _TransplantRefusal("field nesting too deep to reconcile")
@@ -425,6 +549,8 @@ def _update_in_place(ref, orig_obj, mod_obj, writer, memo, depth: int = 0) -> bo
     for k in list(mod_obj.keys()):
         ks = str(k)
         if ks in ("/P", "/Parent"):
+            continue
+        if only is not None and ks not in only:
             continue
         orig_val = orig_obj.get(ks)
         mod_val = mod_obj.get(ks)
@@ -454,6 +580,8 @@ def _update_in_place(ref, orig_obj, mod_obj, writer, memo, depth: int = 0) -> bo
         - {str(k) for k in mod_obj.keys()}
         - {"/P", "/Parent"}
     )
+    if only is not None:
+        removed_keys &= set(only)
     for ks in removed_keys:
         if generic.pdf_name(ks) in live:
             del live[generic.pdf_name(ks)]
@@ -514,52 +642,254 @@ def _page_annots(page) -> list:
     return list(annots)
 
 
-def _match_pages(orig: pikepdf.Pdf, mod: pikepdf.Pdf):
-    """Two-pointer in-order matching of original pages into the modified
-    file (bisim excluding /Annots). Returns (pairs, insertions) where pairs
-    is [(orig_ix, mod_ix)] covering EVERY original page in order, and
-    insertions is [(after_orig_ix, mod_ix)] for pages new to the document
-    (after_orig_ix = -1 inserts before everything). Raises ValueError when
-    an original page has no match (removal/reorder/content drift)."""
-    pairs: list[tuple[int, int]] = []
-    insertions: list[tuple[int, int]] = []
-    mod_ix = 0
+def _inherited_page_key(page_obj, key: str):
+    """The value a page would take for ``key`` from its ANCESTORS alone.
+
+    Only meaningful for the keys Table 31 marks inheritable; for the rest the
+    answer is always None, which is what makes deleting one of them from a
+    page dict a complete expression of its removal.
+    """
+    if key not in _PAGE_INHERITABLE:
+        return None
+    node = page_obj.get("/Parent")
+    for _ in range(MAX_FIELD_DEPTH):
+        if not isinstance(node, pikepdf.Dictionary):
+            return None
+        value = node.get(key)
+        if value is not None:
+            return value
+        node = node.get("/Parent")
+    return None
+
+
+def _effective_page_key(page_obj, key: str):
+    """What ``key`` actually resolves to for this page (7.7.3.4).
+
+    qpdf pushes every inheritable attribute down onto the pages when it opens a
+    file, so through pikepdf this reduces to the page's own entry — measured,
+    and deliberately not depended on: the climb is what the clause says, and a
+    reader that stops flattening must not silently change the answer.
+    """
+    value = page_obj.get(key)
+    if value is not None:
+        return value
+    return _inherited_page_key(page_obj, key)
+
+
+def _writer_inherited_page_key(live_page, key: str):
+    """The same climb over the WRITER's graph — the file as it actually is.
+
+    The distinction is load-bearing: qpdf's flattening means the reader's model
+    can show a value on a page the file keeps on an ancestor, so a removal
+    judged against the reader alone would delete an entry that is not there and
+    leave the ancestor's value standing.
+    """
+    if key not in _PAGE_INHERITABLE:
+        return None
+    node = _resolved(live_page.get(generic.pdf_name("/Parent")))
+    for _ in range(MAX_FIELD_DEPTH):
+        if not isinstance(node, generic.DictionaryObject):
+            return None
+        value = node.get(generic.pdf_name(key))
+        if value is not None:
+            return _resolved(value)
+        node = _resolved(node.get(generic.pdf_name("/Parent")))
+    return None
+
+
+def _apply_page_key_delta(writer, page_ref, orig_page, mod_page, memo_mat) -> bool:
+    """Reconcile one page's /Rotate and box geometry toward the modified twin.
+
+    Compared by EFFECTIVE value, never by dict membership: a rebuild that
+    materializes an inherited /MediaBox onto the page, or hoists one off it,
+    changes the dict without changing the page, and either direction would
+    otherwise manufacture a delta that is not there.
+
+    Writing a value is always exact — an entry on the page overrides whatever
+    it would have inherited. REMOVING one is not: it is expressible only when
+    the page's own dict is where the value lives and no ancestor supplies
+    another, because this module never rewrites page-tree nodes. Otherwise it
+    refuses, rather than emit a page whose geometry is an ancestor's instead of
+    the default the edit asked for.
+    """
+    orig_obj = orig_page.obj
+    mod_obj = mod_page.obj
+    live = page_ref.get_object()
+    reach: dict[str, object] = {}
+    changed_keys: set[str] = set()
+    for key in _PAGE_CARRY:
+        eff_orig = _effective_page_key(orig_obj, key)
+        eff_mod = _effective_page_key(mod_obj, key)
+        if _bisim(eff_orig, eff_mod, set()):
+            continue
+        changed_keys.add(key)
+        if eff_mod is None:
+            if (
+                generic.pdf_name(key) not in live
+                or _writer_inherited_page_key(live, key) is not None
+            ):
+                raise _TransplantRefusal(
+                    f"page-key-removal-inherited-{key[1:].lower()}"
+                )
+            continue  # absent from `reach` — the removal sweep deletes it
+        reach[key] = eff_mod
+    if not changed_keys:
+        return False
+    return _update_in_place(
+        page_ref, orig_obj, reach, writer, memo_mat, only=changed_keys
+    )
+
+
+def _plan_pages(orig: pikepdf.Pdf, mod: pikepdf.Pdf) -> dict:
+    """Pair the original's pages with the modified file's and name the shape.
+
+    Pairing is structural (bisim over the page dict, excluding /Annots and the
+    carried geometry keys), positional first and then greedy, so an unchanged
+    document pairs index-for-index and a permutation still finds every page.
+
+    The plan is one of two kinds:
+
+    ``in-order``   every original page survives, in order; the only difference
+                   is pages the edit ADDED. This is the shipped shape, and its
+                   emission path is unchanged.
+    ``rebuild``    pages were removed, reordered, or both, so the page tree's
+                   /Kids is rewritten wholesale.
+
+    A page with no twin is ambiguous the moment the edit ALSO adds an unpaired
+    page: a rewritten page and a delete-plus-insert are the same two facts, and
+    nothing in the file distinguishes them. Content and resource drift is
+    exactly that case, and it refuses — the DocMDP transform exists to detect
+    that change, so carrying it would preserve a byte range over a document
+    that says something else.
+    """
+    n_orig = len(orig.pages)
     n_mod = len(mod.pages)
-    for orig_ix in range(len(orig.pages)):
-        found = None
-        probe = mod_ix
-        pending: list[int] = []
-        while probe < n_mod:
-            if _bisim(orig.pages[orig_ix].obj, mod.pages[probe].obj, set(), skip=_PAGE_SKIP):
-                found = probe
+    orig_objs = [orig.pages[i].obj for i in range(n_orig)]
+    mod_objs = [mod.pages[j].obj for j in range(n_mod)]
+
+    mod_of_orig: dict[int, int] = {}
+    taken: set[int] = set()
+    for i in range(min(n_orig, n_mod)):
+        if _bisim(orig_objs[i], mod_objs[i], set(), skip=_PAGE_SKIP):
+            mod_of_orig[i] = i
+            taken.add(i)
+    for i in range(n_orig):
+        if i in mod_of_orig:
+            continue
+        for j in range(n_mod):
+            if j in taken:
+                continue
+            if _bisim(orig_objs[i], mod_objs[j], set(), skip=_PAGE_SKIP):
+                mod_of_orig[i] = j
+                taken.add(j)
                 break
-            pending.append(probe)
-            probe += 1
-        if found is None:
-            raise ValueError(
-                f"Page {orig_ix + 1} of the signed original has no structural "
-                "match in the edited file (removed, reordered, or its content "
-                "changed) — that edit cannot be appended without invalidating"
-            )
-        for p in pending:
-            insertions.append((orig_ix - 1, p))
-        pairs.append((orig_ix, found))
-        mod_ix = found + 1
-    for p in range(mod_ix, n_mod):
-        insertions.append((len(orig.pages) - 1, p))
-    return pairs, insertions
+
+    removed = [i for i in range(n_orig) if i not in mod_of_orig]
+    fresh = [j for j in range(n_mod) if j not in taken]
+    if removed and fresh:
+        raise ValueError(
+            f"Page {removed[0] + 1} of the signed original has no structural "
+            "match in the edited file, which also adds unmatched pages — a "
+            "rewritten page cannot be told apart from a delete plus an insert, "
+            "so that edit cannot be appended without invalidating"
+        )
+
+    pairs = [(i, mod_of_orig[i]) for i in sorted(mod_of_orig)]
+    reordered = [m for _, m in pairs] != sorted(m for _, m in pairs)
+    classes: set[str] = set()
+    if removed or fresh or reordered:
+        classes.add("page-structure")
+
+    if not removed and not reordered:
+        insertions = [
+            (sum(1 for _, m in pairs if m < j) - 1, j) for j in fresh
+        ]
+        return {
+            "kind": "in-order", "pairs": pairs, "insertions": insertions,
+            "removed": [], "reordered": False, "classes": classes,
+        }
+
+    orig_of_mod = {m: o for o, m in pairs}
+    sequence = [
+        ("keep", orig_of_mod[j]) if j in orig_of_mod else ("new", j)
+        for j in range(n_mod)
+    ]
+    return {
+        "kind": "rebuild", "pairs": pairs, "insertions": [],
+        "sequence": sequence, "removed": removed, "reordered": reordered,
+        "classes": classes,
+    }
+
+
+def _rewrite_page_tree(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf,
+                       plan: dict, page_refs: dict, memo_mat) -> int:
+    """Write the reordered/pruned page sequence as one /Kids replacement.
+
+    An incremental update cannot delete an object, so a removal is expressed
+    the only way the format offers: the surviving pages are re-listed and the
+    dropped ones stop being reachable from the newest revision.
+
+    Every original page must hang off ONE page-tree node. Flattening a deeper
+    tree would orphan the intermediate nodes and with them the attributes
+    their descendants inherit (7.7.3.4) — the page geometry would change
+    silently — so a multi-parent tree refuses instead.
+    """
+    parents = set()
+    for orig_ix in range(len(orig.pages)):
+        parent = orig.pages[orig_ix].obj.get("/Parent")
+        if not isinstance(parent, pikepdf.Object) or not parent.is_indirect:
+            raise _TransplantRefusal("page-tree-parent-unresolvable")
+        parents.add(parent.objgen)
+    if len(parents) != 1:
+        raise _TransplantRefusal("page-tree-multi-parent")
+
+    parent_ref = _writer_ref(parents.pop(), writer)
+    parent_obj = parent_ref.get_object()
+
+    inserted = 0
+    kids = []
+    for kind, ix in plan["sequence"]:
+        if kind == "keep":
+            kids.append(page_refs[ix])
+            continue
+        page_obj = _materialize_direct(
+            mod.pages[ix].obj, writer, memo_mat, 0, skip=_PAGE_PARENT
+        )
+        page_obj[generic.pdf_name("/Parent")] = parent_ref
+        kids.append(writer.add_object(page_obj))
+        inserted += 1
+
+    delta = len(kids) - len(orig.pages)
+    parent_obj[generic.pdf_name("/Kids")] = generic.ArrayObject(kids)
+    writer.mark_update(parent_ref)
+    # /Count is the page count of a node's whole subtree, so a removal or an
+    # insertion moves it at every level up to the catalog — an unmarked
+    # ancestor would ship a count the newest revision contradicts.
+    node = parent_obj
+    while isinstance(node, generic.DictionaryObject):
+        node[generic.pdf_name("/Count")] = generic.NumberObject(
+            int(node[generic.pdf_name("/Count")]) + delta
+        )
+        writer.update_container(node)
+        node = _resolved(node.get(generic.pdf_name("/Parent")))
+    return inserted
 
 
 def _apply_annot_delta(
     writer, page_ref, orig_page, mod_page, memo_mat
-) -> tuple[bool, int, int, int]:
+) -> tuple[bool, int, int, int, set]:
     """Compute and apply one page's /Annots delta onto the writer.
 
-    Returns (changed, added, updated, removed). Kept annotations stay as
-    their ORIGINAL refs; /NM-matched changed ones reconcile IN PLACE via
+    Returns (changed, added, updated, removed, classes). Kept annotations stay
+    as their ORIGINAL refs; /NM-matched changed ones reconcile IN PLACE via
     _update_in_place (so /AcroForm references to the same widget object
     stay valid and back-pointers are never duplicated); new ones
-    materialize. Order follows the MODIFIED file (z-order is real)."""
+    materialize. Order follows the MODIFIED file (z-order is real).
+
+    A widget's presence in the array is a FORM fact, not an annotation one:
+    Table 257 admits filling at /P 2 while annotations wait for /P 3, so a
+    delta that only moves or adds widgets must not be reported as annotation
+    work and refused a level too early."""
     orig_annots = _page_annots(orig_page)
     mod_annots = _page_annots(mod_page)
 
@@ -576,6 +906,7 @@ def _apply_annot_delta(
                 by_field.setdefault(fname, []).append(i)
 
     added = updated = 0
+    classes: set[str] = set()
     new_refs = []
     new_is_orig_ref = []
     for m in mod_annots:
@@ -610,6 +941,7 @@ def _apply_annot_delta(
             new_refs.append(ref)
             new_is_orig_ref.append(False)
             added += 1
+            classes.add("form-fill" if _is_widget(m) else "annotations")
             continue
         kind, i = match
         used.add(i)
@@ -622,11 +954,13 @@ def _apply_annot_delta(
             new_is_orig_ref.append(False)
             if kind == "update":
                 updated += 1
+                classes.add("form-fill" if _is_widget(m) else "annotations")
             continue
         ref = _writer_ref(a.objgen, writer)
         if kind == "update":
             if _update_in_place(ref, a, m, writer, memo_mat):
                 updated += 1
+                classes.add("form-fill" if _is_widget(m) else "annotations")
         new_refs.append(ref)
         new_is_orig_ref.append(True)
 
@@ -638,6 +972,8 @@ def _apply_annot_delta(
             )
 
     removed = len(orig_annots) - len(used)
+    if removed:
+        classes.add("annotations")  # widget removal refused above
 
     same_sequence = (
         removed == 0
@@ -652,7 +988,15 @@ def _apply_annot_delta(
         page_obj = page_ref.get_object()
         page_obj[generic.pdf_name("/Annots")] = generic.ArrayObject(new_refs)
         writer.mark_update(page_ref)
-    return changed, added, updated, removed
+        if not classes:
+            # Membership and content both held; only the ORDER moved. Z-order
+            # among widgets alone is form work, and anything else on the page
+            # makes it annotation work.
+            widgets_only = all(_is_widget(a) for a in orig_annots) and all(
+                _is_widget(m) for m in mod_annots
+            )
+            classes.add("form-fill" if widgets_only else "annotations")
+    return changed, added, updated, removed, classes
 
 
 def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> int:
@@ -695,6 +1039,17 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
     mod_fields: dict[str, list] = {}
     walk(orig_acro.get("/Fields"), "", orig_fields)
     walk(mod_acro.get("/Fields"), "", mod_fields)
+
+    # The mirror of the addition refusal below, and the guard a page REMOVAL
+    # needs: dropping a page drops its widgets, and a revision that re-lists
+    # the surviving pages while /Fields still registers a field nothing draws
+    # leaves a phantom the rewrite path does not.
+    for name, origs in orig_fields.items():
+        if len(origs) > len(mod_fields.get(name, [])):
+            raise _TransplantRefusal(
+                f"the edit removed form field '{name}' — form structure "
+                "changes cannot be appended to a signed document"
+            )
 
     updated = 0
     for name, mods in mod_fields.items():
@@ -766,18 +1121,27 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
 
 
 def transplant_incremental(original: str, modified: str, output: str) -> dict:
-    """Append ``modified``'s annotate/fill/add-page delta onto ``original``.
+    """Append ``modified``'s annotate/fill/geometry/page-tree delta onto
+    ``original``.
 
     Returns {"applied": bool, ...counts} — applied=False carries a
     ``reason`` and writes NOTHING. On success ``output`` (which may equal
     ``modified`` but never ``original``) receives original-bytes + one
     appended revision; the byte-prefix property is asserted before the
     file lands (stage-and-swap, the pikepdf in-place discipline).
+
+    A success also reports ``delta_classes``, and a ceiling refusal reports
+    the certification level with the class it forbade: the two together are
+    what lets a caller say which policy stopped which change instead of
+    reporting a bare failure.
     """
     validate_pdf(original)
     validate_pdf(modified)
     out_path = Path(output)
-    if Path(original).resolve() == out_path.resolve():
+    # Sameness is the filesystem's: a hard link is one physical file under two
+    # spellings no resolution reconciles, and this refusal exists because the
+    # original's bytes are read AFTER the output is written to.
+    if is_same_file(original, output):
         raise ValueError("Refusing to overwrite the signed original in place")
 
     if not has_live_signatures(original):
@@ -815,50 +1179,74 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
                 return {"applied": False, "reason": "catalog-changed"}
 
             try:
-                pairs, insertions = _match_pages(orig, mod)
-                if any(after_ix < 0 for after_ix, _ in insertions):
-                    # pyHanko's insert_page has no before-first position on
-                    # a non-empty tree; a page prepended to a signed doc
-                    # falls back to the rewrite path (which invalidates —
-                    # the same choice every structural edit makes).
-                    return {"applied": False, "reason": "page-insert-at-start"}
+                plan = _plan_pages(orig, mod)
 
                 writer = IncrementalPdfFileWriter(io.BytesIO(orig_bytes))
                 memo_mat: dict = {}
 
-                pages_changed = added = updated = removed = 0
-                for orig_ix, mod_ix in pairs:
+                classes: set[str] = set(plan["classes"])
+                pages_changed = added = updated = removed = keys_updated = 0
+                page_refs: dict[int, object] = {}
+                for orig_ix, mod_ix in plan["pairs"]:
                     page_ref = writer.find_page_for_modification(orig_ix)[0]
-                    changed, a, u, r = _apply_annot_delta(
+                    page_refs[orig_ix] = page_ref
+                    changed, a, u, r, annot_classes = _apply_annot_delta(
                         writer, page_ref, orig.pages[orig_ix],
                         mod.pages[mod_ix], memo_mat,
                     )
+                    if _apply_page_key_delta(
+                        writer, page_ref, orig.pages[orig_ix],
+                        mod.pages[mod_ix], memo_mat,
+                    ):
+                        keys_updated += 1
+                        classes.add("page-keys")
+                        changed = True
                     if changed:
                         pages_changed += 1
                     added += a
                     updated += u
                     removed += r
+                    classes |= annot_classes
 
                 fields_updated = _acroform_delta(writer, orig, mod, memo_mat)
+                if fields_updated:
+                    classes.add("form-fill")
 
                 inserted = 0
-                # Reverse order keeps each `after` index valid against the
-                # original numbering while earlier insertions are pending.
-                for after_ix, mod_ix in sorted(insertions, reverse=True):
-                    page_obj = _materialize_direct(
-                        mod.pages[mod_ix].obj, writer, memo_mat, 0
+                if plan["kind"] == "rebuild":
+                    inserted = _rewrite_page_tree(
+                        writer, orig, mod, plan, page_refs, memo_mat
                     )
-                    # insert_page owns /Parent; a stale one from the source
-                    # would point into the MODIFIED file's tree.
-                    if generic.pdf_name("/Parent") in page_obj:
-                        del page_obj[generic.pdf_name("/Parent")]
-                    writer.insert_page(page_obj, after=after_ix)
-                    inserted += 1
+                else:
+                    # Reverse order keeps each `after` index valid against the
+                    # original numbering while earlier insertions are pending.
+                    # `after=-1` prepends into the root's /Kids — measured, not
+                    # assumed: the earlier before-first refusal read pyHanko's
+                    # "there are no pages yet" branch as a limitation it is not.
+                    for after_ix, mod_ix in sorted(plan["insertions"], reverse=True):
+                        # insert_page owns /Parent, and following the source's
+                        # would copy the modified file's whole page tree in.
+                        page_obj = _materialize_direct(
+                            mod.pages[mod_ix].obj, writer, memo_mat, 0,
+                            skip=_PAGE_PARENT,
+                        )
+                        writer.insert_page(page_obj, after=after_ix)
+                        inserted += 1
             except (ValueError, _TransplantRefusal) as e:
                 return {"applied": False, "reason": str(e)}
 
-            if not (pages_changed or fields_updated or inserted):
+            pages_removed = len(plan["removed"])
+            if not (pages_changed or fields_updated or inserted or pages_removed
+                    or plan["reordered"]):
                 return {"applied": False, "reason": "no-delta"}
+
+            # The ceiling, consulted on the FULL classified delta and before
+            # any bytes exist: the writer holds the revision in memory only,
+            # so a refusal here writes nothing and leaves the caller's rewrite
+            # path the sole author of the file.
+            refused = _ceiling_refusal(certification_of_pdf(orig), classes)
+            if refused is not None:
+                return refused
 
             buf = io.BytesIO()
             writer.write(buf)
@@ -897,7 +1285,11 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
         "annots_updated": updated,
         "annots_removed": removed,
         "fields_updated": fields_updated,
+        "page_keys_updated": keys_updated,
         "pages_inserted": inserted,
+        "pages_removed": pages_removed,
+        "pages_reordered": plan["reordered"],
+        "delta_classes": [c for c in DELTA_CLASSES if c in classes],
         "bytes_appended": len(result) - len(orig_bytes),
     }
 

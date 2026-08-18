@@ -401,15 +401,43 @@ def _fill_field(pdf):
 
 
 def _edited(tmp_dir, certified, kind, tag):
-    """The certified document plus one edit, landed as an appended revision."""
-    modified = _rewritten(
-        certified, os.path.join(tmp_dir, f"mod-{tag}.pdf"),
-        _add_square if kind == "annotate" else _fill_field,
-    )
+    """The certified document plus one edit, landed as an appended revision.
+
+    Written with the library's own incremental writer rather than through
+    ``transplant_incremental``. The transplant consults the certification and
+    REFUSES to author a revision Table 257 forbids — the rows below are about
+    what the diff policy SAYS of a revision that exists, so the revision is
+    made here instead of borrowing a door that now (correctly) closes.
+    ``test_the_transplant_refuses_to_author_a_forbidden_revision`` pins the
+    door itself.
+    """
     out = os.path.join(tmp_dir, f"edited-{tag}.pdf")
-    result = transplant_incremental(certified, modified, out)
-    assert result["applied"], result
-    return out
+
+    def annotate(writer):
+        page = _first_page(writer)
+        annot = generic.DictionaryObject({
+            generic.pdf_name("/Type"): generic.pdf_name("/Annot"),
+            generic.pdf_name("/Subtype"): generic.pdf_name("/Square"),
+            generic.pdf_name("/Rect"): generic.ArrayObject(
+                [generic.NumberObject(x) for x in (100, 300, 200, 360)]
+            ),
+            generic.pdf_name("/F"): generic.NumberObject(4),
+            generic.pdf_name("/C"): generic.ArrayObject(
+                [generic.NumberObject(1), generic.NumberObject(0),
+                 generic.NumberObject(0)]
+            ),
+        })
+        _append_to_annots(writer, page, writer.add_object(annot))
+
+    def fill(writer):
+        acro = writer.root[generic.pdf_name("/AcroForm")]
+        for raw in acro.raw_get(generic.pdf_name("/Fields")).get_object():
+            field = raw.get_object()
+            if field.get(generic.pdf_name("/FT")) == generic.pdf_name("/Tx"):
+                field[generic.pdf_name("/V")] = generic.pdf_string("filled")
+                writer.update_container(field)
+
+    return _appended(certified, out, annotate if kind == "annotate" else fill)
 
 
 _EXPECTED_UNDER_OURS = {
@@ -469,6 +497,34 @@ def test_a_forbidden_annotation_reports_a_violation_through_the_engine_door(tmp_
     assert verdict["signatures"][0]["policy_judged"] is True
     assert verdict["signatures"][0]["policy_ok"] is False
     assert verdict["summary"]["any_policy_violation"] is True
+
+
+@pytest.mark.parametrize("level,edit,expect_class", [
+    ("none", "fill", "form-fill"),
+    ("none", "annotate", "annotations"),
+    ("form-fill", "annotate", "annotations"),
+])
+def test_the_transplant_refuses_to_author_a_forbidden_revision(
+    tmp_dir, pki, level, edit, expect_class
+):
+    """The other half of the row above: the file that reports a violation is
+    one this product will not write.
+
+    Until the ceiling landed the transplant authored these revisions happily —
+    it consulted only whether the document was signed, never what its
+    certification permitted — so the app preserved a byte range while emitting
+    a document its own verifier calls illegally modified.
+    """
+    certified, _ = _certify(tmp_dir, pki, level, name=f"refuse-{level}-{edit}.pdf")
+    modified = _rewritten(
+        certified, os.path.join(tmp_dir, f"refuse-mod-{level}-{edit}.pdf"),
+        _add_square if edit == "annotate" else _fill_field,
+    )
+    out = os.path.join(tmp_dir, f"refuse-out-{level}-{edit}.pdf")
+    result = transplant_incremental(certified, modified, out)
+    assert result["applied"] is False
+    assert result["reason"] == f"certified-{level}-forbids-{expect_class}"
+    assert not os.path.exists(out)
 
 
 # ── where the annotation rule must NOT reach ───────────────────────────────
@@ -659,9 +715,8 @@ def _kids_form_pdf(path):
     return path
 
 
-@pytest.mark.parametrize("level,expected_ok", [("none", False), ("form-fill", True),
-                                               ("annotate", True)])
-def test_filling_a_kids_widget_is_judged_as_form_filling(tmp_dir, pki, level, expected_ok):
+@pytest.mark.parametrize("level", ["form-fill", "annotate"])
+def test_filling_a_kids_widget_is_judged_as_form_filling(tmp_dir, pki, level):
     from engine.forms import fill_form_fields
 
     src = _kids_form_pdf(os.path.join(tmp_dir, f"kids-{level}.pdf"))
@@ -670,7 +725,35 @@ def test_filling_a_kids_widget_is_judged_as_form_filling(tmp_dir, pki, level, ex
     fill_form_fields(certified, out, {"applicant": "filled"})
     _field, ok, modification = _rows_under(out, DIFF_POLICY)[0]
     assert modification == "FORM_FILLING"
-    assert ok is expected_ok
+    assert ok is True
+
+
+def test_filling_a_no_changes_certified_document_is_not_preserved(tmp_dir, pki):
+    """The "none" row of the case above, inverted when the ceiling landed.
+
+    It used to assert that a fill against a /P 1 document lands as an appended
+    revision judged FORM_FILLING and NOT permitted — an intact byte range on a
+    file the author's own policy calls illegally modified. That is the
+    behaviour the ceiling exists to stop: the fill now falls back to the
+    ordinary rewrite, which breaks the signature visibly instead.
+    """
+    from engine.forms import fill_form_fields
+
+    src = _kids_form_pdf(os.path.join(tmp_dir, "kids-none.pdf"))
+    certified, _ = _certify(tmp_dir, pki, "none", name="kids-cert-none.pdf", src=src)
+    out = os.path.join(tmp_dir, "kids-filled-none.pdf")
+    result = fill_form_fields(certified, out, {"applicant": "filled"})
+    # The op reports preservation only when it happened (the missing REASON is
+    # the renderer-side gap, not this one).
+    assert "signatures_preserved" not in result
+    assert result["filled"] == 1
+    verdict = verify_signatures(out)
+    assert verdict["signatures"][0]["intact"] is False
+    assert transplant_incremental(
+        certified,
+        _rewritten(certified, os.path.join(tmp_dir, "kids-none-mod.pdf"), _fill_field),
+        os.path.join(tmp_dir, "kids-none-tp.pdf"),
+    )["reason"] == "certified-none-forbids-form-fill"
 
 
 def test_a_kids_widget_moved_while_filling_is_not_cleared(tmp_dir, pki):
