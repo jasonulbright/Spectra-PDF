@@ -16,7 +16,8 @@ from . import budget
 from .acroform import reattach_forms_file
 from .inplace import is_same_file, staged_write_if
 from .validate import validate_pdf
-from .widget_faces import harvest_appearances, stage_appearances_file
+from .widget_faces import (harvest_appearances, regenerate_appearances_file,
+                           stage_appearances_file)
 
 
 # Ghostscript quality presets map to -dPDFSETTINGS values
@@ -47,6 +48,7 @@ def compress(
     mrc_lang: str = "eng",
     jbig2_path: str = "",
     tesseract_path: str = "",
+    font_dir: str = "",
 ) -> dict:
     """Compress a PDF using Ghostscript, or MRC-layer its scanned pages.
 
@@ -68,6 +70,10 @@ def compress(
         jbig2_path: explicit path to the vendored JBIG2 encoder (mrc only).
         tesseract_path: explicit path to the vendored recognizer; REQUIRED
             when `mrc_verify_text` is on (mrc only).
+        font_dir: The bundled fallback faces, for regenerating the appearance
+            of a widget that carries none whose value is outside the form
+            font's encoding. Without it such a field keeps the appearance the
+            producer synthesizes; every other field is unaffected.
 
     The `mrc_*` arguments are ignored on the Ghostscript branch, and `dpi` is
     meaningless on the MRC branch (its whole point is that the stencil stays
@@ -113,7 +119,12 @@ def compress(
         # than being flattened into the page and put back alongside it
         # (engine/widget_faces.py). Nothing is staged for a document with no
         # form field, which leaves the producer's input the original file.
-        staged, boxes = stage_appearances_file(input_path, scratch)
+        # A widget carrying no appearance is given one first, so the producer
+        # has none to synthesize and flatten; everything downstream that reads
+        # content reads that copy, or the reattach restores a bare widget.
+        forms_input = regenerate_appearances_file(input_path, scratch,
+                                                  font_dir) or input_path
+        staged, boxes = stage_appearances_file(forms_input, scratch)
         with staged_write_if(same_file, output_path) as gs_target:
             cmd = [
                 gs_path,
@@ -141,7 +152,7 @@ def compress(
                 cmd.append(f"-dPDFSETTINGS={preset}")
 
             cmd.extend([f"-sOutputFile={str(gs_target).replace('%', '%%')}",  # % = gs template char (distill review)
-                        str(staged if staged is not None else input_path)])
+                        str(staged if staged is not None else forms_input)])
 
             # The budget is DERIVED from the input, never the fixed 300 s that
             # a 50 MB scan died on. stdin isolation lives in budget.run — gs
@@ -150,7 +161,7 @@ def compress(
             if result.returncode != 0:
                 raise RuntimeError(f"Ghostscript failed: {result.stderr}")
 
-            forms_source = harvest_appearances(gs_target, input_path, scratch,
+            forms_source = harvest_appearances(gs_target, forms_input, scratch,
                                                boxes, info["pages"])
 
             # gs pdfwrite drops /AcroForm and every widget annotation — compressing a
@@ -159,7 +170,7 @@ def compress(
             # carrying the appearances the producer just recompressed. Against the
             # STAGED file when in-place — the original must still be readable here.
             reattach_forms_file(forms_source if forms_source is not None
-                                else input_path, gs_target)
+                                else forms_input, gs_target)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
