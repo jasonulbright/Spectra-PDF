@@ -18,6 +18,7 @@ from pikepdf import Array, Dictionary, String
 from engine.form_authoring import (
     FieldSpecError,
     add_form_fields,
+    author_choice_appearance,
     author_vertical_field_font,
     existing_field_names,
 )
@@ -834,3 +835,342 @@ def test_the_door_needs_a_field_to_bind(tmp_path):
             script="japanese",
             font_dir=FONTS_DIR,
         )
+
+
+# ── Option-list appearances ───────────────────────────────────────────────
+#
+# A list box's appearance draws EVERY label, so it is the one field kind whose
+# appearance depends on arbitrary authored text. What is pinned here is the
+# per-ROW font choice (the standard face where WinAnsi covers the row, an
+# embedded subset where it does not), the exact geometry of the rows and of
+# the selection band, and that the whole surface has ONE author: the create,
+# the door and the fill all produce the same stream for the same state.
+
+MIXED_OPTIONS = ["US", "한국", "Ελλάδα", "Россия"]
+
+
+def _list_spec(name="country", options=None, rect=None, **extra):
+    return {
+        "name": name,
+        "type": "optionlist",
+        "page_index": 0,
+        "rect": rect or [72, 600, 300, 700],
+        "options": list(options if options is not None else MIXED_OPTIONS),
+        **extra,
+    }
+
+
+def _widget_of(pdf, name):
+    for entry in pdf.Root["/AcroForm"]["/Fields"]:
+        if str(entry.get("/T")) == name:
+            return entry
+    raise AssertionError(f"no field named {name}")
+
+
+def _list_appearance(path, name="country"):
+    """(stream bytes, {resource: (subtype, base font, embedded program keys)}).
+
+    Written for a MIXED appearance: a simple Type 1 face and a composite
+    subset side by side in one /Resources, which `_font_facts` (composite
+    only) cannot describe.
+    """
+    with pikepdf.open(path) as pdf:
+        ap = _widget_of(pdf, name)["/AP"]["/N"]
+        fonts = ap["/Resources"]["/Font"]
+        facts = {}
+        for key in fonts.keys():
+            font = fonts[key]
+            descendants = font.get("/DescendantFonts")
+            descriptor = (
+                descendants[0]["/FontDescriptor"]
+                if descendants is not None
+                else font.get("/FontDescriptor")
+            )
+            programs = (
+                {str(k) for k in descriptor.keys()} & set(_FONT_PROGRAM_KEYS)
+                if descriptor is not None
+                else set()
+            )
+            facts[str(key)] = (str(font["/Subtype"]), str(font["/BaseFont"]), programs)
+        return bytes(ap.read_bytes()), facts
+
+
+def _set_da(path, name, da):
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        _widget_of(pdf, name)["/DA"] = String(da)
+        pdf.save(path)
+
+
+def _set_key(path, name, key, value):
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        _widget_of(pdf, name)[key] = value
+        pdf.save(path)
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+def test_a_mixed_option_list_draws_every_row_through_its_own_font(tmp_path):
+    src = _blank(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+    add_form_fields(src, out, [_list_spec()], font_dir=FONTS_DIR)
+    _set_da(out, "country", "/Helv 10 Tf 0 g")
+    drawn = str(tmp_path / "drawn.pdf")
+    result = author_choice_appearance(out, drawn, fields=["country"], font_dir=FONTS_DIR)
+    assert result["fields"] == ["country"]
+    assert result["embedded"] == ["country"]
+
+    body, fonts = _list_appearance(drawn)
+    text = body.decode("latin-1")
+    # The WinAnsi row draws as a literal string through the standard face; the
+    # three others draw as hex through embedded subsets. Four Tm operators mean
+    # four rows: nothing was dropped for being unencodable.
+    assert "(US) Tj" in text
+    assert text.count(" Tm") == 4
+    assert fonts["/Helv"] == ("/Type1", "/Helvetica", set())
+    embedded = {key: facts for key, facts in fonts.items() if key != "/Helv"}
+    assert len(embedded) == 2, embedded
+    # Korean resolves to the bundled CJK face, whose CFF outlines embed as
+    # /FontFile3; Greek and Cyrillic share ONE Liberation subset (/FontFile2),
+    # because the ladder resolves a face per ROW and both rows land on it.
+    by_face = {facts[1].split("+")[-1]: facts for facts in embedded.values()}
+    assert by_face["NotoSansCJKsc"][0] == "/Type0"
+    assert by_face["NotoSansCJKsc"][2] == {"/FontFile3"}
+    assert by_face["LiberationSans"][0] == "/Type0"
+    assert by_face["LiberationSans"][2] == {"/FontFile2"}
+    # One resource per FACE, not per row.
+    assert len(fonts) == 3
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+def test_the_rows_of_an_option_list_sit_one_line_pitch_apart(tmp_path):
+    # Exact geometry, at an explicit /DA size so nothing depends on the
+    # auto-size scan. Box 228x100 with a 1 pt border and 1 pt of list padding:
+    # the rows live in the 96 pt band 2 pt in, the first baseline one row pitch
+    # down from its top (2 + 96 - 11.1), and each row after it drops another.
+    # The pitch is the GLYPH height plus its leading (9.25 * 1.2), which is
+    # what the provider that drew this surface before the door uses — a list
+    # whose rows moved when it was selected would be the visible defect.
+    src = _blank(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+    add_form_fields(src, out, [_list_spec()], font_dir=FONTS_DIR)
+    _set_da(out, "country", "/Helv 10 Tf 0 g")
+    drawn = str(tmp_path / "drawn.pdf")
+    author_choice_appearance(out, drawn, fields=["country"], font_dir=FONTS_DIR)
+    text = _list_appearance(drawn)[0].decode("latin-1")
+    assert "1 0 0 1 2 86.9 Tm" in text
+    assert "1 0 0 1 2 75.8 Tm" in text
+    assert "1 0 0 1 2 64.7 Tm" in text
+    assert "1 0 0 1 2 53.6 Tm" in text
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+def test_the_selection_band_covers_exactly_one_row_pitch(tmp_path):
+    # /I names rows 0 and 2. A band runs the full row pitch, so two adjacent
+    # selected rows highlight continuously: row i's band bottom is its baseline
+    # less the descent and half the leading (86.9 - 2.07 - 0.925), and it runs
+    # the full width inside the border.
+    src = _blank(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+    add_form_fields(src, out, [_list_spec()], font_dir=FONTS_DIR)
+    _set_da(out, "country", "/Helv 10 Tf 0 g")
+    _set_key(out, "country", "/I", Array([0, 2]))
+    drawn = str(tmp_path / "drawn.pdf")
+    author_choice_appearance(out, drawn, fields=["country"], font_dir=FONTS_DIR)
+    text = _list_appearance(drawn)[0].decode("latin-1")
+    assert "0.6 0.7569 0.8549 rg\n1 83.91 227 11.1 re f" in text
+    assert "0.6 0.7569 0.8549 rg\n1 61.71 227 11.1 re f" in text
+    assert text.count(" re f") == 3  # two bands plus the /MK background
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+def test_the_top_index_scrolls_the_rows_and_the_band_together(tmp_path):
+    # /TI is the row drawn at the TOP, so rows above it are scrolled out and
+    # the selection moves up with them: row 2 selected under /TI 2 bands the
+    # FIRST drawn row, at the first row's own position.
+    src = _blank(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+    add_form_fields(src, out, [_list_spec()], font_dir=FONTS_DIR)
+    _set_da(out, "country", "/Helv 10 Tf 0 g")
+    _set_key(out, "country", "/TI", 2)
+    _set_key(out, "country", "/I", Array([2]))
+    drawn = str(tmp_path / "drawn.pdf")
+    author_choice_appearance(out, drawn, fields=["country"], font_dir=FONTS_DIR)
+    text = _list_appearance(drawn)[0].decode("latin-1")
+    assert text.count(" Tm") == 2  # only the last two options are drawn
+    assert "(US) Tj" not in text  # the first row scrolled out
+    assert "1 0 0 1 2 86.9 Tm" in text  # row 2 now sits at the top
+    assert "1 83.91 227 11.1 re f" in text
+
+
+def test_a_winansi_only_list_needs_no_embedded_font(tmp_path):
+    # The boundary in the other direction: a list the standard face covers
+    # draws through it alone, with no font program anywhere in the appearance,
+    # and with no font tree in reach.
+    src = _blank(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+    add_form_fields(src, out, [_list_spec(options=["Red", "Grün", "Café"])])
+    drawn = str(tmp_path / "drawn.pdf")
+    result = author_choice_appearance(out, drawn, fields=["country"], font_dir="")
+    assert result["embedded"] == []
+    body, fonts = _list_appearance(drawn)
+    assert set(fonts) == {"/Helv"}
+    assert fonts["/Helv"][2] == set()
+    assert body.decode("latin-1").count(" Tm") == 3
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+@pytest.mark.parametrize("script", sorted(VERTICAL_PINS))
+def test_a_vertical_option_list_draws_its_options_as_columns(tmp_path, script):
+    # T31 x F28: a list bound to a vertical font routes its rows through the
+    # vertical emitter — the SAME door, one call, not a second one.
+    labels = [VERTICAL_VALUES[script][0], "US"]
+    src = _blank(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+    add_form_fields(
+        src,
+        out,
+        [
+            _list_spec(
+                options=labels,
+                rect=[400, 400, 500, 700],
+                writing_mode="vertical",
+                script=script,
+            )
+        ],
+        font_dir=FONTS_DIR,
+    )
+    resource = VERTICAL_PINS[script][0]
+    assert _field_da(out, "country") == f"/{resource} 0 Tf 0 g"
+    _set_key(out, "country", "/I", Array([0]))
+    drawn = str(tmp_path / "drawn.pdf")
+    author_choice_appearance(out, drawn, fields=["country"], font_dir=FONTS_DIR)
+    body, fonts = _list_appearance(drawn)
+    text = body.decode("latin-1")
+    # The vertical emitter names ONE resource, and it embeds its own subset —
+    # the /DR collection font the field's /DA names carries no program.
+    assert set(fonts) == {"/TxV"}
+    assert fonts["/TxV"][2], "the vertical appearance embeds its own subset"
+    assert text.count(" Tm") == 2
+    assert "0.6 0.7569 0.8549 rg" in text  # the selected column is banded
+
+
+def test_the_choice_door_reports_every_problem_and_writes_nothing(tmp_path):
+    src = _blank(tmp_path / "in.pdf")
+    created = str(tmp_path / "created.pdf")
+    out = str(tmp_path / "out.pdf")
+    add_form_fields(
+        src,
+        created,
+        [
+            _list_spec(options=["Red", "Blue"]),
+            _text("note"),
+            {
+                "name": "pick",
+                "type": "dropdown",
+                "page_index": 0,
+                "rect": [72, 500, 300, 524],
+                "options": ["a", "b"],
+            },
+        ],
+    )
+    with pytest.raises(FieldSpecError) as exc:
+        author_choice_appearance(
+            created, out, fields=["country", "note", "pick", "ghost"], font_dir=FONTS_DIR
+        )
+    problems = exc.value.problems
+    assert len(problems) == 3
+    assert any("note: a text field draws no list of options" in p for p in problems)
+    assert any("pick: a dropdown field draws no list of options" in p for p in problems)
+    assert any("ghost: this document has no form field" in p for p in problems)
+    assert not pathlib.Path(out).exists()
+
+
+def test_the_choice_door_needs_a_field_to_draw(tmp_path):
+    src = _blank(tmp_path / "in.pdf")
+    created = str(tmp_path / "created.pdf")
+    add_form_fields(src, created, [_list_spec(options=["Red", "Blue"])])
+    with pytest.raises(ValueError, match="Name the option lists"):
+        author_choice_appearance(
+            created, str(tmp_path / "out.pdf"), fields=[], font_dir=FONTS_DIR
+        )
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+def test_a_list_beyond_winansi_refuses_by_name_without_a_font_tree(tmp_path):
+    # The degenerate case the capability keeps a named refusal for: the rows
+    # need an embedded face and there is no font tree to resolve one from.
+    src = _blank(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+    with pytest.raises(FieldSpecError) as exc:
+        add_form_fields(src, out, [_list_spec()], font_dir="")
+    assert any("no font is available to embed" in p for p in exc.value.problems)
+    assert not pathlib.Path(out).exists()
+
+    created = str(tmp_path / "created.pdf")
+    add_form_fields(src, created, [_list_spec()], font_dir=FONTS_DIR)
+    with pytest.raises(FieldSpecError) as exc:
+        author_choice_appearance(created, out, fields=["country"], font_dir="")
+    assert any("no fallback font is available" in p for p in exc.value.problems)
+    assert not pathlib.Path(out).exists()
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+def test_selecting_an_option_redraws_the_whole_list(tmp_path):
+    # The fill side, measured rather than assumed: selecting a row regenerates
+    # the SAME all-rows appearance the door authored, with the band moved. One
+    # author for the surface — author, select, reopen, exact bytes.
+    src = _blank(tmp_path / "in.pdf")
+    created = str(tmp_path / "created.pdf")
+    add_form_fields(src, created, [_list_spec()], font_dir=FONTS_DIR)
+    _set_da(created, "country", "/Helv 10 Tf 0 g")
+    drawn = str(tmp_path / "drawn.pdf")
+    author_choice_appearance(created, drawn, fields=["country"], font_dir=FONTS_DIR)
+
+    filled = str(tmp_path / "filled.pdf")
+    fill_form_fields(drawn, filled, {"country": ["한국"]}, font_dir=FONTS_DIR)
+    assert _fields(filled)["country"]["value"] == ["한국"]
+    before = _list_appearance(drawn)[0].decode("latin-1")
+    after = _list_appearance(filled)[0].decode("latin-1")
+    # Every row still draws, and the ONLY difference is the band.
+    assert after.count(" Tm") == 4
+    assert "(US) Tj" in after
+    # Row 1 of four: its baseline is 75.8, and the band bottom is that less
+    # the descent and half the leading.
+    assert "1 72.81 227 11.1 re f" in after
+    assert after.replace("0.6 0.7569 0.8549 rg\n1 72.81 227 11.1 re f\n", "") == before
+
+    # Selecting again from the FILLED file lands the band on the other row and
+    # nothing else moves — the appearance is a function of the state, so a
+    # second pass cannot accumulate.
+    again = str(tmp_path / "again.pdf")
+    fill_form_fields(filled, again, {"country": ["Ελλάδα"]}, font_dir=FONTS_DIR)
+    text = _list_appearance(again)[0].decode("latin-1")
+    assert text.count(" re f") == 2  # one band plus the background
+    assert "1 61.71 227 11.1 re f" in text
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+def test_the_created_list_and_the_door_agree_byte_for_byte(tmp_path):
+    # Two authors of one surface drift the moment nothing compares them: the
+    # create path draws the list itself, and running the door over the result
+    # changes nothing.
+    src = _blank(tmp_path / "in.pdf")
+    created = str(tmp_path / "created.pdf")
+    add_form_fields(src, created, [_list_spec()], font_dir=FONTS_DIR)
+    drawn = str(tmp_path / "drawn.pdf")
+    author_choice_appearance(created, drawn, fields=["country"], font_dir=FONTS_DIR)
+    assert _list_appearance(drawn)[0] == _list_appearance(created)[0]
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+def test_a_clear_leaves_the_rows_drawn_and_removes_only_the_band(tmp_path):
+    src = _blank(tmp_path / "in.pdf")
+    created = str(tmp_path / "created.pdf")
+    add_form_fields(src, created, [_list_spec()], font_dir=FONTS_DIR)
+    _set_da(created, "country", "/Helv 10 Tf 0 g")
+    drawn = str(tmp_path / "drawn.pdf")
+    author_choice_appearance(created, drawn, fields=["country"], font_dir=FONTS_DIR)
+    filled = str(tmp_path / "filled.pdf")
+    fill_form_fields(drawn, filled, {"country": ["한국"]}, font_dir=FONTS_DIR)
+    cleared = str(tmp_path / "cleared.pdf")
+    fill_form_fields(filled, cleared, {"country": []}, font_dir=FONTS_DIR)
+    assert _list_appearance(cleared)[0] == _list_appearance(drawn)[0]

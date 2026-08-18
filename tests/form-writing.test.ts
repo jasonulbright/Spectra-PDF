@@ -4,8 +4,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   FIELD_SCRIPTS,
+  choiceAppearanceFields,
   effectiveFieldWriting,
   fieldWritingParams,
+  labelsLeaveWinAnsi,
+  needsChoiceAppearance,
   verticalFontCalls,
   writesTextRun,
 } from '../src/renderer/lib/form-writing';
@@ -177,5 +180,123 @@ describe('verticalFontCalls', () => {
     expect(
       verticalFontCalls([spec({ name: '   ', writingMode: 'vertical', script: 'japanese' })]),
     ).toEqual([]);
+  });
+});
+
+describe('labelsLeaveWinAnsi', () => {
+  it('is false for every label the standard font has a code for', () => {
+    // Each of these is OUTSIDE ASCII and INSIDE WinAnsi, so a codePoint > 0x7F
+    // test would route work to the engine that pdf-lib draws without complaint.
+    expect(
+      labelsLeaveWinAnsi(['Café', '“Quoted” ‘x’', 'a—b', '€100', '• item', '™', 'Ærø', 'plain']),
+    ).toBe(false);
+  });
+
+  it('is true as soon as one label leaves it', () => {
+    expect(labelsLeaveWinAnsi(['US', '한국'])).toBe(true);
+    expect(labelsLeaveWinAnsi(['Да'])).toBe(true);
+    // Inside the BMP, outside WinAnsi, and visually a hyphen: the minus sign
+    // is the case a "looks Latin" eyeball test would wave through.
+    expect(labelsLeaveWinAnsi(['− 5'])).toBe(true);
+  });
+
+  it('reads an astral character as ONE code point, as the encoder does', () => {
+    // A charCodeAt loop would see two surrogate halves (U+D83D, U+DE00), and
+    // neither half is what the encoder is asked to encode.
+    expect(labelsLeaveWinAnsi(['a\u{1F600}b'])).toBe(true);
+  });
+
+  it('is false for no labels at all', () => {
+    expect(labelsLeaveWinAnsi([])).toBe(false);
+    expect(labelsLeaveWinAnsi([''])).toBe(false);
+  });
+});
+
+describe('needsChoiceAppearance', () => {
+  const list = (over: Partial<NewFieldSpec>): NewFieldSpec =>
+    spec({ name: 'country', type: 'optionlist', options: ['US'], ...over });
+
+  it('is false for a horizontal option list the standard font covers', () => {
+    // The byte-identity boundary: this batch stays the single pdf-lib write.
+    expect(needsChoiceAppearance(list({ options: ['US', 'Café', '€100'] }))).toBe(false);
+  });
+
+  it('is true when a label leaves WinAnsi', () => {
+    expect(needsChoiceAppearance(list({ options: ['US', '한국'] }))).toBe(true);
+  });
+
+  it('is true for a VERTICAL option list whatever its labels are', () => {
+    // pdf-lib cannot author a CID-keyed font at all, so a column's rows are
+    // the engine's to draw even when every one of them is Latin.
+    expect(
+      needsChoiceAppearance(
+        list({ options: ['US', 'JP'], writingMode: 'vertical', script: 'japanese' }),
+      ),
+    ).toBe(true);
+  });
+
+  it('is false for every other field kind, whatever its options say', () => {
+    // A dropdown draws only its selected value and a new field has none; a
+    // radio option draws a mark. Neither reaches the label encoder.
+    expect(needsChoiceAppearance(spec({ name: 'd', type: 'dropdown', options: ['한국'] }))).toBe(
+      false,
+    );
+    expect(needsChoiceAppearance(spec({ name: 'r', type: 'radio', options: ['가나'] }))).toBe(
+      false,
+    );
+    expect(needsChoiceAppearance(spec({ name: 't', type: 'text' }))).toBe(false);
+  });
+
+  it('reads the option OBJECT form, not only bare strings', () => {
+    expect(
+      needsChoiceAppearance(
+        list({ options: [{ label: 'US', rect: RECT }, { label: '한국', rect: RECT }] }),
+      ),
+    ).toBe(true);
+  });
+
+  it('ignores an option whose label is only whitespace', () => {
+    // The create drops it, so a predicate that counted it would send the
+    // engine a field whose rows it would not draw.
+    expect(needsChoiceAppearance(list({ options: ['US', '   '] }))).toBe(false);
+  });
+});
+
+describe('choiceAppearanceFields', () => {
+  const list = (name: string, over: Partial<NewFieldSpec> = {}): NewFieldSpec =>
+    spec({ name, type: 'optionlist', options: ['US'], ...over });
+
+  it('asks for NOTHING when no spec in the batch needs the door', () => {
+    expect(choiceAppearanceFields([])).toEqual([]);
+    expect(choiceAppearanceFields([list('a'), spec({ name: 'b' })])).toEqual([]);
+  });
+
+  it('gathers every list that needs it into ONE call', () => {
+    // The door takes a list and every call re-saves the whole document, so
+    // three lists are one rewrite rather than three.
+    expect(
+      choiceAppearanceFields([
+        list('a', { options: ['한국'] }),
+        spec({ name: 'plain' }),
+        list('b', { options: ['Ελλάδα'] }),
+        list('c', { options: ['US'], writingMode: 'vertical', script: 'korean' }),
+      ]),
+    ).toEqual(['a', 'b', 'c']);
+  });
+
+  it('leaves the WinAnsi lists of a mixed batch out', () => {
+    expect(
+      choiceAppearanceFields([list('covered', { options: ['Café'] }), list('mixed', { options: ['Да'] })]),
+    ).toEqual(['mixed']);
+  });
+
+  it('sends the field name the write used — trimmed', () => {
+    expect(choiceAppearanceFields([list('  country  ', { options: ['한국'] })])).toEqual([
+      'country',
+    ]);
+  });
+
+  it('skips a nameless spec rather than asking for a field with no name', () => {
+    expect(choiceAppearanceFields([list('   ', { options: ['한국'] })])).toEqual([]);
   });
 });

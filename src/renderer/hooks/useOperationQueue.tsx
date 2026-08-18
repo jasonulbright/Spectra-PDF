@@ -75,6 +75,7 @@ export const FRIENDLY_NAMES: Record<string, string> = {
   render_separations: 'Render Separations',
   set_field_lock: 'Set Field Lock',
   author_vertical_field_font: 'Set Field Direction',
+  author_choice_appearance: 'Draw Option List',
   set_document_js: 'Edit Document JavaScript',
   set_initial_view: 'Set Initial View',
   set_advanced_properties: 'Set Document Properties',

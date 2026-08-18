@@ -5,7 +5,14 @@
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { PDFDocument } from 'pdf-lib';
+import {
+  PDFDict,
+  PDFDocument,
+  PDFName,
+  PDFRawStream,
+  PDFStream,
+  decodePDFRawStream,
+} from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { FieldSpecError, addFormField, addFormFields } from '../src/renderer/lib/form-authoring';
 import { readFormFields, fillFormFields } from './helpers/pdflib-forms';
@@ -25,6 +32,21 @@ async function blankPdf(pages = 1): Promise<Uint8Array> {
 async function fieldMap(bytes: Uint8Array) {
   const { fields } = await readFormFields(bytes);
   return new Map(fields.map((f) => [f.name, f]));
+}
+
+/** A field's widget /AP /N content stream, decoded — with the font resource
+ * names appended, so a test can say which face the appearance draws through
+ * as well as what it draws. */
+async function appearanceOf(bytes: Uint8Array, name: string): Promise<string> {
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  const widget = doc.getForm().getField(name).acroField.getWidgets()[0];
+  const normal = widget.getAppearances()?.normal;
+  if (!(normal instanceof PDFStream)) throw new Error(`no /AP /N stream for ${name}`);
+  const fonts = (normal.dict.lookupMaybe(PDFName.of('Resources'), PDFDict) ?? undefined)
+    ?.lookupMaybe(PDFName.of('Font'), PDFDict);
+  const named = (fonts?.keys() ?? []).map((k) => k.toString()).join(' ');
+  const body = decodePDFRawStream(normal as PDFRawStream).decode();
+  return `${Array.from(body, (b) => String.fromCharCode(b)).join('')}\n% fonts: ${named}`;
 }
 
 describe('addFormField', () => {
@@ -467,39 +489,56 @@ describe('addFormFields', () => {
   });
 
   // The option-list appearance lays out EVERY label, so the create runs each
-  // one through the standard font's WinAnsi encoder. Before the refusal below
-  // that encoder threw its own internal message from inside pdf-lib's
-  // appearance provider, mid-batch, with part of the document already written.
-  // The boundary is the encoder's own table, not "non-ASCII": everything
-  // WinAnsi has a code for still creates.
-  it('refuses an option list whose labels leave WinAnsi, naming the characters', async () => {
+  // one through the standard font's WinAnsi encoder — which throws its own
+  // internal message from inside pdf-lib's appearance provider, mid-batch,
+  // with part of the document already written. The labels used to be refused
+  // here to keep that throw off the user; now they CREATE, with the widget's
+  // appearance suppressed to the box alone and the engine door authoring the
+  // rows. The boundary predicate survives as the door-routing one, so the
+  // cases that used to name the refusal now prove the field lands.
+  it('creates an option list whose labels leave WinAnsi, drawing the box alone', async () => {
     const base = await blankPdf();
-    const cases: [string, string[], string][] = [
-      ['cjk', ['가나', 'plain'], '"가" (U+AC00), "나" (U+B098)'],
-      ['cyrillic', ['Да', 'plain'], '"Д" (U+0414), "а" (U+0430)'],
-      // A code point above the BMP: the check iterates by CODE POINT exactly
-      // as the encoder does, so this is ONE character, not two surrogate
-      // halves (U+D83D, U+DE00) — the reading a charCodeAt loop would give.
-      ['astral', ['a\u{1F600}b'], '"\u{1F600}" (U+1F600)'],
+    const cases: [string, string[]][] = [
+      ['cjk', ['가나', 'plain']],
+      ['cyrillic', ['Да', 'plain']],
+      // A code point above the BMP: the routing predicate iterates by CODE
+      // POINT exactly as the encoder does, so this is ONE character, not two
+      // surrogate halves (U+D83D, U+DE00) — the reading a charCodeAt loop
+      // would give, which would land this batch in the throwing provider.
+      ['astral', ['a\u{1F600}b']],
       // Inside the BMP, outside WinAnsi, and visually a hyphen: the minus sign
       // is the case a "looks Latin" eyeball test would wave through.
-      ['minus', ['− 5'], '"−" (U+2212)'],
+      ['minus', ['− 5']],
     ];
-    for (const [label, options, expected] of cases) {
-      let caught: unknown;
-      try {
-        await addFormFields(base, [
-          { name: label, type: 'optionlist', pageIndex: 0, rect: [50, 500, 250, 560], options },
-        ]);
-      } catch (e) {
-        caught = e;
-      }
-      expect(caught, label).toBeInstanceOf(FieldSpecError);
-      expect((caught as FieldSpecError).problems.map((p) => p.key), label).toEqual([
-        'refusal.field.optionListWinAnsi',
+    for (const [label, options] of cases) {
+      const bytes = await addFormFields(base, [
+        { name: label, type: 'optionlist', pageIndex: 0, rect: [50, 500, 250, 560], options },
       ]);
-      expect((caught as FieldSpecError).problems[0].vars, label).toEqual({ chars: expected });
+      const m = await fieldMap(bytes);
+      expect(m.get(label), label).toMatchObject({ type: 'optionlist', options });
+      // The appearance is the box and nothing else — no text object at all
+      // reached the encoder, and the engine door draws the rows next.
+      const drawn = await appearanceOf(bytes, label);
+      expect(drawn, label).not.toMatch(/BT|Tj|TJ/);
+      expect(drawn, label).toMatch(/\bB\b/); // the box is filled and stroked
     }
+  });
+
+  it('keeps the pdf-lib appearance for an option list WinAnsi covers', async () => {
+    // The byte-identity boundary in the other direction: a covered list is the
+    // single pdf-lib write it has always been, rows drawn by its own provider.
+    const bytes = await addFormFields(await blankPdf(), [
+      {
+        name: 'covered',
+        type: 'optionlist',
+        pageIndex: 0,
+        rect: [50, 500, 250, 560],
+        options: ['Red', 'Grün', 'Café'],
+      },
+    ]);
+    const drawn = await appearanceOf(bytes, 'covered');
+    expect(drawn).toMatch(/Tj/);
+    expect(drawn).toContain('/Helvetica');
   });
 
   it('creates an option list from every label WinAnsi does cover', async () => {
@@ -539,28 +578,23 @@ describe('addFormFields', () => {
     expect(m.get('pick')).toMatchObject({ type: 'radio' });
   });
 
-  it('elides a long run of unencodable characters', async () => {
-    // Distinct characters, in first-seen order across the labels, capped: a
-    // label pasted from another script contributes one entry per character.
-    let caught: unknown;
-    try {
-      await addFormFields(await blankPdf(), [
-        {
-          name: 'many',
-          type: 'optionlist',
-          pageIndex: 0,
-          rect: [50, 400, 300, 560],
-          // Ten distinct Greek letters, the last two of them repeats.
-          options: ['ΑΒΓΔΕ', 'ΖΗΘΙΚΑΒ'],
-        },
-      ]);
-    } catch (e) {
-      caught = e;
-    }
-    const chars = (caught as FieldSpecError).problems[0].vars!.chars as string;
-    expect(chars.split(', ')).toHaveLength(9);
-    expect(chars.startsWith('"Α" (U+0391), "Β" (U+0392)')).toBe(true);
-    expect(chars.endsWith('"Θ" (U+0398), …')).toBe(true);
+  it('creates a list of many unencodable labels without touching the encoder', async () => {
+    // A label pasted from another script used to be refused character by
+    // character. It creates now; what still must not happen is the standard
+    // encoder seeing any of it, which it would do through `save()`'s dirty
+    // -field sweep if the box-only draw had not also marked the field clean.
+    const bytes = await addFormFields(await blankPdf(), [
+      {
+        name: 'many',
+        type: 'optionlist',
+        pageIndex: 0,
+        rect: [50, 400, 300, 560],
+        options: ['ΑΒΓΔΕ', 'ΖΗΘΙΚΑΒ'],
+      },
+    ]);
+    const m = await fieldMap(bytes);
+    expect(m.get('many')).toMatchObject({ type: 'optionlist', options: ['ΑΒΓΔΕ', 'ΖΗΘΙΚΑΒ'] });
+    expect(await appearanceOf(bytes, 'many')).not.toMatch(/BT/);
   });
 
   it('is what the single-field entry point calls', async () => {
