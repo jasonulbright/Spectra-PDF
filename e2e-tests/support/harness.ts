@@ -3048,3 +3048,18 @@ export async function tabDragTrack(point: PhysicalScreenPoint): Promise<string |
   );
   return result;
 }
+
+/**
+ * Make THIS window's tab-order flush report that the order never landed.
+ *
+ * The one way to produce a peer that does not acknowledge a quit: a window
+ * whose flush fails withholds its receipt rather than acknowledging over an
+ * order the far side is not holding. Every renderer this suite can reach
+ * otherwise answers, which is why the abort half of the quit gate has no other
+ * driving surface.
+ */
+export async function breakTabOrderPublish(): Promise<void> {
+  await browser.execute(function () {
+    (window as any).__SPECTRA_TEST__.breakTabOrderPublish();
+  });
+}
