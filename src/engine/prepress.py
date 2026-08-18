@@ -163,6 +163,22 @@ def _validate_dest_profile(dest_profile: str, gs_path: str) -> None:
 # goes through the producer, and is REPORTED — as is one whose bracket did not
 # survive, which costs the plate and never the colour, because the staged
 # shading paints exactly what the transform would have painted.
+#
+# The walk reaches page content, the Form XObjects and tiling patterns under
+# it, and annotation APPEARANCE streams: the producer colour-converts an `/AP`
+# exactly as it converts page content, so a colorant gradient in one is
+# rasterized in the same way (measured). Every appearance is claimed and no
+# annotation is exempt, because the producer exempts none:
+#   - the FLAGS decide nothing. ISO 32000-2 12.5.3 makes bit 2 (Hidden)
+#     suppress both display and print and bit 3 (Print) govern the rest, but
+#     the producer converts every appearance whatever they say (measured), so
+#     a flag-aware carve-out would leave it free to destroy the plates it
+#     skipped. A document's ink inventory is not a rendering question.
+#   - every FACE is rewritten — `/N`, `/R`, `/D` and the appearance states.
+#   - an annotation the producer DROPS is flattened into the page content it
+#     came from (measured), so its bracket travels there and its plate is
+#     recovered at the page tier; a subtype the walk skipped would lose that
+#     copy to a process raster instead.
 
 _MARK_TAG = Name("/SpectraShading")
 _MARK_ID = "/SpectraId"
@@ -206,18 +222,20 @@ def _needs_no_transform(alt) -> bool:
     return isinstance(alt, pikepdf.Name) and str(alt) == "/DeviceCMYK"
 
 
-def _carve_targets(pdf):
+def _carve_targets(pdf, annotations: bool):
     """(the shadings the carve-out claims, the colorants it cannot).
 
     The order is the resource walk's, and it is what names them: the same
     document walked again yields the same identifiers, which is how the
-    restore pass finds the objects the staging pass rewrote.
+    restore pass finds the objects the staging pass rewrote. The walk's reach
+    is therefore part of that identity — staging and restore ask for the same
+    `annotations`.
     """
     from .ink_manager import _shading_dicts, shading_skip_reason
 
     targets: list = []
     rasterized: set = set()
-    for shading in _shading_dicts(pdf, annotations=False):
+    for shading in _shading_dicts(pdf, annotations):
         try:
             colorspace = shading.get("/ColorSpace")
             entry = _colorant_alternate(colorspace)
@@ -354,7 +372,7 @@ def _bracket_owner(pdf, owner, ids) -> None:
         owner["/Contents"] = pdf.make_stream(data)
 
 
-def _stage_carve_out(source: Path, scratch: Path):
+def _stage_carve_out(source: Path, scratch: Path, annotations: bool):
     """(the staged input or None, {ident: colorants}, the rasterized colorants).
 
     None means nothing was staged and the conversion runs on the original.
@@ -362,7 +380,7 @@ def _stage_carve_out(source: Path, scratch: Path):
     from .ink_manager import _content_owners
 
     with pikepdf.open(str(source)) as pdf:
-        targets, rasterized = _carve_targets(pdf)
+        targets, rasterized = _carve_targets(pdf, annotations)
         staged = _apply_staging(pdf, targets)
         rasterized.update(name for item in targets if item.ident not in staged
                           for name in item.colorants)
@@ -370,7 +388,7 @@ def _stage_carve_out(source: Path, scratch: Path):
             return None, {}, sorted(rasterized)
         ids = {item.staged_function: item.ident for item in targets
                if item.ident in staged}
-        for owner in _content_owners(pdf, annotations=False):
+        for owner in _content_owners(pdf, annotations):
             _bracket_owner(pdf, owner, ids)
         path = scratch / "staged.pdf"
         pdf.save(str(path))
@@ -459,7 +477,8 @@ def _swap_owner(pdf, owner, by_ident, swapped) -> None:
                 del properties[key]
 
 
-def _restore_carve_out(output: Path, source: Path, idents: set) -> set:
+def _restore_carve_out(output: Path, source: Path, idents: set,
+                       annotations: bool) -> set:
     """Put every staged shading's colorant space back on the converted file.
 
     Returns the idents that were found. One that was not costs its plate and
@@ -472,7 +491,7 @@ def _restore_carve_out(output: Path, source: Path, idents: set) -> set:
     if not idents:
         return swapped
     with pikepdf.open(str(source)) as src:
-        targets, _rasterized = _carve_targets(src)
+        targets, _rasterized = _carve_targets(src, annotations)
         by_ident = {item.ident: item for item in targets if item.ident in idents}
         if set(by_ident) != set(idents):
             return swapped
@@ -480,22 +499,184 @@ def _restore_carve_out(output: Path, source: Path, idents: set) -> set:
             for item in by_ident.values():
                 item.colorspace = converted.copy_foreign(item.colorspace)
                 item.function = converted.copy_foreign(item.function)
-            for owner in _content_owners(converted, annotations=False):
+            for owner in _content_owners(converted, annotations):
                 _swap_owner(converted, owner, by_ident, swapped)
             if swapped:
                 converted.save(str(output))
     return swapped
 
 
-def _after_restore(output: Path, source: Path, claimed: dict, rasterized: list) -> list:
+def _after_restore(output: Path, source: Path, claimed: dict, rasterized: list,
+                   annotations: bool) -> list:
     """Restore the claimed shadings, and name whatever the restore could not."""
     if not claimed:
         return rasterized
-    missing = set(claimed) - _restore_carve_out(output, source, set(claimed))
+    missing = set(claimed) - _restore_carve_out(output, source, set(claimed),
+                                                annotations)
     if not missing:
         return rasterized
     return sorted(set(rasterized) | {name for ident in missing
                                      for name in claimed[ident]})
+
+
+# ── the appearance's pattern space ─────────────────────────────────────────
+#
+# A pattern matrix maps pattern space to the DEFAULT user space of the content
+# stream the pattern is a resource of (ISO 32000-2 8.7.2) — for an annotation
+# appearance, that stream's own space, never the page's. The producer writes an
+# appearance's CONTENT in a scaled space but its pattern matrices in the page's,
+# so a gradient inside an appearance collapses to a flat band and a tiling
+# pattern lands at the wrong step (both measured, and neither is about colour: a
+# DeviceCMYK gradient with nothing to convert breaks the same way).
+#
+# The two are reconciled by making the appearance's default space BE the page's:
+# 12.5.5's appearance-to-Rect map is baked into the content as a leading `cm`,
+# the `/BBox` becomes the `/Rect` and the `/Matrix` the identity. Every paint
+# lands exactly where it did, and the pattern matrices then mean what the
+# producer wrote them to mean. Only an appearance that actually paints through
+# a pattern is touched — nothing else reads a stream's default space.
+
+_IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+
+def _compose(inner, outer):
+    """`inner` then `outer`, in the row-vector convention PDF matrices use."""
+    a, b, c, d, e, f = inner
+    p, q, r, s, t, u = outer
+    return (a * p + b * r, a * q + b * s,
+            c * p + d * r, c * q + d * s,
+            e * p + f * r + t, e * q + f * s + u)
+
+
+def _matrix_of(obj, key: str):
+    """A six-number matrix entry, or the identity when there is none."""
+    try:
+        entry = obj.get(key)
+        if entry is None:
+            return _IDENTITY
+        values = [float(v) for v in entry]
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return tuple(values) if len(values) == 6 else None
+
+
+def _box_of(obj, key: str):
+    """A rectangle as (x0, y0, x1, y1) with the corners in order."""
+    try:
+        values = [float(v) for v in obj.get(key)]
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if len(values) != 4:
+        return None
+    return (min(values[0], values[2]), min(values[1], values[3]),
+            max(values[0], values[2]), max(values[1], values[3]))
+
+
+def _appearance_matrix(stream, rect):
+    """12.5.5's appearance-to-Rect matrix, or None when it does not exist.
+
+    The form matrix transforms the bounding box, that box's own bounding box is
+    mapped onto the annotation rectangle, and the two compose. A degenerate box
+    has no such map, which is what the standard's own algorithm says about it.
+    """
+    bbox = _box_of(stream, "/BBox")
+    matrix = _matrix_of(stream, "/Matrix")
+    if bbox is None or matrix is None or rect is None:
+        return None
+    corners = [_compose((1, 0, 0, 1, x, y), matrix)[4:]
+               for x in (bbox[0], bbox[2]) for y in (bbox[1], bbox[3])]
+    xs = [point[0] for point in corners]
+    ys = [point[1] for point in corners]
+    width, height = max(xs) - min(xs), max(ys) - min(ys)
+    if width <= 0 or height <= 0 or rect[2] - rect[0] <= 0 or rect[3] - rect[1] <= 0:
+        return None
+    sx = (rect[2] - rect[0]) / width
+    sy = (rect[3] - rect[1]) / height
+    fit = (sx, 0.0, 0.0, sy, rect[0] - min(xs) * sx, rect[1] - min(ys) * sy)
+    return _compose(matrix, fit)
+
+
+def _real(value: float) -> str:
+    text = f"{value:.10f}".rstrip("0").rstrip(".")
+    return "0" if text in ("", "-", "-0") else text
+
+
+def _paints_through_pattern(stream, depth: int = 0) -> bool:
+    """Whether this appearance reaches a `/Pattern` resource at any depth."""
+    if depth > 8:
+        return False
+    try:
+        resources = stream.get("/Resources")
+        if resources is None:
+            return False
+        patterns = resources.get("/Pattern")
+        if isinstance(patterns, pikepdf.Dictionary) and len(patterns) > 0:
+            return True
+        xobjects = resources.get("/XObject")
+        if not isinstance(xobjects, pikepdf.Dictionary):
+            return False
+        for key in list(xobjects.keys()):
+            entry = xobjects[key]
+            if (isinstance(entry, pikepdf.Stream)
+                    and str(entry.get("/Subtype")) == "/Form"
+                    and _paints_through_pattern(entry, depth + 1)):
+                return True
+    except Exception:  # noqa: BLE001 — an unreadable appearance is left alone
+        return False
+    return False
+
+
+def _appearance_streams(pdf) -> list:
+    """[(appearance stream, its annotation rectangle)], the unambiguous ones.
+
+    One stream worn by two annotations has two rectangles and so no single
+    default space to be rebased into; it keeps the one the producer gave it.
+    """
+    rects: dict = {}
+    streams: dict = {}
+    for page in pdf.pages:
+        for annot in list(page.obj.get("/Annots") or []):
+            try:
+                rect = _box_of(annot, "/Rect")
+                appearance = annot.get("/AP")
+            except Exception:  # noqa: BLE001
+                continue
+            if rect is None or appearance is None:
+                continue
+            faces: list = []
+            for key in list(appearance.keys()):
+                entry = appearance[key]
+                if isinstance(entry, pikepdf.Stream):
+                    faces.append(entry)
+                elif isinstance(entry, pikepdf.Dictionary):
+                    faces.extend(entry[state] for state in list(entry.keys()))
+            for face in faces:
+                if not isinstance(face, pikepdf.Stream):
+                    continue
+                ident = face.objgen if face.is_indirect else id(face)
+                streams.setdefault(ident, face)
+                rects.setdefault(ident, set()).add(rect)
+    return [(streams[ident], next(iter(seen)))
+            for ident, seen in rects.items() if len(seen) == 1]
+
+
+def _rebase_appearances(output: Path) -> None:
+    """Re-express every pattern-painting appearance in the page's own space."""
+    with pikepdf.open(str(output), allow_overwriting_input=True) as pdf:
+        rebased = False
+        for stream, rect in _appearance_streams(pdf):
+            if not _paints_through_pattern(stream):
+                continue
+            matrix = _appearance_matrix(stream, rect)
+            if matrix is None:
+                continue
+            prefix = ("q " + " ".join(_real(v) for v in matrix) + " cm\n").encode("ascii")
+            stream.write(prefix + bytes(stream.read_bytes()) + b"\nQ")
+            stream["/BBox"] = pikepdf.Array(list(rect))
+            stream["/Matrix"] = pikepdf.Array(list(_IDENTITY))
+            rebased = True
+        if rebased:
+            pdf.save(str(output))
 
 
 def _ink_names(path: Path) -> list:
@@ -596,9 +777,12 @@ def convert_cmyk(
     source_inks = _ink_names(input_path)
     scratch = Path(tempfile.mkdtemp(prefix="spectra-prepress-"))
     try:
-        staged, claimed, rasterized = _stage_carve_out(input_path, scratch)
+        staged, claimed, rasterized = _stage_carve_out(input_path, scratch,
+                                                       annotations=True)
         result = run(staged if staged is not None else input_path)
-        rasterized = _after_restore(output_path, input_path, claimed, rasterized)
+        rasterized = _after_restore(output_path, input_path, claimed, rasterized,
+                                    annotations=True)
+        _rebase_appearances(output_path)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
@@ -817,9 +1001,17 @@ def convert_pdfx(
                 raise RuntimeError(f"Ghostscript PDF/X conversion failed: {outcome.stderr}")
             return outcome
 
-        staged, claimed, rasterized = _stage_carve_out(input_path, scratch)
+        # No appearance is staged here: the conformance policy removes every
+        # annotation on the page — every subtype, at every level (measured) —
+        # so a staged appearance is staged into an object the producer then
+        # deletes, and the restore would report a rasterization that did not
+        # happen on top of the annotation loss the report already names.
+        staged, claimed, rasterized = _stage_carve_out(input_path, scratch,
+                                                       annotations=False)
         result = run(staged if staged is not None else input_path)
-        rasterized = _after_restore(output_path, input_path, claimed, rasterized)
+        rasterized = _after_restore(output_path, input_path, claimed, rasterized,
+                                    annotations=False)
+        _rebase_appearances(output_path)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
