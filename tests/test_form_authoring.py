@@ -1174,3 +1174,153 @@ def test_a_clear_leaves_the_rows_drawn_and_removes_only_the_band(tmp_path):
     cleared = str(tmp_path / "cleared.pdf")
     fill_form_fields(filled, cleared, {"country": []}, font_dir=FONTS_DIR)
     assert _list_appearance(cleared)[0] == _list_appearance(drawn)[0]
+
+
+# ── Option-list direction and rotation ────────────────────────────────────
+
+#: Two labels whose logical texts share their words but not their order, so
+#: each resolves a DIFFERENT base direction (rules P2/P3, first strong
+#: character). Grouping them by font for embedding must not group them by
+#: direction: they are separate paragraphs.
+LTR_BASE_LABEL = "Test שלום"
+RTL_BASE_LABEL = "שלום עולם Test"
+
+
+def _tounicode_map(font) -> dict:
+    """{code: text} from a font's /ToUnicode — the map any consumer reads the
+    drawn codes back through."""
+    tou = font.get("/ToUnicode")
+    if tou is None:
+        return {}
+    text = bytes(tou.read_bytes()).decode("latin-1")
+    out = {}
+    for block in re.findall(r"beginbfchar(.*?)endbfchar", text, re.S):
+        for src, dst in re.findall(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", block):
+            out[int(src, 16)] = bytes.fromhex(dst).decode("utf-16-be")
+    for block in re.findall(r"beginbfrange(.*?)endbfrange", text, re.S):
+        for lo, hi, dst in re.findall(
+            r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", block
+        ):
+            start = int(dst, 16)
+            for offset, code in enumerate(range(int(lo, 16), int(hi, 16) + 1)):
+                out[code] = chr(start + offset)
+    return out
+
+
+def _drawn_rows(path, name="country") -> list[str]:
+    """Each row of a list box's appearance as the text it VISUALLY draws,
+    left to right — the codes in the order they are shown, decoded."""
+    body, _facts = _list_appearance(path, name)
+    with pikepdf.open(path) as pdf:
+        fonts = _widget_of(pdf, name)["/AP"]["/N"]["/Resources"]["/Font"]
+        table = {}
+        for key in fonts.keys():
+            table.update(_tounicode_map(fonts[key]))
+    rows = []
+    for show in re.findall(rb"Tm\n(.*?) TJ", body):
+        rows.append("".join(table[int(h, 16)] for h in re.findall(rb"<(....)>", show)))
+    return rows
+
+
+@pytest.mark.skipif(not _HAS_CJK, reason="bundled CJK face not provisioned")
+def test_each_option_label_resolves_its_own_base_direction(tmp_path):
+    # INVERTED: every label sharing a font was concatenated into ONE bidi
+    # body, so one base direction laid out all of them and a label whose own
+    # first strong character disagreed came back in its neighbour's order.
+    src = _blank(tmp_path / "in.pdf")
+    out = str(tmp_path / "out.pdf")
+    add_form_fields(
+        src, out, [_list_spec(options=[LTR_BASE_LABEL, RTL_BASE_LABEL])],
+        font_dir=FONTS_DIR,
+    )
+    drawn = str(tmp_path / "drawn.pdf")
+    author_choice_appearance(out, drawn, fields=["country"], font_dir=FONTS_DIR)
+    # One subset for both rows — the embedding grouping is unchanged.
+    body, fonts = _list_appearance(drawn)
+    assert set(fonts) == {"/TxU0"}
+    # An LTR-base label puts its Latin word first and reverses its Hebrew
+    # one; an RTL-base label puts its Latin word LAST in logical order and
+    # first on the page, with both Hebrew words after it.
+    assert _drawn_rows(drawn) == ["Test םולש", "Test םלוע םולש"]
+    # What the shared base produced: the Hebrew run stayed leftmost because
+    # the FIRST label's direction had already decided the whole body's.
+    assert _drawn_rows(drawn)[1] != "םלוע םולש Test"
+
+
+def _set_mk_rotation(path, name, degrees):
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        widget = _widget_of(pdf, name)
+        mk = widget.get("/MK")
+        if mk is None:
+            widget["/MK"] = Dictionary()
+            mk = widget["/MK"]
+        mk["/R"] = degrees
+        pdf.save(path)
+
+
+#: A 40 x 100 list box, so a quarter turn is unmistakable in the numbers.
+TALL_RECT = [72, 600, 112, 700]
+
+#: {/MK /R: (/BBox, /Matrix)}. The frame is the rect with its axes swapped
+#: for a quarter turn, and the matrix is the pure rotation that turns that
+#: frame back onto the rect — no translation, because ISO 32000-2 12.5.5
+#: maps the transformed /BBox onto /Rect.
+ROTATION_PINS = {
+    90: ([0, 0, 100, 40], [0, 1, -1, 0, 0, 0]),
+    180: ([0, 0, 40, 100], [-1, 0, 0, -1, 0, 0]),
+    270: ([0, 0, 100, 40], [0, -1, 1, 0, 0, 0]),
+}
+
+
+def _drawn_rotated(tmp_path, degrees):
+    src = _blank(tmp_path / f"in{degrees}.pdf")
+    created = str(tmp_path / f"created{degrees}.pdf")
+    add_form_fields(
+        src, created, [_list_spec(options=["Red", "Blue"], rect=TALL_RECT)]
+    )
+    _set_da(created, "country", "/Helv 10 Tf 0 g")
+    if degrees:
+        _set_mk_rotation(created, "country", degrees)
+    drawn = str(tmp_path / f"drawn{degrees}.pdf")
+    author_choice_appearance(created, drawn, fields=["country"], font_dir="")
+    return drawn
+
+
+@pytest.mark.parametrize("degrees", sorted(ROTATION_PINS))
+def test_a_turned_list_box_keeps_its_quarter_turn(tmp_path, degrees):
+    # INVERTED: the emitter always wrote the raw rect as its /BBox with no
+    # /Matrix, so a widget carrying /MK /R came back upright — the rows ran
+    # across a box the document had turned on its side.
+    drawn = _drawn_rotated(tmp_path, degrees)
+    want_bbox, want_matrix = ROTATION_PINS[degrees]
+    with pikepdf.open(drawn) as pdf:
+        ap = _widget_of(pdf, "country")["/AP"]["/N"]
+        assert [float(v) for v in ap["/BBox"]] == want_bbox
+        assert [float(v) for v in ap["/Matrix"]] == want_matrix
+        # The rows and the chrome are laid out in that frame, not the rect's.
+        text = bytes(ap.read_bytes()).decode("latin-1")
+        assert f"0 0 {want_bbox[2]} {want_bbox[3]} re f" in text
+
+
+def test_an_unturned_list_box_carries_no_matrix(tmp_path):
+    # The other half of the pin: an appearance with nothing to turn is what
+    # it was, down to the byte, with no /Matrix key it does not need.
+    drawn = _drawn_rotated(tmp_path, 0)
+    with pikepdf.open(drawn) as pdf:
+        ap = _widget_of(pdf, "country")["/AP"]["/N"]
+        assert [float(v) for v in ap["/BBox"]] == [0, 0, 40, 100]
+        assert "/Matrix" not in ap
+
+
+def test_flattening_a_turned_list_box_stamps_it_turned(tmp_path):
+    # /MK /R only means anything if what reads the appearance honours the
+    # /Matrix: the flatten maps the TRANSFORMED /BBox onto /Rect, so the
+    # stamp scales by one rather than squashing a 100x40 frame into 40x100.
+    drawn = _drawn_rotated(tmp_path, 90)
+    flat = str(tmp_path / "flat.pdf")
+    fill_form_fields(drawn, flat, {}, flatten=True)
+    with pikepdf.open(flat) as pdf:
+        content = bytes(pdf.pages[0].Contents.read_bytes()).decode("latin-1")
+    # Rect [72 600 112 700]; the transformed box is 40 x 100 already, so the
+    # stamp is a pure translation onto the rect's lower-left corner.
+    assert "q 1 0 0 1 112 600 cm /FlatW0x0 Do Q" in content

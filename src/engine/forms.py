@@ -37,6 +37,7 @@ from pikepdf import Dictionary, Name
 from engine import afcalc, fieldactions, formdata
 from engine.acroform import calculation_order_names
 from engine.afscript import recognize
+from engine.content_walk import IDENTITY, as_matrix, bbox_of_corners_under_matrix
 from engine.document_js import decode_js
 from engine.fieldmdp import lock_of_field_dict
 from engine.pdf_metrics import (
@@ -886,7 +887,11 @@ def _text_appearance(
     h = abs(rect[3] - rect[1])
     requested_font, size, color = _parse_da(da)
 
-    if _da_writes_vertically(pdf, da):
+    # Nothing drawn has no direction and nothing to embed, so a cleared field
+    # takes the ordinary empty appearance rather than the column builder,
+    # which refuses an empty subset by name. /DA still states the writing
+    # mode, so the next value to arrive comes back as columns.
+    if flatten_control_chars(value, keep_newline=False) and _da_writes_vertically(pdf, da):
         _vertical_appearance(
             pdf, widget, value, da, multiline, quadding, font_dir, w, h, size, color
         )
@@ -989,14 +994,7 @@ def _text_appearance(
         parts.append(emit(line))
     parts.extend([b"ET", b"Q", b"EMC"])
 
-    stream = pdf.make_stream(b"\n".join(parts))
-    stream["/Type"] = Name.XObject
-    stream["/Subtype"] = Name.Form
-    stream["/BBox"] = pikepdf.Array([0, 0, w, h])
-    stream["/Resources"] = Dictionary(Font=Dictionary({("/" + font_name): font_obj}))
-    widget["/AP"] = Dictionary(N=pdf.make_indirect(stream))
-    if "/AS" in widget:
-        del widget["/AS"]
+    _put_appearance(pdf, widget, parts, w, h, {("/" + font_name): font_obj})
     return substituted
 
 
@@ -1086,14 +1084,7 @@ def _vertical_appearance(
         parts.append(vt.show(column, size))
     parts.extend([b"ET", b"Q", b"EMC"])
 
-    stream = pdf.make_stream(b"\n".join(parts))
-    stream["/Type"] = Name.XObject
-    stream["/Subtype"] = Name.Form
-    stream["/BBox"] = pikepdf.Array([0, 0, w, h])
-    stream["/Resources"] = Dictionary(Font=Dictionary({"/TxV": vt.font_obj}))
-    widget["/AP"] = Dictionary(N=pdf.make_indirect(stream))
-    if "/AS" in widget:
-        del widget["/AS"]
+    _put_appearance(pdf, widget, parts, w, h, {"/TxV": vt.font_obj})
 
 
 # ── Option-list appearances ───────────────────────────────────────────────
@@ -1138,6 +1129,80 @@ def _border_width(widget) -> float:
         return float(bs.get("/W", 1)) if bs is not None else 1.0
     except (TypeError, ValueError):
         return 1.0
+
+
+def _widget_rotation(widget) -> int:
+    """The quarter turn a widget's /MK /R states, as degrees in [0, 360).
+
+    /R is the rotation of the appearance COUNTERCLOCKWISE relative to the
+    page and shall be a multiple of 90 (ISO 32000-2 12.5.6.19, Table 191);
+    anything else states no quarter turn and draws upright.
+    """
+    mk = widget.get("/MK")
+    if mk is None:
+        return 0
+    try:
+        degrees = float(mk.get("/R", 0))
+    except (TypeError, ValueError):
+        return 0
+    if degrees % 90:
+        return 0
+    return int(degrees % 360)
+
+
+def _rotated_frame(w: float, h: float, rotation: int) -> tuple[float, float]:
+    """The frame an appearance is LAID OUT in for a widget of `w` x `h`.
+
+    A quarter turn swaps the axes, so a 40x100 widget at /R 90 lays its
+    content out across 100x40 and the matrix turns that onto the rect.
+    """
+    return (h, w) if rotation in (90, 270) else (w, h)
+
+
+def _rotation_matrix(rotation: int) -> list[float] | None:
+    """The /Matrix turning a laid-out frame by /MK /R, or None for upright.
+
+    Pure rotation with no translation: a form XObject's transformed /BBox is
+    mapped onto /Rect (ISO 32000-2 12.5.5), so the offset the turn produces
+    is taken out there. None rather than the identity keeps an unrotated
+    appearance free of a key it does not need.
+    """
+    if rotation == 90:
+        return [0, 1, -1, 0, 0, 0]
+    if rotation == 180:
+        return [-1, 0, 0, -1, 0, 0]
+    if rotation == 270:
+        return [0, -1, 1, 0, 0, 0]
+    return None
+
+
+def _put_appearance(
+    pdf: pikepdf.Pdf,
+    widget,
+    parts: list[bytes],
+    w: float,
+    h: float,
+    resources: dict,
+    rotation: int = 0,
+) -> None:
+    """Install `parts` as the widget's /AP /N over a `w` x `h` frame.
+
+    The one place a widget appearance's /BBox and /Matrix are decided, so a
+    frame that turns cannot turn at one emitter and stay flat at another.
+    `w` and `h` are the frame the parts were laid out in, which for a
+    quarter-turned widget is the rect with its axes already swapped.
+    """
+    stream = pdf.make_stream(b"\n".join(parts))
+    stream["/Type"] = Name.XObject
+    stream["/Subtype"] = Name.Form
+    stream["/BBox"] = pikepdf.Array([0, 0, w, h])
+    matrix = _rotation_matrix(rotation)
+    if matrix is not None:
+        stream["/Matrix"] = pikepdf.Array(matrix)
+    stream["/Resources"] = Dictionary(Font=Dictionary(resources))
+    widget["/AP"] = Dictionary(N=pdf.make_indirect(stream))
+    if "/AS" in widget:
+        del widget["/AS"]
 
 
 def _mk_color(components, stroke: bool) -> bytes | None:
@@ -1242,10 +1307,15 @@ def _embedded_line_font(pdf: pikepdf.Pdf, name: str, face: str, text: str) -> _L
     carries every glyph those lines draw. A face whose text reorders or
     shapes goes through the shared right-to-left builder, exactly as the
     value path does.
+
+    Every line here is an independent PARAGRAPH — one option label says
+    nothing about the next — so the builder resolves a base direction per
+    line. Sharing one, as a wrapped value's lines do, lays a right-to-left
+    label out in whatever direction its neighbours happened to establish.
     """
     from engine import rtl_text
 
-    rtl = rtl_text.build(pdf, face, text)
+    rtl = rtl_text.build(pdf, face, text, per_line_base=True)
     if rtl is not None:
         return _LineFont(
             name, rtl.font_obj, rtl.width_em, lambda line, size, _r=rtl: _r.show(line, size)
@@ -1356,16 +1426,23 @@ def _choice_list_appearance(
     too wide for the box is clipped, which is what the row/selection
     correspondence means. The selection band is drawn under the clip so a
     row scrolled past the bottom cannot paint outside the widget.
+
+    Everything below lays out in the frame /MK /R turns onto the rect, so a
+    quarter-turned widget measures its rows against the swapped axes.
     """
     rect = [float(v) for v in widget["/Rect"]]
-    w = abs(rect[2] - rect[0])
-    h = abs(rect[3] - rect[1])
+    rotation = _widget_rotation(widget)
+    w, h = _rotated_frame(abs(rect[2] - rect[0]), abs(rect[3] - rect[1]), rotation)
     _requested, size, color = _parse_da(da)
     rows, marked = _visible_rows(labels, selected, top_index)
 
-    if _da_writes_vertically(pdf, da):
+    # Nothing to lay out in columns, and the column builder refuses an empty
+    # subset: a list whose visible rows are all blank draws through the line
+    # arm, whose no-rows branch below is already the empty appearance.
+    if any(rows) and _da_writes_vertically(pdf, da):
         _choice_vertical_appearance(
-            pdf, widget, rows, marked, da, quadding, font_dir, w, h, size, color
+            pdf, widget, rows, marked, da, quadding, font_dir, w, h, size, color,
+            rotation,
         )
         return False
 
@@ -1424,14 +1501,7 @@ def _choice_list_appearance(
         # consumer can read; the standard face is the honest empty one.
         empty, substituted = _standard_line_font(pdf, _parse_da(da)[0])
         resources["/" + empty.name] = empty.obj
-    stream = pdf.make_stream(b"\n".join(parts))
-    stream["/Type"] = Name.XObject
-    stream["/Subtype"] = Name.Form
-    stream["/BBox"] = pikepdf.Array([0, 0, w, h])
-    stream["/Resources"] = Dictionary(Font=Dictionary(resources))
-    widget["/AP"] = Dictionary(N=pdf.make_indirect(stream))
-    if "/AS" in widget:
-        del widget["/AS"]
+    _put_appearance(pdf, widget, parts, w, h, resources, rotation)
     return substituted
 
 
@@ -1447,6 +1517,7 @@ def _choice_vertical_appearance(
     h: float,
     size: float,
     color: str,
+    rotation: int = 0,
 ) -> None:
     """Regenerate a VERTICAL list box's /AP /N — every option as its own
     column.
@@ -1456,6 +1527,10 @@ def _choice_vertical_appearance(
     down the page rather than across it. The stacking axis carries the row
     pitch, so `/TI` and the selection band mean what they mean for lines,
     one axis over.
+
+    `w` and `h` arrive already swapped for a quarter-turned widget, and
+    `rotation` is what turns that frame back onto the rect — the writing
+    frame is the text's own axes and states nothing about the widget's.
     """
     from engine import vertical_text
 
@@ -1509,14 +1584,7 @@ def _choice_vertical_appearance(
         parts.append(vt.show(column, size))
     parts.extend([b"ET", b"Q", b"EMC"])
 
-    stream = pdf.make_stream(b"\n".join(parts))
-    stream["/Type"] = Name.XObject
-    stream["/Subtype"] = Name.Form
-    stream["/BBox"] = pikepdf.Array([0, 0, w, h])
-    stream["/Resources"] = Dictionary(Font=Dictionary({"/TxV": vt.font_obj}))
-    widget["/AP"] = Dictionary(N=pdf.make_indirect(stream))
-    if "/AS" in widget:
-        del widget["/AS"]
+    _put_appearance(pdf, widget, parts, w, h, {"/TxV": vt.font_obj}, rotation)
 
 
 def _fit_vertical_choice_size(rows: list[str], vt, w: float, h: float) -> float:
@@ -2447,14 +2515,20 @@ def _flatten_fields(pdf: pikepdf.Pdf) -> None:
                 rw = abs(rect[2] - rect[0])
                 rh = abs(rect[3] - rect[1])
                 bbox = [float(v) for v in stream.get("/BBox", [0, 0, rw or 1, rh or 1])]
-                bx0, by0 = min(bbox[0], bbox[2]), min(bbox[1], bbox[3])
-                bw = abs(bbox[2] - bbox[0]) or 1.0
-                bh = abs(bbox[3] - bbox[1]) or 1.0
+                # ISO 32000-2 12.5.5: the /BBox corners go through the form's
+                # own /Matrix first and the TRANSFORMED box is what maps onto
+                # /Rect. A quarter-turned widget (/MK /R) is exactly the case
+                # where the raw box is the wrong shape.
+                matrix = as_matrix(stream.get("/Matrix")) or IDENTITY
+                bx0, by0, bx1, by1 = bbox_of_corners_under_matrix(
+                    matrix, bbox[0], bbox[1], bbox[2], bbox[3]
+                )
+                bw = abs(bx1 - bx0) or 1.0
+                bh = abs(by1 - by0) or 1.0
                 sx = rw / bw
                 sy = rh / bh
-                # Standard widget stamping: map the appearance BBox onto the
-                # widget Rect (identity /Matrix assumed — true for both our
-                # generated streams and typical checkbox states).
+                # The `Do` applies the form's /Matrix itself, so the operators
+                # below carry only the box-onto-rect part.
                 name = f"/FlatW{len(xobjects)}x{i}"
                 xobjects[Name(name)] = stream
                 ops.append(

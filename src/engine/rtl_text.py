@@ -35,11 +35,28 @@ class RtlText:
     bytes. `advance_1000` from the shaper is the drawn advance by
     construction: the emitted glyph widths plus the TJ corrections below sum
     to exactly it, which is what keeps a wrap that measured here agreeing
-    with what lands on the page."""
+    with what lands on the page.
 
-    __slots__ = ("font_obj", "_encode", "_width", "_gencode", "_gwidth", "_runs", "_base")
+    Base direction is a PARAGRAPH property (rules P2/P3), so the lines of one
+    wrapped value share the one resolved over the whole text. `per_line_base`
+    is for a body whose lines are independent paragraphs — a list of option
+    labels — where one shared base would lay a right-to-left label out in its
+    neighbour's direction. Embedding groups and paragraphs are different
+    groupings and only the first decides the subset."""
 
-    def __init__(self, pdf, face: str, text: str, runs: "dict | None" = None):
+    __slots__ = (
+        "font_obj", "_encode", "_width", "_gencode", "_gwidth", "_runs",
+        "_base", "_per_line_base",
+    )
+
+    def __init__(
+        self,
+        pdf,
+        face: str,
+        text: str,
+        runs: "dict | None" = None,
+        per_line_base: bool = False,
+    ):
         from engine.font_fallback import build_fallback_font, build_shaped_font
 
         # `runs` is resolved by `build`, BEFORE anything is embedded — whether
@@ -59,6 +76,7 @@ class RtlText:
             )
             self._gencode = self._gwidth = None
         self._runs = runs
+        self._per_line_base = per_line_base
         self._base = bidi.paragraph_level(text)
 
     # -- units ------------------------------------------------------------
@@ -75,8 +93,9 @@ class RtlText:
 
     def _visual(self, line: str) -> list:
         units = self._units(line)
+        base = bidi.paragraph_level(line) if self._per_line_base else self._base
         ordered = bidi.reorder_to_visual(
-            units, self._base, key=lambda u: (u[1][:1] or " ")
+            units, base, key=lambda u: (u[1][:1] or " ")
         )
         if len(ordered) != len(units):
             raise ValueError(
@@ -180,7 +199,9 @@ def shaped_runs(face: str, text: str) -> dict:
     return runs
 
 
-def build(pdf, face: str, text: str) -> "RtlText | None":
+def build(
+    pdf, face: str, text: str, per_line_base: bool = False
+) -> "RtlText | None":
     """An `RtlText` when this text needs one, else None — the gate every
     caller uses, so output that needs neither reordering nor shaping keeps
     its shipped emission byte for byte.
@@ -193,4 +214,4 @@ def build(pdf, face: str, text: str) -> "RtlText | None":
     runs = shaped_runs(face, text)
     if not runs and not bidi.has_strong_rtl(text):
         return None
-    return RtlText(pdf, face, text, runs=runs)
+    return RtlText(pdf, face, text, runs=runs, per_line_base=per_line_base)
