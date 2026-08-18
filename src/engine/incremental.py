@@ -1007,11 +1007,22 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
     same widget objects stay intact. A field name present only in the
     MODIFIED file means the edit ADDED a form field — beyond the fill tier
     (and beyond what DocMDP permits) — so it refuses rather than half-
-    registering. Returns updated-field count."""
+    registering. Returns updated-field count.
+
+    A /AcroForm that the edit REMOVED outright is the maximal case of the
+    field-removal refusal below, not an absent delta: this module runs only on
+    a document whose live signatures were found through /AcroForm /Fields, so
+    dropping the dictionary unregisters the very fields the preserved byte
+    range signs, and ISO 32000-2 Table 257 (12.8.2.2) admits it at no
+    certification level — /P 2 covers filling in forms, instantiating page
+    templates and signing, and /P 3 adds only annotation work. Ignoring it
+    would report success for a document that still carries the form."""
     orig_acro = orig.Root.get("/AcroForm")
     mod_acro = mod.Root.get("/AcroForm")
     if mod_acro is None:
-        return 0  # a fill never removes the form; nothing to do
+        if orig_acro is None:
+            return 0
+        raise _TransplantRefusal("acroform-removed")
     if orig_acro is not None and _bisim(orig_acro, mod_acro, set()):
         return 0
     if orig_acro is None:
@@ -1091,32 +1102,37 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
     # suspicious modification (live e2e catch: 3 -> 1).
     _ACRO_KEEP = frozenset({"/Fields", "/SigFlags"})
     if not _bisim(orig_acro, mod_acro, set(), skip=_ACRO_KEEP):
-        if orig_acro.is_indirect:
-            ref = _writer_ref(orig_acro.objgen, writer)
-            live = ref.get_object()
-            changed = False
-            for k in list(mod_acro.keys()):
-                ks = str(k)
-                if ks in _ACRO_KEEP:
-                    continue
-                ov = orig_acro.get(ks)
-                mv = mod_acro.get(ks)
-                if ov is not None and _bisim(ov, mv, set()):
-                    continue
-                live[generic.pdf_name(ks)] = _materialize(mv, writer, memo_mat)
+        # A direct /AcroForm has no object to mark updated, and the only way to
+        # reach it is to rewrite the catalog — which this module never does, so
+        # the delta is inexpressible rather than absent. The twin of the inline
+        # field refusal above.
+        if not orig_acro.is_indirect:
+            raise _TransplantRefusal("acroform-inline")
+        ref = _writer_ref(orig_acro.objgen, writer)
+        live = ref.get_object()
+        changed = False
+        for k in list(mod_acro.keys()):
+            ks = str(k)
+            if ks in _ACRO_KEEP:
+                continue
+            ov = orig_acro.get(ks)
+            mv = mod_acro.get(ks)
+            if ov is not None and _bisim(ov, mv, set()):
+                continue
+            live[generic.pdf_name(ks)] = _materialize(mv, writer, memo_mat)
+            changed = True
+        gone = (
+            {str(k) for k in orig_acro.keys()}
+            - {str(k) for k in mod_acro.keys()}
+            - _ACRO_KEEP
+        )
+        for ks in gone:
+            if generic.pdf_name(ks) in live:
+                del live[generic.pdf_name(ks)]
                 changed = True
-            gone = (
-                {str(k) for k in orig_acro.keys()}
-                - {str(k) for k in mod_acro.keys()}
-                - _ACRO_KEEP
-            )
-            for ks in gone:
-                if generic.pdf_name(ks) in live:
-                    del live[generic.pdf_name(ks)]
-                    changed = True
-            if changed:
-                writer.mark_update(ref)
-                updated += 1
+        if changed:
+            writer.mark_update(ref)
+            updated += 1
     return updated
 
 
@@ -1156,7 +1172,10 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
 
             # Catalog-level guard: beyond /AcroForm (fill), /Pages (page
             # tree), and metadata (ignored — rebuild churn), the roots must
-            # agree, or the edit exceeds the append-safe tier. /Version is
+            # agree, or the edit exceeds the append-safe tier. A key skipped
+            # here is DELEGATED, never excused: /AcroForm's own pass judges its
+            # removal as well as its content, so the skip cannot turn a dropped
+            # form into a silent success. /Version is
             # metadata too: a signing append writes it into the catalog
             # while rebuilds normalize it into the header — the original's
             # own bytes keep whichever it had (live catch: a signed fixture
