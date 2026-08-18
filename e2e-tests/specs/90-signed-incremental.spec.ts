@@ -403,4 +403,91 @@ describe('signed-document incremental commit', () => {
 
     await closeAllFiles();
   });
+
+  // ── The doors the funnel claim used to miss ──────────────────────────────
+  //
+  // The whole-file panels look like page-tier work and are not: the page tier
+  // IS gated, and these panels are a different tier that snapshots and rewrites
+  // the entire file. They went through their own local helpers rather than a
+  // literal `call('…', { file, output })` at panel top level, which is why a
+  // grep for the treatment shape never saw them.
+  //
+  // Two of them are driven here as cross-stack spot checks — the AST guard
+  // covers the roster, and what a guard cannot show is that the dialog actually
+  // reaches the screen and that declining leaves the working copy untouched.
+
+  /** Open a private copy of the signed fixture and answer with its path. */
+  async function openSignedCopy(name: string): Promise<string> {
+    await waitForHarness();
+    await closeAllFiles();
+    const tmp = mkdtempSync(join(tmpdir(), 'spectra-funnel-'));
+    const work = join(tmp, name);
+    copyFileSync(SIGNED_PDF, work);
+    await openByPaths([work]);
+    return work;
+  }
+
+  /** Decline the signed-edit question and answer with the message it asked. */
+  async function declineSignedEdit(): Promise<string> {
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, {
+      timeout: 20_000,
+      timeoutMsg: 'the panel rewrote a signed document with no warning',
+    });
+    const message = await $(CONFIRM_MESSAGE).getText();
+    expect(await $(CONFIRM_AFFIRM).isExisting()).toBe(true);
+    await $(CONFIRM_CANCEL).click();
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, { timeout: 15_000, reverse: true });
+    return message;
+  }
+
+  it('the Rotate PANEL asks before it rewrites a signed document, and a decline writes nothing', async () => {
+    await openSignedCopy('signed-rotate-panel.pdf');
+    const before = await workingBytes();
+
+    await setView('operations');
+    await setActiveOp('rotate');
+    await $('[data-testid="rotate-apply"]').waitForDisplayed({ timeout: 20_000 });
+    await $('[data-testid="rotate-apply"]').click();
+
+    // This rotate is not the page tier's single-key delta the case above lets
+    // through: the panel rewrites the whole file, which is why its roster class
+    // is structural and why every signed document gets the question.
+    expect(await declineSignedEdit()).toContain('invalidate its digital signatures');
+
+    // Declined means the engine was never called: not one byte of the working
+    // copy moved, and the document is not dirty.
+    expect((await workingBytes()).equals(before)).toBe(true);
+    expect((await getState()).activeFile?.dirty).toBe(false);
+
+    await setActiveOp('signatures');
+    const intact = await verifyActiveSignatures();
+    expect(intact.signature_count).toBe(1);
+    expect(intact.all_valid).toBe(true);
+
+    await closeAllFiles();
+  });
+
+  it('the Page Boxes panel asks the same question, through the same funnel', async () => {
+    await openSignedCopy('signed-pagebox-panel.pdf');
+    const before = await workingBytes();
+
+    await setView('operations');
+    await setActiveOp('pagebox');
+    await $('[data-testid="pagebox-apply"]').waitForDisplayed({ timeout: 20_000 });
+    // A margin, because the panel refuses an empty one before it ever reaches
+    // the funnel — a refusal there would prove nothing about the gate.
+    await setReactInputValue('[data-testid="pagebox-top"]', '12');
+    await $('[data-testid="pagebox-apply"]').click();
+
+    expect(await declineSignedEdit()).toContain('invalidate its digital signatures');
+    expect((await workingBytes()).equals(before)).toBe(true);
+    expect((await getState()).activeFile?.dirty).toBe(false);
+
+    await setActiveOp('signatures');
+    const intact = await verifyActiveSignatures();
+    expect(intact.signature_count).toBe(1);
+    expect(intact.all_valid).toBe(true);
+
+    await closeAllFiles();
+  });
 });
