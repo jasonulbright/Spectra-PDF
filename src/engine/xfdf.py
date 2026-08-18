@@ -42,8 +42,6 @@ popups are not comments and are not reported as losses.
 
 from __future__ import annotations
 
-import shutil
-import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -55,6 +53,7 @@ from engine.annotations import (
     reply_relationship,
     usable_relationship_name,
 )
+from engine.inplace import staged_write
 from engine.pdf_save import save_pdf
 
 XFDF_NS = "http://ns.adobe.com/xfdf/"
@@ -793,13 +792,10 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
         in_path = Path(file)
         out_path = Path(output)
         if in_path.resolve() == out_path.resolve():
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(in_path.parent)
-            ) as tmp:
-                tmp_path = tmp.name
-            save_pdf(pdf, tmp_path)
-            preserved = finalize_preserving_signatures(str(in_path), tmp_path)
-            shutil.move(tmp_path, str(out_path))
+            with staged_write(out_path) as staged:
+                save_pdf(pdf, str(staged))
+                pdf.close()
+                preserved = finalize_preserving_signatures(str(in_path), str(staged))
         else:
             save_pdf(pdf, output)
             preserved = finalize_preserving_signatures(str(in_path), str(out_path))

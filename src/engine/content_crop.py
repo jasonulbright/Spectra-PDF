@@ -26,14 +26,13 @@ selection yielded a rectangle, the call refuses rather than writing an output
 identical to its input.
 """
 
-import shutil
-import tempfile
 from pathlib import Path
 
 import pikepdf
 from pikepdf import Array
 
 from engine.content_walk import IDENTITY
+from engine.inplace import staged_write
 from engine.page_boxes import MIN_EXTENT, box_key, effective_box
 from engine.pdf_save import save_pdf
 from engine.redact import _resolve_resources
@@ -294,16 +293,11 @@ def content_crop(
             }
 
         if same_file:
-            with tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, dir=str(input_path.parent)
-            ) as tmp:
-                tmp_path = tmp.name
-            save_pdf(pdf, tmp_path)
+            with staged_write(output_path) as staged:
+                save_pdf(pdf, str(staged))
+                pdf.close()
         else:
             save_pdf(pdf, output_path)
-
-    if same_file:
-        shutil.move(tmp_path, str(output_path))
 
     return {
         "output": str(output_path),
