@@ -1,12 +1,23 @@
 import { expect } from '@wdio/globals';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import {
   getState,
   invokeAppCommand,
   openByPaths,
+  waitForDisplayedSelector,
   waitForHarness,
 } from '../support/harness.js';
 
@@ -170,7 +181,8 @@ describe('app exit and the launch that reads its record', () => {
       /* a machine with no startup.json is a machine with the default already */
     }
     try {
-      if (existsSync(SESSION_FILE)) rmSync(SESSION_FILE);
+      // Recursive: one case plants a DIRECTORY on this name to fail a write.
+      if (existsSync(SESSION_FILE)) rmSync(SESSION_FILE, { recursive: true, force: true });
     } catch {
       /* the next launch treats a missing record as a first run */
     }
@@ -286,5 +298,99 @@ describe('app exit and the launch that reads its record', () => {
 
     // The claim under test: one window, not two.
     expect(await browser.getWindowHandles()).toHaveLength(1);
+  });
+
+  // ── A quit snapshot that does not reach disk ─────────────────────────────
+  //
+  // The last window out captures the session on its way down, and the capture
+  // is what the teardown is gated on. A write that failed leaves the PREVIOUS
+  // run's record on the file and lifts the seal again, so destroying the window
+  // then would exit having thrown this session away with nothing left standing
+  // to capture it from.
+  //
+  // The failure is planted rather than stubbed: the record lands by renaming
+  // its staged bytes over `session.json`, and a DIRECTORY sitting on that name
+  // is a rename the OS refuses. The staging write itself still succeeds, which
+  // is what makes this the outcome under test rather than an early error.
+
+  /** Put a directory where the record goes. Non-empty, so no tidying pass can
+   * turn it back into a name a rename could take. */
+  function plantDirectoryOverRecord(): void {
+    if (existsSync(SESSION_FILE)) rmSync(SESSION_FILE, { recursive: true, force: true });
+    mkdirSync(SESSION_FILE, { recursive: true });
+    writeFileSync(resolve(SESSION_FILE, 'occupied.txt'), 'the record cannot land here');
+    expect(statSync(SESSION_FILE).isDirectory()).toBe(true);
+  }
+
+  function clearPlantedDirectory(): void {
+    if (existsSync(SESSION_FILE)) rmSync(SESSION_FILE, { recursive: true, force: true });
+  }
+
+  it('the window × on the LAST window leaves it standing when the record cannot be written', async () => {
+    plantDirectoryOverRecord();
+
+    // Awaited, not fired and slept on: the command ANSWERING is what says the
+    // close was refused. A close that went through would have destroyed this
+    // window and taken the process with it, and there would be nothing left to
+    // resolve the call.
+    await browser.executeAsync<null, []>(function (done) {
+      (window as any).__SPECTRA_TEST__.closeThisWindow()
+        .then(() => done(null))
+        .catch(() => done(null));
+    });
+
+    expect(appIsRunning()).toBe(true);
+    expect(await browser.getWindowHandles()).toHaveLength(1);
+    expect((await getState()).fileCount).toBe(1);
+
+    // The staged bytes went with the failure: a write that could not land takes
+    // its temp file away rather than leaving it beside the record.
+    expect(stagingLeftovers()).toEqual([]);
+  });
+
+  it('File ▸ Exit says so rather than exiting on a record that never landed', async () => {
+    // The same capture, reached through the quit. There is no peer to ask, so
+    // the prepare round answers immediately and the capture is what fails —
+    // and a quit that captured nothing must not close anything.
+    expect(await invokeAppCommand('file.exit')).toBe(true);
+    await waitForDisplayedSelector('[data-testid="confirm-message"]', {
+      timeout: 30_000,
+      timeoutMsg: 'the Exit reported nothing when its session snapshot could not be written',
+    });
+    expect(await $('[data-testid="confirm-message"]').getText()).toContain('nothing was closed');
+    await $('[data-testid="notice-ok"]').click();
+    await waitForDisplayedSelector('[data-testid="confirm-message"]', {
+      timeout: 15_000,
+      reverse: true,
+    });
+
+    expect(appIsRunning()).toBe(true);
+    expect(await browser.getWindowHandles()).toHaveLength(1);
+    expect(stagingLeftovers()).toEqual([]);
+  });
+
+  it('and the record starts landing again the moment it can', async () => {
+    // The seal was lifted on each failure rather than held over a snapshot that
+    // never reached disk, so nothing here has to be un-frozen: the ordinary
+    // debounced write is what takes the file back.
+    clearPlantedDirectory();
+
+    const survivor = (await browser.getWindowHandles())[0];
+    expect(await invokeAppCommand('window.newWindow')).toBe(true);
+    const handles = await waitForHandles(2);
+    const throwaway = handles.find((h) => h !== survivor)!;
+    await browser.switchToWindow(throwaway);
+    await waitForHarness(30_000);
+    await browser.execute(() => {
+      void (window as any).__SPECTRA_TEST__.closeThisWindow();
+    });
+    await browser.switchToWindow(survivor);
+    await waitForHandles(1);
+
+    await browser.waitUntil(
+      () => existsSync(SESSION_FILE) && statSync(SESSION_FILE).isFile() && readSession().length > 0,
+      { timeout: 20_000, interval: 250, timeoutMsg: 'session writes never resumed' },
+    );
+    expect(holds(readSession()[0], survivorDoc)).toBe(true);
   });
 });
