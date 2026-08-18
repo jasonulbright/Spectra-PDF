@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
+import { useOperations } from '../hooks/useOperations';
 import { file, app, dialog, batch, actionFile } from '../lib/tauri-bridge';
 import { getSettings } from '../lib/app-settings';
 import { ensureGsPath } from './SettingsPanel';
@@ -67,6 +68,7 @@ export function GuidedActionsPanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call, callRaw, saveFile } = useEngine();
+  const { confirmSignedEdit } = useOperations();
   const [actions, setActions] = useState<GuidedAction[]>(() => loadGuidedActions());
   const [view, setView] = useState<PanelView>({ kind: 'list' });
   const [editError, setEditError] = useState<string | null>(null);
@@ -108,6 +110,20 @@ export function GuidedActionsPanel(): React.ReactElement {
       if (terminalIndex !== -1 && !terminalOutput) {
         terminalOutput = (await saveFile(terminalOutputName(action.steps[terminalIndex]))) ?? null;
         if (!terminalOutput) return;
+      }
+      // ONE signed-document decision for the whole run, before any step
+      // touches the document: an in-place step here is always a whole-file
+      // rewrite (`structural`), and asking per step would put the same dialog
+      // in front of a user N times for one gesture. A run whose only steps
+      // write elsewhere never asks. Taken before the first `file.snapshot`,
+      // whose commit gate would otherwise flush pending page edits on the way
+      // to refusing the run.
+      const touchesDocument = action.steps.some((s) => !stepDefFor(s.op).terminalOutput);
+      if (
+        touchesDocument &&
+        !(await confirmSignedEdit(activeFile.path, workingPath, 'structural'))
+      ) {
+        return;
       }
       setView({ kind: 'run', action });
       setRunStatuses(action.steps.map(() => 'pending'));
@@ -153,7 +169,7 @@ export function GuidedActionsPanel(): React.ReactElement {
         setRunning(false);
       }
     },
-    [activeFile, running, call, reloadFile, saveFile],
+    [activeFile, running, call, reloadFile, saveFile, confirmSignedEdit],
   );
 
   /** Run entry: collect ask-at-run values first when any step wants them. */

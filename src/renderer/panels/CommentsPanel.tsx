@@ -2,7 +2,9 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppState, useAppDispatch } from '../state/AppStateProvider';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
-import { dialog, file } from '../lib/tauri-bridge';
+import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
+import { dialog } from '../lib/tauri-bridge';
 import { getCanvasServices, getCommandContext } from '../commands/context';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { ANNOTATION_PALETTE } from '../components/canvas/PageCell';
@@ -99,6 +101,7 @@ export function CommentsPanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
+  const { performOperation } = useOperations();
   const [model, setModel] = useState<CommentModel | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -232,15 +235,11 @@ export function CommentsPanel(): React.ReactElement {
     setBusy(true);
     setStatus(tChrome('panel.comments.importing'));
     try {
-      const snapshotPath = await file.snapshot(activeFile.workingPath);
-      const r = await call('import_xfdf', {
-        file: activeFile.workingPath,
-        xfdf,
-        output: activeFile.workingPath,
-      });
-      const buf = await file.readBuffer(activeFile.workingPath);
-      const info = await call('get_page_count', { file: activeFile.workingPath });
-      dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer: buf, snapshotPath });
+      const r = await performOperation(activeFile.path, 'import_xfdf', { xfdf });
+      if (r === EDIT_DECLINED) {
+        setStatus('');
+        return;
+      }
       await refresh();
       const rr = r as unknown as { added: number; skipped: { reason: string }[] };
       const skipped = rr.skipped.length
@@ -257,7 +256,7 @@ export function CommentsPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [activeFile, call, dispatch, refresh]);
+  }, [activeFile, performOperation, refresh]);
 
   const deleteAll = useCallback(async () => {
     if (!activeFile) return;
@@ -265,14 +264,11 @@ export function CommentsPanel(): React.ReactElement {
     setBusy(true);
     setStatus(tChrome('panel.comments.deleting'));
     try {
-      const snapshotPath = await file.snapshot(activeFile.workingPath);
-      const r = await call('delete_all_annotations', {
-        file: activeFile.workingPath,
-        output: activeFile.workingPath,
-      });
-      const buf = await file.readBuffer(activeFile.workingPath);
-      const info = await call('get_page_count', { file: activeFile.workingPath });
-      dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer: buf, snapshotPath });
+      const r = await performOperation(activeFile.path, 'delete_all_annotations', {});
+      if (r === EDIT_DECLINED) {
+        setStatus('');
+        return;
+      }
       await refresh();
       const n = (r as unknown as { removed: number }).removed;
       setStatus(tChromeCount('panel.comments.removed', n));
@@ -281,7 +277,7 @@ export function CommentsPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [activeFile, call, dispatch, refresh]);
+  }, [activeFile, performOperation, refresh]);
 
   // The produced file opens like any other document — through App's one open
   // funnel, never a second implementation of "open some files".

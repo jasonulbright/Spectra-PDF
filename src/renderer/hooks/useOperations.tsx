@@ -36,11 +36,16 @@ export type PerformOperation = (
 /** Author N form fields as ONE undoable act — App's `handleAddFormFields`, the
  * same instance the canvas placement card calls. Field creation is renderer-side
  * pdf-lib rather than an engine method, so it cannot ride `performOperation`;
- * exposing the handler here is what keeps the panel off a second creation path. */
+ * exposing the handler here is what keeps the panel off a second creation path.
+ *
+ * `EDIT_DECLINED` for the same reason `performOperation` returns it: the
+ * signed-document decision refused or the user declined, and a caller that
+ * reports "created N" on a resolved promise would report a creation that never
+ * happened. */
 export type AddFormFields = (
   filePath: string,
   specs: readonly NewFieldSpec[],
-) => Promise<void>;
+) => Promise<void | typeof EDIT_DECLINED>;
 
 /** What a document's own signatures permit — App's `confirmEditOfSignedDoc`,
  * the same instance the canvas edit handlers use. A dialog that authors a
@@ -52,6 +57,11 @@ export type ConfirmSignedEdit = (
   workingPath: string,
   editClass: EditClass,
   fields?: readonly string[] | null,
+  /** Of `fields`, the ones the caller actually named — the rest are what the
+   * document's own calculations would change as a result. A lock that bites
+   * only those has to say so, or a user told "Total is locked" after typing
+   * into "Item 1" has been told nothing. */
+  typed?: readonly string[] | null,
 ) => Promise<boolean>;
 
 interface OperationsValue {

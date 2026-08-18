@@ -49,9 +49,47 @@ export const OP_EDIT_CLASS = {
   // /Link annotations: the incremental tier preserves them, and only a
   // certification that forbids commenting has anything to say.
   add_links: 'annotate',
+  create_links_from_urls: 'annotate',
   set_link_target: 'annotate',
   set_link_appearance: 'annotate',
   delete_link: 'annotate',
+
+  // ── Comments ──────────────────────────────────────────────────────────
+  // Both move only /Annots. Deletion is annotation MODIFICATION in the
+  // certification table's terms, not a page-tree change, so it shares the
+  // class with the import rather than falling to structural.
+  import_xfdf: 'annotate',
+  delete_all_annotations: 'annotate',
+
+  // ── Page geometry, run from a panel ───────────────────────────────────
+  // The page TIER routes rotate/delete through the commit's transplant and
+  // asks `pageEditDecision`. These panels do not: they call the engine on the
+  // working copy, which rewrites the whole file, so every byte range breaks
+  // and the class is structural whatever the page tier could have carried.
+  rotate: 'structural',
+  delete: 'structural',
+  set_page_boxes: 'structural',
+  content_crop: 'structural',
+
+  // ── Navigation structures ─────────────────────────────────────────────
+  set_outline: 'structural',
+  outline_from_structure: 'structural',
+  set_threads: 'structural',
+
+  // ── Embedded files and portfolios ─────────────────────────────────────
+  add_attachment: 'structural',
+  remove_attachment: 'structural',
+  make_portfolio: 'structural',
+  update_portfolio_member: 'structural',
+
+  // ── Optional content ──────────────────────────────────────────────────
+  set_layer_visibility: 'structural',
+
+  // ── Structure tree ────────────────────────────────────────────────────
+  add_struct_node: 'structural',
+  delete_struct_node: 'structural',
+  move_struct_node: 'structural',
+  autotag: 'structural',
 
   // ── Text and object editing (drawn-content drift) ─────────────────────
   convert_text_run: 'structural',

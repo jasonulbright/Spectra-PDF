@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
-import { file, dialog } from '../lib/tauri-bridge';
+import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
+import { dialog } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
@@ -23,8 +25,9 @@ function human(size: number): string {
 export function AttachmentsPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const { activeFile, openNewFiles, dispatch } = useActiveFile();
+  const { activeFile, openNewFiles } = useActiveFile();
   const { call, saveFile } = useEngine();
+  const { performOperation } = useOperations();
   const [items, setItems] = useState<Attachment[]>([]);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -50,16 +53,6 @@ export function AttachmentsPanel(): React.ReactElement {
     void refresh();
   }, [buffer, workingPath, refresh]);
 
-  const reloadFile = useCallback(
-    async (snapshotPath: string) => {
-      if (!activeFile) return;
-      const buf = await file.readBuffer(activeFile.workingPath);
-      const info = await call('get_page_count', { file: activeFile.workingPath });
-      dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer: buf, snapshotPath });
-    },
-    [activeFile, call, dispatch],
-  );
-
   const handleAdd = useCallback(async () => {
     if (!activeFile) return;
     const source = await dialog.pickAnyFile();
@@ -67,13 +60,11 @@ export function AttachmentsPanel(): React.ReactElement {
     setBusy(true);
     setStatus(tChrome('panel.attach.attaching'));
     try {
-      const snapshotPath = await file.snapshot(activeFile.workingPath);
-      const r = await call('add_attachment', {
-        file: activeFile.workingPath,
-        output: activeFile.workingPath,
-        source,
-      });
-      await reloadFile(snapshotPath);
+      const r = await performOperation(activeFile.path, 'add_attachment', { source });
+      if (r === EDIT_DECLINED) {
+        setStatus('');
+        return;
+      }
       await refresh();
       setStatus(tChrome('panel.attach.attached', { name: (r as unknown as { name: string }).name }));
     } catch (e: unknown) {
@@ -81,7 +72,7 @@ export function AttachmentsPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [activeFile, call, reloadFile, refresh]);
+  }, [activeFile, performOperation, refresh]);
 
   const handleExtract = useCallback(
     async (name: string) => {
@@ -108,9 +99,11 @@ export function AttachmentsPanel(): React.ReactElement {
       setBusy(true);
       setStatus(tChrome('panel.attach.removing'));
       try {
-        const snapshotPath = await file.snapshot(activeFile.workingPath);
-        await call('remove_attachment', { file: activeFile.workingPath, output: activeFile.workingPath, name });
-        await reloadFile(snapshotPath);
+        const r = await performOperation(activeFile.path, 'remove_attachment', { name });
+        if (r === EDIT_DECLINED) {
+          setStatus('');
+          return;
+        }
         await refresh();
         setStatus(tChrome('panel.attach.removed', { name }));
       } catch (e: unknown) {
@@ -119,7 +112,7 @@ export function AttachmentsPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, call, reloadFile, refresh],
+    [activeFile, performOperation, refresh],
   );
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.attach.open')} />;

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
-import { file } from '../lib/tauri-bridge';
+import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
+import type { OpMethod } from '../lib/op-edit-class';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { getDocumentProxy } from '../lib/pdfDocCache';
@@ -50,8 +52,9 @@ function draftOf(node: StructNode): Draft {
 export function TagsPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const { activeFile, openNewFiles, dispatch } = useActiveFile();
+  const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
+  const { performOperation } = useOperations();
   const [tree, setTree] = useState<StructTree | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -221,9 +224,11 @@ export function TagsPanel(): React.ReactElement {
     };
   }, [selected, path, buffer, texts]);
 
+  // `OpMethod`, not `string`: a tree mutation added without an edit class does
+  // not compile, and the signed-document decision is the funnel's.
   const runMutation = useCallback(
     async (
-      method: string,
+      method: OpMethod,
       params: Record<string, unknown>,
       done: string,
       reselect: string | null,
@@ -236,11 +241,14 @@ export function TagsPanel(): React.ReactElement {
       // are being written, so the tree that comes back is the new truth.
       touchedDraft.current.clear();
       try {
-        const snapshotPath = await file.snapshot(activeFile.workingPath);
-        await call(method, { file: activeFile.workingPath, output: activeFile.workingPath, ...params });
-        const buf = await file.readBuffer(activeFile.workingPath);
-        const info = await call('get_page_count', { file: activeFile.workingPath });
-        dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer: buf, snapshotPath });
+        const r = await performOperation(activeFile.path, method, params);
+        if (r === EDIT_DECLINED) {
+          // Nothing was written, so the selection this run predicted must not
+          // be applied to a tree that never changed.
+          pendingSelect.current = null;
+          setStatus('');
+          return;
+        }
         setStatus(done);
       } catch (e: unknown) {
         pendingSelect.current = null;
@@ -249,7 +257,7 @@ export function TagsPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, call, dispatch],
+    [activeFile, performOperation],
   );
 
   const applyProps = useCallback(() => {

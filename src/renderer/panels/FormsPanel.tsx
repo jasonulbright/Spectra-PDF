@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
+import { useOperations } from '../hooks/useOperations';
 import { file, app } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { readFormFields } from '../lib/forms';
+import { fillClosure, formCalculation } from '../lib/form-overlay';
 import { mergeUntouched } from '../lib/late-read';
 import type { FormField, FormFieldValue } from '../lib/forms';
 import {
@@ -43,6 +45,7 @@ export function FormsPanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles, dispatch } = useActiveFile();
   const { call } = useEngine();
+  const { confirmSignedEdit } = useOperations();
   const workingPath = activeFile?.workingPath ?? null;
   // The values as first read — Apply sends only the fields the user CHANGED
   // (a diff), never the full current-state snapshot: the engine validates every
@@ -166,6 +169,32 @@ export function FormsPanel(): React.ReactElement {
     setBusy(true);
     setStatus(flatten ? tChrome('panel.forms.fillingFlattening') : tChrome('panel.forms.filling'));
     try {
+      // The signed-document decision, taken BEFORE the snapshot — `file.
+      // snapshot` runs the commit gate, so asking after it would flush pending
+      // page edits on the way to refusing this edit.
+      //
+      // Two classes, because the button does two things. A plain fill is
+      // `form-fill` and is asked about the TRANSITIVE set: filling an unlocked
+      // line item that recalculates a locked Total produces a document
+      // reporting as altered, and a decision taken on the typed names alone
+      // would never see it. Flatten BAKES the widgets away — the form stops
+      // existing — so it is structural whatever a fill-only certification
+      // permits.
+      const typedNames = Object.keys(edits);
+      const targets = fillClosure(formCalculation(fields, calculationOrder), typedNames);
+      const allowed = flatten
+        ? await confirmSignedEdit(activeFile.path, activeFile.workingPath, 'structural')
+        : await confirmSignedEdit(
+            activeFile.path,
+            activeFile.workingPath,
+            'form-fill',
+            targets,
+            typedNames,
+          );
+      if (!allowed) {
+        setStatus('');
+        return;
+      }
       // Snapshot (runs the commit gate) → fill through the
       // ENGINE (Unicode-capable + multi-select optionlist) → reload → UPDATE_
       // FILE (undoable via the snapshot). `call` is commit-gated (never
@@ -200,7 +229,7 @@ export function FormsPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [activeFile, fields, values, flatten, dispatch, call]);
+  }, [activeFile, fields, values, flatten, calculationOrder, dispatch, call, confirmSignedEdit]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.forms.open')} />;
 

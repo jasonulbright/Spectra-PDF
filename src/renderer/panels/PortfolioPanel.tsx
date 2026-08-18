@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
-import { file, dialog, app } from '../lib/tauri-bridge';
+import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
+import { dialog, app } from '../lib/tauri-bridge';
 import { getCommandContext } from '../commands/context';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
@@ -35,8 +37,9 @@ const isPdfMember = (m: Member): boolean =>
 export function PortfolioPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const { activeFile, openNewFiles, dispatch } = useActiveFile();
+  const { activeFile, openNewFiles } = useActiveFile();
   const { call, callRaw, saveFile } = useEngine();
+  const { performOperation } = useOperations();
   const [info, setInfo] = useState<PortfolioInfo | null>(null);
   const [title, setTitle] = useState('');
   const [status, setStatus] = useState('');
@@ -62,22 +65,6 @@ export function PortfolioPanel(): React.ReactElement {
     }
     void refresh();
   }, [buffer, workingPath, refresh]);
-
-  const reloadFile = useCallback(
-    async (snapshotPath: string) => {
-      if (!activeFile) return;
-      const buf = await file.readBuffer(activeFile.workingPath);
-      const pages = await call('get_page_count', { file: activeFile.workingPath });
-      dispatch({
-        type: 'UPDATE_FILE',
-        path: activeFile.path,
-        pageCount: pages.pages,
-        buffer: buf,
-        snapshotPath,
-      });
-    },
-    [activeFile, call, dispatch],
-  );
 
   /** The create core (paths in hand): build, then open through the funnel. */
   const createWithPaths = useCallback(
@@ -121,12 +108,10 @@ export function PortfolioPanel(): React.ReactElement {
     setBusy(true);
     setStatus(tChrome('panel.portfolio.converting'));
     try {
-      const snapshotPath = await file.snapshot(activeFile.workingPath);
-      await call('make_portfolio', {
-        file: activeFile.workingPath,
-        output: activeFile.workingPath,
-      });
-      await reloadFile(snapshotPath);
+      if ((await performOperation(activeFile.path, 'make_portfolio', {})) === EDIT_DECLINED) {
+        setStatus('');
+        return;
+      }
       await refresh();
       setStatus(tChrome('panel.portfolio.converted'));
     } catch (e: unknown) {
@@ -134,7 +119,7 @@ export function PortfolioPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [activeFile, call, reloadFile, refresh]);
+  }, [activeFile, performOperation, refresh]);
 
   const addWithSource = useCallback(
     async (source: string) => {
@@ -142,13 +127,11 @@ export function PortfolioPanel(): React.ReactElement {
       setBusy(true);
       setStatus(tChrome('panel.portfolio.adding'));
       try {
-        const snapshotPath = await file.snapshot(activeFile.workingPath);
-        const r = await call('add_attachment', {
-          file: activeFile.workingPath,
-          output: activeFile.workingPath,
-          source,
-        });
-        await reloadFile(snapshotPath);
+        const r = await performOperation(activeFile.path, 'add_attachment', { source });
+        if (r === EDIT_DECLINED) {
+          setStatus('');
+          return;
+        }
         await refresh();
         setStatus(tChrome('panel.portfolio.added', { name: (r as unknown as { name: string }).name }));
       } catch (e: unknown) {
@@ -158,7 +141,7 @@ export function PortfolioPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, call, reloadFile, refresh],
+    [activeFile, performOperation, refresh],
   );
 
   const handleAddMember = useCallback(async () => {
@@ -254,14 +237,14 @@ export function PortfolioPanel(): React.ReactElement {
       setBusy(true);
       setStatus(tChrome('panel.portfolio.updating'));
       try {
-        const snapshotPath = await file.snapshot(activeFile.workingPath);
-        await call('update_portfolio_member', {
-          file: activeFile.workingPath,
-          output: activeFile.workingPath,
+        const r = await performOperation(activeFile.path, 'update_portfolio_member', {
           name,
           source,
         });
-        await reloadFile(snapshotPath);
+        if (r === EDIT_DECLINED) {
+          setStatus('');
+          return;
+        }
         await refresh();
         setStatus(tChrome('panel.portfolio.updated', { name }));
       } catch (e: unknown) {
@@ -271,7 +254,7 @@ export function PortfolioPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, call, reloadFile, refresh],
+    [activeFile, performOperation, refresh],
   );
 
   const handleUpdateMember = useCallback(
@@ -306,13 +289,11 @@ export function PortfolioPanel(): React.ReactElement {
       setBusy(true);
       setStatus(tChrome('panel.portfolio.removing'));
       try {
-        const snapshotPath = await file.snapshot(activeFile.workingPath);
-        await call('remove_attachment', {
-          file: activeFile.workingPath,
-          output: activeFile.workingPath,
-          name,
-        });
-        await reloadFile(snapshotPath);
+        const r = await performOperation(activeFile.path, 'remove_attachment', { name });
+        if (r === EDIT_DECLINED) {
+          setStatus('');
+          return;
+        }
         await refresh();
         setStatus(tChrome('panel.portfolio.removed', { name }));
       } catch (e: unknown) {
@@ -321,7 +302,7 @@ export function PortfolioPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, call, reloadFile, refresh],
+    [activeFile, performOperation, refresh],
   );
 
   const createSection = (

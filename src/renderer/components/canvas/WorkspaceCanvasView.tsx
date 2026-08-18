@@ -393,10 +393,15 @@ interface WorkspaceCanvasViewProps {
   // the FormsPanel shape (snapshot(gate) → engine fill_form_fields → reload →
   // UPDATE_FILE), so it lands on the snapshot-undo chain.
   onFillFormValues: (path: string, values: Record<string, FormFieldValue>) => Promise<void>;
-  // Author a new form field into one file — same whole-file-op shape.
-  onAddFormField: (path: string, spec: NewFieldSpec) => Promise<void>;
+  // Author a new form field into one file — same whole-file-op shape, and the
+  // same EDIT_DECLINED contract: creating a field is a structural change, so a
+  // signed document takes the decision before anything is written.
+  onAddFormField: (path: string, spec: NewFieldSpec) => Promise<void | typeof EDIT_DECLINED>;
   /** Author N fields as ONE undoable act — what an accepted candidate set uses. */
-  onAddFormFields: (path: string, specs: readonly NewFieldSpec[]) => Promise<void>;
+  onAddFormFields: (
+    path: string,
+    specs: readonly NewFieldSpec[],
+  ) => Promise<void | typeof EDIT_DECLINED>;
   // Per-position external drop: the canvas publishes a resolver here so
   // App's drop handler can map a drop point to the document + index under it
   // (returns null for a between/empty drop → App falls back to appending).
@@ -1354,7 +1359,7 @@ export function WorkspaceCanvasView({
           return { box: { x: vx0, y: vy0, width: vx1 - vx0, height: vy1 - vy0 }, bakedRotate: p.rotate };
         });
         if (!built) throw new Error(tChrome('canvas.newfield.pageGone'));
-        await onAddFormField(built.path, {
+        const outcome = await onAddFormField(built.path, {
           name: params.name.trim(),
           type: params.type,
           pageIndex: built.appearance.page - 1,
@@ -1388,6 +1393,10 @@ export function WorkspaceCanvasView({
               }
             : {}),
         });
+        // A declined signed-document edit wrote nothing: the placement and the
+        // typed name stay so the gesture is not lost, and the dialog the
+        // decision already showed is the surface — there is nothing to add.
+        if (outcome === EDIT_DECLINED) return;
         // Created — reset the authoring surfaces; stay in forms mode so the
         // new field is immediately fillable.
         setNewFieldPlacement(null);
@@ -5716,7 +5725,11 @@ export function WorkspaceCanvasView({
         (workspaceForms.get(path)?.fields ?? []).map((f) => f.name.split('.')[0]),
       );
       const specs = buildFieldSpecs(resolved, existing);
-      await onAddFormFields(path, specs);
+      // A declined signed-document edit created NOTHING — reporting the specs
+      // as created would name fields the file does not have.
+      if ((await onAddFormFields(path, specs)) === EDIT_DECLINED) {
+        return { created: 0, skipped: skipped + specs.length };
+      }
       return { created: specs.length, skipped };
     },
     [geometryForPage, workspaceForms, onAddFormFields],
