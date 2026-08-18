@@ -235,7 +235,12 @@ def _subset(face: dict, glyphs, retain_gids: bool) -> tuple[bytes, object]:
     options.name_IDs = [1, 2]
     subsetter = ft_subset.Subsetter(options=options)
     subsetter.populate(glyphs=sorted(set(glyphs) | {".notdef"}))
-    font = TTFont(face["path"], fontNumber=int(face.get("index", 0)))
+    # `recalcTimestamp` off: it defaults ON and compiles the current clock into
+    # `head.modified`, which would make the embedded bytes a function of the
+    # second the save ran rather than of the face and the glyph set.
+    font = TTFont(
+        face["path"], fontNumber=int(face.get("index", 0)), recalcTimestamp=False
+    )
     subsetter.subset(font)
     buf = io.BytesIO()
     font.save(buf)
