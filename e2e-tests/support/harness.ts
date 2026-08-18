@@ -195,6 +195,35 @@ export async function iccPickerPending(): Promise<boolean> {
   });
 }
 
+/** Answer the next native save dialog with this path, or with `null` for a
+ * cancelled one. Everything after the dialog — the suggested name, the button's
+ * own handler, the engine call, the report — is the shipped path, so an action
+ * that writes a new file can be driven by clicking the control that writes it. */
+export async function answerNextSaveDialog(path: string | null): Promise<void> {
+  await browser.execute(
+    function (p) {
+      (window as any).__SPECTRA_TEST__.answerNextSaveDialog(p);
+    },
+    path,
+  );
+}
+
+/** Has the armed answer been taken by a save yet? An action that refuses before
+ * it saves leaves no other trace that the dialog was reached. */
+export async function saveDialogPending(): Promise<boolean> {
+  return browser.execute(function () {
+    return Boolean((window as any).__SPECTRA_TEST__.saveDialogPending());
+  });
+}
+
+/** The name the consumed save dialog was opened with — what the action proposed
+ * to call its own output. */
+export async function takenSaveDialogDefault(): Promise<string | null> {
+  return browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.takenSaveDialogDefault() as string | null;
+  });
+}
+
 export async function compressRun(
   out: string,
   opts?: {

@@ -42,7 +42,7 @@ export function GrayscalePanel(): React.ReactElement {
     <div className="flex flex-col gap-4">
       <div className="text-sm text-neutral-400">{tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span> ({tChromeCount('panel.common.pageCount', activeFile.pageCount)})</div>
       <p className="text-sm text-neutral-500">{tChrome('panel.grayscale.blurb')}</p>
-      <button onClick={handleGrayscale} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+      <button data-testid="grayscale-convert" onClick={handleGrayscale} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
         {busy ? tChrome('panel.grayscale.convertingBtn') : tChrome('panel.grayscale.convert')}
       </button>
       <StatusBar message={status} busy={busy} />
