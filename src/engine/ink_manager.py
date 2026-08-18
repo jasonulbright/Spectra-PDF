@@ -40,6 +40,11 @@ separation preview's composite, and the order the plates are listed in.
 
 from __future__ import annotations
 
+import os
+import stat
+import tempfile
+from pathlib import Path
+
 import pikepdf
 from pikepdf import Array, Dictionary, Name
 
@@ -73,6 +78,46 @@ SHADING_NO_COMPOSE = "the shading's function cannot be composed with the tint tr
 def _name_text(obj) -> str:
     text = str(obj)
     return text[1:] if text.startswith("/") else text
+
+
+# ── the document write ─────────────────────────────────────────────────────
+
+
+def _save(pdf, file: str, output: str) -> None:
+    """Write `pdf` to `output`, which may name the file it was opened from.
+
+    Sameness is the filesystem's, not the string's: one physical file has
+    several unresolvable spellings (UNC versus mapped letter, hard links), so
+    `samefile` compares volume serial and file index.
+
+    A same-file write stages beside the original and `os.replace`s it, which
+    swaps a directory entry rather than rewriting bytes in place — a write
+    that dies part-way therefore leaves the input whole, and a stage that
+    never lands is removed instead of being left beside the document. The Pdf
+    is closed before the swap because the destination cannot be replaced while
+    it is held open.
+    """
+    input_path = Path(file)
+    output_path = Path(output)
+    same_file = input_path.resolve() == output_path.resolve() or (
+        output_path.exists() and os.path.samefile(str(input_path), str(output_path))
+    )
+    if not same_file:
+        if output_path.exists() and not os.access(output_path, os.W_OK):
+            os.chmod(output_path, stat.S_IWRITE)
+        save_pdf(pdf, str(output_path))
+        return
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".pdf", dir=str(input_path.parent))
+    os.close(fd)
+    try:
+        save_pdf(pdf, tmp_path)
+        pdf.close()
+        os.replace(tmp_path, str(output_path))
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
 
 
 # ── the resource walk ──────────────────────────────────────────────────────
@@ -374,7 +419,7 @@ def alias_ink(
 
     Args:
         file: Input PDF path.
-        output: Output PDF path.
+        output: Output PDF path (may equal the input — stage and replace).
         source: The colorant to rename.
         target: The colorant it joins.
         accept_target_transform: Consent to the appearance change when the
@@ -422,7 +467,7 @@ def alias_ink(
                             del colorants[Name("/" + source)]
         if renamed == 0:
             raise ValueError(f'Ink "{source}" is not used in this document.')
-        save_pdf(pdf, output)
+        _save(pdf, file, output)
     return {
         "source": source,
         "target": target,
@@ -792,7 +837,7 @@ def spot_to_process(
 
     Args:
         file: Input PDF path.
-        output: Output PDF path.
+        output: Output PDF path (may equal the input — stage and replace).
         inks: Colorant names to convert.
         pages: Accepted and reported; a colour space is a document-level
             object, so converting it on one page and not another would need
@@ -870,7 +915,7 @@ def spot_to_process(
 
         changed_images = _convert_images(pdf, wanted)
         changed_shadings, skipped_shadings = _convert_shadings(pdf, wanted)
-        save_pdf(pdf, output)
+        _save(pdf, file, output)
 
     return {
         "inks": sorted(wanted),
