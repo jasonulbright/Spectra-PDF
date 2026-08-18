@@ -727,6 +727,15 @@ FORM_TEXT_CMYK = b"0.624 0 1 0 k"
 FORM_OFF_RGB = b"0 1 1 rg"
 FORM_DOWN_RGB = b"1 0 1 rg"
 
+#: The same paints after a grayscale conversion. These are the producer's own
+#: operands, measured against the bundled binary — not a luminance formula, so
+#: a changed binary reports here rather than silently redefining "gray".
+FORM_PAGE_GRAY = b"0.271 g"
+FORM_FILL_GRAY = b"0.506 g"
+FORM_TEXT_GRAY = b"0.863 g"
+FORM_OFF_GRAY = b"0.894 g"
+FORM_DOWN_GRAY = b"0.565 g"
+
 FORM_FIELD_RECT = (20, 100, 280, 140)
 
 
