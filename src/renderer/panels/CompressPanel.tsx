@@ -376,7 +376,7 @@ export function CompressPanel(): React.ReactElement {
         </label>
         <p className="text-xs text-neutral-500 max-w-md">{tChrome('panel.compress.thenOptimizeHint')}</p>
       </div>
-      <button onClick={handleCompress} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+      <button data-testid="compress-run" onClick={handleCompress} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
         {busy ? tChrome('panel.compress.compressing') : tChrome('panel.compress.compress')}
       </button>
       <StatusBar message={status} busy={busy} />

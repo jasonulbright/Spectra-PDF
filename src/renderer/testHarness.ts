@@ -759,6 +759,39 @@ function armIccPicker(path: string | null): void {
 }
 
 /**
+ * The native SAVE dialog: OS-modal, so WebDriver cannot answer it, and it is
+ * the first step of every "write the result to a new file" action — which is
+ * why no Ghostscript-backed conversion had an end-to-end path at all.
+ *
+ * `dialog.saveFile` is the one door: `useEngine.saveFile` reads the property at
+ * call time and the panels that skip that hook call it directly, so the answer
+ * lands at the DIALOG rather than at any panel's state. Everything a click
+ * reaches — the name the action suggests, its handler, the engine request it
+ * assembles, the report it renders — runs unchanged. An answer is consumed by a
+ * single save; an unarmed save still opens the real dialog. `null` is a
+ * cancelled dialog, which every caller reads as "do nothing".
+ */
+let armedSaveAnswer: { path: string | null } | null = null;
+let saveDialogIntercepted = false;
+let takenSaveDialogDefault: string | null = null;
+
+function armSaveDialog(path: string | null): void {
+  if (!saveDialogIntercepted) {
+    const native = dialog.saveFile;
+    dialog.saveFile = async (options?: { defaultPath?: string }) => {
+      const armed = armedSaveAnswer;
+      if (!armed) return native(options);
+      armedSaveAnswer = null;
+      takenSaveDialogDefault = options?.defaultPath ?? null;
+      return armed.path;
+    };
+    saveDialogIntercepted = true;
+  }
+  takenSaveDialogDefault = null;
+  armedSaveAnswer = { path };
+}
+
+/**
  * Combine Files: same shape and the same reason — the source
  * picker and the save dialog are native, so e2e injects the LIST and the
  * output and the REAL assembly runs.
@@ -1945,6 +1978,18 @@ export interface TestHarness {
    * has been opened and answered — the only evidence a control that changes
    * nothing (a cancelled dialog) reached the dialog at all. */
   iccPickerPending: () => boolean;
+  /** Answer the NEXT native save dialog with this path, or with `null` for a
+   * cancelled dialog. The save is still started by the control that opens it,
+   * so the suggested name, the handler, the engine call and the report are all
+   * the shipped ones — only the OS dialog is bypassed. */
+  answerNextSaveDialog: (path: string | null) => void;
+  /** Is an armed answer still waiting for a save to take it? False once a save
+   * has consumed it, which is the evidence that the control reached the dialog
+   * at all — an action that refuses before saving changes nothing else. */
+  saveDialogPending: () => boolean;
+  /** The `defaultPath` the consumed save dialog was opened with: the name the
+   * action proposed for its own output. Null until an answer is taken. */
+  takenSaveDialogDefault: () => string | null;
   /** Compress panel (panel must be mounted). Sets the panel's own
    * controls, then runs the real engine call with an injected output path. */
   compressRun: (
@@ -3416,6 +3461,9 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     answerIccPicker: (path) => armIccPicker(path),
     iccPickerPending: () => armedIccPick !== null,
+    answerNextSaveDialog: (path) => armSaveDialog(path),
+    saveDialogPending: () => armedSaveAnswer !== null,
+    takenSaveDialogDefault: () => takenSaveDialogDefault,
     combineRun: async (sources, output, options) => {
       if (!combine) {
         const msg = 'combineRun: dialog not mounted';
