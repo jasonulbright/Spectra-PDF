@@ -5,6 +5,7 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { ensureGsPath, getSettings } from './SettingsPanel';
 import { tesseractPath } from '../lib/ocr-recognize';
+import { app } from '../lib/tauri-bridge';
 import { OCR_LANGUAGES, DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
 import { toTesseractLang, describeLanguages } from '../ocr/language-selection';
 import {
@@ -141,6 +142,7 @@ export function CompressPanel(): React.ReactElement {
       try {
         const params: Record<string, unknown> = {
           file: activeFile.workingPath, output, gs_path: await ensureGsPath(),
+          font_dir: await app.getEditFontPath(),
         };
         if (mrc) {
           Object.assign(
