@@ -53,7 +53,7 @@ from engine.annotations import (
     reply_relationship,
     usable_relationship_name,
 )
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 
 XFDF_NS = "http://ns.adobe.com/xfdf/"
@@ -791,7 +791,7 @@ def import_xfdf(file: str, xfdf: str, output: str) -> dict:
 
         in_path = Path(file)
         out_path = Path(output)
-        if in_path.resolve() == out_path.resolve():
+        if is_same_file(str(in_path), str(out_path)):
             with staged_write(out_path) as staged:
                 save_pdf(pdf, str(staged))
                 pdf.close()

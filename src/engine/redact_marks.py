@@ -27,7 +27,7 @@ from pathlib import Path
 import pikepdf
 
 from .incremental import finalize_preserving_signatures
-from .inplace import staged_write
+from .inplace import is_same_file, staged_write
 from .redact import properties_of
 from .validate import validate_pdf
 from engine.pdf_save import save_pdf
@@ -232,7 +232,7 @@ def save_redaction_marks(file: str, output: str, regions: list) -> dict:
     validate_pdf(file)
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
 
     with pikepdf.open(file) as pdf:
         scanned = _scan(pdf)

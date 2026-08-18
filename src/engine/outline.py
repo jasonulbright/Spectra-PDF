@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pikepdf
 from pikepdf import OutlineItem
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 
 MAX_DEPTH = 32
@@ -280,7 +280,7 @@ def set_outline(file: str, outline: list[dict], output: str) -> dict:
     """Replace the bookmark tree from a JSON tree of {title, page, children}."""
     input_path = Path(file)
     output_path = Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
 
     with pikepdf.open(file) as pdf:
         items = _build_items(pdf, outline or [], len(pdf.pages), 0)

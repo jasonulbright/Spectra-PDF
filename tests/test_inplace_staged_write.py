@@ -1283,6 +1283,16 @@ def _besides(directory: Path, *expected: str) -> list:
     return sorted(p.name for p in directory.iterdir() if p.name not in expected)
 
 
+def _hardlink(source: Path, alias: Path) -> Path:
+    """A second name for one physical file, or a skip where the filesystem
+    has no such thing."""
+    try:
+        os.link(str(source), str(alias))
+    except (AttributeError, NotImplementedError, OSError) as exc:
+        pytest.skip(f"this filesystem does not make hard links: {exc}")
+    return alias
+
+
 def _drawn(path: Path) -> list:
     """Every page's drawn content and every XObject it draws, with the
     resource NAMES canonicalized.
@@ -1380,46 +1390,72 @@ class TestWritingBackOverTheInput:
         """
         source = case.build(tmp_path / "source.pdf")
         before = source.read_bytes()
-        alias = tmp_path / "alias.pdf"
-        try:
-            os.link(str(source), str(alias))
-        except (AttributeError, NotImplementedError, OSError) as exc:
-            pytest.skip(f"this filesystem does not make hard links: {exc}")
+        alias = _hardlink(source, tmp_path / "alias.pdf")
 
         case.run(str(source), str(source))
 
         assert source.read_bytes() != before
         assert alias.read_bytes() == before
 
+    def test_a_write_cancelled_mid_flight_leaves_nothing_staged(
+        self, case, tmp_path, monkeypatch,
+    ):
+        """Cancellation is not an `Exception`. A scope that cleans up on
+        `except Exception` lets `KeyboardInterrupt` past with the completed
+        temp file still sitting beside the user's document — and the interrupt
+        itself must still arrive, so the caller stops."""
+        source = case.build(tmp_path / "source.pdf")
+        before = source.read_bytes()
+
+        def cancel(*args, **_kwargs):
+            target = (case.staged_of or _second_argument)(args)
+            if target:
+                Path(target).write_bytes(b"%PDF-1.7\n% staged and then cancelled\n")
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(case.dies_on or case.module, case.dies, cancel)
+        with pytest.raises(KeyboardInterrupt):
+            case.run(str(source), str(source))
+
+        assert source.read_bytes() == before
+        assert _besides(tmp_path, "source.pdf", *case.leaves) == []
+
 
 class TestOnePhysicalFileUnderTwoNames:
-    """The identity that a string comparison cannot see.
+    """The identity that a string comparison cannot see — and the BRANCH it
+    decides.
 
     Windows spells one physical file several unresolvable ways (UNC versus
     mapped letter, hard links), so an output that resolves differently can
     still BE the input. Only a filesystem-identity test reaches the staged
     branch; a direct write there would go through the link and into the file
     pikepdf holds open.
+
+    The other alias tests hand an op one path twice, so the same-file test
+    answers yes on the spelling alone and the alias only READS — they pin the
+    SWAP and never the routing. Handing the op the alias as its output is the
+    routing question, and it is asked of every case rather than of one, because
+    the same-file test is one shared predicate and a regression in it is a
+    regression in all of them at once.
     """
 
-    def test_an_output_hardlinked_to_the_input_is_recognised_as_the_input(
-        self, tmp_path,
+    def test_an_output_hardlinked_to_the_input_routes_through_staging(
+        self, case, tmp_path,
     ):
-        source = _with_images(tmp_path / "source.pdf")
-        alias = tmp_path / "alias.pdf"
-        try:
-            os.link(str(source), str(alias))
-        except (AttributeError, NotImplementedError, OSError) as exc:
-            pytest.skip(f"this filesystem does not make hard links: {exc}")
+        source = case.build(tmp_path / "source.pdf")
+        before_bytes = source.read_bytes()
+        before = case.effect(str(source))
+        alias = _hardlink(source, tmp_path / "alias.pdf")
 
-        before = _image_names(str(source))
-        page_images_mod.delete_page_image(str(source), str(alias), page=1, index=0)
+        case.run(str(source), str(alias))
 
-        assert _image_names(str(alias)) != before
+        # The op landed at the name it was given.
+        assert case.effect(str(alias)) != before
         # The staged file replaced the NAME. The other name still reading as
         # it did is what says the write did not go through the link into the
         # bytes pikepdf held open.
-        assert _image_names(str(source)) == before
+        assert source.read_bytes() == before_bytes
+        assert _besides(tmp_path, "source.pdf", "alias.pdf", *case.leaves) == []
 
 
 # ── the coverage guard ─────────────────────────────────────────────────────

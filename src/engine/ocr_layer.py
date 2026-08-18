@@ -32,7 +32,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Dictionary, Name
 
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_metrics import text_width_em
 from engine.pdf_save import save_pdf
 
@@ -110,15 +110,7 @@ def apply_ocr_layer(file: str, output: str, pages: list[dict]) -> dict:
     """
     input_path = Path(file)
     output_path = Path(output)
-    # TRUE identity, not just string identity: resolve() sees through subst
-    # drives (verified live), but Windows spells one physical file several
-    # unresolvable ways (UNC vs mapped letter, hardlinks). os.path.samefile
-    # compares volume serial + file index, so an aliased output==input still
-    # takes the safe temp+rename branch instead of a direct overwrite of a
-    # file pikepdf has open (batch-mirror review finding).
-    same_file = input_path.resolve() == output_path.resolve() or (
-        output_path.exists() and os.path.samefile(input_path, output_path)
-    )
+    same_file = is_same_file(str(input_path), str(output_path))
 
     with pikepdf.open(file) as pdf:
         total = len(pdf.pages)

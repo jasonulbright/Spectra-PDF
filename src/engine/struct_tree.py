@@ -42,7 +42,7 @@ from pathlib import Path
 
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 
 # Deep enough for any real document's nesting; combined with the visited-set
@@ -322,7 +322,7 @@ def set_struct_props(file: str, output: str, path: list, props: dict) -> dict:
             f'"{scope}" is not a header scope; a header cell reads Row, Column or Both.'
         )
     input_path, output_path = Path(file), Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         elem = _walk_path(pdf, path)[-1]
         if "type" in props:
@@ -379,7 +379,7 @@ def move_struct_node(file: str, output: str, path: list, direction: str, index=N
     if direction == "to" and index is None:
         raise ValueError("direction 'to' needs an index")
     input_path, output_path = Path(file), Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         chain = _walk_path(pdf, path)
         elem = chain[-1]
@@ -490,7 +490,7 @@ def delete_struct_node(file: str, output: str, path: list) -> dict:
     if not path:
         raise ValueError("path must name an element, not the tree root")
     input_path, output_path = Path(file), Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         chain = _walk_path(pdf, path)
         elem = chain[-1]
@@ -519,7 +519,7 @@ def add_struct_node(file: str, output: str, parent_path: list, stype: str, index
     if not new_type:
         raise ValueError("type must not be empty")
     input_path, output_path = Path(file), Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         parent = _walk_path(pdf, parent_path)[-1]
         elem = pdf.make_indirect(

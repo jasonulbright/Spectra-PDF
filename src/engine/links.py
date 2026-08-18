@@ -43,7 +43,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Dictionary, Name, String
 from engine.fieldactions import destination_page as _resolve_dest_page
-from engine.inplace import staged_write
+from engine.inplace import is_same_file, staged_write
 from engine.pdf_save import save_pdf
 
 #: Border styles this module AUTHORS. Reading covers /B and /I (beveled,
@@ -537,7 +537,7 @@ def _nth_link(pdf, page_no: int, index: int):
 def set_link_target(file: str, output: str, page: int, index: int, target: dict) -> dict:
     """Retarget a link (replaces any existing action AND destination)."""
     input_path, output_path = Path(file), Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         annot = _nth_link(pdf, page, index)
         _write_target(pdf, annot, target or {})
@@ -565,7 +565,7 @@ def set_link_appearance(file: str, output: str, page: int, index: int, appearanc
     """Restyle a link's border. Total: every border key is rewritten from the
     request, so a style left out is REMOVED rather than left behind."""
     input_path, output_path = Path(file), Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         annot = _nth_link(pdf, page, index)
         _write_appearance(annot, appearance)
@@ -581,7 +581,7 @@ def set_link_rect(file: str, output: str, page: int, index: int, rect: list) -> 
     """Move or resize a link's region. The geometry half of editing an
     existing link — the canvas hands back the rect it dragged."""
     input_path, output_path = Path(file), Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         annot = _nth_link(pdf, page, index)
         annot["/Rect"] = Array(_normalized_rect(rect))
@@ -623,7 +623,7 @@ def add_links(file: str, output: str, links: list) -> dict:
     if not links:
         raise ValueError("no links to add")
     input_path, output_path = Path(file), Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         prepared = []
         for spec in links:
@@ -657,7 +657,7 @@ def add_links(file: str, output: str, links: list) -> dict:
 def delete_link(file: str, output: str, page: int, index: int) -> dict:
     """Remove one link annotation from a page."""
     input_path, output_path = Path(file), Path(output)
-    same_file = input_path.resolve() == output_path.resolve()
+    same_file = is_same_file(str(input_path), str(output_path))
     with pikepdf.open(file) as pdf:
         target = _nth_link(pdf, page, index)
         pg = pdf.pages[int(page) - 1]
