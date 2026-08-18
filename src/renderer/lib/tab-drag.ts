@@ -429,15 +429,20 @@ export interface SerialPublisher<T> {
   /** Record a value to publish. The newest one always wins. */
   post(value: T): void;
   /**
-   * Resolve once nothing is outstanding and nothing is waiting.
+   * Resolve once nothing is outstanding and nothing is waiting, with whether
+   * the newest posted value actually reached the far side.
    *
    * A serial publisher is unwedgeable precisely because nothing waits on it,
    * which is also why the newest value can still be in the queue when something
    * reads the far side. Anywhere a reader has to see the last thing this window
    * knew — the session record a quit seals — the flush is what makes "last
    * published" mean "last measured".
+   *
+   * False is the answer that matters: a send that REJECTED left the far side
+   * holding something older than this window measured, and reporting that as
+   * flushed hands a quit a receipt for an order that never arrived.
    */
-  flush(): Promise<void>;
+  flush(): Promise<boolean>;
 }
 
 /**
@@ -453,13 +458,20 @@ export interface SerialPublisher<T> {
 export function createSerialPublisher<T>(send: (value: T) => Promise<void>): SerialPublisher<T> {
   let inFlight = false;
   let pending: { value: T } | null = null;
-  let waiting: Array<() => void> = [];
+  let waiting: Array<(landed: boolean) => void> = [];
+  /** The newest value posted, kept for the one retry a flush is allowed. */
+  let last: { value: T } | null = null;
+  /** Whether the newest posted value reached the far side. */
+  let landed = true;
+  /** Whether this run of failures has already been retried. */
+  let retried = false;
+
   const settle = (): void => {
     const woken = waiting;
     waiting = [];
-    for (const resolve of woken) resolve();
+    for (const resolve of woken) resolve(landed);
   };
-  const drain = (): void => {
+  const start = (): void => {
     const next = pending;
     pending = null;
     if (!next) {
@@ -468,22 +480,47 @@ export function createSerialPublisher<T>(send: (value: T) => Promise<void>): Ser
       return;
     }
     inFlight = true;
-    void send(next.value).then(drain, drain);
+    void send(next.value).then(
+      () => {
+        // Only the NEWEST value decides. One that succeeded while a newer one
+        // was already queued behind it says nothing about what the far side
+        // ends up holding.
+        if (pending === null) landed = true;
+        start();
+      },
+      // A rejection leaves `landed` false: the far side is holding something
+      // older than this window measured.
+      () => start(),
+    );
   };
   return {
     post(value: T): void {
       pending = { value };
+      last = { value };
+      landed = false;
+      retried = false;
       if (inFlight) return;
-      drain();
+      start();
     },
-    flush(): Promise<void> {
+    flush(): Promise<boolean> {
       // Idle is idle: a flush that nothing is outstanding for must not wait for
       // a publish that may never be posted.
-      if (!inFlight && pending === null) return Promise.resolve();
+      if (!inFlight && pending === null) {
+        if (landed) return Promise.resolve(true);
+        // One retry, and one only. The failure this path actually meets is a
+        // transient refusal of the command channel, and the cost of reporting
+        // it as lost is an aborted Exit the user has to repeat. A retry that
+        // fails too is a far side that is not listening, which is exactly what
+        // the caller has to hear about.
+        if (last === null || retried) return Promise.resolve(false);
+        retried = true;
+        pending = { value: last.value };
+        start();
+      }
       // A value posted while this is waiting extends the wait rather than
       // slipping past it — the point is that the far side holds the newest
       // order, not that some publish finished.
-      return new Promise<void>((resolve) => waiting.push(resolve));
+      return new Promise<boolean>((resolve) => waiting.push(resolve));
     },
   };
 }
@@ -492,7 +529,7 @@ export function createSerialPublisher<T>(send: (value: T) => Promise<void>): Ser
 
 /** What `flushTabOrder` needs of a publisher, and nothing more. */
 export interface TabOrderChannel {
-  flush(): Promise<void>;
+  flush(): Promise<boolean>;
 }
 
 /**
@@ -510,14 +547,17 @@ export function setTabOrderChannel(channel: TabOrderChannel | null): void {
 }
 
 /**
- * Finish publishing this window's tab order.
+ * Finish publishing this window's tab order, reporting whether it landed.
  *
  * Awaited before a quit, because the seal takes whatever arrived last: a
  * reorder made in the seconds before Exit is still waiting behind an in-flight
  * publish, and the session would restore the arrangement the user just changed.
+ *
+ * True for a window whose strip never registered a publisher: it has published
+ * no order, so there is none to lose.
  */
-export function flushTabOrder(): Promise<void> {
-  return tabOrder ? tabOrder.flush() : Promise.resolve();
+export function flushTabOrder(): Promise<boolean> {
+  return tabOrder ? tabOrder.flush() : Promise.resolve(true);
 }
 
 // ── Frame throttle ────────────────────────────────────────────────────────

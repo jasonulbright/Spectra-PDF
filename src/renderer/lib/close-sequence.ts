@@ -23,19 +23,27 @@
 // invariant living inside a listener callback is an invariant with no test.
 
 export interface CloseSequenceDeps {
-  /** Finish publishing this window's tab order. */
-  flush: () => Promise<void>;
+  /** Finish publishing this window's tab order; false when it did not land. */
+  flush: () => Promise<boolean>;
   /** Tell the waiting quit this window heard it. */
   ack: (quitId: number) => Promise<unknown>;
 }
 
 /**
- * The prologue of every `app:beforeClose` — run before anything that can
- * show a dialog.
+ * The prologue of every close request — run before anything that can show a
+ * dialog. Returns whether this window may go on and close.
  *
  * `quitId` is null when the close is a plain window ×, where there is no quit
  * waiting and nothing to acknowledge; the flush still runs, because the last
- * window closing seals the record by that route too.
+ * window closing seals the record by that route too, and the window closes
+ * whatever the flush reports — refusing a × over a stale tab order would make
+ * the button do nothing at all.
+ *
+ * A flush that reports the order did NOT land withholds the receipt instead.
+ * Acknowledging over it hands the quit a receipt for an order that never
+ * arrived, and the quit would then seal a record this window has already
+ * superseded. Withholding costs the quit its own bounded wait and then an
+ * abort: nothing closes, which is the fail-closed outcome.
  *
  * A failed acknowledgement is swallowed: the quit's own timeout is the
  * authority on an unanswered request, and a rejected invoke here would abort
@@ -44,12 +52,14 @@ export interface CloseSequenceDeps {
 export async function sealBeforeClose(
   quitId: number | null,
   deps: CloseSequenceDeps,
-): Promise<void> {
-  await deps.flush();
-  if (quitId === null) return;
+): Promise<boolean> {
+  const landed = await deps.flush();
+  if (quitId === null) return true;
+  if (!landed) return false;
   try {
     await deps.ack(quitId);
   } catch {
     /* the quit's timeout decides; a lost receipt must not stop this close */
   }
+  return true;
 }

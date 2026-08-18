@@ -364,6 +364,16 @@ pub struct PendingOpen {
     /// Set only on an open that came with the document's ownership.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handover: Option<Handover>,
+    /// A handover whose source has not committed it yet.
+    ///
+    /// Invisible to the drain while it stands. The source writes its working
+    /// copy back over the user's own file BETWEEN taking the reservation and
+    /// committing it, so a target that drained the entry before that write
+    /// opens the bytes the write was about to replace — and the drain removes
+    /// the entry, leaving the destruction rollback nothing to hand back. The
+    /// commit clears this and signals; nothing else may.
+    #[serde(default, skip_serializing)]
+    pub reserved: bool,
 }
 
 pub struct WindowRegistry {
@@ -431,12 +441,57 @@ impl WindowRegistry {
         found
     }
 
+    /// Every open queued for a label, reserved or not.
+    ///
+    /// The recovery read: a window's destruction has to see the handovers that
+    /// moved to it and were never committed, which are exactly the ones the
+    /// drain cannot take.
     pub fn take_pending(&self, label: &str) -> Vec<PendingOpen> {
         self.pending
             .lock()
             .ok()
             .and_then(|mut p| p.remove(label))
             .unwrap_or_default()
+    }
+
+    /// The opens a window may act on now, leaving uncommitted handovers queued.
+    ///
+    /// The renderer drains on mount and on every open signal, both of which can
+    /// fall between a reservation and its commit; a reserved entry taken there
+    /// would open a file its source is still writing.
+    pub fn take_deliverable(&self, label: &str) -> Vec<PendingOpen> {
+        let Ok(mut pending) = self.pending.lock() else {
+            return Vec::new();
+        };
+        let (held, ready): (Vec<PendingOpen>, Vec<PendingOpen>) = match pending.get_mut(label) {
+            Some(queue) => queue.drain(..).partition(|open| open.reserved),
+            None => return Vec::new(),
+        };
+        if held.is_empty() {
+            pending.remove(label);
+        } else {
+            pending.insert(label.to_string(), held);
+        }
+        ready
+    }
+
+    /// Make a committed handover drainable. False when the token names no
+    /// queued entry — drained, revoked, or reclaimed by a destruction.
+    pub fn release_pending(&self, label: &str, token: u64) -> bool {
+        let Ok(mut pending) = self.pending.lock() else {
+            return false;
+        };
+        let Some(queue) = pending.get_mut(label) else {
+            return false;
+        };
+        let mut found = false;
+        for open in queue.iter_mut() {
+            if open.handover.as_ref().map(|h| h.token) == Some(token) {
+                open.reserved = false;
+                found = true;
+            }
+        }
+        found
     }
 
     pub fn forget(&self, label: &str) {
@@ -549,6 +604,7 @@ pub fn queue_open(
             merge,
             index: None,
             handover: None,
+            reserved: false,
         },
     )
 }
@@ -561,6 +617,10 @@ pub fn queue_open(
 /// a shell association, a second instance, a restored session, a tear-off into
 /// a window with no tabs at all — appends. Nothing handed over ever merges:
 /// the document arrives as itself, in a window that may have none.
+///
+/// Queued RESERVED: ownership has moved but the source has not written the
+/// file yet, so the entry is held out of the drain until the commit releases
+/// it.
 pub fn queue_handover(
     registry: &WindowRegistry,
     label: &str,
@@ -575,6 +635,7 @@ pub fn queue_handover(
             merge: false,
             index,
             handover: Some(handover),
+            reserved: true,
         },
     )
 }
@@ -734,12 +795,18 @@ pub async fn focus_app_window(app: AppHandle, label: String) -> Result<(), Strin
     Ok(())
 }
 
+/// Drain this window's queued opens.
+///
+/// Uncommitted handovers stay behind: the document has changed hands but its
+/// source is still writing the file the open would read.
 #[tauri::command]
 pub async fn take_pending_opens(
     app: AppHandle,
     window: tauri::WebviewWindow,
 ) -> Result<Vec<PendingOpen>, String> {
-    Ok(app.state::<WindowRegistry>().take_pending(window.label()))
+    Ok(app
+        .state::<WindowRegistry>()
+        .take_deliverable(window.label()))
 }
 
 #[cfg(test)]
@@ -1050,9 +1117,51 @@ mod tests {
             merge: false,
             index: None,
             handover: None,
+            reserved: false,
         };
         let json = serde_json::to_string(&plain).unwrap();
         assert!(!json.contains("handover"), "{json}");
+        // The gate is this side's bookkeeping: a renderer that could read it
+        // would be reading a decision it does not make.
+        assert!(!json.contains("reserved"), "{json}");
+    }
+
+    #[test]
+    fn an_uncommitted_handover_is_invisible_to_the_drain_and_stays_queued() {
+        let registry = WindowRegistry::new();
+        assert!(queue_open(&registry, "doc-1", vec!["C:\\b.pdf".into()], false));
+        assert!(queue_handover(&registry, "doc-1", vec!["C:\\a.pdf".into()], None, handover(4)));
+
+        // The source is still writing the file this open would read, and the
+        // entry is the destruction rollback's only record of the move.
+        let drained = registry.take_deliverable("doc-1");
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].files, vec!["C:\\b.pdf".to_string()]);
+        // Draining again takes nothing and still leaves it.
+        assert!(registry.take_deliverable("doc-1").is_empty());
+
+        assert!(registry.release_pending("doc-1", 4));
+        let committed = registry.take_deliverable("doc-1");
+        assert_eq!(committed.len(), 1);
+        assert_eq!(committed[0].files, vec!["C:\\a.pdf".to_string()]);
+        assert!(registry.take_pending("doc-1").is_empty());
+    }
+
+    #[test]
+    fn a_release_names_one_token_and_a_destruction_still_sees_what_was_never_committed() {
+        let registry = WindowRegistry::new();
+        assert!(queue_handover(&registry, "doc-1", vec!["C:\\a.pdf".into()], None, handover(4)));
+        assert!(queue_handover(&registry, "doc-1", vec!["C:\\b.pdf".into()], None, handover(5)));
+        // A commit releases its own handover and no other window's.
+        assert!(!registry.release_pending("doc-9", 4));
+        assert!(!registry.release_pending("doc-1", 6));
+        assert!(registry.release_pending("doc-1", 4));
+        assert_eq!(registry.take_deliverable("doc-1").len(), 1);
+        // The recovery read sees the one still held, which is the point of
+        // holding it: the drain could not have taken it away.
+        let left = registry.take_pending("doc-1");
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].files, vec!["C:\\b.pdf".to_string()]);
     }
 
     #[test]
@@ -1062,6 +1171,7 @@ mod tests {
             merge: false,
             index: Some(0),
             handover: None,
+            reserved: false,
         };
         let json = serde_json::to_string(&queued).unwrap();
         assert_eq!(

@@ -916,6 +916,66 @@ pub fn abandon_quit(app: &AppHandle, id: u64) {
     unseal(app);
 }
 
+/// Wait out the PREPARE round's receipts.
+///
+/// The same wait as the close round's, minus the unseal: nothing is sealed yet
+/// when this runs, and calling the unseal here would write a fresh snapshot for
+/// a quit that has not captured anything.
+pub fn await_prepare_acks(app: &AppHandle, id: u64) -> QuitGate {
+    app.state::<QuitAcks>().wait(id, QUIT_ACK_TIMEOUT)
+}
+
+/// Call off a PREPARE round that could not be delivered. Nothing is sealed, so
+/// there is nothing to put back.
+pub fn abandon_prepare(app: &AppHandle, id: u64) {
+    app.state::<QuitAcks>().abort(id);
+}
+
+/// Order the three steps of an app-level quit.
+///
+/// The capture sits strictly BETWEEN the two rounds, and that is the whole
+/// point of there being two. Each window publishes its tab order through a
+/// channel nothing waits on, so an order changed seconds before Exit can still
+/// be in flight when the quit is decided. Capturing first sealed over it: the
+/// initiating window flushed its own, and every peer flushed only when it heard
+/// the close request — which the seal already preceded, so a reorder made in
+/// window B was lost whenever window A exited.
+///
+/// So the peers are asked to flush and say so BEFORE anything is captured. Only
+/// once every one of them has answered does the record get taken and sealed,
+/// and only then are they asked to close. A round nobody answers aborts with
+/// nothing captured and nothing sealed.
+///
+/// A capture that FAILED aborts too. `seal_and_write` has already lifted the
+/// seal on that outcome, so the file still holds the previous run's record;
+/// closing the windows now would exit having silently thrown this session away,
+/// with the windows that could still be captured already gone.
+pub fn sequence_quit(
+    prepare: impl FnOnce() -> QuitGate,
+    capture: impl FnOnce() -> WriteOutcome,
+    close: impl FnOnce() -> QuitGate,
+) -> bool {
+    if prepare() == QuitGate::Abort {
+        return false;
+    }
+    if capture() == WriteOutcome::Failed {
+        return false;
+    }
+    close() == QuitGate::Proceed
+}
+
+/// Whether a teardown may go ahead on the outcome of its own quit snapshot.
+///
+/// A snapshot that did not land leaves the previous record as the file's
+/// contents, and `seal_and_write` lifts the seal rather than holding the file
+/// closed over a snapshot that never reached disk. Destroying the windows on
+/// that outcome exits with some earlier run's session on disk and nothing left
+/// alive to write this one from. `Refused` is a different answer: another path
+/// sealed first, so this session is already recorded.
+pub fn teardown_permitted(capture: WriteOutcome) -> bool {
+    capture != WriteOutcome::Failed
+}
+
 // ── Applying geometry ─────────────────────────────────────────────────────
 
 /// Put a window where the record says, adjusted for the monitors that exist
@@ -1543,6 +1603,150 @@ mod tests {
             state.write_checked(|| (), |()| Ok(())),
             WriteOutcome::Refused
         );
+    }
+
+    // ── The two-phase quit ────────────────────────────────────────────────
+
+    /// A quit snapshot that cannot be written, however many times it is tried.
+    fn held_open() -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "the record is held open",
+        ))
+    }
+
+    #[test]
+    fn an_order_published_during_the_prepare_round_is_in_the_sealed_capture() {
+        let state = SessionState::new();
+        // The arrangement the record holds when Exit is chosen: window B has
+        // reordered its tabs, and its publish is still in flight.
+        state.set_order("doc-1", paths(&["a.pdf", "b.pdf"]));
+        let captured = Cell::new(Vec::new());
+
+        let proceeded = sequence_quit(
+            || {
+                // The peer flushes what it measured and only then answers, so
+                // the reorder is on this side before the round completes.
+                state.set_order("doc-1", paths(&["b.pdf", "a.pdf"]));
+                QuitGate::Proceed
+            },
+            || {
+                captured.set(state.order("doc-1"));
+                state.seal_and_write(|| Ok(()))
+            },
+            || QuitGate::Proceed,
+        );
+
+        assert!(proceeded);
+        // Capturing ahead of the round is what sealed this over: the restored
+        // session arranged the tabs the way they were before the user moved
+        // them, and only the initiating window's own flush was ever waited on.
+        assert_eq!(captured.take(), paths(&["b.pdf", "a.pdf"]));
+        assert!(state.is_sealed());
+    }
+
+    #[test]
+    fn the_sealed_capture_is_what_the_last_peer_published() {
+        let state = SessionState::new();
+        let captured = Cell::new(Vec::new());
+        let proceeded = sequence_quit(
+            || {
+                // Two peers answer the same round; the record has to hold both
+                // windows' newest orders, not whichever one lost a race with
+                // the capture.
+                state.set_order("doc-1", paths(&["b.pdf"]));
+                state.set_order("doc-2", paths(&["c.pdf", "d.pdf"]));
+                QuitGate::Proceed
+            },
+            || {
+                let mut both = state.order("doc-1");
+                both.extend(state.order("doc-2"));
+                captured.set(both);
+                state.seal_and_write(|| Ok(()))
+            },
+            || QuitGate::Proceed,
+        );
+        assert!(proceeded);
+        assert_eq!(captured.take(), paths(&["b.pdf", "c.pdf", "d.pdf"]));
+    }
+
+    #[test]
+    fn a_prepare_round_that_goes_unanswered_captures_nothing_and_seals_nothing() {
+        let state = SessionState::new();
+        let captured = Cell::new(false);
+        let closed = Cell::new(false);
+
+        let proceeded = sequence_quit(
+            || QuitGate::Abort,
+            || {
+                captured.set(true);
+                state.seal_and_write(|| Ok(()))
+            },
+            || {
+                closed.set(true);
+                QuitGate::Proceed
+            },
+        );
+
+        // A window that never heard the prepare request has an order this side
+        // may not have; recording one over it is the loss the round exists to
+        // prevent, so nothing is recorded and nothing closes.
+        assert!(!proceeded);
+        assert!(!captured.get());
+        assert!(!closed.get());
+        assert!(!state.is_sealed());
+    }
+
+    #[test]
+    fn a_quit_snapshot_that_did_not_land_stops_the_quit_before_anything_closes() {
+        let state = SessionState::new();
+        let closed = Cell::new(false);
+
+        let proceeded = sequence_quit(
+            || QuitGate::Proceed,
+            || state.seal_and_write(held_open),
+            || {
+                closed.set(true);
+                QuitGate::Proceed
+            },
+        );
+
+        // The file still holds the previous run's record and the seal is back
+        // off. Closing the windows now would exit having thrown this session
+        // away, with nothing left standing to capture it from.
+        assert!(!proceeded);
+        assert!(!closed.get());
+        assert!(!state.is_sealed());
+    }
+
+    #[test]
+    fn a_prompted_window_that_never_answers_the_close_round_still_stops_the_quit() {
+        let state = SessionState::new();
+        let proceeded = sequence_quit(
+            || QuitGate::Proceed,
+            || state.seal_and_write(|| Ok(())),
+            || QuitGate::Abort,
+        );
+        assert!(!proceeded);
+    }
+
+    #[test]
+    fn the_last_window_is_destroyed_only_when_its_snapshot_reached_disk() {
+        let state = SessionState::new();
+        // The window × path and the tray Quit both capture here. A destination
+        // held open by another process fails the write, `seal_and_write` puts
+        // the seal back, and destroying the window on that outcome exits with
+        // an older run's session on disk.
+        assert!(!teardown_permitted(state.seal_and_write(held_open)));
+        assert!(!state.is_sealed());
+
+        // The same close, once the write lands.
+        assert!(teardown_permitted(state.seal_and_write(|| Ok(()))));
+        assert!(state.is_sealed());
+
+        // A path that finds the file already sealed is not a failure: this
+        // session is recorded, by whichever quit path got there first.
+        assert!(teardown_permitted(state.seal_and_write(|| Ok(()))));
     }
 
     #[test]
