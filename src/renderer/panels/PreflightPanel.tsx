@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import { useAppDispatch } from '../state/AppStateProvider';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
@@ -306,7 +307,7 @@ export function PreflightPanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
-  const { performOperation, confirmSignedEdit } = useOperations();
+  const { performOperation } = useOperations();
   const dispatch = useAppDispatch();
   const [report, setReport] = useState<PreflightReport | null>(null);
   const [shipped, setShipped] = useState<PreflightProfile[]>([]);
@@ -525,13 +526,10 @@ export function PreflightPanel(): React.ReactElement {
   const runFix = useCallback(
     async (params: Record<string, unknown>): Promise<boolean> => {
       if (!activeFile) return false;
-      if (!(await confirmSignedEdit(activeFile.path, activeFile.workingPath, 'structural'))) {
-        return false;
-      }
       setBusy(true);
       setStatus(tChrome('panel.preflight.fixing'));
       try {
-        await performOperation(activeFile.path, 'apply_preflight_fixups', {
+        const r = await performOperation(activeFile.path, 'apply_preflight_fixups', {
           ...params,
           ...(await tools()),
           tesseract_path: await app.getTesseractPath(),
@@ -541,6 +539,10 @@ export function PreflightPanel(): React.ReactElement {
           // AFTER is never skipped.
           ...(report ? { report } : {}),
         });
+        if (r === EDIT_DECLINED) {
+          setStatus('');
+          return false;
+        }
         // The buffer changed, so the report re-runs and the rows flip
         // themselves — the re-check is never a claim the panel makes.
         setStatus(tChrome('panel.preflight.fixed'));
@@ -556,7 +558,7 @@ export function PreflightPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, confirmSignedEdit, performOperation, report, tools],
+    [activeFile, performOperation, report, tools],
   );
 
   /** Repair one row: the engine resolves the check to its doors and applies

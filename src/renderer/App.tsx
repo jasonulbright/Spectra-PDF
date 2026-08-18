@@ -19,6 +19,7 @@ import {
   type EditClass,
   type FieldLock,
   type SignaturePolicy,
+  type SignedEditDecision,
 } from './lib/signatures';
 import type { LinkSpec } from './lib/links';
 import { toEngineFormat } from './lib/af-emit';
@@ -81,6 +82,10 @@ import { PresentationView } from './components/canvas/PresentationView';
 import { usePdfProxies } from './hooks/usePdfProxies';
 import type { CanvasDropResolver } from './components/canvas/WorkspaceCanvasView';
 import { commitPageEdits } from './lib/workspace-commit';
+import { pageEditDecision, type PageDelta } from './lib/page-edit-gate';
+import { opEditClass, type OpMethod } from './lib/op-edit-class';
+import type { PreserveOutcome, PreserveRefusal } from './lib/preserve-reason';
+import { sealBeforeClose } from './lib/close-sequence';
 import { setCommitGate, runCommitGate } from './lib/commit-gate';
 import { initialViewPlan, parseInitialView, planIsInert } from './lib/initial-view';
 import { readFormFields } from './lib/forms';
@@ -400,22 +405,17 @@ function AppContent(): React.ReactElement {
   // (caching the bare "checked once" skipped the warning after an in-session
   // sign). `signature_policy` is an internal read, so asking the question does
   // not flush the user's pending annotations to disk.
-  const confirmEditOfSignedDoc = useCallback(
-    async (
-      path: string,
-      workingPath: string,
-      editClass: EditClass,
-      fields: readonly string[] | null = null,
-      /** Of `fields`, the ones the caller actually named — the rest are what
-       * the document's own calculations would change as a result. A lock that
-       * bites only those has to say so, or a user told "Total is locked" after
-       * typing into "Item 1" has been told nothing. */
-      typed: readonly string[] | null = null,
-    ): Promise<boolean> => {
-      const policy = (await call('signature_policy', {
-        path: workingPath,
-      })) as unknown as SignaturePolicy;
-      const decision = signedEditDecision(policy, editClass, fields, typed);
+  const readSignaturePolicy = useCallback(
+    async (workingPath: string): Promise<SignaturePolicy> =>
+      (await call('signature_policy', { path: workingPath })) as unknown as SignaturePolicy,
+    [call],
+  );
+
+  /** Render one decision. Shared by the whole-file classes and the page tier
+   * so the two surfaces cannot drift on how a refusal is shown, only on how
+   * the decision was reached. */
+  const confirmDecision = useCallback(
+    async (path: string, decision: SignedEditDecision): Promise<boolean> => {
       if (decision.kind === 'proceed') return true;
       // The locked-field refusal names what it stopped; every other decision
       // takes no values, and passing an unused one is harmless.
@@ -433,7 +433,47 @@ function AppContent(): React.ReactElement {
       editWarnedPathsRef.current.add(path);
       return true;
     },
-    [call, showNotice, showProceedConfirm],
+    [showNotice, showProceedConfirm],
+  );
+
+  const confirmEditOfSignedDoc = useCallback(
+    async (
+      path: string,
+      workingPath: string,
+      editClass: EditClass,
+      fields: readonly string[] | null = null,
+      /** Of `fields`, the ones the caller actually named — the rest are what
+       * the document's own calculations would change as a result. A lock that
+       * bites only those has to say so, or a user told "Total is locked" after
+       * typing into "Item 1" has been told nothing. */
+      typed: readonly string[] | null = null,
+    ): Promise<boolean> => {
+      const policy = await readSignaturePolicy(workingPath);
+      return confirmDecision(path, signedEditDecision(policy, editClass, fields, typed));
+    },
+    [readSignaturePolicy, confirmDecision],
+  );
+
+  /** The page tier's gate, taken BEFORE the gesture like every other one.
+   *
+   * The page tier writes at COMMIT time, so the question is not whether the
+   * document is signed but whether the commit's append will carry THIS delta:
+   * a rotate on an approval-signed document keeps its signature and must not
+   * raise a dialog, while the same rotate on a certified one costs it and
+   * must. One selection can span files, so each affected document is decided
+   * on its own policy and the first refusal stops the whole gesture — a
+   * partially-applied batch is not a thing the page tier can undo halfway. */
+  const confirmPageEdit = useCallback(
+    async (paths: readonly string[], delta: PageDelta): Promise<boolean> => {
+      for (const path of paths) {
+        const f = state.files.get(path);
+        if (!f) continue;
+        const policy = await readSignaturePolicy(f.workingPath);
+        if (!(await confirmDecision(path, pageEditDecision(policy, delta)))) return false;
+      }
+      return true;
+    },
+    [state.files, readSignaturePolicy, confirmDecision],
   );
 
   const handleConfirmResult = useCallback((result: ConfirmResult) => {
@@ -482,6 +522,45 @@ function AppContent(): React.ReactElement {
   // natural place to report, so failures surface here.
   const [commitError, setCommitError] = useState<string | null>(null);
 
+  // Signed files whose commit could not be appended, waiting to be said out
+  // loud. Queued rather than awaited inside the commit: the commit's promise
+  // is what the commit gate and every save flow wait on, and parking those
+  // behind a modal would put an OK button in front of the engine queue. The
+  // rewrite has already landed by the time this runs — the notice reports
+  // what happened, it does not gate it.
+  const preserveQueue = useRef<PreserveRefusal[]>([]);
+  const preserveDraining = useRef(false);
+  const reportPreserveRefusals = useCallback(
+    (refusals: readonly PreserveRefusal[]) => {
+      if (refusals.length === 0) return;
+      preserveQueue.current.push(...refusals);
+      if (preserveDraining.current) return;
+      preserveDraining.current = true;
+      void (async () => {
+        try {
+          for (;;) {
+            const next = preserveQueue.current.shift();
+            if (!next) break;
+            const reason =
+              'detail' in next.reason
+                ? tChrome(next.reason.key, { detail: next.reason.detail })
+                : tChrome(next.reason.key);
+            await showNotice(
+              tChrome('app.preserve.title'),
+              tChrome('app.preserve.notPreserved', {
+                name: next.path.split(/[\\/]/).pop() ?? next.path,
+                reason,
+              }),
+            );
+          }
+        } finally {
+          preserveDraining.current = false;
+        }
+      })();
+    },
+    [showNotice],
+  );
+
   // Materialize pending in-memory page edits onto the snapshot undo chain.
   // Runs before anything that reads or replaces file bytes (save, whole-file
   // ops, close) — all dirty files commit together because cross-file moves
@@ -493,7 +572,7 @@ function AppContent(): React.ReactElement {
     if (state.pageDirtyPaths.length === 0) return Promise.resolve();
     const run = (async () => {
       try {
-        await commitPageEdits({
+        const outcome = await commitPageEdits({
           workspace: state.workspace,
           files: state.files,
           dirtyPaths: state.pageDirtyPaths,
@@ -507,24 +586,36 @@ function AppContent(): React.ReactElement {
           // The gate's guarantee ("engine reads bytes matching what the
           // user sees") holds by construction here: we ARE the commit,
           // reading the working copy plus the temp this very run staged.
+          // The engine's OUTCOME travels, not a boolean: `applied: false`
+          // covers an unsigned file and a refused append equally, and the
+          // reason is the only thing that separates the standing behaviour
+          // from a signature the user just lost.
           preserveSignatures: async (workingPath, stagedPath) => {
             const r = (await callRaw('transplant_incremental', {
               original: workingPath,
               modified: stagedPath,
               output: stagedPath,
-            })) as { applied?: boolean };
-            return r.applied === true;
+            })) as unknown as PreserveOutcome;
+            return { ...r, applied: r.applied === true };
           },
           readBack: batch.readFileBuffer,
         });
         setCommitError(null);
+        reportPreserveRefusals(outcome.signatureRefusals);
       } finally {
         inflightCommit.current = null;
       }
     })();
     inflightCommit.current = run;
     return run;
-  }, [state.pageDirtyPaths, state.workspace, state.files, dispatch, callRaw]);
+  }, [
+    state.pageDirtyPaths,
+    state.workspace,
+    state.files,
+    dispatch,
+    callRaw,
+    reportPreserveRefusals,
+  ]);
   const commitRef = useRef(commitIfNeeded);
   commitRef.current = commitIfNeeded;
 
@@ -822,6 +913,12 @@ function AppContent(): React.ReactElement {
   // already open are reused. A cancelled encrypted file is skipped.
   const importFilesIntoDoc = useCallback(
     async (rawPaths: string[], toDocId: string, toIndex: number) => {
+      // Adding pages changes the destination's page TREE, which is
+      // `page-structure`: the append tier carries it on an approval-signed
+      // document and no certification permits it. Asked first, before a claim
+      // is taken or a byte is read, so a refusal costs nothing.
+      const dest = state.workspace.documents.find((d) => d.id === toDocId);
+      if (dest && !(await confirmPageEdit([dest.path], 'page-structure'))) return;
       // Import sources are `files` entries keyed by path too — the same
       // identity gate as openByPaths (a case-variant drop must reuse the
       // already-registered source, not mint a second ghost) INCLUDING its
@@ -889,7 +986,14 @@ function AppContent(): React.ReactElement {
       dispatch({ type: 'IMPORT_PAGES', toDocId, toIndex, pages: allPages });
       if (unused.size > 0) void releasePaths([...unused]);
     },
-    [state.files, dispatch, prepareFileBytes, reportClaimRefusal],
+    [
+      state.files,
+      state.workspace.documents,
+      dispatch,
+      prepareFileBytes,
+      reportClaimRefusal,
+      confirmPageEdit,
+    ],
   );
 
   // The canvas publishes its drop resolver here.
@@ -1052,13 +1156,28 @@ function AppContent(): React.ReactElement {
   // Snapshot + perform operation + reload. The engine's answer is RETURNED —
   // an operation that reports a partial result can only reach the surface
   // that must say so through this value.
+  //
+  // THE SIGNED-DOCUMENT GATE LIVES HERE, once, keyed on the op's own edit
+  // class. Every in-place operation flows through this function, so a class
+  // in the roster is a question asked on every surface that runs the op —
+  // which is the difference between sixteen guarded call sites and fourteen
+  // unguarded ones. The two `none` ops own their own confirms, for reasons
+  // the roster states.
+  //
+  // The decision runs BEFORE the snapshot: `file.snapshot` runs the commit
+  // gate, so asking afterwards would have flushed the user's pending page
+  // edits to disk on the way to refusing the edit that caused it.
   const performOperation = useCallback<PerformOperation>(async (
     filePath: string,
-    method: string,
+    method: OpMethod,
     params: Record<string, unknown>,
   ) => {
     const f = state.files.get(filePath);
     if (!f) return null;
+    const editClass = opEditClass(method);
+    if (editClass !== 'none' && !(await confirmEditOfSignedDoc(filePath, f.workingPath, editClass))) {
+      return EDIT_DECLINED;
+    }
     const snapshotPath = await file.snapshot(f.workingPath);
     const answer = await call(method, { ...params, file: f.workingPath, output: f.workingPath });
     const reloaded = await reloadFile(filePath);
@@ -1066,7 +1185,7 @@ function AppContent(): React.ReactElement {
       dispatch({ type: 'UPDATE_FILE', path: filePath, pageCount: reloaded.pageCount, buffer: reloaded.buffer, snapshotPath });
     }
     return answer;
-  }, [state.files, call, reloadFile, dispatch]);
+  }, [state.files, call, reloadFile, dispatch, confirmEditOfSignedDoc]);
 
   // Applying redactions REWRITES the page content, so it is a structural-class
   // edit however small the band: the append tier cannot carry it, every byte
@@ -1078,11 +1197,9 @@ function AppContent(): React.ReactElement {
     async (path: string, regions: { page: number; rect: [number, number, number, number] }[]): Promise<boolean> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return false;
-      await performOperation(path, 'redact', { regions });
-      return true;
+      return (await performOperation(path, 'redact', { regions })) !== EDIT_DECLINED;
     },
-    [state.files, performOperation, confirmEditOfSignedDoc],
+    [state.files, performOperation],
   );
 
   // Persist the pending marks as the file's /Redact set — undoable,
@@ -1094,11 +1211,10 @@ function AppContent(): React.ReactElement {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
       // Saving marks writes /Redact annotations and removes nothing yet, so
-      // it is annotate-class; applying them is the content change.
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'annotate'))) return;
+      // it is annotate-class in the roster; applying them is the content change.
       await performOperation(path, 'save_redaction_marks', { regions });
     },
-    [state.files, performOperation, confirmEditOfSignedDoc],
+    [state.files, performOperation],
   );
 
   // An address this app will not open is still an address the user wants.
@@ -1168,12 +1284,9 @@ function AppContent(): React.ReactElement {
         }
         case 'hide': {
           if (action.targets.length === 0) return;
-          const f = state.files.get(path);
-          if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
           // A visibility change writes the annotation's own /F bit: the page
           // raster is drawn from the file, so a widget hidden only in memory
-          // is still on the page every other reader sees.
-          if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'annotate'))) return;
+          // is still on the page every other reader sees. Annotate-class.
           await performOperation(path, 'set_widget_visibility', {
             targets: action.targets,
             hide: action.hide,
@@ -1274,28 +1387,25 @@ function AppContent(): React.ReactElement {
       state.files,
       call,
       performOperation,
-      confirmEditOfSignedDoc,
       showNotice,
       showProceedConfirm,
       copyToClipboard,
     ],
   );
 
-  // Link authoring writes /Link annotations, so it is an annotate-class edit:
-  // the incremental tier preserves it, and only a certification that forbids
-  // commenting has anything to say about it. EVERY link mutation routes
-  // through this one gate — the canvas gesture, the panel's Create, a
-  // retarget, a restyle, a delete — so a signed document is asked about once,
-  // in one place, whichever surface the edit came from.
+  // Link authoring writes /Link annotations, so every link method is
+  // annotate-class in the roster: the incremental tier preserves it, and only
+  // a certification that forbids commenting has anything to say about it.
+  // EVERY link mutation routes through this one function — the canvas
+  // gesture, the panel's Create, a retarget, a restyle, a delete — so the
+  // four share one shape and one return contract.
   const runLinkEdit = useCallback(
-    async (path: string, method: string, params: Record<string, unknown>): Promise<boolean> => {
+    async (path: string, method: OpMethod, params: Record<string, unknown>): Promise<boolean> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'annotate'))) return false;
-      await performOperation(path, method, params);
-      return true;
+      return (await performOperation(path, method, params)) !== EDIT_DECLINED;
     },
-    [state.files, performOperation, confirmEditOfSignedDoc],
+    [state.files, performOperation],
   );
 
   const handleAddLinks = useCallback(
@@ -1465,17 +1575,16 @@ function AppContent(): React.ReactElement {
     async (path: string, field: string, lock: FieldLock | null): Promise<boolean> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return false;
-      await performOperation(path, 'set_field_lock', {
+      const r = await performOperation(path, 'set_field_lock', {
         field,
         allow_signed: true,
         ...(lock === null
           ? {}
           : { lock: lock.action, lock_fields: lockNeedsFields(lock.action) ? lock.fields : [] }),
       });
-      return true;
+      return r !== EDIT_DECLINED;
     },
-    [state.files, performOperation, confirmEditOfSignedDoc],
+    [state.files, performOperation],
   );
 
   const handleSetFieldActions = useCallback(
@@ -1487,14 +1596,13 @@ function AppContent(): React.ReactElement {
     ): Promise<boolean> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return false;
       // The door is total over what it is ASKED about and inert about the
       // rest. `clear` names the members this call addresses, because the wire
       // cannot distinguish an omitted member from "leave it": passing
       // `actions` takes over the value half, passing `data` takes over every
       // data trigger, and a null/absent half leaves the document's own alone.
       // A button edit must not silently destroy a script it never mentioned.
-      await performOperation(path, 'set_field_actions', {
+      const r = await performOperation(path, 'set_field_actions', {
         field,
         allow_signed: true,
         clear: [
@@ -1507,9 +1615,9 @@ function AppContent(): React.ReactElement {
         ...(actions?.defaultValue !== undefined ? { default_value: actions.defaultValue } : {}),
         ...(data ? { actions: data.map(toEngineAction) } : {}),
       });
-      return true;
+      return r !== EDIT_DECLINED;
     },
-    [state.files, performOperation, confirmEditOfSignedDoc],
+    [state.files, performOperation],
   );
 
   const handleApplyOcrLayer = useCallback(
@@ -1532,7 +1640,6 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
       if (opts?.convert) {
         // Render the replacement in the bundled fallback
         // font FAMILY — getEditFontPath returns the fonts DIRECTORY and
@@ -1540,17 +1647,19 @@ function AppContent(): React.ReactElement {
         // own font. The path the editor offers when the run's own font
         // can't express the typed characters.
         const fontPath = await app.getEditFontPath();
-        await performOperation(path, 'convert_text_run', {
+        const converted = await performOperation(path, 'convert_text_run', {
           page,
           index,
           new_text: newText,
           font_path: fontPath,
         });
+        if (converted === EDIT_DECLINED) return EDIT_DECLINED;
         return;
       }
-      await performOperation(path, 'replace_text_run', { page, index, new_text: newText });
+      const r = await performOperation(path, 'replace_text_run', { page, index, new_text: newText });
+      if (r === EDIT_DECLINED) return EDIT_DECLINED;
     },
-    [state.files, performOperation, confirmEditOfSignedDoc],
+    [state.files, performOperation],
   );
 
   // Run-scoped size/color restyle — same signed-doc gate, text unchanged.
@@ -1563,15 +1672,15 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
-      await performOperation(path, 'restyle_text_run', {
+      const r = await performOperation(path, 'restyle_text_run', {
         page,
         index,
         ...(style.size != null ? { size: style.size } : {}),
         ...(style.color ? { color: style.color } : {}),
       });
+      if (r === EDIT_DECLINED) return EDIT_DECLINED;
     },
-    [state.files, performOperation, confirmEditOfSignedDoc],
+    [state.files, performOperation],
   );
 
   const handleEditParagraph = useCallback(
@@ -1585,7 +1694,6 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
       // The fingerprint (member runs + logical text) makes the engine
       // re-derive its grouping and REFUSE if the page changed underneath —
       // a heuristic must never silently retarget.
@@ -1632,13 +1740,14 @@ function AppContent(): React.ReactElement {
       // the metric twin in that directory. Gating this on substitution would
       // kern some documents and silently not others.
       params.font_path = await app.getEditFontPath();
-      await performOperation(path, 'replace_paragraph_text', params);
+      const r = await performOperation(path, 'replace_paragraph_text', params);
+      if (r === EDIT_DECLINED) return EDIT_DECLINED;
     },
-    [state.files, performOperation, confirmEditOfSignedDoc],
+    [state.files, performOperation],
   );
 
   // merge: one engine op, one undo step; both fingerprints ride so the
-  // engine refuses a stale view. Signed-doc-guarded like every content edit.
+  // engine refuses a stale view. Structural-class like every content edit.
   const handleMergeParagraph = useCallback(
     async (
       path: string,
@@ -1658,8 +1767,7 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
-      await performOperation(path, 'merge_paragraph_with_previous', {
+      const r = await performOperation(path, 'merge_paragraph_with_previous', {
         page,
         // The engine addresses the SELECTED paragraph: for the shipped
         // previous-merge that is cur (it merges upward); for with_next it
@@ -1687,8 +1795,9 @@ function AppContent(): React.ReactElement {
         // source an edit gets.
         font_path: await app.getEditFontPath(),
       });
+      if (r === EDIT_DECLINED) return EDIT_DECLINED;
     },
-    [state.files, performOperation, confirmEditOfSignedDoc],
+    [state.files, performOperation],
   );
 
   // Add Text: author a NEW text object at `rect` (PDF user-space points,
@@ -1735,7 +1844,6 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
       const params: Record<string, unknown> = {
         page,
         rect,
@@ -1755,14 +1863,15 @@ function AppContent(): React.ReactElement {
       if (opts?.writingMode !== undefined && opts.writingMode !== 'horizontal') {
         params.writing_mode = opts.writingMode;
       }
-      await performOperation(path, 'add_text_box', params);
+      const r = await performOperation(path, 'add_text_box', params);
+      if (r === EDIT_DECLINED) return EDIT_DECLINED;
     },
-    [state.files, performOperation, confirmEditOfSignedDoc],
+    [state.files, performOperation],
   );
 
   // Delete, transform (move/resize/rotate), or restyle (recolour /
   // line-width) one vector path object. Same undoable snapshot/commit-gate flow
-  // as an image edit (signed-doc-guarded), just a different engine op.
+  // as an image edit (structural-class), just a different engine op.
   const handleEditVector = useCallback(
     async (
       kind: 'delete' | 'transform' | 'restyle',
@@ -1778,10 +1887,10 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
       if (kind === 'transform') {
         if (!opts?.matrix) throw new Error('transform requires a target matrix');
-        await performOperation(path, 'transform_page_vector', { page, index, matrix: opts.matrix });
+        const r = await performOperation(path, 'transform_page_vector', { page, index, matrix: opts.matrix });
+        if (r === EDIT_DECLINED) return EDIT_DECLINED;
         return;
       }
       if (kind === 'restyle') {
@@ -1789,12 +1898,14 @@ function AppContent(): React.ReactElement {
         if (opts?.fill) params.fill = opts.fill;
         if (opts?.stroke) params.stroke = opts.stroke;
         if (opts?.lineWidth !== undefined) params.line_width = opts.lineWidth;
-        await performOperation(path, 'restyle_page_vector', params);
+        const r = await performOperation(path, 'restyle_page_vector', params);
+        if (r === EDIT_DECLINED) return EDIT_DECLINED;
         return;
       }
-      await performOperation(path, 'delete_page_vector', { page, index });
+      const r = await performOperation(path, 'delete_page_vector', { page, index });
+      if (r === EDIT_DECLINED) return EDIT_DECLINED;
     },
-    [state.files, performOperation, confirmEditOfSignedDoc],
+    [state.files, performOperation],
   );
 
   // --- Edit ▸ Images ----------------------------------------------------
@@ -1821,12 +1932,19 @@ function AppContent(): React.ReactElement {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
 
-      if (kind !== 'extract' && !(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) {
+      // Every mutating kind but `replace` runs through performOperation and
+      // is decided there by its roster class. `replace` is the deliberate
+      // exception: it holds ONE snapshot across a passthrough-then-raw retry
+      // (two performOperation calls would snapshot twice and leak a copy on
+      // every CMYK fallback), so it keeps its own guard — the shape is
+      // bespoke, not the decision.
+      if (kind === 'replace' && !(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) {
         return EDIT_DECLINED;
       }
 
       if (kind === 'delete') {
-        await performOperation(path, 'delete_page_image', { page, index });
+        const r = await performOperation(path, 'delete_page_image', { page, index });
+        if (r === EDIT_DECLINED) return EDIT_DECLINED;
         return;
       }
 
@@ -1835,7 +1953,8 @@ function AppContent(): React.ReactElement {
         // User-space M' is invariant to /Rotate, so no rotation re-projection
         // is needed here (unlike signature placement).
         if (!opts?.matrix) throw new Error('transform requires a target matrix');
-        await performOperation(path, 'transform_page_image', { page, index, matrix: opts.matrix });
+        const r = await performOperation(path, 'transform_page_image', { page, index, matrix: opts.matrix });
+        if (r === EDIT_DECLINED) return EDIT_DECLINED;
         return;
       }
 
@@ -1844,7 +1963,8 @@ function AppContent(): React.ReactElement {
         // rotation-invariant by construction (the engine emits it as a clip
         // at the draw), so like transform it needs no re-projection.
         if (!opts?.rect) throw new Error('crop requires a rect');
-        await performOperation(path, 'crop_page_image', { page, index, rect: opts.rect });
+        const r = await performOperation(path, 'crop_page_image', { page, index, rect: opts.rect });
+        if (r === EDIT_DECLINED) return EDIT_DECLINED;
         return;
       }
 
@@ -1859,13 +1979,14 @@ function AppContent(): React.ReactElement {
         ) {
           throw new Error('opacity requires a value, a blend mode, or a mask');
         }
-        await performOperation(path, 'set_image_opacity', {
+        const r = await performOperation(path, 'set_image_opacity', {
           page,
           index,
           ...(opts.opacity !== undefined ? { opacity: opts.opacity } : {}),
           ...(opts.blend !== undefined ? { blend: opts.blend } : {}),
           ...(opts.mask !== undefined ? { mask: opts.mask } : {}),
         });
+        if (r === EDIT_DECLINED) return EDIT_DECLINED;
         return;
       }
 
@@ -1979,16 +2100,17 @@ function AppContent(): React.ReactElement {
     ): Promise<string | void> => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
-      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
       if (kind === 'transform') {
         if (!opts.targets?.length) throw new Error('group transform requires targets');
-        await performOperation(path, 'transform_page_images', { page, targets: opts.targets });
+        const r = await performOperation(path, 'transform_page_images', { page, targets: opts.targets });
+        if (r === EDIT_DECLINED) return EDIT_DECLINED;
         return;
       }
       if (!opts.indexes?.length) throw new Error('group delete requires indexes');
-      await performOperation(path, 'delete_page_images', { page, indexes: opts.indexes });
+      const r = await performOperation(path, 'delete_page_images', { page, indexes: opts.indexes });
+      if (r === EDIT_DECLINED) return EDIT_DECLINED;
     },
-    [state.files, performOperation, confirmEditOfSignedDoc],
+    [state.files, performOperation],
   );
 
   // Add Image: embed a NEW raster at `rect` (PDF user-space points). Picks
@@ -2293,9 +2415,16 @@ function AppContent(): React.ReactElement {
     // window that never answers has not heard it and will not close, and this
     // window closing anyway would leave it standing behind a session record
     // that stopped being written the moment Exit was chosen.
-    if (!(await app.requestQuit())) return;
+    if (!(await app.requestQuit())) {
+      // Fail-closed, and said out loud. The quit unsealed itself and nothing
+      // closed; without a word the user sees Exit do nothing at all, which is
+      // indistinguishable from a hung menu — and the remedy (close the
+      // unresponsive window first) is not guessable.
+      await showNotice(tChrome('app.exit.abortedTitle'), tChrome('app.exit.aborted'));
+      return;
+    }
     await app.confirmClose();
-  }, [state.files, isFileDirty, showConfirm, commitOrAbort]);
+  }, [state.files, isFileDirty, showConfirm, commitOrAbort, showNotice]);
 
   // Hand a document to another window. A hand-off MOVES: the document leaves
   // this workspace, so two live copies of one file never exist and every
@@ -2515,6 +2644,7 @@ function AppContent(): React.ReactElement {
     restyleLink: (path, page, index, appearance) =>
       runLinkEdit(path, 'set_link_appearance', { page, index, appearance }),
     removeLink: (path, page, index) => runLinkEdit(path, 'delete_link', { page, index }),
+    confirmPageEdit,
   };
   const commandHandlersRef = useRef(commandHandlers);
   commandHandlersRef.current = commandHandlers;
@@ -2572,6 +2702,7 @@ function AppContent(): React.ReactElement {
       restyleLink: (path, page, index, appearance) =>
         h.current.restyleLink(path, page, index, appearance),
       removeLink: (path, page, index) => h.current.removeLink(path, page, index),
+      confirmPageEdit: (paths, delta) => h.current.confirmPageEdit(paths, delta),
     });
     setCommandStateSource(() => ({ state: stateRef.current, dispatch }));
     return () => {
@@ -2598,18 +2729,23 @@ function AppContent(): React.ReactElement {
   // Handle window close — Rust intercepts CloseRequested and emits app:beforeClose
   useEffect(() => {
     const unlisten = app.onBeforeClose(async (quitId) => {
-      // Receipt first, before any prompt: the quit that sent this is waiting
-      // for it and calls itself off without one, so it cannot queue behind a
-      // dialog the user may take minutes to answer.
-      if (quitId !== null) app.quitAck(quitId).catch(() => {});
+      // Flush, THEN acknowledge — the ordering `lib/close-sequence` exists to
+      // pin. The seal takes whatever order arrived last, and only the sealing
+      // window used to flush, so a reorder made in THIS window was sealed over
+      // when another one hit Exit. Publishing before the receipt closes that
+      // seam inside the abort bound the quit already enforces: a flush that
+      // never finishes withholds the receipt and the quit aborts, which is the
+      // fail-closed outcome rather than a wedge.
+      //
+      // The receipt still precedes every DIALOG below: a prompt can take
+      // minutes, and a receipt queued behind one reads to the quit as a dead
+      // renderer. The flush is bounded by this window's own in-flight publish,
+      // which is why it is the one thing allowed in front of it.
+      await sealBeforeClose(quitId, { flush: flushTabOrder, ack: app.quitAck });
       const minimizeToTray = getSettings().minimizeToTray === true;
       const dirtyFiles = Array.from(filesRef.current.values()).filter(
         (f) => f.dirty || pageDirtyRef.current.includes(f.path),
       );
-      // The last window closing seals the session record too, so the order
-      // this window's strip is in has to be published before it goes — same
-      // reason as Exit, reached by the × instead.
-      await flushTabOrder();
       // Rust decides between hiding and closing, because only it knows whether
       // this is the last workspace window: tray residency is an app-level
       // state, so a second window's × closes that window rather than hiding

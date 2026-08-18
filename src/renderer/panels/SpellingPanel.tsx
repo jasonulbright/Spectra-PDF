@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tLanguageName, currentLanguage } from '../i18n';
 import { app, dialog, file } from '../lib/tauri-bridge';
 import { loadSettings, saveSettings } from '../lib/app-settings';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import type { EditSpan } from '../lib/edit-paragraphs';
 import {
   AUTO_LANGUAGE,
@@ -212,11 +213,9 @@ export function SpellingPanel(): React.ReactElement {
       const fix = paragraphFix(para.text, para.spans, { ...issue, word }, replacement, para.runs[0]);
       if (!fix) return { issue, ok: false, reason: tChrome('panel.spelling.reasonMoved') };
       // A correction is a content edit, so it answers to the document's own
-      // signatures exactly as the canvas editor's does.
-      if (!(await confirmSignedEdit(filePath, workingPath, 'structural'))) {
-        return { issue, ok: false, reason: tChrome('panel.spelling.reasonDeclined') };
-      }
-      await performOperation(filePath, 'replace_paragraph_text', {
+      // signatures exactly as the canvas editor's does — decided inside
+      // performOperation, from the op's own edit class.
+      const r = await performOperation(filePath, 'replace_paragraph_text', {
         page: issue.page,
         paragraph_index: para.index,
         new_text: fix.text,
@@ -228,9 +227,12 @@ export function SpellingPanel(): React.ReactElement {
         expected_text: para.text,
         font_path: await app.getEditFontPath(),
       });
+      if (r === EDIT_DECLINED) {
+        return { issue, ok: false, reason: tChrome('panel.spelling.reasonDeclined') };
+      }
       return { issue, ok: true };
     },
-    [filePath, workingPath, call, performOperation, confirmSignedEdit, replacement],
+    [filePath, workingPath, call, performOperation, replacement],
   );
 
   const fixComment = useCallback(

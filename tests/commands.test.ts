@@ -9,6 +9,7 @@ import {
   hasSelection,
   hasActiveFile,
   isActiveFileDirty,
+  selectedPagePaths,
   type CommandId,
 } from '../src/renderer/commands/registry';
 import {
@@ -98,6 +99,7 @@ const noopHandlers = (): AppCommandHandlers => ({
   retargetLink: vi.fn(async () => true),
   restyleLink: vi.fn(async () => true),
   removeLink: vi.fn(async () => true),
+  confirmPageEdit: vi.fn(async () => true),
 });
 
 afterEach(() => {
@@ -165,6 +167,62 @@ describe('enablement helpers', () => {
   it('hasSelection reads the ui slice', () => {
     expect(hasSelection(initialState)).toBe(false);
     expect(hasSelection(stateWith({ ui: { ...initialState.ui, selectedPageIds: new Set(['x']) } }))).toBe(true);
+  });
+
+  // The signed-document gate decides per FILE, and a page id names no file on
+  // its own — so the selection resolves to owning paths before it is asked.
+  describe('selectedPagePaths', () => {
+    const pagesOf = (path: string, ids: string[]) =>
+      ids.map((id) => ({
+        id,
+        sourceDocId: path,
+        sourcePageIndex: 0,
+        rotation: 0 as const,
+        width: 100,
+        height: 100,
+      }));
+    const docOf = (id: string, path: string, ids: string[]) => ({
+      ...makeFile(path),
+      id,
+      pages: pagesOf(path, ids),
+      pageCount: ids.length,
+    });
+    const workspaceOf = () => ({
+      documents: [
+        docOf('a#0', 'a.pdf', ['a0', 'a1']),
+        // A second document over the SAME file — one path, not two.
+        docOf('a#1', 'a.pdf', ['a2']),
+        docOf('b#0', 'b.pdf', ['b0']),
+      ],
+    });
+
+    it('is empty with nothing selected', () => {
+      expect(selectedPagePaths(stateWith({ workspace: workspaceOf() }))).toEqual([]);
+    });
+
+    it('names every file the selection spans, once each, in workspace order', () => {
+      const state = stateWith({
+        workspace: workspaceOf(),
+        ui: { ...initialState.ui, selectedPageIds: new Set(['b0', 'a2', 'a0']) },
+      });
+      expect(selectedPagePaths(state)).toEqual(['a.pdf', 'b.pdf']);
+    });
+
+    it('names only the files the selection actually touches', () => {
+      const state = stateWith({
+        workspace: workspaceOf(),
+        ui: { ...initialState.ui, selectedPageIds: new Set(['b0']) },
+      });
+      expect(selectedPagePaths(state)).toEqual(['b.pdf']);
+    });
+
+    it('ignores an id no open document holds', () => {
+      const state = stateWith({
+        workspace: workspaceOf(),
+        ui: { ...initialState.ui, selectedPageIds: new Set(['gone']) },
+      });
+      expect(selectedPagePaths(state)).toEqual([]);
+    });
   });
 
   it('hasActiveFile ignores a GHOST import-only active file', () => {
@@ -935,12 +993,74 @@ describe('invokeCommand', () => {
     expect(finalState().ui.tool).toBe('select');
   });
 
-  it('document.deleteSelection deletes the batch then clears — even when the reducer rejects', () => {
+  it('document.deleteSelection deletes the batch then clears — even when the reducer rejects', async () => {
     const { dispatched } = wire(
       stateWith({ ui: { ...initialState.ui, selectedPageIds: new Set(['stale#p0']), focusedTab: { doc: 'x.pdf' } } }),
     );
     expect(invokeCommand('document.deleteSelection')).toBe(true);
+    // The signed-document gate is asked before the dispatch, so the pair lands
+    // a turn after the click.
+    await new Promise((r) => setTimeout(r, 0));
     expect(dispatched.map((a) => a.type)).toEqual(['DELETE_PAGE_REFS', 'UI_CLEAR_SELECTION']);
+  });
+
+  // The three page-tier commands consult the gate FIRST and dispatch nothing
+  // when it refuses. Each names the delta class its gesture actually produces:
+  // a rotate is `page-keys` (appendable, so an approval-signed document keeps
+  // its signature and sees no dialog), a delete is `page-structure`.
+  it('the page-tier commands ask the gate with their own delta class', async () => {
+    const state = stateWith({
+      files: new Map([['a.pdf', makeFile('a.pdf')]]),
+      workspace: {
+        documents: [
+          {
+            ...makeFile('a.pdf'),
+            id: 'a#0',
+            pages: [
+              { id: 'p0', sourceDocId: 'a.pdf', sourcePageIndex: 0, rotation: 0 as const, width: 1, height: 1 },
+            ],
+            pageCount: 1,
+          },
+        ],
+      },
+      ui: { ...initialState.ui, selectedPageIds: new Set(['p0']), focusedTab: { doc: 'a.pdf' } },
+    });
+    const { handlers } = wire(state);
+    invokeCommand('document.rotateSelectionCW');
+    invokeCommand('document.rotateSelectionCCW');
+    invokeCommand('document.deleteSelection');
+    await new Promise((r) => setTimeout(r, 0));
+    expect((handlers.confirmPageEdit as ReturnType<typeof vi.fn>).mock.calls).toEqual([
+      [['a.pdf'], 'page-keys'],
+      [['a.pdf'], 'page-keys'],
+      [['a.pdf'], 'page-structure'],
+    ]);
+  });
+
+  it('a refused gate dispatches nothing from any page-tier command', async () => {
+    const { dispatched, handlers } = wire(
+      stateWith({ ui: { ...initialState.ui, selectedPageIds: new Set(['p0']), focusedTab: { doc: 'a.pdf' } } }),
+    );
+    (handlers.confirmPageEdit as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    invokeCommand('document.rotateSelectionCW');
+    invokeCommand('document.rotateSelectionCCW');
+    invokeCommand('document.deleteSelection');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(dispatched).toEqual([]);
+  });
+
+  it('the page-tier commands are unavailable while the gate is unreachable', () => {
+    // The gate lives on App's handler bundle. A command that cannot consult it
+    // must be disabled, not silently ungated.
+    wire(stateWith({ ui: { ...initialState.ui, selectedPageIds: new Set(['p0']) } }));
+    registerAppCommandHandlers(null);
+    for (const id of [
+      'document.deleteSelection',
+      'document.rotateSelectionCW',
+      'document.rotateSelectionCCW',
+    ] as const) {
+      expect(invokeCommand(id), id).toBe(false);
+    }
   });
 
   it('view.home focuses Home; view.toolsPane toggles the dock on a doc tab', () => {

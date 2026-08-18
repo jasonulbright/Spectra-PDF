@@ -575,7 +575,11 @@ describe('commitPageEdits (transactional)', () => {
         workspace, files, dirtyPaths, ...makeDeps(fs),
         preserveSignatures: async (workingPath, stagedPath) => {
           calls.push([workingPath, stagedPath]);
-          return workingPath === 'a.pdf.working'; // only a.pdf is "signed"
+          // only a.pdf is "signed"; the other reports the unsigned reason,
+          // which is not a signature anyone lost.
+          return workingPath === 'a.pdf.working'
+            ? { applied: true }
+            : { applied: false, reason: 'not-signed' };
         },
         readBack: async () => transplanted,
       });
@@ -596,7 +600,7 @@ describe('commitPageEdits (transactional)', () => {
       let readBackCalled = false;
       await commitPageEdits({
         workspace, files, dirtyPaths, ...makeDeps(fs),
-        preserveSignatures: async () => false,
+        preserveSignatures: async () => ({ applied: false, reason: 'not-signed' }),
         readBack: async () => {
           readBackCalled = true;
           return new Uint8Array();
@@ -620,6 +624,80 @@ describe('commitPageEdits (transactional)', () => {
       expect(fs.renames).toHaveLength(2);
       expect(fs.dispatched).toHaveLength(1);
       expect(fs.dispatched[0].type).toBe('COMMIT_PAGE_EDITS');
+    });
+
+    // The reason, not the boolean. A signed file whose append refused is
+    // rewritten — it always was — and the difference between that and an
+    // unsigned file is the only thing that tells the user a signature is gone.
+    describe('the refusal reason', () => {
+      it('reports a refused signed file and names it by its own path', async () => {
+        const { files, workspace, dirtyPaths } = await crossFileState();
+        const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+        const outcome = await commitPageEdits({
+          workspace, files, dirtyPaths, ...makeDeps(fs),
+          preserveSignatures: async (workingPath) =>
+            workingPath === 'a.pdf.working'
+              ? {
+                  applied: false,
+                  reason: 'certified-annotate-forbids-page-structure',
+                  certification_level: 'annotate',
+                }
+              : { applied: false, reason: 'not-signed' },
+          readBack: async () => new Uint8Array(),
+        });
+        expect(outcome.signatureRefusals).toEqual([
+          { path: 'a.pdf', reason: { key: 'app.preserve.certifiedAnnotate' } },
+        ]);
+        // And the commit still landed: the rewrite is the standing fallback.
+        expect(fs.dispatched).toHaveLength(1);
+      });
+
+      it('reports nothing when every transplant applied', async () => {
+        const { files, workspace, dirtyPaths } = await crossFileState();
+        const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+        const outcome = await commitPageEdits({
+          workspace, files, dirtyPaths, ...makeDeps(fs),
+          preserveSignatures: async () => ({ applied: true }),
+          readBack: async () => new Uint8Array([7]),
+        });
+        expect(outcome.signatureRefusals).toEqual([]);
+      });
+
+      it('reports nothing when no transplant dep is supplied at all', async () => {
+        const { files, workspace, dirtyPaths } = await crossFileState();
+        const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+        const outcome = await commitPageEdits({ workspace, files, dirtyPaths, ...makeDeps(fs) });
+        expect(outcome.signatureRefusals).toEqual([]);
+      });
+
+      it('collects one entry per refusing file, in commit order', async () => {
+        const { files, workspace, dirtyPaths } = await crossFileState();
+        const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+        const outcome = await commitPageEdits({
+          workspace, files, dirtyPaths, ...makeDeps(fs),
+          preserveSignatures: async (workingPath) => ({
+            applied: false,
+            reason: workingPath === 'a.pdf.working' ? 'encrypted' : 'catalog-changed',
+          }),
+          readBack: async () => new Uint8Array(),
+        });
+        expect(outcome.signatureRefusals).toEqual([
+          { path: 'a.pdf', reason: { key: 'app.preserve.encrypted' } },
+          { path: 'b.pdf', reason: { key: 'app.preserve.catalogChanged' } },
+        ]);
+      });
+
+      it('a plan with nothing to commit still answers with an empty report', async () => {
+        const { files } = await setup();
+        const fs: FakeFs = { writes: [], renames: [], removed: [], snapshots: [], dispatched: [] };
+        const outcome = await commitPageEdits({
+          workspace: { documents: [] },
+          files,
+          dirtyPaths: ['a.pdf'],
+          ...makeDeps(fs),
+        });
+        expect(outcome.signatureRefusals).toEqual([]);
+      });
     });
   });
 });

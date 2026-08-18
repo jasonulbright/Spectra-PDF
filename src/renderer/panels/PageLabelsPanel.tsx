@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
-import { file } from '../lib/tauri-bridge';
+import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
@@ -63,8 +64,9 @@ function labelFor(ranges: Range[], page1: number): string {
 export function PageLabelsPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const { activeFile, openNewFiles, dispatch } = useActiveFile();
+  const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
+  const { performOperation } = useOperations();
   const [ranges, setRanges] = useState<Range[]>([]);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -127,15 +129,16 @@ export function PageLabelsPanel(): React.ReactElement {
     setBusy(true);
     setStatus(tChrome('panel.pageLabels.applying'));
     try {
-      const snapshotPath = await file.snapshot(activeFile.workingPath);
-      await call('set_page_labels', {
-        file: activeFile.workingPath,
-        output: activeFile.workingPath,
+      // Through performOperation, which takes the signed-document decision
+      // from the op's roster class — writing /PageLabels is a catalog change,
+      // so it is structural.
+      const result = await performOperation(activeFile.path, 'set_page_labels', {
         ranges: ranges.map((r) => ({ start: r.start - 1, style: r.style, prefix: r.prefix, start_at: r.startAt })),
       });
-      const buf = await file.readBuffer(activeFile.workingPath);
-      const info = await call('get_page_count', { file: activeFile.workingPath });
-      dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer: buf, snapshotPath });
+      if (result === EDIT_DECLINED) {
+        setStatus('');
+        return;
+      }
       setStatus(ranges.length === 0 ? tChrome('panel.pageLabels.removed') : tChromeCount('panel.pageLabels.applied', ranges.length));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e);
@@ -143,7 +146,7 @@ export function PageLabelsPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [activeFile, ranges, call, dispatch]);
+  }, [activeFile, ranges, performOperation]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.pageLabels.open')} />;
 

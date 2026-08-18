@@ -6,6 +6,7 @@ import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import { getCanvasServices } from '../commands/context';
 import { dialog, report as reportFile } from '../lib/tauri-bridge';
 import { parkStructSelection } from '../lib/a11y-jump';
@@ -212,7 +213,7 @@ export function AccessibilityPanel(): React.ReactElement {
   useTranslation();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
-  const { performOperation, confirmSignedEdit } = useOperations();
+  const { performOperation } = useOperations();
   const dispatch = useAppDispatch();
   const [report, setReport] = useState<AccessibilityReport | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -322,16 +323,20 @@ export function AccessibilityPanel(): React.ReactElement {
   const applyAutoFix = useCallback(
     async (check: Check): Promise<boolean> => {
       if (!activeFile) return false;
-      if (!(await confirmSignedEdit(activeFile.path, activeFile.workingPath, 'structural'))) {
-        return false;
-      }
       setBusy(true);
       setStatus(tChrome('panel.a11y.fixing'));
       try {
-        await performOperation(activeFile.path, 'apply_accessibility_fixes', {
+        // The signed-document decision is taken inside performOperation, from
+        // the op's own edit class; `allow_signed` says it was taken here
+        // rather than making the engine take it again with no way to consent.
+        const r = await performOperation(activeFile.path, 'apply_accessibility_fixes', {
           checks: [check.id],
           allow_signed: true,
         });
+        if (r === EDIT_DECLINED) {
+          setStatus('');
+          return false;
+        }
         // The buffer changed, so the report re-runs and the row flips itself.
         setStatus(tChrome('panel.a11y.fixed'));
         return true;
@@ -344,7 +349,7 @@ export function AccessibilityPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, confirmSignedEdit, performOperation],
+    [activeFile, performOperation],
   );
 
   /** Declare every run this check named page furniture, a page at a time.
@@ -361,14 +366,18 @@ export function AccessibilityPanel(): React.ReactElement {
         setStatus(tChrome('panel.a11y.nothingToShow'));
         return false;
       }
-      if (!(await confirmSignedEdit(activeFile.path, activeFile.workingPath, 'structural'))) {
-        return false;
-      }
       setBusy(true);
       setStatus(tChrome('panel.a11y.fixing'));
       try {
+        // One call per page, each its own undoable step. The first declined
+        // one stops the run: the gate remembers a Continue per file, so a
+        // decline is a decline for the whole set rather than for one page.
         for (const call of calls) {
-          await performOperation(activeFile.path, call.method, call.params);
+          const r = await performOperation(activeFile.path, call.method, call.params);
+          if (r === EDIT_DECLINED) {
+            setStatus('');
+            return false;
+          }
         }
         setStatus(tChrome('panel.a11y.fixed'));
         return true;
@@ -381,7 +390,7 @@ export function AccessibilityPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, confirmSignedEdit, performOperation],
+    [activeFile, performOperation],
   );
 
   /** Write one authored value at one finding. */
@@ -394,13 +403,14 @@ export function AccessibilityPanel(): React.ReactElement {
         setStatus(tChrome('panel.a11y.needsValue'));
         return;
       }
-      if (!(await confirmSignedEdit(activeFile.path, activeFile.workingPath, 'structural'))) {
-        return;
-      }
       setBusy(true);
       setStatus(tChrome('panel.a11y.fixing'));
       try {
-        await performOperation(activeFile.path, spec.method, spec.params);
+        const r = await performOperation(activeFile.path, spec.method, spec.params);
+        if (r === EDIT_DECLINED) {
+          setStatus('');
+          return;
+        }
         // The value is written, so the re-check that follows owns this editor
         // again — keeping it "touched" would freeze the empty draft the next
         // report seeds against.
@@ -414,7 +424,7 @@ export function AccessibilityPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, confirmSignedEdit, drafts, performOperation],
+    [activeFile, drafts, performOperation],
   );
 
   const toggleCategory = useCallback((id: string) => {

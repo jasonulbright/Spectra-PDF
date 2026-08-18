@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { ensureGsPath } from './SettingsPanel';
@@ -117,10 +118,14 @@ export function TrapPresetsPanel(): React.ReactElement {
     setBusy(true);
     setStatus(tChrome('panel.trapPresets.assigning'));
     try {
-      await performOperation(filePath, 'assign_trap_presets', {
+      const r = await performOperation(filePath, 'assign_trap_presets', {
         assignments,
         trapped,
       });
+      if (r === EDIT_DECLINED) {
+        setStatus('');
+        return;
+      }
       setStatus(tChrome('panel.trapPresets.assigned', {
         count: assignments.length,
         trapped,
