@@ -1402,7 +1402,11 @@ export const PANEL_STRINGS = {
     'Replaces the spot with its alternate colour space everywhere it is painted — fills, strokes, images, shadings and patterns — through its own tint transform. Total ink rises where one plate becomes several.',
   'panel.inkManager.convert': 'Convert {{name}} to process',
   'panel.inkManager.converting': 'Converting…',
-  'panel.inkManager.converted': '{{name}} is now process colour.',
+  'panel.inkManager.converted': '{{name}} is now process colour.{{skipped}}',
+  'panel.inkManager.convertedSkipped_one':
+    ' — {{count}} gradient still prints it: the conversion cannot describe its colour.',
+  'panel.inkManager.convertedSkipped_other':
+    ' — {{count}} gradients still print it: the conversion cannot describe their colour.',
 
   'panel.printerMarks.open': 'Open a PDF to add printer marks',
   'panel.printerMarks.blurb':

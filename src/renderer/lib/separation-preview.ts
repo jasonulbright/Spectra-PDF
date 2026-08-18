@@ -8,6 +8,7 @@
 
 import { displayPointToPdf } from './pdfx-build';
 import { rotateNormalizedPoint } from './redaction';
+import { tChrome, tChromeCount } from '../i18n';
 
 export type InkKind = 'process' | 'spot' | 'all' | 'none';
 
@@ -778,6 +779,79 @@ export function inspectInkIsAFloor(
   inventoryComplete: boolean,
 ): boolean {
   return inspection !== null && !inventoryComplete;
+}
+
+// ── spot to process ────────────────────────────────────────────────────────
+
+/**
+ * One shading a spot-to-process conversion left exactly as it was.
+ *
+ * The colorant is still live in it, so that gradient still prints the plate
+ * the rest of the document no longer has. Composing a tint transform onto a
+ * shading's function samples one input; a shading whose colour is not driven
+ * by one input, and one whose transform, alternate or function cannot be read,
+ * are both outside that composition.
+ *
+ * `reason` is the engine's own English report text. It has no catalog row and
+ * no surface renders it — a report string is not a refusal, so the engine
+ * message table does not carry it either.
+ */
+export interface SkippedShading {
+  /** The resource walk's position, stable for one document. */
+  shading: number;
+  colorants: string[];
+  reason: string;
+}
+
+/**
+ * The shadings a conversion skipped, as the panel reads them.
+ *
+ * A payload with no list is read as "nothing was skipped" rather than as
+ * "could not tell" — the opposite of `readInventory`, and for a reason that
+ * does not generalize: the engine emits this list on every conversion, and it
+ * ships in the same binary as this reader, so an absent list is the whole
+ * answer instead of a gap in one.
+ */
+export function readSkippedShadings(payload: unknown): SkippedShading[] {
+  const raw = (payload ?? {}) as { skipped?: unknown };
+  if (!Array.isArray(raw.skipped)) return [];
+  return raw.skipped.map((entry) => {
+    const record = (entry ?? {}) as Record<string, unknown>;
+    return {
+      shading: Number(record.shading) || 0,
+      colorants: Array.isArray(record.colorants)
+        ? record.colorants.map((c) => String(c))
+        : [],
+      reason: typeof record.reason === 'string' ? record.reason : '',
+    };
+  });
+}
+
+/**
+ * What the panel says a spot-to-process conversion did.
+ *
+ * A conversion the engine completed in part is reported in part: the plain
+ * sentence claims the colorant is gone, and a document where one gradient
+ * still prints it contradicts that claim on the press. With nothing skipped
+ * the slot is empty and the message is the plain sentence character for
+ * character.
+ *
+ * The appended clause counts gradients and states the cause at the level that
+ * holds for EVERY skip. The engine distinguishes six causes and reports each
+ * verbatim; naming one of them here would state the wrong cause for the other
+ * five, which is the class of claim this message exists to stop making.
+ */
+export function convertedToProcessMessage(
+  name: string,
+  skipped: readonly SkippedShading[],
+): string {
+  return tChrome('panel.inkManager.converted', {
+    name,
+    skipped:
+      skipped.length === 0
+        ? ''
+        : tChromeCount('panel.inkManager.convertedSkipped', skipped.length),
+  });
 }
 
 /** The profiles the engine offered, read the same way. */
