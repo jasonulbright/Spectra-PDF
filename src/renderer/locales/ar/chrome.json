@@ -3263,6 +3263,7 @@
   "panel.a11y.detail.same_label_different_targets": "نص الرابط نفسه يؤدي إلى {{count}} هدفًا مختلفًا: {{targets}}.",
   "panel.a11y.detail.script_site": "برنامج نصي من نوع {{kind}} اسمه {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "تعذّرت قراءة برنامج نصي في هذا المستند، لذا لم يرَ هذا الفحص ما ينفّذه.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{parent}} في الصفحة {{page}} لا يضم وسومه الفرعية بالتسلسل الذي يشترطه المعيار له.",
   "panel.a11y.detail.structure_nesting_unreadable": "تعذّرت قراءة نطاق أسماء أحد عناصر البنية: {{reason}}. لم يُفحص تداخله.",
   "panel.a11y.detail.structure_nesting_violation": "{{child}} داخل {{parent}} في الصفحة {{page}}، حيث لا يسمح المعيار بذلك.",
   "panel.a11y.detail.structure_tree_empty": "لا تحتوي شجرة بنية المستند على أي عناصر، لذا لا شيء فيها موسوم.",

@@ -2999,6 +2999,7 @@
   "panel.a11y.detail.same_label_different_targets": "Sama linkkiteksti johtaa {{count}} eri kohteeseen: {{targets}}.",
   "panel.a11y.detail.script_site": "{{kind}}-komentosarja nimeltä {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "Tämän asiakirjan komentosarjaa ei voitu lukea, joten tämä tarkistus ei nähnyt, mitä se suorittaa.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{parent}} sivulla {{page}} ei sisällä alatason tunnisteitaan siinä järjestyksessä, jota standardi siltä vaatii.",
   "panel.a11y.detail.structure_nesting_unreadable": "Rakenne-elementin nimiavaruutta ei voitu lukea: {{reason}}. Sen sisäkkäisyyttä ei tarkistettu.",
   "panel.a11y.detail.structure_nesting_violation": "{{child}} on elementin {{parent}} sisällä sivulla {{page}}, missä standardi ei sitä salli.",
   "panel.a11y.detail.structure_tree_empty": "Asiakirjan rakennepuussa ei ole yhtään elementtiä, joten mitään siinä ei ole merkitty tunnisteilla.",

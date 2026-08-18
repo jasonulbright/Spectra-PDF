@@ -3131,6 +3131,7 @@
   "panel.a11y.detail.same_label_different_targets": "Той самий текст посилання веде до {{count}} різних цілей: {{targets}}.",
   "panel.a11y.detail.script_site": "Сценарій {{kind}} з іменем {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "Сценарій у цьому документі не вдалося прочитати, тож ця перевірка не побачила, що він виконує.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{parent}} на сторінці {{page}} не містить дочірні теги в порядку, якого вимагає для нього стандарт.",
   "panel.a11y.detail.structure_nesting_unreadable": "Не вдалося прочитати простір імен елемента структури: {{reason}}. Його вкладеність не перевірялася.",
   "panel.a11y.detail.structure_nesting_violation": "{{child}} міститься всередині {{parent}} на сторінці {{page}}, де стандарт цього не дозволяє.",
   "panel.a11y.detail.structure_tree_empty": "У дереві структури документа немає жодного елемента, тож ніщо в ньому не позначено тегами.",

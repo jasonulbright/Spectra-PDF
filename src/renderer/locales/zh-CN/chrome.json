@@ -2933,6 +2933,7 @@
   "panel.a11y.detail.same_label_different_targets": "相同的链接文字指向 {{count}} 个不同目标：{{targets}}。",
   "panel.a11y.detail.script_site": "一个名为 {{name}} 的 {{kind}} 脚本。",
   "panel.a11y.detail.scripts_unreadable": "本文档中有一段脚本无法读取，因此本项检查未看到它运行了什么。",
+  "panel.a11y.detail.structure_nesting_content_model": "第 {{page}} 页的 {{parent}} 未按标准对它的要求排列其子标记。",
   "panel.a11y.detail.structure_nesting_unreadable": "无法读取某个结构元素的命名空间：{{reason}}。未检查它的嵌套。",
   "panel.a11y.detail.structure_nesting_violation": "第 {{page}} 页的 {{parent}} 中含有 {{child}}，标准不允许这样嵌套。",
   "panel.a11y.detail.structure_tree_empty": "文档的结构树中没有任何元素，因此其中没有任何内容带标记。",

@@ -2999,6 +2999,7 @@
   "panel.a11y.detail.same_label_different_targets": "Aynı bağlantı metni {{count}} farklı hedefe götürüyor: {{targets}}.",
   "panel.a11y.detail.script_site": "{{name}} adlı bir {{kind}} betiği.",
   "panel.a11y.detail.scripts_unreadable": "Bu belgedeki bir betik okunamadı, bu yüzden bu denetim onun neyi çalıştırdığını görmedi.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{page}}. sayfadaki {{parent}}, alt etiketlerini standardın onun için gerektirdiği sırada tutmuyor.",
   "panel.a11y.detail.structure_nesting_unreadable": "Bir yapı ögesinin ad alanı okunamadı: {{reason}}. İç içe geçişi denetlenmedi.",
   "panel.a11y.detail.structure_nesting_violation": "{{page}}. sayfada {{child}}, standardın izin vermediği {{parent}} ögesinin içinde.",
   "panel.a11y.detail.structure_tree_empty": "Belgenin yapı ağacında hiç öge yok, bu yüzden içinde etiketli hiçbir şey yok.",

@@ -2933,6 +2933,7 @@
   "panel.a11y.detail.same_label_different_targets": "相同的連結文字指向 {{count}} 個不同目標：{{targets}}。",
   "panel.a11y.detail.script_site": "一個名為 {{name}} 的 {{kind}} 指令碼。",
   "panel.a11y.detail.scripts_unreadable": "本文件中有一段指令碼無法讀取，因此本項檢查未看到它執行了什麼。",
+  "panel.a11y.detail.structure_nesting_content_model": "第 {{page}} 頁的 {{parent}} 未依標準對它的要求排列其子標籤。",
   "panel.a11y.detail.structure_nesting_unreadable": "無法讀取某個結構元素的命名空間：{{reason}}。未檢查其巢狀關係。",
   "panel.a11y.detail.structure_nesting_violation": "第 {{page}} 頁的 {{parent}} 中含有 {{child}}，標準不允許這樣的巢狀。",
   "panel.a11y.detail.structure_tree_empty": "文件的結構樹中沒有任何元素，因此其中沒有任何內容附標籤。",

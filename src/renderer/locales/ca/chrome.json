@@ -3065,6 +3065,7 @@
   "panel.a11y.detail.same_label_different_targets": "El mateix text d’enllaç porta a {{count}} destins diferents: {{targets}}.",
   "panel.a11y.detail.script_site": "Un script {{kind}} anomenat {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "Un script d’aquest document no s’ha pogut llegir, així que aquesta comprovació no ha vist què executa.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{parent}} a la pàgina {{page}} no conté les seves etiquetes filles en la seqüència que l’estàndard li exigeix.",
   "panel.a11y.detail.structure_nesting_unreadable": "No s’ha pogut llegir l’espai de noms d’un element d’estructura: {{reason}}. La seva imbricació no s’ha comprovat.",
   "panel.a11y.detail.structure_nesting_violation": "{{child}} és dins de {{parent}} a la pàgina {{page}}, on l’estàndard no ho permet.",
   "panel.a11y.detail.structure_tree_empty": "L’arbre d’estructura del document no conté cap element, així que no hi ha res etiquetat.",

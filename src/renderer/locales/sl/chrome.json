@@ -3131,6 +3131,7 @@
   "panel.a11y.detail.same_label_different_targets": "Isto besedilo povezave vodi k {{count}} različnim ciljem: {{targets}}.",
   "panel.a11y.detail.script_site": "Skript {{kind}} z imenom {{name}}.",
   "panel.a11y.detail.scripts_unreadable": "Skripta v tem dokumentu ni bilo mogoče prebrati, zato ta preverba ni videla, kaj izvaja.",
+  "panel.a11y.detail.structure_nesting_content_model": "{{parent}} na strani {{page}} ne vsebuje svojih podrejenih oznak v zaporedju, ki ga zanj zahteva standard.",
   "panel.a11y.detail.structure_nesting_unreadable": "Imenskega prostora elementa strukture ni bilo mogoče prebrati: {{reason}}. Njegova gnezdenost ni bila preverjena.",
   "panel.a11y.detail.structure_nesting_violation": "{{child}} je znotraj {{parent}} na strani {{page}}, kjer standard tega ne dovoljuje.",
   "panel.a11y.detail.structure_tree_empty": "Drevo strukture dokumenta ne vsebuje nobenega elementa, zato v njem ni nič označeno.",
