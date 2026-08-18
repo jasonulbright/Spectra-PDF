@@ -1482,6 +1482,12 @@ function AppContent(): React.ReactElement {
     async (path: string, specs: readonly NewFieldSpec[]) => {
       const f = state.files.get(path);
       if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
+      // Creating a field authors form STRUCTURE, not a value: pdf-lib's save
+      // coalesces the file, so every byte range breaks and no certification
+      // level carries it. Asked BEFORE the snapshot — `file.snapshot` runs the
+      // commit gate, so asking after would flush pending page edits on the way
+      // to refusing this one.
+      if (!(await confirmEditOfSignedDoc(path, f.workingPath, 'structural'))) return EDIT_DECLINED;
       const snapshotPath = await file.snapshot(f.workingPath);
       const bytes = await file.readBuffer(f.workingPath);
       const withFields = await addFormFields(bytes, specs);
@@ -1526,7 +1532,7 @@ function AppContent(): React.ReactElement {
         snapshotPath,
       });
     },
-    [state.files, reloadFile, dispatch, call],
+    [state.files, reloadFile, dispatch, call, confirmEditOfSignedDoc],
   );
 
   const handleAddFormField = useCallback(

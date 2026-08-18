@@ -8,7 +8,8 @@ import {
 } from '../lib/content-crop';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
-import { file } from '../lib/tauri-bridge';
+import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import { ensureGsPath } from './SettingsPanel';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
@@ -27,8 +28,9 @@ const BOXES: { value: string; label: PanelKey }[] = [
 export function PageBoxesPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const { activeFile, openNewFiles, dispatch } = useActiveFile();
+  const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
+  const { performOperation } = useOperations();
   const [box, setBox] = useState('crop');
   const [top, setTop] = useState(0);
   const [bottom, setBottom] = useState(0);
@@ -83,10 +85,7 @@ export function PageBoxesPanel(): React.ReactElement {
     setBusy(true);
     setStatus(tChrome('panel.pageBoxes.applying'));
     try {
-      const snapshotPath = await file.snapshot(activeFile.workingPath);
-      const result = await call('set_page_boxes', {
-        file: activeFile.workingPath,
-        output: activeFile.workingPath,
+      const result = await performOperation(activeFile.path, 'set_page_boxes', {
         box,
         top,
         bottom,
@@ -94,9 +93,10 @@ export function PageBoxesPanel(): React.ReactElement {
         right,
         ...(pages ? { pages } : {}),
       });
-      const buffer = await file.readBuffer(activeFile.workingPath);
-      const info = await call('get_page_count', { file: activeFile.workingPath });
-      dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer, snapshotPath });
+      if (result === EDIT_DECLINED) {
+        setStatus('');
+        return;
+      }
       const res = result as unknown as { changed: number; skipped: { page: number; reason: string }[] };
       const skipped = res.skipped?.length ?? 0;
       setStatus(
@@ -111,7 +111,7 @@ export function PageBoxesPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [activeFile, box, top, bottom, left, right, pageInput, call, dispatch]);
+  }, [activeFile, box, top, bottom, left, right, pageInput, performOperation]);
 
   // Auto crop: measure first, commit second — the same call with `preview`
   // flipped, so the number the reader is shown is the number that lands.
@@ -126,10 +126,7 @@ export function PageBoxesPanel(): React.ReactElement {
       setBusy(true);
       setStatus(tChrome(preview ? 'panel.pageBoxes.autoScanning' : 'panel.pageBoxes.applying'));
       try {
-        const snapshotPath = preview ? null : await file.snapshot(activeFile.workingPath);
-        const result = (await call('content_crop', {
-          file: activeFile.workingPath,
-          output: activeFile.workingPath,
+        const params = {
           box,
           margin,
           preview,
@@ -138,22 +135,28 @@ export function PageBoxesPanel(): React.ReactElement {
           // for want of a renderer.
           gs_path: await ensureGsPath(),
           ...(scope.pages ? { pages: scope.pages } : {}),
-        })) as unknown as ContentCropResult;
-        const summary = summarizeContentCrop(result);
+        };
+        // Preview MEASURES and writes nothing (`preview` suppresses the save
+        // engine-side), so it stays a plain read; the commit arm is an
+        // in-place rewrite and takes the funnel's signed-document decision.
+        let result: ContentCropResult;
         if (preview) {
-          setAutoPreview(summary);
+          result = (await call('content_crop', {
+            file: activeFile.workingPath,
+            output: activeFile.workingPath,
+            ...params,
+          })) as unknown as ContentCropResult;
         } else {
-          setAutoPreview(null);
-          const buffer = await file.readBuffer(activeFile.workingPath);
-          const info = await call('get_page_count', { file: activeFile.workingPath });
-          dispatch({
-            type: 'UPDATE_FILE',
-            path: activeFile.path,
-            pageCount: info.pages,
-            buffer,
-            snapshotPath: snapshotPath as string,
-          });
+          const answer = await performOperation(activeFile.path, 'content_crop', params);
+          if (answer === EDIT_DECLINED) {
+            setStatus('');
+            return;
+          }
+          result = answer as unknown as ContentCropResult;
         }
+        const summary = summarizeContentCrop(result);
+        if (preview) setAutoPreview(summary);
+        else setAutoPreview(null);
         setStatus(
           tChrome(preview ? 'panel.pageBoxes.autoFound' : 'panel.pageBoxes.autoApplied', {
             count: summary.cropped,
@@ -170,7 +173,7 @@ export function PageBoxesPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, box, margin, pageInput, call, dispatch],
+    [activeFile, box, margin, pageInput, call, performOperation],
   );
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.pageBoxes.open')} />;

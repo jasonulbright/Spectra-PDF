@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
-import { useEngine } from '../hooks/useEngine';
-import { file } from '../lib/tauri-bridge';
+import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { PageRangeField } from '../components/PageRangeField';
@@ -12,8 +12,8 @@ import { tChrome, tChromeCount } from '../i18n';
 export function RotatePanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const { activeFile, openNewFiles, dispatch } = useActiveFile();
-  const { call } = useEngine();
+  const { activeFile, openNewFiles } = useActiveFile();
+  const { performOperation } = useOperations();
   const [angle, setAngle] = useState<90 | 180 | 270>(90);
   const [pageInput, setPageInput] = useState('all');
   const [status, setStatus] = useState('');
@@ -29,11 +29,14 @@ export function RotatePanel(): React.ReactElement {
     const pages: 'all' | number[] = scope.pages ?? 'all';
     setBusy(true); setStatus(tChrome('panel.rotate.rotating'));
     try {
-      const snapshotPath = await file.snapshot(activeFile.workingPath);
-      await call('rotate', { file: activeFile.workingPath, pages, angle, output: activeFile.workingPath });
-      const buffer = await file.readBuffer(activeFile.workingPath);
-      const info = await call('get_page_count', { file: activeFile.workingPath });
-      dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer, snapshotPath });
+      // This panel's rotate is a whole-file engine rewrite, not the page
+      // tier's in-memory /Rotate — so it takes the whole-file signed-document
+      // decision `performOperation` owns, from the roster's `structural`.
+      const result = await performOperation(activeFile.path, 'rotate', { pages, angle });
+      if (result === EDIT_DECLINED) {
+        setStatus('');
+        return;
+      }
       setStatus(tChrome('panel.rotate.done', {
         pages: typeof pages === 'string' ? 'all' : pages.length,
         angle,
@@ -43,7 +46,7 @@ export function RotatePanel(): React.ReactElement {
       setStatus(tChrome('panel.common.error', { message: msg }));
     }
     finally { setBusy(false); }
-  }, [activeFile, angle, pageInput, call, dispatch]);
+  }, [activeFile, angle, pageInput, performOperation]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.rotate.open')} />;
 

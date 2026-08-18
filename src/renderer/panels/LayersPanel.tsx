@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
-import { file } from '../lib/tauri-bridge';
+import { useOperations } from '../hooks/useOperations';
+import { EDIT_DECLINED } from '../lib/edit-text';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
@@ -16,8 +17,9 @@ interface Layer {
 export function LayersPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
-  const { activeFile, openNewFiles, dispatch } = useActiveFile();
+  const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
+  const { performOperation } = useOperations();
   const [layers, setLayers] = useState<Layer[]>([]);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -49,16 +51,14 @@ export function LayersPanel(): React.ReactElement {
       setBusy(true);
       setStatus(layer.visible ? tChrome('panel.layers.hiding', { name: layer.name }) : tChrome('panel.layers.showing', { name: layer.name }));
       try {
-        const snapshotPath = await file.snapshot(activeFile.workingPath);
-        await call('set_layer_visibility', {
-          file: activeFile.workingPath,
-          output: activeFile.workingPath,
+        const r = await performOperation(activeFile.path, 'set_layer_visibility', {
           index: layer.index,
           visible: !layer.visible,
         });
-        const buf = await file.readBuffer(activeFile.workingPath);
-        const info = await call('get_page_count', { file: activeFile.workingPath });
-        dispatch({ type: 'UPDATE_FILE', path: activeFile.path, pageCount: info.pages, buffer: buf, snapshotPath });
+        if (r === EDIT_DECLINED) {
+          setStatus('');
+          return;
+        }
         await refresh();
         setStatus(layer.visible ? tChrome('panel.layers.hidden', { name: layer.name }) : tChrome('panel.layers.shown', { name: layer.name }));
       } catch (e: unknown) {
@@ -67,7 +67,7 @@ export function LayersPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, call, dispatch, refresh],
+    [activeFile, performOperation, refresh],
   );
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.layers.open')} />;
