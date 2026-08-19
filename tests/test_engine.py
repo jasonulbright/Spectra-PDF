@@ -7,6 +7,8 @@ import shutil
 import pikepdf
 import pytest
 
+import gs_axis
+
 from engine.merge import merge
 from engine.split import split
 from engine.rotate import rotate
@@ -3636,6 +3638,10 @@ class TestPrintPdf:
         import engine.printer as printer_mod
         monkeypatch.setattr(printer_mod.subprocess, "run", fake_run)
         monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        # The job spawn is stubbed below the capability check, which probes
+        # for real; "GS" is forced usable so the argv keeps the path the
+        # caller named.
+        gs_axis.force_available(monkeypatch, "GS")
         r = print_pdf(
             file=sample_pdf, printer="My Printer", gs_path="GS",
             pages="1-2, 4", copies=3, fit="actual",
@@ -3680,6 +3686,7 @@ class TestPrintPdf:
         import engine.printer as printer_mod
         monkeypatch.setattr(printer_mod.subprocess, "run", fake_run)
         monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        gs_axis.force_available(monkeypatch, "GS")
         with pytest.raises(RuntimeError, match="failed to open printer"):
             print_pdf(file=sample_pdf, printer="No Such Printer")
 
@@ -3696,6 +3703,7 @@ class TestPrintPdf:
         import engine.printer as printer_mod
         monkeypatch.setattr(printer_mod.subprocess, "run", fake_run)
         monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        gs_axis.force_available(monkeypatch, "GS")
         with pytest.raises(RuntimeError, match="printer offline"):
             print_pdf(file=sample_pdf, printer="P")
 
@@ -3708,6 +3716,7 @@ class TestPrintPdf:
 
         monkeypatch.setattr(printer_mod.subprocess, "run", timeout_run)
         monkeypatch.setattr(printer_mod, "printer_exists", lambda name: True)
+        gs_axis.force_available(monkeypatch, "GS")
         with pytest.raises(RuntimeError, match="timed out.*driver did not respond"):
             print_pdf(file=sample_pdf, printer="P")
 
