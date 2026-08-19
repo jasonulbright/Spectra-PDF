@@ -104,6 +104,10 @@ docs/reviews/
 docs/README.md
 docs/archive/
 docs/reference/
+# Private licensing-review work product. Public distributions carry the
+# required notices and source offers, never the internal audit narrative.
+docs/licensing-audit-*.md
+scripts/license-audit*.tsv
 # Licensed specification PDFs, obtained under a sponsored-access grant that
 # permits reading and not redistribution. This repository is public, so a
 # commit here republishes them.
