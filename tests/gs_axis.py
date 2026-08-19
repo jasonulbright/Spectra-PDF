@@ -95,6 +95,41 @@ def force_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gc.shutil, "which", lambda *_a, **_k: None)
 
 
+# ── A forced present answer (for tests that stub the spawn itself) ────────
+
+
+def force_available(monkeypatch: pytest.MonkeyPatch, path: str) -> None:
+    """Make the authority answer "usable" for `path`, spawning nothing.
+
+    The mirror of `force_absent`, and for the same reason: a test that stubs
+    `subprocess.run` below a door still has the door's own capability check
+    above it, and that check probes for real. Forcing the answer at `probe`
+    and at `shutil.which` — never at `resolve` or `require` — keeps the door
+    exercising the authority it actually calls, and keeps `path` intact as
+    the resolved executable so an exact-argv assertion still measures the
+    argv the door built. Any other candidate answers unavailable, so a real
+    Ghostscript on the machine cannot substitute itself.
+    """
+    gc.clear_cache()
+    version = ".".join(str(part) for part in gc.MINIMUM_VERSION)
+
+    def _probe(candidate) -> gc.GsCapability:
+        text = str(candidate or "")
+        if text == path:
+            return gc.GsCapability(True, text, version, "")
+        return gc.GsCapability(False, text, "", gc.NOT_EXECUTABLE)
+
+    def _never_runs(*_args, **_kwargs):
+        raise AssertionError("a forced capability answer must not spawn a probe")
+
+    monkeypatch.setattr(gc, "discover", lambda: [path])
+    monkeypatch.setattr(gc, "probe", _probe)
+    monkeypatch.setattr(gc, "_run", _never_runs)
+    monkeypatch.setattr(
+        gc.shutil, "which", lambda name, *_a, **_k: path if name == path else None
+    )
+
+
 # ── The mechanical door sweep (shared with the guards) ────────────────────
 #
 # One predicate, two consumers: the guards in `test_gs_capability.py` (which
@@ -179,6 +214,7 @@ __all__: tuple[str, ...] = (
     "builds_a_gs_command",
     "engine_modules",
     "force_absent",
+    "force_available",
     "gs_door_modules",
     "modules_matching",
     "modules_missing_the_authority",
