@@ -108,7 +108,8 @@ build consumed:
 poppler and poppler-data version numbers are not recorded in the shipped files;
 the pin is the SHA-256 in `scripts/libreoffice-notices.tsv` together with that
 source release. `scripts/bundle-libreoffice.ps1` refuses to vendor a tree that
-is missing any file the manifest names.
+is missing any file the manifest names. The source is available under the
+written source offer below.
 
 ## Embedded Python runtime
 
@@ -201,19 +202,30 @@ The obligations that follow, and how each is met:
   filename. The wheel's `DELVEWHEEL` file records that the renaming happened
   and ships in the dist-info for the same reason.
 - **Corresponding source.** The archives linked in the table above are the
-  source for these exact versions, which is where they are obtained today; they
-  are also available from us on request. Attaching them to Spectra PDF's own
-  release assets is in progress and is not yet done for any published release.
-  `vendor/wheels/pi_heif-1.4.0.tar.gz` in this repository is the source
-  distribution of the binding itself.
+  source for these exact versions. The release workflow accompanies each
+  installer it publishes with those two archives and the binding's own source
+  distribution as release assets; `scripts/corresponding-source.tsv` pins all
+  three by SHA-256 and `scripts/stage-corresponding-source.ps1` stages them.
+  They are also available from us on request. The binding source is committed
+  in this repository at `vendor/wheels/pi_heif-1.4.0.tar.gz`.
 
-Obligations across the whole manifest are handled by license class: permissive
-components ship with their notices; weak-copyleft components ship only on terms
-verified for that specific component; GPL and AGPL object code requires the
-complete Corresponding Source to be made available to every recipient, and a
-public MIT-licensed repository naming the upstream does not by itself satisfy
-that. An upstream link records where a component's source lives; it is not by
-itself a claim that the source obligation is discharged.
+### Written source offer
+
+For every GPL-2.0 or LGPL-2.1 component in this distribution whose preferred
+source form is not already carried in the installer or attached to the release,
+the Spectra PDF distributor offers any third party the complete corresponding
+machine-readable source code, including the scripts used to control compilation
+and installation, for at least three years after the last distribution of that
+object code. It will be supplied on a durable physical medium for no more than
+the reasonable cost of physically providing it. Request it through the public
+issue tracker at <https://github.com/jasonulbright/Spectra-PDF/issues> and name
+the Spectra PDF version and component. The exact upstream version or build
+recipe for each covered component is recorded in this file and its referenced
+manifests.
+
+Components under GPL-3.0, AGPL-3.0 or LGPL-3.0 are distributed with their
+preferred source form or with exact corresponding-source archives attached to
+the same release. Permissive components carry their required notices.
 
 ## Fonts
 
@@ -340,7 +352,7 @@ source comes from; each is a separate dynamically loaded DLL, so a recipient
 can substitute a modified build. Every DLL in this tree is a build of an MSYS2
 mingw-w64 package, and MSYS2 publishes both the build recipe and a per-version
 source package for each — `scripts/tesseract-licenses.tsv` records the recipe
-URL per binary.
+URL per binary. Their source is available under the written source offer above.
 
 **No GPL object code ships in this tree.** The upstream build's `libtiff-6.dll`
 imports `libjbig-0.dll` (JBIG-KIT, GPL-2.0-or-later), so `libtiff` is rebuilt
@@ -413,10 +425,10 @@ and upstream URL is in `scripts/dictionaries.tsv`, and each language's own
 upstream licence and readme files ship verbatim beside its word list in
 `dictionaries/<tag>/notices/`.
 
-Several of these are copyleft. The table below names the upstream each word
-list's source comes from; that records where the source lives, and for the
-GPL-licensed entries it is not by itself the Corresponding Source mechanism
-their license requires (see the license-class note under HEIF decoding above).
+Several of these are copyleft. The shipped `.aff` and `.dic` text files, plus
+the per-language build/readme material copied beside them, are themselves the
+preferred form for modifying these dictionaries, so their corresponding source
+accompanies every installer. The table records the pinned upstream provenance.
 
 | Tag | Language | License | Source |
 |---|---|---|---|
@@ -474,10 +486,9 @@ ship verbatim in `dictionaries/fi/notices/`.
 
 libvoikko is tri-licensed; MPL-1.1 is the option this project exercises, and
 all three are recorded because upstream's notice files carry all three.
-voikko-fi is copyleft (GPL-2.0-or-later) and its row names the upstream its
-source comes from, on the same license-class basis as the copyleft word lists
-above: the link records where the source lives, not that the Corresponding
-Source obligation is discharged.
+voikko-fi is copyleft (GPL-2.0-or-later); its complete Debian source package is
+available at the exact source location named in the row and under the written
+source offer above.
 
 `libvoikko-1.dll` links the same three mingw runtime DLLs the OCR runtime does
 (`libgcc_s_seh-1.dll`, `libstdc++-6.dll`, `libwinpthread-1.dll`). A DLL loaded
