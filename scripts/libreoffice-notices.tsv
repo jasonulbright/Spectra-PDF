@@ -1,0 +1,47 @@
+# The GPL-bearing components of the vendored LibreOffice tree, and the notice
+# texts that cover them. The tree as a whole is MPL-2.0, but two of its parts
+# are not, and both are REQUIRED by the PDF -> Office/web export targets:
+#
+#   program/xpdfimport.exe            statically links poppler (GPL-2.0-or-later)
+#   share/xpdfimport/poppler_data     the encoding tables poppler reads
+#
+# Reachability is not theoretical. LibreOffice imports every PDF through this
+# helper, and engine/office_export.py feeds a PDF straight into it for the
+# docx / rtf / odt / html / xhtml targets. Measured against a copy of the tree
+# with these removed:
+#
+#   * without program/xpdfimport.exe, all five targets fail outright
+#     ("source file could not be loaded"); office -> PDF conversion is
+#     unaffected, which is why the exe looks removable until the export
+#     direction is tested.
+#   * without share/xpdfimport/poppler_data/cidToUnicode, the five targets
+#     still SUCCEED but silently drop the text of any PDF that draws a CJK
+#     font through a predefined CMap encoding. The permissive cMap tables
+#     alone do not restore it — the GPL cidToUnicode tables are the
+#     load-bearing half.
+#
+# So neither can be trimmed, and both ship with their notices. Corresponding
+# Source for the object code is the LibreOffice source release for the pinned
+# version (it carries the external poppler tarball the build consumed):
+# https://download.documentfoundation.org/libreoffice/src/26.2.5/
+# GAP: the exact upstream poppler and poppler-data version numbers are not
+# recorded in the shipped binary or data; the pin is the sha256 below plus the
+# LibreOffice source release above.
+#
+# Gate rules (scripts/bundle-libreoffice.ps1 and tests/test_libreoffice_notices.py
+# both read this file):
+#   * every row names a file that the provisioned tree carries
+#   * a non-notice row carries a component, an SPDX expression, a source URL,
+#     and the basename of a notice row that ships in the tree
+#   * a sha256 is either "-" or 64 hex characters, and a pinned one must match
+#
+file	component	role	sha256	spdx	notice	source
+LICENSE	LibreOffice aggregated third-party notices (carries poppler's notice and the GPL v2 text)	notice	-	-	-	https://www.libreoffice.org/download/download/
+share/xpdfimport/poppler_data/COPYING	poppler-data license summary	notice	-	-	-	https://poppler.freedesktop.org/
+share/xpdfimport/poppler_data/COPYING.gpl2	GNU General Public License version 2 text	notice	-	-	-	https://poppler.freedesktop.org/
+share/xpdfimport/poppler_data/COPYING.adobe	Adobe CMap license text	notice	-	-	-	https://poppler.freedesktop.org/
+program/xpdfimport.exe	poppler, statically linked into LibreOffice's PDF import helper	binary	fa3749824d02dfb6b2aadffd85b0a0c38185680af3f1bfe94cffec0271f6c919	GPL-2.0-or-later	LICENSE	https://www.libreoffice.org/about-us/source-code/
+share/xpdfimport/poppler_data/cidToUnicode	poppler-data CID-to-Unicode tables	data	-	GPL-2.0-or-later	COPYING.gpl2	https://poppler.freedesktop.org/
+share/xpdfimport/poppler_data/nameToUnicode	poppler-data glyph-name tables	data	-	GPL-2.0-or-later	COPYING.gpl2	https://poppler.freedesktop.org/
+share/xpdfimport/poppler_data/unicodeMap	poppler-data Unicode output maps	data	-	GPL-2.0-or-later	COPYING.gpl2	https://poppler.freedesktop.org/
+share/xpdfimport/poppler_data/cMap	poppler-data predefined CMaps	data	-	LicenseRef-Adobe-CMap	COPYING.adobe	https://poppler.freedesktop.org/
