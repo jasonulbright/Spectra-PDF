@@ -61,6 +61,7 @@ type BridgeAnswer = Omit<GsCapability, 'pending'>;
 
 let current: GsCapability = UNRESOLVED;
 let inFlight: Promise<GsCapability> | null = null;
+let pinned: GsCapability | null = null;
 const listeners = new Set<() => void>();
 
 function publish(next: GsCapability): GsCapability {
@@ -116,6 +117,7 @@ export function subscribeGsCapability(listener: () => void): () => void {
  * re-probes.
  */
 export function ensureGsCapability(): Promise<GsCapability> {
+  if (pinned) return Promise.resolve(pinned);
   if (!current.pending) return Promise.resolve(current);
   if (!inFlight) {
     inFlight = app
@@ -142,6 +144,7 @@ export function ensureGsCapability(): Promise<GsCapability> {
  * settings surface validates before it saves.
  */
 export function refreshGsCapability(path?: string): Promise<GsCapability> {
+  if (pinned) return Promise.resolve(pinned);
   const candidate = path === undefined ? configuredPath() : (path.trim() || undefined);
   const probe = app
     .refreshGsCapability(candidate)
@@ -248,10 +251,38 @@ export function openGsSetup(): void {
   setupOpener?.();
 }
 
+/**
+ * Test seam: hold this answer for the session, whatever the machine has.
+ *
+ * The end-to-end suite has to walk the absent surfaces on a machine that has
+ * a working Ghostscript — every developer box and the CI test runner do,
+ * because the PRESENT axis needs one — and there is no way to arrange the
+ * absence from outside: discovery reads the registry and the environment as
+ * well as PATH, so uninstalling is the only real answer and no suite may do
+ * that. A pinned answer is therefore the seam, and it sits at the same place
+ * `setTabOrderChannel` does: the module the shipped code already reads,
+ * reached only from the harness, which exists only in a `VITE_E2E` build.
+ *
+ * Pinning wins over both probe paths, so a surface's own `refresh` cannot
+ * lift it. `null` unpins and leaves the session UNRESOLVED — the next ask
+ * probes for real, which is how a spec proves that installing Ghostscript
+ * lights the surfaces up without a restart.
+ */
+export function pinGsCapability(answer: BridgeAnswer | null): GsCapability {
+  inFlight = null;
+  if (answer === null) {
+    pinned = null;
+    return publish(UNRESOLVED);
+  }
+  pinned = settled(answer);
+  return publish(pinned);
+}
+
 /** Test seam: forget the session's answer and its subscribers. */
 export function resetGsCapability(): void {
   current = UNRESOLVED;
   inFlight = null;
+  pinned = null;
   listeners.clear();
   setupOpener = null;
 }

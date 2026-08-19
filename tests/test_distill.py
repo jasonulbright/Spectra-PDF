@@ -1,7 +1,11 @@
-"""Tests for PostScript/EPS → PDF distilling. gs-gated like
-every Ghostscript-backed op (the conftest `gs_path` fixture skips when
-`resources/ghostscript` is unprovisioned — a recorded gate count must
-come from a run WITHOUT skips)."""
+"""Tests for PostScript/EPS → PDF distilling.
+
+The capability-PRESENT axis, like every Ghostscript-backed op: the conftest
+`gs_path` fixture skips when the AUTHORITY (`engine.gs_capability`) finds no
+usable Ghostscript on the machine. Nothing in the distribution provides one,
+so the question is never whether a directory was vendored — a recorded gate
+count must come from a run WITHOUT skips. The absent axis for this door is a
+roster row in `test_gs_absent.py`."""
 
 import os
 

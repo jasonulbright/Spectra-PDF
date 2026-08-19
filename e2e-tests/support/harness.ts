@@ -3092,3 +3092,55 @@ export async function breakTabOrderPublish(): Promise<void> {
     (window as any).__SPECTRA_TEST__.breakTabOrderPublish();
   });
 }
+
+// ── Ghostscript: the capability-absent axis ───────────────────────────────
+
+export interface GsAnswer {
+  available: boolean;
+  path: string;
+  version: string;
+  reason: string;
+  detail: string;
+  pending: boolean;
+}
+
+/**
+ * Pin this session's Ghostscript answer to "none configured".
+ *
+ * Every machine that can run this suite HAS a Ghostscript — the present axis
+ * needs one — so absence cannot be arranged from outside the app: discovery
+ * reads the registry and the environment as well as PATH. The pin sits on the
+ * renderer's one answer, so the disabled panels, the gated menu commands, the
+ * partial legs and Settings ▸ Engine all read it.
+ *
+ * `reason` selects which absent state renders; the default is the
+ * fresh-install one.
+ */
+export async function gsForceAbsent(reason?: string): Promise<void> {
+  await browser.execute(function (r: string | undefined) {
+    (window as any).__SPECTRA_TEST__.gsForceAbsent(r);
+  }, reason);
+}
+
+/** Lift the pin and probe for real. Resolves with the answer that landed —
+ * the no-restart claim, asserted without reloading anything. */
+export async function gsRestore(): Promise<GsAnswer> {
+  return browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.gsRestore();
+  }) as Promise<GsAnswer>;
+}
+
+/** The renderer's current Ghostscript answer. */
+export async function gsAnswer(): Promise<GsAnswer> {
+  return browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.gsAnswer();
+  }) as Promise<GsAnswer>;
+}
+
+/** Answer the next native "pick any file" dialog (Settings ▸ Engine ▸
+ * Browse) with this path, or with `null` for a cancelled dialog. */
+export async function answerAnyFilePicker(path: string | null): Promise<void> {
+  await browser.execute(function (p: string | null) {
+    (window as any).__SPECTRA_TEST__.answerAnyFilePicker(p);
+  }, path);
+}

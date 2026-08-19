@@ -21,15 +21,17 @@ from engine.extract_text import extract_text
 from engine.image_export import export_images
 from engine.text_authoring import add_text_box
 
+import gs_axis
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GS = os.path.join(ROOT, "resources", "ghostscript", "gswin64c.exe")
+GS = gs_axis.GS_PATH
 TESS = os.path.join(ROOT, "resources", "tesseract", "tesseract.exe")
 FONTS = os.path.join(ROOT, "resources", "fonts")
 PHRASE = "SCANNED IMAGE PAGE"
 
 pytestmark = pytest.mark.skipif(
-    not (os.path.isfile(GS) and os.path.isfile(TESS)),
-    reason="vendored Ghostscript/Tesseract not provisioned",
+    not (GS and os.path.isfile(TESS)),
+    reason=f"{gs_axis.PRESENT_AXIS_SKIP}, or Tesseract is not vendored",
 )
 
 

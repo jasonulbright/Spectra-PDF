@@ -32,6 +32,8 @@ from engine.create_pdf import (
 )
 from engine.extract_text import extract_text
 
+import gs_axis
+
 
 def field_names(path):
     with pikepdf.open(str(path)) as pdf:
@@ -446,7 +448,6 @@ PS_BODY = (
 
 REPO = Path(__file__).resolve().parent.parent
 SOFFICE = REPO / "resources" / "libreoffice" / "program" / "soffice.exe"
-GS = REPO / "resources" / "ghostscript" / "gswin64c.exe"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 SOURCES = FIXTURES / "sources"
 
@@ -455,7 +456,8 @@ SOURCES = FIXTURES / "sources"
 needs_soffice = pytest.mark.skipif(
     not SOFFICE.is_file(), reason="vendored LibreOffice not provisioned"
 )
-needs_gs = pytest.mark.skipif(not GS.is_file(), reason="vendored Ghostscript not provisioned")
+GS = gs_axis.GS_PATH
+needs_gs = gs_axis.requires_gs
 needs_sources = pytest.mark.skipif(
     not (SOURCES / "report.docx").is_file(),
     reason="Office fixtures not built (tests/fixtures/make_sources.py)",
