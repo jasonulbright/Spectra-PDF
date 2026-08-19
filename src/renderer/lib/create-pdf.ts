@@ -57,6 +57,16 @@ export function classify(path: string): SourceKind {
   return '';
 }
 
+/**
+ * The chosen sources that need Ghostscript — PostScript and EPS, which it
+ * distils. Images, Office documents and PDFs go through other tools
+ * entirely, so Create PDF refuses a SOURCE when there is no interpreter,
+ * never the whole dialog.
+ */
+export function postscriptSources(paths: readonly string[]): string[] {
+  return paths.filter((path) => classify(path) === 'postscript');
+}
+
 /** The catalog key naming each kind in the UI. */
 export const KIND_LABEL_KEYS: Record<Exclude<SourceKind, ''>, string> = {
   pdf: 'dialog.createPdf.kindPdf',

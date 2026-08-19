@@ -3,7 +3,9 @@ import { useAppModal } from '../hooks/useAppModal';
 import { useEngine } from '../hooks/useEngine';
 import { useOperationQueue } from '../hooks/useOperationQueue';
 import { app, dialog } from '../lib/tauri-bridge';
-import { ensureGsPath } from '../panels/SettingsPanel';
+import { gsBlocked, gsPathIfAvailable, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from './GsRequiredNotice';
 import { TEST_HARNESS_ENABLED, registerCreatePdf, type CreatePdfRunOptions } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, type UiKey, type UiPluralKey } from '../i18n';
@@ -118,8 +120,15 @@ export function CreatePdfDialog({
     setRows((prev) => addPaths(prev, seeded));
   }, [seedKey]);
 
-  const showQuality = useMemo(() => needsQualityPreset(rows), [rows]);
-  const blocked = rows.length === 0 || hasUnsupported(rows);
+  const gs = useGsCapability();
+  // `needsQualityPreset` is true for exactly the PostScript rows, which are
+  // the only ones Ghostscript distils. Images, Office documents and PDFs are
+  // built by other tools, so an absent interpreter refuses those SOURCES and
+  // leaves the dialog working for every other list.
+  const psRows = useMemo(() => needsQualityPreset(rows), [rows]);
+  const psRefused = psRows && gsBlocked(gs);
+  const showQuality = psRows && !gsBlocked(gs);
+  const blocked = rows.length === 0 || hasUnsupported(rows) || psRefused;
 
   const addSources = useCallback(async () => {
     const picked = await dialog.pickCreatePdfSources();
@@ -195,7 +204,10 @@ export function CreatePdfDialog({
       try {
         // Both converters resolve up front: which arms a run needs depends on
         // the LIST, and asking per row would stall the conversion mid-way.
-        const [gsPath, sofficePath] = await Promise.all([ensureGsPath(), app.getSofficePath()]);
+        const [gsPath, sofficePath] = await Promise.all([
+          needsQualityPreset(sourceRows) ? requireGsPath() : gsPathIfAvailable(),
+          app.getSofficePath(),
+        ]);
         const params = {
           sources: toEngineSources(sourceRows),
           output: out,
@@ -362,7 +374,15 @@ export function CreatePdfDialog({
                 }}
                 className="flex items-center gap-2 px-2 py-1.5 text-xs"
               >
-                <span className="shrink-0 px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 text-[10px] uppercase tracking-wide">
+                <span
+                  className={
+                    'shrink-0 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide ' +
+                    (row.kind === 'postscript' && gsBlocked(gs)
+                      ? 'bg-amber-900/40 text-amber-200'
+                      : 'bg-neutral-800 text-neutral-400')
+                  }
+                  data-gs-refused={row.kind === 'postscript' && gsBlocked(gs) ? 'yes' : undefined}
+                >
                   {row.kind
                     ? tChrome(KIND_LABEL_KEYS[row.kind] as UiKey)
                     : tChrome('dialog.createPdf.kindUnsupported')}
@@ -549,6 +569,7 @@ export function CreatePdfDialog({
               {tChrome('dialog.common.open')}
             </button>
           )}
+          {psRefused && <GsRequiredNotice capability={gs} testId="create-pdf-gs" />}
           <button
             type="button"
             data-testid="create-pdf-convert"

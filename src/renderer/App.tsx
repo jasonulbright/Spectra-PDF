@@ -107,7 +107,8 @@ import { PrinterMarksPanel } from './panels/PrinterMarksPanel';
 import { HairlinesPanel } from './panels/HairlinesPanel';
 import { FlattenerPanel } from './panels/FlattenerPanel';
 import { TrapPresetsPanel } from './panels/TrapPresetsPanel';
-import { SettingsPanel, getSettings, ensureGsPath, type PrefCategory } from './panels/SettingsPanel';
+import { SettingsPanel, getSettings, type PrefCategory } from './panels/SettingsPanel';
+import { gsPathIfAvailable, registerGsSetupOpener, requireGsPath } from './lib/gs-capability';
 import { MenuBar } from './components/MenuBar';
 import { MainToolbar } from './components/MainToolbar';
 import { TabStrip } from './components/TabStrip';
@@ -254,6 +255,14 @@ function AppContent(): React.ReactElement {
   // category (rather than a boolean) is what lets Help ▸ Third-party Licenses
   // land ON the licences, instead of at the top of a scroll.
   const [showSettings, setShowSettings] = useState<PrefCategory | null>(null);
+  // Every Ghostscript-gated surface offers the same set-up affordance, and
+  // Preferences is reachable from App alone — so App registers the route
+  // once (the command-context slot idiom) rather than each of the 25
+  // surfaces holding its own.
+  useEffect(() => {
+    registerGsSetupOpener(() => setShowSettings('engine'));
+    return () => registerGsSetupOpener(null);
+  }, []);
   const [showAbout, setShowAbout] = useState(false);
   const [showProperties, setShowProperties] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
@@ -3084,7 +3093,11 @@ function AppContent(): React.ReactElement {
         const soffice_path = await app.getSofficePath();
         return call('export_document', {
           file: af.workingPath, output: destPath, fmt: format, soffice_path,
-          gs_path: await ensureGsPath(), ...(options ?? {}),
+          // Slides are the only format Ghostscript renders for; Word, Excel
+          // and HTML are LibreOffice's alone, so an absent prerequisite
+          // refuses ONE format instead of the export.
+          gs_path: format === 'pptx' ? await requireGsPath() : await gsPathIfAvailable(),
+          ...(options ?? {}),
         });
       },
     });

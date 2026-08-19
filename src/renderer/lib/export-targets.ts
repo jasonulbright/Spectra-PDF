@@ -46,6 +46,26 @@ export type ExportFormat = keyof typeof EXPORT_TARGETS;
 
 export const EXPORT_FORMATS = Object.keys(EXPORT_TARGETS) as readonly ExportFormat[];
 
+/**
+ * The targets Ghostscript renders: every image format, and slides (a slide
+ * carries a picture of the page). Word, Excel, HTML and text come out of
+ * LibreOffice and the text extractor, which need no interpreter — so an
+ * absent Ghostscript narrows the FORMAT LIST rather than closing export.
+ */
+export const GS_EXPORT_FORMATS: readonly ExportFormat[] = ['pptx', 'png', 'jpeg', 'tiff'];
+
+export function exportFormatNeedsGs(format: ExportFormat): boolean {
+  return GS_EXPORT_FORMATS.includes(format);
+}
+
+/** The formats offerable right now. */
+export function availableExportFormats(
+  formats: readonly ExportFormat[],
+  gsAvailable: boolean,
+): ExportFormat[] {
+  return formats.filter((f) => gsAvailable || !exportFormatNeedsGs(f));
+}
+
 /** The targets whose options open a step in the single-file dialog. The other
  * document targets take none and go straight to the save dialog. */
 export type DocumentExportFormat = 'txt' | 'xlsx' | 'pptx';

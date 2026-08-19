@@ -555,6 +555,17 @@ export interface GsInfo {
   vendor: string;
 }
 
+/** `src-tauri/src/gs.rs` `GsAnswer` — one validated answer about one path.
+ * `reason` is a named code (`not-configured`, `not-executable`,
+ * `probe-failed`, `version-below-minimum`), never a sentence to match on. */
+export interface GsAnswer {
+  available: boolean;
+  path: string;
+  version: string;
+  reason: string;
+  detail: string;
+}
+
 export interface PrinterList {
   printers: string[];
   default: string | null;
@@ -618,6 +629,10 @@ export const app = {
   getEditFontPath: () => invoke<string>('get_edit_font_path'),
   /** The bundled spelling dictionaries DIRECTORY (resources/dictionaries) —
    *  the engine resolves a language tag against what is on disk. */
+  /** The installed ICC press profiles' directory. Mirrors getDictionaryPath:
+   * Rust owns the resource path, and the engine reads the profiles itself —
+   * the bytes never cross this boundary. */
+  getIccPath: () => invoke<string>('get_icc_path'),
   getDictionaryPath: () => invoke<string>('get_dictionary_path'),
   /** The managed folder a user's own dictionaries are copied into (Rust owns
    *  the path, so an added dictionary outlives the folder it came from). */
@@ -646,6 +661,13 @@ export const app = {
     invoke<void>('open_portfolio_member_file', { path }),
   getBundledGsInfo: () => invoke<GsInfo>('get_bundled_gs_info'),
   detectExternalGs: () => invoke<GsInfo | null>('detect_external_gs'),
+  /** The validated capability answer for `path`, or for discovery when it is
+   * omitted. Cached in Rust per path + mtime + size. */
+  gsCapability: (path?: string) => invoke<GsAnswer>('gs_capability', { path: path ?? null }),
+  /** The same answer with Rust's probe cache dropped first — what a Browse,
+   * a cleared path, or a Ghostscript installed while the app is open needs. */
+  refreshGsCapability: (path?: string) =>
+    invoke<GsAnswer>('refresh_gs_capability', { path: path ?? null }),
   getVersion: () => invoke<string>('get_app_version'),
   /** Open a SHIPPED third-party licenses file (allowlisted name) with the
    *  OS default handler — resolved against the app's resource dir in Rust. */

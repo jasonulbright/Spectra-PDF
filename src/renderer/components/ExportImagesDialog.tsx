@@ -2,7 +2,9 @@ import React, { useCallback, useRef, useState } from 'react';
 import { useAppModal } from '../hooks/useAppModal';
 import { useEngine } from '../hooks/useEngine';
 import { dialog } from '../lib/tauri-bridge';
-import { ensureGsPath } from '../panels/SettingsPanel';
+import { gsBlocked, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from './GsRequiredNotice';
 import { TEST_HARNESS_ENABLED, registerExportImages } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber } from '../i18n';
@@ -49,6 +51,7 @@ export function ExportImagesDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ExportImagesResult | null>(null);
+  const gs = useGsCapability();
   // Reentrancy ref taken before the first await (the CreatePdf/convert rule).
   const exportingRef = useRef(false);
 
@@ -67,7 +70,7 @@ export function ExportImagesDialog({
           dpi: opts.dpi,
           pages: opts.pages,
           gray: opts.gray,
-          gs_path: await ensureGsPath(),
+          gs_path: await requireGsPath(),
         })) as unknown as ExportImagesResult;
         setResult(r);
         return r;
@@ -219,12 +222,13 @@ export function ExportImagesDialog({
             </p>
           )}
 
+          <GsRequiredNotice capability={gs} testId="export-images-gs" />
           <div className="flex justify-end gap-2 pt-1">
             <button
               type="button"
               data-testid="export-images-run"
               className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
-              disabled={busy}
+              disabled={busy || gsBlocked(gs)}
               onClick={() => void exportImages()}
             >
               {tChrome(busy ? 'dialog.exportImages.exporting' : 'dialog.exportImages.export')}

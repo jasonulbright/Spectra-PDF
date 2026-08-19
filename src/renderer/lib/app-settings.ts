@@ -6,8 +6,10 @@
 // consumers; nothing here may touch the DOM, Tauri, or React.
 
 export interface Settings {
+  /** The Ghostscript program the user chose, or '' to use whichever install
+   * discovery finds. Never written without a passing probe — and never a
+   * bundled path: the distribution ships no Ghostscript. */
   gsPath: string;
-  gsSource: 'builtin' | 'external';
   defaultOutputDir: string;
   compressionQuality: string;
   /** Which MRC preset the Compress panel opens on, for a user whose
@@ -94,7 +96,6 @@ export interface Settings {
 
 export const DEFAULTS: Settings = {
   gsPath: '',
-  gsSource: 'builtin',
   defaultOutputDir: '',
   compressionQuality: 'ebook',
   mrcPreset: 'balanced',
@@ -125,10 +126,14 @@ export function loadSettings(): Settings {
     if (typeof parsed.minimizeToTray === 'string') {
       parsed.minimizeToTray = parsed.minimizeToTray === 'true';
     }
-    // Default gsSource to builtin when unset.
-    if (!parsed.gsSource) {
-      parsed.gsSource = 'builtin';
+    // An install upgraded from the bundled-Ghostscript build carries a
+    // gsPath pointing into the app's own resource tree, which no longer
+    // exists. Dropping it returns that install to discovery rather than
+    // leaving it pinned to a path nothing answers at.
+    if (typeof parsed.gsPath === 'string' && /[\\/]resources[\\/]ghostscript[\\/]/i.test(parsed.gsPath)) {
+      parsed.gsPath = '';
     }
+    delete parsed.gsSource;
     return { ...DEFAULTS, ...parsed };
   } catch { return DEFAULTS; }
 }

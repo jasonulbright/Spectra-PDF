@@ -1266,6 +1266,36 @@ export function openDocumentBlocker(action: GuidedAction): string | null {
   });
 }
 
+/**
+ * The steps in this action that need Ghostscript — the PLAN-time answer.
+ *
+ * A saved action is a promise about a whole sequence, so a run that dies at
+ * step four because the fourth step needed an interpreter has already
+ * rewritten the document three times. The registry's own `needsGs` flags are
+ * the roster, so a new gs-bearing step cannot ship without an answer here.
+ */
+export function gsBlockedSteps(action: GuidedAction): GuidedStepOp[] {
+  const blocked: GuidedStepOp[] = [];
+  for (const step of action.steps) {
+    if (stepDefFor(step.op).needsGs && !blocked.includes(step.op)) blocked.push(step.op);
+  }
+  return blocked;
+}
+
+/** Why this action cannot run without a Ghostscript, or null when it can.
+ * `available` is the capability answer; the caller holds it so this stays
+ * synchronous and testable. */
+export function gsBlocker(action: GuidedAction, available: boolean): string | null {
+  if (available) return null;
+  const blocked = gsBlockedSteps(action);
+  if (blocked.length === 0) return null;
+  const steps = blocked.map((op) => tStepTitle(op, stepDefFor(op).title)).join(', ');
+  return tChrome(
+    blocked.length === 1 ? 'refusal.action.needsGhostscriptOne' : 'refusal.action.needsGhostscript',
+    { steps },
+  );
+}
+
 /** Why this action cannot REPLACE the originals, or null. Mirrors the
  * engine's own in-place refusal: the converted document is a new file, so
  * "replace `report.docx` with a PDF still called `report.docx`" is a
