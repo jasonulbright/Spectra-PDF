@@ -1,31 +1,29 @@
 """ICC-managed colour conversion for prepress.
 
 Converts a document's color to DeviceCMYK for print. Ghostscript drives the
-conversion through its
-built-in ICC engine (LittleCMS + its compiled-in default CMYK profile), so the
-transform is colour-managed even though no external profile is bundled: an RGB
-red (`1 0 0 rg`) comes out as CMYK (`0 0.996 1 0 k`), not a naive component
-copy.
+conversion through its built-in ICC engine (LittleCMS), and the destination is
+ALWAYS a named profile out of the bundled set (`engine/icc_profiles.py`) or a
+profile file the caller supplied: an RGB red (`1 0 0 rg`) comes out as CMYK
+(`0 0.996 1 0 k`), not a naive component copy, and which press it came out
+FOR is a fact the result carries rather than a property of whatever the
+producer was built with.
 
-``convert_cmyk`` takes a destination ICC profile, either a user's .icc file or
-a bare name resolved against
-gs's ROM-filesystem profiles like ``default_cmyk.icc`` — probe-verified), and
-``convert_pdfx`` produces a PDF/X master with a real /OutputIntents entry
-(GTS_PDFX, registered characterization by identifier, optionally embedding
-the user's destination profile as /DestOutputProfile) via a customized
-PDFX_def.ps against the bundled template's contract. Soft-proofing remains a
-distinct capability.
+``convert_cmyk`` takes a destination profile by ICC description string or by
+path and reports the description string it used. ``convert_pdfx`` produces a
+PDF/X master with a real /OutputIntents entry (GTS_PDFX, the destination
+profile embedded as /DestOutputProfile, identified by what the profile itself
+declares) via a customized PDFX_def.ps against the bundled template's
+contract. Soft-proofing remains a distinct capability.
 """
 
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
 import pikepdf
 from pikepdf import Dictionary, Name
 
-from . import budget, standards_report
+from . import budget, icc_profiles, standards_report
 from .acroform import reattach_forms_file
 from .trapping import DEFAULT_TRAPPED, TRAPPED_VALUES
 from .validate import validate_pdf
@@ -44,63 +42,28 @@ from .widget_faces import (IDENTITY, box_of, compose, face_box,
 # (1) is the prepress default — it maps in-gamut colours exactly and clips the
 # rest, which is what a print house expects; perceptual (0) would shift every
 # colour to compress the gamut. 0=perceptual 1=relative 2=saturation 3=absolute.
-# NB: with the BUILT-IN default CMYK profile "saturation" renders IDENTICALLY to
-# perceptual — that profile has no Saturation (AToB2) table, so LittleCMS falls
-# back to perceptual per the ICC spec. It stays a valid value (a bundled
-# destination profile that defines it would make it distinct), but the UI does
-# not offer it while it would be a no-op.
+# NB: every bundled destination profile carries its own saturation table
+# (B2A2), so "saturation" is a DISTINCT transform under them — it is not the
+# no-op it was against a profile that defined none and fell back to perceptual
+# per the ICC spec.
 _RENDER_INTENTS = {"perceptual": 0, "relative": 1, "saturation": 2, "absolute": 3}
 
 
-def _dest_profile_flag(dest_profile: str) -> list[str]:
-    """-sOutputICCProfile for a user profile. A PATH must exist (typo caught
-    early, not as an opaque gs error); a bare name passes through to gs's
-    ROM-filesystem profile set (default_cmyk.icc and friends)."""
-    p = str(dest_profile).strip()
-    if not p:
-        return []
-    if ("/" in p or "\\" in p) and not Path(p).is_file():
-        raise ValueError(f"Destination ICC profile not found: {p}")
-    return [f"-sOutputICCProfile={p}"]
+def _dest_profile_flags(profile) -> list[str]:
+    """-sOutputICCProfile plus the permit that lets -dSAFER read it.
 
-
-def _permit_profile_read(dest_profile: str) -> list[str]:
-    """--permit-file-read for a destination profile that is a real file."""
-    p = str(dest_profile).strip()
-    if not p or not Path(p).is_file():
-        return []
-    return [f"--permit-file-read={p}"]
+    The destination is always a real file now, so the permit is never
+    optional: -dSAFER blocks the profile READ, and without an explicit permit
+    the conversion fails on a profile the caller legitimately named.
+    """
+    path = str(profile.path)
+    return [f"-sOutputICCProfile={path}", f"--permit-file-read={path}"]
 
 
 # ── the destination profile's own class ────────────────────────────────────
 
-#: ICC.1 clause 7.2 fixed header offsets: the profile/device class at 12, the
-#: data colour space at 16, the 'acsp' file signature at 36. Four-byte
-#: signatures at fixed positions, so reading them costs no dependency.
-_ICC_CLASS = slice(12, 16)
-_ICC_SPACE = slice(16, 20)
-_ICC_SIGNATURE = slice(36, 40)
-_ICC_HEADER_BYTES = 128
 
-#: Profile classes that can describe an OUTPUT condition. A device link
-#: ('link') carries a baked-in input space, an abstract profile ('abst')
-#: transforms within one space and a named-colour profile ('nmcl') holds a
-#: swatch list — none of the three names a destination a conversion can
-#: target, whatever their data colour space says.
-_OUTPUT_CLASSES = frozenset({"prtr", "mntr", "scnr", "spac"})
-
-
-def _icc_header(data: bytes) -> tuple[str, str] | None:
-    """(profile class, data colour space) or None when this is not a profile."""
-    if len(data) < _ICC_HEADER_BYTES or data[_ICC_SIGNATURE] != b"acsp":
-        return None
-    return (
-        data[_ICC_CLASS].decode("latin-1", "replace").strip(),
-        data[_ICC_SPACE].decode("latin-1", "replace").strip(),
-    )
-
-
-def _require_cmyk_profile(label: str, data: bytes) -> None:
+def _require_cmyk_profile(label: str, profile) -> None:
     """Refuse a destination profile that cannot be this op's output space.
 
     Ghostscript accepts whatever `-sOutputICCProfile` names and converts to
@@ -108,44 +71,32 @@ def _require_cmyk_profile(label: str, data: bytes) -> None:
     greyscale conversion and says nothing (measured). The op's name is a
     promise about the output space, so the profile is checked against it.
     """
-    header = _icc_header(data)
-    if header is None:
-        raise ValueError(f'"{label}" is not an ICC profile.')
-    profile_class, space = header
-    if profile_class not in _OUTPUT_CLASSES:
+    if profile.profile_class not in icc_profiles.OUTPUT_CLASSES:
         raise ValueError(
-            f'The destination profile "{label}" is a "{profile_class}" profile, '
-            "which does not describe an output condition."
+            f'The destination profile "{label}" is a "{profile.profile_class}" '
+            "profile, which does not describe an output condition."
         )
-    if space != "CMYK":
+    if profile.space != "CMYK":
         raise ValueError(
-            f'The destination profile "{label}" describes "{space}" colour, '
-            "not CMYK."
+            f'The destination profile "{label}" describes "{profile.space}" '
+            "colour, not CMYK."
         )
 
 
-def _validate_dest_profile(dest_profile: str, gs_path: str) -> None:
-    """Read the destination profile's header before anything converts.
+def _resolve_dest_profile(dest_profile: str, icc_dir: str):
+    """The destination profile this conversion will use, checked.
 
-    A bare name is one of Ghostscript's own ROM-filesystem profiles and is
-    read the only way it can be — extracted and inspected — because that set
-    holds greyscale and RGB profiles too.
+    A caller names a bundled profile by its ICC description string or supplies
+    a profile file; naming nothing resolves to the bundled default, which is a
+    NAMED press rather than whatever CMYK space the producer was built with.
+    The header is read before anything converts, so a profile that cannot be
+    the destination is refused by name rather than silently converting the
+    document into some other space.
     """
-    p = str(dest_profile).strip()
-    if not p:
-        return
-    path = Path(p)
-    if path.is_file():
-        _require_cmyk_profile(path.name, path.read_bytes()[:_ICC_HEADER_BYTES])
-        return
-    if "/" in p or "\\" in p:
-        raise ValueError(f"Destination ICC profile not found: {p}")
-    scratch = Path(tempfile.mkdtemp(prefix="spectra-icc-"))
-    try:
-        extracted = _extract_rom_profile(gs_path, p, scratch)
-        _require_cmyk_profile(p, extracted.read_bytes()[:_ICC_HEADER_BYTES])
-    finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+    profile = icc_profiles.resolve(dest_profile, icc_dir)
+    label = str(dest_profile).strip() or profile.description
+    _require_cmyk_profile(label, profile)
+    return profile
 
 
 # ── the colorant-shading carve-out ─────────────────────────────────────────
@@ -680,6 +631,7 @@ def convert_cmyk(
     dest_profile: str = "",
     gs_path: str = "gs",
     font_dir: str = "",
+    icc_dir: str = "",
 ) -> dict:
     """Convert a PDF's colour to DeviceCMYK using Ghostscript's ICC engine.
 
@@ -688,13 +640,16 @@ def convert_cmyk(
         output: Output PDF path.
         render_intent: perceptual | relative | saturation | absolute (the ICC
             rendering intent; default relative colorimetric — the prepress norm).
-        dest_profile: Optional destination ICC profile — a .icc file path, or a
-            bare gs ROM-filesystem profile name. Empty = gs's compiled default.
+        dest_profile: The destination ICC profile — a bundled profile's ICC
+            description string, or a .icc file path. Empty resolves to the
+            bundled default, which is a named press condition; the description
+            string of whichever profile was used comes back in the result.
         gs_path: Path to the Ghostscript executable.
         font_dir: The bundled fallback faces, for regenerating the appearance
             of a widget that carries none whose value is outside the form
             font's encoding. Without it such a field keeps the appearance the
             producer synthesizes; every other field is unaffected.
+        icc_dir: The bundled colour-profile directory.
     """
     info = validate_pdf(file)
     intent = _RENDER_INTENTS.get(str(render_intent).strip().lower())
@@ -705,7 +660,7 @@ def convert_cmyk(
 
     input_path = Path(file)
     output_path = Path(output)
-    _validate_dest_profile(dest_profile, gs_path)
+    profile = _resolve_dest_profile(dest_profile, icc_dir)
 
     def command(source: Path) -> list:
         return [
@@ -726,11 +681,7 @@ def convert_cmyk(
             # colour description; honouring embedded profiles is the point of a
             # colour-managed conversion.
             f"-dRenderIntent={intent}",
-            *_dest_profile_flag(dest_profile),
-            # -dSAFER blocks the profile READ, so a destination profile given as a
-            # path fails without an explicit permit — every path a file picker can
-            # produce. A bare ROM-filesystem name is not a file and needs none.
-            *_permit_profile_read(dest_profile),
+            *_dest_profile_flags(profile),
             "-dNOPAUSE",
             "-dQUIET",
             "-dBATCH",
@@ -780,6 +731,10 @@ def convert_cmyk(
     return {
         "output": str(output_path),
         "render_intent": str(render_intent).strip().lower(),
+        # The press this document was converted FOR, by the profile's own
+        # description string. A conversion that cannot say which press it
+        # targeted is a number nobody can check.
+        "dest_profile": profile.description,
         "original_size": input_path.stat().st_size,
         "output_size": output_path.stat().st_size,
         **_colour_report(source_inks, output_path, rasterized,
@@ -794,42 +749,16 @@ _PDFX_VERSIONS = {1: "1.3", 3: "1.3", 4: "1.6"}
 
 
 def _ps_escape(s: str) -> str:
-    return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-
-
-def _extract_rom_profile(gs_path: str, name: str, dest_dir: Path) -> Path:
-    """Copy a gs ROM-filesystem ICC profile (default_cmyk.icc and friends —
-    compiled into the gs DLL) out to a real file, so it can be EMBEDDED as a
-    PDF/X /DestOutputProfile. Probe-verified: a PostScript read/write loop
-    under --permit-file-write; the result carries the 'acsp' ICC magic."""
-    dest = dest_dir / name
-    dest_ps = str(dest).replace("\\", "/")
-    ps = (
-        f"(%rom%iccprofiles/{name}) (r) file /in exch def "
-        f"({_ps_escape(dest_ps)}) (w) file /out exch def "
-        "{ in read { out exch write } { exit } ifelse } loop out closefile"
-    )
-    result = subprocess.run(
-        [
-            gs_path,
-            "-dNODISPLAY",
-            "-dBATCH",
-            "-dNOPAUSE",
-            "-q",
-            f"--permit-file-write={dest_ps}",
-            "-c",
-            ps,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        stdin=subprocess.DEVNULL,
-    )
-    if result.returncode != 0 or not dest.is_file():
-        raise RuntimeError(
-            f"Could not extract the bundled profile {name}: {result.stderr}"
-        )
-    return dest
+    text = str(s)
+    try:
+        text.encode("latin-1")
+    except UnicodeEncodeError:
+        raise ValueError(
+            f'The output intent cannot carry "{text}" — a PDF/X output '
+            "condition is written in the document's own encoding, which does "
+            "not hold every character of that name."
+        ) from None
+    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
 def _pdfx_def_ps(
@@ -839,6 +768,7 @@ def _pdfx_def_ps(
     info: str,
     icc_path: str,
     trapped: str = DEFAULT_TRAPPED,
+    registry: str = "",
 ) -> str:
     """A customized PDFX_def.ps (the bundled template's contract, trimmed to
     our fixed choices): DOCINFO GTS_PDFXVersion per level, an OutputIntent
@@ -850,6 +780,13 @@ def _pdfx_def_ps(
     `/Trapped` is a CLAIM about the document, and the converter is entitled to
     make it only when the caller asserts it: converting colour neither adds a
     trap network nor proves the absence of one, so the default is `/Unknown`.
+
+    `/RegistryName` is a CLAIM too — ISO 32000-2 Table 401 makes it the
+    registry the identifier is DEFINED IN — so it is written only when the
+    caller passes one, which happens only where the destination profile
+    declares its own characterization. An identifier that is just a profile's
+    description string is defined in no registry, and saying otherwise would
+    invent a registration.
     """
     gts = {1: "PDF/X-1a:2001", 3: "PDF/X-3:2002", 4: "PDF/X-4"}[version]
     claim = str(trapped).strip().lstrip("/").capitalize()
@@ -875,7 +812,7 @@ def _pdfx_def_ps(
         f"  /OutputCondition ({_ps_escape(condition)})",
         f"  /Info ({_ps_escape(info) if info else 'none'})",
         f"  /OutputConditionIdentifier ({_ps_escape(identifier)})",
-        "  /RegistryName (http://www.color.org)",
+        *([f"  /RegistryName ({_ps_escape(registry)})"] if registry else []),
         *(["  /DestOutputProfile {icc_PDFX}"] if icc_path else []),
         ">> /PUT pdfmark",
         "[{Catalog} <</OutputIntents [ {OutputIntent_PDFX} ]>> /PUT pdfmark",
@@ -888,21 +825,29 @@ def convert_pdfx(
     output: str,
     version: int = 3,
     dest_profile: str = "",
-    condition: str = "Commercial and specialty printing",
-    identifier: str = "CGATS TR001",
+    condition: str = "",
+    identifier: str = "",
     info: str = "",
     gs_path: str = "gs",
     trapped: str = DEFAULT_TRAPPED,
+    icc_dir: str = "",
 ) -> dict:
     """Produce a PDF/X print master with a real output intent (tail).
 
     The conversion runs CMYK (colour-managed, like convert_cmyk) and the
-    output carries /GTS_PDFXVersion + a /GTS_PDFX /OutputIntents entry. With
-    ``dest_profile`` (a .icc FILE) the profile is EMBEDDED as the intent's
-    /DestOutputProfile and also drives the conversion itself
-    (-sOutputICCProfile), so the pixels and the declared condition agree;
-    without it, the intent names a registered characterization by
-    ``identifier`` alone (PDF/X permits that for registry conditions).
+    output carries /GTS_PDFXVersion + a /GTS_PDFX /OutputIntents entry. The
+    destination profile — the caller's, or the bundled default — is EMBEDDED
+    as the intent's /DestOutputProfile and also drives the conversion itself
+    (-sOutputICCProfile), so the pixels and the declared condition always
+    agree.
+
+    ``condition`` and ``identifier`` are the caller's declaration when the
+    caller makes one. Left empty they are READ OFF THE PROFILE
+    (`icc_profiles.output_condition`): a profile that declares its own
+    characterization identifies the intent by what it declares, and one that
+    declares none is identified by its description string with no registry
+    named. Nothing here invents a registry name for a profile that carries
+    none.
 
     Deliberate non-carrier: like PDF/A, the output does NOT get the original's
     interactive form fields transplanted back — a PDF/X master is a print
@@ -922,31 +867,40 @@ def convert_pdfx(
     version = int(version)
     if version not in _PDFX_VERSIONS:
         raise ValueError("version must be 1 (X-1a), 3 (X-3), or 4 (X-4).")
-    profile = str(dest_profile).strip()
+    profile = _resolve_dest_profile(dest_profile, icc_dir)
+    declared, described, registry = icc_profiles.output_condition(profile)
+    identifier = str(identifier).strip() or declared
+    condition = str(condition).strip() or described
+    # ISO 32000-2 Table 401 REQUIRES /Info when the identifier does not name a
+    # standard production condition, and our identifier is a description
+    # string whenever the profile declares no characterization. The profile's
+    # own name is the human-readable identification that entry is for.
+    info = str(info).strip() or profile.description
+    # A caller who names its own condition is declaring something this engine
+    # cannot check against a registry, so no registry is claimed for it.
+    if str(identifier) != declared:
+        registry = ""
 
     input_path = Path(file)
     output_path = Path(output)
-    _validate_dest_profile(profile, gs_path)
 
     # Every scratch file this conversion writes lives here, and the user's
     # output directory is never written to except by Ghostscript's own
-    # -sOutputFile. Extraction used to land the profile beside the output and
-    # unlink it afterwards, which deleted a user's own default_cmyk.icc.
+    # -sOutputFile. A profile staged beside the output and unlinked afterwards
+    # once deleted a user's own file of the same name.
     scratch = Path(tempfile.mkdtemp(prefix="spectra-pdfx-"))
     try:
-        if profile and not Path(profile).is_file():
-            if "/" in profile or "\\" in profile:
-                raise ValueError(f"Destination ICC profile not found: {profile}")
-            # A bare gs ROM-filesystem name (default_cmyk.icc …): the EMBED
-            # needs a real file, so copy it out of the DLL first.
-            profile = str(_extract_rom_profile(gs_path, profile, scratch))
-
         source_facts = standards_report.census(input_path)
         source_inks = _ink_names(input_path)
 
         def_path = str(scratch / "pdfx-def.ps")
-        with open(def_path, "w", encoding="ascii") as f:
-            f.write(_pdfx_def_ps(version, condition, identifier, info, profile, trapped))
+        # latin-1, not ascii: the identifier and the condition can now come
+        # from a user's own profile's description string, and a PostScript
+        # string is bytes. A character beyond latin-1 is refused by name below
+        # rather than crashing the encoder.
+        with open(def_path, "w", encoding="latin-1") as f:
+            f.write(_pdfx_def_ps(version, condition, identifier, info,
+                                 profile.path, trapped, registry))
 
         def command(source: Path) -> list:
             return [
@@ -962,10 +916,10 @@ def convert_pdfx(
                 # forced loss is reported by name rather than hidden.
                 "-dPreserveSeparation=true",
                 "-dPreserveDeviceN=true",
-                *(_dest_profile_flag(profile)),
-                # The def file READS the profile to embed it — -dSAFER blocks
-                # that without an explicit permit (live test catch).
-                *([f"--permit-file-read={profile}"] if profile else []),
+                # The flag drives the conversion and the permit lets the def
+                # file READ the same profile to embed it — -dSAFER blocks that
+                # read without one (live test catch).
+                *_dest_profile_flags(profile),
                 "-dNOPAUSE",
                 "-dBATCH",
                 "-dSAFER",
@@ -1038,7 +992,9 @@ def convert_pdfx(
         "output": str(output_path),
         "pdfx_version": gts,
         "trapped": claimed,
-        "embedded_profile": bool(profile),
+        "embedded_profile": True,
+        "dest_profile": profile.description,
+        "output_condition_identifier": identifier,
         "original_size": input_path.stat().st_size,
         "output_size": output_path.stat().st_size,
         **report,

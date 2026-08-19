@@ -57,7 +57,7 @@ from pathlib import Path
 
 import pikepdf
 
-from . import budget, soft_proof
+from . import budget, icc_profiles, soft_proof
 from .acroform import has_form_fields
 from .color_spaces import build_resolver
 from .preflight import COLORSPACE, walk_page_resources
@@ -475,7 +475,7 @@ def _carries_form_fields(file: str) -> bool:
 
 
 def _stage_for_profile(file: str, page: int, profile_path: str, out_dir: Path,
-                       gs_path: str) -> Path:
+                       gs_path: str, icc_dir: str = "") -> Path:
     """One page, colour-managed to the press profile, as its own PDF.
 
     The separation device ignores the destination profile, so this is where
@@ -491,7 +491,8 @@ def _stage_for_profile(file: str, page: int, profile_path: str, out_dir: Path,
     single.write_bytes(_render_part(file, [page - 1]))
     staged = out_dir / "staged.pdf"
     try:
-        convert_cmyk(str(single), str(staged), dest_profile=profile_path, gs_path=gs_path)
+        convert_cmyk(str(single), str(staged), dest_profile=profile_path,
+                     gs_path=gs_path, icc_dir=icc_dir)
     finally:
         single.unlink(missing_ok=True)
     return staged
@@ -506,6 +507,7 @@ def render_separations(
     reuse: bool = True,
     simulation=None,
     font_dir: str = "",
+    icc_dir: str = "",
 ) -> dict:
     """Rasterize one page to one grayscale plate per separation.
 
@@ -522,7 +524,8 @@ def render_separations(
             that is not already device CMYK is colour-managed to that profile
             BEFORE it is separated — the device ignores the destination
             profile, so without the staging the ink amounts would come from
-            Ghostscript's compiled-in default rather than the chosen press.
+            the conversion's own default destination rather than the chosen
+            press.
         font_dir: The bundled fallback faces, for regenerating the appearance
             of a widget that carries none. Without it such a field rasters
             through the device's own synthesis — `/V`'s UTF-16BE bytes drawn
@@ -561,7 +564,7 @@ def render_separations(
         # request and REPORTS it, so a proof that cannot be produced falls
         # back to the ordinary plates rather than failing the raster.
         profile, _refusal = soft_proof.resolve_profile(
-            request, intent=intent, gs_path=gs_path
+            request, intent=intent, icc_dir=icc_dir
         )
     stage = profile is not None and soft_proof.staging_applies(
         inventory["color_families"]
@@ -589,7 +592,7 @@ def render_separations(
 
     if stage:
         rastered = _stage_for_profile(str(prepared), page, profile.path, out_dir,
-                                      gs_path)
+                                      gs_path, icc_dir)
         first = 1
     else:
         rastered = prepared
@@ -927,7 +930,7 @@ def _cached_output_intent(plate_dir: Path) -> dict:
     return found
 
 
-def _resolve_proof(plate_dir: Path, request, chosen, gs_path: str):
+def _resolve_proof(plate_dir: Path, request, chosen, icc_dir: str):
     """(the record to return, the CMYK→sRGB transform, the spot tables).
 
     A refusal comes back as a record carrying the sentence and no transform:
@@ -936,7 +939,7 @@ def _resolve_proof(plate_dir: Path, request, chosen, gs_path: str):
     look honoured.
     """
     intent = _cached_output_intent(plate_dir) if request.source == "document" else None
-    profile, refusal = soft_proof.resolve_profile(request, intent=intent, gs_path=gs_path)
+    profile, refusal = soft_proof.resolve_profile(request, intent=intent, icc_dir=icc_dir)
     if refusal:
         return soft_proof.refused_record(refusal), None, {}
     if profile is None:
@@ -951,7 +954,7 @@ def _resolve_proof(plate_dir: Path, request, chosen, gs_path: str):
     assumed: list = []
     if spots:
         tables, assumed, refusal = soft_proof.spot_tables(
-            spots, _cached_alternates(plate_dir), profile.path, gs_path
+            spots, _cached_alternates(plate_dir), profile.path
         )
         if refusal:
             return soft_proof.refused_record(refusal), None, {}
@@ -982,6 +985,7 @@ def composite_separations(
     output: str = "",
     simulation=None,
     gs_path: str = "gs",
+    icc_dir: str = "",
 ) -> dict:
     """Composite the chosen plates into an RGB PNG, with the ink statistics.
 
@@ -996,8 +1000,9 @@ def composite_separations(
             plates.
         simulation: The soft proof's profile request. Absent or `none`
             composites through the multiply model, unchanged.
-        gs_path: Path to the Ghostscript executable, for the bundled press
-            profile and the gray profile a non-CMYK spot alternate needs.
+        gs_path: Path to the Ghostscript executable.
+        icc_dir: The bundled colour-profile directory, for the press profile
+            a `bundled` request names.
 
     Without a profile each visible ink multiplies its display colour down,
     scaled by its density, so an ink switched off leaves the page exactly as
@@ -1049,7 +1054,7 @@ def composite_separations(
     transform = None
     spot_tables: dict = {}
     if request is not None and request.source != "none":
-        record, transform, spot_tables = _resolve_proof(plate_dir, request, chosen, gs_path)
+        record, transform, spot_tables = _resolve_proof(plate_dir, request, chosen, icc_dir)
 
     layers = _load_ink_layers([p for _, p, _, _, _ in chosen])
     height, width = layers[0].shape
@@ -1095,18 +1100,24 @@ def composite_separations(
     }
 
 
-def list_simulation_profiles(file: str = "", gs_path: str = "gs") -> dict:
+def list_simulation_profiles(file: str = "", gs_path: str = "gs",
+                             icc_dir: str = "") -> dict:
     """Which press profiles this document can be proofed against.
 
     The panel needs this before it composites anything: the default is the
     document's OWN output intent when it embeds a profile, and otherwise no
-    proof at all. Falling through to the bundled press would proof against a
+    proof at all. Falling through to a bundled press would proof against a
     press neither the user chose nor the document declared.
 
     An intent that names a registered characterization by identifier alone is
     reported `present` without `embedded` — it is still offered, and choosing
     it refuses by name rather than substituting a press the document never
     named.
+
+    `bundled` is the whole installed press set, each by its ICC description
+    string, plus which of them a request that names none resolves to. The
+    panel shows the names: a proof against an unnamed press is a picture
+    nobody can check.
     """
     intent = (
         soft_proof.read_output_intent(file)
@@ -1121,7 +1132,13 @@ def list_simulation_profiles(file: str = "", gs_path: str = "gs") -> dict:
         if not refusal and space == "CMYK":
             embedded = True
             name = description
-    bundled_raw, bundled_name = soft_proof.bundled_profile(gs_path)
+    presses = soft_proof.bundled_presses(icc_dir)
+    default = ""
+    if presses:
+        try:
+            default = icc_profiles.default_cmyk(icc_dir).description
+        except (ValueError, RuntimeError):
+            default = ""
     return {
         "document": {
             "present": bool(intent.get("present")),
@@ -1129,5 +1146,13 @@ def list_simulation_profiles(file: str = "", gs_path: str = "gs") -> dict:
             "identifier": str(intent.get("identifier") or ""),
             "name": name,
         },
-        "bundled": {"present": bool(bundled_raw), "name": bundled_name},
+        "bundled": {
+            "present": bool(presses),
+            # `name` is the default press. It stays beside the full list so a
+            # caller that only ever showed one bundled entry keeps naming a
+            # real press instead of an empty string.
+            "name": default,
+            "default": default,
+            "names": [p.description for p in presses],
+        },
     }
