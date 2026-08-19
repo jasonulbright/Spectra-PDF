@@ -5,10 +5,17 @@
 # pinned SHA-256, and extracted from the NSIS installer with 7-Zip WITHOUT
 # running it -- byte-for-byte the technique bundle-ghostscript.ps1 already uses.
 #
-# Tesseract is Apache-2.0 and Leptonica (its imaging dependency) is BSD-2-Clause;
-# both are friendlier than the AGPL Ghostscript already shipping here. Open PDF
-# Studio invokes tesseract.exe as a separate process, unmodified upstream (see
+# Tesseract is Apache-2.0 and Leptonica (its imaging dependency) is BSD-2-Clause.
+# tesseract.exe is invoked as a separate process, unmodified upstream (see
 # THIRD-PARTY-LICENSES.md).
+#
+# ONE binary of that installer is not shipped as it came: its libtiff-6.dll
+# statically imports libjbig-0.dll (JBIG-KIT, GPL-2.0-or-later), which the
+# license-class gate refuses as object code. The replacement is built by
+# scripts/build-libtiff-nojbig.ps1 -- the same libtiff version from the same
+# recipe with JBIG disabled -- and is installed over the installer's copy here,
+# after which libjbig-0.dll is dropped. Nothing in the product can reach JBIG:
+# both Tesseract spawn sites receive a PNG this program rendered.
 #
 # The LANGUAGE MODELS are NOT staged here -- scripts/sync-ocr-assets.mjs owns
 # them, because the offered-language list is parsed out of the app's own
@@ -24,6 +31,11 @@ param(
 # Pinned installer checksum -- update deliberately alongside $TessVersion.
 # Verified against the served 50,175,248-byte installer.
 $ExpectedSha256 = "C885FFF6998E0608BA4BB8AB51436E1C6775C2BAFC2559A19B423E18678B60C9"
+
+# The checked-in JBIG-free libtiff, and the hash it must have. Update both
+# deliberately, from what build-libtiff-nojbig.ps1 prints.
+$LibTiffSrc = Join-Path $PSScriptRoot "tesseract-libtiff\libtiff-6.dll"
+$ExpectedLibTiffSha256 = "AA79B1C2EC7FD815325C94A5E97BC904A962D9A40E55C74EB06A804AD7D756D8"
 
 $Url = "https://digi.bib.uni-mannheim.de/tesseract/tesseract-ocr-w64-setup-$TessVersion.exe"
 
@@ -81,6 +93,29 @@ function Get-NoticeProblems {
     return $problems
 }
 
+# ---------------------------------------------------------------------------
+# The JBIG gate. Same shape and the same both-paths rule as the notice gate: a
+# tree that already carries the GPL DLL is re-vendored rather than skipped past.
+# The check is a byte scan for the import name over every shipped binary, not a
+# presence check on the file: an import survives deleting the DLL and turns into
+# a process that will not start, so what must be proven absent is the reference.
+# ---------------------------------------------------------------------------
+function Get-JbigProblems {
+    param([string]$Root)
+    $problems = @()
+    if (Test-Path (Join-Path $Root "libjbig-0.dll")) {
+        $problems += "  libjbig-0.dll is present (JBIG-KIT, GPL-2.0-or-later)"
+    }
+    foreach ($bin in @(Get-ChildItem $Root -File -ErrorAction SilentlyContinue |
+                       Where-Object { $_.Extension -in @(".dll", ".exe") })) {
+        $bytes = [System.IO.File]::ReadAllBytes($bin.FullName)
+        if ([System.Text.Encoding]::ASCII.GetString($bytes).Contains("libjbig")) {
+            $problems += "  $($bin.Name): references libjbig"
+        }
+    }
+    return $problems
+}
+
 $tessExe = Join-Path $DestDir "tesseract.exe"
 if (Test-Path $tessExe) {
     $current = (& $tessExe --version 2>$null | Select-Object -First 1)
@@ -91,13 +126,18 @@ if (Test-Path $tessExe) {
     # trigger a re-vendor, not a silent skip past the gate below.
     $noticeProblems = @(Get-NoticeProblems -Root $DestDir)
     $hasNotices = $noticeProblems.Count -eq 0
-    if ($current -eq "tesseract v$TessVersion" -and $hasTsv -and $hasModel -and $hasNotices) {
-        Write-Host "Tesseract $TessVersion already vendored at $DestDir (notices complete)"
+    $jbigProblems = @(Get-JbigProblems -Root $DestDir)
+    $noJbig = $jbigProblems.Count -eq 0
+    if ($current -eq "tesseract v$TessVersion" -and $hasTsv -and $hasModel -and $hasNotices -and $noJbig) {
+        Write-Host "Tesseract $TessVersion already vendored at $DestDir (notices complete, JBIG-free)"
         return
     }
-    Write-Host "Re-vendoring: existing tree is incomplete (tsv=$hasTsv models=$hasModel notices=$hasNotices)"
+    Write-Host "Re-vendoring: existing tree is incomplete (tsv=$hasTsv models=$hasModel notices=$hasNotices nojbig=$noJbig)"
     if (-not $hasNotices) {
         $noticeProblems | Select-Object -First 5 | ForEach-Object { Write-Host $_ }
+    }
+    if (-not $noJbig) {
+        $jbigProblems | Select-Object -First 5 | ForEach-Object { Write-Host $_ }
     }
 }
 
@@ -177,6 +217,31 @@ if ($dlls.Count -lt 10) {
 }
 foreach ($dll in $dlls) { Copy-Item $dll.FullName -Destination $DestDir -Force }
 Write-Host "  Copied $($dlls.Count) DLLs"
+
+# The JBIG swap. Order matters: the installer's libtiff-6.dll is overwritten
+# first, so the tree is never left with a libtiff that imports a DLL that is
+# already gone. Both steps refuse rather than warn -- a tree that keeps the GPL
+# binary and a tree whose Tesseract cannot start are both unshippable.
+if (-not (Test-Path $LibTiffSrc)) {
+    Write-Error ("JBIG-free libtiff missing: $LibTiffSrc`n" +
+                 "Run scripts\build-libtiff-nojbig.ps1 and commit the result.")
+    exit 1
+}
+$libTiffSha = (Get-FileHash $LibTiffSrc -Algorithm SHA256).Hash
+if ($libTiffSha -ne $ExpectedLibTiffSha256) {
+    Write-Error ("Checksum mismatch for the checked-in libtiff-6.dll.`n" +
+                 "  expected: $ExpectedLibTiffSha256`n  actual:   $libTiffSha")
+    exit 1
+}
+Copy-Item $LibTiffSrc -Destination (Join-Path $DestDir "libtiff-6.dll") -Force
+Write-Host "  Installed the JBIG-free libtiff-6.dll ($ExpectedLibTiffSha256)"
+Remove-Item (Join-Path $DestDir "libjbig-0.dll") -Force -ErrorAction SilentlyContinue
+$jbigProblems = @(Get-JbigProblems -Root $DestDir)
+if ($jbigProblems) {
+    Write-Error ("JBIG gate FAILED -- refusing to ship:`n" + ($jbigProblems -join "`n"))
+    exit 1
+}
+Write-Host "  JBIG gate: no shipped binary references libjbig."
 
 # tessdata: restore what was staged, else seed with the installer's own eng/osd
 # so a freshly vendored tree is usable before sync-ocr-assets.mjs runs. `osd`
@@ -272,7 +337,7 @@ Write-Host "  Copied $copied third-party licence texts (offline, from the checke
 # without this, it would ship unnotified.
 # ---------------------------------------------------------------------------
 $shipped = @(Get-ChildItem $DestDir -File | Where-Object { $_.Extension -in @(".dll", ".exe") })
-$problems = @(Get-NoticeProblems -Root $DestDir)
+$problems = @(Get-NoticeProblems -Root $DestDir) + @(Get-JbigProblems -Root $DestDir)
 if ($problems) {
     Write-Error ("Redistribution-notice gate FAILED -- refusing to ship:`n" +
                  ($problems -join "`n") +

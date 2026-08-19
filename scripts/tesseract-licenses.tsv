@@ -1,79 +1,91 @@
 # Redistribution-notice manifest for the bundled OCR runtime.
 #
-# bundle-tesseract.ps1 ships tesseract.exe plus every DLL beside it (51 today),
+# bundle-tesseract.ps1 ships tesseract.exe plus every DLL beside it (50 today),
 # enumerated rather than hand-listed so the copy set cannot rot when upstream
 # changes its dependencies. The upstream installer supplies notices for two of
-# those 52 binaries; this manifest accounts for the rest, and the build REFUSES
+# those 51 binaries; this manifest accounts for the rest, and the build REFUSES
 # if a shipped binary has no row here or its notice is missing.
 #
-# COLUMNS: file <TAB> component <TAB> spdx <TAB> notice <TAB> source
+# COLUMNS: file <TAB> component <TAB> spdx <TAB> notice <TAB> source <TAB> srcpkg
 #   file      exact filename as shipped in resources/tesseract/
 #   component upstream project (several files legitimately share one)
 #   spdx      SPDX expression. "OR" = we may rely on any listed licence;
 #             the notice file carries the text(s) that choice requires.
 #   notice    filename under resources/tesseract/licenses/
 #   source    upstream the notice text came from
+#   srcpkg    where the source for THIS BINARY is published. Every DLL in the
+#             installer is an MSYS2 mingw-w64 package build, and MSYS2 publishes
+#             both the build recipe (the URL in this column) and a per-version
+#             source package at
+#             https://mirror.msys2.org/mingw/sources/<pkgbase>-<version>.src.tar.zst
+#             The recipe URL is the durable half: the mirror carries the
+#             versions currently packaged, and the pinned Tesseract build
+#             freezes older ones.
 #
 # RULES:
 #  - A dependency is never removed to simplify this file. Every component gets
 #    a row, whatever its licence.
-#  - Copyleft components are ordinary rows. libjbig (GPL-2.0) and the GCC
-#    runtime (GPL-3.0 WITH the Runtime Library Exception) are listed exactly
-#    like the permissive ones: this project is MIT open source with a public
-#    repository, so the source column answers "where is the source".
+#  - Copyleft components are ordinary rows. The GCC runtime (GPL-3.0 WITH the
+#    Runtime Library Exception) and the LGPL libraries are listed exactly like
+#    the permissive ones; the source and srcpkg columns answer "where is the
+#    source", and for the LGPL rows the relink option is available because each
+#    is a separate dynamically loaded DLL.
+#  - No GPL object code ships in this tree. libtiff is rebuilt without JBIG
+#    support by scripts/build-libtiff-nojbig.ps1 so that libjbig-0.dll
+#    (JBIG-KIT, GPL-2.0-or-later) is neither imported nor shipped; the bundler
+#    refuses if any shipped binary references it.
 #  - Keep sorted by filename so a diff against a fresh `Get-ChildItem` reads
 #    cleanly.
 #
-file	component	spdx	notice	source
-libLerc.dll	LERC	Apache-2.0	LICENSE-LERC.txt	https://github.com/Esri/lerc
-libarchive-13.dll	libarchive	BSD-2-Clause	LICENSE-libarchive.txt	https://github.com/libarchive/libarchive
-libb2-1.dll	libb2 (BLAKE2)	CC0-1.0	LICENSE-libb2.txt	https://github.com/BLAKE2/libb2
-libbrotlicommon.dll	Brotli	MIT	LICENSE-brotli.txt	https://github.com/google/brotli
-libbrotlidec.dll	Brotli	MIT	LICENSE-brotli.txt	https://github.com/google/brotli
-libbz2-1.dll	bzip2	bzip2-1.0.6	LICENSE-bzip2.txt	https://gitlab.com/bzip2/bzip2
-libcairo-2.dll	Cairo	LGPL-2.1-only OR MPL-1.1	LICENSE-cairo.txt	https://gitlab.freedesktop.org/cairo/cairo
-libcrypto-3-x64.dll	OpenSSL	Apache-2.0	LICENSE-openssl.txt	https://github.com/openssl/openssl
-libdatrie-1.dll	libdatrie	LGPL-2.1-or-later	LICENSE-libdatrie.txt	https://github.com/tlwg/libdatrie
-libdeflate.dll	libdeflate	MIT	LICENSE-libdeflate.txt	https://github.com/ebiggers/libdeflate
-libexpat-1.dll	Expat	MIT	LICENSE-expat.txt	https://github.com/libexpat/libexpat
-libffi-8.dll	libffi	MIT	LICENSE-libffi.txt	https://github.com/libffi/libffi
-libfontconfig-1.dll	fontconfig	MIT	LICENSE-fontconfig.txt	https://gitlab.freedesktop.org/fontconfig/fontconfig
-libfreetype-6.dll	FreeType	FTL OR GPL-2.0-or-later	LICENSE-freetype.txt	https://gitlab.freedesktop.org/freetype/freetype
-libfribidi-0.dll	GNU FriBidi	LGPL-2.1-or-later	LICENSE-fribidi.txt	https://github.com/fribidi/fribidi
-libgcc_s_seh-1.dll	GCC runtime library	GPL-3.0-or-later WITH GCC-exception-3.1	LICENSE-gcc-runtime.txt	https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html
-libgif-7.dll	giflib	MIT	LICENSE-giflib.txt	https://sourceforge.net/projects/giflib/
-libgio-2.0-0.dll	GLib	LGPL-2.1-or-later	LICENSE-glib.txt	https://gitlab.gnome.org/GNOME/glib
-libglib-2.0-0.dll	GLib	LGPL-2.1-or-later	LICENSE-glib.txt	https://gitlab.gnome.org/GNOME/glib
-libgmodule-2.0-0.dll	GLib	LGPL-2.1-or-later	LICENSE-glib.txt	https://gitlab.gnome.org/GNOME/glib
-libgobject-2.0-0.dll	GLib	LGPL-2.1-or-later	LICENSE-glib.txt	https://gitlab.gnome.org/GNOME/glib
-libgraphite2.dll	Graphite2	LGPL-2.1-or-later OR MPL-2.0 OR GPL-2.0-or-later	LICENSE-graphite2.txt	https://github.com/silnrsi/graphite
-libharfbuzz-0.dll	HarfBuzz	MIT	LICENSE-harfbuzz.txt	https://github.com/harfbuzz/harfbuzz
-libiconv-2.dll	GNU libiconv	LGPL-2.1-or-later	LICENSE-libiconv.txt	https://savannah.gnu.org/projects/libiconv/
-libicudt75.dll	ICU	Unicode-DFS-2016	LICENSE-icu.txt	https://github.com/unicode-org/icu
-libicuin75.dll	ICU	Unicode-DFS-2016	LICENSE-icu.txt	https://github.com/unicode-org/icu
-libicuuc75.dll	ICU	Unicode-DFS-2016	LICENSE-icu.txt	https://github.com/unicode-org/icu
-libintl-8.dll	GNU gettext (libintl)	LGPL-2.1-or-later	LICENSE-gettext-runtime.txt	https://savannah.gnu.org/projects/gettext/
-libjbig-0.dll	JBIG-KIT	GPL-2.0-or-later	LICENSE-jbigkit.txt	https://www.cl.cam.ac.uk/~mgk25/jbigkit/
-libjpeg-8.dll	libjpeg-turbo	IJG AND BSD-3-Clause AND Zlib	LICENSE-libjpeg-turbo.txt	https://github.com/libjpeg-turbo/libjpeg-turbo
-libleptonica-6.dll	Leptonica	BSD-2-Clause	LICENSE-leptonica.txt	https://github.com/DanBloomberg/leptonica
-liblz4.dll	LZ4	BSD-2-Clause	LICENSE-lz4.txt	https://github.com/lz4/lz4
-liblzma-5.dll	XZ Utils (liblzma)	0BSD	LICENSE-xz.txt	https://github.com/tukaani-project/xz
-libopenjp2-7.dll	OpenJPEG	BSD-2-Clause	LICENSE-openjpeg.txt	https://github.com/uclouvain/openjpeg
-libpango-1.0-0.dll	Pango	LGPL-2.1-or-later	LICENSE-pango.txt	https://gitlab.gnome.org/GNOME/pango
-libpangocairo-1.0-0.dll	Pango	LGPL-2.1-or-later	LICENSE-pango.txt	https://gitlab.gnome.org/GNOME/pango
-libpangoft2-1.0-0.dll	Pango	LGPL-2.1-or-later	LICENSE-pango.txt	https://gitlab.gnome.org/GNOME/pango
-libpangowin32-1.0-0.dll	Pango	LGPL-2.1-or-later	LICENSE-pango.txt	https://gitlab.gnome.org/GNOME/pango
-libpcre2-8-0.dll	PCRE2	BSD-3-Clause	LICENSE-pcre2.txt	https://github.com/PCRE2Project/pcre2
-libpixman-1-0.dll	Pixman	MIT	LICENSE-pixman.txt	https://gitlab.freedesktop.org/pixman/pixman
-libpng16-16.dll	libpng	libpng-2.0	LICENSE-libpng.txt	https://github.com/pnggroup/libpng
-libsharpyuv-0.dll	libwebp	BSD-3-Clause	LICENSE-libwebp.txt	https://github.com/webmproject/libwebp
-libstdc++-6.dll	GCC runtime library	GPL-3.0-or-later WITH GCC-exception-3.1	LICENSE-gcc-runtime.txt	https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html
-libtesseract-5.dll	Tesseract OCR	Apache-2.0	LICENSE-Tesseract.txt	https://github.com/tesseract-ocr/tesseract
-libthai-0.dll	libthai	LGPL-2.1-or-later	LICENSE-libthai.txt	https://github.com/tlwg/libthai
-libtiff-6.dll	libtiff	libtiff	LICENSE-libtiff.txt	https://gitlab.com/libtiff/libtiff
-libwebp-7.dll	libwebp	BSD-3-Clause	LICENSE-libwebp.txt	https://github.com/webmproject/libwebp
-libwebpmux-3.dll	libwebp	BSD-3-Clause	LICENSE-libwebp.txt	https://github.com/webmproject/libwebp
-libwinpthread-1.dll	mingw-w64 (winpthreads)	MIT AND Zope-2.1	LICENSE-mingw-w64.txt	https://sourceforge.net/p/mingw-w64/mingw-w64/
-libzstd.dll	Zstandard	BSD-3-Clause OR GPL-2.0-only	LICENSE-zstd.txt	https://github.com/facebook/zstd
-tesseract.exe	Tesseract OCR	Apache-2.0	LICENSE-Tesseract.txt	https://github.com/tesseract-ocr/tesseract
-zlib1.dll	zlib	Zlib	LICENSE-zlib.txt	https://github.com/madler/zlib
+file	component	spdx	notice	source	srcpkg
+libLerc.dll	LERC	Apache-2.0	LICENSE-LERC.txt	https://github.com/Esri/lerc	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-lerc
+libarchive-13.dll	libarchive	BSD-2-Clause	LICENSE-libarchive.txt	https://github.com/libarchive/libarchive	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libarchive
+libb2-1.dll	libb2 (BLAKE2)	CC0-1.0	LICENSE-libb2.txt	https://github.com/BLAKE2/libb2	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libb2
+libbrotlicommon.dll	Brotli	MIT	LICENSE-brotli.txt	https://github.com/google/brotli	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-brotli
+libbrotlidec.dll	Brotli	MIT	LICENSE-brotli.txt	https://github.com/google/brotli	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-brotli
+libbz2-1.dll	bzip2	bzip2-1.0.6	LICENSE-bzip2.txt	https://gitlab.com/bzip2/bzip2	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-bzip2
+libcairo-2.dll	Cairo	LGPL-2.1-only OR MPL-1.1	LICENSE-cairo.txt	https://gitlab.freedesktop.org/cairo/cairo	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-cairo
+libcrypto-3-x64.dll	OpenSSL	Apache-2.0	LICENSE-openssl.txt	https://github.com/openssl/openssl	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-openssl
+libdatrie-1.dll	libdatrie	LGPL-2.1-or-later	LICENSE-libdatrie.txt	https://github.com/tlwg/libdatrie	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libdatrie
+libdeflate.dll	libdeflate	MIT	LICENSE-libdeflate.txt	https://github.com/ebiggers/libdeflate	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libdeflate
+libexpat-1.dll	Expat	MIT	LICENSE-expat.txt	https://github.com/libexpat/libexpat	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-expat
+libffi-8.dll	libffi	MIT	LICENSE-libffi.txt	https://github.com/libffi/libffi	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libffi
+libfontconfig-1.dll	fontconfig	MIT	LICENSE-fontconfig.txt	https://gitlab.freedesktop.org/fontconfig/fontconfig	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-fontconfig
+libfreetype-6.dll	FreeType	FTL OR GPL-2.0-or-later	LICENSE-freetype.txt	https://gitlab.freedesktop.org/freetype/freetype	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-freetype
+libfribidi-0.dll	GNU FriBidi	LGPL-2.1-or-later	LICENSE-fribidi.txt	https://github.com/fribidi/fribidi	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-fribidi
+libgcc_s_seh-1.dll	GCC runtime library	GPL-3.0-or-later WITH GCC-exception-3.1	LICENSE-gcc-runtime.txt	https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-gcc
+libgif-7.dll	giflib	MIT	LICENSE-giflib.txt	https://sourceforge.net/projects/giflib/	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-giflib
+libgio-2.0-0.dll	GLib	LGPL-2.1-or-later	LICENSE-glib.txt	https://gitlab.gnome.org/GNOME/glib	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-glib2
+libglib-2.0-0.dll	GLib	LGPL-2.1-or-later	LICENSE-glib.txt	https://gitlab.gnome.org/GNOME/glib	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-glib2
+libgmodule-2.0-0.dll	GLib	LGPL-2.1-or-later	LICENSE-glib.txt	https://gitlab.gnome.org/GNOME/glib	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-glib2
+libgobject-2.0-0.dll	GLib	LGPL-2.1-or-later	LICENSE-glib.txt	https://gitlab.gnome.org/GNOME/glib	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-glib2
+libgraphite2.dll	Graphite2	LGPL-2.1-or-later OR MPL-2.0 OR GPL-2.0-or-later	LICENSE-graphite2.txt	https://github.com/silnrsi/graphite	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-graphite2
+libharfbuzz-0.dll	HarfBuzz	MIT	LICENSE-harfbuzz.txt	https://github.com/harfbuzz/harfbuzz	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-harfbuzz
+libiconv-2.dll	GNU libiconv	LGPL-2.1-or-later	LICENSE-libiconv.txt	https://savannah.gnu.org/projects/libiconv/	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libiconv
+libicudt75.dll	ICU	Unicode-DFS-2016	LICENSE-icu.txt	https://github.com/unicode-org/icu	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-icu
+libicuin75.dll	ICU	Unicode-DFS-2016	LICENSE-icu.txt	https://github.com/unicode-org/icu	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-icu
+libicuuc75.dll	ICU	Unicode-DFS-2016	LICENSE-icu.txt	https://github.com/unicode-org/icu	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-icu
+libintl-8.dll	GNU gettext (libintl)	LGPL-2.1-or-later	LICENSE-gettext-runtime.txt	https://savannah.gnu.org/projects/gettext/	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-gettext
+libjpeg-8.dll	libjpeg-turbo	IJG AND BSD-3-Clause AND Zlib	LICENSE-libjpeg-turbo.txt	https://github.com/libjpeg-turbo/libjpeg-turbo	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libjpeg-turbo
+libleptonica-6.dll	Leptonica	BSD-2-Clause	LICENSE-leptonica.txt	https://github.com/DanBloomberg/leptonica	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-leptonica
+liblz4.dll	LZ4	BSD-2-Clause	LICENSE-lz4.txt	https://github.com/lz4/lz4	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-lz4
+liblzma-5.dll	XZ Utils (liblzma)	0BSD	LICENSE-xz.txt	https://github.com/tukaani-project/xz	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-xz
+libopenjp2-7.dll	OpenJPEG	BSD-2-Clause	LICENSE-openjpeg.txt	https://github.com/uclouvain/openjpeg	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-openjpeg2
+libpango-1.0-0.dll	Pango	LGPL-2.1-or-later	LICENSE-pango.txt	https://gitlab.gnome.org/GNOME/pango	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-pango
+libpangocairo-1.0-0.dll	Pango	LGPL-2.1-or-later	LICENSE-pango.txt	https://gitlab.gnome.org/GNOME/pango	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-pango
+libpangoft2-1.0-0.dll	Pango	LGPL-2.1-or-later	LICENSE-pango.txt	https://gitlab.gnome.org/GNOME/pango	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-pango
+libpangowin32-1.0-0.dll	Pango	LGPL-2.1-or-later	LICENSE-pango.txt	https://gitlab.gnome.org/GNOME/pango	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-pango
+libpcre2-8-0.dll	PCRE2	BSD-3-Clause	LICENSE-pcre2.txt	https://github.com/PCRE2Project/pcre2	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-pcre2
+libpixman-1-0.dll	Pixman	MIT	LICENSE-pixman.txt	https://gitlab.freedesktop.org/pixman/pixman	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-pixman
+libpng16-16.dll	libpng	libpng-2.0	LICENSE-libpng.txt	https://github.com/pnggroup/libpng	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libpng
+libsharpyuv-0.dll	libwebp	BSD-3-Clause	LICENSE-libwebp.txt	https://github.com/webmproject/libwebp	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libwebp
+libstdc++-6.dll	GCC runtime library	GPL-3.0-or-later WITH GCC-exception-3.1	LICENSE-gcc-runtime.txt	https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-gcc
+libtesseract-5.dll	Tesseract OCR	Apache-2.0	LICENSE-Tesseract.txt	https://github.com/tesseract-ocr/tesseract	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-tesseract-ocr
+libthai-0.dll	libthai	LGPL-2.1-or-later	LICENSE-libthai.txt	https://github.com/tlwg/libthai	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libthai
+libtiff-6.dll	libtiff (rebuilt without JBIG)	libtiff	LICENSE-libtiff.txt	https://gitlab.com/libtiff/libtiff	scripts/build-libtiff-nojbig.ps1
+libwebp-7.dll	libwebp	BSD-3-Clause	LICENSE-libwebp.txt	https://github.com/webmproject/libwebp	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libwebp
+libwebpmux-3.dll	libwebp	BSD-3-Clause	LICENSE-libwebp.txt	https://github.com/webmproject/libwebp	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-libwebp
+libwinpthread-1.dll	mingw-w64 (winpthreads)	MIT AND Zope-2.1	LICENSE-mingw-w64.txt	https://sourceforge.net/p/mingw-w64/mingw-w64/	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-winpthreads
+libzstd.dll	Zstandard	BSD-3-Clause OR GPL-2.0-only	LICENSE-zstd.txt	https://github.com/facebook/zstd	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-zstd
+tesseract.exe	Tesseract OCR	Apache-2.0	LICENSE-Tesseract.txt	https://github.com/tesseract-ocr/tesseract	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-tesseract-ocr
+zlib1.dll	zlib	Zlib	LICENSE-zlib.txt	https://github.com/madler/zlib	https://github.com/msys2/MINGW-packages/tree/master/mingw-w64-zlib
