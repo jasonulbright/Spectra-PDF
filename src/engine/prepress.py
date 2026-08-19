@@ -629,7 +629,7 @@ def convert_cmyk(
     output: str,
     render_intent: str = "relative",
     dest_profile: str = "",
-    gs_path: str = "gs",
+    gs_path: str = "",
     font_dir: str = "",
     icc_dir: str = "",
 ) -> dict:
@@ -828,7 +828,7 @@ def convert_pdfx(
     condition: str = "",
     identifier: str = "",
     info: str = "",
-    gs_path: str = "gs",
+    gs_path: str = "",
     trapped: str = DEFAULT_TRAPPED,
     icc_dir: str = "",
 ) -> dict:

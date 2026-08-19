@@ -8,7 +8,7 @@ attributed to its source page, plus a summary (similarity, counts, page
 counts). Rows from similar replaced-line pairs additionally carry word-level
 ``segments`` for intra-line highlighting. Read-only: neither file is modified.
 
-Visual: rasterizes both files with the bundled Ghostscript (``ppmraw`` — PPM
+Visual: rasterizes both files with the configured Ghostscript (``ppmraw`` — PPM
 P6 is a trivial stdlib parse: header + raw RGB bytes, no PIL/numpy/PNG
 dependency) and pixel-diffs page pairs 1:1 by index, reporting per-pair diff
 counts and changed-region rectangles in PDF points. Engine-side deliberately —
@@ -427,7 +427,7 @@ def _read_ppm(path: Path) -> tuple[int, int, bytes]:
     # valued (0x09–0x0D/0x20 — ordinary dark-pixel values), and guessing wrong
     # silently shifts the whole buffer into a bogus-but-plausible diff. A loud
     # rejection is strictly better than a coin-flip for a diff tool. The
-    # bundled Ghostscript always writes this exact framing.
+    # Ghostscript always writes this exact framing.
     if i >= n or not data[i : i + 1].isspace():
         raise ValueError(f"Malformed PPM header (missing separator after maxval): {path.name}")
     i += 1
@@ -538,7 +538,7 @@ def compare_visual(
     file_b: str,
     dpi: int = 72,
     tolerance: int = 0,
-    gs_path: str = "gs",
+    gs_path: str = "",
 ) -> dict:
     """Pixel-diff two PDFs page by page (paired 1:1 by index).
 

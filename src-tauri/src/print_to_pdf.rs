@@ -5,7 +5,7 @@
 //! Shape: a Windows printer using the IN-BOX "Microsoft PS Class Driver" on
 //! a standard TCP/IP RAW port aimed at 127.0.0.1:9100, where THIS APP
 //! listens (loopback only). The spooler streams PostScript; the listener
-//! hands it to the bundled Ghostscript through the CLI `distill` arm,
+//! hands it to the configured Ghostscript through the CLI `distill` arm,
 //! and the finished PDF opens through the normal open funnel
 //! (the second-instance `app:openFile` event). No driver is shipped, no
 //! service is installed — the OS driver does the rendering contract and the

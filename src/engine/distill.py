@@ -36,7 +36,7 @@ def _read_header(path: Path) -> bytes:
         return f.read(256)
 
 
-def distill(file: str, output: str, preset: str = "printer", gs_path: str = "gs") -> dict:
+def distill(file: str, output: str, preset: str = "printer", gs_path: str = "") -> dict:
     """Convert a PostScript or EPS file to PDF.
 
     Args:

@@ -167,10 +167,16 @@ class TestVerification:
         with pytest.raises(RuntimeError, match="mask verification failed"):
             verify_mask_stream(flipped, gs_path)
 
-    def test_missing_ghostscript_refuses_by_name(self):
+    def test_missing_ghostscript_refuses_by_name(self, tmp_path):
+        # An EXPLICIT path naming no program. "" now means "resolve one" and
+        # would find an installed Ghostscript, which would test the machine
+        # rather than the refusal; an explicit path never falls through to
+        # discovery. The message is the capability authority's own — there is
+        # one wording for "no usable Ghostscript", not one per door.
         stream = encode_mask_ccitt_g4(make_mask())
-        with pytest.raises(RuntimeError, match="Ghostscript is not available"):
-            verify_mask_stream(stream, "")
+        absent = str(tmp_path / "nowhere" / "gswin64c.exe")
+        with pytest.raises(RuntimeError, match="Ghostscript is required for this operation"):
+            verify_mask_stream(stream, absent)
 
     @needs_jbig2
     def test_jbig2_generic_stencil_decodes_back(self, gs_path):

@@ -4,7 +4,9 @@ This is the app's only recognizer, shared by GUI, CLI, batch, and scheduled
 runs. Keeping recognition in the engine supports headless operation and avoids
 multiple recognizers disagreeing about the same page.
 
-The pipeline is two vendored tools, both already required by the product:
+The pipeline is two external tools, both already required by the product
+(tesseract ships with it; Ghostscript is user-supplied and validated before
+each raster):
 
     page -> Ghostscript raster (PNG, 300 dpi) -> tesseract TSV -> word boxes
 
@@ -30,6 +32,8 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
+
+from . import budget
 
 # Matches the renderer's old rasterizer (ocr-client.ts): 300 dpi is the density
 # tesseract's models are trained around -- materially lower loses small type,
@@ -69,7 +73,7 @@ def _tesseract_exe(tesseract_path: str) -> Path:
 
 
 def _render_page_png(file: str, page: int, gs_path: str, out_png: Path) -> None:
-    """Rasterise ONE page with the vendored Ghostscript.
+    """Rasterise ONE page with the configured Ghostscript.
 
     Same device/idiom as image_export.py. -dFirstPage/-dLastPage bound the work
     to the single page being recognised, so a 900-page scan costs one page's
@@ -82,14 +86,8 @@ def _render_page_png(file: str, page: int, gs_path: str, out_png: Path) -> None:
     Both the flag and the page box apply /Rotate, so the two agree with no
     further normalization.
     """
-    gs = Path(gs_path) if gs_path else Path()
-    if not gs.is_file():
-        raise RuntimeError(
-            f"Ghostscript is not available at {gs_path or '(no path given)'}; "
-            "it is required to rasterise pages for OCR."
-        )
     cmd = [
-        str(gs),
+        gs_path,
         "-q",
         "-dNOPAUSE",
         "-dBATCH",
@@ -102,7 +100,12 @@ def _render_page_png(file: str, page: int, gs_path: str, out_png: Path) -> None:
         f"-sOutputFile={out_png}",
         str(file),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # Through the gs family's door: it validates the executable (a file that
+    # exists is not a Ghostscript that runs) and derives the budget. This run
+    # previously had no timeout at all, so an interpreter that hung stalled
+    # the whole recognition with nothing to report.
+    proc = budget.gs(cmd, what=f"Ghostscript (OCR raster, page {page})",
+                     path=file, pages=1)
     if proc.returncode != 0 or not out_png.is_file():
         detail = (proc.stderr or proc.stdout or "").strip()[:400]
         raise RuntimeError(f"Could not render page {page} for OCR: {detail}")
@@ -286,7 +289,7 @@ def recognize(
             run, which is slower and slightly less accurate on a page that is
             only one of them.
         tesseract_path: Path to the vendored tesseract.exe.
-        gs_path: Path to the vendored Ghostscript.
+        gs_path: Path to the Ghostscript to drive ("" resolves one).
 
     Returns:
         ``{"text": str, "words": [{text, x, y, w, h}]}`` with coordinates
