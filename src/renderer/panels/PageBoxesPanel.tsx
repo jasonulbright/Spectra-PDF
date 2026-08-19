@@ -10,7 +10,7 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
 import { EDIT_DECLINED } from '../lib/edit-text';
-import { ensureGsPath } from './SettingsPanel';
+import { gsPathIfAvailable } from '../lib/gs-capability';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { PageRangeField } from '../components/PageRangeField';
@@ -131,9 +131,10 @@ export function PageBoxesPanel(): React.ReactElement {
           margin,
           preview,
           // Only reached for a scan whose codestream this runtime cannot
-          // decode, but the crop must not silently measure that page as blank
-          // for want of a renderer.
-          gs_path: await ensureGsPath(),
+          // decode, so an absent Ghostscript refuses THAT document at the
+          // moment the fallback is reached (engine-side, by name) rather than
+          // blanket-disabling a crop that works on everything else.
+          gs_path: await gsPathIfAvailable(),
           ...(scope.pages ? { pages: scope.pages } : {}),
         };
         // Preview MEASURES and writes nothing (`preview` suppresses the save

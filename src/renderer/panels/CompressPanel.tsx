@@ -3,7 +3,10 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
-import { ensureGsPath, getSettings } from './SettingsPanel';
+import { getSettings } from './SettingsPanel';
+import { gsBlocked, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { tesseractPath } from '../lib/ocr-recognize';
 import { app } from '../lib/tauri-bridge';
 import { OCR_LANGUAGES, DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
@@ -83,6 +86,7 @@ export function CompressPanel(): React.ReactElement {
   const [thenOptimize, setThenOptimize] = useState(false);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const gs = useGsCapability();
 
   const [imageRes, setImageRes] = useState<ImageResolution | null>(null);
   const [imageResError, setImageResError] = useState<string | null>(null);
@@ -141,7 +145,7 @@ export function CompressPanel(): React.ReactElement {
       setStatus(tChrome('panel.compress.compressing'));
       try {
         const params: Record<string, unknown> = {
-          file: activeFile.workingPath, output, gs_path: await ensureGsPath(),
+          file: activeFile.workingPath, output, gs_path: await requireGsPath(),
           font_dir: await app.getEditFontPath(),
         };
         if (mrc) {
@@ -376,7 +380,8 @@ export function CompressPanel(): React.ReactElement {
         </label>
         <p className="text-xs text-neutral-500 max-w-md">{tChrome('panel.compress.thenOptimizeHint')}</p>
       </div>
-      <button data-testid="compress-run" onClick={handleCompress} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+      <GsRequiredNotice capability={gs} testId="compress-gs" />
+      <button data-testid="compress-run" onClick={handleCompress} disabled={busy || gsBlocked(gs)} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
         {busy ? tChrome('panel.compress.compressing') : tChrome('panel.compress.compress')}
       </button>
       <StatusBar message={status} busy={busy} />

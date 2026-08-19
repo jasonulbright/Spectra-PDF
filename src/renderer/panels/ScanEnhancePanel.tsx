@@ -9,7 +9,10 @@ import { invokeCommand } from '../commands/context';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
-import { ghostscriptPath, tesseractPath } from '../lib/ocr-recognize';
+import { tesseractPath } from '../lib/ocr-recognize';
+import { gsBlocked, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import {
   DEFAULT_SCAN_ENHANCE,
   previewCounts,
@@ -51,6 +54,7 @@ export function ScanEnhancePanel(): React.ReactElement {
   const [report, setReport] = useState<ScanAnalysis | null>(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const gs = useGsCapability();
 
   const workingPath = activeFile?.workingPath ?? null;
   const filePath = activeFile?.path ?? null;
@@ -83,7 +87,7 @@ export function ScanEnhancePanel(): React.ReactElement {
   // request without them refuses by name rather than quietly doing less.
   const toolPaths = useCallback(
     async () => {
-      const [tesseract, gs] = await Promise.all([tesseractPath(), ghostscriptPath()]);
+      const [tesseract, gs] = await Promise.all([tesseractPath(), requireGsPath()]);
       return { tesseract_path: tesseract, gs_path: gs };
     },
     [],
@@ -388,10 +392,11 @@ export function ScanEnhancePanel(): React.ReactElement {
         )}
       </div>
 
+      <GsRequiredNotice capability={gs} testId="scanenhance-gs" />
       <div className="flex items-center gap-2">
         <button
           data-testid="scanenhance-measure"
-          disabled={busy || problem !== null}
+          disabled={busy || problem !== null || gsBlocked(gs)}
           onClick={() => void measure()}
           className="px-3 py-1.5 text-sm bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
         >
@@ -399,7 +404,7 @@ export function ScanEnhancePanel(): React.ReactElement {
         </button>
         <button
           data-testid="scanenhance-apply"
-          disabled={busy || problem !== null || counts.changing === 0}
+          disabled={busy || problem !== null || counts.changing === 0 || gsBlocked(gs)}
           onClick={() => void apply()}
           className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-50"
         >

@@ -4,7 +4,9 @@ import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
 import { file, app, dialog, batch, actionFile } from '../lib/tauri-bridge';
 import { getSettings } from '../lib/app-settings';
-import { ensureGsPath } from './SettingsPanel';
+import { gsBlocked, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerGuidedActionsHandlers } from '../testHarness';
@@ -14,6 +16,7 @@ import {
   askedParamKeys,
   buildStepParams,
   editorParams,
+  gsBlocker,
   inPlaceBlocker,
   loadGuidedActions,
   newStep,
@@ -75,6 +78,12 @@ export function GuidedActionsPanel(): React.ReactElement {
   const [listError, setListError] = useState<string | null>(null);
   const [runStatuses, setRunStatuses] = useState<StepStatus[]>([]);
   const [running, setRunning] = useState(false);
+  const gs = useGsCapability();
+  // The run callbacks are memoised on their own inputs; a ref keeps the
+  // plan-time check reading the CURRENT answer without making every run
+  // handler depend on it.
+  const gsRef = useRef(gs);
+  gsRef.current = gs;
 
   const persist = (list: GuidedAction[]): void => {
     setActions(list);
@@ -135,7 +144,7 @@ export function GuidedActionsPanel(): React.ReactElement {
           try {
             const def = stepDefFor(step.op);
             const extras: Record<string, string> = {};
-            if (def.needsGs) extras.gs_path = await ensureGsPath();
+            if (def.needsGs) extras.gs_path = await requireGsPath();
             if (def.needsFontDir) extras.font_dir = await app.getEditFontPath();
             if (def.needsTesseract) extras.tesseract_path = await app.getTesseractPath();
             if (def.needsSoffice) extras.soffice_path = await app.getSofficePath();
@@ -181,6 +190,10 @@ export function GuidedActionsPanel(): React.ReactElement {
       // says why, so this is belt-and-braces at the one place a keyboard or a
       // stale render could still reach.
       if (openDocumentBlocker(action) !== null) return;
+      // PLAN time, not mid-run: a sequence whose fourth step needs an
+      // interpreter must refuse before its first step has rewritten the
+      // document three times.
+      if (gsBlocker(action, !gsBlocked(gsRef.current)) !== null) return;
       const anyAsked = action.steps.some((s) => askedParamKeys(s).length > 0);
       if (anyAsked) {
         setView({ kind: 'prerun', action, values: {}, error: null });
@@ -221,7 +234,7 @@ export function GuidedActionsPanel(): React.ReactElement {
           dest: inPlace ? '' : dest,
           steps,
           action_name: action.name,
-          gs_path: await ensureGsPath(),
+          gs_path: await requireGsPath(),
           tesseract_path: await app.getTesseractPath(),
           // A folder run may START with a create_pdf step, so
           // the LibreOffice arm has to be reachable from here too.
@@ -245,6 +258,7 @@ export function GuidedActionsPanel(): React.ReactElement {
   const runActionOnFolder = useCallback(
     async (action: GuidedAction) => {
       if (running) return;
+      if (gsBlocker(action, !gsBlocked(gsRef.current)) !== null) return;
       const source = await dialog.pickFolder(tChrome('panel.ga.pickSource'));
       if (!source) return;
       const dest = await dialog.pickFolder(tChrome('panel.ga.pickDest'));
@@ -268,6 +282,7 @@ export function GuidedActionsPanel(): React.ReactElement {
       // The engine refuses this too; refusing here means no folder picker
       // opens for a run that cannot happen.
       if (inPlaceBlocker(action) !== null) return;
+      if (gsBlocker(action, !gsBlocked(gsRef.current)) !== null) return;
       const source = await dialog.pickFolder(tChrome('panel.ga.pickInPlace'));
       if (!source) return;
       const anyAsked = action.steps.some((s) => askedParamKeys(s).length > 0);
@@ -825,6 +840,7 @@ export function GuidedActionsPanel(): React.ReactElement {
           {listError}
         </p>
       )}
+      <GsRequiredNotice capability={gs} testId="actions-gs" />
       {actions.length === 0 ? (
         <p className="text-sm text-neutral-500" data-testid="actions-empty">
           {tChrome('panel.ga.empty')}
@@ -838,6 +854,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             // engine after a folder picker.
             const openBlocked = openDocumentBlocker(a);
             const inPlaceBlocked = inPlaceBlocker(a);
+            const gsBlockedMsg = gsBlocker(a, !gsBlocked(gs));
             return (
             <div
               key={a.id}
@@ -846,6 +863,11 @@ export function GuidedActionsPanel(): React.ReactElement {
             >
               <div className="flex-1 min-w-0">
                 <div className="text-sm text-neutral-200 truncate">{a.name}</div>
+                {gsBlockedMsg !== null && (
+                  <div className="text-xs text-amber-300" data-testid={`action-gs-${a.id}`}>
+                    {gsBlockedMsg}
+                  </div>
+                )}
                 <div className="text-xs text-neutral-500">
                   {a.steps.map((s) => tStepTitle(s.op, stepDefFor(s.op).title)).join(' → ')}
                 </div>
@@ -853,8 +875,8 @@ export function GuidedActionsPanel(): React.ReactElement {
               <button
                 type="button"
                 data-testid={`action-run-${a.id}`}
-                disabled={!activeFile || running || openBlocked !== null}
-                title={openBlocked ?? undefined}
+                disabled={!activeFile || running || openBlocked !== null || gsBlockedMsg !== null}
+                title={openBlocked ?? gsBlockedMsg ?? undefined}
                 onClick={() => void runAction(a)}
                 className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
               >
@@ -863,8 +885,8 @@ export function GuidedActionsPanel(): React.ReactElement {
               <button
                 type="button"
                 data-testid={`action-folder-${a.id}`}
-                disabled={running}
-                title={tChrome('panel.ga.folderTitle')}
+                disabled={running || gsBlockedMsg !== null}
+                title={gsBlockedMsg ?? tChrome('panel.ga.folderTitle')}
                 onClick={() => void runActionOnFolder(a)}
                 className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
               >
@@ -899,8 +921,8 @@ export function GuidedActionsPanel(): React.ReactElement {
                 <button
                   type="button"
                   data-testid={`action-inplace-${a.id}`}
-                  disabled={running || inPlaceBlocked !== null}
-                  title={inPlaceBlocked ?? tChrome('panel.ga.inPlaceTitle')}
+                  disabled={running || inPlaceBlocked !== null || gsBlockedMsg !== null}
+                  title={inPlaceBlocked ?? gsBlockedMsg ?? tChrome('panel.ga.inPlaceTitle')}
                   onClick={() => setConfirmInPlace(a.id)}
                   className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
                 >

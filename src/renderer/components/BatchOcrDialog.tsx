@@ -2,7 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useEngine } from '../hooks/useEngine';
 import { useAppModal } from '../hooks/useAppModal';
 import { app, dialog, batch } from '../lib/tauri-bridge';
-import { recognizePage, tesseractPath, ghostscriptPath } from '../lib/ocr-recognize';
+import { recognizePage, tesseractPath } from '../lib/ocr-recognize';
+import { gsBlocked, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from './GsRequiredNotice';
 import type { BatchPdfEntry } from '../lib/tauri-bridge';
 import { OCR_LANGUAGES, DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
 import { toTesseractLang, describeLanguages } from '../ocr/language-selection';
@@ -60,6 +63,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
   useTranslation();
   const { callRaw } = useEngine();
 
+  const gs = useGsCapability();
   const [phase, setPhase] = useState<Phase>('setup');
   const [source, setSource] = useState<string | null>(null);
   const [dest, setDest] = useState<string | null>(null);
@@ -316,6 +320,10 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
 
   const canStart =
     phase === 'setup' &&
+    // Batch OCR runs OUTSIDE the workspace — no panel, no commit gate, no op
+    // queue — so its refusal is taken here, before a single source folder is
+    // walked, rather than inherited from a panel's disabled state.
+    !gsBlocked(gs) &&
     !scanning &&
     source !== null &&
     (inPlace || (dest !== null && !conflict && movedConflict === null)) &&
@@ -401,7 +409,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
         dest: '',
         lang: toTesseractLang(langs),
         tesseract_path: await tesseractPath(),
-        gs_path: await ghostscriptPath(),
+        gs_path: await requireGsPath(),
         error_root: errorRoot ?? '',
         repair_damaged: repairDamaged,
         replace_repaired_originals: repairDamaged && replaceRepaired,
@@ -468,7 +476,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             mrc_preset: preset,
             mrc_verify_text: verifyText,
             mrc_lang: lang,
-            gs_path: await ghostscriptPath(),
+            gs_path: await requireGsPath(),
             tesseract_path: await tesseractPath(),
             font_dir: await app.getEditFontPath(),
           })) as unknown as MrcReport,
@@ -481,7 +489,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
             file: src,
             output: out,
             orientation,
-            gs_path: await ghostscriptPath(),
+            gs_path: await requireGsPath(),
             tesseract_path: await tesseractPath(),
           })) as unknown as ScanEnhanceReport,
       });
@@ -1004,6 +1012,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               </button>
             )}
           </div>
+          <GsRequiredNotice capability={gs} testId="batch-ocr-gs" />
         </div>
       )}
 

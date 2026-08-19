@@ -14,6 +14,18 @@ export const PANEL_STRINGS = {
   'panel.common.folderRouteHint':
     'This works on the open document. To run the same steps over every document in a folder, build an action.',
   'panel.common.folderRouteOpen': 'Open Guided Actions',
+  // The ONE explanation every Ghostscript-gated surface renders, plus the
+  // three states a configured-but-unusable install can be in. Ghostscript is
+  // a user-supplied prerequisite; nothing in the product ships it.
+  'panel.common.gsRequired':
+    'This needs Ghostscript, which Spectra PDF does not include. Install it, then point Spectra PDF at it in Settings ▸ Engine.',
+  'panel.common.gsNotExecutable':
+    'The Ghostscript set in Settings ▸ Engine is not there any more. Choose the program again.',
+  'panel.common.gsProbeFailed':
+    'The Ghostscript set in Settings ▸ Engine did not run. Check the install, then try again in Settings ▸ Engine.',
+  'panel.common.gsTooOld':
+    'The Ghostscript set in Settings ▸ Engine is older than this version needs. Install a newer one.',
+  'panel.common.gsSetUp': 'Set up Ghostscript',
   'panel.common.useSelection': 'Use selection',
   'panel.common.useSelectionTitle': 'Fill this field with the pages selected in the page list',
 
@@ -1316,7 +1328,9 @@ export const PANEL_STRINGS = {
   'panel.outputPreview.simulation': 'Simulation profile',
   'panel.outputPreview.simulationNone': 'No press — show the inks',
   'panel.outputPreview.simulationDocument': 'This document’s output intent',
-  'panel.outputPreview.simulationBundled': 'Bundled press profile',
+  'panel.outputPreview.simulationBundled': 'An installed press profile',
+  'panel.outputPreview.simulationPressAria': 'Press profile',
+  'panel.outputPreview.simulationPressDefault': 'Default press ({{name}})',
   'panel.outputPreview.simulationFile': 'Choose a profile file…',
   'panel.outputPreview.simulationUsing': 'Proofing through {{name}}',
   'panel.outputPreview.simulationAssumed':
@@ -1609,11 +1623,16 @@ export const PANEL_STRINGS = {
   'panel.prepress.intentRelative': 'Relative colorimetric (print default)',
   'panel.prepress.intentPerceptual': 'Perceptual (photographic)',
   'panel.prepress.intentAbsolute': 'Absolute colorimetric (proofing)',
+  'panel.prepress.intentSaturation': 'Saturation (business graphics)',
   'panel.prepress.destination': 'Destination',
   'panel.prepress.destinationAria': 'Destination profile',
-  'panel.prepress.profileDefault': 'Ghostscript default CMYK',
-  'panel.prepress.profileBundled': 'Bundled profile (default_cmyk.icc)',
+  'panel.prepress.profileDefault': 'Default press profile',
+  'panel.prepress.profileDefaultNamed': 'Default press profile ({{name}})',
+  'panel.prepress.profileInstalled': 'An installed press profile',
+  'panel.prepress.profileInstalledAria': 'Press profile',
   'panel.prepress.profileFile': 'Choose an .icc file…',
+  'panel.prepress.profilesUnavailable':
+    'The installed press profiles could not be read, so only the default press and a profile file of your own are offered.',
   'panel.prepress.converting': 'Converting…',
   'panel.prepress.convertCmyk': 'Convert to CMYK',
   'panel.prepress.convertingCmyk': 'Converting to CMYK…',
@@ -2159,12 +2178,24 @@ export const PANEL_STRINGS = {
   'panel.settings.catTray': 'Tray & Startup',
   'panel.settings.catLicenses': 'Updates & Licenses',
   'panel.settings.saved': 'Settings saved',
-  'panel.settings.gsEngine': 'Ghostscript Engine',
-  'panel.settings.gsExternal': 'External (System)',
-  'panel.settings.gsBuiltin': 'Built-in (Bundled)',
-  'panel.settings.builtin': 'Built-in',
-  'panel.settings.external': 'External',
-  'panel.settings.gsUsedFor': 'Used for Compress and PDF/A conversion',
+  'panel.settings.gsEngine': 'Ghostscript',
+  'panel.settings.gsUsedFor':
+    'Used by Compress, Grayscale, PDF/A and PDF/X, printing, page rasterization and image export, visual comparison, OCR and scan enhancement, transparency flattening, Rebuild, and PostScript conversion.',
+  'panel.settings.gsStatusReady': 'Ready',
+  'panel.settings.gsStatusMissing': 'Not set up',
+  'panel.settings.gsPathLabel': 'Program',
+  'panel.settings.gsNonePath': 'None found',
+  'panel.settings.gsDiscovered': 'Found on this PC',
+  'panel.settings.gsChosen': 'Chosen by you',
+  'panel.settings.gsBrowse': 'Choose Ghostscript…',
+  'panel.settings.gsPickTitle': 'Choose the Ghostscript program',
+  'panel.settings.gsUseDiscovered': 'Use the one found on this PC',
+  'panel.settings.gsRecheck': 'Check again',
+  'panel.settings.gsChecking': 'Checking…',
+  'panel.settings.gsDetail': 'Details: {{detail}}',
+  'panel.settings.gsWhereToGet': 'Ghostscript is available from ghostscript.com.',
+  'panel.settings.gsLicense':
+    'Ghostscript is not part of Spectra PDF. It is a separate program under its own license (AGPL-3.0, or a commercial license from Artifex), which you install and license yourself. Spectra PDF runs it as a separate program and ships no copy of it.',
   'panel.settings.categoriesAria': 'Preferences categories',
   'panel.settings.version': 'Version {{version}}',
   'panel.settings.vendor': 'Vendor: {{vendor}}',

@@ -375,10 +375,19 @@ describe('the two switches', () => {
     expect(request.black_ink).toBe(false);
   });
 
-  it('sends the picked path only for a picked profile', () => {
+  it('names WHICH press a proof runs through', () => {
+    // `profile` carries a path under `file` and an ICC description string
+    // under `bundled` — the installed set is offered by name, so the request
+    // has to say which of them was chosen. Empty under `bundled` is the
+    // default press, which is still a NAMED press engine-side.
     expect(simulationRequest('file', 'C:/press.icc', false, false).profile)
       .toBe('C:/press.icc');
-    expect(simulationRequest('bundled', 'C:/press.icc', false, false).profile).toBe('');
+    expect(simulationRequest('bundled', 'Coated FOGRA39', false, false).profile)
+      .toBe('Coated FOGRA39');
+    expect(simulationRequest('bundled', '', false, false).profile).toBe('');
+    // The document's own intent is read off the document; naming a press
+    // there would proof against one it never declared.
+    expect(simulationRequest('document', 'Coated FOGRA39', false, false).profile).toBe('');
   });
 });
 
@@ -457,12 +466,21 @@ describe('what the engine says it proofed through', () => {
   it('reads the profiles a document offers', () => {
     const offered = readSimulationProfiles({
       document: { present: true, embedded: false, identifier: 'CGATS TR001', name: '' },
-      bundled: { present: true, name: 'Artifex CMYK SWOP Profile' },
+      bundled: {
+        present: true,
+        name: 'Coated FOGRA39',
+        default: 'Coated FOGRA39',
+        names: ['Coated FOGRA39', 'US Web Coated (SWOP)'],
+      },
     });
     expect(offered.document.present).toBe(true);
     expect(offered.document.embedded).toBe(false);
     expect(offered.document.identifier).toBe('CGATS TR001');
-    expect(offered.bundled.name).toBe('Artifex CMYK SWOP Profile');
+    expect(offered.bundled.name).toBe('Coated FOGRA39');
+    // The whole installed set travels, so the picker can offer each press by
+    // name instead of one anonymous "bundled" entry.
+    expect(offered.bundled.default).toBe('Coated FOGRA39');
+    expect(offered.bundled.names).toEqual(['Coated FOGRA39', 'US Web Coated (SWOP)']);
     // An intent present but not embeddable must not become the default, and
     // the bundled press being AVAILABLE is not the bundled press being
     // chosen — the panel opens unproofed rather than on a press nobody named.
@@ -475,6 +493,8 @@ describe('what the engine says it proofed through', () => {
     const offered = readSimulationProfiles(undefined);
     expect(offered.document.present).toBe(false);
     expect(offered.bundled.present).toBe(false);
+    expect(offered.bundled.names).toEqual([]);
+    expect(offered.bundled.default).toBe('');
   });
 });
 

@@ -1,10 +1,12 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { StandardsAlterations } from '../components/StandardsAlterations';
-import { ensureGsPath } from './SettingsPanel';
+import { gsBlocked, gsPathIfAvailable, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { app, dialog } from '../lib/tauri-bridge';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
@@ -15,15 +17,15 @@ import type { StandardsReport } from '../lib/standards-report';
 // ICC-managed CMYK conversion for prepress (Ghostscript). Like
 // grayscale/pdfa it writes a new file (the "Optimize" tool group's pattern);
 // the render intent maps to Ghostscript's ICC transform.
-// Only intents that produce a DISTINCT result with the bundled default CMYK
-// profile are offered — that profile carries no Saturation table, so
-// "saturation" would render identically to "perceptual" (a control that does
-// nothing, the silent-degradation class). It returns to the picker when
-// a user-picked destination profile is in play only if that profile defines
-// it — which we cannot know cheaply, so it stays withheld (recorded).
+// All four ICC intents are offered. Saturation was withheld while the
+// destination was a profile with no B2A2 table, where it rendered
+// identically to perceptual — a control that does nothing. The installed
+// press profiles carry that table, so the intent is distinct and offering it
+// is the honest state.
 const RENDER_INTENTS: { value: string; label: PanelKey }[] = [
   { value: 'relative', label: 'panel.prepress.intentRelative' },
   { value: 'perceptual', label: 'panel.prepress.intentPerceptual' },
+  { value: 'saturation', label: 'panel.prepress.intentSaturation' },
   { value: 'absolute', label: 'panel.prepress.intentAbsolute' },
 ];
 
@@ -35,13 +37,21 @@ const PDFX_VERSIONS: { value: number; label: PanelKey }[] = [
   { value: 4, label: 'panel.prepress.x4' },
 ];
 
-/** The destination-profile row shared by both actions: empty = Ghostscript's
- * built-in default CMYK; "bundled" = gs's own default_cmyk.icc by ROM name
- * (extractable, so PDF/X can embed it); or a user's .icc file. */
-type ProfileChoice = { kind: 'default' } | { kind: 'bundled' } | { kind: 'file'; path: string };
+/**
+ * The destination-profile row shared by both actions.
+ *
+ * The engine resolves an empty `dest_profile` to the installed default press,
+ * an ICC DESCRIPTION STRING to that installed press, and anything else as a
+ * file path. The previous middle choice sent the literal `default_cmyk.icc`,
+ * a Ghostscript ROM name the profile resolver now refuses by name.
+ */
+type ProfileChoice =
+  | { kind: 'default' }
+  | { kind: 'installed'; name: string }
+  | { kind: 'file'; path: string };
 
-const profileParam = (p: ProfileChoice): string =>
-  p.kind === 'default' ? '' : p.kind === 'bundled' ? 'default_cmyk.icc' : p.path;
+export const profileParam = (p: ProfileChoice): string =>
+  p.kind === 'default' ? '' : p.kind === 'installed' ? p.name : p.path;
 
 export function PrepressPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -50,12 +60,48 @@ export function PrepressPanel(): React.ReactElement {
   const { call, saveFile } = useEngine();
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const gs = useGsCapability();
   const [report, setReport] = useState<StandardsReport | null>(null);
   const [renderIntent, setRenderIntent] = useState('relative');
   const [profile, setProfile] = useState<ProfileChoice>({ kind: 'default' });
+  // The presses this machine actually has, and which of them an unnamed
+  // destination resolves to. Read from the engine rather than named in a
+  // string: the picker has to offer real profiles, and the default has to be
+  // called what it is.
+  const [presses, setPresses] = useState<{ default: string; names: string[] } | null>(null);
   const [pdfxVersion, setPdfxVersion] = useState(3);
-  const [condition, setCondition] = useState('Commercial and specialty printing');
-  const [identifier, setIdentifier] = useState('CGATS TR001');
+  // Empty by default, and empty is not "unset": the engine READS both off the
+  // destination profile, so a hardcoded pair would declare a characterization
+  // the chosen press may not have.
+  const [condition, setCondition] = useState('');
+  const [identifier, setIdentifier] = useState('');
+
+  const workingPath = activeFile?.workingPath ?? null;
+  useEffect(() => {
+    if (!workingPath) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await call('list_simulation_profiles', {
+          file: workingPath,
+          gs_path: await gsPathIfAvailable(),
+          icc_dir: await app.getIccPath(),
+        });
+        if (cancelled) return;
+        const bundled = ((res ?? {}) as { bundled?: Record<string, unknown> }).bundled ?? {};
+        const names = Array.isArray(bundled.names) ? bundled.names.map(String) : [];
+        setPresses({ default: String(bundled.default ?? ''), names });
+      } catch {
+        // A listing that cannot be read leaves the default press and a file
+        // of the user's own — never a picker offering a press that is not
+        // installed.
+        if (!cancelled) setPresses({ default: '', names: [] });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workingPath, call]);
 
   const pickProfile = useCallback(async () => {
     const p = await dialog.pickIccFile();
@@ -76,8 +122,9 @@ export function PrepressPanel(): React.ReactElement {
         output,
         render_intent: renderIntent,
         dest_profile: profileParam(profile),
-        gs_path: await ensureGsPath(),
+        gs_path: await requireGsPath(),
         font_dir: await app.getEditFontPath(),
+        icc_dir: await app.getIccPath(),
       });
       const orig = (r.original_size / 1024).toFixed(0);
       const out = (r.output_size / 1024).toFixed(0);
@@ -105,9 +152,12 @@ export function PrepressPanel(): React.ReactElement {
         output,
         version: pdfxVersion,
         dest_profile: profileParam(profile),
+        // Empty travels: the engine derives both from the profile, and
+        // sending a placeholder would declare a condition the press does not.
         condition,
         identifier,
-        gs_path: await ensureGsPath(),
+        gs_path: await requireGsPath(),
+        icc_dir: await app.getIccPath(),
       });
       setStatus(
         tChrome('panel.prepress.pdfxDone', {
@@ -158,24 +208,48 @@ export function PrepressPanel(): React.ReactElement {
           onChange={(e) => {
             const k = e.target.value;
             if (k === 'file') void pickProfile();
-            else setProfile({ kind: k as 'default' | 'bundled' });
+            else if (k === 'installed') {
+              setProfile({ kind: 'installed', name: presses?.names[0] ?? '' });
+            } else setProfile({ kind: 'default' });
           }}
           className="px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
         >
-          <option value="default">{tChrome('panel.prepress.profileDefault')}</option>
-          <option value="bundled">{tChrome('panel.prepress.profileBundled')}</option>
+          <option value="default">
+            {presses && presses.default !== ''
+              ? tChrome('panel.prepress.profileDefaultNamed', { name: presses.default })
+              : tChrome('panel.prepress.profileDefault')}
+          </option>
+          {presses !== null && presses.names.length > 0 && (
+            <option value="installed">{tChrome('panel.prepress.profileInstalled')}</option>
+          )}
           <option value="file">{tChrome('panel.prepress.profileFile')}</option>
         </select>
+        {profile.kind === 'installed' && presses !== null && (
+          <select
+            data-testid="cmyk-dest-press"
+            aria-label={tChrome('panel.prepress.profileInstalledAria')}
+            value={profile.name}
+            onChange={(e) => setProfile({ kind: 'installed', name: e.target.value })}
+            className="px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+          >
+            {presses.names.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        )}
         {profile.kind === 'file' && (
           <span className="text-xs text-neutral-400 truncate" title={profile.path}>
             {profile.path.split(/[\\/]/).pop()}
           </span>
         )}
       </div>
+      <GsRequiredNotice capability={gs} testId="prepress-gs" />
       <button
         data-testid="cmyk-convert"
         onClick={handleConvert}
-        disabled={busy}
+        disabled={busy || gsBlocked(gs)}
         className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
       >
         {busy ? tChrome('panel.prepress.converting') : tChrome('panel.prepress.convertCmyk')}
@@ -220,7 +294,7 @@ export function PrepressPanel(): React.ReactElement {
         <button
           data-testid="pdfx-convert"
           onClick={handlePdfx}
-          disabled={busy}
+          disabled={busy || gsBlocked(gs)}
           className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
         >
           {busy ? tChrome('panel.prepress.working') : tChrome('panel.prepress.createPdfx')}

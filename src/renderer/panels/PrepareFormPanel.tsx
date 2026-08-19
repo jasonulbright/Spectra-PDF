@@ -19,7 +19,10 @@ import {
 import { DATE_FORMATS, TIME_FORMATS } from '../lib/af-calc';
 import { actionsFromScripts } from '../lib/af-emit';
 import { getCanvasServices, getCommandContext, invokeCommand } from '../commands/context';
-import { ghostscriptPath, tesseractPath } from '../lib/ocr-recognize';
+import { tesseractPath } from '../lib/ocr-recognize';
+import { gsPathIfAvailable } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
 import { readFormFields, type FormField } from '../lib/forms';
 import {
@@ -103,6 +106,7 @@ export function PrepareFormPanel(): React.ReactElement {
   const [result, setResult] = useState<DetectionResult | null>(null);
   const [scope, setScope] = useState<Scope>({ kind: 'document', pages: '' });
   const [busy, setBusy] = useState(false);
+  const gs = useGsCapability();
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState('');
@@ -203,16 +207,18 @@ export function PrepareFormPanel(): React.ReactElement {
         return;
       }
       // A page with nothing readable on it is a scan, and its rules and
-      // labels come back through the recogniser — so the vendored binaries
-      // travel with every call, not only when the user knows to ask.
-      const [tesseract, gs] = await Promise.all([tesseractPath(), ghostscriptPath()]);
+      // labels come back through the recogniser — so the tool paths travel
+      // with every call, not only when the user knows to ask. Detection over
+      // a VECTOR source needs no Ghostscript, so an absent one narrows what
+      // can be detected instead of refusing the panel.
+      const [tesseract, gsPath] = await Promise.all([tesseractPath(), gsPathIfAvailable()]);
       const detection = (await call('detect_form_fields', {
         file: workingPath,
         pages,
         scan: 'auto',
         lang: DEFAULT_OCR_LANGUAGE,
         tesseract_path: tesseract,
-        gs_path: gs,
+        gs_path: gsPath,
       })) as unknown as DetectionResult;
       setResult(detection);
       const services = getCanvasServices();
@@ -454,6 +460,7 @@ export function PrepareFormPanel(): React.ReactElement {
         )}
       </div>
 
+      <GsRequiredNotice capability={gs} testId="prepareform-gs" />
       <button
         className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded px-3 py-1.5 text-sm"
         data-testid="prepare-form-detect"
