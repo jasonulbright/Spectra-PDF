@@ -6,23 +6,56 @@ convention (an unprovisioned box must not fail the suite -- but per the
 a gate count is only recorded from a run with NO skips).
 """
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from engine.recognize import _parse_tsv, _png_size, recognize
+from engine.recognize import _LANG_RE, _parse_tsv, _png_size, recognize
 
 ROOT = Path(__file__).resolve().parents[1]
 TESSERACT = ROOT / "resources" / "tesseract" / "tesseract.exe"
 GS = ROOT / "resources" / "ghostscript" / "gswin64c.exe"
 SCANNED = ROOT / "e2e-tests" / "fixtures" / "scanned.pdf"
+TESSDATA = TESSERACT.parent / "tessdata"
+CJK_FONT = ROOT / "resources" / "fonts" / "NotoSansCJKsc-Regular.otf"
+LANGUAGES_TS = ROOT / "src" / "renderer" / "ocr" / "languages.ts"
 
 needs_ocr_stack = pytest.mark.skipif(
     not (TESSERACT.is_file() and GS.is_file() and SCANNED.is_file()),
     reason="vendored tesseract/ghostscript not provisioned",
 )
+
+needs_cjk_stack = pytest.mark.skipif(
+    not (
+        TESSERACT.is_file()
+        and GS.is_file()
+        and CJK_FONT.is_file()
+        and (TESSDATA / "chi_sim.traineddata").is_file()
+        and (TESSDATA / "chi_tra.traineddata").is_file()
+    ),
+    reason="vendored tesseract/ghostscript/CJK models not provisioned",
+)
+
+
+def _shipped_stems() -> list[str]:
+    """Every model stem the vendored tessdata actually carries."""
+    return sorted(p.stem for p in TESSDATA.glob("*.traineddata"))
+
+
+def _offered_codes() -> list[str]:
+    """The codes the picker offers, read out of the renderer's catalog.
+
+    Read, never written from here: `ocr/languages.ts` is the single source of
+    truth for what the product offers, and this file's job is to prove the
+    engine's door accepts all of it.
+    """
+    source = LANGUAGES_TS.read_text(encoding="utf-8")
+    codes = re.findall(r"\{\s*code:\s*'([^']+)'", source)
+    assert codes, "no language codes found in ocr/languages.ts"
+    return codes
 
 HEADER = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext"
 
@@ -109,9 +142,64 @@ class TestValidation:
     def test_rejects_a_language_that_could_reach_the_filesystem(self):
         # Tesseract treats -l as a filename stem, and this op also serves the
         # CLI where the value comes straight from a user.
-        for bad in ["../../etc/passwd", "eng;rm", "eng/../x", "eng eng", "ENG!"]:
+        for bad in [
+            "../../etc/passwd",
+            "eng;rm",
+            "eng/../x",
+            "eng eng",
+            "ENG!",
+            "chi.sim",
+            "chi-sim",
+            "chi_",
+            "_sim",
+            "chi_simplified",
+            "eng+",
+            "+eng",
+            "eng++fra",
+            "eng+../x",
+            "chi_sim/../../x",
+        ]:
             with pytest.raises(ValueError):
                 recognize("x.pdf", 1, bad, str(TESSERACT), str(GS))
+
+    def test_accepts_the_three_letter_script_suffix_the_tree_ships(self, tmp_path):
+        # The regression this pins: the pattern admitted a FOUR-letter suffix
+        # only, so `chi_sim` and `chi_tra` -- both present in tessdata, both
+        # offered by the picker -- were refused as "Invalid recognition
+        # language" and Chinese could not be recognised at all.
+        for lang in ["chi_sim", "chi_tra", "eng+chi_sim", "chi_sim+chi_tra"]:
+            assert _LANG_RE.match(lang), lang
+            with pytest.raises((FileNotFoundError, RuntimeError)):
+                recognize(str(tmp_path / "nope.pdf"), 1, lang, str(TESSERACT), str(GS))
+
+    def test_the_four_letter_only_pattern_is_the_bug_being_fixed(self):
+        # Revert-proof. This is the pattern that shipped; it is written out
+        # here so that restoring it fails loudly rather than silently taking
+        # Chinese recognition away again.
+        reverted = re.compile(
+            r"^[a-z]{3}(_[a-z]{4})?(\+[a-z]{3}(_[a-z]{4})?)*$", re.IGNORECASE
+        )
+        assert not reverted.match("chi_sim")
+        assert not reverted.match("chi_tra")
+        assert _LANG_RE.match("chi_sim")
+        assert _LANG_RE.match("chi_tra")
+
+    @pytest.mark.skipif(not TESSDATA.is_dir(), reason="vendored tessdata not provisioned")
+    def test_every_shipped_model_passes_the_door(self):
+        stems = _shipped_stems()
+        assert stems, "no traineddata in the vendored tessdata"
+        assert [s for s in stems if not _LANG_RE.match(s)] == []
+
+    def test_every_offered_language_passes_the_door(self):
+        # The picker's roster and the engine's guard drift apart silently:
+        # an offered code the guard refuses is a language the user can choose
+        # and never recognise with.
+        assert [c for c in _offered_codes() if not _LANG_RE.match(c)] == []
+
+    @pytest.mark.skipif(not TESSDATA.is_dir(), reason="vendored tessdata not provisioned")
+    def test_every_offered_language_has_a_model_in_the_tree(self):
+        shipped = set(_shipped_stems())
+        assert [c for c in _offered_codes() if c not in shipped] == []
 
     def test_an_empty_language_falls_back_to_the_default(self):
         # Matches ocr/language-selection.ts: an empty selection resolves to the
@@ -186,6 +274,82 @@ class TestAgainstTheVendoredStack:
     def test_refuses_a_page_past_the_end(self):
         with pytest.raises(RuntimeError):
             recognize(str(SCANNED), 999, "eng", str(TESSERACT), str(GS))
+
+
+#: Drawn at a size tesseract's models are trained around. The same string at
+#: 150 px comes back as rubble -- oversized glyphs are as bad for recognition
+#: as undersized ones -- so the fixture is not "as large as possible".
+CJK_FONT_PX = 40
+CJK_SIMPLIFIED = "中文识别测试页面"
+CJK_TRADITIONAL = "中文識別測試頁面"
+
+
+def _cjk_page_pdf(text: str, tmp_path: Path, name: str) -> str:
+    """A SCANNED page carrying CJK text: the bundled font rendered to a raster,
+    the raster wrapped as a page.
+
+    Deliberately a raster rather than embedded text: OCR is only reached by a
+    page with no text layer, so a fixture with real glyph operators would test
+    nothing about recognition.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    from engine.create_pdf import image_to_pdf
+
+    png = tmp_path / f"{name}.png"
+    image = Image.new("L", (int(CJK_FONT_PX * len(text) * 1.2) + 160, CJK_FONT_PX * 3), 255)
+    ImageDraw.Draw(image).text(
+        (80, CJK_FONT_PX),
+        text,
+        font=ImageFont.truetype(str(CJK_FONT), CJK_FONT_PX),
+        fill=0,
+    )
+    # The stored resolution is what `image_to_pdf` sizes the page by, and the
+    # OCR raster is 300 dpi; matching them keeps the round trip 1:1 rather
+    # than recognising an upscale of an upscale.
+    image.save(png, dpi=(300, 300))
+    pdf = tmp_path / f"{name}.pdf"
+    image_to_pdf(png, pdf, dpi_default=300.0)
+    return str(pdf)
+
+
+@needs_cjk_stack
+class TestChineseRecognition:
+    """Chinese end to end, because validation alone would not have caught it.
+
+    The models ship, the picker offers them, and the engine refused the code:
+    every layer looked correct in isolation.
+    """
+
+    def test_simplified_chinese_comes_back_as_chinese(self, tmp_path):
+        src = _cjk_page_pdf(CJK_SIMPLIFIED, tmp_path, "sim")
+        result = recognize(src, 1, "chi_sim", str(TESSERACT), str(GS))
+        assert result["words"], "no word boxes returned"
+        joined = "".join(result["text"].split())
+        assert joined == CJK_SIMPLIFIED
+
+    def test_traditional_chinese_comes_back_as_chinese(self, tmp_path):
+        src = _cjk_page_pdf(CJK_TRADITIONAL, tmp_path, "tra")
+        result = recognize(src, 1, "chi_tra", str(TESSERACT), str(GS))
+        assert result["words"], "no word boxes returned"
+        joined = "".join(result["text"].split())
+        assert joined == CJK_TRADITIONAL
+
+    def test_the_combined_form_loads_both_models(self, tmp_path):
+        # eng+chi_sim is what the picker produces for a mixed folder, and it
+        # is the shape the guard has to admit alongside the bare code.
+        src = _cjk_page_pdf(CJK_SIMPLIFIED, tmp_path, "mixed")
+        result = recognize(src, 1, "eng+chi_sim", str(TESSERACT), str(GS))
+        assert result["words"], "no word boxes returned"
+        assert "".join(result["text"].split()) == CJK_SIMPLIFIED
+
+    def test_the_boxes_lie_inside_the_page(self, tmp_path):
+        src = _cjk_page_pdf(CJK_SIMPLIFIED, tmp_path, "boxes")
+        for w in recognize(src, 1, "chi_sim", str(TESSERACT), str(GS))["words"]:
+            assert 0.0 <= w["x"] <= 1.0
+            assert 0.0 <= w["y"] <= 1.0
+            assert 0.0 < w["w"] <= 1.0
+            assert 0.0 < w["h"] <= 1.0
 
 
 #: The cropped fixture, in points. The MediaBox is letter; the CropBox is a
