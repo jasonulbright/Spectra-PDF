@@ -290,7 +290,7 @@ def _refuse(answer: GsCapability) -> None:
         raise GsUnavailable(
             f"Ghostscript is required for this operation and there is no program "
             f"at {answer.path}. Install Ghostscript from ghostscript.com, then "
-            f"set its path in Settings > Tools.",
+            f"set its path in Preferences > Engine.",
             reason=answer.reason,
             path=answer.path,
         )
@@ -299,7 +299,7 @@ def _refuse(answer: GsCapability) -> None:
             f"Ghostscript at {answer.path} did not pass its capability check "
             f"({answer.detail or 'the probe render produced nothing'}). Install "
             f"Ghostscript from ghostscript.com, then set its path in "
-            f"Settings > Tools.",
+            f"Preferences > Engine.",
             reason=answer.reason,
             path=answer.path,
         )
@@ -308,14 +308,14 @@ def _refuse(answer: GsCapability) -> None:
             f"Ghostscript {answer.version or '(unknown version)'} at {answer.path} "
             f"is older than the {_minimum_text()} this build requires. Install a "
             f"newer Ghostscript from ghostscript.com, then set its path in "
-            f"Settings > Tools.",
+            f"Preferences > Engine.",
             reason=answer.reason,
             path=answer.path,
         )
     raise GsUnavailable(
         "Ghostscript is required for this operation and none is configured. "
         "Install Ghostscript from ghostscript.com, then set its path in "
-        "Settings > Tools.",
+        "Preferences > Engine.",
         reason=NOT_CONFIGURED,
         path=answer.path,
     )
