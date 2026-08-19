@@ -30,14 +30,12 @@ uharfbuzz==0.56.0
 # exists for. BSD-3-Clause; a cp314 win_amd64 wheel exists, so nothing
 # compiles at packaging time.
 numpy==2.5.2
-# HEIC/HEIF decoding. HEIC is a common camera format on phones used to
-# photograph documents;
-# the bundled Pillow cannot read it (`features.check("heif")` is False —
-# measured). AVIF, WEBP and JPEG 2000 are already decodable by Pillow itself.
-# BSD-3-Clause for the plugin; its binary wheel bundles libheif/libde265
-# (LGPLv3) and x265 (GPLv2) — ordinary notice rows for an MIT open-source
-# project with a public repository, listed in THIRD-PARTY-LICENSES.md.
-pillow-heif==1.5.0
+# HEIC/HEIF decoding is NOT resolved here. The decode-only distribution is
+# vendored into the repository instead — scripts/vendored-wheels.tsv and
+# vendor/wheels/ — because its upstream is discontinued and an index cannot be
+# relied on to keep serving it. The encoder-carrying distribution is
+# deliberately not used: it bundles an x265 build that maps into the engine
+# process on every HEIF import, and nothing in the product encodes HEIF.
 # Spreadsheet export: the workbook writer for the xlsx target. A spreadsheet
 # filter cannot write a page-description document, so the cells come from this
 # engine's own table detection and this package writes them. MIT; a

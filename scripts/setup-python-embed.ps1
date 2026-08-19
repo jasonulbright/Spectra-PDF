@@ -54,6 +54,12 @@ Write-Host "Installing hash-pinned dependencies from python-requirements.txt..."
 & $DestDir\python.exe -m pip install --require-hashes -r $LockFile --no-warn-script-location 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Hash-verified dependency install failed" }
 
+# The wheels committed under vendor/wheels/ (HEIF decode). Installed from the
+# repository with --no-index, so a package withdrawn from the index cannot
+# break a build. Runs BEFORE the cleanup below, which removes pip.
+& powershell -ExecutionPolicy Bypass -File "$PSScriptRoot\install-vendored-wheels.ps1" -Python "$DestDir\python.exe"
+if ($LASTEXITCODE -ne 0) { throw "Vendored wheel install failed" }
+
 # Cleanup -- remove pip, caches, install bookkeeping. dist-info dirs are
 # PRUNED, not deleted: each wheel's METADATA (name/version/license fields)
 # and license texts (licenses/, LICENSE*, COPYING*, NOTICE*, AUTHORS*) must
@@ -66,7 +72,16 @@ Get-ChildItem $DestDir -Recurse -Directory -Filter "__pycache__" | Remove-Item -
 # RECORD is not a licence file but pip requires it to uninstall or upgrade a
 # package. Without it, dependency upgrades fail with uninstall-no-record-file
 # and the runtime must be rebuilt from scratch.
-$Keep = '^(METADATA|RECORD|LICENSE.*|COPYING.*|NOTICE.*|AUTHORS.*)$'
+#
+# LICEN[CS]E covers both spellings: openpyxl and et_xmlfile declare their MIT
+# text as `LICENCE.rst`/`LICENCE.python`, and a LICENSE-only pattern shipped
+# both packages with no licence text at all.
+#
+# DELVEWHEEL records the content-hash filename mangling delvewheel applied to a
+# wheel's bundled DLLs. For the LGPL libraries in the HEIF wheel that file is
+# the instruction a recipient needs to exercise the replacement right: a
+# rebuilt library must be installed under the mangled name.
+$Keep = '^(METADATA|RECORD|DELVEWHEEL|LICEN[CS]E.*|COPYING.*|COPYRIGHT.*|NOTICE.*|AUTHORS.*|LEGAL.*)$'
 foreach ($di in (Get-ChildItem $DestDir -Recurse -Directory -Filter "*.dist-info")) {
     foreach ($f in (Get-ChildItem $di.FullName -File)) {
         if ($f.Name -notmatch $Keep) { Remove-Item $f.FullName -Force }

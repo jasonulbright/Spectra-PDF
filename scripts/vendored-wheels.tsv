@@ -1,0 +1,27 @@
+# Pinned manifest for the Python wheels vendored INTO THIS REPOSITORY.
+#
+# Everything else the engine runtime needs is resolved from an index at build
+# time (scripts/python-requirements.txt, hash-pinned). A package lands here
+# instead when the build must keep working after the index stops carrying it:
+# the artifact bytes are committed, and this manifest is their integrity
+# record. scripts/install-vendored-wheels.ps1 installs the `wheel` rows with
+# --no-index, so no build step contacts an index for them.
+#
+# ROLES
+#  wheel  the binary artifact actually installed into an interpreter
+#  sdist  the same release's source distribution, committed so a fork is
+#         possible without the index. Every `wheel` row REQUIRES a matching
+#         `sdist` row at the same version; the install script refuses
+#         otherwise, because an artifact that cannot be rebuilt is not owned.
+#
+# Files live in vendor/wheels/. Bumping a row means replacing the files,
+# recomputing the sha256 (certutil -hashfile <file> SHA256), and reviewing the
+# result as a git diff. Nothing here is ever re-fetched at build time.
+#
+# spdx is the DECLARED license of the distribution itself. Binary wheels that
+# bundle native libraries carry their own additional terms; those are notice
+# rows in THIRD-PARTY-LICENSES.md, keyed to the measured library versions and
+# never to the wheel's own bundled-license file, which upstream lets go stale.
+package	version	role	file	sha256	spdx	upstream
+pi_heif	1.4.0	wheel	pi_heif-1.4.0-cp314-cp314-win_amd64.whl	743b971b9c0d35be8435702443596e3e9280084e68fc8d5c4de4b31fb12a1417	BSD-3-Clause	https://files.pythonhosted.org/packages/a6/67/1373582c4bfa3ca2092befd5555fc52d581fc34ad4a5cb0d8401d7f847b4/pi_heif-1.4.0-cp314-cp314-win_amd64.whl
+pi_heif	1.4.0	sdist	pi_heif-1.4.0.tar.gz	e1199d9d41d9ecc877cf3ae7322ff099f6404574f2e62da47590cd4ecb9ec554	BSD-3-Clause	https://files.pythonhosted.org/packages/6a/a2/70168b601b41bdf5726dfc8dc110eb4052a2e851fed9c9bdae95910e401d/pi_heif-1.4.0.tar.gz
