@@ -96,6 +96,14 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Setup Node.js for staged OCR models
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install Node dependencies for staged OCR models
+        run: npm ci
+
       # One install per step. The default shell on windows runners reports the
       # step's verdict as the LAST command's exit status, and a native command's
       # non-zero exit does not abort the block, so a failed install in a
@@ -125,6 +133,36 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-icc.ps1
         shell: pwsh
 
+      - name: Stage the shipped edit fonts
+        run: powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1
+        shell: pwsh
+
+      - name: Stage the shipped LibreOffice runtime
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1
+        shell: pwsh
+
+      - name: Stage the shipped native Tesseract runtime
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
+        shell: pwsh
+
+      - name: Stage the shipped JBIG2 encoder
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-jbig2enc.ps1
+        shell: pwsh
+
+      - name: Stage the shipped spelling dictionaries
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-dictionaries.ps1
+        shell: pwsh
+
+      - name: Stage the shipped Finnish spelling runtime
+        # Must follow dictionaries (which rebuilds the tree) and Tesseract
+        # (whose MinGW runtime DLLs the Finnish runtime deliberately reuses).
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-voikko.ps1
+        shell: pwsh
+
+      - name: Stage the shipped OCR language models
+        run: node scripts/sync-ocr-assets.mjs
+        shell: pwsh
+
       - name: Install Ghostscript as a TEST TOOL (capability-present axis)
         # This does not vendor Ghostscript into Spectra PDF. The clean runner
         # installs the current Chocolatey package like an end user would; the
@@ -145,6 +183,8 @@ jobs:
 
       - name: Run engine tests (full suite)
         run: python -m pytest tests/ -q
+        env:
+          SPECTRAPDF_REQUIRE_ZERO_SKIPS: "1"
 
   audit:
     name: Dependency Audit
