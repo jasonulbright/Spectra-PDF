@@ -633,27 +633,29 @@ def verify_mask_stream(
     encoding — an INDEPENDENT decoder (jbig2dec / its own CCITT arm) is what
     makes this a round trip rather than a restatement.
     """
-    if not gs_path or not os.path.isfile(gs_path):
-        raise RuntimeError(
-            f"Ghostscript is not available at {gs_path or '(no path given)'} — a mask "
-            "stream cannot be decoded back, and an unverified stencil is not shippable."
-        )
-
     with tempfile.TemporaryDirectory(prefix="spectrapdf_maskverify_") as work:
         wd = Path(work)
         pdf = wd / "stencil.pdf"
         png = wd / "stencil.png"
         build_stencil_pdf(stream, pdf)
-        allowed = budget.for_file(pdf, base=60.0, pages=1, per_mb=30.0)
-        result = budget.run(
+        # `budget.gs`, not `budget.run`: the decoder has to be a WORKING
+        # Ghostscript, and an existence check said yes to a file that cannot
+        # initialise — which would have failed here as an opaque decode error
+        # and read as a bad stencil. The budget is the same one the
+        # `budget.for_file` call derived; `text=False` keeps stderr as bytes
+        # for the decode below.
+        result = budget.gs(
             [
                 str(gs_path), "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER",
                 "-sDEVICE=pnggray", "-r72", f"-sOutputFile={png}", str(pdf),
             ],
             what="Ghostscript (mask verification)",
-            budget=allowed,
-            size_bytes=pdf.stat().st_size,
+            path=pdf,
             pages=1,
+            base=60.0,
+            per_mb=30.0,
+            per_page=0.0,
+            text=False,
         )
         if result.returncode != 0 or not png.is_file():
             detail = (result.stderr or b"").decode("utf-8", "replace").strip()

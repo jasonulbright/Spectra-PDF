@@ -363,8 +363,13 @@ class TestPresets:
     def test_missing_ghostscript_refuses_by_name(self, text_scan, tmp_dir):
         # Rule 4: gs is the INDEPENDENT decoder every stencil is verified
         # through, so its absence is not a degraded mode, it is a refusal.
-        with pytest.raises(RuntimeError, match="Ghostscript is not available"):
-            mrc_compress(text_scan, os.path.join(tmp_dir, "o.pdf"), gs_path="")
+        # The path is EXPLICIT and names no program: "" now means "resolve
+        # one", so it would find an installed Ghostscript and succeed. An
+        # explicit path never falls through to discovery, which is what makes
+        # this a test of the refusal rather than of the machine.
+        absent = os.path.join(tmp_dir, "nowhere", "gswin64c.exe")
+        with pytest.raises(RuntimeError, match="Ghostscript is required for this operation"):
+            mrc_compress(text_scan, os.path.join(tmp_dir, "o.pdf"), gs_path=absent)
 
 
 # --------------------------------------------------------------------------

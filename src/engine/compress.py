@@ -38,7 +38,7 @@ def compress(
     output: str,
     quality: str = "ebook",
     dpi: int | None = None,
-    gs_path: str = "gs",
+    gs_path: str = "",
     mrc_preset: str = "balanced",
     mrc_mask_codec: str = "",
     mrc_bg_div: int | None = None,

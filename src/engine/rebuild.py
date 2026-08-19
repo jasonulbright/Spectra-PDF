@@ -13,7 +13,7 @@ from . import budget
 def rebuild(
     file: str,
     output: str,
-    gs_path: str = "gs",
+    gs_path: str = "",
 ) -> dict:
     """Rebuild a PDF by round-tripping through Ghostscript pdfwrite.
 

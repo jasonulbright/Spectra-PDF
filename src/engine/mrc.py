@@ -61,6 +61,7 @@ from PIL import Image
 from pikepdf import Dictionary, Name
 
 from . import budget
+from . import gs_capability
 from . import mrc_verify
 from .inplace import is_same_file, staged_write
 from .mrc_codecs import (
@@ -370,11 +371,10 @@ def _rasterize_placement(
     layer geometry identical to the placement's: the scan covers ≥ 90% of the
     page, not 100%, so the two are not the same rectangle.
     """
-    if not gs_path or not os.path.isfile(gs_path):
-        raise RuntimeError(
-            f"Ghostscript is not available at {gs_path or '(no path given)'} — the page "
-            "image cannot be decoded, and MRC has no other way to read it."
-        )
+    # No availability check here: `budget.gs` below validates the path and
+    # raises the one named refusal. A second check in front of it could only
+    # disagree with the authority — an existing file that cannot initialise
+    # passed this one and then failed as an unexplained render error.
     dpi = min(max(candidate.source_dpi, MIN_RASTER_DPI), MAX_RASTER_DPI)
     px0, py0, px1, py1 = _page_box(page)
     with tempfile.TemporaryDirectory(prefix="spectrapdf_mrc_") as work:
@@ -950,7 +950,7 @@ def mrc_compress(
     verify_text: bool = False,
     lang: str = "eng",
     tesseract_path: str = "",
-    gs_path: str = "gs",
+    gs_path: str = "",
     jbig2_path: str = "",
 ) -> dict:
     """Rewrite every scanned page of `file` as MRC layers into `output`.
@@ -1007,13 +1007,12 @@ def mrc_compress(
         raise ValueError(f"the MRC background divisor must be 1-12, got {bg_divisor}")
     if not 1 <= fg_divisor <= 12:
         raise ValueError(f"the MRC foreground divisor must be 1-12, got {fg_divisor}")
-    if not gs_path or not os.path.isfile(gs_path):
-        # Rule 4: every mask is decode-verified through an independent
-        # decoder before it is embedded, and Ghostscript is that decoder.
-        raise RuntimeError(
-            f"Ghostscript is not available at {gs_path or '(no path given)'} — MRC cannot "
-            "verify the stencils it writes, and an unverified stencil is not shippable."
-        )
+    # Rule 4: every mask is decode-verified through an independent decoder
+    # before it is embedded, and Ghostscript is that decoder — so the run is
+    # refused UP FRONT rather than after minutes of segmentation. The probed
+    # path is adopted so every later render and verification in this run
+    # drives the same binary the check passed.
+    gs_path = gs_capability.require(gs_path).path
     verify_threshold = float(settings["verify_threshold"])
     if verify_text and (not tesseract_path or not os.path.isfile(tesseract_path)):
         # Asked for and not available REFUSES. Running the compression with

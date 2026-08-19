@@ -639,7 +639,7 @@ def _wanted_fixups(profile: dict, checks) -> list[str]:
 
 
 def apply_fixups(file: str, output: str, profile=None, profile_path: str = "",
-                 checks=None, report=None, gs_path: str = "gs", font_dir: str = "",
+                 checks=None, report=None, gs_path: str = "", font_dir: str = "",
                  tesseract_path: str = "") -> dict:
     """Run the fixups a profile carries, in the canonical order.
 

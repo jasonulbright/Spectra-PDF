@@ -343,7 +343,7 @@ def ocr_file(
     output: str,
     language: str = "eng",
     tesseract_path: str = "",
-    gs_path: str = "gs",
+    gs_path: str = "",
     mrc: bool = False,
     mrc_preset: str = "balanced",
     mrc_verify_text: bool = False,

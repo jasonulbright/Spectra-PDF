@@ -19,14 +19,13 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
 
 import pikepdf
 
-from engine import bidi
+from engine import bidi, budget
 from engine.form_detect import _crop_box, _page_rotate, _page_segments
 from engine.redact import _resolve_resources
 from engine.soffice import _normalise_face
@@ -104,14 +103,8 @@ def _render_background(file: str, page_number: int, gs_path: str, out_png: Path)
     different scale from the text drawn over them. The device clips page content
     to the CropBox either way, and a page with no CropBox is unaffected.
     """
-    gs = Path(gs_path) if gs_path else Path()
-    if not gs.is_file():
-        raise RuntimeError(
-            f"Ghostscript is not available at {gs_path or '(no path given)'}; "
-            "it is required to render a page's graphics onto a slide."
-        )
     cmd = [
-        str(gs),
+        gs_path,
         "-q",
         "-dNOPAUSE",
         "-dBATCH",
@@ -127,7 +120,12 @@ def _render_background(file: str, page_number: int, gs_path: str, out_png: Path)
         f"-sOutputFile={out_png}",
         str(file),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    # Through the gs family's door: it validates the executable (an existing
+    # file is not a working interpreter) and derives the budget. This run had
+    # no timeout before, so a wedged interpreter stalled the export with
+    # nothing to report.
+    proc = budget.gs(cmd, what=f"Ghostscript (slide raster, page {page_number})",
+                     path=file, pages=1)
     if proc.returncode != 0 or not out_png.is_file():
         detail = (proc.stderr or proc.stdout or "").strip()[:400]
         raise RuntimeError(f"Could not render page {page_number} for a slide: {detail}")
