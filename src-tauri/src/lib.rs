@@ -9,6 +9,7 @@ mod snapshot;
 mod watchers;
 mod web_capture;
 mod engine;
+pub mod gs;
 mod printers;
 pub mod scanner;
 pub mod app_windows;
@@ -176,6 +177,8 @@ pub fn run() {
             commands::open_portfolio_member_file,
             commands::get_bundled_gs_info,
             commands::detect_external_gs,
+            commands::gs_capability,
+            commands::refresh_gs_capability,
             commands::get_app_version,
             commands::open_third_party_licenses,
             commands::reveal_in_file_manager,

@@ -18,6 +18,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from . import gs_capability
+
 
 def derive(
     *,
@@ -120,7 +122,16 @@ def gs(cmd: list[str], *, what: str, path: str | Path, pages: int = 0,
     small one", so every input now gets AT LEAST what it got before and large
     ones get more. Lowering the floor would have converted a slow-but-passing
     small job into a new failure — fixing a timeout by introducing one.
+
+    Ghostscript is user-supplied, so this is also where its availability is
+    decided: `cmd[0]` is validated by `gs_capability` and REPLACED with the
+    validated path before anything spawns. Deciding it here rather than at
+    each door is what makes the refusal one message instead of a dozen
+    spellings of "file not found", and what stops an unconfigured run from
+    reaching the OS as a spawn failure.
     """
+    capability = gs_capability.require(cmd[0] if cmd else "")
+    cmd = [capability.path, *cmd[1:]]
     size = 0
     try:
         size = Path(path).stat().st_size
