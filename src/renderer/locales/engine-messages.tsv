@@ -214,10 +214,10 @@ glyph_outlines.pageDrawsTextType	pattern	glyph_outlines	Page {{page}} draws text
 glyph_outlines.pageDrawsTextWhich	pattern	glyph_outlines	Page {{page}} draws text in {{name}}, which is not embedded in this document and no bundled face could stand in for it.
 glyph_outlines.pageDrawsTextWhose	pattern	glyph_outlines	Page {{page}} draws text in {{name}}, whose embedded font program could not be read.
 grayscale.ghostscriptGrayscaleConversionFailed	pattern	grayscale	Ghostscript grayscale conversion failed: {{v0}}
-gs_capability.ghostscriptDidPassCapability	pattern	gs_capability	Ghostscript at {{v0}} did not pass its capability check ({{v1}}). Install Ghostscript from ghostscript.com, then set its path in Settings > Tools.
-gs_capability.ghostscriptOlderThanBuild	pattern	gs_capability	Ghostscript {{v0}} at {{v1}} is older than the {{v2}} this build requires. Install a newer Ghostscript from ghostscript.com, then set its path in Settings > Tools.
-gs_capability.ghostscriptRequiredOperationNone	exact	gs_capability	Ghostscript is required for this operation and none is configured. Install Ghostscript from ghostscript.com, then set its path in Settings > Tools.
-gs_capability.ghostscriptRequiredOperationThere	pattern	gs_capability	Ghostscript is required for this operation and there is no program at {{v0}}. Install Ghostscript from ghostscript.com, then set its path in Settings > Tools.
+gs_capability.ghostscriptDidPassCapability	pattern	gs_capability	Ghostscript at {{v0}} did not pass its capability check ({{v1}}). Install Ghostscript from ghostscript.com, then set its path in Preferences > Engine.
+gs_capability.ghostscriptOlderThanBuild	pattern	gs_capability	Ghostscript {{v0}} at {{v1}} is older than the {{v2}} this build requires. Install a newer Ghostscript from ghostscript.com, then set its path in Preferences > Engine.
+gs_capability.ghostscriptRequiredOperationNone	exact	gs_capability	Ghostscript is required for this operation and none is configured. Install Ghostscript from ghostscript.com, then set its path in Preferences > Engine.
+gs_capability.ghostscriptRequiredOperationThere	pattern	gs_capability	Ghostscript is required for this operation and there is no program at {{v0}}. Install Ghostscript from ghostscript.com, then set its path in Preferences > Engine.
 guided_actions.actionProducesDocumentOnce	exact	guided_actions	an action produces its document once — use create_pdf or create_pdf_folders, not both
 guided_actions.actionSteps	exact	guided_actions	the action has no steps
 guided_actions.createPdfMustFirst	pattern	guided_actions	{{op}} must be the first step — it produces the document the rest of the action works on

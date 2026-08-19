@@ -43,7 +43,7 @@ const CANDIDATE_NAMES: [&str; 3] = ["gswin64c", "gswin32c", "gs"];
 /// may only ever be produced by the capability path.
 pub const CLI_REQUIRED: &str = "this command requires Ghostscript; none is configured -- \
 install it from ghostscript.com, or point Spectra at an existing install with --gs-path \
-(Settings > Tools in the app)";
+(Preferences > Engine in the app)";
 
 /// One validated answer about one Ghostscript path.
 #[derive(Debug, Clone, serde::Serialize)]
