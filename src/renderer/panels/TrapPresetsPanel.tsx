@@ -6,7 +6,9 @@ import { useOperations } from '../hooks/useOperations';
 import { EDIT_DECLINED } from '../lib/edit-text';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
-import { ensureGsPath } from './SettingsPanel';
+import { gsBlocked, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { TEST_HARNESS_ENABLED, registerTrapPresets } from '../testHarness';
 import { tChrome } from '../i18n';
 import {
@@ -40,6 +42,7 @@ export function TrapPresetsPanel(): React.ReactElement {
   const [fields, setFields] = useState<TrapFields>({});
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const gs = useGsCapability();
 
   const workingPath = activeFile?.workingPath ?? null;
   const filePath = activeFile?.path ?? null;
@@ -147,7 +150,7 @@ export function TrapPresetsPanel(): React.ReactElement {
       const res = await call('export_postscript', {
         file: workingPath,
         output,
-        gs_path: await ensureGsPath(),
+        gs_path: await requireGsPath(),
       });
       setStatus(tChrome('panel.trapPresets.exported', {
         pages: (res as unknown as { trapping_pages?: number }).trapping_pages ?? 0,
@@ -351,6 +354,9 @@ export function TrapPresetsPanel(): React.ReactElement {
         {tChrome('panel.trapPresets.trappedNote')}
       </p>
 
+      {/* Authoring, validating and assigning presets are gs-free and stay
+          live; only the PostScript emission needs the interpreter. */}
+      <GsRequiredNotice capability={gs} testId="trappresets-gs" />
       <div className="flex items-center gap-2">
         <button
           data-testid="trap-preset-apply"
@@ -362,7 +368,7 @@ export function TrapPresetsPanel(): React.ReactElement {
         </button>
         <button
           data-testid="trap-preset-export"
-          disabled={busy}
+          disabled={busy || gsBlocked(gs)}
           onClick={() => void exportPostscript()}
           className="px-3 py-1.5 text-sm bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
         >

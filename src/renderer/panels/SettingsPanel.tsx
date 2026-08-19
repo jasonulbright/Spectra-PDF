@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { app, batch, dialog, virtualPrinter, type GsInfo, type VirtualPrinterStatus } from '../lib/tauri-bridge';
+import { app, batch, dialog, virtualPrinter, type GsAnswer, type VirtualPrinterStatus } from '../lib/tauri-bridge';
+import { gsBlocked, gsStateKey, refreshGsCapability } from '../lib/gs-capability';
+import { GsRequiredNotice } from '../components/GsRequiredNotice';
+import { useGsCapability } from '../hooks/useGsCapability';
 import { deriveAccentVars, type ThemeName } from '../lib/accent';
 import { StatusBar } from '../components/StatusBar';
 import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
@@ -18,63 +21,12 @@ function getSystemTheme(): string {
 }
 
 
-// Cached GS info for display
-let cachedBundledGs: GsInfo | null = null;
-let cachedExternalGs: GsInfo | null = null;
-
-// Initialize GS path from main process (bundled)
-let gsPathResolved = false;
-async function resolveGsPath(): Promise<void> {
-  if (gsPathResolved) return;
-  gsPathResolved = true;
-  try {
-    try {
-      cachedBundledGs = await app.getBundledGsInfo();
-    } catch {
-      // Fall back to direct path resolution.
-      const bundledPath = await app.getGsPath();
-      cachedBundledGs = { path: bundledPath, version: '', product: 'GPL Ghostscript', vendor: 'Artifex Software' };
-    }
-    try {
-      cachedExternalGs = await app.detectExternalGs();
-    } catch {
-      cachedExternalGs = null;
-    }
-    // Ensure gsPath is set for operations; auto-heal if external GS disappeared
-    const current = loadSettings();
-    if (!current.gsPath || current.gsSource === 'builtin' ||
-        (current.gsSource === 'external' && !cachedExternalGs)) {
-      saveSettings({ ...current, gsPath: cachedBundledGs.path, gsSource: 'builtin' });
-    }
-  } catch {
-    // BOTH resolution calls failed (one early IPC hiccup). Un-pin the
-    // attempt: a resolver that rejects once must not stay a permanently
-    // rejected promise that kills every gs feature for the whole session
-    // (regression) — ensureGsPath retries a failed attempt.
-    gsPathResolved = false;
-  }
-}
-let gsPathReady = resolveGsPath();
-
-/**
- * The gs path, guaranteed resolved.
- * `getSettings().gsPath` is '' for the first IPC round-trip after a fresh
- * launch (the resolver persists asynchronously), and a gs job started in
- * that window failed with a raw spawn error. Every gs caller awaits this
- * instead of reading the setting cold. A failed resolution attempt retries
- * on the next call rather than being cached forever.
- */
-export async function ensureGsPath(): Promise<string> {
-  await gsPathReady;
-  if (!gsPathResolved) {
-    gsPathReady = resolveGsPath();
-    await gsPathReady;
-  }
-  return loadSettings().gsPath || cachedBundledGs?.path || '';
-}
-
-
-
+// Ghostscript resolution used to live here — a module-level probe at import
+// plus `ensureGsPath()`, which returned a PATH and wrote the bundled one into
+// the settings whether or not anything was there. The answer is a CAPABILITY
+// now, it is produced by the leaf `lib/gs-capability`, and no path is ever
+// written without a passing probe. This panel is one of its consumers, not
+// its owner.
 
 
 /**
@@ -231,16 +183,144 @@ function useForcedColors(): boolean {
   return forced;
 }
 
-function GsInfoDisplay({ info, label }: { info: GsInfo | null; label: string }): React.ReactElement | null {
-  if (!info) return null;
+/**
+ * Settings ▸ Engine ▸ Ghostscript — the authority surface for a prerequisite
+ * the product does not ship.
+ *
+ * What it replaces: a Built-in/External pair of buttons over a bundled copy,
+ * backed by a resolver that wrote a path into the settings whether or not
+ * anything answered there. A path is only ever stored here after it PROBES
+ * usable, and a candidate that fails is reported without disturbing the
+ * install the app is currently using.
+ */
+function GhostscriptSection(): React.ReactElement {
+  useTranslation();
+  const capability = useGsCapability();
+  const [configured, setConfigured] = useState(() => loadSettings().gsPath);
+  const [candidate, setCandidate] = useState<GsAnswer | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  // A candidate is probed through the bridge rather than the shared store:
+  // publishing a failed candidate would mark the whole app gs-less while a
+  // working install is still configured.
+  const adopt = useCallback(async (path: string | undefined) => {
+    setChecking(true);
+    try {
+      if (path !== undefined) {
+        const answer = await app.refreshGsCapability(path);
+        if (!answer.available) {
+          setCandidate(answer);
+          return;
+        }
+      }
+      const next = { ...loadSettings(), gsPath: path ?? '' };
+      saveSettings(next);
+      setConfigured(next.gsPath);
+      setCandidate(null);
+      await refreshGsCapability(next.gsPath || undefined);
+    } catch {
+      setCandidate({ available: false, path: path ?? '', version: '', reason: 'probe-failed', detail: '' });
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  const recheck = useCallback(async () => {
+    setChecking(true);
+    setCandidate(null);
+    try {
+      await refreshGsCapability(loadSettings().gsPath || undefined);
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  const browse = useCallback(() => {
+    void dialog.pickAnyFile().then((picked) => {
+      if (picked) void adopt(picked);
+    });
+  }, [adopt]);
+
+  const shown = candidate ?? capability;
+  const failureKey = candidate
+    ? (gsStateKey({ ...candidate, pending: false }) as PanelKey | null)
+    : (gsStateKey(capability) as PanelKey | null);
+
   return (
-    <div className="px-3 py-2 bg-neutral-800 border border-neutral-700 rounded text-sm">
-      <div className="font-medium text-neutral-200">{label}</div>
-      <div className="flex flex-col gap-0.5 mt-1 text-xs text-neutral-400">
-        <span>{info.product}</span>
-        <span>{tChrome('panel.settings.version', { version: info.version })}</span>
-        <span>{tChrome('panel.settings.vendor', { vendor: info.vendor })}</span>
+    <div data-testid="prefs-gs">
+      <label className="block text-sm text-neutral-400 mb-2">{tChrome('panel.settings.gsEngine')}</label>
+      <div className="px-3 py-2 bg-neutral-800 border border-neutral-700 rounded text-sm flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <span
+            className={
+              'px-2 py-0.5 rounded text-xs font-medium ' +
+              (capability.available ? 'bg-green-800 text-green-100' : 'bg-neutral-700 text-neutral-300')
+            }
+            data-testid="prefs-gs-status"
+            data-gs-available={capability.available ? 'yes' : 'no'}
+          >
+            {tChrome(capability.available ? 'panel.settings.gsStatusReady' : 'panel.settings.gsStatusMissing')}
+          </span>
+          {capability.available && (
+            <span className="text-xs text-neutral-400">
+              {tChrome('panel.settings.version', { version: capability.version })}
+            </span>
+          )}
+          <span className="text-xs text-neutral-500">
+            {tChrome(configured ? 'panel.settings.gsChosen' : 'panel.settings.gsDiscovered')}
+          </span>
+        </div>
+        <div className="flex gap-2 text-xs text-neutral-400">
+          <span className="shrink-0">{tChrome('panel.settings.gsPathLabel')}</span>
+          <span className="break-all ltr-notation" data-testid="prefs-gs-path">
+            {configured || capability.path || tChrome('panel.settings.gsNonePath')}
+          </span>
+        </div>
+        {failureKey && (
+          <span className="text-xs text-amber-300" data-testid="prefs-gs-problem">
+            {tChrome(failureKey)}
+          </span>
+        )}
+        {!shown.available && shown.detail !== '' && (
+          <span className="text-xs text-neutral-500 break-all">
+            {tChrome('panel.settings.gsDetail', { detail: shown.detail })}
+          </span>
+        )}
       </div>
+      <div className="flex gap-2 mt-2">
+        <button
+          type="button"
+          onClick={browse}
+          disabled={checking}
+          data-testid="prefs-gs-browse"
+          className="px-3 py-1.5 rounded text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-200 disabled:opacity-50"
+        >
+          {tChrome('panel.settings.gsBrowse')}
+        </button>
+        {configured !== '' && (
+          <button
+            type="button"
+            onClick={() => void adopt(undefined)}
+            disabled={checking}
+            data-testid="prefs-gs-clear"
+            className="px-3 py-1.5 rounded text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-200 disabled:opacity-50"
+          >
+            {tChrome('panel.settings.gsUseDiscovered')}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => void recheck()}
+          disabled={checking}
+          data-testid="prefs-gs-recheck"
+          className="px-3 py-1.5 rounded text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-200 disabled:opacity-50"
+        >
+          {tChrome(checking ? 'panel.settings.gsChecking' : 'panel.settings.gsRecheck')}
+        </button>
+      </div>
+      <p className="text-xs text-neutral-500 mt-2">{tChrome('panel.settings.gsUsedFor')}</p>
+      <p className="text-xs text-neutral-500 mt-1">{tChrome('panel.settings.gsWhereToGet')}</p>
+      <p className="text-xs text-neutral-500 mt-1">{tChrome('panel.settings.gsLicense')}</p>
     </div>
   );
 }
@@ -278,27 +358,10 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
   const [category, setCategory] = useState<PrefCategory>(initialCategory);
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [status, setStatus] = useState('');
-  const [bundledGs, setBundledGs] = useState<GsInfo | null>(cachedBundledGs);
-  const [externalGs, setExternalGs] = useState<GsInfo | null>(cachedExternalGs);
   const [startWithWindows, setStartWithWindows] = useState(false);
   const forcedColors = useForcedColors();
 
   useEffect(() => {
-    // Refresh GS info when panel opens (cached values may not be ready yet)
-    app.getBundledGsInfo().then((info) => {
-      cachedBundledGs = info;
-      setBundledGs(info);
-    }).catch(() => {});
-    app.detectExternalGs().then((info) => {
-      cachedExternalGs = info;
-      setExternalGs(info);
-      // Auto-heal: if external was selected but is now gone, reset to built-in
-      if (!info && loadSettings().gsSource === 'external' && cachedBundledGs) {
-        const healed = { ...loadSettings(), gsSource: 'builtin' as const, gsPath: cachedBundledGs.path };
-        saveSettings(healed);
-        setSettings(healed);
-      }
-    }).catch(() => {});
     // Load startup state from registry (Start with Windows toggle)
     app.getStartupEnabled().then(([enabled]) => {
       setStartWithWindows(enabled);
@@ -314,18 +377,6 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
     if (key === 'theme') applyTheme(value as string);
     setStatus(tChrome('panel.settings.saved'));
   }, []);
-
-  const handleGsSourceChange = useCallback((source: 'builtin' | 'external') => {
-    const gsPath = source === 'external' && externalGs ? externalGs.path : (bundledGs?.path ?? '');
-    setSettings((prev) => {
-      const next = { ...prev, gsSource: source, gsPath };
-      saveSettings(next);
-      return next;
-    });
-    setStatus(tChrome('panel.settings.saved'));
-  }, [bundledGs, externalGs]);
-
-  const activeGs = settings.gsSource === 'external' && externalGs ? externalGs : bundledGs;
 
   return (
     <div className="prefs">
@@ -344,37 +395,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         ))}
       </nav>
       <div className="prefs-body flex flex-col gap-6" data-testid={`prefs-body-${category}`}>
-      {category === 'engine' && (
-      <div>
-        <label className="block text-sm text-neutral-400 mb-2">{tChrome('panel.settings.gsEngine')}</label>
-        <GsInfoDisplay info={activeGs} label={settings.gsSource === 'external' ? tChrome('panel.settings.gsExternal') : tChrome('panel.settings.gsBuiltin')} />
-        {externalGs && (
-          <div className="flex gap-2 mt-2">
-            <button
-              onClick={() => handleGsSourceChange('builtin')}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-                settings.gsSource === 'builtin'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-neutral-700 hover:bg-neutral-600 text-neutral-300'
-              }`}
-            >
-              {tChrome('panel.settings.builtin')}
-            </button>
-            <button
-              onClick={() => handleGsSourceChange('external')}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-                settings.gsSource === 'external'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-neutral-700 hover:bg-neutral-600 text-neutral-300'
-              }`}
-            >
-              {tChrome('panel.settings.external')}
-            </button>
-          </div>
-        )}
-        <p className="text-xs text-neutral-500 mt-1">{tChrome('panel.settings.gsUsedFor')}</p>
-      </div>
-      )}
+      {category === 'engine' && <GhostscriptSection />}
 
       {category === 'general' && (
       <>
@@ -757,6 +778,11 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
 // silent; the listener status and the last failed job are shown verbatim so
 // a taken port or a bad job is a named condition, not a mystery.
 function VirtualPrinterBlock(): React.JSX.Element {
+  // The printer's backend is the CLI's PostScript distiller, so installing
+  // one without a Ghostscript would put a printer in every application's
+  // print dialog that accepts jobs and produces nothing — a failure OUTSIDE
+  // this app, where no notice of ours can reach it.
+  const gs = useGsCapability();
   const [vpStatus, setVpStatus] = useState<VirtualPrinterStatus | null>(null);
   const [vpBusy, setVpBusy] = useState(false);
   const [vpError, setVpError] = useState<string | null>(null);
@@ -791,6 +817,7 @@ function VirtualPrinterBlock(): React.JSX.Element {
       <p className="text-xs text-neutral-500 mb-2">
         {tChrome('panel.settings.printerBlurb')}
       </p>
+      <GsRequiredNotice capability={gs} testId="virtual-printer-gs" />
       {vpStatus === null ? (
         <p className="text-sm text-neutral-500">Checking…</p>
       ) : (
@@ -824,7 +851,7 @@ function VirtualPrinterBlock(): React.JSX.Element {
               <button
                 type="button"
                 data-testid="virtual-printer-install"
-                disabled={vpBusy}
+                disabled={vpBusy || gsBlocked(gs)}
                 onClick={() => void run(() => virtualPrinter.install())}
                 className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
               >

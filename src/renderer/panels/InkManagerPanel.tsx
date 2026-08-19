@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
@@ -39,6 +41,7 @@ function swatch(rgb: number[] | null): string {
 
 export function InkManagerPanel(): React.ReactElement {
   useTranslation();
+  const gs = useGsCapability();
   const { activeFile, openNewFiles } = useActiveFile();
   const { call } = useEngine();
   const { performOperation } = useOperations();
@@ -172,6 +175,7 @@ export function InkManagerPanel(): React.ReactElement {
 
   return (
     <div className="flex flex-col gap-4">
+      <GsRequiredNotice capability={gs} testId="ink-manager-gs" />
       <div className="text-sm text-neutral-400">
         {tChrome('panel.common.workingOn')}{' '}
         <span className="text-neutral-200">{activeFile.name}</span>

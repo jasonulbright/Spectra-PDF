@@ -10,7 +10,10 @@ import { loadDocument } from '../lib/pdfRenderer';
 import { extractPageText } from '../search/extract';
 import { displayRectToPdf } from '../lib/pdfx-build';
 import { recognizePage } from '../lib/ocr-recognize';
-import { ghostscriptPath, tesseractPath } from '../lib/ocr-recognize';
+import { tesseractPath } from '../lib/ocr-recognize';
+import { gsBlocked, gsPathIfAvailable, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from './GsRequiredNotice';
 import { DEFAULT_OCR_LANGUAGE, OCR_LANGUAGES } from '../ocr/languages';
 import { tOcrLanguage } from '../i18n';
 import { TEST_HARNESS_ENABLED, registerScan } from '../testHarness';
@@ -115,6 +118,11 @@ export function ScanDialog({
   const [brightness, setBrightness] = useState<number | null>(null);
   const [contrast, setContrast] = useState<number | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const gs = useGsCapability();
+  // Scanning and assembly need no interpreter; enhancement and recognition
+  // both go through a raster, so those two OPTIONS gate and the dialog does
+  // not.
+  const gsOff = gsBlocked(gs);
   const [enhance, setEnhance] = useState(false);
   const [ocr, setOcr] = useState(false);
   const [lang, setLang] = useState(DEFAULT_OCR_LANGUAGE);
@@ -333,7 +341,11 @@ export function ScanDialog({
       setError(null);
       try {
         setProgress({ message: tChrome('dialog.scan.building') });
-        const [gsPath, sofficePath] = await Promise.all([app.getGsPath(), app.getSofficePath()]);
+        // Scanned pages are IMAGES: Create PDF assembles them without
+        // Ghostscript, which it needs only for a PostScript source. Assembly
+        // therefore proceeds with no capability at all; the enhance and OCR
+        // legs below are the ones that require one.
+        const [gsPath, sofficePath] = await Promise.all([gsPathIfAvailable(), app.getSofficePath()]);
         await track('create_pdf', { file: output }, () =>
           callRaw('create_pdf', {
             sources: pages.map((p) => ({ path: p.path })),
@@ -353,9 +365,9 @@ export function ScanDialog({
         // is the defect the enhancement exists to fix, and doing it the other
         // way would bake a worse text layer into the document at the one
         // moment the whole pipeline is ours.
-        if (enhance) {
+        if (enhance && !gsOff) {
           setProgress({ message: tChrome('dialog.scan.enhancing') });
-          const [gs, tess] = await Promise.all([ghostscriptPath(), tesseractPath()]);
+          const [gs, tess] = await Promise.all([requireGsPath(), tesseractPath()]);
           await track('enhance_scan', { file: output }, () =>
             callRaw('enhance_scan', {
               file: output,
@@ -366,7 +378,7 @@ export function ScanDialog({
             }),
           );
         }
-        if (ocr) {
+        if (ocr && !gsOff) {
           setProgress({ message: tChrome('dialog.scan.recognizing') });
           await makeSearchable(output);
         }
@@ -379,7 +391,7 @@ export function ScanDialog({
         setPhase('setup');
       }
     },
-    [pages, scanDpi, dpi, enhance, ocr, callRaw, track, makeSearchable],
+    [pages, scanDpi, dpi, enhance, ocr, gsOff, callRaw, track, makeSearchable],
   );
 
   const discardScratches = useCallback(async (staged: readonly ScanPage[]) => {
@@ -793,12 +805,13 @@ export function ScanDialog({
                 )}
 
                 <div className="flex flex-col gap-1.5">
+                  {gsOff && <GsRequiredNotice capability={gs} testId="scan-gs" />}
                   <label className="flex items-center gap-2 text-xs">
                     <input
                       type="checkbox"
                       data-testid="scan-enhance"
-                      checked={enhance}
-                      disabled={busy}
+                      checked={enhance && !gsOff}
+                      disabled={busy || gsOff}
                       onChange={(e) => setEnhance(e.target.checked)}
                     />
                     {tChrome('dialog.scan.enhance')}
@@ -807,8 +820,8 @@ export function ScanDialog({
                     <input
                       type="checkbox"
                       data-testid="scan-ocr"
-                      checked={ocr}
-                      disabled={busy}
+                      checked={ocr && !gsOff}
+                      disabled={busy || gsOff}
                       onChange={(e) => setOcr(e.target.checked)}
                     />
                     {tChrome('dialog.scan.ocr')}

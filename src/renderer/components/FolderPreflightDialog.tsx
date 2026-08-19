@@ -5,7 +5,9 @@ import { FolderRow, SweepShell } from './FolderSweepUi';
 import { useSweepFolders } from '../hooks/useSweepFolders';
 import { batch, dialog, app } from '../lib/tauri-bridge';
 import { getSettings } from '../lib/app-settings';
-import { ensureGsPath } from '../panels/SettingsPanel';
+import { gsPathIfAvailable } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from './GsRequiredNotice';
 import { tChrome, tChromeCount } from '../i18n';
 import { TEST_HARNESS_ENABLED, registerFolderPreflight } from '../testHarness';
 import {
@@ -64,6 +66,7 @@ export function FolderPreflightDialog({
   useTranslation();
   const { call, callRaw } = useEngine();
 
+  const gs = useGsCapability();
   const [phase, setPhase] = useState<Phase>('setup');
   const {
     source,
@@ -227,7 +230,7 @@ export function FolderPreflightDialog({
         // the engine resolves its own constant rather than a copy of it.
         shipped.some((p) => p.id === activeProfile.id) ? activeProfile.id : activeProfile,
         {
-          gs: await ensureGsPath(),
+          gs: await gsPathIfAvailable(),
           fonts: await app.getEditFontPath(),
           tesseract: await app.getTesseractPath(),
           logDir,
@@ -299,6 +302,11 @@ export function FolderPreflightDialog({
       {phase === 'setup' && (
         <div className="flex flex-col gap-4">
           <p className="text-xs text-neutral-500">{tChrome('dialog.preflightSweep.blurb')}</p>
+
+          {/* The droplet says up front that the check set is reduced: a
+              report that silently omitted its raster checks would read as a
+              clean pass. */}
+          <GsRequiredNotice capability={gs} testId="folder-preflight-gs" />
 
           <FolderRow
             label={tChrome('dialog.batch.sourceLabel')}

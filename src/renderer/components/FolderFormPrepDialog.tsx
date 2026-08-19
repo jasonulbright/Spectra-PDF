@@ -8,7 +8,10 @@ import { useSweepLog } from '../hooks/useSweepLog';
 import { tChrome, tChromeCount, tOcrLanguage } from '../i18n';
 import { OCR_LANGUAGES, DEFAULT_OCR_LANGUAGE } from '../ocr/languages';
 import { toTesseractLang, describeLanguages } from '../ocr/language-selection';
-import { ghostscriptPath, tesseractPath } from '../lib/ocr-recognize';
+import { tesseractPath } from '../lib/ocr-recognize';
+import { gsPathIfAvailable } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from './GsRequiredNotice';
 import { TEST_HARNESS_ENABLED, registerFormPrep } from '../testHarness';
 import {
   candidateKey,
@@ -96,6 +99,7 @@ export function FolderFormPrepDialog({
   useTranslation();
   const { callRaw } = useEngine();
 
+  const gs = useGsCapability();
   const [phase, setPhase] = useState<Phase>('setup');
   const {
     source,
@@ -186,7 +190,7 @@ export function FolderFormPrepDialog({
   const makeIo = useCallback(async () => {
     const [tesseract, ghostscript, fontDir] = await Promise.all([
       tesseractPath(),
-      ghostscriptPath(),
+      gsPathIfAvailable(),
       app.getEditFontPath(),
     ]);
     return createFolderPrepIo(callRaw, { tesseract, ghostscript, fontDir });
@@ -384,6 +388,10 @@ export function FolderFormPrepDialog({
     >
       {phase === 'setup' && (
         <div className="flex flex-col gap-4">
+          {/* An unattended sweep records its own refusals per document: a
+              vector page still yields its fields, a scanned one cannot be
+              read without a rasteriser. */}
+          <GsRequiredNotice capability={gs} testId="form-prep-gs" />
           <FolderRow
             label={tChrome('dialog.batch.sourceLabel')}
             testid="form-prep-source"

@@ -5,7 +5,9 @@ import { FolderRow, RunningView, SweepShell } from './FolderSweepUi';
 import { useSweepLog } from '../hooks/useSweepLog';
 import { dialog, app, batch } from '../lib/tauri-bridge';
 import { destConflictsWithSource } from '../lib/batch-ocr';
-import { ensureGsPath } from '../panels/SettingsPanel';
+import { gsBlocked, gsPathIfAvailable } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from './GsRequiredNotice';
 import { tChrome, tChromeCount, tNumber } from '../i18n';
 import { TEST_HARNESS_ENABLED, registerFolderCreatePdf } from '../testHarness';
 import { PAGE_SIZES, ORIENTATIONS, QUALITY_PRESETS } from '../lib/create-pdf';
@@ -97,6 +99,7 @@ export function FolderCreatePdfDialog({
   const [marginPt, setMarginPt] = useState(0);
   const [imageDpi, setImageDpi] = useState(200);
   const [distillPreset, setDistillPreset] = useState('printer');
+  const gs = useGsCapability();
 
   const [report, setReport] = useState<FolderCreatePdfReport | null>(null);
   const [progress, setProgress] = useState<FolderProgress | null>(null);
@@ -236,7 +239,10 @@ export function FolderCreatePdfDialog({
     try {
       const io = createFolderCreatePdfIo(
         callRaw,
-        { ghostscript: await ensureGsPath(), soffice: await app.getSofficePath() },
+        // Images and Office documents build with no interpreter; a
+        // PostScript source in the walk is refused BY NAME, per document, by
+        // the engine that reaches it.
+        { ghostscript: await gsPathIfAvailable(), soffice: await app.getSofficePath() },
         { pageSize, orientation, marginPt, imageDpi, distillPreset },
       );
       rep = await runFolderCreatePdf(listing, io, {
@@ -497,7 +503,10 @@ export function FolderCreatePdfDialog({
           {/* The quality preset is a `distill` parameter and means nothing for
               a picture — offered only when the walk can pick up PostScript at
               all, which is the `all` source set. */}
-          {sources === 'all' && (
+          {sources === 'all' && gsBlocked(gs) && (
+            <GsRequiredNotice capability={gs} testId="folder-create-pdf-gs" />
+          )}
+          {sources === 'all' && !gsBlocked(gs) && (
             <div>
               <label
                 className="block text-sm text-neutral-400 mb-1"

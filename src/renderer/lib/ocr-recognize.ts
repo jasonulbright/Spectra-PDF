@@ -5,15 +5,15 @@
 // two recognizers can disagree about the same page, and a headless run has no
 // WebView to host a WASM one in.
 //
-// This is a leaf module on purpose. Importing `ensureGsPath` from SettingsPanel
-// creates a render-time dependency that breaks every non-panel consumer, the
-// same dependency trap avoided by `app-settings.ts`: pulling in a panel
-// component drags module-level theme and Ghostscript side effects into
-// whatever imports it. Nothing here may touch React, the DOM, or a component —
-// only the bridge and the leaf settings module.
+// This is a leaf module on purpose. Importing the settings PANEL for a
+// Ghostscript path created a render-time dependency that broke every
+// non-panel consumer, so this module resolved its own — a second resolver
+// that could disagree with the first. `lib/gs-capability` is itself a leaf,
+// which dissolves that reason: there is one answer, and this module asks for
+// it. Nothing here may touch React, the DOM, or a component.
 
 import { app } from './tauri-bridge';
-import { loadSettings } from './app-settings';
+import { requireGsPath } from './gs-capability';
 import type { OcrResult } from '../ocr/types';
 
 /** The engine caller shape both consumers already hold (`useEngine().callRaw`). */
@@ -25,21 +25,10 @@ export type RawEngineCall = (
 // Resolved once per session — the vendored paths cannot change at runtime, and
 // asking Rust per PAGE would add a round trip to every OCR job in a batch.
 let tesseractPathPromise: Promise<string> | null = null;
-let bundledGsPromise: Promise<string> | null = null;
 
 export function tesseractPath(): Promise<string> {
   if (!tesseractPathPromise) tesseractPathPromise = app.getTesseractPath();
   return tesseractPathPromise;
-}
-
-/** The user's configured Ghostscript, else the bundled one. Ghostscript is what
- * rasterises the page for recognition, so it honours the same preference every
- * other gs-backed operation does rather than hard-wiring the bundle. */
-export async function ghostscriptPath(): Promise<string> {
-  const configured = loadSettings().gsPath;
-  if (configured) return configured;
-  if (!bundledGsPromise) bundledGsPromise = app.getGsPath();
-  return bundledGsPromise;
 }
 
 /**
@@ -58,7 +47,7 @@ export async function recognizePage(
   pageIndex: number,
   lang: string,
 ): Promise<OcrResult> {
-  const [tesseract, gs] = await Promise.all([tesseractPath(), ghostscriptPath()]);
+  const [tesseract, gs] = await Promise.all([tesseractPath(), requireGsPath()]);
   const res = (await callRaw('recognize', {
     file,
     page: pageIndex + 1,

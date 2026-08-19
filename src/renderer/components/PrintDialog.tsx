@@ -4,7 +4,9 @@ import { useEngine } from '../hooks/useEngine';
 import { app, batch, type PrinterCapabilities } from '../lib/tauri-bridge';
 import { useAppModal } from '../hooks/useAppModal';
 import { runCommitGate } from '../lib/commit-gate';
-import { ensureGsPath } from '../panels/SettingsPanel';
+import { gsBlocked, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from './GsRequiredNotice';
 import {
   buildPrintParams,
   copiesError,
@@ -75,6 +77,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
   const [capsError, setCapsError] = useState<string | null>(null);
 
   const [opts, setOpts] = useState<Opts>(defaultPrintOptions);
+  const gs = useGsCapability();
   const [copies, setCopies] = useState('1');
   const [scaleText, setScaleText] = useState('100');
   const [posterScaleText, setPosterScaleText] = useState('100');
@@ -184,7 +187,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
             ...opts,
             file: workingPath,
             printer: '',
-            gsPath: await ensureGsPath(),
+            gsPath: await requireGsPath(),
             pages: rangeMode === 'custom' ? rangeText : '',
             copies: 1,
             scalePercent: Number(scaleText.trim()) || 100,
@@ -265,7 +268,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
   const sheetMissing = needsSheet && sheet === null;
   const noPrinters = printers !== null && printers.length === 0;
   const canPrint =
-    !busy && gated && printer !== '' && !rangeErr && !copiesErr && !scaleErr &&
+    !busy && gated && !gsBlocked(gs) && printer !== '' && !rangeErr && !copiesErr && !scaleErr &&
     !posterScaleErr && !overlapErr && !sheetMissing &&
     (rangeMode === 'all' || rangeText.trim() !== '');
 
@@ -278,7 +281,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
         ...opts,
         file: activeFile.workingPath,
         printer,
-        gsPath: await ensureGsPath(),
+        gsPath: await requireGsPath(),
         pages: rangeMode === 'custom' ? rangeText : '',
         copies: Number(copies.trim()),
         scalePercent: Number(scaleText.trim()),
@@ -750,6 +753,10 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
           </div>
         </div>
 
+        {/* Every print path — the preview raster and the spool alike — is a
+            Ghostscript device, so this dialog gates whole rather than by
+            control. */}
+        <GsRequiredNotice capability={gs} testId="print-gs" />
         {error && (
           <p className="text-sm text-red-400" data-testid="print-error">{error}</p>
         )}
