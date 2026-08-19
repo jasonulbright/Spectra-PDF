@@ -132,6 +132,20 @@ class TestProvisionedTree:
                     files for _d, _s, files in os.walk(path)
                 ), f"{table} is an empty directory"
 
+    def test_the_shipped_app_fonts_are_in_libreoffices_private_font_directory(self):
+        app_fonts = os.path.join(REPO, "resources", "fonts")
+        lo_fonts = os.path.join(TREE, "share", "fonts", "truetype")
+        names = sorted(
+            name for name in os.listdir(app_fonts)
+            if os.path.splitext(name)[1].lower() in (".ttf", ".otf", ".ttc", ".otc")
+        )
+        assert names
+        for name in names:
+            with open(os.path.join(app_fonts, name), "rb") as left:
+                expected = hashlib.sha256(left.read()).digest()
+            with open(os.path.join(lo_fonts, name), "rb") as right:
+                assert hashlib.sha256(right.read()).digest() == expected, name
+
 
 # PowerShell 7 first: some environments put a reduced `powershell` on PATH that
 # lacks Get-FileHash, which the bundler has always used.

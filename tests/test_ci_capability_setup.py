@@ -26,6 +26,7 @@ def _assert_capabilities_precede_engine_tests(workflow: str) -> None:
         "scripts/bundle-dictionaries.ps1",
         "scripts/bundle-voikko.ps1",
         "scripts/sync-ocr-assets.mjs",
+        "scripts/setup-test-softhsm.ps1",
     ):
         assert text.index(resource_step) < engine_test
     assert text.index("choco install ghostscript -y --no-progress") < engine_test
@@ -37,6 +38,14 @@ def test_scan_fixture_uses_the_ghostscript_authority() -> None:
     text = (ROOT / "tests" / "fixtures" / "make_scans.py").read_text()
     assert "from engine.gs_capability import require" in text
     assert "resources\" / \"ghostscript" not in text
+
+
+def test_the_test_hsm_download_is_version_and_hash_pinned() -> None:
+    text = (ROOT / "scripts" / "setup-test-softhsm.ps1").read_text()
+    assert '$Version = "2.5.0"' in text
+    assert "releases/download/v$Version/SoftHSM2-$Version-portable.zip" in text
+    assert "85273bcc1a6b90e877f7bb4f7e90221d57103d8f5241d154a79dd730a135b910" in text
+    assert "1980a74f3088a7273d7efa502b6ceb8de6a5285d5bcd36d49512a8717bf89635" in text
 
 
 def test_full_capability_gate_refuses_a_skip(monkeypatch) -> None:
