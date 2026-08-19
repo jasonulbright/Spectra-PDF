@@ -413,7 +413,7 @@ def _embed_image(pdf: pikepdf.Pdf, path: str) -> tuple[pikepdf.Object, int, int,
     # its translations.
     if suffix in create_pdf_mod.HEIF_SUFFIXES and not create_pdf_mod._register_heif():
         raise RuntimeError(
-            f"HEIC/HEIF images need the pillow-heif plugin, which this runtime "
+            f"HEIC/HEIF images need the HEIF decoder plugin, which this runtime "
             f"does not have: {src_path}"
         )
     create_pdf_mod._register_heif()

@@ -67,7 +67,7 @@ create_pdf.createPdfCannotConvert	pattern	create_pdf	Create PDF cannot convert {
 create_pdf.createPdfNeedsLeast	exact	create_pdf	Create PDF needs at least one source
 create_pdf.everySourceMustObject	exact	create_pdf	every source must be an object with a path or a kind
 create_pdf.everySourceNeedsPath	exact	create_pdf	every source needs a path (or the kind 'blank')
-create_pdf.heicHeifImagesNeed	pattern	create_pdf,watermark	HEIC/HEIF images need the pillow-heif plugin, which this runtime does not have: {{src_path}}
+create_pdf.heicHeifImagesNeed	pattern	create_pdf,watermark	HEIC/HEIF images need the HEIF decoder plugin, which this runtime does not have: {{src_path}}
 create_pdf.imageContainsFrames	pattern	create_pdf	the image contains no frames: {{src_path}}
 create_pdf.imageDpiDefaultMust	exact	create_pdf	the image DPI default must be a positive number
 create_pdf.imageFileEmpty	pattern	create_pdf	the image file is empty: {{src_path}}
