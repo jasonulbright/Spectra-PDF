@@ -1,0 +1,15 @@
+﻿libtiff-6.dll -- libtiff 4.6.0 built without JBIG support.
+
+Built by scripts/build-libtiff-nojbig.ps1 from:
+  source  https://download.osgeo.org/libtiff/tiff-4.6.0.tar.gz
+          SHA-256 88B3979E6D5C7E32B50D7EC72FB15AF724F6AB2CBF7E10880C360A77E4B5D99A
+  patch   https://raw.githubusercontent.com/msys2/MINGW-packages/3f3d7684e19dc172fb4d0819d5833c567d570d26/mingw-w64-libtiff/0002-libtiff-install-headers.patch
+          SHA-256 493742947C8667655B6B89F2D7D27E92E1438A490ED86F50811112394B432A12
+  recipe  https://github.com/msys2/MINGW-packages/tree/3f3d7684e19dc172fb4d0819d5833c567d570d26/mingw-w64-libtiff
+          (MSYS2 mingw-w64-libtiff at version 4.6.0; the configure line is
+          that recipe's shared build with --enable-jbig replaced by
+          --disable-jbig, no other change)
+
+SHA-256 of the DLL as committed: AA79B1C2EC7FD815325C94A5E97BC904A962D9A40E55C74EB06A804AD7D756D8
+
+libtiff is MIT-licensed; its notice ships as resources/tesseract/licenses/LICENSE-libtiff.txt.

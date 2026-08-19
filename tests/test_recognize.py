@@ -161,6 +161,22 @@ class TestAgainstTheVendoredStack:
         result = recognize(str(SCANNED), 1, "eng+fra", str(TESSERACT), str(GS))
         assert "INVOICE" in result["text"].upper()
 
+    def test_the_vendored_tree_carries_no_jbig(self):
+        # The tree's libtiff is rebuilt without JBIG (scripts/build-libtiff-nojbig.ps1)
+        # so no GPL object code ships. Deleting libjbig-0.dll alone does not
+        # achieve that: the import is static, and a tree that still names it is a
+        # tesseract.exe that cannot start. Both halves are asserted, and the
+        # recognition above proves the tree still runs.
+        tree = TESSERACT.parent
+        assert not (tree / "libjbig-0.dll").exists()
+        referencing = [
+            binary.name
+            for binary in tree.iterdir()
+            if binary.suffix.lower() in (".dll", ".exe")
+            and b"libjbig" in binary.read_bytes()
+        ]
+        assert referencing == []
+
     def test_the_vendored_tree_can_actually_emit_tsv(self):
         # Guards the failure that cost real time: tessdata/configs/tsv is a
         # CONFIG file, not a model. Without it tesseract exits 0 and prints
