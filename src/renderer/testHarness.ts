@@ -28,6 +28,12 @@ import {
 } from './lib/symbol-library';
 import { importSymbolSetFromPath } from './lib/symbol-set-io';
 import { setTabOrderChannel } from './lib/tab-drag';
+import {
+  ensureGsCapability,
+  gsCapability,
+  pinGsCapability,
+  type GsCapability,
+} from './lib/gs-capability';
 import type { FocusedTab } from './state/types';
 
 export interface TestStateSnapshot {
@@ -756,6 +762,33 @@ function armIccPicker(path: string | null): void {
     iccPickerIntercepted = true;
   }
   armedIccPick = { path };
+}
+
+/**
+ * The native "pick any file" dialog — the Settings ▸ Engine browse control's
+ * first step, and OS-modal like every other native picker.
+ *
+ * Answered at the DIALOG so the browse handler runs unchanged: the picked
+ * path is probed through the bridge, and a candidate that fails is reported
+ * without disturbing the install the app is using. That refuse-without-
+ * storing branch is the one a spec has to be able to reach, and there is no
+ * other way in.
+ */
+let armedAnyFilePick: { path: string | null } | null = null;
+let anyFilePickerIntercepted = false;
+
+function armAnyFilePicker(path: string | null): void {
+  if (!anyFilePickerIntercepted) {
+    const native = dialog.pickAnyFile;
+    dialog.pickAnyFile = async () => {
+      const armed = armedAnyFilePick;
+      if (!armed) return native();
+      armedAnyFilePick = null;
+      return armed.path;
+    };
+    anyFilePickerIntercepted = true;
+  }
+  armedAnyFilePick = { path };
 }
 
 /**
@@ -1967,6 +2000,35 @@ export interface TestHarness {
    * remounts.
    */
   breakTabOrderPublish: () => void;
+  /**
+   * Force this session's Ghostscript answer OFF, whatever the machine has.
+   *
+   * Every box that can run this suite has a Ghostscript — the present axis
+   * needs one — so the absent surfaces are otherwise unreachable end to end.
+   * The force is applied to the renderer's ONE answer rather than to a
+   * panel's props, so the disabled states, the `when` predicates, the
+   * partial legs and the settings surface all read the same pinned answer
+   * the shipped code reads.
+   *
+   * `reason` picks which absent state is under test (`not-configured` is
+   * the fresh-install one); the surfaces branch on it.
+   */
+  gsForceAbsent: (reason?: string) => void;
+  /**
+   * Lift the force and probe for real, returning the answer that landed.
+   *
+   * The no-restart claim in one call: a spec asserts a surface disabled,
+   * calls this, and asserts the same surface live without reloading
+   * anything.
+   */
+  gsRestore: () => Promise<GsCapability>;
+  /** The renderer's current answer, for a spec that needs to see it. */
+  gsAnswer: () => GsCapability;
+  /** Answer the NEXT native "pick any file" dialog with this path, or with
+   * `null` for a cancelled one. The pick is still STARTED by the control
+   * that opens it, so the browse handler, its probe and its store-or-refuse
+   * decision are all the shipped ones. */
+  answerAnyFilePicker: (path: string | null) => void;
   /** Watermark panel (panel must be mounted): select the PDF source and set
    * the file and page a native picker would have set. Apply is still clicked. */
   watermarkSetPdfSource: (path: string, page?: number) => void;
@@ -3451,6 +3513,21 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     breakTabOrderPublish: () => {
       setTabOrderChannel({ flush: async () => false });
     },
+    gsForceAbsent: (reason) => {
+      pinGsCapability({
+        available: false,
+        path: '',
+        version: '',
+        reason: reason ?? 'not-configured',
+        detail: '',
+      });
+    },
+    gsRestore: async () => {
+      pinGsCapability(null);
+      return ensureGsCapability();
+    },
+    gsAnswer: () => gsCapability(),
+    answerAnyFilePicker: (path) => armAnyFilePicker(path),
     watermarkSetPdfSource: (path, page) => {
       if (!watermarkPanel) {
         const msg = 'watermarkSetPdfSource: panel not mounted';

@@ -37,6 +37,8 @@ from typing import Callable
 import pikepdf
 import pytest
 
+import gs_axis
+
 from engine import autotag as autotag_mod
 from engine import derived_nav as derived_nav_mod
 from engine import doc_properties as doc_properties_mod
@@ -587,10 +589,9 @@ class TestTheProducerShapedStaging:
 
     @pytest.fixture
     def gs_path(self):
-        path = FIXTURES.parent.parent / "resources" / "ghostscript" / "gswin64c.exe"
-        if not path.is_file():
-            pytest.skip("Ghostscript not available")
-        return str(path)
+        if not gs_axis.GS_PATH:
+            pytest.skip(gs_axis.PRESENT_AXIS_SKIP)
+        return gs_axis.GS_PATH
 
     def test_in_place_grayscale_leaves_nothing_staged(self, tmp_path, gs_path):
         source = _text_and_figure(tmp_path / "source.pdf")

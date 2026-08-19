@@ -53,10 +53,11 @@ from engine.guided_actions import validate_steps
 from engine.mrc import segment
 from engine.recognize import recognize
 
+import gs_axis
+
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 RESOURCES = Path(__file__).resolve().parent.parent / "resources"
 TESSERACT = RESOURCES / "tesseract" / "tesseract.exe"
-GS = RESOURCES / "ghostscript" / "gswin64c.exe"
 
 #: `make_enhance_scans.py` builds `scan-skew.pdf` at exactly this angle.
 SKEW_DEGREES = 2.75
@@ -66,7 +67,8 @@ SKEW_TOLERANCE = 0.1
 needs_tesseract = pytest.mark.skipif(
     not TESSERACT.is_file(), reason="Tesseract not vendored"
 )
-needs_gs = pytest.mark.skipif(not GS.is_file(), reason="Ghostscript not vendored")
+GS = gs_axis.GS_PATH
+needs_gs = gs_axis.requires_gs
 
 
 def _copy(name: str, tmp_dir) -> str:
