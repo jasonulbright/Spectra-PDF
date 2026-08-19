@@ -348,7 +348,7 @@ class TestHeif:
         src = Path(tmp_dir) / "photo.heic"
         src.write_bytes(b"\x00\x00\x00\x20ftypheic" + b"\x00" * 64)
         monkeypatch.setattr(create_pdf_mod, "_heif_registered", False)
-        with pytest.raises(RuntimeError, match="pillow-heif"):
+        with pytest.raises(RuntimeError, match="HEIF decoder plugin"):
             image_to_pdf(src, Path(tmp_dir) / "photo.pdf")
 
     def test_the_heif_suffixes_are_a_subset_of_the_accepted_set(self):
