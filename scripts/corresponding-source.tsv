@@ -1,0 +1,10 @@
+# Source archives that accompany every release which ships the matching object code.
+#
+# Remote archives are downloaded by scripts/stage-corresponding-source.ps1 and
+# accepted only at the SHA-256 recorded here. Repository paths are copied from
+# the reviewed vendored artifact. The release workflow uploads every row and
+# includes it in SHA256SUMS.txt.
+component	version	file	sha256	source
+libheif	1.23.0	libheif-1.23.0.tar.gz	4c9182b18897617182eed12ab5eb9f9d855b3aa3a736d6bdb31abc034ec7d393	https://github.com/strukturag/libheif/releases/download/v1.23.0/libheif-1.23.0.tar.gz
+libde265	1.1.1	libde265-1.1.1.tar.gz	fd48a927e94ed74fc7ce8829d222b9d8599fcbfe8b6448ba66705babc56ab219	https://github.com/strukturag/libde265/releases/download/v1.1.1/libde265-1.1.1.tar.gz
+pi_heif	1.4.0	pi_heif-1.4.0.tar.gz	e1199d9d41d9ecc877cf3ae7322ff099f6404574f2e62da47590cd4ecb9ec554	vendor/wheels/pi_heif-1.4.0.tar.gz
