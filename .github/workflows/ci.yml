@@ -118,6 +118,31 @@ jobs:
       - name: Install pytest
         run: pip install pytest
 
+      - name: Stage the committed ICC colour profiles
+        # Engine tests exercise CMYK/PDF-X paths directly, outside the Tauri
+        # package job. A clean runner has no resources/icc tree until the same
+        # gated staging script used by the release build creates it.
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-icc.ps1
+        shell: pwsh
+
+      - name: Install Ghostscript as a TEST TOOL (capability-present axis)
+        # This does not vendor Ghostscript into Spectra PDF. The clean runner
+        # installs the current Chocolatey package like an end user would; the
+        # product probe, not this workflow, enforces the minimum version.
+        run: choco install ghostscript -y --no-progress
+        shell: pwsh
+
+      - name: Export the test Ghostscript path
+        # The Windows installer registers Ghostscript but does not necessarily
+        # add it to this already-running Actions worker's PATH. Python has no
+        # access to the Rust registry resolver, so give its shared capability
+        # authority the executable that was actually installed.
+        run: |
+          $candidates = @(Get-ChildItem "${env:ProgramFiles}\gs\gs*\bin\gswin64c.exe" -File -ErrorAction Stop)
+          if ($candidates.Count -ne 1) { throw "Expected one installed Ghostscript, found $($candidates.Count)" }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECTRAPDF_GS_PATH=$($candidates[0].FullName)" -Encoding utf8
+        shell: pwsh
+
       - name: Run engine tests (full suite)
         run: python -m pytest tests/ -q
 

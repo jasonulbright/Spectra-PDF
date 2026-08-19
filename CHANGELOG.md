@@ -9,6 +9,7 @@
 - Ghostscript is now an optional program you install separately; no copy ships in the installer.
 - Spectra PDF discovers installed copies through Windows, `PATH`, or the path chosen in Settings.
 - Ghostscript 10.0 or newer is accepted after a real capability check; newer maintenance releases are not pinned out.
+- The interactive installer can open the official Ghostscript download page; silent and passive installs never download or install it.
 - Features that require Ghostscript now name what is missing and remain disabled until a usable copy is configured.
 - Features with a non-Ghostscript path remain available when Ghostscript is absent.
 
@@ -20,6 +21,7 @@
 
 ### Distribution
 
+- Interactive installation now obtains acceptance of the bundled Adobe color-profile EULA; silent and passive deployment require `/acceptEULA`.
 - Third-party notices now match the components in the installer and remain available offline.
 - Exact source archives for the bundled HEIF decoder libraries accompany the release and appear in its checksum file.
 - Clean GitHub builds no longer depend on a developer's ignored Ghostscript resource folder.

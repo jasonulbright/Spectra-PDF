@@ -18,6 +18,7 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
+    "licenseFile": "../vendor/icc/Adobe-Color-Profile-License.txt",
     "targets": ["nsis"],
     "icon": [
       "icons/icon.ico",
