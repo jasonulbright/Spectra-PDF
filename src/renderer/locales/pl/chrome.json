@@ -4916,7 +4916,6 @@
   "panel.settings.keepLogsAria": "Przechowuj dzienniki wsadowego rozpoznawania przez",
   "panel.settings.keepLogsFor": "Przechowuj dzienniki przez",
   "panel.settings.lastJobFailed": "Ostatnie zadanie zakończyło się błędem: {{error}}",
-  "panel.settings.licensesP1": "Ghostscript (AGPL-3.0) i LibreOffice (MPL-2.0) są dostarczane bez modyfikacji i wywoływane wyłącznie jako osobne programy — nigdy nie są konsolidowane z tą aplikacją. Ghostscript obsługuje kompresję, odcienie szarości, PDF/A, przebudowę i eksport obrazów; LibreOffice — eksport do Worda i innych formatów edytowalnych.",
   "panel.settings.licensesP2": "Dostarczane albo osadzone są także: Python (licencja PSF) z pakietami pikepdf (MPL-2.0), pdfminer.six (MIT) i pyHanko (MIT); pdf.js (Apache-2.0); pdf-lib (MIT); Tesseract — dostarczony silnik rozpoznawania tekstu, również uruchamiany wyłącznie jako osobny program — i jego modele językowe (Apache-2.0), obok których zainstalowano informacje o rozpowszechnianiu dla każdej konsolidowanej przez niego biblioteki; czcionki Liberation i Libertinus (SIL OFL 1.1); Tauri i skompilowane pakiety Rust (MIT/Apache-2.0 i podobne).",
   "panel.settings.licensesP3": "Pełne informacje są dostarczane wraz z aplikacją: lista zbiorcza (z licencją i źródłem każdego składnika) oraz zestawienie pakietów Rust.",
   "panel.settings.location": "Lokalizacja",

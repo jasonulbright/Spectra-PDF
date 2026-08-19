@@ -4702,7 +4702,6 @@
   "panel.settings.keepLogsAria": "Toplu OCR günlüklerinin saklanma süresi",
   "panel.settings.keepLogsFor": "Günlükleri şu süre boyunca sakla",
   "panel.settings.lastJobFailed": "Son iş başarısız oldu: {{error}}",
-  "panel.settings.licensesP1": "Ghostscript (AGPL-3.0) ve LibreOffice (MPL-2.0) değiştirilmeden pakete dahil edilmiştir ve kesinlikle ayrı programlar olarak çağrılır — hiçbir zaman bu uygulamaya bağlanmazlar. Ghostscript Sıkıştır, Gri Tonlama, PDF/A, Yeniden Oluştur ve görüntü dışa aktarımını yürütür; LibreOffice ise Word ve diğer düzenlenebilir biçimlere aktarımı.",
   "panel.settings.licensesP2": "Ayrıca pakete dahil veya gömülü olanlar: paketleri arasında pikepdf (MPL-2.0), pdfminer.six (MIT) ve pyHanko (MIT) bulunan Python (PSF lisansı); pdf.js (Apache-2.0); pdf-lib (MIT); pakete dahil OCR motoru olan ve o da kesinlikle ayrı bir program olarak çalıştırılan Tesseract ile dil modelleri (Apache-2.0) — bağladığı her kitaplığın yeniden dağıtım bildirimleri yanına kurulmuş olarak; Liberation ve Libertinus yazı tipleri (SIL OFL 1.1); Tauri ve derlenmiş Rust paketleri (MIT/Apache-2.0 ve benzerleri).",
   "panel.settings.licensesP3": "Bildirimlerin tamamı uygulamayla birlikte gelir: toplu liste (her bileşenin lisansı ve kaynağıyla birlikte) ve paket başına Rust dökümü.",
   "panel.settings.location": "Konum",

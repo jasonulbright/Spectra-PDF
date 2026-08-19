@@ -4702,7 +4702,6 @@
   "panel.settings.keepLogsAria": "Aufbewahrungsdauer der Stapel-OCR-Protokolle",
   "panel.settings.keepLogsFor": "Protokolle aufbewahren für",
   "panel.settings.lastJobFailed": "Letzter Auftrag fehlgeschlagen: {{error}}",
-  "panel.settings.licensesP1": "Ghostscript (AGPL-3.0) und LibreOffice (MPL-2.0) sind unverändert mitgeliefert und werden strikt als eigenständige Programme aufgerufen – niemals in diese Anwendung eingebunden. Ghostscript übernimmt Komprimieren, Graustufen, PDF/A, Neuaufbau und den Bildexport; LibreOffice übernimmt den Export nach Word und in andere bearbeitbare Formate.",
   "panel.settings.licensesP2": "Ebenfalls mitgeliefert oder eingebettet: Python (PSF-Lizenz) mit unter anderem pikepdf (MPL-2.0), pdfminer.six (MIT) und pyHanko (MIT); pdf.js (Apache-2.0); pdf-lib (MIT); Tesseract – die mitgelieferte OCR-Engine, ebenfalls strikt als eigenständiges Programm ausgeführt – und seine Sprachmodelle (Apache-2.0), mit den Weitergabehinweisen jeder eingebundenen Bibliothek daneben installiert; die Schriften Liberation und Libertinus (SIL OFL 1.1); Tauri und die kompilierten Rust-Crates (MIT/Apache-2.0 und ähnliche).",
   "panel.settings.licensesP3": "Die vollständigen Hinweise werden mit der Anwendung ausgeliefert: die Gesamtliste (mit Lizenz und Quelle jeder Komponente) und die Aufstellung je Rust-Crate.",
   "panel.settings.location": "Speicherort",

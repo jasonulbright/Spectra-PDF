@@ -4702,7 +4702,6 @@
   "panel.settings.keepLogsAria": "Behold logfiler fra batch-OCR i",
   "panel.settings.keepLogsFor": "Behold logfiler i",
   "panel.settings.lastJobFailed": "Sidste job mislykkedes: {{error}}",
-  "panel.settings.licensesP1": "Ghostscript (AGPL-3.0) og LibreOffice (MPL-2.0) leveres uændrede og kaldes strengt som separate programmer — aldrig linket ind i dette program. Ghostscript står for Komprimér, Gråtoner, PDF/A, Genopbyg og billedeksport; LibreOffice står for eksport til Word og andre redigerbare formater.",
   "panel.settings.licensesP2": "Også medfølgende eller indlejret: Python (PSF-licens) med bl.a. pikepdf (MPL-2.0), pdfminer.six (MIT) og pyHanko (MIT) blandt sine pakker; pdf.js (Apache-2.0); pdf-lib (MIT); Tesseract — den medfølgende OCR-motor, der også køres strengt som et separat program — og dens sprogmodeller (Apache-2.0), med videredistributionsmeddelelserne for hvert bibliotek, den linker til, installeret ved siden af; skrifterne Liberation og Libertinus (SIL OFL 1.1); Tauri og de kompilerede Rust-crates (MIT/Apache-2.0 og lignende).",
   "panel.settings.licensesP3": "De fuldstændige meddelelser leveres med programmet: den samlede liste (med hver komponents licens og kilde) og Rust-oversigten pr. crate.",
   "panel.settings.location": "Placering",
