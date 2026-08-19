@@ -12,7 +12,7 @@ export interface OcrLanguage {
 }
 
 // The vendored recognition languages. Every entry's traineddata is staged
-// into resources/ocr-lang by scripts/sync-ocr-assets.mjs — the script PARSES
+// into resources/tesseract/tessdata by scripts/sync-ocr-assets.mjs — it PARSES
 // this file for the codes, so this list is the single source of truth and a
 // language added here without a matching @tesseract.js-data package fails the
 // staging loudly instead of failing recognition silently at runtime.
