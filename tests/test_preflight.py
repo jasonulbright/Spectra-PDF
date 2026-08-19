@@ -30,8 +30,10 @@ from engine.preflight_profiles import (
 )
 import preflight_builders as builders
 
+import gs_axis
+
 REPO = pathlib.Path(__file__).resolve().parents[1]
-GS = os.path.join(REPO, "resources", "ghostscript", "gswin64c.exe")
+GS = gs_axis.GS_PATH
 
 
 def _statuses(report) -> dict:
@@ -308,7 +310,7 @@ class TestSeverityIsTheProfiles:
 # ── total area coverage ───────────────────────────────────────────────────
 
 
-@pytest.mark.skipif(not os.path.isfile(GS), reason="Ghostscript not available")
+@gs_axis.requires_gs
 class TestTotalAreaCoverage:
     def test_the_per_pixel_maximum_is_what_is_reported(self, tmp_dir):
         src = builders.build("tac_360", tmp_dir)

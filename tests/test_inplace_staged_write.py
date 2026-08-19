@@ -28,6 +28,8 @@ import pikepdf
 import pytest
 from pikepdf import Array, Dictionary, Name, String
 
+import gs_axis
+
 from engine import annotations as annotations_mod
 from engine import attachments as attachments_mod
 from engine import batch_ocr as batch_ocr_mod
@@ -1875,7 +1877,7 @@ def case(request, gs_path_or_none):
         pytest.skip("Tesseract not vendored")
     if subject.needs_gs:
         if gs_path_or_none is None:
-            pytest.skip("Ghostscript not available")
+            pytest.skip(gs_axis.PRESENT_AXIS_SKIP)
         runner = subject.run_gs
         return replace(
             subject,
@@ -1886,10 +1888,13 @@ def case(request, gs_path_or_none):
 
 @pytest.fixture
 def gs_path_or_none():
-    """The bundled Ghostscript, or None — the shared `gs_path` fixture skips
-    the whole test, which would skip the five cases that never call it."""
-    path = FIXTURES.parent.parent / "resources" / "ghostscript" / "gswin64c.exe"
-    return str(path) if path.is_file() else None
+    """The authority's Ghostscript, or None — the shared `gs_path` fixture
+    skips the whole test, which would skip the five cases that never call it.
+
+    `needs_gs` on a case is the same present-axis question every other suite
+    asks; it is spelled as a field here only because the cases are data.
+    """
+    return gs_axis.GS_PATH or None
 
 
 def _besides(directory: Path, *expected: str) -> list:

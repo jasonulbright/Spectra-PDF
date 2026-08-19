@@ -39,9 +39,10 @@ from engine.preflight_sweep import run_preflight_sweep
 
 import preflight_builders as builders
 
+import gs_axis
+
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 RESOURCES = FIXTURES.parent.parent / "resources"
-GS = RESOURCES / "ghostscript" / "gswin64c.exe"
 TESSERACT = RESOURCES / "tesseract" / "tesseract.exe"
 
 #: What every one of these walks stages its working copy as.
@@ -91,7 +92,8 @@ def _ocr_layer_present(path: Path) -> bool:
         return xobjects is not None and "/SpectraPDFOCR" in xobjects
 
 
-needs_gs = pytest.mark.skipif(not GS.is_file(), reason="Ghostscript not vendored")
+GS = gs_axis.GS_PATH
+needs_gs = gs_axis.requires_gs
 needs_tesseract = pytest.mark.skipif(
     not TESSERACT.is_file(), reason="Tesseract not vendored"
 )

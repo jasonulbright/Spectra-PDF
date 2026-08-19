@@ -15,28 +15,30 @@ import pytest
 
 from engine.recognize import _LANG_RE, _parse_tsv, _png_size, recognize
 
+import gs_axis
+
 ROOT = Path(__file__).resolve().parents[1]
 TESSERACT = ROOT / "resources" / "tesseract" / "tesseract.exe"
-GS = ROOT / "resources" / "ghostscript" / "gswin64c.exe"
+GS = gs_axis.GS_PATH
 SCANNED = ROOT / "e2e-tests" / "fixtures" / "scanned.pdf"
 TESSDATA = TESSERACT.parent / "tessdata"
 CJK_FONT = ROOT / "resources" / "fonts" / "NotoSansCJKsc-Regular.otf"
 LANGUAGES_TS = ROOT / "src" / "renderer" / "ocr" / "languages.ts"
 
 needs_ocr_stack = pytest.mark.skipif(
-    not (TESSERACT.is_file() and GS.is_file() and SCANNED.is_file()),
-    reason="vendored tesseract/ghostscript not provisioned",
+    not (TESSERACT.is_file() and GS and SCANNED.is_file()),
+    reason=f"{gs_axis.PRESENT_AXIS_SKIP}, or the tesseract stack is not vendored",
 )
 
 needs_cjk_stack = pytest.mark.skipif(
     not (
         TESSERACT.is_file()
-        and GS.is_file()
+        and GS
         and CJK_FONT.is_file()
         and (TESSDATA / "chi_sim.traineddata").is_file()
         and (TESSDATA / "chi_tra.traineddata").is_file()
     ),
-    reason="vendored tesseract/ghostscript/CJK models not provisioned",
+    reason=f"{gs_axis.PRESENT_AXIS_SKIP}, or the tesseract/CJK stack is not vendored",
 )
 
 

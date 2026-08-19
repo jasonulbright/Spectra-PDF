@@ -14,15 +14,14 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+import gs_axis  # noqa: E402
 from engine import budget, gs_capability as gc  # noqa: E402
 
-GS = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "resources", "ghostscript", "gswin64c.exe")
-)
+#: The Ghostscript the present axis drives — the authority's own answer for
+#: this machine, never a path this file goes looking for.
+GS = gs_axis.GS_PATH
 
-needs_gs = pytest.mark.skipif(
-    not os.path.isfile(GS), reason="capability-present axis: no provisioned Ghostscript"
-)
+needs_gs = gs_axis.requires_gs
 
 
 @pytest.fixture(autouse=True)
@@ -417,29 +416,19 @@ def test_no_gs_door_is_left_spawning_a_raw_subprocess():
     that takes the parameter and calls `subprocess` directly is the shape
     this whole layer was built to remove, so it is checked mechanically
     rather than by review.
-    """
-    import pathlib
-    import re
 
-    engine_dir = pathlib.Path(__file__).resolve().parents[1] / "src" / "engine"
-    offenders = []
-    for path in sorted(engine_dir.glob("*.py")):
-        if path.name in {"budget.py", "gs_capability.py"}:
-            continue
-        text = path.read_text(encoding="utf-8")
-        # A module that only PASSES `gs_path` down is not a door; the ones
-        # that matter BUILD a Ghostscript command, which always names the
-        # executable as the list's first element.
-        if not re.search(r"\[\s*(?:str\()?\s*gs_path\b", text):
-            continue
-        # Such a module must NAME the authority: either `budget.gs`, which
-        # validates and replaces the executable before spawning, or
-        # `gs_capability` directly. One that names neither has no way to have
-        # validated the path it was handed, whatever it does with it.
-        if "budget.gs(" in text or "gs_capability" in text:
-            continue
-        offenders.append(path.name)
-    assert not offenders, offenders
+    A module that only PASSES `gs_path` down is not a door; the ones that
+    matter BUILD a Ghostscript command, which always names the executable as
+    the list's first element. Such a module must NAME the authority: either
+    `budget.gs`, which validates and replaces the executable before spawning,
+    or `gs_capability` directly. One that names neither has no way to have
+    validated the path it was handed, whatever it does with it.
+
+    The predicate lives in `gs_axis` because the absent-axis roster is
+    derived from the same sweep — a door this finds is a door that owes an
+    absent-state answer.
+    """
+    assert not gs_axis.modules_missing_the_authority()
 
 
 def test_no_gs_default_is_a_bare_command_name():
@@ -451,15 +440,7 @@ def test_no_gs_default_is_a_bare_command_name():
     discovery answers it — including the registry-installed copies that
     never reach PATH.
     """
-    import pathlib
-    import re
-
-    engine_dir = pathlib.Path(__file__).resolve().parents[1] / "src" / "engine"
-    offenders = []
-    for path in sorted(engine_dir.glob("*.py")):
-        text = path.read_text(encoding="utf-8")
-        if re.search(r'gs_path\s*(?::\s*str\s*)?=\s*["\']gs["\']', text):
-            offenders.append(path.name)
+    offenders = gs_axis.modules_matching(r'gs_path\s*(?::\s*str\s*)?=\s*["\']gs["\']')
     assert not offenders, offenders
 
 
@@ -513,20 +494,12 @@ def test_no_module_decides_ghostscript_by_file_existence():
     the authority exists to end. Existence is never the question; the probe
     is.
     """
-    import pathlib
-    import re
-
-    engine_dir = pathlib.Path(__file__).resolve().parents[1] / "src" / "engine"
     offenders = []
-    for path in sorted(engine_dir.glob("*.py")):
-        if path.name == "gs_capability.py":
-            continue
-        text = path.read_text(encoding="utf-8")
-        for pattern in (
-            r"os\.path\.isfile\(\s*gs_path",
-            r"os\.path\.exists\(\s*gs_path",
-            r"Path\(\s*gs_path\s*\)",
-        ):
-            if re.search(pattern, text):
-                offenders.append(f"{path.name}: {pattern}")
+    for pattern in (
+        r"os\.path\.isfile\(\s*gs_path",
+        r"os\.path\.exists\(\s*gs_path",
+        r"Path\(\s*gs_path\s*\)",
+    ):
+        for name in gs_axis.modules_matching(pattern, skip={"gs_capability.py"}):
+            offenders.append(f"{name}: {pattern}")
     assert not offenders, offenders
