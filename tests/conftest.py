@@ -10,11 +10,13 @@ import pytest
 # Add src/ to path so `from engine.xxx import yyy` works with relative imports
 SRC_DIR = os.path.join(os.path.dirname(__file__), "..", "src")
 sys.path.insert(0, SRC_DIR)
+# …and tests/, so the shared helpers import by name whether pytest was
+# pointed at the directory, at one file, or at a scratch checkout.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from gs_axis import GS_PATH, PRESENT_AXIS_SKIP, force_absent  # noqa: E402
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
-GS_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "resources", "ghostscript", "gswin64c.exe"
-)
 
 
 @pytest.fixture
@@ -47,10 +49,35 @@ def tmp_pdf(sample_pdf, tmp_dir):
 
 @pytest.fixture
 def gs_path():
-    """Path to the bundled Ghostscript executable."""
-    if not os.path.isfile(GS_PATH):
-        pytest.skip("Ghostscript not available")
+    """The capability-present axis: the Ghostscript the authority validated.
+
+    Not a vendored path — nothing in the distribution provides Ghostscript,
+    so the question is "did the authority find a usable one?" and the answer
+    comes from `engine.gs_capability` rather than from a directory listing.
+    """
+    if not GS_PATH:
+        pytest.skip(PRESENT_AXIS_SKIP)
     return GS_PATH
+
+
+@pytest.fixture
+def gs_absent(monkeypatch):
+    """The capability-absent axis: the authority answers "none", always.
+
+    Runs on every machine, including one with a working Ghostscript: the
+    force is applied to discovery and the probe, so no arrangement of PATH,
+    environment or installed copies can leak a usable answer into a test
+    that is asserting the refusal.
+    """
+    force_absent(monkeypatch)
+    yield
+    _gs_capability().clear_cache()
+
+
+def _gs_capability():
+    from engine import gs_capability
+
+    return gs_capability
 
 
 ICC_DIR = os.path.join(os.path.dirname(__file__), "..", "resources", "icc")

@@ -17,15 +17,15 @@ from pikepdf import Array, Dictionary, Name
 from engine.extract_text import extract_text
 from engine.watermark import POSITIONS, watermark
 
-GS_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "resources", "ghostscript", "gswin64c.exe"
-)
+import gs_axis
+
+GS_PATH = gs_axis.GS_PATH
 
 
 @pytest.fixture
 def gs():
-    if not os.path.isfile(GS_PATH):
-        pytest.skip("Ghostscript not available")
+    if not GS_PATH:
+        pytest.skip(gs_axis.PRESENT_AXIS_SKIP)
     return GS_PATH
 
 

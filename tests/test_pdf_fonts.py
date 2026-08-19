@@ -9,6 +9,8 @@ import pikepdf
 from pikepdf import Array, Dictionary, Name
 import pytest
 
+import gs_axis
+
 from engine.pdf_fonts import font_capability, _strip_subset_prefix
 
 # HIRAGANA LETTER A — kept as a name so the byte literals below stay ASCII.
@@ -1070,13 +1072,20 @@ class TestT9BareProgramFonts:
         assert cap.char_width("A") == 600
 
     def test_type1_fontfile_recovers(self):
+        # A real Type1 program to read, taken from the Ghostscript the
+        # AUTHORITY resolved — the same `Resource/Font` tree every install
+        # carries. Sourcing it from a vendored directory would make this
+        # test disappear the moment the distribution stops shipping one,
+        # and what is under test here is the Type1 reader, not packaging.
         import os
-        pfa = os.path.join(
-            os.path.dirname(__file__), "..", "resources", "ghostscript",
-            "Resource", "Font", "NimbusRoman-Regular",
-        )
-        if not os.path.isfile(pfa):
-            pytest.skip("bundled gs Type1 fonts not provisioned")
+        pfa = ""
+        if gs_axis.GS_PATH:
+            pfa = os.path.join(
+                os.path.dirname(os.path.dirname(gs_axis.GS_PATH)),
+                "Resource", "Font", "NimbusRoman-Regular",
+            )
+        if not pfa or not os.path.isfile(pfa):
+            pytest.skip(f"{gs_axis.PRESENT_AXIS_SKIP} (its Type1 fonts are the fixture)")
         with open(pfa, "rb") as f:
             raw = f.read()
         pdf = pikepdf.new()

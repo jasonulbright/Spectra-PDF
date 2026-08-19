@@ -30,11 +30,11 @@ from engine.preflight_profiles import FIXUP_IDS
 from engine.separations import list_inks
 import preflight_builders as builders
 
+import gs_axis
+
 REPO = pathlib.Path(__file__).resolve().parents[1]
-GS = os.path.join(REPO, "resources", "ghostscript", "gswin64c.exe")
-needs_gs = pytest.mark.skipif(
-    not os.path.isfile(GS), reason="the bundled Ghostscript is not provisioned"
-)
+GS = gs_axis.GS_PATH
+needs_gs = gs_axis.requires_gs
 
 
 def _profile(fixups, **checks) -> dict:

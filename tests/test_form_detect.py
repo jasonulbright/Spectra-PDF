@@ -18,11 +18,13 @@ from pikepdf import Array, Dictionary, Name, String
 from engine.form_detect import detect_form_fields
 from engine.form_detect_vocab import is_date_label, is_signature_label
 
+import gs_axis
+
 
 K = 0.5523  # the circle-from-Béziers control-point ratio
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-GS_EXE = _ROOT / "resources" / "ghostscript" / "gswin64c.exe"
+GS_EXE = gs_axis.GS_PATH
 TESSERACT_EXE = _ROOT / "resources" / "tesseract" / "tesseract.exe"
 
 
@@ -491,7 +493,7 @@ def _scanned(source, target):
         png = pathlib.Path(tmp) / "page.png"
         subprocess.run(
             [
-                str(GS_EXE), "-sDEVICE=png16m", f"-r{OCR_DPI}", "-dNOPAUSE",
+                GS_EXE, "-sDEVICE=png16m", f"-r{OCR_DPI}", "-dNOPAUSE",
                 "-dBATCH", "-dQUIET", "-dSAFER", f"-sOutputFile={png}", str(source),
             ],
             check=True,
@@ -504,10 +506,11 @@ def _scanned(source, target):
 
 @pytest.fixture
 def recognisers():
-    for exe in (GS_EXE, TESSERACT_EXE):
-        if not exe.is_file():
-            pytest.skip(f"{exe.name} not available")
-    return {"tesseract_path": str(TESSERACT_EXE), "gs_path": str(GS_EXE)}
+    if not GS_EXE:
+        pytest.skip(gs_axis.PRESENT_AXIS_SKIP)
+    if not TESSERACT_EXE.is_file():
+        pytest.skip("Tesseract not vendored")
+    return {"tesseract_path": str(TESSERACT_EXE), "gs_path": GS_EXE}
 
 
 def test_a_scan_of_a_ruled_form_recovers_the_same_fields(tmp_path, ruled, recognisers):
@@ -551,7 +554,7 @@ def test_scan_never_reports_the_page_as_an_image(tmp_path, ruled, recognisers):
 def test_a_scan_with_no_recogniser_refuses_by_name(tmp_path, ruled, recognisers):
     scan = _scanned(ruled, tmp_path / "scan.pdf")
     with pytest.raises(RuntimeError, match="OCR engine is not available"):
-        detect_form_fields(scan, gs_path=str(GS_EXE))
+        detect_form_fields(scan, gs_path=GS_EXE)
 
 
 def test_scan_always_recognises_a_born_digital_page(tmp_path, ruled, recognisers):
