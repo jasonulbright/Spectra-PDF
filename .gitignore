@@ -37,10 +37,14 @@ Desktop.ini
 
 # Embedded runtimes (downloaded/copied during build, not committed)
 resources/python/
-resources/ghostscript/
 resources/fonts/
+# Ghostscript is NOT provisioned and NOT shipped: it is a user-supplied,
+# optional prerequisite the app discovers. No script writes this directory and
+# no build reads it; the entry stays so a tree left behind by a build from
+# before the change cannot land in git.
+resources/ghostscript/
 # Native Tesseract (vendored by scripts/bundle-tesseract.ps1; large binaries +
-# 47 language models, same repo-hygiene class as resources/ghostscript).
+# 47 language models, same repo-hygiene class as resources/python).
 resources/tesseract/
 # JBIG2 encoder (vendored by scripts/bundle-jbig2enc.ps1; a ~4.8MB static
 # binary plus its notice tree — same repo-hygiene class as the above. The
@@ -51,12 +55,15 @@ resources/jbig2enc/
 # ~147MB of word lists across 34 languages, same repo-hygiene class as the
 # above. The pinned manifest with every file's sha256 is what lives in git).
 resources/dictionaries/
-# ICC colour profiles (vendored by scripts/bundle-icc.ps1 out of a local
-# licensed package, same repo-hygiene class as the above; the pinned manifest
-# with every profile's sha256 and the end-user licence text are what live in
-# git). The source package is not committed -- it is redistributable only
-# under an agreement carrying an indemnity, so it stays with its holder.
+# ICC colour profiles (staged by scripts/bundle-icc.ps1 from the committed
+# copies under vendor/icc, same repo-hygiene class as the above: the resource
+# tree is a build output). The profiles themselves, their end-user licence text
+# and the pinned manifest with every profile's sha256 live in git.
 resources/icc/
+# The owner-held bundler package the committed profiles were extracted from.
+# It is redistributable only under an agreement carrying an indemnity, so it
+# stays with its holder; the standalone-distribution grant is what the
+# committed profiles travel under.
 AdobeICCProfilesCS4Win_bundler.zip
 
 # Test

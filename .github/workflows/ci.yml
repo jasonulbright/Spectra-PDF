@@ -60,12 +60,12 @@ jobs:
       - name: Create resource stubs for Tauri build script
         run: |
           mkdir -p resources/python
-          mkdir -p resources/ghostscript
           mkdir -p resources/fonts
           mkdir -p resources/libreoffice
           mkdir -p resources/tesseract
           mkdir -p resources/jbig2enc
           mkdir -p resources/dictionaries
+          mkdir -p resources/icc
         shell: bash
 
       # `cargo test` rather than `cargo check`: check compiles without running
@@ -269,12 +269,20 @@ jobs:
           mkdir -p resources/dictionaries
         shell: bash
 
-      - name: Vendor Ghostscript (the visual-compare e2e drives the real GS raster)
-        # 11-compare.spec.ts (visual mode) exercises engine compare_visual, which
-        # shells out to bundled Ghostscript — so the suite DOES need real GS, not
-        # a stub. bundle-ghostscript.ps1 downloads + checksum-verifies + extracts
-        # with 7-Zip (preinstalled on windows runners).
-        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1
+      - name: Vendor the ICC colour profiles (committed under vendor/icc)
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-icc.ps1
+        shell: pwsh
+
+      - name: Install Ghostscript as a TEST TOOL (the capability-present e2e axis)
+        # Ghostscript is not shipped: the product discovers a user-installed one
+        # and disables its dependent features when none is configured. The
+        # capability-PRESENT axis of the suite (11-compare's visual mode drives
+        # the real raster) still needs a real Ghostscript on the machine, so this
+        # job installs one the way a user would. Tests may use tools the product
+        # does not ship. No version pin: the installer publishes what it
+        # publishes, and the capability probe enforces the minimum version.
+        run: choco install ghostscript -y --no-progress
+        shell: pwsh
 
       # Vendoring and staging are separate steps: a failed vendoring in a
       # multi-command block would be masked by the staging command's exit
