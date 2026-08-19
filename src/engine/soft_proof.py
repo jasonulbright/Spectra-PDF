@@ -8,9 +8,11 @@ alternative — the plate coverages become a CMYK accumulation buffer and one
 LittleCMS transform takes that buffer to sRGB.
 
 Four profile sources, in precedence order: the document's own
-`/OutputIntents` `/DestOutputProfile`, a user-picked `.icc`, the press
-profile compiled into the bundled Ghostscript, and none. None is the
-multiply model, byte for byte.
+`/OutputIntents` `/DestOutputProfile`, a user-picked `.icc`, a bundled press
+profile named by its ICC description string, and none. None is the multiply
+model, byte for byte — and it is the only source that means "no proof". A
+bundled press this engine cannot produce REFUSES BY NAME; it never resolves
+to the same record as none.
 
 Two switches, one intent and one flag. Simulating paper white is
 ABSOLUTE_COLORIMETRIC — the media white point is held rather than mapped
@@ -31,8 +33,8 @@ honoured.
 The separation device ignores the destination profile — plates are
 byte-identical across profiles — so a page carrying colour that is not
 already device CMYK must be colour-managed to the profile BEFORE it is
-separated, or the ink amounts on the plates come from Ghostscript's
-compiled-in default rather than from the press being proofed.
+separated, or the ink amounts on the plates come from the conversion's own
+default destination rather than from the press being proofed.
 `staging_applies` is that test, and it reads the colour families the ink
 inventory's own walk reached.
 """
@@ -47,19 +49,16 @@ from pathlib import Path
 
 import pikepdf
 
+from . import icc_profiles
 from .color_spaces import build_function
-from .prepress import _extract_rom_profile
 
 #: The plate names the separation device gives the process inks, in the
 #: channel order of a CMYK buffer.
 PROCESS_CHANNELS = ("Cyan", "Magenta", "Yellow", "Black")
 
-#: Where a profile source may come from. `none` is the multiply model.
+#: Where a profile source may come from. `none` is the multiply model, and
+#: `bundled` carries a press profile's ICC description string.
 PROFILE_SOURCES = ("none", "document", "file", "bundled")
-
-#: The Ghostscript ROM profile offered as the bundled press.
-BUNDLED_PROFILE_NAME = "default_cmyk.icc"
-_ROM_GRAY_NAME = "default_gray.icc"
 
 #: Colour families a page can carry and still be separated exactly as it
 #: stands: the plates then ARE the document's own ink numbers.
@@ -265,29 +264,38 @@ def describe_profile(raw: bytes) -> tuple[str, str, str]:
     return description, space, ""
 
 
-def rom_profile(gs_path: str, name: str) -> Path:
-    """A Ghostscript ROM profile as a file, extracted once.
+def bundled_presses(icc_dir: str = "") -> list:
+    """Every bundled press profile, by ICC description string.
 
-    The extraction is a subprocess, and the proof asks for the same profile
-    on every recomposite, so an extraction already on disk is reused.
+    The list IS the picker's content: a proof names the press it proofed
+    against, so the set has to be offerable by name rather than reduced to one
+    anonymous "bundled" entry.
     """
-    dest = profile_cache_dir() / name
-    if dest.is_file() and dest.stat().st_size > 0:
-        return dest
-    return _extract_rom_profile(gs_path, name, profile_cache_dir())
+    return sorted(icc_profiles.cmyk_profiles(icc_dir), key=lambda p: p.description)
 
 
-def bundled_profile(gs_path: str) -> tuple[bytes, str]:
-    """The press profile compiled into the bundled Ghostscript, and its own
-    description. Empty bytes when the bundle is not present."""
+def bundled_profile(name: str = "", icc_dir: str = "") -> tuple[bytes, str, str]:
+    """(bytes, description, refusal) for a bundled press profile.
+
+    `name` is a profile's ICC description string; empty takes the default
+    press. **A missing or unreadable profile is a REFUSAL, never empty bytes
+    with an empty name.** This used to swallow every failure and return
+    `(b"", "")`, which the caller could only read as "no bundled press
+    exists" — so a broken resource tree and a deliberate no-proof request
+    arrived at the panel looking identical, and the proof silently became the
+    multiply model.
+    """
     try:
-        raw = rom_profile(gs_path, BUNDLED_PROFILE_NAME).read_bytes()
-    except Exception:  # noqa: BLE001 - an absent bundle is not a refusal
-        return b"", ""
+        profile = icc_profiles.resolve(name, icc_dir)
+        raw = Path(profile.path).read_bytes()
+    except (ValueError, RuntimeError) as exc:
+        return b"", "", str(exc)
+    except OSError as exc:
+        return b"", "", unreadable_profile_message(str(exc))
     description, _space, refusal = describe_profile(raw)
     if refusal:
-        return b"", ""
-    return raw, description
+        return b"", "", refusal
+    return raw, description or profile.description, ""
 
 
 def read_output_intent(file: str) -> dict:
@@ -324,7 +332,7 @@ def resolve_profile(
     request: Request | None,
     *,
     intent: dict | None = None,
-    gs_path: str = "gs",
+    icc_dir: str = "",
 ) -> tuple[Profile | None, str]:
     """(the profile to proof through, the refusal). Both empty means none."""
     if request is None or request.source == "none":
@@ -342,9 +350,9 @@ def resolve_profile(
         except OSError as exc:
             return None, unreadable_profile_message(str(exc))
     else:
-        raw, _description = bundled_profile(gs_path)
-        if not raw:
-            return None, unreadable_profile_message(BUNDLED_PROFILE_NAME)
+        raw, _description, refusal = bundled_profile(request.profile, icc_dir)
+        if refusal:
+            return None, refusal
 
     description, space, refusal = describe_profile(raw)
     if refusal:
@@ -580,7 +588,16 @@ def page_alternates(file: str, page: int) -> dict:
     return found
 
 
-def _source_profile(entry: dict, gs_path: str):
+#: The mode a one-channel device space is read through. There is no bundled
+#: grey profile and PIL builds none, so a DeviceGray tint is proofed as the
+#: sRGB colour with all three components equal — the assumption a viewer
+#: without a CMM makes, and it is NAMED back to the caller like every other
+#: assumption here rather than taken silently.
+_GRAY_AS_RGB = "GRAY"
+_GRAY_ASSUMPTION = "sRGB grey"
+
+
+def _source_profile(entry: dict):
     """(profile handle, PIL mode, what was assumed, refusal) for one alternate.
 
     A device space carries no ICC description, so a proof of it has to assume
@@ -608,11 +625,7 @@ def _source_profile(entry: dict, gs_path: str):
     if family in ("DeviceRGB", "CalRGB"):
         return ImageCms.createProfile("sRGB"), "RGB", "sRGB", ""
     if family in ("DeviceGray", "CalGray"):
-        try:
-            handle = ImageCms.getOpenProfile(str(rom_profile(gs_path, _ROM_GRAY_NAME)))
-        except Exception as exc:  # noqa: BLE001
-            return None, "", "", unreadable_profile_message(str(exc))
-        return handle, "L", ImageCms.getProfileDescription(handle).strip(), ""
+        return ImageCms.createProfile("sRGB"), _GRAY_AS_RGB, _GRAY_ASSUMPTION, ""
     if family == "Lab":
         return ImageCms.createProfile("LAB"), "LAB", "", ""
     if family == "DeviceCMYK":
@@ -620,7 +633,7 @@ def _source_profile(entry: dict, gs_path: str):
     return None, "", "", ""
 
 
-def _lut_to_cmyk(entry: dict, profile_path: str, gs_path: str):
+def _lut_to_cmyk(entry: dict, profile_path: str):
     """(a 256×4 CMYK table, what was assumed, refusal) for one colorant."""
     import numpy as np
     from PIL import Image, ImageCms
@@ -634,7 +647,7 @@ def _lut_to_cmyk(entry: dict, profile_path: str, gs_path: str):
                                   and not entry.get("icc")):
         return table, "", ""
 
-    handle, mode, assumed, refusal = _source_profile(entry, gs_path)
+    handle, mode, assumed, refusal = _source_profile(entry)
     if refusal:
         return None, "", refusal
     if handle is None or not mode:
@@ -650,7 +663,15 @@ def _lut_to_cmyk(entry: dict, profile_path: str, gs_path: str):
         raw[:, 1] = np.clip(table[:, 1] + 128.0, 0.0, 255.0)
         raw[:, 2] = np.clip(table[:, 2] + 128.0, 0.0, 255.0)
         source = Image.fromarray(raw.astype(np.uint8).reshape(1, TINT_STEPS, 3), mode="LAB")
+    elif mode == _GRAY_AS_RGB:
+        # One channel replicated across three: the transform is built for RGB
+        # because that is the profile the grey is being read through.
+        grey = (table[:, 0] * 255.0 + 0.5).astype(np.uint8)
+        source = Image.fromarray(
+            np.repeat(grey, 3).reshape(1, TINT_STEPS, 3), mode="RGB")
     elif mode == "L":
+        # A one-component space carrying its OWN embedded profile: read
+        # through that profile, not through the sRGB-grey assumption.
         source = Image.fromarray(
             (table[:, 0] * 255.0 + 0.5).astype(np.uint8).reshape(1, TINT_STEPS), mode="L"
         )
@@ -664,7 +685,7 @@ def _lut_to_cmyk(entry: dict, profile_path: str, gs_path: str):
         transform = ImageCms.buildTransform(
             handle,
             ImageCms.getOpenProfile(profile_path),
-            mode,
+            "RGB" if mode == _GRAY_AS_RGB else mode,
             "CMYK",
             renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC,
         )
@@ -674,7 +695,7 @@ def _lut_to_cmyk(entry: dict, profile_path: str, gs_path: str):
     return converted.reshape(TINT_STEPS, 4).astype(np.float32) / 255.0, assumed, ""
 
 
-def spot_tables(names, alternates: dict, profile_path: str, gs_path: str):
+def spot_tables(names, alternates: dict, profile_path: str):
     """(name → 256×4 CMYK table, what was assumed, the refusal).
 
     A colorant whose alternate is itself a `/Separation` or `/DeviceN` — or
@@ -692,7 +713,7 @@ def spot_tables(names, alternates: dict, profile_path: str, gs_path: str):
         family = str(entry.get("family") or "")
         if family in ("Separation", "DeviceN"):
             return {}, [], undescribable_alternate_message(name, family)
-        table, assumption, refusal = _lut_to_cmyk(entry, profile_path, gs_path)
+        table, assumption, refusal = _lut_to_cmyk(entry, profile_path)
         if refusal:
             return {}, [], refusal
         if table is None:

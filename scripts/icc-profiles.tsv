@@ -1,0 +1,44 @@
+# The bundled ICC colour profiles, one row per shipped profile.
+#
+# `description` is the ICC profile description string and is the ONLY name any
+# caller may use for a bundled profile: the distribution agreement requires
+# every individual profile to be referenced by that string, and the engine
+# resolves by it (src/engine/icc_profiles.py) by reading each shipped
+# profile's own `desc` tag. The file name on disk is the upstream member's
+# base name and carries no meaning — nothing may key off it.
+#
+# `condition` is the profile's own `targ` (characterizationTarget) tag content,
+# empty when the profile declares none. It is the ONLY source for a PDF/X
+# /OutputConditionIdentifier that claims a registered characterization; a
+# profile with an empty condition is identified by its description string
+# instead, because a registry name it does not declare would be invented.
+#
+# `copyright` is the profile's own `cprt` tag, reproduced here so a row cannot
+# be added for a profile whose copyright notice nobody read. The notice gate in
+# scripts/bundle-icc.ps1 refuses to write the resource tree when a row is
+# incomplete or when the shipped end-user licence text is missing.
+#
+# Regenerate the sha256 column with: scripts\bundle-icc.ps1 -WriteManifest
+description	role	member	sha256	condition	copyright
+Coated FOGRA27 (ISO 12647-2:2004)	cmyk	Adobe ICC Profiles (bundler)/CMYK/CoatedFOGRA27.icc	ec41aacd3d0a95e911097443c929848524c8fef645a0f6a18c26dc507576f265		Copyright 2004-2007 Adobe Systems Incorporated
+Coated FOGRA39 (ISO 12647-2:2004)	cmyk	Adobe ICC Profiles (bundler)/CMYK/CoatedFOGRA39.icc	da2b9b593e27cba2563cbc8596071c5c8f2395d3dbb4434538bac2bc9d58ce77	ICCHDAT FOGRA39	Copyright 2007 Adobe Systems, Inc.
+Coated GRACoL 2006 (ISO 12647-2:2004)	cmyk	Adobe ICC Profiles (bundler)/CMYK/CoatedGRACoL2006.icc	81c0a00a8a5ae00c08a1f55f8efa618814762d8ef22df1b39d0e69c990d9f490	ICCHDAT CGATS TR 003	Copyright 2007 Adobe Systems Incorporated
+Japan Color 2001 Coated	cmyk	Adobe ICC Profiles (bundler)/CMYK/JapanColor2001Coated.icc	842bd0543ab1ddd8fe1dd154a3752b461a1589eb39b37a28dee764a319d7b333		Copyright 2002 Adobe Systems, Inc.
+Japan Color 2001 Uncoated	cmyk	Adobe ICC Profiles (bundler)/CMYK/JapanColor2001Uncoated.icc	108472bd69acdf4ccca0b84c5d8d6be916107e4c1d9ca57ed27dd6137e9aa7c1		Copyright 2002 Adobe Systems, Inc.
+Japan Color 2002 Newspaper	cmyk	Adobe ICC Profiles (bundler)/CMYK/JapanColor2002Newspaper.icc	3ad66070209c6721fab7f2506c27e21e24b091bdd491ee0e16ef75964ac26629		Copyright 2004 Adobe Systems, Inc.
+Japan Color 2003 Web Coated	cmyk	Adobe ICC Profiles (bundler)/CMYK/JapanColor2003WebCoated.icc	662a345063b2853a66ed12dc54215e513e8485cbf4cb7f673971c834979eb25f	ICCHDAT JCW2003	Copyright 2007 Adobe Systems Incorporated. For licensing terms and conditions, see http://www.adobe.com/products/eulas/
+Japan Web Coated (Ad)	cmyk	Adobe ICC Profiles (bundler)/CMYK/JapanWebCoated.icc	5d3cfa03514978003cab345ba5fcabbf6bde5b60074e7e7548edb269bf339653		Copyright 2002 Adobe Systems, Inc.
+U.S. Web Coated (SWOP) v2	cmyk	Adobe ICC Profiles (bundler)/CMYK/USWebCoatedSWOP.icc	35f401731df11a4eba3502af632e51d68bc394bcb7d34632a331c1ba3f4a0bf6		Copyright 2000 Adobe Systems, Inc.
+U.S. Web Uncoated v2	cmyk	Adobe ICC Profiles (bundler)/CMYK/USWebUncoated.icc	b1290f5b924dc1d585bdf7edb87a64add4e04fcc32dd092a8804c999d29fa660		Copyright 2000 Adobe Systems, Inc.
+Uncoated FOGRA29 (ISO 12647-2:2004)	cmyk	Adobe ICC Profiles (bundler)/CMYK/UncoatedFOGRA29.icc	9af0eb039208b0ae700d3fccd64a657b174db5c617c09ee79ced7cfcb7d4c392		Copyright 2006 Adobe Systems, Inc.
+Web Coated FOGRA28 (ISO 12647-2:2004)	cmyk	Adobe ICC Profiles (bundler)/CMYK/WebCoatedFOGRA28.icc	817f6969bcd38a82f36dc8fe6ee797bec28bcd57c0d23c363bf56f4957cdac93		Copyright 2006 Adobe Systems, Inc.
+Web Coated SWOP 2006 Grade 3 Paper	cmyk	Adobe ICC Profiles (bundler)/CMYK/WebCoatedSWOP2006Grade3.icc	7380bc2a173c7eaa4f900384bad224b0a2f1dda6ea5339f3aef893f50f4e9d35	ICCHDAT CGATS TR 005	Copyright 2007 Adobe Systems Incorporated
+Web Coated SWOP 2006 Grade 5 Paper	cmyk	Adobe ICC Profiles (bundler)/CMYK/WebCoatedSWOP2006Grade5.icc	15d7ebc8031d8358d1ad2ae5e93d0157d2341ecc72896d4c41779027794745cb	ICCHDAT CGATS TR 006	Copyright 2007 Adobe Systems Incorporated
+Adobe RGB (1998)	rgb	Adobe ICC Profiles (bundler)/RGB/AdobeRGB1998.icc	304f569a83c1e5eddaddac54e99ed03339333db013738bb499ab64f049887e28		Copyright 2000 Adobe Systems Incorporated
+Apple RGB	rgb	Adobe ICC Profiles (bundler)/RGB/AppleRGB.icc	94559b531a2481650e1bcfb8fbf4295e6d315f6ebf3660b9ad6ea96d3c8f8b82		Copyright 2000 Adobe Systems Incorporated
+ColorMatch RGB	rgb	Adobe ICC Profiles (bundler)/RGB/ColorMatchRGB.icc	11f767aef1cdebb4f60ba6432a1b6546558d6de9c51435d46c4333aacec2c4cf		Copyright 2000 Adobe Systems Incorporated
+HDTV (Rec. 709)	rgb	Adobe ICC Profiles (bundler)/RGB/VideoHD.icc	0fff564619d25adb8728e693cee1de9093ad443826164f2956b9a8c15bebc2ca		Copyright 2007 Adobe Systems Incorporated
+PAL/SECAM	rgb	Adobe ICC Profiles (bundler)/RGB/PAL_SECAM.icc	b047f5cd95f0f62a98ceaede6fc59c4b6a76b29f2c74d6204c30553a073ebf7a		Copyright 2000 Adobe Systems Incorporated
+SDTV NTSC	rgb	Adobe ICC Profiles (bundler)/RGB/VideoNTSC.icc	41c835b1ddc851f2b1facdd142a5847f58ac70a99c03d974ce6dede815731c09		Copyright 2007 Adobe Systems Incorporated
+SDTV PAL	rgb	Adobe ICC Profiles (bundler)/RGB/VideoPAL.icc	bf62d7155802ae42b966702986d9911f846dfdacf18aa2299f797c861d1d4f23		Copyright 2007 Adobe Systems Incorporated
+SMPTE-C	rgb	Adobe ICC Profiles (bundler)/RGB/SMPTE-C.icc	8a4df954c554bede09cd9e66192c02a15f7edf736cc3d3939cca0f70fb99925e		Copyright 2000 Adobe Systems Incorporated

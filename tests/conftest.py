@@ -53,6 +53,25 @@ def gs_path():
     return GS_PATH
 
 
+ICC_DIR = os.path.join(os.path.dirname(__file__), "..", "resources", "icc")
+
+
+@pytest.fixture
+def icc_dir():
+    """The bundled colour-profile directory.
+
+    The guard tests for the PROFILES, not for the directory: the release
+    workflow creates the resource directories as stubs, so an isdir check
+    would pass over an empty tree and the tests below would then measure
+    nothing while reporting green.
+    """
+    import glob
+
+    if not glob.glob(os.path.join(ICC_DIR, "*.icc")):
+        pytest.skip("bundled ICC profiles not available")
+    return ICC_DIR
+
+
 def _resolve_soffice():
     """Bundled LibreOffice first (resources/libreoffice), else a system install."""
     bundled = os.path.join(
