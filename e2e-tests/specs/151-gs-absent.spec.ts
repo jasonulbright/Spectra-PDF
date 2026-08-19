@@ -1,5 +1,5 @@
 import { expect } from '@wdio/globals';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -86,6 +86,26 @@ describe('the Ghostscript-absent axis', () => {
     await gsRestore();
     rmSync(tmp, { recursive: true, force: true });
   });
+
+  // A modal left open covers the chrome behind it, so every click the next
+  // test aims at the window lands on the dialog instead. Each test therefore
+  // ends on a bare window whether or not its own assertions held.
+  afterEach(async () => {
+    for (const testId of ['create-pdf-close', 'prefs-close']) {
+      const button = await $(`[data-testid="${testId}"]`);
+      if (await button.isExisting()) await button.click();
+    }
+  });
+
+  /** Preferences, on the Engine section. Opened per test rather than carried
+   * between them: a shared open dialog makes each test depend on the last
+   * one having finished. */
+  async function openEngineSettings(): Promise<void> {
+    expect(await invokeAppCommand('help.licenses')).toBe(true);
+    await waitForDisplayedSelector('[data-testid="prefs-cat-engine"]', { timeout: 10_000 });
+    await $('[data-testid="prefs-cat-engine"]').click();
+    await waitForDisplayedSelector(GS_STATUS, { timeout: 10_000 });
+  }
 
   it('pins the answer the whole renderer reads', async () => {
     const answer = await gsAnswer();
@@ -177,27 +197,37 @@ describe('the Ghostscript-absent axis', () => {
     );
     expect(built).toBe(join(tmp, 'from-image.pdf'));
 
+    // A refused conversion is a NULL result, not a rejection: the dialog
+    // catches its own failure and renders it, which is the shape every
+    // caller of the harness bridge sees.
     const refused = await browser.executeAsync<string, [string, string]>(
       function (src, dest, done) {
         (window as any).__SPECTRA_TEST__
           .createPdfRun([src], dest)
-          .then(() => done('BUILT'))
-          .catch((e: Error) => done(String(e)));
+          .then((r: { output: string } | null) => done(r === null ? 'REFUSED' : 'BUILT'))
+          .catch((e: Error) => done(`THREW ${String(e)}`));
       },
       postscript,
       join(tmp, 'from-ps.pdf'),
     );
-    expect(refused).not.toBe('BUILT');
-    expect(refused).toContain('Ghostscript');
-    await $('[data-testid="create-pdf-close"]').click();
+    expect(refused).toBe('REFUSED');
+    // Nothing was written, so the refusal is the interpreter's absence rather
+    // than a conversion that ran and reported oddly.
+    expect(existsSync(join(tmp, 'from-ps.pdf'))).toBe(false);
+    expect(await $('[data-testid="create-pdf-error"]').getText()).toContain('Ghostscript');
+
+    // And the surface says so before anything is run: the row is marked, the
+    // one shared notice renders, and the button that would start the
+    // conversion is disabled.
+    await expect($('[data-testid="create-pdf-row"] [data-gs-refused="yes"]')).toBeDisplayed();
+    await expect($('[data-testid="create-pdf-gs"]')).toBeDisplayed();
+    expect(await $('[data-testid="create-pdf-convert"]').isEnabled()).toBe(false);
   });
 
   // ── Settings ▸ Engine: the surface where the answer changes ────────────
 
   it('reports the engine as not set up', async () => {
-    expect(await invokeAppCommand('help.licenses')).toBe(true);
-    await $('[data-testid="prefs-cat-engine"]').click();
-    await waitForDisplayedSelector(GS_STATUS, { timeout: 10_000 });
+    await openEngineSettings();
     expect(await $(GS_STATUS).getAttribute('data-gs-available')).toBe('no');
     await expect($(GS_PROBLEM)).toBeDisplayed();
   });
@@ -206,6 +236,7 @@ describe('the Ghostscript-absent axis', () => {
     // The defect this replaced: the old resolver wrote a path into settings
     // whether or not anything answered there, so a mistyped browse left the
     // app pointed at nothing while the panel claimed it was configured.
+    await openEngineSettings();
     const before = await storedGsPath();
     const bogus = join(tmp, 'not-a-ghostscript.exe');
     writeFileSync(bogus, 'this is not a program', 'ascii');
@@ -228,11 +259,11 @@ describe('the Ghostscript-absent axis', () => {
   });
 
   it('a cancelled browse changes nothing at all', async () => {
+    await openEngineSettings();
     const before = await storedGsPath();
     await answerAnyFilePicker(null);
     await $(GS_BROWSE).click();
     expect(await storedGsPath()).toBe(before);
-    await $('[data-testid="prefs-close"]').click();
   });
 
   // ── The claim that makes the whole posture liveable ────────────────────
