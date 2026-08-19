@@ -228,6 +228,14 @@ jobs:
         run: node scripts/sync-ocr-assets.mjs
         shell: pwsh
 
+      - name: Stage corresponding source archives
+        # The HEIF binding ships two LGPL libraries. Every released installer
+        # is accompanied by their exact source and the binding's own sdist;
+        # the staging script downloads only the version- and SHA-256-pinned
+        # rows in scripts/corresponding-source.tsv.
+        run: powershell -ExecutionPolicy Bypass -File scripts/stage-corresponding-source.ps1 -OutputDirectory release-sources
+        shell: pwsh
+
       - name: Build, sign, and publish release
         # v1's breaking changes do not touch this workflow: no renamed
         # inputs are used, Tauri 2 is stable, the bundles are Windows-only,
@@ -243,9 +251,21 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Spectra PDF ${{ github.ref_name }}"
-          releaseBody: "See CHANGELOG.md for details. The installer is unsigned (no code-signing certificate); SmartScreen may warn on first run -- verify your download against SHA256SUMS.txt, published with this release."
+          releaseBody: "See CHANGELOG.md for details. The installer is unsigned (no code-signing certificate); SmartScreen may warn on first run -- verify your download against SHA256SUMS.txt, published with this release. Exact corresponding-source archives for the bundled HEIF decoder libraries are attached to this release."
           releaseDraft: false
           prerelease: false
+
+      - name: Publish corresponding source archives
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $files = @(Get-ChildItem release-sources -File -ErrorAction Stop)
+          if (-not $files) { throw "no corresponding-source archives were staged" }
+          foreach ($file in $files) {
+            gh release upload ${{ github.ref_name }} $file.FullName --clobber
+            if ($LASTEXITCODE -ne 0) { throw "failed to upload $($file.Name)" }
+          }
 
       # The installer is UNSIGNED, so a published checksum is the only way a
       # cautious user can confirm the file they downloaded is the file this
@@ -256,8 +276,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $bundle = "src-tauri/target/release/bundle/nsis"
-          $files = Get-ChildItem $bundle -Filter "*-setup.exe" -ErrorAction Stop
-          if (-not $files) { throw "no installer found in $bundle to checksum" }
+          $installers = @(Get-ChildItem $bundle -Filter "*-setup.exe" -ErrorAction Stop)
+          if (-not $installers) { throw "no installer found in $bundle to checksum" }
+          $sources = @(Get-ChildItem release-sources -File -ErrorAction Stop)
+          if (-not $sources) { throw "no corresponding-source archives found to checksum" }
+          $files = @($installers) + @($sources)
           $lines = foreach ($f in $files) {
             $h = (Get-FileHash -Algorithm SHA256 $f.FullName).Hash.ToLowerInvariant()
             "$h  $($f.Name)"
