@@ -1,9 +1,9 @@
-"""Export PDF pages as raster images via bundled Ghostscript (image half).
+"""Export PDF pages as raster images via Ghostscript (image half).
 
 Why Ghostscript and not the LibreOffice route the Office exports use:
 LibreOffice's CLI image export renders the FIRST page only — useless for a
-multi-page document. The gs raster is already bundled, already trusted for
-visual compare (`compare.py`) and printing, and renders every page.
+multi-page document. The gs raster is the same one already trusted for visual
+compare (`compare.py`) and printing, and renders every page.
 
 Formats:
   png / jpeg — one file PER PAGE. The user's chosen name is treated as the
@@ -24,11 +24,11 @@ margin the crop exists to hide, so the exported file does not depict the page
 the user was looking at when they asked for it.
 """
 
-import subprocess
 from pathlib import Path
 
 import pikepdf
 
+from . import budget
 from .printer import parse_page_spec
 from .validate import validate_pdf
 
@@ -40,7 +40,9 @@ _FORMATS = {
 }
 
 _MIN_DPI, _MAX_DPI = 18, 1200
-_TIMEOUT = 600  # a 1,000-page doc at 300 dpi is minutes, not the default 300s
+#: Budget FLOOR for one export run. The derived allowance adds time per
+#: megabyte and per page on top; this is what the smallest job still gets.
+_TIMEOUT = 600
 
 
 def image_extension(fmt: str) -> str:
@@ -74,7 +76,7 @@ def export_images(
     pages: str = "",
     gray: bool = False,
     quality: int = 90,
-    gs_path: str = "gs",
+    gs_path: str = "",
 ) -> dict:
     """Render pages of ``file`` to raster images.
 
@@ -148,12 +150,17 @@ def export_images(
         cmd.append(f"-sPageList={spec}")
     cmd.extend([f"-sOutputFile={gs_out}", str(input_path)])
 
-    result = subprocess.run(
+    # Through the gs family's own door: it validates the executable and
+    # replaces cmd[0] with the probed path, and it derives the budget from the
+    # input instead of the flat `_TIMEOUT` that a 1,000-page render outgrew.
+    # The floor stays `_TIMEOUT`, so no export that finished before can now
+    # time out.
+    result = budget.gs(
         cmd,
-        capture_output=True,
-        text=True,
-        timeout=_TIMEOUT,
-        stdin=subprocess.DEVNULL,  # gs must never inherit the RPC pipe
+        what="Ghostscript (image export)",
+        path=input_path,
+        pages=n_pages,
+        base=float(_TIMEOUT),
     )
     if result.returncode != 0:
         raise RuntimeError(f"Ghostscript failed: {result.stderr.strip() or result.stdout.strip()}")

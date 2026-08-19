@@ -15,7 +15,7 @@ from .widget_faces import (harvest_appearances, regenerate_appearances_file,
 def grayscale(
     file: str,
     output: str,
-    gs_path: str = "gs",
+    gs_path: str = "",
     font_dir: str = "",
 ) -> dict:
     """Convert a PDF to grayscale using Ghostscript.

@@ -52,6 +52,7 @@ from pathlib import Path
 
 import pikepdf
 
+from . import gs_capability
 from .print_layout import (
     NUP_ORDERS,
     apply_subset,
@@ -288,6 +289,12 @@ def _num(name: str, value, lo, hi) -> float:
 
 
 def _run_jobs(args: list[str], jobs: int) -> None:
+    # The spool run is not a budget.gs shape (the timeout bounds a printer
+    # DRIVER, not a document render), so availability is decided here instead:
+    # `args[0]` is validated once and replaced with the probed path before the
+    # first job spawns. Deciding it before the loop means an unusable
+    # Ghostscript refuses by name rather than failing `copies` times.
+    args = [gs_capability.require(args[0] if args else "").path, *args[1:]]
     for _ in range(jobs):
         try:
             result = subprocess.run(
@@ -314,7 +321,7 @@ def _run_jobs(args: list[str], jobs: int) -> None:
 def print_pdf(
     file: str,
     printer: str,
-    gs_path: str = "gs",
+    gs_path: str = "",
     pages: str = "",
     copies: int = 1,
     fit: str = "fit",
@@ -722,7 +729,7 @@ def print_preview_cleanup(directory: str) -> dict:
 
 def print_preview(
     file: str,
-    gs_path: str = "gs",
+    gs_path: str = "",
     dpi: int = 72,
     max_pages: int = 8,
     cleanup_dir: str | None = None,

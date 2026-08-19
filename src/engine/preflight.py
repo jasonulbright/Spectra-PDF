@@ -1819,7 +1819,7 @@ def _with_english(row: dict) -> dict:
 # ── assembly ──────────────────────────────────────────────────────────────
 
 
-def preflight(file: str, profile=None, profile_path: str = "", gs_path: str = "gs",
+def preflight(file: str, profile=None, profile_path: str = "", gs_path: str = "",
               font_dir: str | None = None) -> dict:
     """The print-readiness report, measured against one profile.
 

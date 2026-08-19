@@ -89,7 +89,7 @@ def run_preflight_sweep(
     log_dir: str = "",
     in_place: bool = False,
     move_processed_root: str = "",
-    gs_path: str = "gs",
+    gs_path: str = "",
     font_dir: str = "",
     tesseract_path: str = "",
     progress: bool = False,

@@ -11,7 +11,7 @@ def convert_pdfa(
     file: str,
     output: str,
     level: str = "2b",
-    gs_path: str = "gs",
+    gs_path: str = "",
 ) -> dict:
     """Convert a PDF to PDF/A format using Ghostscript.
 

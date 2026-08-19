@@ -293,8 +293,6 @@ links.urlMustEmpty	exact	links	url must not be empty
 links.webAddressesEmailAddresses	exact	links	No web addresses or email addresses were found in the text.
 mrc.everyScannedPageFailed	exact	mrc	every scanned page failed mask verification — no MRC output was written
 mrc.everyScannedPageFailedText	exact	mrc	every scanned page failed text verification — no MRC output was written, because a page whose words did not survive is not an output worth having. Try the archival preset, which keeps thin strokes.
-mrc.ghostscriptAvailableMrcCannot	pattern	mrc	Ghostscript is not available at {{v0}} — MRC cannot verify the stencils it writes, and an unverified stencil is not shippable.
-mrc.ghostscriptAvailablePageImage	pattern	mrc	Ghostscript is not available at {{v0}} — the page image cannot be decoded, and MRC has no other way to read it.
 mrc.ghostscriptCouldRenderPage	pattern	mrc	Ghostscript could not render the page image: {{detail}}
 mrc.mrcBackgroundDivisorMust	pattern	mrc	the MRC background divisor must be 1-12, got {{bg_divisor}}
 mrc.mrcForegroundDivisorMust	pattern	mrc	the MRC foreground divisor must be 1-12, got {{fg_divisor}}
@@ -304,7 +302,6 @@ mrc.pdfJbigFilterMask	pattern	mrc	PDF/A-1 has no JBIG2 filter, so the mask codec
 mrc.unknownMrcMaskCodec	pattern	mrc	unknown MRC mask codec: {{name}} (expected one of {{v1}})
 mrc.unknownMrcPresetExpected	pattern	mrc	unknown MRC preset: {{preset}} (expected one of {{v1}})
 mrc_codecs.ccittGMaskMust	pattern	mrc_codecs	a CCITT G4 mask must encode as ONE strip; libtiff wrote {{v0}} — the concatenated stream would decode progressively wrong.
-mrc_codecs.ghostscriptAvailableMaskStream	pattern	mrc_codecs	Ghostscript is not available at {{v0}} — a mask stream cannot be decoded back, and an unverified stencil is not shippable.
 mrc_codecs.jbigEncoderAvailableJbig	pattern	mrc_codecs	The JBIG2 encoder is not available: no jbig2.exe at {{v0}}. Run scripts/bundle-jbig2enc.ps1.
 mrc_codecs.jbigEncoderProducedOutput	pattern	mrc_codecs	The JBIG2 encoder produced no output for page {{v0}}.
 mrc_codecs.jbigEncoderProducedSymbol	exact	mrc_codecs	The JBIG2 encoder produced no symbol dictionary — the shared /JBIG2Globals stream every page refers to is missing.
@@ -498,7 +495,6 @@ pubkey_crypt.leastOneRecipientCertificate	exact	pubkey_crypt	At least one recipi
 pubkey_crypt.readableXCertificatePem	pattern	pubkey_crypt	{{v0}} is not a readable X.509 certificate (PEM or DER).
 rebuild.ghostscriptRebuildFailed	pattern	rebuild	Ghostscript rebuild failed: {{stderr}}
 recognize.couldRenderPageOcr	pattern	recognize	Could not render page {{page}} for OCR: {{detail}}
-recognize.ghostscriptAvailableRequiredRasterise	pattern	recognize	Ghostscript is not available at {{v0}}; it is required to rasterise pages for OCR.
 recognize.invalidRecognitionLanguage	pattern	recognize	Invalid recognition language: {{lang}}
 recognize.ocrEngineAvailableTesseract	pattern	recognize	The OCR engine is not available: no tesseract.exe at {{v0}}. Run scripts/bundle-tesseract.ps1.
 recognize.ocrFailedPage	pattern	recognize	OCR failed on page {{page}}: {{detail}}
@@ -582,7 +578,6 @@ signatures.unknownCertificationLevelChoose	pattern	signatures	Unknown certificat
 signatures.unknownFieldLockChoose	pattern	fieldmdp	Unknown field lock "{{lock}}". Choose all, include, or exclude.
 signatures.validityMustBetweenDay	exact	signatures	Validity must be between 1 day and 20 years.
 slide_export.couldRenderPageSlide	pattern	slide_export	Could not render page {{page_number}} for a slide: {{detail}}
-slide_export.ghostscriptAvailableRequiredRender	pattern	slide_export	Ghostscript is not available at {{v0}}; it is required to render a page's graphics onto a slide.
 slide_export.presentationWrittenSlideS	pattern	slide_export	the presentation was written with {{slides}} slide(s) for {{v1}} exported page(s), so it does not carry the document
 slide_export.unknownSlideSizeChoose	pattern	slide_export	unknown slide size {{slide_size}} (choose page, 16:9 or 4:3)
 soffice.documentPasswordProtectedCannot	pattern	soffice	the document is password-protected and cannot be converted without its password: {{src}}

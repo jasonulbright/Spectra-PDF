@@ -502,7 +502,7 @@ def render_separations(
     file: str,
     page: int = 1,
     dpi: int = 150,
-    gs_path: str = "gs",
+    gs_path: str = "",
     overprint: bool = True,
     reuse: bool = True,
     simulation=None,
@@ -984,7 +984,7 @@ def composite_separations(
     alarm: bool = False,
     output: str = "",
     simulation=None,
-    gs_path: str = "gs",
+    gs_path: str = "",
     icc_dir: str = "",
 ) -> dict:
     """Composite the chosen plates into an RGB PNG, with the ink statistics.
@@ -1100,7 +1100,7 @@ def composite_separations(
     }
 
 
-def list_simulation_profiles(file: str = "", gs_path: str = "gs",
+def list_simulation_profiles(file: str = "", gs_path: str = "",
                              icc_dir: str = "") -> dict:
     """Which press profiles this document can be proofed against.
 

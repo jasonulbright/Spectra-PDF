@@ -696,7 +696,7 @@ def analyze_scan(
     background_strength: float = 1.0,
     osd_confidence: float = DEFAULT_OSD_CONFIDENCE,
     jpeg_quality: int = DEFAULT_JPEG_QUALITY,
-    gs_path: str = "gs",
+    gs_path: str = "",
     tesseract_path: str = "",
 ) -> dict:
     """Measure every selected page and report; write nothing.
@@ -769,7 +769,7 @@ def enhance_scan(
     background_strength: float = 1.0,
     osd_confidence: float = DEFAULT_OSD_CONFIDENCE,
     jpeg_quality: int = DEFAULT_JPEG_QUALITY,
-    gs_path: str = "gs",
+    gs_path: str = "",
     tesseract_path: str = "",
 ) -> dict:
     """Deskew, despeckle, whiten and re-orient every selected scanned page.

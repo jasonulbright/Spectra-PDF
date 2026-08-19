@@ -263,6 +263,28 @@ pub fn get_dictionary_path(app: &AppHandle) -> String {
     dunce::simplified(&dir).to_string_lossy().to_string()
 }
 
+/// The bundled colour-profile DIRECTORY (resources/icc).
+///
+/// Returns the DIR, not one profile, for the same reason as the dictionaries:
+/// the engine resolves a profile by its DESCRIPTION against what is on disk,
+/// so a request for a press condition lands on a real file without the
+/// renderer knowing the file layout. `dunce::simplified` for the same reason
+/// too — a verbatim `\\?\` prefix travels into a path the engine opens, and
+/// the profile bytes are embedded into the document from it.
+///
+/// A missing directory is not resolved away here: the engine's own
+/// `icc_profiles.profile_dir` falls back to the source-tree layout, and a
+/// directory with no profiles in it refuses BY NAME rather than converting
+/// against nothing.
+pub fn get_icc_path(app: &AppHandle) -> String {
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .expect("failed to resolve resource dir");
+    let dir = resource_dir.join("icc");
+    dunce::simplified(&dir).to_string_lossy().to_string()
+}
+
 /// Resolves LibreOffice's `soffice` for Office export. Prefers the vendored copy
 /// (resources/libreoffice, assembled by a setup script and gitignored like the
 /// gs / python runtimes) and falls back to a standard system install, so a dev

@@ -204,9 +204,14 @@ def test_a_deck_with_no_slides_is_refused_and_nothing_survives(tmp_dir, gs_path,
 
 
 def test_refuses_without_ghostscript(tmp_dir):
+    # An EXPLICIT path that names no program, not "" — absent now means
+    # "resolve one", and on a machine that has a Ghostscript installed it
+    # finds it. What must still refuse is a path the user named that cannot
+    # run, and it refuses through the capability authority's own message.
     src = _write(os.path.join(tmp_dir, "s.pdf"), [_text_page(1)])
-    with pytest.raises(RuntimeError, match="Ghostscript is not available"):
-        export_document(src, os.path.join(tmp_dir, "s.pptx"), "pptx", gs_path="")
+    absent = os.path.join(tmp_dir, "nowhere", "gswin64c.exe")
+    with pytest.raises(RuntimeError, match="Ghostscript is required for this operation"):
+        export_document(src, os.path.join(tmp_dir, "s.pptx"), "pptx", gs_path=absent)
 
 
 def test_rejects_an_unknown_slide_size(tmp_dir, gs_path):

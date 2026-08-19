@@ -1078,7 +1078,7 @@ def flatten_transparency(
     pages=None,
     balance: float = DEFAULT_BALANCE,
     dpi: int = DEFAULT_DPI,
-    gs_path: str = "gs",
+    gs_path: str = "",
     outline_text: bool = False,
     outline_strokes: bool = False,
     font_dir: str = "",
