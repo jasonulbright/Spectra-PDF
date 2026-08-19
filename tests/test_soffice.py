@@ -271,13 +271,34 @@ class TestDeclaredFacesWithoutRunningSoffice:
             zf.writestr("word/document.xml", document)
         assert declared_faces(path) == {"Noto Sans Arabic"}
 
-    def test_an_odf_font_name_resolves_through_its_declaration(self):
-        # `style:font-name="Lucida Sans1"` is a REFERENCE to a font-face
-        # declaration whose family is "Lucida Sans". Left unresolved it named a
-        # face nobody has and reported a substitution that never happened.
-        faces = declared_faces(SOURCES / "report.odt")
-        assert "Lucida Sans" in faces
-        assert not any(name.endswith("1") for name in faces), faces
+    def test_odf_counts_only_the_style_and_script_that_body_text_draws(self):
+        # These LibreOffice-generated files carry dormant Microsoft YaHei,
+        # NSimSun and Lucida Sans slots plus unused named styles. None of those
+        # fonts draws the Latin fixture text.
+        assert declared_faces(SOURCES / "report.odt") == {"Liberation Serif"}
+        assert declared_faces(SOURCES / "sheet.ods") == {"Liberation Sans"}
+
+    def test_odf_resolves_each_writing_system_slot_for_actual_text(self, tmp_dir):
+        path = Path(tmp_dir) / "scripts.fodt"
+        path.write_text(
+            '''<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+              xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+              xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+              xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0">
+              <office:font-face-decls>
+                <style:font-face style:name="L" svg:font-family="Latin Face"/>
+                <style:font-face style:name="A" svg:font-family="Asian Face"/>
+                <style:font-face style:name="C1" svg:font-family="Complex Face"/>
+              </office:font-face-decls>
+              <office:styles><style:default-style style:family="paragraph">
+                <style:text-properties style:font-name="L" style:font-name-asian="A"
+                  style:font-name-complex="C1"/>
+              </style:default-style></office:styles>
+              <office:body><office:text><text:p>Latin 中文 العربية</text:p></office:text></office:body>
+            </office:document>''',
+            encoding="utf-8",
+        )
+        assert declared_faces(path) == {"Latin Face", "Asian Face", "Complex Face"}
 
     def test_an_rtf_font_table_name_excludes_the_control_word(self):
         assert declared_faces(SOURCES / "note.rtf") == {"Liberation Serif"}
