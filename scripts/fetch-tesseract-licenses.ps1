@@ -87,7 +87,6 @@ $Sources = [ordered]@{
     # icu4c/LICENSE is a POINTER ("../LICENSE") -- fetch the real text.
     "LICENSE-icu.txt"             = @("https://raw.githubusercontent.com/unicode-org/icu/main/LICENSE")
     "LICENSE-gettext-runtime.txt" = @("https://raw.githubusercontent.com/spdx/license-list-data/main/text/LGPL-2.1-only.txt")
-    "LICENSE-jbigkit.txt"         = @("https://raw.githubusercontent.com/spdx/license-list-data/main/text/GPL-2.0-only.txt")
     "LICENSE-libjpeg-turbo.txt"   = @("https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/main/LICENSE.md")
     "LICENSE-leptonica.txt"       = @("https://raw.githubusercontent.com/DanBloomberg/leptonica/master/leptonica-license.txt")
     # We ship the LIBRARY (liblz4), which is BSD-2 under lib/. The repo-root
