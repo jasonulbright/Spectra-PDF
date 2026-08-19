@@ -184,7 +184,7 @@ def image_to_pdf(src: str | Path, dest: str | Path, *, dpi_default: float = 200.
         raise ValueError(f"the image file is empty: {src_path}")
     if src_path.suffix.lower() in HEIF_SUFFIXES and not _register_heif():
         raise RuntimeError(
-            f"HEIC/HEIF images need the pillow-heif plugin, which this runtime "
+            f"HEIC/HEIF images need the HEIF decoder plugin, which this runtime "
             f"does not have: {src_path}"
         )
     # Registering unconditionally costs nothing and lets a .heic that arrived
