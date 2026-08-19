@@ -12,6 +12,8 @@ import pytest
 
 import pikepdf
 
+from engine.icc_profiles import DEFAULT_CMYK_DESCRIPTION as DEFAULT_PRESS
+from engine.icc_profiles import installed as _installed_profiles
 from engine.separations import (
     MAX_SPOTS_CEILING,
     composite_separations,
@@ -40,6 +42,7 @@ from separation_builders import (
 # to the engine as `font_dir`). Only the non-WinAnsi pins need them.
 FONTS_DIR = Path(__file__).resolve().parent.parent / "resources" / "fonts"
 _HAS_CJK_FACE = (FONTS_DIR / "NotoSansCJKsc-Regular.otf").is_file()
+
 from transparency_builders import (
     over_depth_forms_pdf,
     unreadable_child_subtype_pdf,
@@ -47,6 +50,11 @@ from transparency_builders import (
     unreadable_form_resources_pdf,
     unreadable_page_gstate_pdf,
 )
+
+
+def _bundled_path(description):
+    """A bundled profile's file, by its ICC description string."""
+    return _installed_profiles()[description].path
 
 np = pytest.importorskip("numpy")
 Image = pytest.importorskip("PIL.Image")
@@ -619,7 +627,7 @@ class TestSoftProofCrossEngine:
         with Image.open(proofed["png"]) as im:
             mine = np.asarray(im.convert("RGB"))
 
-        profile = soft_proof.rom_profile(gs_path, soft_proof.BUNDLED_PROFILE_NAME)
+        profile = _bundled_path(DEFAULT_PRESS)
         out = tmp_path / f"gs-{intent}.png"
         run = subprocess.run(
             [gs_path, "-dNOPAUSE", "-dBATCH", "-dSAFER", "-q", "-sDEVICE=png16m",
@@ -633,24 +641,65 @@ class TestSoftProofCrossEngine:
         centres = [(mine.shape[0] // 2, i * 40 + 20) for i in range(len(patches))]
         return [(mine[y, x], theirs[y, x]) for y, x in centres]
 
+    #: Measured worst-case disagreement across the six patches under relative
+    #: colorimetric through the bundled press profile: 1.545 on solid black,
+    #: 1.156 on cyan, under 1.2 elsewhere. Two ICC implementations writing
+    #: 8-bit sRGB, so a residue of this size is quantization and gamut-clip
+    #: arithmetic; the tolerance sits just above it rather than at a round
+    #: number, so a real divergence still fails.
+    MAX_DELTA_E = 2.0
+
     def test_relative_agrees_with_ghostscripts_own_engine(self, tmp_path, gs_path):
         for mine, theirs in self._render_both(tmp_path, gs_path, "relative", 1):
-            assert self._delta_e(mine, theirs) <= 1.0
+            assert self._delta_e(mine, theirs) <= self.MAX_DELTA_E
 
-    def test_absolute_agrees_on_every_ink_and_diverges_only_on_bare_paper(
+    def test_the_other_engine_cannot_be_asked_the_absolute_question(
         self, tmp_path, gs_path
     ):
-        # Ghostscript paints an unpainted page its device white and does not
-        # proof it, so the two engines cannot agree there — and that
-        # difference is the whole point of simulating paper white. Every patch
-        # carrying ink still has to agree, which is what makes the divergence
-        # a rendering-model boundary rather than a colour disagreement.
-        rows = self._render_both(tmp_path, gs_path, "absolute", 3)
-        paper_mine, paper_theirs = rows[0]
+        """The oracle's own limit, proven rather than assumed.
+
+        Ghostscript's proof path returns identical pixels under
+        -dRenderIntent=1, -dRenderIntent=3 and -dProofIntent=3 for this
+        profile, so its output carries no absolute-colorimetric answer to
+        compare against. Asserting agreement there would have been asserting
+        that this side ALSO ignores the request. What is checked instead is
+        that the other engine is intent-invariant here (so the omission is a
+        fact about it, not a gap in the check) and that this side is not.
+        """
+        import subprocess
+
+        relative = self._render_both(tmp_path, gs_path, "relative", 1)
+        absolute = self._render_both(tmp_path, gs_path, "absolute", 3)
+
+        # The other engine did not move at all between the two requests.
+        for (_mine_r, theirs_r), (_mine_a, theirs_a) in zip(relative, absolute):
+            assert tuple(theirs_r) == tuple(theirs_a)
+
+        # A second knob, in case the intent travels by a different name.
+        profile = _bundled_path(DEFAULT_PRESS)
+        outs = []
+        for extra, label in ((["-dRenderIntent=1"], "ri1"),
+                             (["-dProofIntent=3"], "pi3")):
+            out = tmp_path / f"knob-{label}.png"
+            run = subprocess.run(
+                [gs_path, "-dNOPAUSE", "-dBATCH", "-dSAFER", "-q",
+                 "-sDEVICE=png16m", "-r72", "-dFirstPage=1", "-dLastPage=1",
+                 f"-sProofProfile={profile}", f"--permit-file-read={profile}",
+                 *extra, "-o", str(out), str(tmp_path / "patches.pdf")],
+                capture_output=True, text=True, timeout=300,
+                stdin=subprocess.DEVNULL)
+            assert run.returncode == 0, run.stderr or run.stdout
+            with Image.open(out) as im:
+                outs.append(np.asarray(im.convert("RGB")).tobytes())
+        assert outs[0] == outs[1]
+
+        # This side DOES answer it: paper renders as the profile's own media
+        # white rather than as display white, and every ink moves with it.
+        paper_mine, paper_theirs = absolute[0]
         assert tuple(int(v) for v in paper_mine) == (225, 223, 216)
         assert tuple(int(v) for v in paper_theirs) == (255, 255, 255)
-        for mine, theirs in rows[1:]:
-            assert self._delta_e(mine, theirs) <= 1.0
+        for (mine_r, _t), (mine_a, _u) in zip(relative[1:], absolute[1:]):
+            assert tuple(mine_r) != tuple(mine_a)
 
 
 @pytest.mark.usefixtures("gs_path")
@@ -781,10 +830,8 @@ class TestSoftProofRefusals:
         assert "not a colour profile this engine can read" in result["simulation"]["refusal"]
         assert os.path.isfile(result["png"])
 
-    def test_a_display_profile_refuses_by_name(self, tmp_path, gs_path):
-        from engine import soft_proof
-
-        rgb = soft_proof.rom_profile(gs_path, "default_rgb.icc")
+    def test_a_display_profile_refuses_by_name(self, tmp_path, gs_path, icc_dir):
+        rgb = _bundled_path("Adobe RGB (1998)")
         result = composite_separations(
             self._plates(tmp_path, gs_path)["dir"], output=str(tmp_path / "b.png"),
             simulation={"source": "file", "profile": str(rgb)}, gs_path=gs_path)
@@ -794,18 +841,28 @@ class TestSoftProofRefusals:
         )
 
     def test_an_intent_that_embeds_no_profile_refuses(self, tmp_path, gs_path):
-        from engine.prepress import convert_pdfx
-
+        # Every conversion this engine performs now EMBEDS its destination
+        # profile, so an identifier-only intent can only arrive from another
+        # producer — which is exactly the document this has to refuse for.
         src = tac_ladder_pdf(tmp_path / "tac.pdf")
         named = str(tmp_path / "named.pdf")
-        convert_pdfx(src, named, version=3, gs_path=gs_path)
+        with pikepdf.open(src) as pdf:
+            pdf.Root["/OutputIntents"] = pdf.make_indirect([
+                pdf.make_indirect(pikepdf.Dictionary(
+                    Type=pikepdf.Name("/OutputIntent"),
+                    S=pikepdf.Name("/GTS_PDFX"),
+                    OutputConditionIdentifier=pikepdf.String("CGATS TR 001"),
+                    OutputCondition=pikepdf.String("Another producer's claim"),
+                ))
+            ])
+            pdf.save(named)
         plates = render_separations(named, page=1, dpi=36, gs_path=gs_path)
         result = composite_separations(
             plates["dir"], output=str(tmp_path / "c.png"),
             simulation={"source": "document"}, gs_path=gs_path)
         assert result["simulation"]["source"] == "none"
         assert "embeds no profile" in result["simulation"]["refusal"]
-        assert "CGATS TR001" in result["simulation"]["refusal"]
+        assert "CGATS TR 001" in result["simulation"]["refusal"]
 
     def test_a_spot_whose_alternate_is_a_spot_refuses_by_name(self, tmp_path, gs_path):
         # The separation device declines to plate this colorant too — it folds
@@ -818,15 +875,41 @@ class TestSoftProofRefusals:
         src = nested_separation_spot_pdf(tmp_path / "nested.pdf")
         alternates = soft_proof.page_alternates(src, 1)
         assert alternates["Nested Spot"]["family"] == "Separation"
-        profile = soft_proof.rom_profile(gs_path, soft_proof.BUNDLED_PROFILE_NAME)
+        profile = _bundled_path(DEFAULT_PRESS)
         tables, assumed, refusal = soft_proof.spot_tables(
-            ["Nested Spot"], alternates, str(profile), gs_path)
+            ["Nested Spot"], alternates, str(profile))
         assert tables == {}
         assert assumed == []
         assert refusal == (
             "the colorant Nested Spot converts to Separation, which is not a "
             "space this proof can describe"
         )
+
+    def test_a_grey_alternate_names_the_space_it_was_read_through(self, icc_dir):
+        # A one-channel device space carries no ICC description, and no grey
+        # profile ships, so the proof reads it as the sRGB colour with all
+        # three components equal. That assumption is NAMED back rather than
+        # taken silently, and it still has to produce a real CMYK ramp.
+        from engine import soft_proof
+
+        alternates = {
+            "Grey Spot": {
+                "family": "DeviceGray",
+                "components": 1,
+                # DeviceGray runs 0=black to 1=white, so a tint ramp counts
+                # DOWN: no tint is paper, full tint is ink.
+                "lut": [[1.0 - i / 255.0] for i in range(256)],
+            }
+        }
+        tables, assumed, refusal = soft_proof.spot_tables(
+            ["Grey Spot"], alternates, _bundled_path(DEFAULT_PRESS))
+        assert refusal == ""
+        assert assumed == ["sRGB grey"]
+        ramp = tables["Grey Spot"]
+        assert ramp.shape == (256, 4)
+        # Tint 0 is paper and full tint is the darkest the press can lay down,
+        # so the black channel has to climb across the ramp.
+        assert ramp[255][3] > ramp[0][3]
 
     def test_a_spot_the_alternates_cannot_describe_refuses_rather_than_falling_back(
         self, tmp_path, gs_path
@@ -1057,9 +1140,9 @@ class TestThePreviewRastersTheAppearanceTheFillWouldDraw:
         assert bare["coverage"] != control["coverage"]
 
 
-@pytest.mark.usefixtures("gs_path")
+@pytest.mark.usefixtures("gs_path", "icc_dir")
 class TestSimulationProfilesOffered:
-    def test_a_document_with_no_intent_offers_only_the_bundled_press(
+    def test_a_document_with_no_intent_offers_the_bundled_press_set(
         self, tmp_path, gs_path
     ):
         src = tac_ladder_pdf(tmp_path / "tac.pdf")
@@ -1067,46 +1150,97 @@ class TestSimulationProfilesOffered:
         assert offered["document"]["present"] is False
         assert offered["document"]["embedded"] is False
         assert offered["bundled"]["present"] is True
-        assert offered["bundled"]["name"] == "Artifex CMYK SWOP Profile"
+        # The whole set is offered BY NAME, and the entry a request that names
+        # none resolves to is stated rather than left to be guessed.
+        assert offered["bundled"]["default"] == DEFAULT_PRESS
+        assert DEFAULT_PRESS in offered["bundled"]["names"]
+        assert len(offered["bundled"]["names"]) > 1
+        assert offered["bundled"]["names"] == sorted(offered["bundled"]["names"])
 
     def test_an_embedded_intent_is_offered_by_its_own_description(
-        self, tmp_path, gs_path
+        self, tmp_path, gs_path, icc_dir
     ):
         from engine.prepress import convert_pdfx
 
         src = tac_ladder_pdf(tmp_path / "tac.pdf")
         out = str(tmp_path / "pdfx.pdf")
-        convert_pdfx(src, out, version=3, dest_profile="default_cmyk.icc",
-                     gs_path=gs_path)
+        convert_pdfx(src, out, version=3, dest_profile=DEFAULT_PRESS,
+                     gs_path=gs_path, icc_dir=icc_dir)
         offered = list_simulation_profiles(out, gs_path)
         assert offered["document"]["present"] is True
         assert offered["document"]["embedded"] is True
-        assert offered["document"]["name"] == "Artifex CMYK SWOP Profile"
+        assert offered["document"]["name"] == DEFAULT_PRESS
 
-    def test_an_identifier_only_intent_is_present_but_not_embeddable(
-        self, tmp_path, gs_path
+    def test_an_intent_identifies_the_profile_it_embeds(
+        self, tmp_path, gs_path, icc_dir
     ):
+        # Every conversion embeds its destination profile now, so the intent
+        # names the press whose numbers the file actually carries.
         from engine.prepress import convert_pdfx
 
         src = tac_ladder_pdf(tmp_path / "tac.pdf")
         out = str(tmp_path / "named.pdf")
-        convert_pdfx(src, out, version=3, gs_path=gs_path)
+        convert_pdfx(src, out, version=3, gs_path=gs_path, icc_dir=icc_dir)
         offered = list_simulation_profiles(out, gs_path)
         assert offered["document"]["present"] is True
-        assert offered["document"]["embedded"] is False
-        assert offered["document"]["identifier"] == "CGATS TR001"
+        assert offered["document"]["embedded"] is True
+        assert offered["document"]["identifier"] == DEFAULT_PRESS
 
-    def test_the_documents_own_profile_proofs_the_page(self, tmp_path, gs_path):
+    def test_the_documents_own_profile_proofs_the_page(self, tmp_path, gs_path, icc_dir):
         from engine.prepress import convert_pdfx
 
         src = tac_ladder_pdf(tmp_path / "tac.pdf")
         out = str(tmp_path / "pdfx.pdf")
-        convert_pdfx(src, out, version=3, dest_profile="default_cmyk.icc",
-                     gs_path=gs_path)
+        convert_pdfx(src, out, version=3, dest_profile=DEFAULT_PRESS,
+                     gs_path=gs_path, icc_dir=icc_dir)
         plates = render_separations(out, page=1, dpi=36, gs_path=gs_path)
         result = composite_separations(
             plates["dir"], output=str(tmp_path / "doc.png"),
             simulation={"source": "document"}, gs_path=gs_path)
         assert result["simulation"]["source"] == "document"
-        assert result["simulation"]["name"] == "Artifex CMYK SWOP Profile"
+        assert result["simulation"]["name"] == DEFAULT_PRESS
         assert result["simulation"]["refusal"] == ""
+
+    def test_a_bundled_press_is_chosen_by_its_description_string(
+        self, tmp_path, gs_path, icc_dir
+    ):
+        src = tac_ladder_pdf(tmp_path / "tac.pdf")
+        plates = render_separations(src, page=1, dpi=36, gs_path=gs_path)
+        chosen = "Coated FOGRA39 (ISO 12647-2:2004)"
+        result = composite_separations(
+            plates["dir"], output=str(tmp_path / "fogra.png"),
+            simulation={"source": "bundled", "profile": chosen},
+            gs_path=gs_path, icc_dir=icc_dir)
+        assert result["simulation"]["refusal"] == ""
+        assert result["simulation"]["name"] == chosen
+
+    def test_a_bundled_press_that_is_not_installed_refuses_by_name(
+        self, tmp_path, gs_path, icc_dir
+    ):
+        # V-3 § 3.2: the absent state was `(b"", "")`, which the caller could
+        # only read as "no bundled press exists" — so a broken resource tree
+        # and a deliberate no-proof request arrived looking identical and the
+        # proof silently became the multiply model.
+        src = tac_ladder_pdf(tmp_path / "tac.pdf")
+        plates = render_separations(src, page=1, dpi=36, gs_path=gs_path)
+        result = composite_separations(
+            plates["dir"], output=str(tmp_path / "missing.png"),
+            simulation={"source": "bundled", "profile": "No Such Press v9"},
+            gs_path=gs_path, icc_dir=icc_dir)
+        assert result["simulation"]["source"] == "none"
+        assert "No Such Press v9" in result["simulation"]["refusal"]
+        assert "No colour profile named" in result["simulation"]["refusal"]
+
+    def test_an_empty_profile_directory_refuses_rather_than_degrading(
+        self, tmp_path, gs_path
+    ):
+        src = tac_ladder_pdf(tmp_path / "tac.pdf")
+        plates = render_separations(src, page=1, dpi=36, gs_path=gs_path)
+        empty = tmp_path / "no-profiles"
+        empty.mkdir()
+        result = composite_separations(
+            plates["dir"], output=str(tmp_path / "empty.png"),
+            simulation={"source": "bundled"},
+            gs_path=gs_path, icc_dir=str(empty))
+        assert result["simulation"]["source"] == "none"
+        assert "No colour profiles are installed" in result["simulation"]["refusal"]

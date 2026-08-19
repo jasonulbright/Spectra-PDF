@@ -51,6 +51,13 @@ resources/jbig2enc/
 # ~147MB of word lists across 34 languages, same repo-hygiene class as the
 # above. The pinned manifest with every file's sha256 is what lives in git).
 resources/dictionaries/
+# ICC colour profiles (vendored by scripts/bundle-icc.ps1 out of a local
+# licensed package, same repo-hygiene class as the above; the pinned manifest
+# with every profile's sha256 and the end-user licence text are what live in
+# git). The source package is not committed -- it is redistributable only
+# under an agreement carrying an indemnity, so it stays with its holder.
+resources/icc/
+AdobeICCProfilesCS4Win_bundler.zip
 
 # Test
 coverage/

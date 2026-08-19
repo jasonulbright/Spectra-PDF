@@ -6,7 +6,14 @@ from pathlib import Path
 import pikepdf
 import pytest
 
+from engine.icc_profiles import DEFAULT_CMYK_DESCRIPTION as DEFAULT_PRESS
+from engine.icc_profiles import installed as _installed_profiles
 from engine.prepress import convert_cmyk
+
+
+def _bundled_path(icc_dir, description):
+    """A bundled profile's file, by its ICC description string."""
+    return _installed_profiles(icc_dir)[description].path
 
 # The vendored fallback faces (Rust `get_edit_font_path` at run time, threaded
 # to the engine as `font_dir`). Only the non-WinAnsi pin needs them.
@@ -70,18 +77,18 @@ class TestConvertCmyk:
         assert b" k\n" in c or b" k " in c or c.rstrip().endswith(b" k")
         assert b" rg" not in c
 
-    def test_render_intents_produce_distinct_output(self, tmp_dir, gs_path):
+    def test_render_intents_produce_distinct_output(self, tmp_dir, gs_path, icc_dir):
         # The intents the UI offers must actually DIFFER, or a picker option is
-        # a silent no-op (regression). Perceptual / relative / absolute
-        # are distinct with the bundled profile; "saturation" is documented to
-        # collapse to perceptual (that profile has no Saturation table) and is
-        # deliberately absent from the picker — pinned here so a future profile
-        # that makes it distinct is noticed (and returned to the UI).
+        # a silent no-op (regression). All four are distinct now: every
+        # bundled destination profile carries its own saturation table, where
+        # the profile this used to convert through carried none and fell back
+        # to perceptual per the ICC spec.
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
 
         def content(intent):
             out = os.path.join(tmp_dir, f"{intent}.pdf")
-            r = convert_cmyk(src, out, render_intent=intent, gs_path=gs_path)
+            r = convert_cmyk(src, out, render_intent=intent, gs_path=gs_path,
+                             icc_dir=icc_dir)
             assert r["render_intent"] == intent
             with pikepdf.open(out) as pdf:
                 return bytes(pdf.pages[0].Contents.read_bytes())
@@ -92,8 +99,7 @@ class TestConvertCmyk:
         sat = content("saturation")
         assert rel != per, "relative colorimetric must differ from perceptual"
         assert ab != per, "absolute colorimetric must differ from perceptual"
-        # Documented no-op with the built-in profile — the reason the UI omits it.
-        assert sat == per, "saturation unexpectedly distinct — re-offer it in the picker"
+        assert sat != per, "saturation must differ from perceptual"
 
     def test_separation_spot_colours_survive(self, tmp_dir, gs_path):
         # gs's CMYK conversion PRESERVES Separation/spot colours (does not
@@ -125,30 +131,34 @@ class TestConvertCmyk:
             assert b"scn" in c, "the Separation spot colour was flattened away"
 
 
-    def test_a_destination_profile_given_as_a_path_converts(self, tmp_dir, gs_path):
+    def test_a_destination_profile_given_as_a_path_converts(
+            self, tmp_dir, gs_path, icc_dir):
         # -dSAFER blocks the profile READ, so a profile given as a path needs
         # an explicit permit — and a path is every profile a file picker can
-        # produce. The profile is written OUTSIDE the input's directory, which
+        # produce. The profile is copied OUTSIDE the input's directory, which
         # is where a picked one lives.
-        from engine.prepress import _extract_rom_profile
+        import shutil
 
         elsewhere = Path(tmp_dir) / "profiles"
         elsewhere.mkdir()
-        profile = _extract_rom_profile(gs_path, "default_cmyk.icc", elsewhere)
+        profile = elsewhere / "picked.icc"
+        shutil.copy2(_bundled_path(icc_dir, "U.S. Web Uncoated v2"), profile)
         assert profile.read_bytes()[36:40] == b"acsp"
 
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
         out = os.path.join(tmp_dir, "picked.pdf")
-        result = convert_cmyk(src, out, dest_profile=str(profile), gs_path=gs_path)
+        result = convert_cmyk(src, out, dest_profile=str(profile),
+                              gs_path=gs_path, icc_dir=icc_dir)
         assert os.path.getsize(result["output"]) > 0
         content = _content(out)
         assert b" rg" not in content
 
-        # The bare ROM name goes down the same door and is asserted beside it
-        # so the two cannot drift apart again.
-        bare = os.path.join(tmp_dir, "bare.pdf")
-        convert_cmyk(src, bare, dest_profile="default_cmyk.icc", gs_path=gs_path)
-        assert os.path.getsize(bare) > 0
+        # A description string goes down the same door and is asserted beside
+        # it so the two cannot drift apart again.
+        named = os.path.join(tmp_dir, "named.pdf")
+        convert_cmyk(src, named, dest_profile=DEFAULT_PRESS, gs_path=gs_path,
+                     icc_dir=icc_dir)
+        assert os.path.getsize(named) > 0
 
     def test_bad_render_intent_refused(self, tmp_dir):
         # Validated BEFORE Ghostscript is invoked, so no gs needed.
@@ -191,38 +201,43 @@ class TestConvertCmyk:
 class TestConvertPdfx:
     """PDF/X masters with a real output intent."""
 
-    def test_x3_default_carries_intent_and_version(self, tmp_dir, gs_path):
+    def test_x3_default_carries_intent_and_version(self, tmp_dir, gs_path, icc_dir):
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
         out = os.path.join(tmp_dir, "x3.pdf")
         from engine.prepress import convert_pdfx
-        r = convert_pdfx(src, out, gs_path=gs_path)
+        r = convert_pdfx(src, out, gs_path=gs_path, icc_dir=icc_dir)
         assert r["pdfx_version"] == "PDF/X-3:2002"
-        assert r["embedded_profile"] is False
+        # The default destination is a named press, and it is EMBEDDED: an
+        # intent that named a condition and embedded nothing left the file
+        # claiming a press whose numbers it did not carry.
+        assert r["embedded_profile"] is True
+        assert r["dest_profile"] == DEFAULT_PRESS
         with pikepdf.open(out) as pdf:
             intents = pdf.Root["/OutputIntents"]
             assert len(intents) == 1
             i = intents[0]
             assert i["/S"] == pikepdf.Name("/GTS_PDFX")
-            assert str(i["/OutputConditionIdentifier"]) == "CGATS TR001"
-            assert i.get("/DestOutputProfile") is None
-            # The conversion itself went CMYK.
-            assert b" k" in bytes(pdf.pages[0].Contents.read_bytes()) or True
+            assert str(i["/OutputConditionIdentifier"]) == DEFAULT_PRESS
+            assert i.get("/DestOutputProfile") is not None
 
-    def test_x4_and_x1a_versions(self, tmp_dir, gs_path):
+    def test_x4_and_x1a_versions(self, tmp_dir, gs_path, icc_dir):
         from engine.prepress import convert_pdfx
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
         for version, gts in ((4, "PDF/X-4"), (1, "PDF/X-1a:2001")):
             out = os.path.join(tmp_dir, f"x{version}.pdf")
-            r = convert_pdfx(src, out, version=version, gs_path=gs_path)
+            r = convert_pdfx(src, out, version=version, gs_path=gs_path,
+                             icc_dir=icc_dir)
             assert r["pdfx_version"] == gts
 
-    def test_rom_profile_embeds_as_dest_output_profile(self, tmp_dir, gs_path):
+    def test_a_bundled_profile_embeds_as_dest_output_profile(
+            self, tmp_dir, gs_path, icc_dir):
         from engine.prepress import convert_pdfx
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
         out = os.path.join(tmp_dir, "x3p.pdf")
         r = convert_pdfx(
-            src, out, dest_profile="default_cmyk.icc",
+            src, out, dest_profile=DEFAULT_PRESS,
             condition="Probe condition", identifier="Custom", gs_path=gs_path,
+            icc_dir=icc_dir,
         )
         assert r["embedded_profile"] is True
         with pikepdf.open(out) as pdf:
@@ -231,28 +246,33 @@ class TestConvertPdfx:
             data = prof.read_bytes()
             assert data[36:40] == b"acsp"  # a real ICC stream, not a stub
             assert int(prof["/N"]) == 4
+            # A caller's own identifier is honoured, and no registry is
+            # claimed for a condition this engine cannot check.
             assert str(i["/OutputConditionIdentifier"]) == "Custom"
-        # The extraction scratch file was cleaned up.
-        assert not os.path.exists(os.path.join(tmp_dir, "default_cmyk.icc"))
+            assert i.get("/RegistryName") is None
+        # The staging scratch left nothing beside the output.
+        assert not os.path.exists(os.path.join(tmp_dir, "USWebCoatedSWOP.icc"))
 
-    def test_bad_inputs_refused(self, tmp_dir, gs_path):
+    def test_bad_inputs_refused(self, tmp_dir, gs_path, icc_dir):
         from engine.prepress import convert_pdfx
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
         out = os.path.join(tmp_dir, "no.pdf")
         with pytest.raises(ValueError, match="version must be"):
-            convert_pdfx(src, out, version=2, gs_path=gs_path)
-        with pytest.raises(ValueError, match="not found"):
+            convert_pdfx(src, out, version=2, gs_path=gs_path, icc_dir=icc_dir)
+        with pytest.raises(ValueError, match="is not a profile file"):
             convert_pdfx(src, out, dest_profile=os.path.join(tmp_dir, "nope/x.icc"),
-                         gs_path=gs_path)
+                         gs_path=gs_path, icc_dir=icc_dir)
 
-    def test_cmyk_dest_profile_rom_name(self, tmp_dir, gs_path):
+    def test_cmyk_dest_profile_by_description_string(self, tmp_dir, gs_path, icc_dir):
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
         out = os.path.join(tmp_dir, "cmyk.pdf")
-        r = convert_cmyk(src, out, dest_profile="default_cmyk.icc", gs_path=gs_path)
+        r = convert_cmyk(src, out, dest_profile=DEFAULT_PRESS, gs_path=gs_path,
+                         icc_dir=icc_dir)
         assert os.path.getsize(r["output"]) > 0
-        with pytest.raises(ValueError, match="not found"):
+        assert r["dest_profile"] == DEFAULT_PRESS
+        with pytest.raises(ValueError, match="is not a profile file"):
             convert_cmyk(src, out, dest_profile=os.path.join(tmp_dir, "nope/x.icc"),
-                         gs_path=gs_path)
+                         gs_path=gs_path, icc_dir=icc_dir)
 
 
 def _ident(obj):
@@ -1150,86 +1170,84 @@ class TestDestinationProfileClass:
     and reports nothing. The header carries the answer at fixed offsets.
     """
 
-    def test_a_greyscale_profile_is_refused_by_name(self, tmp_dir, gs_path):
-        from engine.prepress import _extract_rom_profile
-
-        elsewhere = Path(tmp_dir) / "profiles"
-        elsewhere.mkdir()
-        grey = _extract_rom_profile(gs_path, "default_gray.icc", elsewhere)
+    def test_a_greyscale_profile_is_refused_by_name(self, tmp_dir, gs_path, icc_dir):
+        # No bundled profile is greyscale, so the case is built from one: the
+        # data colour space is what the check reads, and a one-channel
+        # destination would turn this op into a greyscale conversion.
+        data = bytearray(Path(_bundled_path(icc_dir, DEFAULT_PRESS)).read_bytes())
+        data[16:20] = b"GRAY"
+        grey = Path(tmp_dir) / "grey.icc"
+        grey.write_bytes(bytes(data))
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
         with pytest.raises(ValueError, match='describes "GRAY" colour'):
             convert_cmyk(src, os.path.join(tmp_dir, "out.pdf"),
-                         dest_profile=str(grey), gs_path=gs_path)
+                         dest_profile=str(grey), gs_path=gs_path, icc_dir=icc_dir)
 
-    def test_a_bare_rom_name_is_read_the_same_way(self, tmp_dir, gs_path):
-        # The ROM set holds greyscale and RGB profiles too, and a bare name
+    def test_a_bundled_rgb_profile_is_read_the_same_way(self, tmp_dir, gs_path, icc_dir):
+        # The bundled set holds RGB profiles too, and a description string
         # reaches the same flag, so it is read the same way.
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
         with pytest.raises(ValueError, match="not CMYK"):
             convert_cmyk(src, os.path.join(tmp_dir, "out.pdf"),
-                         dest_profile="default_rgb.icc", gs_path=gs_path)
+                         dest_profile="Adobe RGB (1998)", gs_path=gs_path,
+                         icc_dir=icc_dir)
         convert_cmyk(src, os.path.join(tmp_dir, "ok.pdf"),
-                     dest_profile="default_cmyk.icc", gs_path=gs_path)
+                     dest_profile=DEFAULT_PRESS, gs_path=gs_path, icc_dir=icc_dir)
 
-    def test_a_file_that_is_not_a_profile_is_refused(self, tmp_dir, gs_path):
+    def test_a_file_that_is_not_a_profile_is_refused(self, tmp_dir, gs_path, icc_dir):
         bogus = Path(tmp_dir) / "bogus.icc"
         bogus.write_bytes(b"not an icc profile" * 16)
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
-        with pytest.raises(ValueError, match="is not an ICC profile"):
+        with pytest.raises(ValueError, match="is not a profile file"):
             convert_cmyk(src, os.path.join(tmp_dir, "out.pdf"),
-                         dest_profile=str(bogus), gs_path=gs_path)
+                         dest_profile=str(bogus), gs_path=gs_path, icc_dir=icc_dir)
 
     def test_a_profile_class_that_is_not_an_output_condition_is_refused(
-            self, tmp_dir, gs_path):
+            self, tmp_dir, gs_path, icc_dir):
         # A device link's data colour space is its INPUT space, so the space
         # check alone would let one through; the class is what refuses it.
-        from engine.prepress import _extract_rom_profile
-
-        elsewhere = Path(tmp_dir) / "profiles"
-        elsewhere.mkdir()
-        profile = _extract_rom_profile(gs_path, "default_cmyk.icc", elsewhere)
-        data = bytearray(profile.read_bytes())
+        data = bytearray(Path(_bundled_path(icc_dir, DEFAULT_PRESS)).read_bytes())
         data[12:16] = b"link"
         linked = Path(tmp_dir) / "link.icc"
         linked.write_bytes(bytes(data))
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
         with pytest.raises(ValueError, match='is a "link" profile'):
             convert_cmyk(src, os.path.join(tmp_dir, "out.pdf"),
-                         dest_profile=str(linked), gs_path=gs_path)
+                         dest_profile=str(linked), gs_path=gs_path, icc_dir=icc_dir)
 
-    def test_the_pdfx_door_reads_the_same_header(self, tmp_dir, gs_path):
-        from engine.prepress import _extract_rom_profile, convert_pdfx
+    def test_the_pdfx_door_reads_the_same_header(self, tmp_dir, gs_path, icc_dir):
+        from engine.prepress import convert_pdfx
 
-        elsewhere = Path(tmp_dir) / "profiles"
-        elsewhere.mkdir()
-        grey = _extract_rom_profile(gs_path, "default_gray.icc", elsewhere)
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
         with pytest.raises(ValueError, match="not CMYK"):
             convert_pdfx(src, os.path.join(tmp_dir, "x.pdf"),
-                         dest_profile=str(grey), gs_path=gs_path)
+                         dest_profile="Adobe RGB (1998)", gs_path=gs_path,
+                         icc_dir=icc_dir)
 
 
 class TestOutputDirectoryIsNotScratch:
-    def test_the_rom_extraction_never_deletes_a_file_beside_the_output(
-            self, tmp_dir, gs_path):
-        # The extraction used to write <output dir>/<name> and unlink it, so a
-        # user's own default_cmyk.icc sitting beside the output was deleted by
-        # asking for the bundled profile (measured repro).
+    def test_a_bundled_profile_never_deletes_a_file_beside_the_output(
+            self, tmp_dir, gs_path, icc_dir):
+        # A staged profile written to <output dir>/<name> and unlinked
+        # afterwards once deleted a user's own file of that name sitting
+        # beside the output (measured repro). Nothing is staged there now, and
+        # the proof is that a file of the profile's own name survives.
         from engine.prepress import convert_pdfx
 
         src = _rgb_pdf(os.path.join(tmp_dir, "rgb.pdf"))
         outputs = Path(tmp_dir) / "outputs"
         outputs.mkdir()
-        victim = outputs / "default_cmyk.icc"
+        victim = outputs / Path(_bundled_path(icc_dir, DEFAULT_PRESS)).name
         victim.write_bytes(b"USER FILE - must survive\n" * 4)
         before = victim.read_bytes()
 
         result = convert_pdfx(src, str(outputs / "x3.pdf"),
-                              dest_profile="default_cmyk.icc", gs_path=gs_path)
+                              dest_profile=DEFAULT_PRESS, gs_path=gs_path,
+                              icc_dir=icc_dir)
         assert result["embedded_profile"] is True
         assert victim.is_file(), "the user's profile was deleted"
         assert victim.read_bytes() == before, "the user's profile was overwritten"
         # And the conversion's own scratch left nothing beside the output.
         assert sorted(p.name for p in outputs.iterdir()) == [
-            "default_cmyk.icc", "x3.pdf",
+            victim.name, "x3.pdf",
         ]
