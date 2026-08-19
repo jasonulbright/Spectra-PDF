@@ -25,6 +25,7 @@ from pathlib import Path
 import pikepdf
 
 from engine import distill as distill_mod
+from engine import gs_capability
 from engine import merge as merge_mod
 from engine import soffice as soffice_mod
 from engine.acroform import (
@@ -654,6 +655,13 @@ def create_pdf(
                     gs_path=gs_path,
                     distill_preset=distill_preset,
                 )
+            except gs_capability.GsUnavailable:
+                # `skip` governs SOURCES this run cannot handle. A missing
+                # prerequisite is not a property of one source — absorbing it
+                # per member turns "no Ghostscript is configured" into
+                # "nothing could be converted", which names the wrong problem
+                # and points the user at their files.
+                raise
             except Exception as exc:
                 if on_unsupported == "refuse":
                     raise

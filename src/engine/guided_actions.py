@@ -664,7 +664,7 @@ def run_action(
                 create_pdf(
                     members,
                     str(out_path),
-                    gs_path=gs_path or "gs",
+                    gs_path=gs_path,
                     soffice_path=soffice_path,
                     **build_params,
                 )

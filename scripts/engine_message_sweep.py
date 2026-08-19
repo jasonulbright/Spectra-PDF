@@ -71,6 +71,7 @@ PUBLIC_EXCEPTIONS = frozenset(
         # so it still needs a row.
         "FieldSpecError",
         "OutlineRefusal",
+        "GsUnavailable",
     }
 )
 

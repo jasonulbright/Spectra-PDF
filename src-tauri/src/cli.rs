@@ -27,6 +27,12 @@ pub struct Cli {
     /// Start the GUI minimized to the system tray (used by Start with Windows).
     #[arg(long)]
     pub minimized: bool,
+
+    /// Path to a Ghostscript console executable (gswin64c.exe). Ghostscript is
+    /// installed separately; without this the CLI looks at SPECTRAPDF_GS_PATH,
+    /// the machine's installed programs, and PATH.
+    #[arg(long, global = true, value_name = "PATH")]
+    pub gs_path: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -2520,8 +2526,23 @@ fn resolve_engine_script() -> PathBuf {
     exe_dir().join("engine").join("__startup__.py")
 }
 
-fn resolve_gs() -> PathBuf {
-    exe_dir().join("ghostscript").join("gswin64c.exe")
+/// The `--gs-path` value for this process, set once from the parsed argv.
+static EXPLICIT_GS: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+/// The vendored Ghostscript, if this build still carries one. A CANDIDATE,
+/// never the answer — the resolution must not assume the tree exists.
+fn bundled_gs_candidate() -> Option<PathBuf> {
+    let exe = exe_dir().join("ghostscript").join("gswin64c.exe");
+    exe.is_file().then_some(exe)
+}
+
+/// A PROBED Ghostscript, or the one named error every gs subcommand reports.
+///
+/// One resolver for all 29 gs-needing subcommands: the error text is written
+/// once, so no subcommand can drift back into reporting a raw spawn failure.
+fn resolve_gs() -> Result<PathBuf, String> {
+    let explicit = EXPLICIT_GS.get().cloned().flatten();
+    crate::gs::resolve_for_cli(explicit.as_deref(), bundled_gs_candidate().as_deref())
 }
 
 /// The vendored native Tesseract. Mirrors `resolve_gs`:
@@ -2964,7 +2985,12 @@ fn resolve_sheet(
 // ── Main CLI entry point ────────────────────────────────────────────────────
 
 /// Run the CLI. Returns the exit code.
-pub fn run(command: CliCommand) -> i32 {
+pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
+    // Set once, before any subcommand resolves: `resolve_gs` is called from
+    // dozens of arms and threading the value through every one of them is how
+    // one arm gets left reading the wrong source.
+    let _ = EXPLICIT_GS.set(gs_path);
+
     // Printer enumeration/capabilities are pure winspool — no Python engine
     // to spawn.
     if let CliCommand::Printers(args) = &command {
@@ -3040,7 +3066,7 @@ pub fn run(command: CliCommand) -> i32 {
 fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, String> {
     match command {
         CliCommand::Compress(args) => {
-            let gs = resolve_gs();
+            let gs = resolve_gs()?;
             let mut params = json!({
                 "file": abs(&args.input).to_string_lossy(),
                 "output": abs(&args.output).to_string_lossy(),
@@ -3064,7 +3090,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::Print(args) => {
-            let gs = resolve_gs();
+            let gs = resolve_gs()?;
             let mut params = json!({
                 "file": abs(&args.input).to_string_lossy(),
                 "printer": args.printer,
@@ -3248,7 +3274,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     json!({
                         "sources": sources,
                         "output": abs(&args.output).to_string_lossy(),
-                        "gs_path": resolve_gs().to_string_lossy(),
+                        "gs_path": resolve_gs()?.to_string_lossy(),
                         "soffice_path": resolve_soffice(),
                     }),
                 );
@@ -3285,7 +3311,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "image_dpi_default": args.image_dpi,
                     "distill_preset": args.quality,
                     "on_unsupported": if args.skip_unsupported { "skip" } else { "refuse" },
-                    "gs_path": resolve_gs().to_string_lossy(),
+                    "gs_path": resolve_gs()?.to_string_lossy(),
                     "soffice_path": resolve_soffice(),
                 }),
             )
@@ -3329,7 +3355,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     // The resolution the device REPORTED BACK, so a driver
                     // that clamped the request still sizes its pages right.
                     "image_dpi_default": if result.dpi > 0 { result.dpi as f64 } else { args.image_dpi },
-                    "gs_path": resolve_gs().to_string_lossy(),
+                    "gs_path": resolve_gs()?.to_string_lossy(),
                     "soffice_path": resolve_soffice(),
                 }),
             );
@@ -3355,7 +3381,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "distill_preset": args.quality,
                     "log_dir": args.log_dir.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
                     "progress": args.verbose,
-                    "gs_path": resolve_gs().to_string_lossy(),
+                    "gs_path": resolve_gs()?.to_string_lossy(),
                     "soffice_path": resolve_soffice(),
                 }),
             )
@@ -3429,7 +3455,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::Pdfa(args) => {
-            let gs = resolve_gs();
+            let gs = resolve_gs()?;
             engine.call(
                 "convert_pdfa",
                 json!({
@@ -3442,7 +3468,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::ConvertCmyk(args) => {
-            let gs = resolve_gs();
+            let gs = resolve_gs()?;
             // A bare bundled-profile name passes through; a path is absolutized.
             let profile = if args.dest_profile.is_empty()
                 || !(args.dest_profile.contains('/') || args.dest_profile.contains('\\'))
@@ -3465,7 +3491,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::ConvertPdfx(args) => {
-            let gs = resolve_gs();
+            let gs = resolve_gs()?;
             let profile = if args.dest_profile.is_empty()
                 || !(args.dest_profile.contains('/') || args.dest_profile.contains('\\'))
             {
@@ -3782,7 +3808,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "output": abs(&args.output).to_string_lossy(),
                 "balance": args.balance,
                 "dpi": args.dpi,
-                "gs_path": resolve_gs().to_string_lossy(),
+                "gs_path": resolve_gs()?.to_string_lossy(),
                 "outline_text": args.outline_text,
                 "outline_strokes": args.outline_strokes,
                 "font_dir": resolve_fonts().to_string_lossy().to_string(),
@@ -3836,7 +3862,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "output": abs(&args.output).to_string_lossy(),
                 "level": args.level,
                 "trapping": !args.no_trapping,
-                "gs_path": resolve_gs().to_string_lossy(),
+                "gs_path": resolve_gs()?.to_string_lossy(),
             });
             if let Some(pages) = &args.pages {
                 let numbers = parse_page_numbers(pages)?;
@@ -3867,7 +3893,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "box": args.box_,
                     "margin": args.margin,
                     "preview": args.preview,
-                    "gs_path": resolve_gs().to_string_lossy(),
+                    "gs_path": resolve_gs()?.to_string_lossy(),
                 })
             } else {
                 json!({
@@ -3992,7 +4018,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         ),
 
         CliCommand::OcrFile(args) => {
-            let gs = resolve_gs();
+            let gs = resolve_gs()?;
             let tesseract = resolve_tesseract();
             engine.call(
                 "ocr_file",
@@ -4033,7 +4059,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "background_strength": args.background_strength,
                 "osd_confidence": args.osd_confidence,
                 "jpeg_quality": args.jpeg_quality,
-                "gs_path": resolve_gs().to_string_lossy(),
+                "gs_path": resolve_gs()?.to_string_lossy(),
                 "tesseract_path": resolve_tesseract().to_string_lossy(),
             });
             if args.analyze {
@@ -4065,7 +4091,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "dest": args.dest.as_ref().map(|p| abs(p).to_string_lossy().to_string()).unwrap_or_default(),
                 "steps": steps,
                 "action_name": name,
-                "gs_path": resolve_gs().to_string_lossy(),
+                "gs_path": resolve_gs()?.to_string_lossy(),
                 "tesseract_path": resolve_tesseract().to_string_lossy(),
                 // An action may START with a create_pdf step, so
                 // the LibreOffice arm has to be reachable from a scheduled run
@@ -4154,7 +4180,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 // The bundled device. Total area coverage is the one check
                 // that needs it, and a missing one is reported by the check
                 // rather than refused by the run.
-                "gs_path": resolve_gs().to_string_lossy(),
+                "gs_path": resolve_gs()?.to_string_lossy(),
             }),
         ),
 
@@ -4170,7 +4196,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     .map(|p| abs(p).to_string_lossy().into_owned())
                     .unwrap_or_default(),
                 "checks": if args.fixes.is_empty() { None } else { Some(args.fixes.clone()) },
-                "gs_path": resolve_gs().to_string_lossy(),
+                "gs_path": resolve_gs()?.to_string_lossy(),
                 "font_dir": resolve_fonts().to_string_lossy(),
                 "tesseract_path": resolve_tesseract().to_string_lossy(),
             }),
@@ -4187,7 +4213,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "profile_path": args.profile_path.as_ref()
                     .map(|p| abs(p).to_string_lossy().into_owned())
                     .unwrap_or_default(),
-                "gs_path": resolve_gs().to_string_lossy(),
+                "gs_path": resolve_gs()?.to_string_lossy(),
                 "font_dir": resolve_fonts().to_string_lossy(),
                 "tesseract_path": resolve_tesseract().to_string_lossy(),
                 "write_log": args.log_dir.is_some(),
@@ -4332,7 +4358,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "output": abs(&args.output).to_string_lossy(),
                 "fmt": args.format,
                 "soffice_path": resolve_soffice(),
-                "gs_path": resolve_gs().to_string_lossy(),
+                "gs_path": resolve_gs()?.to_string_lossy(),
             });
             // An omitted option stays absent rather than defaulting here: the
             // engine refuses an option the target does not take, and a value
@@ -4402,7 +4428,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "dest": abs(&args.dest).to_string_lossy(),
                     "steps": [{ "op": op, "params": serde_json::Value::Object(params) }],
                     "action_name": format!("Export folder to {}", args.format),
-                    "gs_path": resolve_gs().to_string_lossy(),
+                    "gs_path": resolve_gs()?.to_string_lossy(),
                     "soffice_path": resolve_soffice(),
                     "log_dir": args
                         .log_dir
@@ -4415,7 +4441,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::ExportImages(args) => {
-            let gs = resolve_gs();
+            let gs = resolve_gs()?;
             engine.call(
                 "export_images",
                 json!({
@@ -4550,7 +4576,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
 
         CliCommand::Compare(args) => {
             if args.visual {
-                let gs = resolve_gs();
+                let gs = resolve_gs()?;
                 engine.call(
                     "compare_visual",
                     json!({
@@ -4807,7 +4833,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "scan": args.scan,
                     "lang": args.lang,
                     "tesseract_path": resolve_tesseract().to_string_lossy(),
-                    "gs_path": resolve_gs().to_string_lossy(),
+                    "gs_path": resolve_gs()?.to_string_lossy(),
                     "max_candidates": args.max_candidates,
                 }),
             )
@@ -4829,7 +4855,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 "scan": args.scan,
                 "lang": args.lang,
                 "tesseract_path": resolve_tesseract().to_string_lossy(),
-                "gs_path": resolve_gs().to_string_lossy(),
+                "gs_path": resolve_gs()?.to_string_lossy(),
                 "max_candidates": args.max_candidates,
                 "allow_signed": args.include_signed,
                 "font_dir": resolve_fonts().to_string_lossy().to_string(),
@@ -5032,7 +5058,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::Grayscale(args) => {
-            let gs = resolve_gs();
+            let gs = resolve_gs()?;
             engine.call(
                 "grayscale",
                 json!({
@@ -5045,7 +5071,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::Distill(args) => {
-            let gs = resolve_gs();
+            let gs = resolve_gs()?;
             engine.call(
                 "distill",
                 json!({
@@ -5106,7 +5132,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             // log all live engine-side (engine/batch_ocr.py) so the CLI and a
             // scheduled run behave identically to each other -- and log
             // identically to the GUI.
-            let gs = resolve_gs();
+            let gs = resolve_gs()?;
             engine.call(
                 "batch_ocr",
                 json!({
@@ -5144,7 +5170,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::Rebuild(args) => {
-            let gs = resolve_gs();
+            let gs = resolve_gs()?;
             engine.call(
                 "rebuild",
                 json!({
@@ -5202,7 +5228,7 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
         });
     }
 
-    let gs = resolve_gs();
+    let gs = resolve_gs()?;
     let total = pdfs.len();
     let mut succeeded = 0usize;
     let mut failed = 0usize;
@@ -5291,7 +5317,7 @@ fn run_batch(engine: &mut CliEngine, args: &BatchArgs) -> Result<Value, String> 
                 }),
             ),
             BatchOperation::Rebuild => {
-                let gs = resolve_gs();
+                let gs = resolve_gs()?;
                 engine.call(
                     "rebuild",
                     json!({

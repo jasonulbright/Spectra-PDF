@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
@@ -202,17 +203,31 @@ pub fn get_tesseract_path(app: &AppHandle) -> String {
     dunce::simplified(&exe).to_string_lossy().to_string()
 }
 
-/// Resolves the path to the bundled Ghostscript executable.
+/// The vendored Ghostscript path, if this build still carries one.
+///
+/// A CANDIDATE, never the answer: Ghostscript is user-supplied, the resource
+/// tree may hold no copy at all, and a path string is not a capability. It is
+/// the last input to `gs::resolve` and nothing else may consume it.
+pub fn bundled_gs_candidate(app: &AppHandle) -> Option<PathBuf> {
+    let resource_dir = app.path().resource_dir().ok()?;
+    let exe = resource_dir.join("ghostscript").join("gswin64c.exe");
+    exe.is_file().then_some(exe)
+}
+
+/// Resolves a USABLE Ghostscript, or "" when there is none.
+///
+/// The empty string is the honest answer for "no capability": every consumer
+/// that used to receive a path to a file that might not exist now receives
+/// either a probed, runnable program or nothing, and the engine's own
+/// authority refuses by name on nothing.
 pub fn get_gs_path(app: &AppHandle) -> String {
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .expect("failed to resolve resource dir");
-    resource_dir
-        .join("ghostscript")
-        .join("gswin64c.exe")
-        .to_string_lossy()
-        .to_string()
+    let bundled = bundled_gs_candidate(app);
+    let answer = crate::gs::resolve(None, bundled.as_deref());
+    if answer.available {
+        answer.path
+    } else {
+        String::new()
+    }
 }
 
 /// The bundled fallback-font DIRECTORY for Edit ▸ Text's
