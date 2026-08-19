@@ -39,7 +39,6 @@ from pikepdf import Array, Dictionary, Name
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-GS = REPO / "resources" / "ghostscript" / "gswin64c.exe"
 
 PAGE_W, PAGE_H = 612.0, 792.0
 DPI = 300
@@ -100,11 +99,18 @@ def _text_pdf(dest: Path) -> None:
 
 
 def _render(src: Path, dest: Path) -> Image.Image:
-    if not GS.is_file():
-        raise SystemExit(f"Ghostscript is not vendored at {GS}")
+    # Fixture regeneration follows the same capability rule as the product:
+    # Ghostscript is user-installed, never under resources/ghostscript, and a
+    # file's existence alone does not prove it can initialise or render.
+    engine_src = str(REPO / "src")
+    if engine_src not in sys.path:
+        sys.path.insert(0, engine_src)
+    from engine.gs_capability import require  # noqa: PLC0415
+
+    gs = require().path
     subprocess.run(
         [
-            str(GS), "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER",
+            gs, "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER",
             "-sDEVICE=png16m", f"-r{DPI}", f"-sOutputFile={dest}", str(src),
         ],
         check=True,

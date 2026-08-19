@@ -26,7 +26,7 @@ jobs:
   verify:
     name: Verify (gates + version consistency)
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
 
@@ -134,6 +134,36 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-icc.ps1
         shell: pwsh
 
+      - name: Stage the shipped edit fonts for engine tests
+        run: powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1
+        shell: pwsh
+
+      - name: Stage the shipped LibreOffice runtime for engine tests
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1
+        shell: pwsh
+
+      - name: Stage the shipped native Tesseract runtime for engine tests
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
+        shell: pwsh
+
+      - name: Stage the shipped JBIG2 encoder for engine tests
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-jbig2enc.ps1
+        shell: pwsh
+
+      - name: Stage the shipped spelling dictionaries for engine tests
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-dictionaries.ps1
+        shell: pwsh
+
+      - name: Stage the shipped Finnish spelling runtime for engine tests
+        # Must follow dictionaries and Tesseract for the same dependency order
+        # the release build itself uses below.
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-voikko.ps1
+        shell: pwsh
+
+      - name: Stage the shipped OCR language models for engine tests
+        run: node scripts/sync-ocr-assets.mjs
+        shell: pwsh
+
       - name: Install Ghostscript as a TEST TOOL (capability-present axis)
         # Ghostscript remains user-installed and absent from the installer.
         # This unpinned test install proves the minimum-version capability path
@@ -150,6 +180,8 @@ jobs:
 
       - name: Engine tests (full suite)
         run: python -m pytest tests/ -q
+        env:
+          SPECTRAPDF_REQUIRE_ZERO_SKIPS: "1"
 
   release:
     name: Build & publish (Windows)

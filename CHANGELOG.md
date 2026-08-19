@@ -25,6 +25,7 @@
 - Third-party notices now match the components in the installer and remain available offline.
 - Exact source archives for the bundled HEIF decoder libraries accompany the release and appear in its checksum file.
 - Clean GitHub builds no longer depend on a developer's ignored Ghostscript resource folder.
+- Clean GitHub verification now stages every shipped engine resource and fails if any engine test is skipped.
 
 ## 1.1.6
 
