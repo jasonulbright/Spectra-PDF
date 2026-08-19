@@ -10,9 +10,10 @@
 # any file it names. See THIRD-PARTY-LICENSES.md section LibreOffice.
 #
 # Two sources, tried in order:
-#   1. A local system install (C:\Program Files\LibreOffice) -- copied verbatim.
-#      This is the fast path on a dev/packaging machine that already has it
-#      (e.g. cutting a release locally: it just copies your installed copy).
+#   1. A local system install (C:\Program Files\LibreOffice) -- copied verbatim
+#      ONLY when its three-part release version matches the pinned version below.
+#      This is the fast path on a dev/packaging machine that already has the
+#      exact release build; an older/newer install cannot change shipped bytes.
 #   2. The official upstream Windows .msi -- downloaded, CHECKSUM-VERIFIED, and
 #      extracted headlessly. This is what makes a CI-tag release self-sufficient:
 #      the GitHub windows-latest runner has no LibreOffice, so it falls to this
@@ -113,6 +114,16 @@ function Assert-Notices([string]$tree) {
     Write-Host "Notice gate: $($rows.Count) manifest rows verified against $tree"
 }
 
+function Get-InstallReleaseVersion([string]$root) {
+    $soffice = Join-Path $root "program\soffice.exe"
+    if (-not (Test-Path -LiteralPath $soffice)) { return $null }
+    $productVersion = (Get-Item -LiteralPath $soffice).VersionInfo.ProductVersion
+    if ($productVersion -match '^(\d+\.\d+\.\d+)(?:\.\d+)?') {
+        return $Matches[1]
+    }
+    return $null
+}
+
 if ($GateOnly) {
     Assert-Notices $DestDir
     exit 0
@@ -147,6 +158,12 @@ $roots = @(
 ) | Where-Object { $_ -and (Test-Path $_) }
 
 foreach ($r in $roots) {
+    $localVersion = Get-InstallReleaseVersion $r
+    if ($localVersion -ne $Version) {
+        $shownVersion = if ($localVersion) { $localVersion } else { "unknown" }
+        Write-Host "Skipping local LibreOffice $shownVersion at $r; release pin is $Version."
+        continue
+    }
     if (Copy-Install $r) {
         Assert-Notices $DestDir
         $ver = (& (Join-Path $DestDir "program\soffice.exe") --version 2>$null | Select-Object -First 1)
@@ -206,6 +223,11 @@ $installed = Get-ChildItem -Path $Extract -Recurse -Filter "soffice.exe" -ErrorA
     Select-Object -First 1
 if (-not $installed) { Write-Error "soffice.exe not found in the extracted MSI."; exit 1 }
 $root = Split-Path (Split-Path $installed.FullName -Parent) -Parent
+$extractedVersion = Get-InstallReleaseVersion $root
+if ($extractedVersion -ne $Version) {
+    Write-Error "Extracted LibreOffice version '$extractedVersion' does not match release pin '$Version'."
+    exit 1
+}
 if (Copy-Install $root) {
     Assert-Notices $DestDir
     Write-Host "Vendored LibreOffice into $DestDir"

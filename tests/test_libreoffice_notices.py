@@ -91,6 +91,16 @@ class TestManifest:
         assert "poppler_data" in text
         assert "GPL-2.0-or-later" in text
 
+    def test_the_local_fast_path_cannot_override_the_release_pin(self):
+        text = open(BUNDLER, encoding="utf-8").read()
+        version = re.search(r'\[string\]\$Version = "(\d+\.\d+\.\d+)"', text)
+        assert version, "bundler has no pinned LibreOffice version"
+        assert f"/src/{version.group(1)}/" in open(MANIFEST, encoding="utf-8").read()
+        assert "Get-InstallReleaseVersion $r" in text
+        assert "$localVersion -ne $Version" in text
+        assert "Get-InstallReleaseVersion $root" in text
+        assert "$extractedVersion -ne $Version" in text
+
 
 @needs_tree
 class TestProvisionedTree:
