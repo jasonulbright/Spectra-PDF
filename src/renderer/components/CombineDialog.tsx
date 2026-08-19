@@ -3,7 +3,9 @@ import { useAppModal } from '../hooks/useAppModal';
 import { useEngine } from '../hooks/useEngine';
 import { useOperationQueue } from '../hooks/useOperationQueue';
 import { app, dialog } from '../lib/tauri-bridge';
-import { ensureGsPath } from '../panels/SettingsPanel';
+import { gsBlocked, gsPathIfAvailable, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from './GsRequiredNotice';
 import { TEST_HARNESS_ENABLED, registerCombine, type CombineRunOptions } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, type UiKey } from '../i18n';
@@ -171,6 +173,10 @@ export function CombineDialog({
   }, [rows, callRaw]);
 
   const blockerKey = combineBlocker(rows, target, destination);
+  const gs = useGsCapability();
+  // A PostScript member is the one kind Ghostscript distils; a list without
+  // one combines with no interpreter at all.
+  const psRefused = rows.some((r) => r.kind === 'postscript') && gsBlocked(gs);
   const planned = useMemo(() => plannedPages(rows), [rows]);
 
   const addSources = useCallback(async () => {
@@ -194,10 +200,13 @@ export function CombineDialog({
    * LIST, and asking per row would stall the run half-way through it. */
   const toolPaths = useCallback(
     async () => {
-      const [gsPath, sofficePath] = await Promise.all([ensureGsPath(), app.getSofficePath()]);
+      const [gsPath, sofficePath] = await Promise.all([
+        rows.some((r) => r.kind === 'postscript') ? requireGsPath() : gsPathIfAvailable(),
+        app.getSofficePath(),
+      ]);
       return { gs_path: gsPath, soffice_path: sofficePath };
     },
-    [],
+    [rows],
   );
 
   const combineIntoNew = useCallback(
@@ -599,6 +608,8 @@ export function CombineDialog({
           </p>
         )}
 
+        {psRefused && <GsRequiredNotice capability={gs} testId="combine-gs" />}
+
         <div className="flex justify-end gap-2 pt-1">
           {result && (
             <button
@@ -625,7 +636,7 @@ export function CombineDialog({
             type="button"
             data-testid="combine-run"
             className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
-            disabled={blockerKey !== null || busy}
+            disabled={blockerKey !== null || busy || psRefused}
             onClick={() => void combine()}
           >
             {tChrome(busy ? 'dialog.combine.combining' : 'dialog.combine.combine')}

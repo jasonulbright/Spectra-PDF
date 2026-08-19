@@ -3,6 +3,8 @@
 // idiom, plus match navigation (↑/↓/Enter) and the "Make searchable" action
 // (persist OCR text via the engine — the addition PDFx doesn't have).
 import React, { useEffect, useRef } from 'react';
+import { gsBlocked } from '../../lib/gs-capability';
+import { useGsCapability } from '../../hooks/useGsCapability';
 import { useTranslation } from 'react-i18next';
 import type { SearchResult } from '../../search/engine';
 import type { SearchOptions } from '../../search/normalize';
@@ -66,6 +68,7 @@ export function FindBar({
   onClose,
 }: FindBarProps): React.ReactElement {
   useTranslation();
+  const gsOff = gsBlocked(useGsCapability());
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -142,7 +145,10 @@ export function FindBar({
           </button>
         </>
       )}
-      {ocrRemaining > 0 && (
+      {/* Recognition rasterises through Ghostscript, so the OCR half of the
+          find bar disappears without one — the TEXT search beside it needs
+          none and is untouched. */}
+      {!gsOff && ocrRemaining > 0 && (
         <span
           data-testid="find-ocr-progress"
           className="text-xs text-amber-300/90 whitespace-nowrap"
@@ -151,7 +157,7 @@ export function FindBar({
           {tChrome('canvas.find.ocrProgress', { count: tNumber(ocrRemaining) })}
         </span>
       )}
-      {hasScanned && (
+      {!gsOff && hasScanned && (
         <select
           data-testid="find-ocr-lang"
           title={tChrome('canvas.find.ocrLanguage')}
@@ -166,7 +172,7 @@ export function FindBar({
           ))}
         </select>
       )}
-      {canApplyOcr && (
+      {!gsOff && canApplyOcr && (
         <button
           data-testid="find-apply-ocr"
           disabled={applyingOcr}

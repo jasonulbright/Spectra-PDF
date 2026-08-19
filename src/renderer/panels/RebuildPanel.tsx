@@ -3,7 +3,9 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
-import { ensureGsPath } from './SettingsPanel';
+import { gsBlocked, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import { suffixedOutputName } from '../lib/output-names';
@@ -15,6 +17,7 @@ export function RebuildPanel(): React.ReactElement {
   const { call, saveFile } = useEngine();
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const gs = useGsCapability();
 
   const handleRebuild = useCallback(async () => {
     if (!activeFile) return;
@@ -22,7 +25,7 @@ export function RebuildPanel(): React.ReactElement {
     if (!output) return;
     setBusy(true); setStatus(tChrome('panel.rebuild.rebuilding'));
     try {
-      const r = await call('rebuild', { file: activeFile.workingPath, output, gs_path: await ensureGsPath() });
+      const r = await call('rebuild', { file: activeFile.workingPath, output, gs_path: await requireGsPath() });
       const orig = (r.original_size / 1024).toFixed(0);
       const out = (r.rebuilt_size / 1024).toFixed(0);
       setStatus(tChrome('panel.rebuild.done', { from: orig, to: out, pages: r.pages }));
@@ -37,7 +40,8 @@ export function RebuildPanel(): React.ReactElement {
       <div className="text-sm text-neutral-400">{tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span> ({tChromeCount('panel.common.pageCount', activeFile.pageCount)})</div>
       <p className="text-sm text-neutral-500">{tChrome('panel.rebuild.blurb')}</p>
       <p className="text-xs text-amber-500/80">{tChrome('panel.rebuild.note')}</p>
-      <button onClick={handleRebuild} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+      <GsRequiredNotice capability={gs} testId="rebuild-gs" />
+      <button onClick={handleRebuild} disabled={busy || gsBlocked(gs)} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
         {busy ? tChrome('panel.rebuild.rebuildingBtn') : tChrome('panel.rebuild.rebuild')}
       </button>
       <StatusBar message={status} busy={busy} />

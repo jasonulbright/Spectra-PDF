@@ -5,7 +5,9 @@ import { useOperations } from '../hooks/useOperations';
 import { useFlattenerPreview } from '../hooks/useFlattenerPreview';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
-import { ensureGsPath } from './SettingsPanel';
+import { gsBlocked, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { app } from '../lib/tauri-bridge';
 import { tChrome } from '../i18n';
 import { localizeEngineMessage } from '../lib/engine-messages';
@@ -44,6 +46,7 @@ export function FlattenerPanel(): React.ReactElement {
   } = useFlattenerPreview();
 
   const [status, setStatus] = useState('');
+  const gs = useGsCapability();
   const [applying, setApplying] = useState(false);
 
   const filePath = activeFile?.path ?? null;
@@ -65,7 +68,7 @@ export function FlattenerPanel(): React.ReactElement {
       const result = await performOperation(filePath, 'flatten_transparency', {
         balance,
         dpi,
-        gs_path: await ensureGsPath(),
+        gs_path: await requireGsPath(),
         outline_text: outlines.text,
         outline_strokes: outlines.strokes,
         font_dir: await app.getEditFontPath(),
@@ -240,10 +243,13 @@ export function FlattenerPanel(): React.ReactElement {
 
       <p className="text-xs text-neutral-500">{tChrome('panel.flattener.scope')}</p>
 
+      {/* Listing what is transparent needs no Ghostscript; flattening it
+          does. The panel therefore stays usable and ONE control gates. */}
+      <GsRequiredNotice capability={gs} testId="flattener-gs" />
       <div className="flex items-center gap-2">
         <button
           data-testid="flattener-apply"
-          disabled={applying || busy || !canApply(report, outlines)}
+          disabled={applying || busy || !canApply(report, outlines) || gsBlocked(gs)}
           onClick={() => void apply()}
           className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-50"
         >

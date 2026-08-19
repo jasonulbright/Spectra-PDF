@@ -81,10 +81,15 @@ export interface SimulationRecord {
   assumed: string[];
 }
 
-/** Which press profiles a document can be proofed against. */
+/** Which press profiles a document can be proofed against.
+ *
+ * `bundled` is the whole installed press set, each by its ICC description
+ * string, plus the one an unnamed request resolves to. A proof names the
+ * press it proofed against, so the set is offered by name rather than
+ * reduced to one anonymous entry. */
 export interface SimulationProfiles {
   document: { present: boolean; embedded: boolean; identifier: string; name: string };
-  bundled: { present: boolean; name: string };
+  bundled: { present: boolean; name: string; default: string; names: string[] };
 }
 
 /** What one separation render produced. */
@@ -491,7 +496,14 @@ export function effectiveBlackInk(paperWhite: boolean, blackInk: boolean): boole
   return paperWhite ? true : blackInk;
 }
 
-/** What the panel sends. Both switches are inert under `none`. */
+/**
+ * What the panel sends. Both switches are inert under `none`.
+ *
+ * `profile` carries a PATH under `file` and an ICC DESCRIPTION STRING under
+ * `bundled` — the installed set is offered by name, so the request has to
+ * name which of them was chosen. Empty under `bundled` means the default
+ * press, which is what the engine resolves an unnamed request to.
+ */
 export function simulationRequest(
   source: SimulationSource,
   profile: string,
@@ -501,7 +513,7 @@ export function simulationRequest(
   const live = simulationIsLive(source);
   return {
     source,
-    profile: source === 'file' ? profile : '',
+    profile: source === 'file' || source === 'bundled' ? profile : '',
     paper_white: live && paperWhite,
     black_ink: live && effectiveBlackInk(paperWhite, blackInk),
   };
@@ -869,6 +881,8 @@ export function readSimulationProfiles(payload: unknown): SimulationProfiles {
     bundled: {
       present: bundled.present === true,
       name: typeof bundled.name === 'string' ? bundled.name : '',
+      default: typeof bundled.default === 'string' ? bundled.default : '',
+      names: Array.isArray(bundled.names) ? bundled.names.map((n) => String(n)) : [],
     },
   };
 }

@@ -5,12 +5,16 @@ import { FolderRow, RunningView, SweepShell } from './FolderSweepUi';
 import { useSweepFolders } from '../hooks/useSweepFolders';
 import { useSweepLog } from '../hooks/useSweepLog';
 import { dialog, app } from '../lib/tauri-bridge';
-import { ensureGsPath } from '../panels/SettingsPanel';
+import { gsBlocked, gsPathIfAvailable, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from './GsRequiredNotice';
 import { tChrome, tChromeCount, tNumber } from '../i18n';
 import { TEST_HARNESS_ENABLED, registerFolderExport } from '../testHarness';
 import {
   DEFAULT_IMAGE_DPI,
   DEFAULT_JPEG_QUALITY,
+  availableExportFormats,
+  exportFormatNeedsGs,
   EXPORT_FORMATS,
   EXPORT_TARGETS,
   type ExportFormat,
@@ -98,6 +102,17 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
   } = useSweepFolders();
 
   const [format, setFormat] = useState<ExportFormat>('docx');
+  const gs = useGsCapability();
+  // Slides and the three image formats are rendered; the rest are not. The
+  // folder sweep therefore offers a SHORTER LIST rather than refusing.
+  const offeredFormats = availableExportFormats(EXPORT_FORMATS, !gsBlocked(gs));
+  const gsOff = gsBlocked(gs);
+  useEffect(() => {
+    // A format chosen while Ghostscript was configured must not stay selected
+    // after it stops being offered — a select showing nothing is how a run
+    // starts with a format the list no longer contains.
+    if (gsOff && exportFormatNeedsGs(format)) setFormat('docx');
+  }, [gsOff, format]);
   const [pages, setPages] = useState('');
   const [layout, setLayout] = useState('reading');
   const [pageBreaks, setPageBreaks] = useState(false);
@@ -196,7 +211,7 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
     try {
       const io = createFolderExportIo(callRaw, {
         soffice: await app.getSofficePath(),
-        ghostscript: await ensureGsPath(),
+        ghostscript: exportFormatNeedsGs(format) ? await requireGsPath() : await gsPathIfAvailable(),
       });
       rep = await runFolderExport(entries, skippedDirs, io, {
         destRoot: dest,
@@ -331,6 +346,8 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
             </p>
           )}
 
+          <GsRequiredNotice capability={gs} testId="folder-export-gs" />
+
           <div>
             <label className="block text-sm text-neutral-400 mb-1" htmlFor="folder-export-format">
               {tChrome('dialog.folderExport.format')}
@@ -342,7 +359,7 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
               value={format}
               onChange={(e) => setFormat(e.target.value as ExportFormat)}
             >
-              {EXPORT_FORMATS.map((key) => (
+              {offeredFormats.map((key) => (
                 <option key={key} value={key}>
                   {tChrome(FORMAT_KEY[key])}
                 </option>

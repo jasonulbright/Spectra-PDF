@@ -2,10 +2,13 @@ import React, { useCallback, useRef, useState } from 'react';
 import { useAppModal } from '../hooks/useAppModal';
 import { useEngine } from '../hooks/useEngine';
 import { dialog } from '../lib/tauri-bridge';
-import { ensureGsPath } from '../panels/SettingsPanel';
+import { gsBlocked, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from './GsRequiredNotice';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
 import {
+  exportFormatNeedsGs,
   EXPORT_TARGETS,
   exportParams,
   exportSummary,
@@ -71,6 +74,8 @@ export function ExportDocumentDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ExportDocumentResult | null>(null);
+  const gs = useGsCapability();
+  const gsRefused = exportFormatNeedsGs(format) && gsBlocked(gs);
   // Reentrancy ref taken before the first await (the CreatePdf/convert rule).
   const exportingRef = useRef(false);
 
@@ -92,7 +97,7 @@ export function ExportDocumentDialog({
         }),
       };
       // Only the presentation target rasterises, and only it needs the renderer.
-      if (format === 'pptx') params.gs_path = await ensureGsPath();
+      if (format === 'pptx') params.gs_path = await requireGsPath();
       setResult((await call('export_document', params)) as unknown as ExportDocumentResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -132,6 +137,8 @@ export function ExportDocumentDialog({
         </div>
         <div className="flex flex-col gap-4 px-5 py-4">
           <p className="text-xs text-neutral-400 break-all">{file.name}</p>
+
+          {gsRefused && <GsRequiredNotice capability={gs} testId="export-doc-gs" />}
 
           <div>
             <label className="block text-sm text-neutral-400 mb-1" htmlFor="export-doc-pages">
@@ -282,7 +289,7 @@ export function ExportDocumentDialog({
             type="button"
             data-testid="export-doc-run"
             onClick={runExport}
-            disabled={busy}
+            disabled={busy || gsRefused}
             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
           >
             {busy ? tChrome('dialog.exportDoc.exporting') : tChrome('dialog.exportDoc.export')}

@@ -9,7 +9,9 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { getCanvasServices } from '../commands/context';
 import { app, dialog, report as reportFile } from '../lib/tauri-bridge';
-import { ensureGsPath } from './SettingsPanel';
+import { gsPathIfAvailable } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { tChrome, tChromeCount } from '../i18n';
 import { TEST_HARNESS_ENABLED, registerPreflight } from '../testHarness';
 import type { PlaceableFinding } from '../lib/a11y-findings';
@@ -322,6 +324,7 @@ export function PreflightPanel(): React.ReactElement {
   const [shownCheck, setShownCheck] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const gs = useGsCapability();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   const buffer = activeFile?.buffer ?? null;
@@ -363,12 +366,13 @@ export function PreflightPanel(): React.ReactElement {
 
   /** The optional tools the checks and the fixups reach for. Total area
    * coverage is a Ghostscript run per page and the colour, downsample and
-   * standard-conversion fixups are gs-backed, so the bundled device has to be
-   * NAMED — a bare `gs` only resolves on a machine that happens to have one on
-   * its path, and the check would report "not available" on every other. */
+   * standard-conversion fixups are gs-backed — so the path is passed when
+   * there is one and '' when there is not. The structural checks are gs-free
+   * and still run; the raster ones report NOT RUN with their reason, which is
+   * the one thing a preflight report may never do silently. */
   const tools = useCallback(
     async () => ({
-      gs_path: await ensureGsPath(),
+      gs_path: await gsPathIfAvailable(),
       font_dir: await app.getEditFontPath(),
     }),
     [],
@@ -1047,6 +1051,7 @@ export function PreflightPanel(): React.ReactElement {
           {tChrome('panel.common.workingOn')}{' '}
           <span className="text-neutral-200">{activeFile.name}</span>
         </div>
+        <GsRequiredNotice capability={gs} testId="preflight-gs" />
         <div className="flex items-center gap-2">
           <button
             data-testid="preflight-recheck"

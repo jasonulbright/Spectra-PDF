@@ -1,4 +1,6 @@
 import React from 'react';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useSeparationPreview } from '../hooks/useSeparationPreview';
 import { NoFileOpen } from '../components/NoFileOpen';
@@ -66,12 +68,14 @@ function swatch(rgb: number[] | null): string {
 
 export function OutputPreviewPanel(): React.ReactElement {
   useTranslation();
+  const gs = useGsCapability();
   const { activeFile, openNewFiles } = useActiveFile();
   const {
     armed, setArmed, inks, inkUnknown, plates, coverage, hidden, toggleInk, showAllInks,
     hideAllInks, densities, setDensity, aliases, sequence, limitPct, setLimitPct, alarm,
     setAlarm, overprint, setOverprint, simulationProfiles, simulationSource,
-    setSimulationSource, pickSimulationProfile, setPaperWhite, setBlackInk, simulation,
+    setSimulationSource, pickSimulationProfile, simulationPress, setSimulationPress,
+    setPaperWhite, setBlackInk, simulation,
     stats, busy, error, inspection, inspectBusy, inspectError,
   } = useSeparationPreview();
 
@@ -277,6 +281,8 @@ export function OutputPreviewPanel(): React.ReactElement {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Plates, ink coverage and soft proofing are all one render device. */}
+      <GsRequiredNotice capability={gs} testId="output-preview-gs" />
       <div className="flex items-center justify-between">
         <div className="text-sm text-neutral-400">
           {tChrome('panel.common.workingOn')}{' '}
@@ -327,6 +333,29 @@ export function OutputPreviewPanel(): React.ReactElement {
             <option value="file">{tChrome('panel.outputPreview.simulationFile')}</option>
           </select>
         </label>
+
+        {/* The installed set is offered BY NAME: a proof against an unnamed
+            press is a picture nobody can check. */}
+        {simulationSource === 'bundled' && simulationProfiles.bundled.names.length > 0 && (
+          <select
+            data-testid="output-preview-press"
+            aria-label={tChrome('panel.outputPreview.simulationPressAria')}
+            className="px-1 py-1 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
+            value={simulationPress}
+            onChange={(e) => setSimulationPress(e.target.value)}
+          >
+            <option value="">
+              {tChrome('panel.outputPreview.simulationPressDefault', {
+                name: simulationProfiles.bundled.default,
+              })}
+            </option>
+            {simulationProfiles.bundled.names.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        )}
 
         {proofing && simulation !== null && (
           <div className="text-xs text-neutral-400" data-testid="output-preview-simulation-using">

@@ -12,6 +12,7 @@ import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
 import { TOOL_DEFS, TOOL_IDS, toolById, toolForCanvasTool, worksOnPage, type ToolId } from './tools';
 import { OPERATIONS, OPERATION_TITLES, type Operation } from './operations';
 import { openFindWhenCanvasReady } from './find-intent';
+import { gsBlocked } from '../lib/gs-capability';
 import {
   toggleGrid,
   toggleGuides,
@@ -20,6 +21,34 @@ import {
 } from '../lib/snap-settings';
 
 // --- Pure enablement helpers (unit-tested; menus gray from these) ---------
+
+/**
+ * The operations that are Ghostscript ALL THE WAY DOWN — no branch of them
+ * produces anything without it.
+ *
+ * Partial consumers are deliberately absent: Compare's text mode, Create PDF's
+ * image and Office sources, Preflight's structural checks, the flattener's
+ * listing, trap-preset authoring and vector form detection all work with no
+ * interpreter at all, so their menu entries stay enabled and the surfaces gate
+ * the one leg that needs one.
+ */
+export const GS_ONLY_OPERATIONS: ReadonlySet<Operation> = new Set<Operation>([
+  'compress',
+  'grayscale',
+  'pdfa',
+  'convert_cmyk',
+  'rebuild',
+  'outputpreview',
+  'inkmanager',
+  'scanenhance',
+]);
+
+/** Whether a gs-only surface may be reached right now. Pending is permitted:
+ * see `GsCapability.pending` — a launch must not gray the menu it is about to
+ * ungray. */
+export function gsUsable(): boolean {
+  return !gsBlocked();
+}
 
 export function canUndo(state: AppState): boolean {
   if (state.pageUndoStack.length > 0) return true;
@@ -287,6 +316,10 @@ function toolCommand(tool: CanvasTool): Command {
 function panelCommand(op: Operation): Command {
   return {
     title: OPERATION_TITLES[op],
+    // The chrome's half of the Ghostscript gate: one term on the ONE place
+    // panel commands are built, so a menu item, a toolbar button and a Tools
+    // Center tile cannot disagree about whether an operation is reachable.
+    when: GS_ONLY_OPERATIONS.has(op) ? () => gsUsable() : undefined,
     run: (ctx) => {
       // With a visible document, the panel opens in the right dock on that tab
       // so the document remains visible while the form is filled in. With no
@@ -404,7 +437,9 @@ export const COMMANDS: Record<CommandId, Command> = {
   // import source is refused like everywhere else (hasActiveFile).
   'file.print': {
     title: 'Print…',
-    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    // Every print path is a Ghostscript device — the spool and the preview
+    // raster alike — so the entry gates with the capability.
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state) && gsUsable(),
     run: (ctx) => ctx.app!.openPrint(),
   },
   // File ▸ Send To ▸ Email attaches the current document to a compose window
@@ -479,12 +514,14 @@ export const COMMANDS: Record<CommandId, Command> = {
   },
   'file.exportPowerpoint': {
     title: 'Presentation (.pptx)…',
-    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    // Slides carry a picture of the page; the other document targets do not,
+    // which is why this ONE export format gates and the rest do not.
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state) && gsUsable(),
     run: (ctx) => ctx.app!.openExportDocument('pptx'),
   },
   'file.exportImages': {
     title: 'Images (PNG/JPEG/TIFF)…',
-    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state),
+    when: (ctx) => ctx.app !== null && hasActiveFile(ctx.state) && gsUsable(),
     run: (ctx) => ctx.app!.openExportImages(),
   },
   'file.close': {
@@ -583,7 +620,10 @@ export const COMMANDS: Record<CommandId, Command> = {
   // the workspace entirely), so its only gate is App being mounted.
   'tools.batchOcr': {
     title: 'Batch OCR Folder…',
-    when: (ctx) => ctx.app !== null,
+    // Ghostscript is the rasteriser Tesseract reads, so OCR over a folder is
+    // gs-gated exactly like OCR over a page. The dialog refuses at open too:
+    // batch runs outside the panel machinery entirely.
+    when: (ctx) => ctx.app !== null && gsUsable(),
     run: (ctx) => ctx.app!.openBatchOcr(),
   },
   // Same no-document shape: it searches and redacts a picked folder tree by

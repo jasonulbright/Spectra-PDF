@@ -3,7 +3,9 @@ import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
-import { ensureGsPath } from './SettingsPanel';
+import { gsBlocked, requireGsPath } from '../lib/gs-capability';
+import { useGsCapability } from '../hooks/useGsCapability';
+import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { getDocumentProxy } from '../lib/pdfDocCache';
 import { renderPageToCanvas } from '../lib/pdfRenderer';
 import {
@@ -55,6 +57,7 @@ export function ComparePanel(): React.ReactElement {
   const [selectedPage, setSelectedPage] = useState<number | null>(null);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const gs = useGsCapability();
 
   // Candidate B files: every open file except the active one (A).
   const others = useMemo(
@@ -103,7 +106,7 @@ export function ComparePanel(): React.ReactElement {
         const res = (await call('compare_visual', {
           file_a: activeFile.workingPath,
           file_b: targetFile.workingPath,
-          gs_path: await ensureGsPath(),
+          gs_path: await requireGsPath(),
         })) as unknown as VisualCompareResult;
         setVisualResult(res);
         const first = listableVisualPages(res.pages).find((p) => p.only_in == null);
@@ -158,6 +161,9 @@ export function ComparePanel(): React.ReactElement {
                   role="tab"
                   aria-selected={mode === m}
                   data-testid={`compare-mode-${m}`}
+                  // Visual comparison renders both documents; text comparison
+                  // reads them. The panel gates a MODE, not itself.
+                  disabled={m === 'visual' && gsBlocked(gs)}
                   onClick={() => setMode(m)}
                   className={`px-3 py-1.5 text-sm font-medium ${
                     mode === m
@@ -172,7 +178,7 @@ export function ComparePanel(): React.ReactElement {
             <button
               data-testid="compare-run"
               onClick={handleCompare}
-              disabled={busy || !targetPath}
+              disabled={busy || !targetPath || (mode === 'visual' && gsBlocked(gs))}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
             >
               {busy ? tChrome('panel.compare.comparing') : tChrome('panel.compare.compare')}
@@ -187,6 +193,7 @@ export function ComparePanel(): React.ReactElement {
             </button>
           </div>
 
+          {mode === 'visual' && <GsRequiredNotice capability={gs} testId="compare-gs" />}
           {mode === 'text' && result && <CompareSummaryBar summary={result.summary} />}
           {mode === 'text' && result && !result.summary.identical && (
             <div
