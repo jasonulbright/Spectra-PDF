@@ -4595,7 +4595,6 @@
   "panel.settings.keepLogsAria": "일괄 OCR 로그 보관 기간",
   "panel.settings.keepLogsFor": "로그 보관 기간",
   "panel.settings.lastJobFailed": "마지막 작업 실패: {{error}}",
-  "panel.settings.licensesP1": "Ghostscript(AGPL-3.0)와 LibreOffice(MPL-2.0)는 수정 없이 포함되어 있으며 철저히 별도 프로그램으로만 호출됩니다 — 이 애플리케이션에 링크되지 않습니다. Ghostscript는 압축, 회색조, PDF/A, 다시 만들기, 이미지 내보내기를 담당하고, LibreOffice는 Word 등 편집 가능한 형식으로의 내보내기를 담당합니다.",
   "panel.settings.licensesP2": "그 밖에 포함되거나 내장된 구성 요소: Python(PSF 라이선스)과 그 패키지인 pikepdf(MPL-2.0), pdfminer.six(MIT), pyHanko(MIT); pdf.js(Apache-2.0); pdf-lib(MIT); 포함된 OCR 엔진이자 역시 철저히 별도 프로그램으로 실행되는 Tesseract와 그 언어 모델(Apache-2.0), 그리고 그것이 링크하는 모든 라이브러리의 재배포 고지가 함께 설치됩니다; Liberation 및 Libertinus 글꼴(SIL OFL 1.1); Tauri와 컴파일된 Rust 크레이트(MIT/Apache-2.0 등).",
   "panel.settings.licensesP3": "전체 고지는 앱과 함께 제공됩니다: 각 구성 요소의 라이선스와 출처를 담은 통합 목록, 그리고 크레이트별 Rust 목록입니다.",
   "panel.settings.location": "위치",

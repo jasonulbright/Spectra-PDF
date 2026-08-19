@@ -6,6 +6,8 @@
 // that hold them, so the answer is one function per question rather than one
 // per component.
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 vi.mock('../src/renderer/lib/tauri-bridge', () => ({
   app: { gsCapability: vi.fn(), refreshGsCapability: vi.fn() },
@@ -127,5 +129,27 @@ describe('guided actions refuse at PLAN time', () => {
   it('says "needs" of one step and "need" of several', () => {
     expect(gsBlocker(action('compress'), false)).toContain('needs Ghostscript');
     expect(gsBlocker(action('compress', 'grayscale'), false)).toContain('need Ghostscript');
+  });
+});
+
+describe('the distribution never claims to carry Ghostscript', () => {
+  const text = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
+
+  it('uses the translated user-installed explanation in Settings', () => {
+    const panel = text('src/renderer/panels/SettingsPanel.tsx');
+    expect(panel).toContain("tChrome('panel.settings.gsLicense')");
+    expect(panel).not.toContain('panel.settings.licensesP1');
+  });
+
+  it('describes the package as an optional integration', () => {
+    const pkg = JSON.parse(text('package.json')) as { description: string };
+    expect(pkg.description).toContain('optional Ghostscript integration');
+    expect(pkg.description).not.toContain('vendors upstream Ghostscript');
+  });
+
+  it('builds the scan fixture with the app-probed executable', () => {
+    const spec = text('e2e-tests/specs/114-prepare-form-detect.spec.ts');
+    expect(spec).toContain('await gsRestore()');
+    expect(spec).not.toMatch(/resources.{0,20}ghostscript/i);
   });
 });
