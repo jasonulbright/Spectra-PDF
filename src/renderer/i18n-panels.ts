@@ -2249,8 +2249,6 @@ export const PANEL_STRINGS = {
   'panel.settings.updatesHint':
     'Spectra PDF never installs updates itself. When a newer release exists it shows a notice, and opening it takes you to the download page. You can always check manually with Help ▸ Check for Updates.',
   'panel.settings.thirdParty': 'Third-party components',
-  'panel.settings.licensesP1':
-    'Ghostscript (AGPL-3.0) and LibreOffice (MPL-2.0) are bundled unmodified and invoked strictly as separate programs — never linked into this application. Ghostscript handles Compress, Grayscale, PDF/A, Rebuild, and image export; LibreOffice handles export to Word and other editable formats.',
   'panel.settings.licensesP2':
     'Also bundled or embedded: Python (PSF license) with pikepdf (MPL-2.0), pdfminer.six (MIT), and pyHanko (MIT) among its packages; pdf.js (Apache-2.0); pdf-lib (MIT); Tesseract — the bundled OCR engine, also run strictly as a separate program — and its language models (Apache-2.0), with the redistribution notices for every library it links installed beside it; the Liberation and Libertinus fonts (SIL OFL 1.1); Tauri and the compiled Rust crates (MIT/Apache-2.0 and similar).',
   'panel.settings.licensesP3':

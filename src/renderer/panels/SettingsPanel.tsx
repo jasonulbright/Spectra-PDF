@@ -733,7 +733,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
       <div data-testid="licenses-note">
         <label className="block text-sm text-neutral-400 mb-2">{tChrome('panel.settings.thirdParty')}</label>
         <div className="text-xs text-neutral-500 space-y-1.5">
-          <p>{tChrome('panel.settings.licensesP1')}</p>
+          <p>{tChrome('panel.settings.gsLicense')}</p>
           <p>{tChrome('panel.settings.licensesP2')}</p>
           <p>{tChrome('panel.settings.licensesP3')}</p>
         </div>

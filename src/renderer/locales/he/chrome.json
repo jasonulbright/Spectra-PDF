@@ -4809,7 +4809,6 @@
   "panel.settings.keepLogsAria": "שמור יומני זיהוי תווים באצווה למשך",
   "panel.settings.keepLogsFor": "שמור יומנים למשך",
   "panel.settings.lastJobFailed": "העבודה האחרונה נכשלה: {{error}}",
-  "panel.settings.licensesP1": "Ghostscript (AGPL-3.0) ו-LibreOffice (MPL-2.0) מצורפים ללא שינוי ומופעלים אך ורק כתוכניות נפרדות — לעולם אינם מקושרים לתוך יישום זה. Ghostscript מטפל בדחיסה, בגווני אפור, ב-PDF/A, בבנייה מחדש ובייצוא תמונות; LibreOffice מטפל בייצוא ל-Word ולתבניות אחרות הניתנות לעריכה.",
   "panel.settings.licensesP2": "מצורפים או מוטמעים גם: Python (רישיון PSF) ובין חבילותיו pikepdf (MPL-2.0), pdfminer.six (MIT) ו-pyHanko (MIT); pdf.js (Apache-2.0); pdf-lib (MIT); Tesseract — מנוע זיהוי התווים המצורף, אף הוא מופעל אך ורק כתוכנית נפרדת — ומודלי השפה שלו (Apache-2.0), עם הודעות ההפצה מחדש של כל ספרייה שהוא מקשר אליה מותקנות לצדו; הגופנים Liberation ו-Libertinus (SIL OFL 1.1); Tauri וארגזי Rust המהודרים (MIT/Apache-2.0 ודומיהם).",
   "panel.settings.licensesP3": "ההודעות המלאות נשלחות עם היישום: הרשימה המצרפית (עם הרישיון והמקור של כל רכיב) והרשימה הנפרדת של כל ארגז Rust.",
   "panel.settings.location": "מיקום",

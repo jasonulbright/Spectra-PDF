@@ -4595,7 +4595,6 @@
   "panel.settings.keepLogsAria": "一括 OCR のログを保持する期間",
   "panel.settings.keepLogsFor": "ログの保持期間",
   "panel.settings.lastJobFailed": "前回のジョブが失敗しました：{{error}}",
-  "panel.settings.licensesP1": "Ghostscript（AGPL-3.0）と LibreOffice（MPL-2.0）は変更を加えずに同梱し、あくまで別々のプログラムとして呼び出しています — このアプリケーションにリンクすることはありません。Ghostscript は圧縮、グレースケール、PDF/A、再構築、画像の書き出しを担当し、LibreOffice は Word などの編集可能な形式への書き出しを担当します。",
   "panel.settings.licensesP2": "同梱または埋め込みのその他：Python（PSF ライセンス）と、そのパッケージである pikepdf（MPL-2.0）、pdfminer.six（MIT）、pyHanko（MIT）。pdf.js（Apache-2.0）。pdf-lib（MIT）。同梱の OCR エンジンであり、これも別プログラムとして実行される Tesseract とその言語モデル（Apache-2.0）— リンクしているすべてのライブラリの再配布告知を隣に収めています。Liberation と Libertinus のフォント（SIL OFL 1.1）。Tauri とコンパイル済みの Rust クレート（MIT/Apache-2.0 など）。",
   "panel.settings.licensesP3": "完全な告知はアプリに同梱されています：構成要素ごとのライセンスと入手元をまとめた一覧と、クレートごとの Rust の一覧です。",
   "panel.settings.location": "場所",
