@@ -121,9 +121,10 @@ is missing any file the manifest names.
 - **CPython 3.14.5** — Python Software Foundation License (PSF) — <https://www.python.org/>
 
 Bundled Python packages (installed into the embedded runtime; exact versions are
-hash-pinned in `scripts/python-requirements.txt`, and each package's own license
-text ships inside the runtime in its `*.dist-info` directory — license fields
-below were read from those wheels' METADATA):
+hash-pinned in `scripts/python-requirements.txt`, or in
+`scripts/vendored-wheels.tsv` for the wheels committed to this repository, and
+each package's own license text ships inside the runtime in its `*.dist-info`
+directory — license fields below were read from those wheels' METADATA):
 
 | Package | License | Source |
 |---------|---------|--------|
@@ -143,7 +144,7 @@ below were read from those wheels' METADATA):
 | pdfminer.six | MIT | <https://github.com/pdfminer/pdfminer.six> |
 | pikepdf | MPL-2.0 (source at the link) | <https://github.com/pikepdf/pikepdf> |
 | pillow | MIT-CMU | <https://github.com/python-pillow/Pillow> |
-| pillow-heif | BSD-3-Clause (the wheel's bundled libraries are listed below) | <https://github.com/bigcat88/pillow_heif> |
+| pi-heif | BSD-3-Clause (the wheel's bundled libraries are listed below) | <https://github.com/bigcat88/pillow_heif> |
 | pycparser | BSD-3-Clause | <https://github.com/eliben/pycparser> |
 | pyHanko | MIT | <https://github.com/MatthiasValvekens/pyHanko> |
 | pyhanko-certvalidator | MIT | <https://github.com/MatthiasValvekens/pyHanko/tree/master/pkgs/pyhanko-certvalidator> |
@@ -164,27 +165,61 @@ pikepdf's binary wheel embeds the **qpdf** library (Apache-2.0,
 `licenses-for-wheels.txt` (shipped in pikepdf's dist-info) carries the
 corresponding notices.
 
-pillow-heif's binary wheel ships prebuilt decoder libraries beside the Python
-package (`resources/python/Lib/site-packages/pillow_heif-*.data/platlib/`).
-Upstream's own `LICENSES_bundled.txt` — shipped in the wheel's dist-info
-alongside its `LICENSE.txt` — is the authority for these; reproduced here so
-the manifest is complete without opening the runtime:
+### HEIF decoding (pi-heif)
 
-| Bundled library | License | Source |
-|---|---|---|
-| libheif | LGPL-3.0 | <https://github.com/strukturag/libheif> |
-| libde265 | LGPL-3.0 | <https://github.com/strukturag/libde265> |
-| x265 | GPL-2.0 | <https://bitbucket.org/multicoreware/x265_git> |
-| libgcc / libstdc++ / libwinpthread (MinGW-w64 runtime) | GPL-3.0 with the GCC Runtime Library Exception | <https://gcc.gnu.org/> |
+HEIC/HEIF camera images are decoded by **pi-heif 1.4.0**, the decode-only
+distribution of the same upstream project. Its wheel and the matching source
+distribution are committed to this repository under `vendor/wheels/` and pinned
+by SHA-256 in `scripts/vendored-wheels.tsv`; nothing about it is fetched at
+build time. It is decode-only deliberately: the encoder-carrying distribution
+of the same project links a **GPL-2.0** video encoder that is mapped into the
+engine process on every HEIF import, and nothing in Spectra PDF encodes HEIF.
 
-Upstream states the combined binary wheel is effectively **GPL-2.0** because of
-x265. Obligations here are handled by license class: permissive components ship
-with their notices; weak-copyleft components ship only on terms verified for
-that specific component; GPL and AGPL object code requires the complete
-Corresponding Source to be made available to every recipient, and a public
-MIT-licensed repository naming the upstream does not by itself satisfy that. The
-upstream links above therefore record where each component's source lives; they
-are not a claim that the source obligation is discharged.
+The wheel ships five prebuilt libraries. delvewheel installs `.data/platlib`
+content to the site-packages root, so they sit directly in
+`resources/python/Lib/site-packages/`, not in a `.data` subdirectory. The
+versions below are the ones the shipped libraries **report at run time**;
+upstream's own `LICENSES_bundled.txt` in the wheel's dist-info names older ones
+and is not the authority for this artifact:
+
+| Bundled library | Version | License | Corresponding source |
+|---|---|---|---|
+| libheif | 1.23.0 | LGPL-3.0-or-later | <https://github.com/strukturag/libheif/releases/download/v1.23.0/libheif-1.23.0.tar.gz> |
+| libde265 | 1.1.1 | LGPL-3.0-or-later | <https://github.com/strukturag/libde265/releases/download/v1.1.1/libde265-1.1.1.tar.gz> |
+| libgcc / libstdc++ (MinGW-w64 GCC runtime) | – | GPL-3.0-or-later WITH GCC-exception-3.1 | <https://gcc.gnu.org/> |
+| libwinpthread (MinGW-w64) | – | MIT AND Zope-2.1 | <https://www.mingw-w64.org/> |
+
+There is no x265 and no libaom in this wheel: the run-time inventory reports one
+decoder (libde265) and no encoder other than libheif's built-in `mask` stub.
+
+libheif and libde265 are **LGPL-3.0** libraries combined with the application.
+The obligations that follow, and how each is met:
+
+- **Notice.** The LGPL-3.0 text and the GPL-3.0 text it incorporates ship in
+  the wheel's dist-info (`pi_heif-1.4.0.dist-info/licenses/`) inside the
+  installed runtime, alongside this file.
+- **Replacement.** Both libraries are ordinary DLLs loaded by the Windows
+  loader from the site-packages directory, so a recipient may replace either
+  with their own build. One practical condition: delvewheel renamed them with a
+  content hash — `libheif-75127e764628a95f6db9f5070bfc87cb.dll` and
+  `libde265-0-aa0625e0aec56a9d4310a2447674dd8a.dll` — and the importing modules
+  bind to those exact names, so a replacement must be installed under the same
+  filename. The wheel's `DELVEWHEEL` file records that the renaming happened
+  and ships in the dist-info for the same reason.
+- **Corresponding source.** The archives linked in the table above are the
+  source for these exact versions, which is where they are obtained today; they
+  are also available from us on request. Attaching them to Spectra PDF's own
+  release assets is in progress and is not yet done for any published release.
+  `vendor/wheels/pi_heif-1.4.0.tar.gz` in this repository is the source
+  distribution of the binding itself.
+
+Obligations across the whole manifest are handled by license class: permissive
+components ship with their notices; weak-copyleft components ship only on terms
+verified for that specific component; GPL and AGPL object code requires the
+complete Corresponding Source to be made available to every recipient, and a
+public MIT-licensed repository naming the upstream does not by itself satisfy
+that. An upstream link records where a component's source lives; it is not by
+itself a claim that the source obligation is discharged.
 
 ## Fonts
 
@@ -288,10 +323,10 @@ License text shipped at: `resources/fonts/LICENSE-NotoMongolian-OFL.txt`
 
 ### Bundled OCR runtime components
 
-`bundle-tesseract.ps1` ships `tesseract.exe` plus **every DLL beside it** — 51
+`bundle-tesseract.ps1` ships `tesseract.exe` plus **every DLL beside it** — 50
 today — enumerated rather than hand-listed so the copy set cannot go stale when
 upstream changes its dependencies. The upstream installer supplies notices for
-only two of those 52 binaries. The rest were collected once from their
+only two of those 51 binaries. The rest were collected once from their
 canonical upstreams by `scripts/fetch-tesseract-licenses.ps1` — a maintenance
 tool run only when the pinned Tesseract build changes — reviewed, and checked
 in at `scripts/tesseract-licenses/`, each file naming its source URL on its
@@ -305,11 +340,21 @@ The mapping from each shipped file to its component and notice is
 installer if any shipped binary lacks a row there or its notice file is
 absent** — so this list cannot silently drift from what is actually in the box.
 
-Several components are copyleft. They are listed here on exactly the same
-footing as the permissive ones, and each entry names the upstream its source
-comes from. Naming the upstream records where that source lives; for the
-GPL-licensed components it is not by itself the Corresponding Source mechanism
-their license requires (see the license-class note under pillow-heif above).
+Several components are weak-copyleft (LGPL). They are listed here on exactly
+the same footing as the permissive ones, and each entry names the upstream its
+source comes from; each is a separate dynamically loaded DLL, so a recipient
+can substitute a modified build. Every DLL in this tree is a build of an MSYS2
+mingw-w64 package, and MSYS2 publishes both the build recipe and a per-version
+source package for each — `scripts/tesseract-licenses.tsv` records the recipe
+URL per binary.
+
+**No GPL object code ships in this tree.** The upstream build's `libtiff-6.dll`
+imports `libjbig-0.dll` (JBIG-KIT, GPL-2.0-or-later), so `libtiff` is rebuilt
+from the same recipe with JBIG support disabled
+(`scripts/build-libtiff-nojbig.ps1`) and `libjbig-0.dll` is not shipped. The
+build refuses if any shipped binary references it. Nothing in this program can
+reach JBIG: TIFF compression 34661 is the only carrier, and the OCR engine is
+only ever handed a PNG this program rendered.
 
 - **Brotli** — MIT — <https://github.com/google/brotli> — `licenses/LICENSE-brotli.txt`
 - **bzip2** — bzip2-1.0.6 — <https://gitlab.com/bzip2/bzip2> — `licenses/LICENSE-bzip2.txt`
@@ -326,7 +371,6 @@ their license requires (see the license-class note under pillow-heif above).
 - **Graphite2** — LGPL-2.1-or-later OR MPL-2.0 OR GPL-2.0-or-later — <https://github.com/silnrsi/graphite> — `licenses/LICENSE-graphite2.txt`
 - **HarfBuzz** — MIT — <https://github.com/harfbuzz/harfbuzz> — `licenses/LICENSE-harfbuzz.txt`
 - **ICU** — Unicode-DFS-2016 — <https://github.com/unicode-org/icu> — `licenses/LICENSE-icu.txt`
-- **JBIG-KIT** — GPL-2.0-or-later — <https://www.cl.cam.ac.uk/~mgk25/jbigkit/> — `licenses/LICENSE-jbigkit.txt`
 - **Leptonica** — BSD-2-Clause — <https://github.com/DanBloomberg/leptonica> — `licenses/LICENSE-leptonica.txt`
 - **LERC** — Apache-2.0 — <https://github.com/Esri/lerc> — `licenses/LICENSE-LERC.txt`
 - **libarchive** — BSD-2-Clause — <https://github.com/libarchive/libarchive> — `licenses/LICENSE-libarchive.txt`
@@ -337,7 +381,7 @@ their license requires (see the license-class note under pillow-heif above).
 - **libjpeg-turbo** — IJG AND BSD-3-Clause AND Zlib — <https://github.com/libjpeg-turbo/libjpeg-turbo> — `licenses/LICENSE-libjpeg-turbo.txt`
 - **libpng** — libpng-2.0 — <https://github.com/pnggroup/libpng> — `licenses/LICENSE-libpng.txt`
 - **libthai** — LGPL-2.1-or-later — <https://github.com/tlwg/libthai> — `licenses/LICENSE-libthai.txt`
-- **libtiff** — libtiff — <https://gitlab.com/libtiff/libtiff> — `licenses/LICENSE-libtiff.txt`
+- **libtiff** (rebuilt without JBIG support) — libtiff — <https://gitlab.com/libtiff/libtiff> — `licenses/LICENSE-libtiff.txt`
 - **libwebp** (webp, webpmux, sharpyuv) — BSD-3-Clause — <https://github.com/webmproject/libwebp> — `licenses/LICENSE-libwebp.txt`
 - **LZ4** — BSD-2-Clause — <https://github.com/lz4/lz4> — `licenses/LICENSE-lz4.txt`
 - **mingw-w64** (winpthreads) — MIT AND Zope-2.1 — <https://www.mingw-w64.org/> — `licenses/LICENSE-mingw-w64.txt`
@@ -378,7 +422,7 @@ upstream licence and readme files ship verbatim beside its word list in
 Several of these are copyleft. The table below names the upstream each word
 list's source comes from; that records where the source lives, and for the
 GPL-licensed entries it is not by itself the Corresponding Source mechanism
-their license requires (see the license-class note under pillow-heif above).
+their license requires (see the license-class note under HEIF decoding above).
 
 | Tag | Language | License | Source |
 |---|---|---|---|
@@ -446,6 +490,62 @@ Source obligation is discharged.
 out of the dictionaries tree cannot see the OCR runtime's directory, so copies
 ship beside it; they are the same components already inventoried under the OCR
 runtime above and carry their notice texts in `dictionaries/fi/notices/`.
+
+## Colour profiles
+
+22 ICC colour profiles ship — 14 CMYK print-condition profiles and 8 RGB
+profiles — vendored by `scripts/bundle-icc.ps1` into the app's `icc`
+resources. They supply the destination profile for Convert to CMYK, the
+default `/DestOutputProfile` for PDF/X output, and the press profiles the
+output preview soft-proofs against.
+
+- **Copyright:** Adobe Systems Incorporated. Each profile carries its own
+  copyright notice in its ICC `cprt` tag; the profiles ship **unmodified**, so
+  those notices travel with them, and the notice text is also repeated per row
+  in `scripts/icc-profiles.tsv`.
+- **License:** the Adobe Systems Incorporated Color Profile Bundling Agreement
+  (10/20/2008), whose section 2(d) permits distribution bundled with an
+  application. End users receive the profiles under that agreement's Exhibit B
+  end-user license, which ships beside them.
+- **License text shipped at:** `resources/icc/Adobe-Color-Profile-License.txt`
+  (committed copy: `scripts/icc-licenses/Adobe-Color-Profile-License.txt`)
+- **Obtaining the profiles:** they are available from us — copyable from the
+  `icc` resource folder of an installed application, or on request — and from
+  Adobe's own color-profile downloads at <https://www.adobe.com/>.
+
+Every profile is referenced by its ICC profile description string, which the
+agreement requires and which is also how the engine resolves one. The shipped
+set:
+
+| ICC profile description string | Space |
+|---|---|
+| Coated FOGRA27 (ISO 12647-2:2004) | CMYK |
+| Web Coated FOGRA28 (ISO 12647-2:2004) | CMYK |
+| Uncoated FOGRA29 (ISO 12647-2:2004) | CMYK |
+| Coated FOGRA39 (ISO 12647-2:2004) | CMYK |
+| Japan Color 2001 Coated | CMYK |
+| Japan Color 2001 Uncoated | CMYK |
+| Japan Color 2002 Newspaper | CMYK |
+| Japan Color 2003 Web Coated | CMYK |
+| Japan Web Coated (Ad) | CMYK |
+| U.S. Web Coated (SWOP) v2 | CMYK |
+| U.S. Web Uncoated v2 | CMYK |
+| Coated GRACoL 2006 (ISO 12647-2:2004) | CMYK |
+| Web Coated SWOP 2006 Grade 3 Paper | CMYK |
+| Web Coated SWOP 2006 Grade 5 Paper | CMYK |
+| Adobe RGB (1998) | RGB |
+| Apple RGB | RGB |
+| ColorMatch RGB | RGB |
+| SMPTE-C | RGB |
+| PAL/SECAM | RGB |
+| HDTV (Rec. 709) | RGB |
+| SDTV NTSC | RGB |
+| SDTV PAL | RGB |
+
+Adobe and the Adobe logo are either registered trademarks or trademarks of
+Adobe in the United States and/or other countries. Spectra PDF is not
+affiliated with Adobe; any terms of Spectra PDF's own license that differ from
+the license above are offered by us alone and not by Adobe.
 
 ## Frontend / runtime libraries
 

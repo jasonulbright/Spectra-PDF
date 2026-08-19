@@ -246,18 +246,101 @@ class TestAcceptedSet:
         assert image_to_pdf(src, out, dpi_default=72.0)["pages"] == 2
 
 
-class TestHeif:
-    def test_heic_decodes_when_the_plugin_is_present(self, tmp_dir):
-        pytest.importorskip("pillow_heif")
-        import pillow_heif
+HEIF_CORPUS = Path(__file__).resolve().parent / "fixtures" / "heif"
 
-        pillow_heif.register_heif_opener()
-        src = Path(tmp_dir) / "photo.heic"
-        Image.new("RGB", (800, 600), (10, 120, 200)).save(src, format="HEIF")
-        out = Path(tmp_dir) / "photo.pdf"
+# What each corpus file MEASURES, at dpi_default=200: the pages it becomes and
+# the decoded mode and pixel size of every frame behind them. Regenerating the
+# corpus (tests/fixtures/make_heif_corpus.py) does not move these numbers —
+# they are properties of the container and of the decode, not of the encoder's
+# rate control. The table is the equivalence contract a decoder swap has to
+# satisfy: it was measured identical under both the encoder-carrying and the
+# decode-only distribution of the plugin, byte for byte on the raw planes.
+HEIF_CASES = [
+    ("rgb8.heic", [("RGB", (160, 120))], 8),
+    ("rgb8-chroma444.heic", [("RGB", (160, 120))], 8),
+    ("gray8.heic", [("L", (160, 120))], 8),
+    ("rgba8.heic", [("RGBA", (160, 120))], 8),
+    ("lossless.heic", [("RGB", (160, 120))], 8),
+    ("odd-dims.heic", [("RGB", (29, 100))], 8),
+    # 10-bit tone-maps down to 8 bits per sample; the RGB path lands in RGB and
+    # the monochrome one in I;16, which _normalise SCALES rather than clips.
+    ("rgb10.heic", [("RGB", (160, 120))], 10),
+    ("gray10.heic", [("I;16", (160, 120))], 10),
+    # libheif turns the EXIF orientation tag into a transform it applies at
+    # decode, so the raster arrives upright and the page is portrait.
+    ("exif-orient6.heic", [("RGB", (120, 160))], 8),
+    # Three top-level images, three pages, each at its OWN size.
+    (
+        "multi-3.heic",
+        [("RGB", (160, 120)), ("RGB", (100, 100)), ("RGBA", (80, 60))],
+        8,
+    ),
+    (
+        "multi-primary1.heic",
+        [("RGB", (160, 120)), ("RGB", (100, 100)), ("RGBA", (80, 60))],
+        8,
+    ),
+    # A grid-derived image: tiles stitched back to full resolution. A reader
+    # that returns one tile gets 128x128 here instead of 512x384.
+    ("grid-tiled.heic", [("RGB", (512, 384))], 8),
+    # A thumbnail is an auxiliary item, never a top-level image: one page.
+    ("thumbnail.heic", [("RGB", (320, 240))], 8),
+]
+
+
+class TestHeif:
+    def test_the_corpus_is_checked_in_and_complete(self):
+        assert sorted(p.name for p in HEIF_CORPUS.glob("*.heic")) == sorted(
+            name for name, _, _ in HEIF_CASES
+        )
+
+    @pytest.mark.parametrize("name,frames,bit_depth", HEIF_CASES)
+    def test_a_corpus_file_becomes_the_pages_it_measures(
+        self, tmp_dir, name, frames, bit_depth
+    ):
+        assert create_pdf_mod._register_heif(), "the HEIF plugin is not provisioned"
+        src = HEIF_CORPUS / name
+        out = Path(tmp_dir) / (src.stem + ".pdf")
         report = image_to_pdf(src, out, dpi_default=200.0)
-        assert report["pages"] == 1
-        assert boxes(out) == [[0.0, 0.0, 288.0, 216.0]]
+        assert report["pages"] == len(frames)
+        expected = [
+            [0.0, 0.0, round(w * 72.0 / 200.0, 2), round(h * 72.0 / 200.0, 2)]
+            for _, (w, h) in frames
+        ]
+        assert boxes(out) == expected
+
+    @pytest.mark.parametrize("name,frames,bit_depth", HEIF_CASES)
+    def test_a_corpus_file_decodes_to_the_modes_it_measures(
+        self, name, frames, bit_depth
+    ):
+        from PIL import ImageSequence
+
+        assert create_pdf_mod._register_heif(), "the HEIF plugin is not provisioned"
+        with Image.open(HEIF_CORPUS / name) as im:
+            assert im.info.get("bit_depth") == bit_depth
+            decoded = [(f.mode, f.size) for f in ImageSequence.Iterator(im)]
+        assert decoded == [(mode, size) for mode, size in frames]
+
+    def test_alpha_is_composited_onto_white_rather_than_dropped(self):
+        assert create_pdf_mod._register_heif()
+        with Image.open(HEIF_CORPUS / "rgba8.heic") as im:
+            normalised = create_pdf_mod._normalise(im.copy())
+        assert normalised.mode == "RGB"
+        # The generator's alpha ramps with the gradient, so the transparent
+        # corner composites to white and the opaque one does not.
+        assert normalised.getpixel((0, 0)) == (255, 255, 255)
+        assert normalised.getpixel((159, 119)) != (255, 255, 255)
+
+    def test_the_decoded_gradient_is_the_picture_and_not_a_flat_field(self):
+        # Shape assertions cannot tell a decode from a blank buffer. The
+        # generator writes a ramp; a working decode carries it, within the
+        # tolerance a lossy encoder leaves behind.
+        assert create_pdf_mod._register_heif()
+        with Image.open(HEIF_CORPUS / "rgb8.heic") as im:
+            picture = im.convert("RGB")
+        assert picture.getpixel((0, 0))[0] < 24
+        assert picture.getpixel((159, 0))[0] > 231
+        assert picture.getpixel((0, 119))[1] > 231
 
     def test_heic_refuses_BY_NAME_when_the_plugin_is_absent(self, tmp_dir, monkeypatch):
         # Never silently skip somebody's photograph: the refusal names the
@@ -270,6 +353,18 @@ class TestHeif:
 
     def test_the_heif_suffixes_are_a_subset_of_the_accepted_set(self):
         assert set(HEIF_SUFFIXES) <= set(IMAGE_SUFFIXES)
+
+    def test_the_decoder_carries_no_encoder(self):
+        # The plugin ships decode-only ON PURPOSE: the encoder-carrying build
+        # links a video encoder into the engine process on every HEIF import,
+        # and nothing in the product writes HEIF. A build that regained one
+        # would regain that, silently.
+        import pi_heif
+
+        info = pi_heif.libheif_info()
+        assert info["decoders"], "no HEVC decoder is present"
+        # `mask` is libheif's built-in stub, not a codec library.
+        assert set(info["encoders"]) <= {"mask"}
 
 
 class TestRefusals:
