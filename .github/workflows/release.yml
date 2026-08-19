@@ -127,6 +127,27 @@ jobs:
       - name: Install pytest
         run: pip install pytest
 
+      - name: Stage the committed ICC colour profiles for engine tests
+        # The verify job is a clean checkout and runs the engine before the
+        # build job vendors resources. Use the release bundler here too so the
+        # tested bytes and the installer bytes are governed by the same hashes.
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-icc.ps1
+        shell: pwsh
+
+      - name: Install Ghostscript as a TEST TOOL (capability-present axis)
+        # Ghostscript remains user-installed and absent from the installer.
+        # This unpinned test install proves the minimum-version capability path
+        # against the current package available to a Windows user.
+        run: choco install ghostscript -y --no-progress
+        shell: pwsh
+
+      - name: Export the test Ghostscript path
+        run: |
+          $candidates = @(Get-ChildItem "${env:ProgramFiles}\gs\gs*\bin\gswin64c.exe" -File -ErrorAction Stop)
+          if ($candidates.Count -ne 1) { throw "Expected one installed Ghostscript, found $($candidates.Count)" }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECTRAPDF_GS_PATH=$($candidates[0].FullName)" -Encoding utf8
+        shell: pwsh
+
       - name: Engine tests (full suite)
         run: python -m pytest tests/ -q
 

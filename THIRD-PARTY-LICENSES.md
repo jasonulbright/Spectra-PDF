@@ -24,6 +24,13 @@ Install it yourself if you want the features that need it — the app discovers
 an installed copy, names it in Settings ▸ Engine, and names Ghostscript plainly
 wherever a feature is unavailable because none is configured.
 
+During a normal interactive Spectra PDF installation, the installer may offer
+to open Artifex's official Ghostscript download page. Spectra PDF does not
+download or run the Ghostscript installer: the user chooses a Ghostscript
+licence and completes Artifex's separate installation. Silent (`/S`) and
+passive (`/P`) Spectra PDF installations do not open the page and never
+download, launch, install or accept terms for Ghostscript.
+
 ## JBIG2 encoder (jbig2enc)
 
 - **Version:** 0.32 (unmodified upstream prebuilt; version- and SHA-256-pinned
