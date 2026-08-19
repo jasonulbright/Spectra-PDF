@@ -34,6 +34,7 @@ import subprocess
 from pathlib import Path
 
 import pikepdf
+from engine import gs_capability
 from engine.pdf_save import save_pdf
 
 # Render stages inherit printer.py's posture: bounded, stdin-isolated.
@@ -523,6 +524,12 @@ def impose_poster(
 # ---------------------------------------------------------------------------
 
 def _run_render(args: list[str], what: str) -> None:
+    # The three render stages share one gs door, so availability is decided
+    # once here: `args[0]` is validated and replaced with the probed path
+    # before anything spawns. A stage that reached the OS with an unusable
+    # path reported a spawn failure under this stage's own `what`, which
+    # named the wrong thing.
+    args = [gs_capability.require(args[0] if args else "").path, *args[1:]]
     try:
         result = subprocess.run(
             args,

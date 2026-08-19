@@ -162,6 +162,7 @@ pub fn run() {
             commands::get_soffice_path,
             commands::get_edit_font_path,
             commands::get_dictionary_path,
+            commands::get_icc_path,
             commands::user_dictionary_dir,
             commands::list_printers,
             commands::printer_capabilities,

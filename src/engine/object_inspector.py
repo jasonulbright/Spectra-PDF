@@ -1035,7 +1035,7 @@ def inspect_point(
     y: float = 0.0,
     plates: list | None = None,
     plates_dir: str = "",
-    gs_path: str = "gs",
+    gs_path: str = "",
 ) -> dict:
     """What is painted at one PDF user-space point, and what ink is there.
 

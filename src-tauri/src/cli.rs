@@ -258,7 +258,7 @@ pub enum CliCommand {
     Check(CheckArgs),
     /// Process all PDFs in a directory (batch mode)
     Batch(BatchArgs),
-    /// Print a PDF to a Windows printer (via bundled Ghostscript)
+    /// Print a PDF to a Windows printer (requires Ghostscript)
     Print(PrintArgs),
     /// List installed Windows printers (JSON: names + default)
     Printers(PrintersArgs),
@@ -657,8 +657,8 @@ pub struct ConvertCmykArgs {
     /// ICC rendering intent: perceptual | relative | saturation | absolute
     #[arg(long, default_value = "relative")]
     pub render_intent: String,
-    /// Destination ICC profile: a .icc file, or a bundled Ghostscript
-    /// profile name like default_cmyk.icc. Omit for the built-in default.
+    /// Destination ICC profile: a .icc file, or the description of a bundled
+    /// profile. Omit for the default press profile.
     #[arg(long, default_value = "")]
     pub dest_profile: String,
 }
@@ -673,8 +673,8 @@ pub struct ConvertPdfxArgs {
     /// PDF/X standard: 1 (X-1a), 3 (X-3), 4 (X-4)
     #[arg(long, default_value_t = 3)]
     pub version: u32,
-    /// Destination ICC profile to embed in the output intent (.icc file or a
-    /// bundled Ghostscript profile name). Omit to name the condition only.
+    /// Destination ICC profile to embed in the output intent (.icc file, or
+    /// the description of a bundled profile). Omit to name the condition only.
     #[arg(long, default_value = "")]
     pub dest_profile: String,
     /// Human-readable output condition
@@ -2563,6 +2563,17 @@ fn resolve_fonts() -> PathBuf {
     exe_dir().join("fonts")
 }
 
+/// The vendored colour-profile DIRECTORY (mirrors `engine::get_icc_path` for
+/// the GUI). Passed as `icc_dir` on every subcommand that resolves a
+/// destination profile, so the CLI converts against the SAME profiles the
+/// window does. A dev build without a provisioned tree is handled
+/// engine-side: `icc_profiles.profile_dir` falls back to the source layout,
+/// and a directory holding no profiles refuses by name rather than converting
+/// against nothing.
+fn resolve_icc() -> PathBuf {
+    exe_dir().join("icc")
+}
+
 /// The comment filter both comment commands take, as the engine's own shape.
 ///
 /// A condition the caller did not give is ABSENT, never empty: the engine
@@ -3485,6 +3496,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "render_intent": args.render_intent,
                     "dest_profile": profile,
                     "gs_path": gs.to_string_lossy(),
+                    "icc_dir": resolve_icc().to_string_lossy().to_string(),
                     "font_dir": resolve_fonts().to_string_lossy().to_string(),
                 }),
             )
@@ -3509,6 +3521,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                     "condition": args.condition,
                     "identifier": args.identifier,
                     "gs_path": gs.to_string_lossy(),
+                    "icc_dir": resolve_icc().to_string_lossy().to_string(),
                 }),
             )
         }
@@ -5739,5 +5752,19 @@ mod tests {
             "spectrapdf", "batch-ocr", "scans", "--in-place", "--dest", "out",
         ])
         .is_err());
+    }
+
+    /// The colour-profile directory is a SIBLING of the executable, exactly
+    /// like the fonts directory the same resolver family already resolves.
+    /// Pinned because the engine reads a profile out of it BY DESCRIPTION and
+    /// embeds its bytes into the document: a directory resolved one level off
+    /// finds nothing, and "no profiles installed" reads as a provisioning
+    /// failure rather than as the layout mistake it would be.
+    #[test]
+    fn the_icc_directory_sits_beside_the_executable() {
+        let icc = resolve_icc();
+        assert_eq!(icc.file_name().unwrap(), "icc");
+        assert_eq!(icc.parent().unwrap(), exe_dir());
+        assert_eq!(icc.parent(), resolve_fonts().parent());
     }
 }

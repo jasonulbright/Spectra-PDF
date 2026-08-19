@@ -377,7 +377,7 @@ def emit_trapping_setup(file: str, output: str = "", assignments=None) -> dict:
 def export_postscript(
     file: str,
     output: str,
-    gs_path: str = "gs",
+    gs_path: str = "",
     level: int = 3,
     pages: str = "",
     trapping: bool = True,

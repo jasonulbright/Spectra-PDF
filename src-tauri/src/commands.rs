@@ -1076,6 +1076,16 @@ pub async fn get_dictionary_path(app: AppHandle) -> Result<String, String> {
     Ok(engine::get_dictionary_path(&app))
 }
 
+/// The bundled colour-profile directory (resources/icc).
+///
+/// Same door as `get_dictionary_path`: the renderer asks Rust where the
+/// resource tree is rather than guessing, and passes the answer through as
+/// `icc_dir` on every call that resolves a destination profile.
+#[tauri::command]
+pub async fn get_icc_path(app: AppHandle) -> Result<String, String> {
+    Ok(engine::get_icc_path(&app))
+}
+
 /// The managed folder a user's own spelling dictionaries are copied into.
 ///
 /// Rust owns the path so a dictionary added from the panel outlives whatever

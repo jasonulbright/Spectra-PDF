@@ -323,3 +323,210 @@ def test_a_bare_name_path_cannot_resolve_is_the_answer(monkeypatch):
     assert not answer.available
     assert answer.reason == gc.NOT_EXECUTABLE
     assert answer.path == "no-such-ghostscript"
+
+
+# ── the doors OUTSIDE the chokepoint ──────────────────────────────────────
+#
+# `budget.gs` validates every run that goes through it. These eight doors did
+# not: three spawned `subprocess.run` directly and four guarded with
+# `os.path.isfile`, which says yes to a copied executable with no `Resource/`
+# tree and to a build too old for the flags passed. Each is asserted at ITS
+# OWN shape, because "it refuses" is only true if the refusal is what the
+# caller of that door actually receives.
+
+
+def _absent(tmp_path):
+    """A path that names no program. Not a bare name — the point is that a
+    caller's EXPLICIT path is the answer, never a hint to go looking."""
+    return str(tmp_path / "nowhere" / "gswin64c.exe")
+
+
+def test_printing_refuses_before_the_first_job_spawns(tmp_pdf, tmp_path):
+    # Decided before the copies loop: an unusable Ghostscript must refuse
+    # once, not once per copy.
+    from engine.printer import print_pdf
+
+    with pytest.raises(gc.GsUnavailable) as caught:
+        print_pdf(tmp_pdf, "Microsoft Print to PDF", gs_path=_absent(tmp_path), copies=3)
+    assert caught.value.reason == gc.NOT_EXECUTABLE
+
+
+def test_every_print_render_stage_refuses_by_name(tmp_pdf, tmp_path, tmp_dir):
+    from engine.print_layout import flatten_pdf, rasterize_pdf, render_preview
+
+    absent = _absent(tmp_path)
+    out = os.path.join(tmp_dir, "out.pdf")
+    for run in (
+        lambda: flatten_pdf(absent, tmp_pdf, out),
+        lambda: rasterize_pdf(absent, tmp_pdf, out, 72),
+        lambda: render_preview(absent, tmp_pdf, tmp_dir, 72, 612.0, 792.0,
+                               ["-dFIXEDMEDIA", "-dFitPage"]),
+    ):
+        with pytest.raises(gc.GsUnavailable) as caught:
+            run()
+        assert caught.value.reason == gc.NOT_EXECUTABLE
+
+
+def test_image_export_refuses_by_name(tmp_pdf, tmp_dir, tmp_path):
+    from engine.image_export import export_images
+
+    with pytest.raises(gc.GsUnavailable):
+        export_images(tmp_pdf, os.path.join(tmp_dir, "p.png"), gs_path=_absent(tmp_path))
+
+
+def test_the_ocr_raster_refuses_by_name(tmp_pdf, tmp_dir, tmp_path):
+    from engine.recognize import _render_page_png
+
+    with pytest.raises(gc.GsUnavailable):
+        _render_page_png(tmp_pdf, 1, _absent(tmp_path),
+                         __import__("pathlib").Path(tmp_dir) / "p.png")
+
+
+def test_the_slide_raster_refuses_by_name(tmp_pdf, tmp_dir, tmp_path):
+    from engine.slide_export import _render_background
+
+    with pytest.raises(gc.GsUnavailable):
+        _render_background(tmp_pdf, 1, _absent(tmp_path),
+                           __import__("pathlib").Path(tmp_dir) / "p.png")
+
+
+def test_mask_verification_refuses_by_name(tmp_path):
+    # Rule 4's decoder. An unverified stencil is not shippable, so the
+    # verification must refuse rather than be skipped.
+    from engine.mrc_codecs import MaskStream, verify_mask_stream
+
+    stream = MaskStream(data=b"", codec="ccitt", width=8, height=8, decode=None,
+                        decode_parms=None, globals_data=None, ink_fraction=0.1)
+    with pytest.raises(gc.GsUnavailable):
+        verify_mask_stream(stream, _absent(tmp_path))
+
+
+def test_mrc_refuses_up_front_rather_than_after_the_segmentation(tmp_pdf, tmp_dir, tmp_path):
+    from engine.mrc import mrc_compress
+
+    with pytest.raises(gc.GsUnavailable) as caught:
+        mrc_compress(tmp_pdf, os.path.join(tmp_dir, "out.pdf"), gs_path=_absent(tmp_path))
+    assert caught.value.reason == gc.NOT_EXECUTABLE
+
+
+def test_no_gs_door_is_left_spawning_a_raw_subprocess():
+    """The sweep that keeps a NEW door from reappearing outside the authority.
+
+    Every module that takes a `gs_path` must reach Ghostscript through
+    `budget` (which validates) or consult `gs_capability` itself. A module
+    that takes the parameter and calls `subprocess` directly is the shape
+    this whole layer was built to remove, so it is checked mechanically
+    rather than by review.
+    """
+    import pathlib
+    import re
+
+    engine_dir = pathlib.Path(__file__).resolve().parents[1] / "src" / "engine"
+    offenders = []
+    for path in sorted(engine_dir.glob("*.py")):
+        if path.name in {"budget.py", "gs_capability.py"}:
+            continue
+        text = path.read_text(encoding="utf-8")
+        # A module that only PASSES `gs_path` down is not a door; the ones
+        # that matter BUILD a Ghostscript command, which always names the
+        # executable as the list's first element.
+        if not re.search(r"\[\s*(?:str\()?\s*gs_path\b", text):
+            continue
+        # Such a module must NAME the authority: either `budget.gs`, which
+        # validates and replaces the executable before spawning, or
+        # `gs_capability` directly. One that names neither has no way to have
+        # validated the path it was handed, whatever it does with it.
+        if "budget.gs(" in text or "gs_capability" in text:
+            continue
+        offenders.append(path.name)
+    assert not offenders, offenders
+
+
+def test_no_gs_default_is_a_bare_command_name():
+    """`gs_path` defaults to ABSENT, never to the literal "gs".
+
+    A literal default is a claim that a program named `gs` is the right one,
+    which on the shipped platform is usually not even the console binary's
+    name (`gswin64c`). Absent means "resolve one", and the authority's
+    discovery answers it — including the registry-installed copies that
+    never reach PATH.
+    """
+    import pathlib
+    import re
+
+    engine_dir = pathlib.Path(__file__).resolve().parents[1] / "src" / "engine"
+    offenders = []
+    for path in sorted(engine_dir.glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        if re.search(r'gs_path\s*(?::\s*str\s*)?=\s*["\']gs["\']', text):
+            offenders.append(path.name)
+    assert not offenders, offenders
+
+
+def test_an_absent_default_still_reaches_discovery(monkeypatch, tmp_path):
+    """The normalization's whole point: "" resolves, it does not refuse blind.
+
+    With the override pointing at a usable stub, a door called with NO
+    `gs_path` must find it — otherwise the defaults sweep would have turned
+    every default caller into a refusal.
+    """
+    stub = stub_gs(str(tmp_path), "10.07.1", renders=True)
+    monkeypatch.setenv(gc.PATH_ENV_VAR, stub)
+    monkeypatch.setattr(gc, "_smoke", lambda _p: (True, ""))
+    gc.clear_cache()
+    answer = gc.resolve("")
+    assert answer.available
+    assert answer.path == stub
+
+
+def test_a_preflight_raster_check_reports_rather_than_skips(tmp_dir, monkeypatch):
+    """The worst failure mode in the matrix: a check that PASSES because the
+    tool it needed was missing. Total area coverage is the one preflight
+    check that measures through Ghostscript, and with none available it must
+    say so by name — a `needs_review` carrying `tac_not_measured`, never a
+    pass it did not earn."""
+    import preflight_builders as builders
+    from engine.preflight import preflight
+
+    profile = {"schema": 1, "id": "t", "name": "T",
+               "checks": {"ink_coverage_max": {"enabled": True}}}
+    src = builders.build("tac_360", tmp_dir)
+
+    monkeypatch.setattr(
+        gc, "resolve",
+        lambda path=None: gc.GsCapability(False, str(path or ""), "", gc.NOT_CONFIGURED),
+    )
+    report = preflight(src, profile=profile)
+    row = next(r for r in report["checks"] if r["id"] == "ink_coverage_max")
+    assert row["status"] == "needs_review"
+    assert [f["detail_key"] for f in row["findings"]] == ["tac_not_measured"]
+
+
+def test_no_module_decides_ghostscript_by_file_existence():
+    """The other half of the defect class the sweep above covers.
+
+    A door does not have to spawn blind to be wrong: guarding with
+    `os.path.isfile(gs_path)` says yes to a copied `gswin64c.exe` with no
+    `Resource/` tree, and to a build too old for the flags the engine passes.
+    Both then fail deep inside the operation as something else — an
+    unexplained render error, a bad stencil — which is exactly the confusion
+    the authority exists to end. Existence is never the question; the probe
+    is.
+    """
+    import pathlib
+    import re
+
+    engine_dir = pathlib.Path(__file__).resolve().parents[1] / "src" / "engine"
+    offenders = []
+    for path in sorted(engine_dir.glob("*.py")):
+        if path.name == "gs_capability.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        for pattern in (
+            r"os\.path\.isfile\(\s*gs_path",
+            r"os\.path\.exists\(\s*gs_path",
+            r"Path\(\s*gs_path\s*\)",
+        ):
+            if re.search(pattern, text):
+                offenders.append(f"{path.name}: {pattern}")
+    assert not offenders, offenders

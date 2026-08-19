@@ -583,7 +583,7 @@ def create_pdf(
     margin_pt: float = 0.0,
     image_dpi_default: float = 200.0,
     soffice_path: str = "",
-    gs_path: str = "gs",
+    gs_path: str = "",
     distill_preset: str = "printer",
     on_unsupported: str = "refuse",
 ) -> dict:

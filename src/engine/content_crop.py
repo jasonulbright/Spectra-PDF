@@ -193,7 +193,7 @@ def _ink_box(pdf, page, page_number: int, file: str, gs_path: str) -> tuple:
     return (rx0 + left * sx, ry1 - bottom * sy, rx0 + right * sx, ry1 - top * sy), True
 
 
-def page_content_box(pdf, page, page_number: int, file: str, gs_path: str = "gs") -> tuple:
+def page_content_box(pdf, page, page_number: int, file: str, gs_path: str = "") -> tuple:
     """`(box, source)` for one page — `box` is None when the page draws nothing.
 
     `source` names which measurement answered: ``ink`` for a scan, ``content``
@@ -212,7 +212,7 @@ def content_crop(
     margin: float = 0.0,
     pages: list | None = None,
     preview: bool = False,
-    gs_path: str = "gs",
+    gs_path: str = "",
 ) -> dict:
     """Crop a page box to each page's own content.
 
