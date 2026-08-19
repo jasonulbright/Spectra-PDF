@@ -84,12 +84,12 @@ jobs:
       - name: Create resource stubs for Tauri build script
         run: |
           mkdir -p resources/python
-          mkdir -p resources/ghostscript
           mkdir -p resources/fonts
           mkdir -p resources/libreoffice
           mkdir -p resources/tesseract
           mkdir -p resources/jbig2enc
           mkdir -p resources/dictionaries
+          mkdir -p resources/icc
         shell: bash
 
       # `cargo check` never RUNS anything. The Rust tests cover the virtual
@@ -169,8 +169,12 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/setup-python-embed.ps1
         shell: pwsh
 
-      - name: Vendor upstream Ghostscript
-        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-ghostscript.ps1
+      - name: Vendor the ICC colour profiles (committed under vendor/icc)
+        # The profiles are committed to this repository, so this step reads no
+        # network and needs no credential. Every file is sha256-verified against
+        # scripts/icc-profiles.tsv on the way out and again on disk, and the
+        # notice gate refuses to write the tree when a row lacks its notice.
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-icc.ps1
         shell: pwsh
 
       - name: Vendor edit fonts (Liberation family, 12 faces, sha256-pinned)
@@ -179,9 +183,9 @@ jobs:
 
       - name: Vendor LibreOffice (O1 export runtime, MPL-2.0)
         # Self-sufficient: the runner has no LibreOffice, so the script downloads
-        # its PINNED, checksum-verified stable .msi (default in the script, like
-        # bundle-ghostscript.ps1). No repo variable, no manual setup. To bump the
-        # version, edit $Version/$ExpectedSha256 in the script.
+        # its PINNED, checksum-verified stable .msi (the default in the script).
+        # No repo variable, no manual setup. To bump the version, edit
+        # $Version/$ExpectedSha256 in the script.
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1
 
       - name: Vendor native Tesseract

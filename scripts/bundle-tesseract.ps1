@@ -3,7 +3,7 @@
 # Upstream ships no Windows binary and points Windows users at
 # the UB Mannheim build, so that is the source: downloaded, verified against a
 # pinned SHA-256, and extracted from the NSIS installer with 7-Zip WITHOUT
-# running it -- byte-for-byte the technique bundle-ghostscript.ps1 already uses.
+# running it -- the same technique bundle-jbig2enc.ps1 uses.
 #
 # Tesseract is Apache-2.0 and Leptonica (its imaging dependency) is BSD-2-Clause.
 # tesseract.exe is invoked as a separate process, unmodified upstream (see

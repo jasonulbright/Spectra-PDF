@@ -1,6 +1,6 @@
 # Vendors the Edit-tool fallback font FAMILY
 # into resources/fonts - the same repo-hygiene class as resources/python and
-# resources/ghostscript: assembled by script, gitignored, SHIPPED in the
+# resources/tesseract: assembled by script, gitignored, SHIPPED in the
 # product bundle (tauri.conf.json resources maps ../resources/fonts -> fonts).
 #
 # Twelve Liberation faces (all SIL OFL 1.1) - Regular/Bold/Italic/BoldItalic
@@ -79,8 +79,7 @@ $Root = Split-Path -Parent $PSScriptRoot
 $Dest = Join-Path $Root 'resources\fonts'
 
 # Skip the download entirely only when EVERY face is present and verified
-# (the bundle-ghostscript re-check precedent: a corrupted/wrong file must
-# not silently satisfy the skip).
+# (a corrupted or wrong file must not silently satisfy the skip).
 #
 # EVERY face means every face the script vendors, not just the two families
 # it started with: the CJK and right-to-left blocks live BELOW this guard, so

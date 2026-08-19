@@ -17,7 +17,7 @@
 #      extracted headlessly. This is what makes a CI-tag release self-sufficient:
 #      the GitHub windows-latest runner has no LibreOffice, so it falls to this
 #      path -- and because a real version + hash are pinned below, it needs NO
-#      repository variable and NO manual setup. Same model as bundle-ghostscript.ps1.
+#      repository variable and NO manual setup. Same model as bundle-tesseract.ps1.
 #
 # NOTE on the "never pin a runtime version" rule: that rule targets BROWSER /
 # WEBVIEW runtimes (WebView2, msedgedriver, Chrome) that auto-update on an
