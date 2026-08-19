@@ -28,6 +28,7 @@
 - Clean GitHub verification now stages every shipped engine resource and fails if any engine test is skipped.
 - Release builds always assemble the pinned LibreOffice 26.2.5 runtime, even when the build machine has another version installed.
 - Office conversion uses the bundled app fonts on clean machines instead of depending on fonts installed in Windows.
+- OpenDocument conversion no longer reports unused CJK or complex-script style defaults as missing fonts.
 - Clean verification now exercises PKCS#11 token signing through a pinned test-only software token instead of skipping it.
 
 ## 1.1.6
