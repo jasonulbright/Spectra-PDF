@@ -1,0 +1,325 @@
+"""The Ghostscript capability authority, and the chokepoint that consults it.
+
+Two things are under test and they are not the same thing: that ONE module
+answers "is a usable Ghostscript configured?" by probing rather than by file
+existence, and that a gs run with no usable Ghostscript leaves the engine as
+ONE named refusal rather than as a spawn failure at whichever door was asked.
+"""
+
+import os
+import subprocess
+import sys
+
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from engine import budget, gs_capability as gc  # noqa: E402
+
+GS = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "resources", "ghostscript", "gswin64c.exe")
+)
+
+needs_gs = pytest.mark.skipif(
+    not os.path.isfile(GS), reason="capability-present axis: no provisioned Ghostscript"
+)
+
+
+@pytest.fixture(autouse=True)
+def clean_capability_cache(monkeypatch):
+    """Every test starts with no probed answers and no ambient override."""
+    monkeypatch.delenv(gc.PATH_ENV_VAR, raising=False)
+    gc.clear_cache()
+    yield
+    gc.clear_cache()
+
+
+def stub_gs(directory, version_line, *, renders=False):
+    """A fake `gs` that answers --version and (optionally) nothing else."""
+    stub = os.path.join(directory, "gswin64c.cmd")
+    body = f"@if \"%1\"==\"--version\" echo {version_line}\r\n"
+    if not renders:
+        body += "@if not \"%1\"==\"--version\" exit /b 1\r\n"
+    with open(stub, "w", encoding="ascii", newline="") as handle:
+        handle.write(body)
+    return stub
+
+
+# ── Version comparison ────────────────────────────────────────────────────
+
+
+def test_version_reads_a_zero_padded_minor_as_a_value():
+    assert gc.parse_version("10.07.1") == (10, 7, 1)
+    assert gc.parse_version("9.50") == (9, 50)
+    assert gc.parse_version("GPL Ghostscript 10.02.1") == (10, 2, 1)
+    assert gc.parse_version("") == ()
+
+
+def test_the_floor_rejects_the_whole_nine_series():
+    # 9.50's minor is 50 — larger than 10.0's 0. The comparison is on the
+    # PAIR, and a minor-only comparison would call 9.50 newer than 10.0.
+    assert gc.parse_version("9.50")[:2] < gc.MINIMUM_VERSION
+    assert gc.parse_version("10.0.0")[:2] >= gc.MINIMUM_VERSION
+    assert gc.parse_version("10.07.1")[:2] >= gc.MINIMUM_VERSION
+
+
+# ── Probing ───────────────────────────────────────────────────────────────
+
+
+@needs_gs
+def test_a_real_ghostscript_probes_available_with_its_version():
+    answer = gc.probe(GS)
+    assert answer.available
+    assert answer.reason == ""
+    assert gc.parse_version(answer.version)[:2] >= gc.MINIMUM_VERSION
+    assert answer.path == GS
+
+
+def test_nothing_configured_is_its_own_reason():
+    answer = gc.probe("")
+    assert not answer.available
+    assert answer.reason == gc.NOT_CONFIGURED
+
+
+def test_a_path_to_nothing_is_not_executable(tmp_path):
+    answer = gc.probe(str(tmp_path / "gswin64c.exe"))
+    assert not answer.available
+    assert answer.reason == gc.NOT_EXECUTABLE
+
+
+def test_a_directory_is_not_a_program(tmp_path):
+    answer = gc.probe(str(tmp_path))
+    assert not answer.available
+    assert answer.reason == gc.NOT_EXECUTABLE
+
+
+def test_a_file_that_is_not_a_program_fails_the_probe(tmp_path):
+    fake = tmp_path / "gswin64c.exe"
+    fake.write_bytes(b"not a program")
+    answer = gc.probe(str(fake))
+    assert not answer.available
+    assert answer.reason == gc.PROBE_FAILED
+
+
+def test_an_older_build_is_refused_by_version_not_by_rendering(tmp_path):
+    stub = stub_gs(str(tmp_path), "9.50")
+    answer = gc.probe(stub)
+    assert not answer.available
+    assert answer.reason == gc.VERSION_BELOW_MINIMUM
+    assert answer.version == "9.50"
+
+
+def test_a_new_enough_build_that_cannot_render_is_still_refused(tmp_path):
+    # THE reason this module exists: a file can exist, be executable, and
+    # report a modern version while being unable to render a page (a copied
+    # exe without its Resource tree). Existence and --version both pass here.
+    stub = stub_gs(str(tmp_path), "10.07.1")
+    answer = gc.probe(stub)
+    assert not answer.available
+    assert answer.reason == gc.PROBE_FAILED
+
+
+def test_the_answer_is_cached_per_path_and_remint_on_clear(tmp_path, monkeypatch):
+    stub = stub_gs(str(tmp_path), "9.50")
+    assert gc.probe(stub).reason == gc.VERSION_BELOW_MINIMUM
+
+    def explode(*_args, **_kwargs):
+        raise AssertionError("a cached answer must not re-probe")
+
+    monkeypatch.setattr(gc, "_run", explode)
+    assert gc.probe(stub).reason == gc.VERSION_BELOW_MINIMUM
+
+    gc.clear_cache()
+    with pytest.raises(AssertionError):
+        gc.probe(stub)
+
+
+def test_a_replaced_binary_at_the_same_path_re_probes(tmp_path):
+    stub = stub_gs(str(tmp_path), "9.50")
+    assert gc.probe(stub).reason == gc.VERSION_BELOW_MINIMUM
+    # Same path, different bytes: the key carries mtime and size, so the
+    # stale answer cannot survive a reinstall over the top.
+    os.utime(stub, (0, 0))
+    stub_gs(str(tmp_path), "10.07.1")
+    assert gc.probe(stub).reason == gc.PROBE_FAILED
+
+
+# ── Discovery and resolution ──────────────────────────────────────────────
+
+
+@needs_gs
+def test_the_environment_override_is_discovered(monkeypatch, tmp_path):
+    monkeypatch.setenv(gc.PATH_ENV_VAR, GS)
+    monkeypatch.setattr(gc.shutil, "which", lambda *_a, **_k: None)
+    answer = gc.resolve("")
+    assert answer.available
+    assert answer.path == GS
+
+
+def test_an_explicit_failure_never_falls_through_to_discovery(tmp_path, monkeypatch):
+    # A machine with a working Ghostscript elsewhere must not silently answer
+    # for the path the user actually named — a settings screen that reports
+    # one path while the run used another is lying.
+    monkeypatch.setattr(gc, "discover", lambda: [GS])
+    named = str(tmp_path / "gswin64c.exe")
+    answer = gc.resolve(named)
+    assert not answer.available
+    assert answer.path == named
+
+
+def test_a_bare_name_resolves_through_path_before_anything_spawns(monkeypatch, tmp_path):
+    stub = stub_gs(str(tmp_path), "9.50")
+    monkeypatch.setattr(gc.shutil, "which", lambda name: stub if name else None)
+    answer = gc.resolve("gs")
+    # The old `or "gs"` shape spawned the bare name blind. It now resolves to
+    # a real path and is judged like any other candidate.
+    assert answer.path == stub
+    assert answer.reason == gc.VERSION_BELOW_MINIMUM
+
+
+def test_no_candidate_at_all_is_not_configured(monkeypatch):
+    monkeypatch.setattr(gc, "discover", lambda: [])
+    answer = gc.resolve("")
+    assert not answer.available
+    assert answer.reason == gc.NOT_CONFIGURED
+
+
+# ── The refusal ───────────────────────────────────────────────────────────
+
+
+def test_require_raises_the_named_refusal_carrying_its_reason(monkeypatch):
+    monkeypatch.setattr(gc, "discover", lambda: [])
+    with pytest.raises(gc.GsUnavailable) as caught:
+        gc.require("")
+    assert caught.value.reason == gc.NOT_CONFIGURED
+    assert "Ghostscript" in str(caught.value)
+    assert "ghostscript.com" in str(caught.value)
+
+
+def test_every_reason_has_its_own_message(tmp_path):
+    missing = gc.probe(str(tmp_path / "gswin64c.exe"))
+    old = gc.probe(stub_gs(str(tmp_path), "9.50"))
+    unconfigured = gc.probe("")
+    texts = {gc.message(a) for a in (missing, old, unconfigured)}
+    assert len(texts) == 3
+    assert gc._minimum_text() in gc.message(old)
+    assert old.version in gc.message(old)
+
+
+def test_describe_is_a_structured_answer(monkeypatch):
+    monkeypatch.setattr(gc, "discover", lambda: [])
+    payload = gc.describe("")
+    assert payload["available"] is False
+    assert payload["reason"] == gc.NOT_CONFIGURED
+    assert payload["minimum_version"] == gc._minimum_text()
+    assert "Ghostscript" in payload["message"]
+
+
+# ── The chokepoint ────────────────────────────────────────────────────────
+
+
+def test_the_chokepoint_refuses_before_it_spawns(tmp_path, monkeypatch):
+    def explode(*_args, **_kwargs):
+        raise AssertionError("nothing may spawn without a usable Ghostscript")
+
+    monkeypatch.setattr(subprocess, "run", explode)
+    with pytest.raises(gc.GsUnavailable):
+        budget.gs(
+            [str(tmp_path / "gswin64c.exe"), "--help"],
+            what="probe",
+            path=str(tmp_path),
+        )
+
+
+@needs_gs
+def test_the_chokepoint_substitutes_the_validated_path(monkeypatch, tmp_path):
+    monkeypatch.setenv(gc.PATH_ENV_VAR, GS)
+    monkeypatch.setattr(gc.shutil, "which", lambda *_a, **_k: None)
+    result = budget.gs(["", "--version"], what="probe", path=str(tmp_path))
+    assert result.returncode == 0
+    assert result.stdout.strip().startswith("10.")
+
+
+def test_the_refusal_is_catchable_as_a_runtime_error(tmp_path):
+    # Every per-file and per-folder handler in the engine catches broadly.
+    # The refusal must land in those handlers as a reported row, which means
+    # it has to stay inside the RuntimeError family.
+    assert issubclass(gc.GsUnavailable, RuntimeError)
+    with pytest.raises(RuntimeError):
+        gc.require(str(tmp_path / "gswin64c.exe"))
+
+
+# ── The doors ─────────────────────────────────────────────────────────────
+#
+# Detection is one edit at the chokepoint; these prove the refusal actually
+# arrives at representative doors in each door's OWN error shape — a raised
+# refusal where the door raises, a reported row where the door isolates per
+# file — rather than as a spawn failure or a crash.
+
+
+def test_compress_refuses_by_name(tmp_pdf, tmp_dir, tmp_path):
+    from engine.compress import compress
+
+    with pytest.raises(gc.GsUnavailable) as caught:
+        compress(
+            tmp_pdf,
+            os.path.join(tmp_dir, "out.pdf"),
+            gs_path=str(tmp_path / "gswin64c.exe"),
+        )
+    assert "Ghostscript" in str(caught.value)
+    assert caught.value.reason == gc.NOT_EXECUTABLE
+
+
+def test_pdfa_conversion_refuses_by_name(tmp_pdf, tmp_dir, tmp_path):
+    from engine.pdfa import convert_pdfa
+
+    with pytest.raises(gc.GsUnavailable):
+        convert_pdfa(
+            tmp_pdf,
+            os.path.join(tmp_dir, "out.pdf"),
+            gs_path=str(tmp_path / "gswin64c.exe"),
+        )
+
+
+def test_rebuild_refuses_by_name(tmp_pdf, tmp_dir, tmp_path):
+    from engine.rebuild import rebuild
+
+    with pytest.raises(gc.GsUnavailable):
+        rebuild(tmp_pdf, os.path.join(tmp_dir, "out.pdf"), gs_path=str(tmp_path / "gswin64c.exe"))
+
+
+def test_a_folder_run_reports_the_refusal_as_a_row(tmp_path):
+    # create_pdf_folders isolates per folder, so its error shape is a ROW.
+    # This is also the site that used to pass `gs_path or "gs"` — a bare name
+    # spawned blind, which is why the failure used to be a FileNotFoundError.
+    from engine.create_pdf_folders import create_pdf_folders
+
+    source = tmp_path / "src" / "job"
+    source.mkdir(parents=True)
+    (source / "page.ps").write_text(
+        "%!PS\n/Helvetica findfont 24 scalefont setfont\n"
+        "72 72 moveto (hello) show showpage\n",
+        encoding="ascii",
+    )
+    dest = tmp_path / "out"
+    report = create_pdf_folders(
+        str(source.parent),
+        str(dest),
+        sources="all",
+        gs_path=str(tmp_path / "gswin64c.exe"),
+        write_log=False,
+    )
+    rows = [row for row in report["results"] if row["status"] == "error"]
+    assert rows, report
+    assert "Ghostscript" in rows[0]["error"]
+
+
+def test_a_bare_name_path_cannot_resolve_is_the_answer(monkeypatch):
+    # Not a licence to go looking elsewhere: a run told to use `gs` must not
+    # quietly succeed through some other install the machine happens to have.
+    monkeypatch.setattr(gc.shutil, "which", lambda *_a, **_k: None)
+    monkeypatch.setattr(gc, "discover", lambda: [GS])
+    answer = gc.resolve("no-such-ghostscript")
+    assert not answer.available
+    assert answer.reason == gc.NOT_EXECUTABLE
+    assert answer.path == "no-such-ghostscript"

@@ -141,7 +141,7 @@ def create_pdf_folders(
     margin_pt: float = 0.0,
     image_dpi_default: float = 200.0,
     distill_preset: str = "printer",
-    gs_path: str = "gs",
+    gs_path: str = "",
     soffice_path: str = "",
     log_dir: str = "",
     write_log: bool = True,
@@ -184,7 +184,7 @@ def create_pdf_folders(
                 margin_pt=margin_pt,
                 image_dpi_default=image_dpi_default,
                 distill_preset=distill_preset,
-                gs_path=gs_path or "gs",
+                gs_path=gs_path,
                 soffice_path=soffice_path,
                 # One unreadable page must not cost the other forty. The
                 # skipped member is reported on its own row, never dropped.
