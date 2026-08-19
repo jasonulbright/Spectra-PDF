@@ -51,10 +51,12 @@ the primary risk surface. In scope:
   documented in the README and is a consequence of not holding a code-signing
   certificate, not a vulnerability. Verify downloads with the SHA-256 checksums
   published alongside each release.
-- Vulnerabilities in bundled third-party components (Ghostscript, LibreOffice,
-  Tesseract data, Python packages) that are already public and fixed upstream —
+- Vulnerabilities in bundled third-party components (LibreOffice, Tesseract
+  data, Python packages) that are already public and fixed upstream —
   please do report these, but as a normal issue asking for a version bump.
   See [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) for what ships.
+  Ghostscript is not shipped — it is a prerequisite the user installs and
+  updates, so report its vulnerabilities to its own publisher.
 - Attacks that require an attacker to already have code execution or
   administrator rights on the machine.
 

@@ -34,6 +34,11 @@
 *.ttf   binary
 *.otf   binary
 *.traineddata binary
+# The committed ICC profiles under vendor/icc. Every one is sha256-pinned in
+# scripts/icc-profiles.tsv and the distribution terms require them UNMODIFIED,
+# so a checkout that translated one byte would both break the build gate and
+# ship a profile we have no right to ship.
+*.icc   binary
 
 # The bundled EU trusted-list files record their own sha256 digests in
 # eutl-manifest.json, so a checkout that translates LF->CRLF makes every

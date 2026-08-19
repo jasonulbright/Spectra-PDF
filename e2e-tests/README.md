@@ -43,8 +43,10 @@ The output is `src-tauri/target/debug/spectrapdf.exe`.
 
 Prereqs for the binary to actually start the engine: `resources/python/`
 must contain a working `python.exe` (run `scripts/setup-python-embed.ps1`
-once) and `resources/ghostscript/` must exist (stub `gswin64c.exe` +
-`gsdll64.dll` are fine for tests that don't exercise GS).
+once). Ghostscript is not shipped and no stub is wanted: the specs that
+exercise it need a REAL Ghostscript installed on the machine, discovered the
+way the product discovers one. Without it those specs run the
+capability-ABSENT axis instead, where the surfaces must refuse by name.
 
 ## Run the suite
 

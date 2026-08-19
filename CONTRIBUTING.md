@@ -47,9 +47,11 @@ output is not.
 ## Building
 
 See the README's Quick Start and Build sections. `npm run prepackage` vendors
-every runtime the app needs — embedded Python, Ghostscript, the edit fonts,
-LibreOffice, native Tesseract, and the OCR language models — and every one of
-them is required for a build to succeed. `npm run package:unsigned` is the
+every runtime the app needs — embedded Python, the ICC colour profiles, the edit
+fonts, LibreOffice, native Tesseract, and the OCR language models — and every
+one of them is required for a build to succeed. Ghostscript is NOT among them:
+it is not shipped with the product. Install one on your machine if you want to
+work on, or test, the features that need it. `npm run package:unsigned` is the
 local build: prepackage plus the Rust compile and the NSIS installer.
 (`npm run package` without `:unsigned` is the release shape — it also signs
 the updater artifacts, which needs `TAURI_SIGNING_PRIVATE_KEY`, a key that

@@ -60,6 +60,55 @@ if ($LASTEXITCODE -ne 0) { throw "Hash-verified dependency install failed" }
 & powershell -ExecutionPolicy Bypass -File "$PSScriptRoot\install-vendored-wheels.ps1" -Python "$DestDir\python.exe"
 if ($LASTEXITCODE -ne 0) { throw "Vendored wheel install failed" }
 
+# Remove anything installed that the SHIPPED set no longer names. A
+# re-provision over an existing tree skips the download (the version marker is
+# present) and installs only what the manifests list -- so a package dropped
+# from them survives, and the runtime keeps shipping it. That is not
+# hypothetical: pillow_heif was replaced by pi_heif, and without this an
+# incremental dev tree still carried the GPL wheel it was replaced to remove.
+# The shipped set is exactly the two manifests, so this is derived from them
+# rather than from a hand-kept list that could go stale the same way.
+$Shipped = @{}
+foreach ($line in (Get-Content $LockFile)) {
+    if ($line -match '^([A-Za-z0-9._-]+)\s*==') {
+        $Shipped[$Matches[1].ToLowerInvariant().Replace('_', '-').Replace('.', '-')] = $true
+    }
+}
+foreach ($line in (Get-Content "$PSScriptRoot\vendored-wheels.tsv" -Encoding UTF8)) {
+    if ($line -match '^#' -or $line -match '^package\t' -or -not $line.Trim()) { continue }
+    $name = ($line -split "`t")[0].Trim()
+    if ($name) { $Shipped[$name.ToLowerInvariant().Replace('_', '-').Replace('.', '-')] = $true }
+}
+# pip and its install-time companions are removed wholesale by the cleanup
+# below; uninstalling them here would take pip out from under that step.
+foreach ($tool in @('pip', 'setuptools', 'wheel')) { $Shipped[$tool] = $true }
+
+$sitePackages = Join-Path $DestDir "Lib\site-packages"
+$stale = @()
+foreach ($di in (Get-ChildItem $sitePackages -Directory -Filter "*.dist-info" -ErrorAction SilentlyContinue)) {
+    # <name>-<version>.dist-info, per the installed-project layout.
+    $dist = ($di.Name -replace '\.dist-info$','') -replace '-[^-]+$',''
+    $key = $dist.ToLowerInvariant().Replace('_', '-').Replace('.', '-')
+    if (-not $Shipped.ContainsKey($key)) { $stale += $dist }
+}
+if ($stale) {
+    Write-Host "Removing $($stale.Count) package(s) no longer in the shipped set: $($stale -join ', ')"
+    foreach ($s in $stale) {
+        # pip's own message is carried into the throw: a failed uninstall here
+        # means the runtime would ship the package, and "it failed" without the
+        # reason costs a second run to learn anything.
+        $log = & $DestDir\python.exe -m pip uninstall $s -y 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "could not uninstall the stale package ${s}:`n$($log -join "`n")" }
+    }
+    # Proven gone rather than assumed: a pip uninstall that reports success but
+    # leaves the dist-info behind would ship the package anyway.
+    $left = @(Get-ChildItem $sitePackages -Directory -Filter "*.dist-info" | Where-Object {
+        $d = ($_.Name -replace '\.dist-info$','') -replace '-[^-]+$',''
+        -not $Shipped.ContainsKey($d.ToLowerInvariant().Replace('_', '-').Replace('.', '-'))
+    })
+    if ($left) { throw "stale packages survived the uninstall: $(($left | ForEach-Object Name) -join ', ')" }
+}
+
 # Cleanup -- remove pip, caches, install bookkeeping. dist-info dirs are
 # PRUNED, not deleted: each wheel's METADATA (name/version/license fields)
 # and license texts (licenses/, LICENSE*, COPYING*, NOTICE*, AUTHORS*) must
