@@ -21,6 +21,7 @@ import {
   closeAllFiles,
   formWidgetCount,
   pressGlobalKey,
+  gsRestore,
 } from '../support/harness.js';
 
 // "Date of birth" is here for the carry the detector's format hint earns: it
@@ -239,15 +240,17 @@ describe('Prepare Form field detection', () => {
 
 /** Render the form at the recognition density and re-embed it as an image.
  *
- * The vendored Ghostscript is a hard requirement rather than a skip: a scan
- * case that quietly does nothing is a case that stops testing the scan arm the
- * first time the fixture build breaks. */
+ * A capability-probed Ghostscript is a hard requirement rather than a skip: a
+ * scan case that quietly does nothing is a case that stops testing the scan arm
+ * the first time the fixture build breaks. The path comes from the running app,
+ * so this exercises the same registry/PATH/setting discovery users receive. */
 async function buildScan(source: string, target: string): Promise<void> {
   const { execFileSync } = await import('node:child_process');
-  const gs = resolve(process.cwd(), '..', 'resources', 'ghostscript', 'gswin64c.exe');
-  const local = resolve(process.cwd(), 'resources', 'ghostscript', 'gswin64c.exe');
-  const exe = existsSync(gs) ? gs : existsSync(local) ? local : null;
-  if (!exe) throw new Error('the vendored Ghostscript is required to build the scan fixture');
+  const answer = await gsRestore();
+  if (!answer.available || !answer.path) {
+    throw new Error(`a usable Ghostscript is required to build the scan fixture: ${answer.reason}`);
+  }
+  const exe = answer.path;
   const png = resolve(tmpdir(), `spectra-e2e-f17-${Date.now()}.png`);
   execFileSync(exe, [
     '-sDEVICE=png16m',

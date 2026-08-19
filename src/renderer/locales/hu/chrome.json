@@ -4702,7 +4702,6 @@
   "panel.settings.keepLogsAria": "A kötegelt OCR naplóinak megőrzése ennyi ideig",
   "panel.settings.keepLogsFor": "Naplók megőrzése ennyi ideig",
   "panel.settings.lastJobFailed": "A legutóbbi feladat sikertelen: {{error}}",
-  "panel.settings.licensesP1": "A Ghostscript (AGPL-3.0) és a LibreOffice (MPL-2.0) módosítás nélkül van csomagolva, és szigorúan külön programként hívódik meg — soha nem linkelődik ebbe az alkalmazásba. A Ghostscript kezeli a Tömörítést, a Szürkeárnyalatost, a PDF/A-t, az Újraépítést és a képexportálást; a LibreOffice a Wordbe és egyéb szerkeszthető formátumokba való exportálást.",
   "panel.settings.licensesP2": "Szintén csomagolva vagy beágyazva: a Python (PSF-licenc), csomagjai között a pikepdf (MPL-2.0), a pdfminer.six (MIT) és a pyHanko (MIT); a pdf.js (Apache-2.0); a pdf-lib (MIT); a Tesseract — a csomagolt OCR-motor, amely szintén szigorúan külön programként fut — és a nyelvi modelljei (Apache-2.0), az általa linkelt minden könyvtár továbbterjesztési közleményével mellette telepítve; a Liberation és a Libertinus betűtípusok (SIL OFL 1.1); a Tauri és a fordított Rust-csomagok (MIT/Apache-2.0 és hasonlók).",
   "panel.settings.licensesP3": "A teljes közlemények az alkalmazással érkeznek: az összesített lista (minden összetevő licencével és forrásával) és a csomagonkénti Rust-felsorolás.",
   "panel.settings.location": "Hely",

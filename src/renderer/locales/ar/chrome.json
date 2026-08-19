@@ -5130,7 +5130,6 @@
   "panel.settings.keepLogsAria": "مدة الاحتفاظ بسجلات التعرف الضوئي على النص بالدفعات",
   "panel.settings.keepLogsFor": "مدة الاحتفاظ بالسجلات",
   "panel.settings.lastJobFailed": "أخفقت المهمة الأخيرة: {{error}}",
-  "panel.settings.licensesP1": "يُرفق كل من Ghostscript (AGPL-3.0) وLibreOffice (MPL-2.0) دون تعديل ويُستدعيان بوصفهما برنامجين منفصلين تمامًا — ولا يُربطان قط داخل هذا التطبيق. يتولى Ghostscript الضغط وتدرج الرمادي وPDF/A وإعادة البناء وتصدير الصور؛ ويتولى LibreOffice التصدير إلى Word والتنسيقات الأخرى القابلة للتحرير.",
   "panel.settings.licensesP2": "ومما هو مرفق أو مضمّن أيضًا: Python (رخصة PSF) ومن حزمه pikepdf (MPL-2.0) وpdfminer.six (MIT) وpyHanko (MIT)؛ وpdf.js (Apache-2.0)؛ وpdf-lib (MIT)؛ وTesseract — محرك التعرف الضوئي على النص المرفق، ويُشغَّل هو أيضًا بوصفه برنامجًا منفصلًا تمامًا — ونماذجه اللغوية (Apache-2.0)، مع إشعارات إعادة التوزيع لكل مكتبة يرتبط بها مثبَّتة إلى جانبه؛ وخطا Liberation وLibertinus (SIL OFL 1.1)؛ وTauri وحزم Rust المُصرَّفة (MIT/Apache-2.0 وما شابهها).",
   "panel.settings.licensesP3": "تُشحن الإشعارات الكاملة مع التطبيق: القائمة المجمَّعة (مع رخصة كل مكوّن ومصدره) وقائمة Rust لكل حزمة.",
   "panel.settings.location": "الموقع",

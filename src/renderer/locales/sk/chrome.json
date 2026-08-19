@@ -4916,7 +4916,6 @@
   "panel.settings.keepLogsAria": "Uchovávať protokoly dávkového rozpoznávania po dobu",
   "panel.settings.keepLogsFor": "Uchovávať protokoly po dobu",
   "panel.settings.lastJobFailed": "Posledná úloha zlyhala: {{error}}",
-  "panel.settings.licensesP1": "Ghostscript (AGPL-3.0) a LibreOffice (MPL-2.0) sa dodávajú bez zmien a volajú sa výhradne ako samostatné programy — nikdy sa s touto aplikáciou nezostavujú. Ghostscript obstaráva kompresiu, odtiene sivej, PDF/A, prestavbu a export obrázkov; LibreOffice export do Wordu a ďalších upraviteľných formátov.",
   "panel.settings.licensesP2": "Dodávané alebo vstavané sú aj: Python (licencia PSF) s balíkmi pikepdf (MPL-2.0), pdfminer.six (MIT) a pyHanko (MIT); pdf.js (Apache-2.0); pdf-lib (MIT); Tesseract — dodaný stroj rozpoznávania textu, tiež spúšťaný výhradne ako samostatný program — a jeho jazykové modely (Apache-2.0), vedľa ktorých sú nainštalované oznámenia o šírení pre každú knižnicu, ktorú zostavuje; písma Liberation a Libertinus (SIL OFL 1.1); Tauri a skompilované balíky Rust (MIT/Apache-2.0 a podobné).",
   "panel.settings.licensesP3": "Úplné oznámenia sa dodávajú s aplikáciou: súhrnný zoznam (s licenciou a zdrojom každej súčasti) a výpis podľa balíkov Rust.",
   "panel.settings.location": "Umiestnenie",

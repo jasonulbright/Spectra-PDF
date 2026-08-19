@@ -4809,7 +4809,6 @@
   "panel.settings.keepLogsAria": "Conserva els registres de l'OCR per lots durant",
   "panel.settings.keepLogsFor": "Conserva els registres durant",
   "panel.settings.lastJobFailed": "L'última tasca ha fallat: {{error}}",
-  "panel.settings.licensesP1": "El Ghostscript (AGPL-3.0) i el LibreOffice (MPL-2.0) s'inclouen sense modificar i s'invoquen estrictament com a programes separats: mai enllaçats dins d'aquesta aplicació. El Ghostscript s'encarrega de Comprimeix, Escala de grisos, PDF/A, Reconstrueix i l'exportació d'imatges; el LibreOffice s'encarrega de l'exportació a Word i altres formats editables.",
   "panel.settings.licensesP2": "També s'hi inclouen o s'hi incrusten: Python (llicència PSF) amb pikepdf (MPL-2.0), pdfminer.six (MIT) i pyHanko (MIT) entre els seus paquets; pdf.js (Apache-2.0); pdf-lib (MIT); Tesseract, el motor d'OCR inclòs, també executat estrictament com a programa separat, i els seus models lingüístics (Apache-2.0), amb els avisos de redistribució de cada biblioteca que enllaça instal·lats al costat; els tipus de lletra Liberation i Libertinus (SIL OFL 1.1); Tauri i els crates de Rust compilats (MIT/Apache-2.0 i similars).",
   "panel.settings.licensesP3": "Els avisos complets s'inclouen amb l'aplicació: la llista agregada (amb la llicència i la font de cada component) i la llista de Rust per crate.",
   "panel.settings.location": "Ubicació",
