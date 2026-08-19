@@ -44,7 +44,18 @@ _LEVEL_WORD = 5
 # but this process also serves the CLI, where it arrives straight from a user.
 # Tesseract treats the value as a filename stem, so anything outside this set
 # could reach the filesystem.
-_LANG_RE = re.compile(r"^[a-z]{3}(_[a-z]{4})?(\+[a-z]{3}(_[a-z]{4})?)*$", re.IGNORECASE)
+#
+# A stem is an ISO 639-2/T code with an optional script/variant suffix. The
+# suffix is THREE OR FOUR letters: the vendored tessdata's only suffixed models
+# are `chi_sim` and `chi_tra`, and tesseract's own script suffixes elsewhere
+# (`_cyrl`, `_latn`, `_vert`) are four. A pattern that admitted only the
+# four-letter form rejected both Chinese models -- offered by the picker,
+# present in the tree -- with "Invalid recognition language", so Chinese
+# recognition could not be reached through this door at all. Widen only to
+# real stem shapes: the guard's job is that no separator, dot, or path
+# character survives.
+_LANG_STEM = r"[a-z]{3}(?:_[a-z]{3,4})?"
+_LANG_RE = re.compile(rf"^{_LANG_STEM}(?:\+{_LANG_STEM})*$", re.IGNORECASE)
 
 
 def _tesseract_exe(tesseract_path: str) -> Path:
