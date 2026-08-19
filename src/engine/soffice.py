@@ -347,6 +347,12 @@ def embedded_faces(pdf_path: str | Path) -> set[str]:
 # substitutions on a clean conversion. These patterns read the RUN properties
 # instead, which is where a face actually gets used.
 _DOCX_DRAWN = re.compile(rb'w:(?:ascii|hAnsi|cs)="([^"]+)"')
+# A default rFonts record contains slots for every writing system whether the
+# document draws any text in them. Latin text inherits ascii/hAnsi; counting
+# the dormant cs/eastAsia slots accuses clean conversions of substituting
+# fonts they never asked LibreOffice to draw. Explicit run properties above
+# still retain `cs`, so an actually selected complex-script face is reported.
+_DOCX_DEFAULT_DRAWN = re.compile(rb'w:(?:ascii|hAnsi)="([^"]+)"')
 _XLSX_DRAWN = re.compile(rb'<name val="([^"]+)"')
 _PPTX_DRAWN = re.compile(rb'typeface="([^"]+)"')
 _ODF_DRAWN = re.compile(rb'style:font-name(?:-asian|-complex)?="([^"]+)"')
@@ -422,7 +428,7 @@ def declared_faces(path: str | Path) -> set[str]:
                         if block is not None:
                             names.update(
                                 m.decode("utf-8", "replace")
-                                for m in _DOCX_DRAWN.findall(block.group())
+                                for m in _DOCX_DEFAULT_DRAWN.findall(block.group())
                             )
                 elif suffix.startswith((".xls", ".xlt")):
                     parts, pattern = _XLSX_PARTS, _XLSX_DRAWN

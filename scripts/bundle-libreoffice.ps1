@@ -132,6 +132,14 @@ if ($GateOnly) {
 function Copy-Install([string]$root) {
     $soffice = Join-Path $root "program\soffice.exe"
     if (-not (Test-Path $soffice)) { return $false }
+    # Validate the dependent resource before replacing a working destination.
+    # The package and CI order deliberately stages resources/fonts first.
+    $appFonts = Join-Path $PSScriptRoot "..\resources\fonts"
+    $fontFiles = @(Get-ChildItem -LiteralPath $appFonts -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension.ToLowerInvariant() -in @(".ttf", ".otf", ".ttc", ".otc") })
+    if (-not $fontFiles) {
+        throw "No app fonts found at $appFonts; run scripts/sync-edit-fonts.ps1 first."
+    }
     Write-Host "Copying LibreOffice from $root ..."
     if (Test-Path $DestDir) { Remove-Item $DestDir -Recurse -Force }
     New-Item -ItemType Directory -Force $DestDir | Out-Null
@@ -143,6 +151,16 @@ function Copy-Install([string]$root) {
         $p = Join-Path $root $sub
         if (Test-Path $p) { Copy-Item $p (Join-Path $DestDir $sub) -Recurse -Force }
     }
+    # LibreOffice's Windows font backend registers this directory with
+    # AddFontResourceExW(FR_PRIVATE). Copy the app's already-vendored faces
+    # here so clean machines convert with the same fonts the rest of Spectra
+    # PDF exposes, without installing anything machine-wide.
+    $loFonts = Join-Path $DestDir "share\fonts\truetype"
+    New-Item -ItemType Directory -Force $loFonts | Out-Null
+    foreach ($font in $fontFiles) {
+        Copy-Item -LiteralPath $font.FullName -Destination (Join-Path $loFonts $font.Name) -Force
+    }
+    Write-Host "Staged $($fontFiles.Count) app fonts for LibreOffice's private font registry."
     # Ship the license text alongside (THIRD-PARTY-LICENSES.md points at it).
     foreach ($lic in @("LICENSE", "license.txt", "LICENSE.html")) {
         $p = Join-Path $root $lic

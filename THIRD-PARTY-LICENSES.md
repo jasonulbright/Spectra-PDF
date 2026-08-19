@@ -236,6 +236,12 @@ the same release. Permissive components carry their required notices.
 
 ## Fonts
 
+Every face below is shipped under `resources/fonts/`. The packaging chain also
+copies the same font files byte-for-byte into LibreOffice's
+`share/fonts/truetype` directory, which LibreOffice registers privately for
+deterministic Office conversion without installing fonts machine-wide. The
+licence texts remain beside the canonical copies under `resources/fonts/`.
+
 **Liberation Sans, Liberation Serif, Liberation Mono** (Regular) —
 © Red Hat / the Liberation Fonts project, licensed under the **SIL Open
 Font License 1.1**. Bundled (vendored by `scripts/sync-edit-fonts.ps1`

@@ -163,6 +163,12 @@ jobs:
         run: node scripts/sync-ocr-assets.mjs
         shell: pwsh
 
+      - name: Stage test-only SoftHSM (PKCS#11 capability axis)
+        # Not an application dependency: this pinned software token gives the
+        # hardware-token signing path a real PKCS#11 module on a clean runner.
+        run: powershell -ExecutionPolicy Bypass -File scripts/setup-test-softhsm.ps1
+        shell: pwsh
+
       - name: Install Ghostscript as a TEST TOOL (capability-present axis)
         # This does not vendor Ghostscript into Spectra PDF. The clean runner
         # installs the current Chocolatey package like an end user would; the

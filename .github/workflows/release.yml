@@ -164,6 +164,11 @@ jobs:
         run: node scripts/sync-ocr-assets.mjs
         shell: pwsh
 
+      - name: Stage test-only SoftHSM for PKCS#11 engine tests
+        # This is a pinned test fixture, not part of the published installer.
+        run: powershell -ExecutionPolicy Bypass -File scripts/setup-test-softhsm.ps1
+        shell: pwsh
+
       - name: Install Ghostscript as a TEST TOOL (capability-present axis)
         # Ghostscript remains user-installed and absent from the installer.
         # This unpinned test install proves the minimum-version capability path
