@@ -38,7 +38,8 @@ from engine.pdf_save import save_pdf
 from engine.split import parse_ranges
 
 # Accepted raster formats. Bundled Pillow decodes WEBP, JPEG 2000, AVIF, GIF,
-# and common formats; pillow-heif supplies HEIC/HEIF camera-image support.
+# and common formats; the vendored decode-only HEIF plugin supplies HEIC/HEIF
+# camera-image support.
 IMAGE_SUFFIXES = (
     ".png",
     ".jpg",
@@ -89,9 +90,9 @@ def _register_heif() -> bool:
     global _heif_registered
     if _heif_registered is None:
         try:
-            import pillow_heif  # noqa: PLC0415
+            import pi_heif  # noqa: PLC0415
 
-            pillow_heif.register_heif_opener()
+            pi_heif.register_heif_opener()
             _heif_registered = True
         except Exception:  # noqa: BLE001 - any import/registration failure is "absent"
             _heif_registered = False
