@@ -16,6 +16,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { expect } from '@wdio/globals';
+import { PDFDocument, PDFName, PDFString } from 'pdf-lib';
 import {
   waitForHarness,
   openByPaths,
@@ -899,13 +900,35 @@ describe('output preview', () => {
     });
 
     /**
+     * A document whose output intent names a condition and embeds nothing.
+     *
+     * The converter embeds its destination profile unconditionally, so no
+     * door in this product produces this shape — but another producer's file
+     * can carry one, and how the panel treats one is what the case below is
+     * about. The bytes are therefore authored rather than converted: the
+     * subject is the READING of an intent, not the writing of one.
+     */
+    async function writeIntentWithoutProfile(source: string, target: string): Promise<void> {
+      const doc = await PDFDocument.load(readFileSync(source));
+      const intent = doc.context.obj({
+        Type: 'OutputIntent',
+        S: 'GTS_PDFX',
+        OutputConditionIdentifier: PDFString.of('FOGRA39'),
+        OutputCondition: PDFString.of('Coated FOGRA39 (ISO 12647-2:2004)'),
+        RegistryName: PDFString.of('http://www.color.org'),
+      });
+      doc.catalog.set(PDFName.of('OutputIntents'), doc.context.obj([intent]));
+      writeFileSync(target, await doc.save());
+    }
+
+    /**
      * Give the open document an output intent, through the repair that owns
      * that edit. The rule is authored here rather than taken from a shipped
-     * one so the spec owns the only thing it varies: with `embed` the intent
-     * carries the press profile, and without it the intent names a condition
-     * and embeds nothing — two documents, and two different answers.
+     * one so the spec owns what it varies. It names no destination profile:
+     * the converter resolves that to the installed default press and embeds
+     * it, which is the only intent this door can write.
      */
-    async function giveOutputIntent(id: string, embed: boolean): Promise<void> {
+    async function giveOutputIntent(id: string): Promise<void> {
       await setView('canvas');
       expect(await invokeAppCommand('tools.panel.preflight')).toBe(true);
       await browser.waitUntil(async () => (await preflightSnapshot()) !== null, {
@@ -926,7 +949,7 @@ describe('output preview', () => {
       doc.profile.fixups = [
         {
           id: 'convert_to_pdfx',
-          params: embed ? { version: 3, dest_profile: 'default_cmyk.icc' } : { version: 3 },
+          params: { version: 3 },
         },
       ];
       writeFileSync(target, JSON.stringify(doc, null, 2));
@@ -941,8 +964,9 @@ describe('output preview', () => {
 
     it('offers an intent that embeds no profile, and refuses it by name', async () => {
       await closeAllFiles();
-      await openByPaths([SPOT]);
-      await giveOutputIntent('intent_named_only', false);
+      const foreign = resolve(dir, 'intent-named-only.pdf');
+      await writeIntentWithoutProfile(SPOT, foreign);
+      await openByPaths([foreign]);
       await openOutputPreview();
       await $('[data-testid="output-preview-arm"]').click();
       await waitForSeparations();
@@ -951,9 +975,11 @@ describe('output preview', () => {
         (c) => c.options.indexOf('document') >= 0,
         'the document’s own intent never reached the panel',
       );
-      // A condition this engine holds no profile for is named, not proofed
-      // against: substituting another press would proof against one document
-      // while displaying another's condition.
+      // The intent is OFFERED — the document states a condition, so the
+      // choice exists — but the panel does not open on it: a condition this
+      // engine holds no profile for is named, not proofed against, and
+      // substituting another press would proof against one document while
+      // displaying another's condition.
       expect(opened.requested).toBe('none');
       expect(opened.using).toBe(false);
 
@@ -970,7 +996,7 @@ describe('output preview', () => {
     it('opens proofing through an intent that embeds its profile', async () => {
       await closeAllFiles();
       await openByPaths([SPOT]);
-      await giveOutputIntent('intent_embedded', true);
+      await giveOutputIntent('intent_embedded');
       await browser.waitUntil(
         async () =>
           (await preflightSnapshot())?.checks.find((c) => c.id === 'output_intent')?.status ===
@@ -987,7 +1013,10 @@ describe('output preview', () => {
         'the document’s own press never became the proof',
       );
       // The document's own press outranks every other source, so the panel
-      // opens on it rather than unproofed.
+      // opens on it rather than unproofed. It has one to open on because the
+      // conversion embeds its destination profile whether or not the rule
+      // named one — an intent whose pixels and declared condition disagree is
+      // not a shape this door can write.
       expect(opened.requested).toBe('document');
       expect(opened.refused).toBe(false);
       expect(opened.paperWhite?.disabled).toBe(false);
