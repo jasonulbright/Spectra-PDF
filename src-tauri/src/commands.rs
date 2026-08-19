@@ -1033,9 +1033,32 @@ pub async fn get_tesseract_path(app: AppHandle) -> Result<String, String> {
     Ok(engine::get_tesseract_path(&app))
 }
 
+/// The path of a Ghostscript that PROBED usable, or "" when there is none.
+///
+/// It used to return the bundled path unconditionally, whether or not
+/// anything was there — which is how an absent prerequisite reached the user
+/// as a spawn failure. Callers that need the reason ask `gs_capability`.
 #[tauri::command]
 pub async fn get_gs_path(app: AppHandle) -> Result<String, String> {
     Ok(engine::get_gs_path(&app))
+}
+
+/// The full capability answer for an explicit path, or for discovery.
+///
+/// The one shape the settings surface reads: available, path, version, and a
+/// NAMED reason when it is not usable.
+#[tauri::command]
+pub async fn gs_capability(app: AppHandle, path: Option<String>) -> Result<crate::gs::GsAnswer, String> {
+    let bundled = engine::bundled_gs_candidate(&app);
+    Ok(crate::gs::resolve(path.as_deref(), bundled.as_deref()))
+}
+
+/// Re-probe after the user changes the setting or installs Ghostscript.
+#[tauri::command]
+pub async fn refresh_gs_capability(app: AppHandle, path: Option<String>) -> Result<crate::gs::GsAnswer, String> {
+    crate::gs::clear_cache();
+    let bundled = engine::bundled_gs_candidate(&app);
+    Ok(crate::gs::resolve(path.as_deref(), bundled.as_deref()))
 }
 
 #[tauri::command]
@@ -1160,117 +1183,69 @@ pub struct GsInfo {
     pub vendor: String,
 }
 
-/// Query the bundled GS info (version from --version).
+/// Query the vendored Ghostscript, if this build still carries one.
+///
+/// Reports only what actually PROBES usable — a resource tree with no gs in
+/// it, or one that cannot render, is an error here rather than a path the
+/// caller would go on to spawn.
 #[tauri::command]
 pub async fn get_bundled_gs_info(app: AppHandle) -> Result<GsInfo, String> {
-    let path = engine::get_gs_path(&app);
-    let version = run_gs_version(&path)?;
+    let Some(candidate) = engine::bundled_gs_candidate(&app) else {
+        return Err(crate::gs::CLI_REQUIRED.to_string());
+    };
+    let answer = crate::gs::probe(&candidate.to_string_lossy());
+    if !answer.available {
+        return Err(crate::gs::cli_error(&answer));
+    }
     Ok(GsInfo {
-        path,
-        version,
+        path: answer.path,
+        version: answer.version,
         product: "GPL Ghostscript".to_string(),
         vendor: "Artifex Software".to_string(),
     })
 }
 
-/// Detect external Ghostscript from ARP registry. Returns None if not found.
+/// Detect an externally installed Ghostscript. Returns None if there is none.
+///
+/// Registry AND PATH, in that order, each candidate PROBED before it is
+/// reported: the registry scan finds the per-machine installs that never
+/// touch PATH, and PATH finds the ones a user unpacked themselves. Neither
+/// alone answers for a prerequisite the user installs however they like.
 #[tauri::command]
 pub async fn detect_external_gs() -> Result<Option<GsInfo>, String> {
-    use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ};
-    use winreg::RegKey;
-
-    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    let uninstall_paths = [
-        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
-        "SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
-    ];
-
-    for uninstall_path in &uninstall_paths {
-        let Ok(key) = hklm.open_subkey_with_flags(uninstall_path, KEY_READ) else {
+    for (path, display_name, publisher) in crate::gs::registry_candidates() {
+        let answer = crate::gs::probe(&path);
+        if !answer.available {
             continue;
-        };
-        for name in key.enum_keys().flatten() {
-            if !name.to_lowercase().contains("ghostscript") {
-                continue;
-            }
-            let Ok(subkey) = key.open_subkey_with_flags(&name, KEY_READ) else {
-                continue;
-            };
-            let display_name: String = subkey
-                .get_value("DisplayName")
-                .unwrap_or_default();
-            let mut install_location: String = subkey
-                .get_value("InstallLocation")
-                .unwrap_or_default();
-            let display_version: String = subkey
-                .get_value("DisplayVersion")
-                .unwrap_or_default();
-            let publisher: String = subkey
-                .get_value("Publisher")
-                .unwrap_or_default();
-
-            // Fallback: parse install dir from UninstallString if InstallLocation is empty
-            if install_location.is_empty() {
-                let uninstall_str: String = subkey
-                    .get_value("UninstallString")
-                    .unwrap_or_default();
-                if !uninstall_str.is_empty() {
-                    let clean = uninstall_str.trim_matches('"');
-                    if let Some(parent) = std::path::Path::new(clean).parent() {
-                        install_location = parent.to_string_lossy().to_string();
-                    }
-                }
-            }
-
-            if install_location.is_empty() {
-                continue;
-            }
-
-            // Find the console exe
-            let install_path = std::path::Path::new(&install_location);
-            let exe = install_path.join("bin").join("gswin64c.exe");
-            if !exe.exists() {
-                // Try gswin32c.exe
-                let exe32 = install_path.join("bin").join("gswin32c.exe");
-                if !exe32.exists() {
-                    continue;
-                }
-                let version = run_gs_version(&exe32.to_string_lossy()).unwrap_or(display_version);
-                return Ok(Some(GsInfo {
-                    path: exe32.to_string_lossy().to_string(),
-                    version,
-                    product: display_name,
-                    vendor: if publisher.is_empty() { "Artifex Software".to_string() } else { publisher },
-                }));
-            }
-
-            let version = run_gs_version(&exe.to_string_lossy()).unwrap_or(display_version);
-            return Ok(Some(GsInfo {
-                path: exe.to_string_lossy().to_string(),
-                version,
-                product: display_name,
-                vendor: if publisher.is_empty() { "Artifex Software".to_string() } else { publisher },
-            }));
         }
+        return Ok(Some(GsInfo {
+            path: answer.path,
+            version: answer.version,
+            product: if display_name.is_empty() {
+                "GPL Ghostscript".to_string()
+            } else {
+                display_name
+            },
+            vendor: if publisher.is_empty() {
+                "Artifex Software".to_string()
+            } else {
+                publisher
+            },
+        }));
     }
-
+    for path in crate::gs::path_candidates() {
+        let answer = crate::gs::probe(&path);
+        if !answer.available {
+            continue;
+        }
+        return Ok(Some(GsInfo {
+            path: answer.path,
+            version: answer.version,
+            product: "GPL Ghostscript".to_string(),
+            vendor: "Artifex Software".to_string(),
+        }));
+    }
     Ok(None)
-}
-
-fn run_gs_version(exe_path: &str) -> Result<String, String> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let output = std::process::Command::new(exe_path)
-        .arg("--version")
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| format!("Failed to run GS: {}", e))?;
-    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if version.is_empty() {
-        Err("Empty version output".to_string())
-    } else {
-        Ok(version)
-    }
 }
 
 // ── Printers ─────────────────────────────────────────────────────────────

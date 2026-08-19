@@ -22,7 +22,7 @@ fn main() {
 
     match cli.command {
         Some(command) => {
-            let code = spectrapdf_lib::cli::run(command);
+            let code = spectrapdf_lib::cli::run(command, cli.gs_path);
             std::process::exit(code);
         }
         None if cli.minimized => {
