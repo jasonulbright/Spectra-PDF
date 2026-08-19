@@ -248,6 +248,8 @@ headers.fontSizeMust	pattern	headers	font_size must be >= {{_MIN_FONT_SIZE}}
 headers.leastOnePlacementRequired	exact	headers	at least one placement is required
 headers.positionMustOneGot	pattern	headers	position must be one of {{_POSITIONS}}, got {{pos}}
 headers.textContainsCharactersOutside	exact	headers	text contains characters outside Latin-1 and no fallback font is available
+icc_profiles.colourProfileNamedInstalled	pattern	icc_profiles	No colour profile named "{{name}}" is installed, and it is not a profile file this engine can open.
+icc_profiles.colourProfilesInstalledThere	pattern	icc_profiles	No colour profiles are installed in {{directory}}, so there is no destination profile to convert to.
 image_export.dpiMustGot	pattern	image_export	dpi must be {{_MIN_DPI}}-{{_MAX_DPI}}, got {{dpi}}
 image_export.dpiMustNumberGot	pattern	image_export	dpi must be a number, got {{dpi}}
 image_export.ghostscriptReportedSuccessExpected	pattern	image_export	Ghostscript reported success but {{v0}} expected output file(s) are missing (first: {{v1}})
@@ -446,13 +448,11 @@ preflight_sweep.checkWritesNothingThere	exact	preflight_sweep	A check writes not
 preflight_sweep.destinationMustOutsideSource	exact	preflight_sweep	The destination must be outside the source folder -- choose a separate folder for the reports.
 preflight_sweep.preflightProfileCarriesFixups	pattern	preflight_sweep	The preflight profile '{{v0}}' carries no fixups, so a fix run over this folder would repair nothing. Choose a profile that carries some, or run the sweep as a check.
 preflight_sweep.preflightSweepRunsMode	pattern	preflight_sweep	A preflight sweep runs in {{v0}} mode, not {{mode}}.
-prepress.couldExtractBundledProfile	pattern	prepress	Could not extract the bundled profile {{name}}: {{v1}}
-prepress.destinationIccProfileFound	pattern	prepress	Destination ICC profile not found: {{profile}}
-prepress.destinationProfileDescribesColour	pattern	prepress	The destination profile "{{label}}" describes "{{space}}" colour, not CMYK.
-prepress.destinationProfileProfileWhich	pattern	prepress	The destination profile "{{label}}" is a "{{profile_class}}" profile, which does not describe an output condition.
+prepress.destinationProfileDescribesColour	pattern	prepress	The destination profile "{{label}}" describes "{{v1}}" colour, not CMYK.
+prepress.destinationProfileProfileWhich	pattern	prepress	The destination profile "{{label}}" is a "{{v1}}" profile, which does not describe an output condition.
 prepress.ghostscriptCmykConversionFailed	pattern	prepress	Ghostscript CMYK conversion failed: {{v0}}
 prepress.ghostscriptPdfXConversion	pattern	prepress	Ghostscript PDF/X conversion failed: {{v0}}
-prepress.iccProfile	pattern	prepress	"{{label}}" is not an ICC profile.
+prepress.outputIntentCannotCarry	pattern	prepress	The output intent cannot carry "{{text}}" — a PDF/X output condition is written in the document's own encoding, which does not hold every character of that name.
 prepress.pdfXConversionAbandoned	pattern	prepress	PDF/X conversion abandoned the standard: {{said}}
 prepress.pdfXOutputCarries	exact	prepress	PDF/X output carries no /OutputIntents — conversion failed.
 prepress.renderIntentMustPerceptual	exact	prepress	render_intent must be perceptual, relative, saturation, or absolute.
