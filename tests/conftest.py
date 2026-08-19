@@ -80,6 +80,27 @@ def _gs_capability():
     return gs_capability
 
 
+def pytest_sessionfinish(session, exitstatus):
+    """A clean full-capability gate may not turn missing resources into green.
+
+    Most resource-heavy tests intentionally skip on an ordinary contributor
+    checkout, where the gitignored shipped runtimes have not been assembled.
+    CI and the release verifier explicitly assemble every one first and set
+    this switch; under that contract, even one skip means the advertised full
+    suite did not run and the gate fails after reporting its normal tally.
+    """
+    if os.environ.get("SPECTRAPDF_REQUIRE_ZERO_SKIPS") != "1":
+        return
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    skipped = reporter.stats.get("skipped", []) if reporter is not None else []
+    if skipped:
+        if reporter is not None:
+            reporter.write_sep(
+                "=", f"full-capability gate refused {len(skipped)} skipped tests"
+            )
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
 ICC_DIR = os.path.join(os.path.dirname(__file__), "..", "resources", "icc")
 
 
