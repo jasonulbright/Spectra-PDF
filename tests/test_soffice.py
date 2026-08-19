@@ -257,6 +257,20 @@ class TestFontSubstitutionIsReported:
 
 @needs_sources
 class TestDeclaredFacesWithoutRunningSoffice:
+    def test_a_latin_docx_does_not_draw_its_dormant_complex_script_default(self):
+        assert declared_faces(SOURCES / "report.docx") == {"Liberation Serif"}
+
+    def test_an_explicit_complex_script_run_is_still_counted(self, tmp_dir):
+        import zipfile
+
+        path = Path(tmp_dir) / "arabic.docx"
+        document = b'''<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+          <w:body><w:p><w:r><w:rPr><w:rFonts w:cs="Noto Sans Arabic"/></w:rPr>
+          <w:t>\xd8\xb9\xd8\xb1\xd8\xa8\xd9\x8a</w:t></w:r></w:p></w:body></w:document>'''
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("word/document.xml", document)
+        assert declared_faces(path) == {"Noto Sans Arabic"}
+
     def test_an_odf_font_name_resolves_through_its_declaration(self):
         # `style:font-name="Lucida Sans1"` is a REFERENCE to a font-face
         # declaration whose family is "Lucida Sans". Left unresolved it named a
