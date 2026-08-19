@@ -13,8 +13,10 @@ import re
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 import zipfile
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 import pikepdf
 
@@ -355,7 +357,6 @@ _DOCX_DRAWN = re.compile(rb'w:(?:ascii|hAnsi|cs)="([^"]+)"')
 _DOCX_DEFAULT_DRAWN = re.compile(rb'w:(?:ascii|hAnsi)="([^"]+)"')
 _XLSX_DRAWN = re.compile(rb'<name val="([^"]+)"')
 _PPTX_DRAWN = re.compile(rb'typeface="([^"]+)"')
-_ODF_DRAWN = re.compile(rb'style:font-name(?:-asian|-complex)?="([^"]+)"')
 # An RTF font table entry is `{\f0\froman Liberation Serif;}` —
 # the name is what survives after the control words, so they are consumed
 # explicitly. Capturing lazily straight after the `\f0` grabbed the control
@@ -369,32 +370,153 @@ _RTF_DRAWN = re.compile(rb"\\f\d+(?:\\[a-zA-Z]+-?\d*[ ]?)*([^\\;{}]+);")
 _DOCX_DEFAULTS = re.compile(rb"<w:docDefaults>.*?</w:docDefaults>", re.S)
 _XLSX_PARTS = ("xl/styles.xml",)
 
-# ODF's `style:font-name` is a REFERENCE to a `<style:font-face>` declaration,
-# not a family name — LibreOffice mints disambiguated style names like
-# "Lucida Sans1", which as a family name is a face nobody has, so an unresolved
-# reference reported a substitution that never happened. Resolve through the
-# declaration to its `svg:font-family`.
-_ODF_FACE_DECL = re.compile(rb"<style:font-face\b[^>]*/?>")
-_ODF_DECL_NAME = re.compile(rb'style:name="([^"]+)"')
-_ODF_DECL_FAMILY = re.compile(rb'svg:font-family="([^"]+)"')
+# ODF font names are references into `<style:font-face>` declarations, and
+# styles carry three independent writing-system slots. LibreOffice populates
+# the CJK and complex-script slots even in a Latin-only document, and writes a
+# large catalogue of UNUSED named styles. A regex over every `font-name`
+# therefore accuses a clean conversion of substituting fonts it never drew.
+# Resolve only the style chain around actual body text, then select the slot
+# that text's Unicode script uses.
+_ODF_NS = {
+    "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
+    "style": "urn:oasis:names:tc:opendocument:xmlns:style:1.0",
+    "svg": "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0",
+    "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
+    "table": "urn:oasis:names:tc:opendocument:xmlns:table:1.0",
+    "draw": "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0",
+    "presentation": "urn:oasis:names:tc:opendocument:xmlns:presentation:1.0",
+}
+
+
+def _oq(prefix: str, name: str) -> str:
+    return f"{{{_ODF_NS[prefix]}}}{name}"
+
+
+def _odf_font_slots(style: ET.Element) -> dict[str, str]:
+    props = style.find(_oq("style", "text-properties"))
+    if props is None:
+        return {}
+    return {
+        slot: value
+        for slot, attr in (
+            ("latin", "font-name"),
+            ("asian", "font-name-asian"),
+            ("complex", "font-name-complex"),
+        )
+        if (value := props.get(_oq("style", attr)))
+    }
+
+
+def _odf_script_slot(char: str) -> str | None:
+    """The ODF writing-system font slot used by one printable character."""
+    if not char or unicodedata.category(char)[0] not in ("L", "M", "N"):
+        return None
+    code = ord(char)
+    if (
+        0x2E80 <= code <= 0xA4CF  # CJK, Yi, Hangul, Hiragana, Katakana
+        or 0xAC00 <= code <= 0xD7AF
+        or 0xF900 <= code <= 0xFAFF
+        or 0xFF00 <= code <= 0xFFEF
+        or 0x20000 <= code <= 0x323AF
+    ):
+        return "asian"
+    if (
+        0x0590 <= code <= 0x18AF  # Hebrew through Mongolian, including Indic
+        or 0x1A00 <= code <= 0x1CFF
+        or 0xA800 <= code <= 0xABFF
+        or 0xFB1D <= code <= 0xFDFF
+        or 0xFE70 <= code <= 0xFEFF
+        or 0x10E60 <= code <= 0x10E7F
+        or 0x1E800 <= code <= 0x1EEFF
+    ):
+        return "complex"
+    return "latin"
 
 
 def _odf_faces(blobs: list[bytes]) -> set[str]:
-    """Drawn ODF faces, resolved through the document's font-face declarations."""
-    declared: dict[str, str] = {}
-    for blob in blobs:
-        for tag in _ODF_FACE_DECL.findall(blob):
-            name = _ODF_DECL_NAME.search(tag)
-            family = _ODF_DECL_FAMILY.search(tag)
-            if name is not None and family is not None:
-                declared[name.group(1).decode("utf-8", "replace")] = family.group(1).decode(
-                    "utf-8", "replace"
+    """Faces inherited by text the ODF body actually draws."""
+    roots = [ET.fromstring(blob) for blob in blobs]
+    declarations: dict[str, str] = {}
+    defaults: dict[str, dict[str, str]] = {}
+    styles: dict[tuple[str, str], tuple[str | None, dict[str, str]]] = {}
+
+    for root in roots:
+        for face in root.iter(_oq("style", "font-face")):
+            name = face.get(_oq("style", "name"))
+            family = face.get(_oq("svg", "font-family"))
+            if name and family:
+                declarations[name] = family
+        for style in root.iter(_oq("style", "default-style")):
+            family = style.get(_oq("style", "family"))
+            if family:
+                defaults[family] = _odf_font_slots(style)
+        for style in root.iter(_oq("style", "style")):
+            family = style.get(_oq("style", "family"))
+            name = style.get(_oq("style", "name"))
+            if family and name:
+                styles[(family, name)] = (
+                    style.get(_oq("style", "parent-style-name")),
+                    _odf_font_slots(style),
                 )
+
+    def resolve(family: str, name: str | None) -> dict[str, str]:
+        resolved = dict(defaults.get(family, {}))
+        chain: list[dict[str, str]] = []
+        seen: set[str] = set()
+        while name and name not in seen:
+            seen.add(name)
+            record = styles.get((family, name))
+            if record is None:
+                break
+            name, slots = record
+            chain.append(slots)
+        for slots in reversed(chain):
+            resolved.update(slots)
+        return resolved
+
+    body = None
+    for root in roots:
+        body = root.find(f".//{_oq('office', 'body')}")
+        if body is not None:
+            break
+    if body is None:
+        return set()
+
     used: set[str] = set()
-    for blob in blobs:
-        for ref in _ODF_DRAWN.findall(blob):
-            key = ref.decode("utf-8", "replace")
-            used.add(declared.get(key, key))
+    style_elements = {
+        _oq("text", "p"): ("paragraph", _oq("text", "style-name")),
+        _oq("text", "h"): ("paragraph", _oq("text", "style-name")),
+        _oq("text", "span"): ("text", _oq("text", "style-name")),
+        _oq("table", "table-cell"): ("table-cell", _oq("table", "style-name")),
+        _oq("table", "covered-table-cell"): ("table-cell", _oq("table", "style-name")),
+    }
+
+    def record(text: str | None, slots: dict[str, str]) -> None:
+        for char in text or "":
+            slot = _odf_script_slot(char)
+            if slot and (face := slots.get(slot) or slots.get("latin")):
+                used.add(declarations.get(face, face))
+
+    def walk(element: ET.Element, inherited: dict[str, str]) -> None:
+        active = inherited
+        style_info = style_elements.get(element.tag)
+        if style_info is not None:
+            family, attribute = style_info
+            active = dict(inherited)
+            active.update(resolve(family, element.get(attribute)))
+        else:
+            for prefix, family in (("draw", "graphic"), ("presentation", "presentation")):
+                name = element.get(_oq(prefix, "style-name"))
+                if name:
+                    active = dict(inherited)
+                    active.update(resolve(family, name))
+                    break
+        record(element.text, active)
+        for child in element:
+            walk(child, active)
+            record(child.tail, active)
+
+    walk(body, {})
     return used
 
 
@@ -460,7 +582,7 @@ def declared_faces(path: str | Path) -> set[str]:
             names.update(
                 m.decode("utf-8", "replace") for m in _RTF_DRAWN.findall(src.read_bytes())
             )
-    except (OSError, zipfile.BadZipFile, KeyError, UnicodeDecodeError):
+    except (OSError, zipfile.BadZipFile, KeyError, UnicodeDecodeError, ET.ParseError):
         return set()
     return {n for n in (_unescape(name) for name in names) if n}
 
