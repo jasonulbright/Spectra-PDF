@@ -40,7 +40,7 @@ LICENSE	LibreOffice aggregated third-party notices (carries poppler's notice and
 share/xpdfimport/poppler_data/COPYING	poppler-data license summary	notice	-	-	-	https://poppler.freedesktop.org/
 share/xpdfimport/poppler_data/COPYING.gpl2	GNU General Public License version 2 text	notice	-	-	-	https://poppler.freedesktop.org/
 share/xpdfimport/poppler_data/COPYING.adobe	Adobe CMap license text	notice	-	-	-	https://poppler.freedesktop.org/
-program/xpdfimport.exe	poppler, statically linked into LibreOffice's PDF import helper	binary	fa3749824d02dfb6b2aadffd85b0a0c38185680af3f1bfe94cffec0271f6c919	GPL-2.0-or-later	LICENSE	https://www.libreoffice.org/about-us/source-code/
+program/xpdfimport.exe	poppler, statically linked into LibreOffice's PDF import helper	binary	134bea5bfd6311ef0a258d45810d262b091daf39c618f4a223adac069a199e0b	GPL-2.0-or-later	LICENSE	https://www.libreoffice.org/about-us/source-code/
 share/xpdfimport/poppler_data/cidToUnicode	poppler-data CID-to-Unicode tables	data	-	GPL-2.0-or-later	COPYING.gpl2	https://poppler.freedesktop.org/
 share/xpdfimport/poppler_data/nameToUnicode	poppler-data glyph-name tables	data	-	GPL-2.0-or-later	COPYING.gpl2	https://poppler.freedesktop.org/
 share/xpdfimport/poppler_data/unicodeMap	poppler-data Unicode output maps	data	-	GPL-2.0-or-later	COPYING.gpl2	https://poppler.freedesktop.org/

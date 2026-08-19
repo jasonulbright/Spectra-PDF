@@ -26,6 +26,7 @@
 - Exact source archives for the bundled HEIF decoder libraries accompany the release and appear in its checksum file.
 - Clean GitHub builds no longer depend on a developer's ignored Ghostscript resource folder.
 - Clean GitHub verification now stages every shipped engine resource and fails if any engine test is skipped.
+- Release builds always assemble the pinned LibreOffice 26.2.5 runtime, even when the build machine has another version installed.
 
 ## 1.1.6
 
