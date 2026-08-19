@@ -3,9 +3,10 @@
 The door is one dispatcher over two kinds of producer, and which kind a target
 takes is a property of the FORMAT, not of what happens to be bundled.
 
-LibreOffice is bundled and invoked as an isolated subprocess (the Ghostscript
-model — unmodified upstream, redistributed under MPL-2.0; see
-THIRD-PARTY-LICENSES.md § LibreOffice). It is never linked into this app's code.
+LibreOffice is bundled and invoked as an isolated subprocess — unmodified
+upstream, never linked into this app's code. The tree is MPL-2.0 apart from the
+PDF-import helper these targets depend on, which is GPL-2.0-or-later; see
+THIRD-PARTY-LICENSES.md § LibreOffice and scripts/libreoffice-notices.tsv.
 
 Import quirk that shapes the LibreOffice half: LibreOffice imports EVERY PDF as a
 **Draw** document. Draw exports cleanly to web/vector/image targets (HTML, XHTML),

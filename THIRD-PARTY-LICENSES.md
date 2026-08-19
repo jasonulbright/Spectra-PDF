@@ -75,18 +75,46 @@ a maintenance tool run only when the pin moves.
 - **Version:** 26.2.5 (unmodified upstream; version- and sha256-pinned — vendored
   by `scripts/bundle-libreoffice.ps1`, which verifies the official installer's
   SHA-256 before extracting it)
-- **License:** Mozilla Public License v2.0 (MPL-2.0)
+- **License:** Mozilla Public License v2.0 (MPL-2.0), except for the PDF-import
+  helper covered in the table below
 - **Role:** Invoked by Spectra PDF as a separate process (`soffice
-  --headless`, no linking) to export a PDF to editable Word (.docx), RTF, ODT,
-  HTML, and XHTML (the O1 export feature).
+  --headless`, no linking) to convert Office, text and web documents to PDF, and
+  to export a PDF to editable Word (.docx), RTF, ODT, HTML, and XHTML.
 - **Binary source:** <https://www.libreoffice.org/download/download/>
 - **Corresponding source:** <https://www.libreoffice.org/about-us/source-code/>
 - **License text shipped at:** `resources/libreoffice/LICENSE` (from the
-  upstream install; the bundling script copies it in)
+  upstream install; the bundling script copies it in). It carries poppler's
+  notice and the GNU GPL version 2 text.
 
 LibreOffice is invoked as an independent program (mere aggregation), so the two
-may be distributed together. LibreOffice remains under the MPL-2.0; its complete
-corresponding source is available at the link above.
+may be distributed together. LibreOffice itself remains under the MPL-2.0; its
+complete corresponding source is available at the link above.
+
+### PDF-import helper (poppler)
+
+LibreOffice imports every PDF through a helper program that statically links
+poppler, which is **not** under the MPL-2.0. Both the helper and the encoding
+tables it reads are required by the PDF-to-Office/web exports, so both ship:
+
+| Component | License | Notice shipped at | Source |
+|---|---|---|---|
+| `program/xpdfimport.exe` (poppler, statically linked) | GPL-2.0-or-later | `resources/libreoffice/LICENSE` | <https://www.libreoffice.org/about-us/source-code/> |
+| `share/xpdfimport/poppler_data/cidToUnicode`, `nameToUnicode`, `unicodeMap` | GPL-2.0-or-later | `.../poppler_data/COPYING.gpl2` | <https://poppler.freedesktop.org/> |
+| `share/xpdfimport/poppler_data/cMap` | Adobe CMap license (permissive) | `.../poppler_data/COPYING.adobe` | <https://poppler.freedesktop.org/> |
+
+Neither part is removable. Without the helper, all five export targets fail to
+load their input; without the GPL encoding tables, the exports succeed but drop
+the text of any PDF that draws a CJK font through a predefined CMap encoding —
+the permissive cMap tables alone do not restore it.
+
+Complete corresponding source for the helper's object code is the LibreOffice
+source release for the pinned version, which carries the poppler sources the
+build consumed:
+<https://download.documentfoundation.org/libreoffice/src/26.2.5/>. The upstream
+poppler and poppler-data version numbers are not recorded in the shipped files;
+the pin is the SHA-256 in `scripts/libreoffice-notices.tsv` together with that
+source release. `scripts/bundle-libreoffice.ps1` refuses to vendor a tree that
+is missing any file the manifest names.
 
 ## Embedded Python runtime
 

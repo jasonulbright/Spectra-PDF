@@ -1,7 +1,13 @@
 # Vendors a LibreOffice runtime into resources/libreoffice/ for the export
 # feature (PDF -> Word/RTF/ODT/HTML). LibreOffice is invoked as a separate
-# headless process (soffice --headless); it is unmodified upstream, redistributed
-# under MPL-2.0 (see THIRD-PARTY-LICENSES.md section LibreOffice).
+# headless process (soffice --headless); it is unmodified upstream.
+#
+# The tree is MPL-2.0 EXCEPT for its PDF-import helper: program/xpdfimport.exe
+# statically links poppler (GPL-2.0-or-later) and reads the encoding tables
+# under share/xpdfimport/poppler_data. Both are required by the PDF -> Office
+# export targets, so both ship, with their notices. scripts/libreoffice-notices.tsv
+# is the manifest; the notice gate below refuses to leave a tree that is missing
+# any file it names. See THIRD-PARTY-LICENSES.md section LibreOffice.
 #
 # Two sources, tried in order:
 #   1. A local system install (C:\Program Files\LibreOffice) -- copied verbatim.
@@ -30,7 +36,10 @@ param(
     # -ExpectedSha256, or "" to skip the check) only to bump the version.
     [string]$Version = "26.2.5",
     [string]$MsiUrl = "",
-    [string]$ExpectedSha256 = "F15BA07BFCB0186986CF3171063506F5D207C11F8CC051BA0D135209E9E915F9"
+    [string]$ExpectedSha256 = "F15BA07BFCB0186986CF3171063506F5D207C11F8CC051BA0D135209E9E915F9",
+    # Run only the notice gate against -DestDir and exit with its verdict.
+    # Nothing is downloaded, copied or removed.
+    [switch]$GateOnly
 )
 
 if (-not $MsiUrl) {
@@ -38,6 +47,76 @@ if (-not $MsiUrl) {
 }
 
 $ErrorActionPreference = "Stop"
+
+$Manifest = "$PSScriptRoot\libreoffice-notices.tsv"
+
+function Read-NoticeManifest([string]$path) {
+    if (-not (Test-Path -LiteralPath $path)) { throw "notice manifest not found: $path" }
+    $rows = @()
+    $seenHeader = $false
+    foreach ($line in Get-Content -LiteralPath $path) {
+        if ($line.StartsWith("#") -or -not $line.Trim()) { continue }
+        $c = $line -split "`t"
+        if (-not $seenHeader) { $seenHeader = $true; continue }
+        if ($c.Count -lt 7) { throw "notice manifest row has $($c.Count) columns: $line" }
+        $rows += [pscustomobject]@{
+            file = $c[0].Trim(); component = $c[1].Trim(); role = $c[2].Trim()
+            sha256 = $c[3].Trim(); spdx = $c[4].Trim(); notice = $c[5].Trim()
+            source = $c[6].Trim()
+        }
+    }
+    if (-not $seenHeader) { throw "notice manifest $path has no header row" }
+    return $rows
+}
+
+# The notice gate. Half one checks the manifest is self-consistent; half two
+# checks the tree that was actually written. A trimmed tree — one where the GPL
+# poppler pieces were dropped to make the licensing question go away — fails
+# here rather than shipping exports that lose their text.
+function Assert-Notices([string]$tree) {
+    $rows = Read-NoticeManifest $Manifest
+    $noticeNames = @($rows | Where-Object { $_.role -eq 'notice' } |
+        ForEach-Object { Split-Path $_.file -Leaf })
+    $bad = @()
+    foreach ($r in $rows) {
+        if (-not $r.file) { $bad += "a row names no file" ; continue }
+        if (-not $r.component) { $bad += "$($r.file): no component" }
+        if (-not $r.source)    { $bad += "$($r.file): no source" }
+        if ($r.role -notin @('binary', 'data', 'notice')) {
+            $bad += "$($r.file): unknown role '$($r.role)'"
+        }
+        if ($r.role -ne 'notice') {
+            if (-not $r.spdx -or $r.spdx -eq '-') { $bad += "$($r.file): no SPDX expression" }
+            if (-not $r.notice -or $r.notice -eq '-') {
+                $bad += "$($r.file): names no notice file"
+            } elseif ($noticeNames -notcontains $r.notice) {
+                $bad += "$($r.file): names notice '$($r.notice)', which no notice row ships"
+            }
+        }
+        if ($r.sha256 -ne '-' -and $r.sha256 -notmatch '^[0-9a-f]{64}$') {
+            $bad += "$($r.file): sha256 is neither '-' nor 64 hex characters"
+        }
+        $path = Join-Path $tree ($r.file -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $path)) {
+            $bad += "$($r.file): the vendored tree does not carry it"
+        } elseif ($r.sha256 -ne '-') {
+            $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne $r.sha256) {
+                $bad += "$($r.file): sha256 $actual, manifest pins $($r.sha256)"
+            }
+        }
+    }
+    if (-not ($rows | Where-Object { $_.role -eq 'binary' })) {
+        $bad += "the manifest names no binary"
+    }
+    if ($bad) { throw "LibreOffice notice gate refused:`n  " + ($bad -join "`n  ") }
+    Write-Host "Notice gate: $($rows.Count) manifest rows verified against $tree"
+}
+
+if ($GateOnly) {
+    Assert-Notices $DestDir
+    exit 0
+}
 
 function Copy-Install([string]$root) {
     $soffice = Join-Path $root "program\soffice.exe"
@@ -69,6 +148,7 @@ $roots = @(
 
 foreach ($r in $roots) {
     if (Copy-Install $r) {
+        Assert-Notices $DestDir
         $ver = (& (Join-Path $DestDir "program\soffice.exe") --version 2>$null | Select-Object -First 1)
         Write-Host "Vendored LibreOffice ($ver) into $DestDir"
         exit 0
@@ -127,6 +207,7 @@ $installed = Get-ChildItem -Path $Extract -Recurse -Filter "soffice.exe" -ErrorA
 if (-not $installed) { Write-Error "soffice.exe not found in the extracted MSI."; exit 1 }
 $root = Split-Path (Split-Path $installed.FullName -Parent) -Parent
 if (Copy-Install $root) {
+    Assert-Notices $DestDir
     Write-Host "Vendored LibreOffice into $DestDir"
     Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
     exit 0
