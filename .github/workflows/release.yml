@@ -119,6 +119,11 @@ jobs:
       - name: Install Python dependencies (the SHIPPED, hash-pinned set)
         run: pip install --require-hashes -r scripts/python-requirements.txt
 
+      # The rest of the shipped set: the wheels committed under vendor/wheels/,
+      # which no index is asked for. Without this the HEIF corpus cannot decode.
+      - name: Install the vendored wheels (the rest of the shipped set)
+        run: powershell -ExecutionPolicy Bypass -File scripts/install-vendored-wheels.ps1
+
       - name: Install pytest
         run: pip install pytest
 

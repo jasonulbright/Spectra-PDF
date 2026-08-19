@@ -387,6 +387,45 @@ class TestTilingBounds:
             assert len(_cm_operands(_forms(pdf.pages[0])[0])) == result["tiles_per_page"]
 
 
+# ── the HEIF source ───────────────────────────────────────────────────────
+
+
+HEIF_CORPUS = os.path.join(os.path.dirname(__file__), "fixtures", "heif")
+
+
+class TestHeifSource:
+    """The watermark arm reaches the HEIF plugin through create_pdf's door.
+
+    It is the second use site, and the one with no test until the decoder was
+    swapped — a plugin change that broke only this arm would have shipped.
+    """
+
+    @pytest.mark.parametrize(
+        "name,frames", [("rgb8.heic", 1), ("rgba8.heic", 1), ("multi-3.heic", 3)]
+    )
+    def test_a_heic_watermark_embeds(self, tmp_dir, name, frames):
+        src = os.path.join(tmp_dir, "in.pdf")
+        out = os.path.join(tmp_dir, "out.pdf")
+        _pages(src, count=2)
+        result = watermark(file=src, output=out, image=os.path.join(HEIF_CORPUS, name))
+        assert result["image_frames"] == frames
+        with pikepdf.open(out) as pdf:
+            assert len(_image_xobjects(pdf)) == 1
+
+    def test_a_heic_refuses_BY_NAME_when_the_plugin_is_absent(self, tmp_dir, monkeypatch):
+        from engine import create_pdf as create_pdf_mod
+
+        src = os.path.join(tmp_dir, "in.pdf")
+        _pages(src, count=1)
+        monkeypatch.setattr(create_pdf_mod, "_heif_registered", False)
+        with pytest.raises(RuntimeError, match="HEIC/HEIF images need"):
+            watermark(
+                file=src,
+                output=os.path.join(tmp_dir, "out.pdf"),
+                image=os.path.join(HEIF_CORPUS, "rgb8.heic"),
+            )
+
+
 # ── the text arm keeps its shipped shape ──────────────────────────────────
 
 

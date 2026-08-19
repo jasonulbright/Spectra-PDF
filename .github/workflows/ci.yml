@@ -110,6 +110,11 @@ jobs:
         # would refuse.
         run: pip install --require-hashes -r scripts/python-requirements.txt
 
+      # The rest of the shipped set: the wheels committed under vendor/wheels/,
+      # which no index is asked for. Without this the HEIF corpus cannot decode.
+      - name: Install the vendored wheels (the rest of the shipped set)
+        run: powershell -ExecutionPolicy Bypass -File scripts/install-vendored-wheels.ps1
+
       - name: Install pytest
         run: pip install pytest
 
@@ -158,6 +163,25 @@ jobs:
 
       - name: pip audit (bundled engine runtime)
         run: pip-audit -r scripts/python-requirements.txt --no-deps
+
+      # The wheels committed under vendor/wheels/ are installed from this
+      # repository rather than resolved from the lockfile, so the step above
+      # cannot see them. They are audited by name and version like any other
+      # shipped package -- a vendored pin is frozen, not exempt.
+      - name: pip audit (vendored wheels)
+        shell: pwsh
+        run: |
+          $req = @()
+          $seenHeader = $false
+          foreach ($line in (Get-Content scripts/vendored-wheels.tsv -Encoding UTF8)) {
+              if (-not $seenHeader) { if ($line -match '^package\t') { $seenHeader = $true }; continue }
+              if (-not $line.Trim()) { continue }
+              $c = $line -split "`t"
+              if ($c[2].Trim() -eq 'wheel') { $req += "$($c[0].Trim())==$($c[1].Trim())" }
+          }
+          if (-not $seenHeader) { throw "vendored-wheels.tsv has no header row" }
+          $req | Set-Content vendored-audit-requirements.txt
+          pip-audit -r vendored-audit-requirements.txt --no-deps
 
   e2e:
     name: E2E (WebdriverIO + tauri-driver)
