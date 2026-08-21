@@ -47,7 +47,7 @@ windows-core = "0.62"
 # WebView2's own COM bindings, already in the tree because tauri-runtime-wry
 # uses them -- promoted to a direct dependency so the web capture can reach
 # ICoreWebView2_7::PrintToPdf, which is Chromium's own print pipeline.
-webview2-com = "0.38"
+webview2-com = "0.39"
 # Those bindings are generated against windows-core 0.61, and an interface
 # cast only typechecks against the `Interface` trait from the SAME
 # windows-core the interface was generated with -- so 0.61 is named alongside
