@@ -94,7 +94,10 @@ export async function loadSignatureFontBytes(id: SignatureFaceId): Promise<Uint8
   const load = (async (): Promise<Uint8Array> => {
     const dir = await app.getEditFontPath();
     const sep = dir.includes('/') && !dir.includes('\\') ? '/' : '\\';
-    const bytes = await file.readBuffer(`${dir}${sep}${face.file}`);
+    // The fonts live in the app's RESOURCE tree, outside the plugin-fs
+    // capability scope ($TEMP/spectrapdf): the scoped read REFUSES them, and
+    // every preview then falls back to one generic cursive.
+    const bytes = await file.readExternalBuffer(`${dir}${sep}${face.file}`);
     const out = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     bytesCache.set(id, out);
     return out;

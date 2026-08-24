@@ -48,7 +48,9 @@ const SIGNATURE_INK_COLOR = '#14213d';
 
 async function importStampImage(path: string): Promise<{ dataUrl: string; aspect: number } | null> {
   try {
-    const bytes = await file.readBuffer(path);
+    // The picked raster is on the user's own disk, outside the plugin-fs
+    // capability scope ($TEMP/spectrapdf) — the scoped read refuses it.
+    const bytes = await file.readExternalBuffer(path);
     const bmp = await createImageBitmap(new Blob([bytes]));
     const MAX = 800;
     const scale = Math.min(1, MAX / Math.max(bmp.width, bmp.height));

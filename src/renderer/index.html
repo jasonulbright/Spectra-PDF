@@ -6,7 +6,12 @@
   <!-- connect-src must allow Tauri's IPC endpoint (ipc: / http://ipc.localhost),
        or every invoke falls back to the slower postMessage transport with a
        console error per call. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <!-- img-src must allow data: and blob:. Every raster this app puts on screen
+       that it produced itself — a page render, a captured signature, a stamp's
+       artwork — is a canvas data URL or an object URL, and under default-src
+       alone an <img> or Image() carrying one fails to load, silently, as a
+       blank preview. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:" />
   <title>Spectra PDF</title>
 </head>
 <body>
