@@ -3356,6 +3356,7 @@
   "panel.a11y.detail.form_field_not_tagged": "حقل نموذج في الصفحة {{page}} خارج شجرة البنية.",
   "panel.a11y.detail.header_cell_has_no_scope": "خلية الرأس هذه لا تعلن نطاقًا، ولا تشير إليها أي خلية.",
   "panel.a11y.detail.heading_level_skipped": "المخطط يقفز من المستوى {{from}} إلى المستوى {{to}}.",
+  "panel.a11y.detail.heading_opens_below_h1": "المخطط يبدأ من المستوى {{level}} بدلاً من المستوى 1.",
   "panel.a11y.detail.label_outside_list_item": "العنصر الأصل لهذا الـ{{role}} هو {{parent}}، وليس عنصر قائمة.",
   "panel.a11y.detail.list_item_outside_list": "العنصر الأصل لهذا العنصر هو {{parent}}، وليس قائمة.",
   "panel.a11y.detail.mark_info_missing": "المستند له شجرة بنية لكنه لا يعلن نفسه موسومًا.",

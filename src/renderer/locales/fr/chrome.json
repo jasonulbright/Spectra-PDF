@@ -3158,6 +3158,7 @@
   "panel.a11y.detail.form_field_not_tagged": "Un champ de formulaire de la page {{page}} est hors de l’arbre de structure.",
   "panel.a11y.detail.header_cell_has_no_scope": "Cette cellule d’en-tête ne déclare aucune portée, et aucune cellule ne la désigne.",
   "panel.a11y.detail.heading_level_skipped": "Le plan passe du niveau {{from}} au niveau {{to}}.",
+  "panel.a11y.detail.heading_opens_below_h1": "Le plan commence au niveau {{level}} au lieu du niveau 1.",
   "panel.a11y.detail.label_outside_list_item": "Le parent de ce {{role}} est {{parent}}, pas un élément de liste.",
   "panel.a11y.detail.list_item_outside_list": "Le parent de cet élément est {{parent}}, pas une liste.",
   "panel.a11y.detail.mark_info_missing": "Le document a un arbre de structure mais ne se déclare pas balisé.",

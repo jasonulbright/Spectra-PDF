@@ -3158,6 +3158,7 @@
   "panel.a11y.detail.form_field_not_tagged": "Un camp de formulari de la pàgina {{page}} és fora de l’arbre d’estructura.",
   "panel.a11y.detail.header_cell_has_no_scope": "Aquesta cel·la de capçalera no declara cap àmbit i cap cel·la no hi apunta.",
   "panel.a11y.detail.heading_level_skipped": "L’esquema salta del nivell {{from}} al nivell {{to}}.",
+  "panel.a11y.detail.heading_opens_below_h1": "L’esquema comença al nivell {{level}} en lloc del nivell 1.",
   "panel.a11y.detail.label_outside_list_item": "L’element pare d’aquest {{role}} és {{parent}}, no un element de llista.",
   "panel.a11y.detail.list_item_outside_list": "L’element pare d’aquest element és {{parent}}, no una llista.",
   "panel.a11y.detail.mark_info_missing": "El document té arbre d’estructura però no es declara etiquetat.",

@@ -3158,6 +3158,7 @@
   "panel.a11y.detail.form_field_not_tagged": "שדה טופס בעמוד {{page}} נמצא מחוץ לעץ המבנה.",
   "panel.a11y.detail.header_cell_has_no_scope": "תא הכותרת הזה אינו מצהיר על תחולה, ואף תא אינו מצביע עליו.",
   "panel.a11y.detail.heading_level_skipped": "המתאר קופץ מרמה {{from}} לרמה {{to}}.",
+  "panel.a11y.detail.heading_opens_below_h1": "המתאר מתחיל ברמה {{level}} במקום ברמה 1.",
   "panel.a11y.detail.label_outside_list_item": "רכיב האב של {{role}} הזה הוא {{parent}}, ולא פריט רשימה.",
   "panel.a11y.detail.list_item_outside_list": "רכיב האב של הפריט הזה הוא {{parent}}, ולא רשימה.",
   "panel.a11y.detail.mark_info_missing": "למסמך יש עץ מבנה אך הוא אינו מצהיר על עצמו כמתויג.",
