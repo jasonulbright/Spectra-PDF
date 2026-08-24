@@ -211,3 +211,66 @@ class TestEcdsaDer:
     def test_an_odd_length_signature_is_refused(self):
         with pytest.raises(ValueError, match="malformed ECDSA signature"):
             wincert.ecdsa_der(bytes(31))
+
+    @staticmethod
+    def _decoded(raw: bytes):
+        from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+
+        der = wincert.ecdsa_der(raw)
+        half = len(raw) // 2
+        r, s = decode_dss_signature(der)
+        assert r == int.from_bytes(raw[:half], "big")
+        assert s == int.from_bytes(raw[half:], "big")
+        return der
+
+    def test_a_p521_pair_decodes(self):
+        # 66-byte halves: the payload passes 127 bytes, so the SEQUENCE length
+        # must take DER's long form. Written short, the sequence claims a
+        # truncated body and no parser accepts it.
+        der = self._decoded(bytes([0x01] * 66) + bytes([0x02] * 66))
+        assert der[:2] == b"\x30\x81"
+
+    def test_a_p521_pair_at_maximum_width_decodes(self):
+        # Both halves high-bit set: each INTEGER carries a leading zero, which
+        # is the widest signature this encoder ever produces (141 bytes).
+        raw = bytes([0xFF] * 66) + bytes([0xFF] * 66)
+        der = self._decoded(raw)
+        assert len(der) == 141
+        assert der[:3] == b"\x30\x81\x8a"
+
+    def test_unequal_r_and_s_widths_decode(self):
+        # r small, s at full width: DER INTEGERs are minimal, so the two lengths
+        # differ and a fixed-width assumption anywhere would break here.
+        self._decoded(bytes(65) + bytes([0x07]) + bytes([0xFF] * 66))
+
+    def test_a_p256_pair_still_uses_the_short_form(self):
+        der = self._decoded(bytes([0xFF] * 32) + bytes([0x01] * 32))
+        assert der[1] == len(der) - 2
+
+
+class TestRawSignatureSize:
+    """The placeholder the dry run reserves must hold the widest DER the same
+    curve can produce, header growth included."""
+
+    @staticmethod
+    def _bound(bit_size: int) -> int:
+        import types
+
+        from engine.signatures import StoreSigner
+
+        fake = types.SimpleNamespace(
+            signing_cert=types.SimpleNamespace(
+                public_key=types.SimpleNamespace(algorithm="ec", bit_size=bit_size)
+            )
+        )
+        return StoreSigner._raw_signature_size(fake)
+
+    @pytest.mark.parametrize("bit_size,expected", [(256, 72), (384, 104), (521, 141)])
+    def test_the_bound_is_the_widest_der_for_the_curve(self, bit_size, expected):
+        assert self._bound(bit_size) == expected
+
+    @pytest.mark.parametrize("bit_size", [256, 384, 521])
+    def test_the_widest_signature_actually_fits(self, bit_size):
+        field = (bit_size + 7) // 8
+        widest = wincert.ecdsa_der(bytes([0xFF] * field) * 2)
+        assert len(widest) == self._bound(bit_size)

@@ -355,20 +355,30 @@ class StoreCertificate:
             raise StoreUnavailable()
         self._store = store
 
-        buf = (BYTE * len(digest)).from_buffer_copy(digest)
-        blob = CRYPT_INTEGER_BLOB(len(digest), ctypes.cast(buf, POINTER(BYTE)))
-        cert = crypt32.CertFindCertificateInStore(
-            store, _ENCODING, 0, CERT_FIND_HASH, byref(blob), None
-        )
-        if not cert:
-            raise ValueError(
-                "No certificate with that thumbprint is in the Windows certificate store."
+        # Everything acquired past this point is released on ANY raise: the
+        # context manager's __exit__ never runs for a failure inside open, so
+        # a refused key would otherwise leak the store and cert handles for the
+        # life of the process.
+        acquired = False
+        try:
+            buf = (BYTE * len(digest)).from_buffer_copy(digest)
+            blob = CRYPT_INTEGER_BLOB(len(digest), ctypes.cast(buf, POINTER(BYTE)))
+            cert = crypt32.CertFindCertificateInStore(
+                store, _ENCODING, 0, CERT_FIND_HASH, byref(blob), None
             )
-        self._cert = cert
-        info = cert.contents
-        self.certificate = ctypes.string_at(info.pbCertEncoded, info.cbCertEncoded)
-        self.chain = self._read_chain(cert)
-        self._acquire_key()
+            if not cert:
+                raise ValueError(
+                    "No certificate with that thumbprint is in the Windows certificate store."
+                )
+            self._cert = cert
+            info = cert.contents
+            self.certificate = ctypes.string_at(info.pbCertEncoded, info.cbCertEncoded)
+            self.chain = self._read_chain(cert)
+            self._acquire_key()
+            acquired = True
+        finally:
+            if not acquired:
+                self.close()
         return self
 
     def close(self) -> None:
@@ -538,7 +548,16 @@ class StoreCertificate:
                 code = ctypes.get_last_error() & 0xFFFFFFFF
                 raise ValueError(f"The legacy signing provider rejected the digest (0x{code:08X}).")
             size = DWORD(0)
-            advapi32.CryptSignHashW(hash_handle, self._key_spec, None, 0, None, byref(size))
+            # The size query carries its own failure. Unchecked, `size` stays 0
+            # and the signing call below fails with ERROR_MORE_DATA, which names
+            # a buffer problem rather than the refusal that actually happened.
+            if not advapi32.CryptSignHashW(
+                hash_handle, self._key_spec, None, 0, None, byref(size)
+            ):
+                code = ctypes.get_last_error() & 0xFFFFFFFF
+                if code in _CANCEL_CODES:
+                    raise SigningCancelled()
+                raise ValueError(f"The legacy signing provider refused the request (0x{code:08X}).")
             out = (BYTE * size.value)()
             if not advapi32.CryptSignHashW(
                 hash_handle, self._key_spec, None, 0, out, byref(size)
@@ -561,9 +580,19 @@ def ecdsa_der(raw: bytes) -> bytes:
     r = int.from_bytes(raw[:half], "big")
     s = int.from_bytes(raw[half:], "big")
 
+    def _length(count: int) -> bytes:
+        """DER definite length. A payload of 128 bytes or more MUST use the
+        long form (``0x81 XX``, ``0x82 XX XX``…); the short form silently
+        truncates it — a P-521 pair, whose payload reaches 138 bytes, is
+        entirely in that range."""
+        if count < 0x80:
+            return bytes([count])
+        body = count.to_bytes((count.bit_length() + 7) // 8, "big")
+        return bytes([0x80 | len(body)]) + body
+
     def _int(value: int) -> bytes:
         body = value.to_bytes((value.bit_length() + 8) // 8 or 1, "big")
-        return b"\x02" + bytes([len(body)]) + body
+        return b"\x02" + _length(len(body)) + body
 
     payload = _int(r) + _int(s)
-    return b"\x30" + bytes([len(payload)]) + payload
+    return b"\x30" + _length(len(payload)) + payload
