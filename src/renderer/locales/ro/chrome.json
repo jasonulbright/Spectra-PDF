@@ -59,6 +59,8 @@
   "app.signedEdit.lockedRefused": "O semnătură din acest document blochează următoarele câmpuri de formular împotriva altor modificări: {{fields}}. Completarea lor ar produce un fișier raportat ca alterat. Salvați o copie și completați copia — copia nu mai este documentul semnat.",
   "app.signedEdit.lockedTitle": "Câmpurile de formular sunt blocate",
   "app.signedEdit.title": "Documentul este semnat",
+  "app.startupEntry.stale": "Această copie a fost mutată de când a fost activată opțiunea „Pornire odată cu Windows”, iar intrarea nu a putut fi actualizată, așa că aplicația nu va porni odată cu Windows. Dezactivați și reactivați setarea în Preferințe. ({{detail}})",
+  "app.startupEntry.staleTitle": "Opțiunea „Pornire odată cu Windows” necesită atenție",
   "app.window.claimTitle": "Deschis în altă fereastră",
   "app.window.focusOther": "Arată acea fereastră",
   "app.window.folderBusy": "O altă fereastră scrie deja în acest dosar: {{folder}}.",

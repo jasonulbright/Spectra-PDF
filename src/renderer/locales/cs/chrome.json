@@ -61,6 +61,8 @@
   "app.signedEdit.lockedRefused": "Podpis v tomto dokumentu blokuje změnu těchto polí formuláře: {{fields}}. Jejich vyplněním vznikne soubor hlášený jako změněný. Uložte kopii a vyplňte ji — kopie už podepsaným dokumentem není.",
   "app.signedEdit.lockedTitle": "Pole formuláře jsou uzamčena",
   "app.signedEdit.title": "Dokument je podepsaný",
+  "app.startupEntry.stale": "Tato kopie byla po zapnutí volby „Spouštět se systémem Windows“ přesunuta a záznam se nepodařilo aktualizovat, takže se aplikace se systémem Windows nespustí. Vypněte a znovu zapněte toto nastavení v Předvolbách. ({{detail}})",
+  "app.startupEntry.staleTitle": "Volba „Spouštět se systémem Windows“ vyžaduje pozornost",
   "app.window.claimTitle": "Otevřeno v jiném okně",
   "app.window.focusOther": "Zobrazit toto okno",
   "app.window.folderBusy": "Do této složky už zapisuje jiné okno: {{folder}}.",

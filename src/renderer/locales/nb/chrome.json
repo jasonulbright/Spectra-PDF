@@ -57,6 +57,8 @@
   "app.signedEdit.lockedRefused": "En signatur i dette dokumentet låser disse skjemafeltene mot videre endring: {{fields}}. Å fylle dem ut ville gi en fil som rapporteres som endret. Lagre en kopi og fyll ut den i stedet — kopien er ikke lenger det signerte dokumentet.",
   "app.signedEdit.lockedTitle": "Skjemafeltene er låst",
   "app.signedEdit.title": "Dokumentet er signert",
+  "app.startupEntry.stale": "Denne kopien er flyttet siden «Start med Windows» ble slått på, og oppføringen kunne ikke oppdateres, så programmet starter ikke med Windows. Slå innstillingen av og på igjen under Innstillinger. ({{detail}})",
+  "app.startupEntry.staleTitle": "«Start med Windows» krever oppmerksomhet",
   "app.window.claimTitle": "Åpen i et annet vindu",
   "app.window.focusOther": "Vis det vinduet",
   "app.window.folderBusy": "Et annet vindu skriver allerede til denne mappen: {{folder}}.",

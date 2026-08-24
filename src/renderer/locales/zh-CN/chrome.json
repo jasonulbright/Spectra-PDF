@@ -55,6 +55,8 @@
   "app.signedEdit.lockedRefused": "本文档的一个签名锁定了以下表单域，禁止进一步更改：{{fields}}。填写它们会产生一个被报告为已更改的文件。请保存副本并填写副本——副本已不再是已签名的文档。",
   "app.signedEdit.lockedTitle": "表单域已锁定",
   "app.signedEdit.title": "文档已签名",
+  "app.startupEntry.stale": "启用“开机时随 Windows 启动”之后此副本已被移动，且无法更新该启动项，因此应用程序不会随 Windows 启动。请在首选项中关闭该设置后再重新开启。({{detail}})",
+  "app.startupEntry.staleTitle": "“开机时随 Windows 启动”需要处理",
   "app.window.claimTitle": "已在其他窗口中打开",
   "app.window.focusOther": "显示该窗口",
   "app.window.folderBusy": "另一个窗口正在写入此文件夹：{{folder}}。",

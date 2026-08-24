@@ -59,6 +59,8 @@
   "app.signedEdit.lockedRefused": "Une signature de ce document verrouille ces champs de formulaire contre toute modification ultérieure : {{fields}}. Les remplir produirait un fichier signalé comme modifié. Enregistrez une copie et remplissez celle-ci — la copie n’est plus le document signé.",
   "app.signedEdit.lockedTitle": "Des champs de formulaire sont verrouillés",
   "app.signedEdit.title": "Le document est signé",
+  "app.startupEntry.stale": "Cette copie a été déplacée depuis l’activation de « Démarrer avec Windows » et l’entrée n’a pas pu être mise à jour ; l’application ne démarrera donc pas avec Windows. Désactivez puis réactivez l’option dans les Préférences. ({{detail}})",
+  "app.startupEntry.staleTitle": "« Démarrer avec Windows » demande votre attention",
   "app.window.claimTitle": "Ouvert dans une autre fenêtre",
   "app.window.focusOther": "Afficher cette fenêtre",
   "app.window.folderBusy": "Une autre fenêtre écrit déjà dans ce dossier : {{folder}}.",

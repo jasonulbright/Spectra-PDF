@@ -56,10 +56,7 @@ pub async fn portfolio_member_dir(
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
         .take(40)
         .collect();
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("{}", e))?
+    let dir = crate::portable::data_root(&app)?
         .join("portfolio-members")
         .join(format!("{}-{:016x}", safe_stem, h.finish()));
     fs::create_dir_all(&dir)
@@ -80,11 +77,7 @@ pub(crate) fn is_managed_member_path(base: &std::path::Path, canonical: &std::pa
 /// engine; this only ever launches what that flow just wrote.
 #[tauri::command]
 pub async fn open_portfolio_member_file(app: AppHandle, path: String) -> Result<(), String> {
-    let base = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("portfolio-members");
+    let base = crate::portable::data_root(&app)?.join("portfolio-members");
     let base = dunce::simplified(&base).to_path_buf();
     let canonical = std::path::PathBuf::from(canonical_path(&path));
     if !is_managed_member_path(&base, &canonical) {
@@ -1094,11 +1087,7 @@ pub async fn get_icc_path(app: AppHandle) -> Result<String, String> {
 /// every word of the language as wrong.
 #[tauri::command]
 pub async fn user_dictionary_dir(app: AppHandle) -> Result<String, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("{}", e))?
-        .join("dictionaries");
+    let dir = crate::portable::data_root(&app)?.join("dictionaries");
     fs::create_dir_all(&dir)
         .map_err(|e| format!("Cannot create the dictionaries folder {}: {}", dir.display(), e))?;
     Ok(dunce::simplified(&dir).to_string_lossy().into_owned())
@@ -1333,7 +1322,7 @@ pub async fn get_window_backdrop(
 #[tauri::command]
 pub async fn append_operation_log(app: AppHandle, line: String) -> Result<(), String> {
     use std::io::Write;
-    let app_data = app.path().app_data_dir().map_err(|e| format!("{}", e))?;
+    let app_data = crate::portable::data_root(&app)?;
     fs::create_dir_all(&app_data).ok();
     let log_path = app_data.join("operations.log");
     let mut f = std::fs::OpenOptions::new()
@@ -1369,11 +1358,7 @@ pub async fn append_operation_log(app: AppHandle, line: String) -> Result<(), St
 fn batch_log_dir(app: &AppHandle, configured: Option<&str>) -> Result<std::path::PathBuf, String> {
     let dir = match configured.map(str::trim).filter(|s| !s.is_empty()) {
         Some(custom) => std::path::PathBuf::from(custom),
-        None => app
-            .path()
-            .app_data_dir()
-            .map_err(|e| format!("{}", e))?
-            .join("batch-logs"),
+        None => crate::portable::data_root(app)?.join("batch-logs"),
     };
     fs::create_dir_all(&dir)
         .map_err(|e| format!("Cannot create the log folder {}: {}", dir.display(), e))?;
@@ -1750,7 +1735,7 @@ const STARTUP_CONFIG_FILE: &str = "startup.json";
 /// more than one flag, and rewriting it whole from a single caller silently
 /// drops whichever ones that caller does not know about.
 fn write_startup_flag(app: &AppHandle, key: &str, value: bool) -> Result<(), String> {
-    let app_data = app.path().app_data_dir().map_err(|e| format!("{}", e))?;
+    let app_data = crate::portable::data_root(app)?;
     fs::create_dir_all(&app_data).ok();
     let config_path = app_data.join(STARTUP_CONFIG_FILE);
     let mut json = fs::read_to_string(&config_path)
@@ -1771,7 +1756,7 @@ fn read_startup_flag<R: tauri::Runtime, M: tauri::Manager<R>>(
     key: &str,
     default: bool,
 ) -> bool {
-    let Ok(app_data) = app.path().app_data_dir() else {
+    let Ok(app_data) = crate::portable::data_root(app) else {
         return default;
     };
     let config_path = app_data.join(STARTUP_CONFIG_FILE);
@@ -1832,6 +1817,131 @@ pub async fn check_auto_update_disabled() -> Result<bool, String> {
 const STARTUP_REG_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const STARTUP_REG_VALUE: &str = "SpectraPDF";
 
+/// What a launch must do to the Run value it found there.
+///
+/// `Absent` covers both "startup is not enabled" and "the value is gone":
+/// neither is this code's business to create, because only the user's own
+/// preference turns the entry on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RunKeyAction {
+    Absent,
+    Current,
+    Rewrite(String),
+}
+
+/// The executable path recorded in a Run value, unquoted, without the flag.
+///
+/// The value this app writes is `"<exe>"` optionally followed by
+/// ` --minimized`, so the quoted head is the path. An unquoted value (written
+/// by an older build or by hand) is taken up to the first ` --`, which is the
+/// only separator this app's own flags use.
+fn run_value_exe(value: &str) -> &str {
+    let trimmed = value.trim();
+    if let Some(rest) = trimmed.strip_prefix('"') {
+        return rest.split('"').next().unwrap_or("");
+    }
+    match trimmed.find(" --") {
+        Some(at) => trimmed[..at].trim_end(),
+        None => trimmed,
+    }
+}
+
+/// Whether the recorded entry still names this executable, and what to write
+/// when it does not.
+///
+/// A portable copy moved to another folder — and an installed copy the user
+/// dragged elsewhere — leaves the Run value pointing at a path with no
+/// executable at it, so "start with Windows" silently stops starting anything.
+/// The recorded MINIMIZED choice is the user's and travels unchanged; only the
+/// path is corrected.
+///
+/// Paths compare case-insensitively because the value is a Windows path and
+/// the shell that reads it treats it that way; a case difference is the same
+/// executable and must not provoke a rewrite every launch.
+pub(crate) fn run_key_action(existing: Option<&str>, exe: &Path) -> RunKeyAction {
+    let Some(value) = existing else {
+        return RunKeyAction::Absent;
+    };
+    let recorded = run_value_exe(value);
+    let exe = exe.to_string_lossy();
+    if recorded.eq_ignore_ascii_case(exe.as_ref()) {
+        return RunKeyAction::Current;
+    }
+    let mut rewritten = format!("\"{}\"", exe);
+    if value.contains("--minimized") {
+        rewritten.push_str(" --minimized");
+    }
+    RunKeyAction::Rewrite(rewritten)
+}
+
+/// The launch-time correction. Returns the OS error when a needed rewrite
+/// could not be made, so the caller can report it.
+#[cfg(windows)]
+fn refresh_startup_entry() -> Result<(), String> {
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok(key) = hkcu.open_subkey_with_flags(STARTUP_REG_KEY, KEY_READ | KEY_WRITE) else {
+        // No Run key to read means nothing was ever enabled here.
+        return Ok(());
+    };
+    let existing: Option<String> = key.get_value(STARTUP_REG_VALUE).ok();
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    match run_key_action(existing.as_deref(), &exe) {
+        RunKeyAction::Absent | RunKeyAction::Current => Ok(()),
+        RunKeyAction::Rewrite(value) => key
+            .set_value(STARTUP_REG_VALUE, &value)
+            .map_err(|e| e.to_string()),
+    }
+}
+
+#[cfg(not(windows))]
+fn refresh_startup_entry() -> Result<(), String> {
+    Ok(())
+}
+
+/// The failed-rewrite message a launch left behind, if any.
+///
+/// Managed state rather than an event: the correction runs before any window
+/// exists, so the report has to wait for a renderer to come and ask.
+pub struct StartupEntryNotice(std::sync::Mutex<Option<String>>);
+
+impl StartupEntryNotice {
+    pub fn new() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+}
+
+impl Default for StartupEntryNotice {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Correct the Run entry for this launch, recording a failure for the
+/// renderer. Called once, from setup.
+pub fn refresh_startup_entry_at_launch(app: &AppHandle) {
+    if let Err(e) = refresh_startup_entry() {
+        if let Ok(mut slot) = app.state::<StartupEntryNotice>().0.lock() {
+            *slot = Some(e);
+        }
+    }
+}
+
+/// The OS error text from a failed launch-time rewrite, or "" for none.
+#[tauri::command]
+pub async fn startup_entry_notice(
+    state: tauri::State<'_, StartupEntryNotice>,
+) -> Result<String, String> {
+    Ok(state
+        .0
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take())
+        .unwrap_or_default())
+}
+
 /// Read the current state of the "Start with Windows" registry entry.
 /// Returns (enabled, minimized) — minimized is true if the --minimized flag is present.
 #[tauri::command]
@@ -1888,8 +1998,43 @@ pub async fn set_startup_enabled(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_batch_log_name, is_managed_member_path};
+    use super::{is_batch_log_name, is_managed_member_path, run_key_action, RunKeyAction};
     use std::path::Path;
+
+    #[test]
+    fn a_moved_copy_gets_its_run_entry_corrected_and_a_current_one_is_left_alone() {
+        let exe = Path::new(r"E:\Portable\SpectraPDF\spectrapdf.exe");
+
+        // Startup was never enabled: nothing to create.
+        assert_eq!(run_key_action(None, exe), RunKeyAction::Absent);
+
+        // The recorded path still names this executable — including when the
+        // shell spelled it differently, which is the same file.
+        assert_eq!(
+            run_key_action(Some(r#""E:\Portable\SpectraPDF\spectrapdf.exe""#), exe),
+            RunKeyAction::Current,
+        );
+        assert_eq!(
+            run_key_action(Some(r#""e:\portable\spectrapdf\SPECTRAPDF.EXE" --minimized"#), exe),
+            RunKeyAction::Current,
+        );
+
+        // Moved: the path is corrected and the user's minimized choice travels.
+        assert_eq!(
+            run_key_action(Some(r#""D:\Old\spectrapdf.exe""#), exe),
+            RunKeyAction::Rewrite(format!("\"{}\"", exe.display())),
+        );
+        assert_eq!(
+            run_key_action(Some(r#""D:\Old\spectrapdf.exe" --minimized"#), exe),
+            RunKeyAction::Rewrite(format!("\"{}\" --minimized", exe.display())),
+        );
+
+        // An unquoted value, from a hand-written entry, is read the same way.
+        assert_eq!(
+            run_key_action(Some(r"D:\Old\spectrapdf.exe --minimized"), exe),
+            RunKeyAction::Rewrite(format!("\"{}\" --minimized", exe.display())),
+        );
+    }
 
     #[test]
     fn log_retention_matches_every_prefix_this_app_writes_and_nothing_else() {
