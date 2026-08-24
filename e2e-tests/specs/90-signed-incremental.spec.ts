@@ -490,4 +490,97 @@ describe('signed-document incremental commit', () => {
 
     await closeAllFiles();
   });
+
+  it('accepting the crop on an approval-signed document crops it and loses the signature it was warned about', async () => {
+    // The decline half of this question is pinned above; this is the half that
+    // proves the warning told the truth. A page box is a page KEY, which the
+    // page tier's transplant would carry — but no page tier runs here: the
+    // crop is `set_page_boxes`, an engine op that rewrites the whole file, so
+    // the signature the user was warned about really does go. A crop that
+    // asked and then quietly kept the signature would mean the question was
+    // wrong; a crop that asked and then did neither would mean the accept was.
+    await openSignedCopy('signed-pagebox-accept.pdf');
+    const before = await workingBytes();
+
+    await setView('operations');
+    await setActiveOp('pagebox');
+    await $('[data-testid="pagebox-apply"]').waitForDisplayed({ timeout: 20_000 });
+    await setReactInputValue('[data-testid="pagebox-top"]', '24');
+    await $('[data-testid="pagebox-apply"]').click();
+
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, {
+      timeout: 20_000,
+      timeoutMsg: 'the crop rewrote a signed document with no warning',
+    });
+    expect(await $(CONFIRM_MESSAGE).getText()).toContain('invalidate its digital signatures');
+    await $(CONFIRM_AFFIRM).click();
+    await waitForDisplayedSelector(CONFIRM_MESSAGE, { timeout: 15_000, reverse: true });
+
+    // The op ran: the working copy is a different file from the one that
+    // stood before the question.
+    await browser.waitUntil(async () => !(await workingBytes()).equals(before), {
+      timeout: 30_000,
+      interval: 500,
+      timeoutMsg: 'the accepted crop never reached the engine',
+    });
+
+    const tmpOut = join(mkdtempSync(join(tmpdir(), 'spectra-crop-accept-')), 'cropped.pdf');
+    await saveActiveAs(tmpOut);
+
+    // The crop is really in the file: the first page's crop box is shorter
+    // than the media box by the margin that was typed.
+    const doc = await PDFDocument.load(readFileSync(tmpOut), {
+      ignoreEncryption: true,
+      updateMetadata: false,
+    });
+    const page = doc.getPage(0);
+    expect(page.getCropBox().height).toBeCloseTo(page.getMediaBox().height - 24, 0);
+
+    // And the signature is not — the same two shapes the rewrite can take.
+    const after = cliJson<{ signed: boolean; signatures: { intact: boolean }[] }>([
+      'verify-signatures',
+      tmpOut,
+    ]);
+    expect(after.signed === false || after.signatures.some((s) => !s.intact)).toBe(true);
+
+    await closeAllFiles();
+  });
+
+  it('the crop on a CERTIFIED document is asked in the terms of the certification, and declining writes nothing', async () => {
+    // The certified counterpart of the crop case above. The page tier's rotate
+    // on a certified document is pinned earlier in this file; this is the
+    // whole-file tier asking about the same document, and the two must agree
+    // on what is at stake — the certification, named as such, not the generic
+    // signature sentence an uncertified document gets.
+    const tmp = mkdtempSync(join(tmpdir(), 'spectra-o5b-cert-crop-'));
+    await certifiedFixture(join(tmp, 'certified-crop.pdf'), 'annotate');
+    const before = await workingBytes();
+    // Certifying is itself an in-place edit, so this document arrives dirty
+    // and the decline is measured as "no further change" rather than against
+    // a clean flag the fixture never leaves behind.
+    const dirtyBefore = (await getState()).activeFile?.dirty;
+
+    await setView('operations');
+    await setActiveOp('pagebox');
+    await $('[data-testid="pagebox-apply"]').waitForDisplayed({ timeout: 20_000 });
+    await setReactInputValue('[data-testid="pagebox-top"]', '18');
+    await $('[data-testid="pagebox-apply"]').click();
+
+    const message = await declineSignedEdit();
+    expect(message).toContain('certified');
+    expect(message).toContain('break the certification');
+
+    // Declined means the engine was never called.
+    expect((await workingBytes()).equals(before)).toBe(true);
+    expect((await getState()).activeFile?.dirty).toBe(dirtyBefore);
+
+    await setActiveOp('signatures');
+    const still = await verifyActiveSignatures();
+    expect(still.signature_count).toBe(1);
+    expect(still.certified).toBe(true);
+    expect(still.certification_level).toBe('annotate');
+    expect(still.any_policy_violation).toBe(false);
+
+    await closeAllFiles();
+  });
 });
