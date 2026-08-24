@@ -86,6 +86,7 @@ import {
 } from '../../lib/spellcheck';
 import { useEngine } from '../../hooks/useEngine';
 import { app, dialog, imageClipboard } from '../../lib/tauri-bridge';
+import { loadSignatureAssets, type SignatureAsset } from '../../lib/signature-assets';
 import {
   SignerSourceFields,
   EMPTY_SIGNER_SOURCE,
@@ -106,6 +107,15 @@ import {
   type LockOptions,
 } from '../../lib/signatures';
 import { FieldLockControl } from '../FieldLockControl';
+import { StampAppearanceFields } from '../StampAppearanceFields';
+import {
+  DEFAULT_STAMP_APPEARANCE,
+  resolveStampFace,
+  stampStyleParams,
+  STAMP_FACE_MISSING,
+  STAMP_FACE_UNREADABLE,
+  type StampAppearanceOptions,
+} from '../../lib/stamp-appearance';
 import { sourceKeyOf } from '../../search/useSearchIndex';
 import { useSearchContext } from '../../search/SearchProvider';
 import { useFind } from '../../search/useFind';
@@ -889,6 +899,13 @@ export function WorkspaceCanvasView({
   // and the names come from the target document rather than from typing.
   const [sigLock, setSigLock] = useState<LockOptions>(DEFAULT_LOCK);
   const [sigLockFields, setSigLockFields] = useState<string[]>([]);
+  // The visible stamp's appearance, the same section the panel offers, so the
+  // two surfaces cannot describe one stamp two ways.
+  const [sigStamp, setSigStamp] = useState<StampAppearanceOptions>(
+    DEFAULT_STAMP_APPEARANCE,
+  );
+  const [sigAssets, setSigAssets] = useState<SignatureAsset[]>([]);
+  const [sigFontDir, setSigFontDir] = useState('');
   // Whether the document the card targets could still take a certification.
   // Starts false so the offer only ever appears once the read has ANSWERED —
   // showing it first and withdrawing it is worse than showing it a beat late.
@@ -5935,6 +5952,25 @@ export function WorkspaceCanvasView({
   // then flushes pending page edits before sign_pdf reads the file, so the
   // output contains what the user sees. The input file itself is NEVER
   // modified — signing writes a new file.
+  // The card's appearance section reads the shared signature store and the
+  // app's fonts directory once the card is open — never before, so an unused
+  // sign tool costs neither read.
+  const sigCardOpen = liveSigPlacement !== null || sigFieldTarget !== null;
+  useEffect(() => {
+    if (!sigCardOpen) return;
+    setSigAssets(loadSignatureAssets());
+    let cancelled = false;
+    void app
+      .getEditFontPath()
+      .then((dir) => {
+        if (!cancelled) setSigFontDir(dir);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sigCardOpen]);
+
   const signingRef = useRef(false);
   const applySignature = useCallback(async (): Promise<void> => {
     const placement = liveSigPlacement;
@@ -5971,6 +6007,26 @@ export function WorkspaceCanvasView({
       // placement when the buffer change lands; this covers the in-flight
       // window where it hasn't yet. Loud, not silent — the card stays open.
       setSignError(tChrome('canvas.sign.pageChanged'));
+      return;
+    }
+    // The appearance resolves BEFORE the reentrancy ref, with the rest of the
+    // synchronous validation: a chosen signature that is gone or unreadable is
+    // a refusal, never a stamp drawn with a different mark.
+    let stampParams: Record<string, unknown>;
+    try {
+      stampParams = stampStyleParams(
+        sigStamp,
+        resolveStampFace(sigStamp.signatureAssetId, sigAssets),
+        sigFontDir,
+      );
+    } catch (e: unknown) {
+      const key =
+        e instanceof Error && e.message === STAMP_FACE_MISSING
+          ? 'panel.stamp.faceMissing'
+          : e instanceof Error && e.message === STAMP_FACE_UNREADABLE
+            ? 'panel.stamp.faceUnreadable'
+            : null;
+      setSignError(key ? tChrome(key) : e instanceof Error ? e.message : String(e));
       return;
     }
     signingRef.current = true;
@@ -6022,6 +6078,7 @@ export function WorkspaceCanvasView({
         ...placementParams,
         ...certifyParams(sigCertify),
         ...lockParams(sigLock),
+        ...stampParams,
       })) as unknown as { signer: string | null; output: string; valid: boolean; intact: boolean; covers_whole_document: boolean };
       setSignDone({ signer: res.signer, output: res.output, ok: res.valid && res.intact && res.covers_whole_document });
       if (sigSource.mode === 'store' && sigSource.thumbprint) {
@@ -6029,6 +6086,7 @@ export function WorkspaceCanvasView({
       }
       setSigPlacement(null);
       setSigFieldTarget(null);
+      setSigStamp(DEFAULT_STAMP_APPEARANCE);
       setTool('select');
     } catch (err) {
       setSignError(err instanceof Error ? err.message : String(err));
@@ -6040,7 +6098,7 @@ export function WorkspaceCanvasView({
       signingRef.current = false;
       setSigningBusy(false);
     }
-  }, [liveSigPlacement, sigFieldTarget, sigSource, sigPassword, sigReason, sigLocation, sigCertify, sigLock, docs, state.files, state.pageDirtyPaths, engineCall, setTool]);
+  }, [liveSigPlacement, sigFieldTarget, sigSource, sigPassword, sigReason, sigLocation, sigCertify, sigLock, sigStamp, sigAssets, sigFontDir, docs, state.files, state.pageDirtyPaths, engineCall, setTool]);
 
   // Harness bridge (e2e builds only): redaction marks live here, out of the
   // reducer's reach, so the canvas registers its own handlers while mounted.
@@ -7245,6 +7303,17 @@ export function WorkspaceCanvasView({
             value={sigLock}
             onChange={setSigLock}
             fieldNames={sigLockFields}
+            idPrefix="canvas-sign"
+          />
+          <StampAppearanceFields
+            value={sigStamp}
+            onChange={setSigStamp}
+            assets={sigAssets}
+            fontDir={sigFontDir}
+            signer={tChrome('panel.stamp.previewSigner')}
+            reason={sigReason}
+            location={sigLocation}
+            call={engineCall}
             idPrefix="canvas-sign"
           />
           {signError && <div data-testid="canvas-sign-error" className="text-xs text-red-400">{signError}</div>}
