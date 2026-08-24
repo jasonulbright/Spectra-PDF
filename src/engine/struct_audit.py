@@ -233,6 +233,11 @@ def _namespace_of(elem) -> str:
 
 
 def _scope_of(value) -> str:
+    # An absent attribute is no scope. Rendering it through `str` yields the
+    # four characters "None", which every caller reads as a declared value —
+    # so a TH carrying no /Scope answers as though it carried one.
+    if value is None:
+        return ""
     try:
         return str(value).lstrip("/")
     except Exception:

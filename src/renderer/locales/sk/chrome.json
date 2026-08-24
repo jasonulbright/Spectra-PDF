@@ -3224,7 +3224,6 @@
   "panel.a11y.detail.header_cell_has_no_scope": "Táto hlavičková bunka nedeklaruje rozsah a žiadna bunka na ňu neodkazuje.",
   "panel.a11y.detail.heading_level_skipped": "Osnova preskakuje z úrovne {{from}} na úroveň {{to}}.",
   "panel.a11y.detail.label_outside_list_item": "Nadradeným prvkom tohto {{role}} je {{parent}}, nie položka zoznamu.",
-  "panel.a11y.detail.list_item_has_no_label": "Táto položka zoznamu má text, ale nemá označenie.",
   "panel.a11y.detail.list_item_outside_list": "Nadradeným prvkom tejto položky je {{parent}}, nie zoznam.",
   "panel.a11y.detail.mark_info_missing": "Dokument má strom štruktúry, ale nedeklaruje sa ako označkovaný.",
   "panel.a11y.detail.multimedia_not_tagged": "Anotácia {{subtype}} na strane {{page}} je mimo stromu štruktúry.",

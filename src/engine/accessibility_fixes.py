@@ -112,10 +112,14 @@ def _fix_tagged(source: str, output: str, report: dict, allow_signed: bool) -> i
 
 
 def _fix_title(source: str, output: str, report: dict, allow_signed: bool) -> int:
-    # A `warn` is "there is a title and the reader is set to show the file name
-    # instead", which needs no value from anyone. A `fail` is "there is no
-    # title", and inventing one is exactly what the authored fix exists for.
-    if _status(report, "title") != "warn":
+    # The two shortfalls this check reports are not alike, and the status no
+    # longer separates them: "there is a title and the reader is set to show
+    # the file name instead" needs no value from anyone, while "there is no
+    # title" can only be repaired by the authored fix that supplies one. The
+    # finding names which, so the door reads the finding.
+    if not any(
+        f["detail_key"] == "title_not_displayed" for f in _findings(report, "title")
+    ):
         return 0
     set_document_title(source, output, display=True, allow_signed=allow_signed)
     return 1

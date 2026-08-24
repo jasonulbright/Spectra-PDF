@@ -3092,7 +3092,6 @@
   "panel.a11y.detail.header_cell_has_no_scope": "Bu başlık hücresi bir kapsam bildirmiyor ve hiçbir hücre ona işaret etmiyor.",
   "panel.a11y.detail.heading_level_skipped": "Ana hat {{from}}. düzeyden {{to}}. düzeye atlıyor.",
   "panel.a11y.detail.label_outside_list_item": "Bu {{role}} öğesinin üst öğesi bir liste öğesi değil, {{parent}}.",
-  "panel.a11y.detail.list_item_has_no_label": "Bu liste öğesinin gövdesi var ama etiketi yok.",
   "panel.a11y.detail.list_item_outside_list": "Bu öğenin üst öğesi bir liste değil, {{parent}}.",
   "panel.a11y.detail.mark_info_missing": "Belgenin bir yapı ağacı var ama kendini etiketli olarak bildirmiyor.",
   "panel.a11y.detail.multimedia_not_tagged": "{{page}}. sayfadaki bir {{subtype}} açıklaması yapı ağacının dışında.",

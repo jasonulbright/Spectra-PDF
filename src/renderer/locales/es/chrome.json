@@ -3158,7 +3158,6 @@
   "panel.a11y.detail.header_cell_has_no_scope": "Esta celda de encabezado no declara ámbito y ninguna celda apunta a ella.",
   "panel.a11y.detail.heading_level_skipped": "El esquema salta del nivel {{from}} al nivel {{to}}.",
   "panel.a11y.detail.label_outside_list_item": "El elemento padre de este {{role}} es {{parent}}, no un elemento de lista.",
-  "panel.a11y.detail.list_item_has_no_label": "Este elemento de lista tiene cuerpo pero no etiqueta.",
   "panel.a11y.detail.list_item_outside_list": "El elemento padre de este elemento es {{parent}}, no una lista.",
   "panel.a11y.detail.mark_info_missing": "El documento tiene árbol de estructura pero no se declara etiquetado.",
   "panel.a11y.detail.multimedia_not_tagged": "Una anotación {{subtype}} de la página {{page}} está fuera del árbol de estructura.",
