@@ -869,6 +869,195 @@ class TestPageKeys:
         assert not os.path.exists(out)
 
 
+class TestRotationLeavesAnnotationsProjected:
+    """What a rotation that lands as an APPEND does to the page's annotations.
+
+    Annotation rectangles are in default user space (ISO 32000-2 Table 166,
+    /Rect), and /Rotate is a display-time property of the page (Table 31), so
+    a rotation moves the page's content and its annotations together: the
+    rects that describe them do not change, and neither does an appearance
+    stream's own /Matrix. That is the file-level invariant the renderer's
+    display-space re-projection stands on — it re-projects a normalized rect
+    for the VIEW and inverts the rotation again when it bakes, so the bytes
+    a rotate-only edit produces carry the same rects as before it (proven on
+    the renderer side by tests/workspace-commit.test.ts's
+    "rotate-after-annotate anchors the same page content as annotate-only").
+
+    The append path must therefore leave /Annots alone entirely. If it ever
+    rewrote annotations to "follow" a rotation, the incremental result and
+    the rewrite result would disagree about where every annotation sits, and
+    the delta would also be classified as annotation work — which the
+    certification ceiling judges at a different level (Table 257: annotation
+    creation, deletion and modification arrive only at /P 3).
+    """
+
+    @staticmethod
+    def _fixture(tmp_dir, pki, name="rot"):
+        """One page, one square, one freetext whose /AP N carries a /Matrix."""
+        src = os.path.join(tmp_dir, f"{name}-base.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(612, 792))
+        page.Contents = pdf.make_stream(b"0 g 10 10 100 100 re f")
+
+        square_ap = pdf.make_stream(b"1 0 0 rg 0 0 40 40 re f")
+        square_ap.stream_dict["/Type"] = pikepdf.Name("/XObject")
+        square_ap.stream_dict["/Subtype"] = pikepdf.Name("/Form")
+        square_ap.stream_dict["/BBox"] = pikepdf.Array([0, 0, 40, 40])
+        square = pdf.make_indirect(pikepdf.Dictionary(
+            Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/Square"),
+            Rect=pikepdf.Array([400, 600, 440, 640]), F=4,
+            NM=pikepdf.String("rot-square"),
+            AP=pikepdf.Dictionary(N=square_ap),
+        ))
+
+        # The counter-rotated appearance the freetext builder emits: /Matrix
+        # maps the form's own space into the page's (8.10.2), which is how a
+        # freetext stays upright on a rotated page.
+        free_ap = pdf.make_stream(b"BT /Helv 12 Tf 0 0 Td (hi) Tj ET")
+        free_ap.stream_dict["/Type"] = pikepdf.Name("/XObject")
+        free_ap.stream_dict["/Subtype"] = pikepdf.Name("/Form")
+        free_ap.stream_dict["/BBox"] = pikepdf.Array([0, 0, 120, 40])
+        free_ap.stream_dict["/Matrix"] = pikepdf.Array([0, 1, -1, 0, 40, 0])
+        freetext = pdf.make_indirect(pikepdf.Dictionary(
+            Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/FreeText"),
+            Rect=pikepdf.Array([100, 200, 220, 240]), F=4,
+            NM=pikepdf.String("rot-freetext"),
+            DA=pikepdf.String("/Helv 12 Tf 0 g"),
+            Contents=pikepdf.String("hi"),
+            AP=pikepdf.Dictionary(N=free_ap),
+        ))
+        page.obj["/Annots"] = pikepdf.Array([square, freetext])
+        pdf.save(src)
+        signed = os.path.join(tmp_dir, f"{name}-signed.pdf")
+        sign_pdf(src, signed, pfx_path=pki["pfx"], password="pw")
+        return signed
+
+    @staticmethod
+    def _authored(pdf):
+        """The two authored annotations — signing adds its own widget to the
+        page, and that one is the signature's business, not this test's."""
+        return [
+            a for a in pdf.pages[0].obj["/Annots"] if a.get("/NM") is not None
+        ]
+
+    @classmethod
+    def _annot_geometry(cls, path):
+        with pikepdf.open(path) as pdf:
+            out = []
+            for a in cls._authored(pdf):
+                ap = a["/AP"]["/N"]
+                out.append((
+                    str(a["/NM"]),
+                    [float(v) for v in a["/Rect"]],
+                    (
+                        [float(v) for v in ap.stream_dict["/Matrix"]]
+                        if "/Matrix" in ap.stream_dict else None
+                    ),
+                    ap.read_bytes(),
+                ))
+            return out
+
+    @classmethod
+    def _annot_objgens(cls, path):
+        with pikepdf.open(path) as pdf:
+            return [a.objgen for a in cls._authored(pdf)]
+
+    @pytest.mark.parametrize("degrees", [90, 180, 270])
+    def test_an_appended_rotation_moves_no_annotation(self, tmp_dir, pki, degrees):
+        signed = self._fixture(tmp_dir, pki, f"rot{degrees}")
+        orig_bytes = open(signed, "rb").read()
+        before = self._annot_geometry(signed)
+        before_objgens = self._annot_objgens(signed)
+
+        def mutate(p):
+            p.pages[0].obj["/Rotate"] = degrees
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+
+        assert r["applied"] is True, r.get("reason")
+        assert r["delta_classes"] == ["page-keys"], r["delta_classes"]
+        assert r["page_keys_updated"] == 1
+        assert (r["annots_added"], r["annots_updated"], r["annots_removed"]) == (0, 0, 0)
+        result = open(out, "rb").read()
+        assert result[: len(orig_bytes)] == orig_bytes
+        _assert_sig_still_valid(out, pki)
+        v = _verdict(out, pki)
+        assert v["policy_ok"] is True, v
+
+        with pikepdf.open(out) as pdf:
+            assert int(pdf.pages[0].obj["/Rotate"]) == degrees
+        assert self._annot_geometry(out) == before
+        assert self._annot_objgens(out) == before_objgens
+
+        # Stronger than equality: the appended revision does not re-issue the
+        # annotation objects at all, so nothing about them can have drifted.
+        appended = result[len(orig_bytes):]
+        for num, gen in before_objgens:
+            assert re.search(
+                rb"(?<![0-9])%d %d obj" % (num, gen), appended
+            ) is None, f"the rotation re-wrote annotation object {num}"
+
+    def test_the_append_and_the_rewrite_place_annotations_identically(
+        self, tmp_dir, pki
+    ):
+        # The two paths are alternatives for the same edit; a user who keeps a
+        # signature must not get a different-looking page for it.
+        signed = self._fixture(tmp_dir, pki, "rot-vs")
+
+        def mutate(p):
+            p.pages[0].obj["/Rotate"] = 90
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        assert transplant_incremental(signed, modified, out)["applied"] is True
+        assert self._annot_geometry(out) == self._annot_geometry(modified)
+        with pikepdf.open(out) as a, pikepdf.open(modified) as b:
+            assert int(a.pages[0].obj["/Rotate"]) == int(b.pages[0].obj["/Rotate"])
+
+    def test_a_rotation_that_did_move_a_rect_is_annotation_work_too(
+        self, tmp_dir, pki
+    ):
+        # The classification is read off the DELTA, not off the gesture: were a
+        # rebuild ever to bake re-projected rects into the file, that is an
+        # annotation modification and Table 257 judges it at /P 3, so it must
+        # not travel under the page-keys class alone.
+        signed = self._fixture(tmp_dir, pki, "rot-moved")
+
+        def mutate(p):
+            p.pages[0].obj["/Rotate"] = 90
+            for a in p.pages[0].obj["/Annots"]:
+                if a.get("/NM") is not None and str(a["/NM"]) == "rot-square":
+                    a["/Rect"] = pikepdf.Array([600, 400, 640, 440])
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, r.get("reason")
+        assert r["delta_classes"] == ["annotations", "page-keys"]
+        assert r["annots_updated"] == 1
+        _assert_sig_still_valid(out, pki)
+
+    def test_a_certified_annotate_document_refuses_the_rotation(
+        self, matrix_docs, tmp_dir
+    ):
+        # The ceiling still stands over the widened reach: /P 3 permits
+        # annotation work and form filling, and page geometry appears in no
+        # row of Table 257, so the rotation falls back to the rewrite.
+        signed = matrix_docs["certified-annotate"]
+
+        def mutate(p):
+            p.pages[0].obj["/Rotate"] = 90
+
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is False
+        assert r["reason"] == "certified-annotate-forbids-page-keys"
+        assert not os.path.exists(out)
+
+
 class TestPageTree:
     """Removal, reordering and insert-anywhere on an approval-signed document."""
 
