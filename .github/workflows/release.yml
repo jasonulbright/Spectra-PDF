@@ -173,6 +173,26 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/setup-test-softhsm.ps1
         shell: pwsh
 
+      # Fetched, never committed: the suite's notice permits use for testing
+      # workflow setup and forbids redistribution. Without this the Ghent gate
+      # skips and the zero-skip gate below refuses the run. Keyed on the fetch
+      # script, which holds the archive digest pins, so a run hits GWG's server
+      # only when a pin moves. A MISS still fetches and verifies the pins, and
+      # both paths re-verify the extracted tree against the per-file manifest.
+      - name: Cache the Ghent PDF Output Suite corpus
+        id: ghent-cache
+        uses: actions/cache@v6
+        with:
+          path: ghent-corpus
+          key: ${{ runner.os }}-ghent-suite-${{ hashFiles('scripts/fetch-ghent-suite.py') }}
+
+      - name: Fetch the Ghent PDF Output Suite corpus
+        if: steps.ghent-cache.outputs.cache-hit != 'true'
+        run: python scripts/fetch-ghent-suite.py
+
+      - name: Verify the Ghent corpus against its manifest
+        run: python scripts/fetch-ghent-suite.py --check
+
       - name: Install Ghostscript as a TEST TOOL (capability-present axis)
         # Ghostscript remains user-installed and absent from the installer.
         # This unpinned test install proves the minimum-version capability path
