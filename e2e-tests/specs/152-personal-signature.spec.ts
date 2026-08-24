@@ -570,15 +570,12 @@ describe('the personal signature: three capture doors, two consumers', () => {
 
     await armStampTool();
     await waitForDisplayedSelector('[data-testid="secondary-toolbar"]', { timeout: 10_000 });
-    // Armed from the dialog's own list — the route that needs no assumption
-    // about when the strip last re-read the store. The list is newest-first,
-    // and every asset that survives to here is a drawn one.
-    await openCaptureDialog();
-    await $('[data-testid="signature-place"]').click();
-    await waitForDisplayedSelector('[data-testid="signature-save"]', {
-      reverse: true,
-      timeout: 10_000,
-    });
+    // The DRAWN asset by name, never "whatever the list shows first": with all
+    // three doors live the newest asset is an imported raster, which lands as
+    // a /Stamp, and this case's claim is about /Ink surviving onto a signed
+    // document rather than about which door ran most recently.
+    const drawn = (await storedAssets()).find((a) => a.kind === 'ink' && a.name === 'Drawn mark')!;
+    await armPreset(drawn.id);
     await clickPage();
     const placed = await getFirstAnnotation(10_000);
     expect(placed).not.toBeNull();
