@@ -117,6 +117,11 @@ scripts/license-audit*.tsv
 # DECLARES A LICENCE, so they are read on a developer disk and never
 # redistributed. This repository is public.
 /pdfa-corpus/
+# The Ghent PDF Output Suite 5.0, fetched by scripts/fetch-ghent-suite.py. The
+# archives carry a USE-ONLY notice (testing workflow setup; no commercial use
+# or sale without written permission), so they are read on a developer disk and
+# never redistributed. This repository is public.
+/ghent-corpus/
 *.local.*
 # ...and scratch DIRECTORIES, which the pattern above misses: it needs a dot
 # after "local", so `u1-shots.local/` was landing in git status as untracked.

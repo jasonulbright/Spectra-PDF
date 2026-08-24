@@ -1,0 +1,89 @@
+# Ghent PDF Output Suite 5.0 — the expected-results table.
+#
+# INTERNAL REGRESSION EVIDENCE ONLY. Passing the gate that reads this table is
+# not a Ghent Workgroup conformance certification; that programme has its own
+# process and this product is not in it. Nothing derived from this file may be
+# worded as certified.
+#
+# Every `expected` cell is PARAPHRASED from the suite's own per-patch ReadMe —
+# the documentation that ships inside the archive, never a reading of what this
+# product happens to produce and never Ghostscript or pdf.js as an oracle. The
+# corpus itself is gitignored (scripts/fetch-ghent-suite.py); this table, the
+# script and the manifest are what the repository carries.
+#
+# The suite's own verdict is VISUAL — a clear X, or a patch that stops matching
+# the reference image beside it. No reference RIP exists here, so a machine
+# cannot pronounce that verdict, and the table does not pretend otherwise:
+# `checks` are the machine-decidable preconditions the app's own surfaces must
+# report for the visual verdict to be reachable at all (the plate set, the ink
+# inventory, the overprint state, the colour family, the image construct, the
+# output intent). A row whose preconditions fail cannot render correctly; a row
+# whose preconditions pass has been shown only that much. The human half is the
+# assembled pages beside their reference page.
+#
+# status: `applicable` or `not_applicable`. A not_applicable row is excluded
+# from the pass tally and carries the patch's own documented reason — it is
+# never silently green.
+#
+# checks tokens, each backed by a function in tests/test_ghent_output.py:
+#   inks:A|B        list_inks names exactly these spot colorants
+#   family:F        list_inks reports colour family F on the page
+#   overprint       list_overprint finds at least one overprinting paint
+#   opm:N           an /ExtGState in the file declares that overprint mode
+#   ocgs            list_layers reports optional-content groups
+#   filter:F        an image XObject uses that decode filter
+#   bpc16           an image XObject carries 16 bits per component
+#   outputintent    the file declares an output intent with an embedded profile
+#
+id	category	patch	tests	expected	surface	status	checks	notes
+1.0	CMYK	GWG010_CMYK_OP_x3.pdf	CMYK objects (text, vector, image, image mask) set to overprint other CMYK objects, overprint mode 0	No clear X anywhere: each X marks an overprint that was not honoured or was rendered wrongly	Output Preview overprint simulation; separation plates	applicable	family:DeviceN,overprint,outputintent
+1.1	CMYK	GWG011_Overprint-Mode_x3.pdf	Overprint mode: whether a zero-tint process channel knocks out or leaves the channel beneath alone	No clear X: an X means the declared overprint mode was not respected	Output Preview overprint simulation	applicable	overprint,opm:0,opm:1,outputintent	Usually only one X appears when the mode is mishandled
+5.0	CMYK	GWG050_Font_Substitution_x3.pdf	Whether the embedded (deliberately altered) face is used, or substituted by a system face of the same name	The altered glyph is drawn; any other character means the embedded face was replaced	Viewer text rendering; font inventory	applicable	overprint,outputintent
+5.1	CMYK	GWG051_Font_subset_PSnames_ident_x1a.pdf	Two subsets of one face with identical PostScript names and glyphs at different table positions	Every glyph renders as the reference; substituted digits mean the subsets were confused	Viewer text rendering; font inventory	applicable	outputintent	Pairs with 5.2
+5.2	CMYK	GWG052_Font_subset_PSnames_diff_x1a.pdf	The same collision with differing PostScript names	Every glyph renders as the reference	Viewer text rendering; font inventory	applicable	outputintent	Pairs with 5.1
+6.0	CMYK	GWG060_Shading_x1a.pdf	Advanced shading types beside a screenshot of each	Each shading matches its reference image; a missing shading shows an x instead	Viewer rendering; separation plates	applicable	family:DeviceN,outputintent	Reference images are screenshots, so slight colour drift is not a failure
+6.1	CMYK	GWG061_Shading_x1a.pdf	Common shading types beside a screenshot of each	Each shading matches its reference image	Viewer rendering; separation plates	applicable	family:DeviceN,outputintent
+8.2	CMYK	GWG082_DeviceN-Support_4c_x3.pdf	DeviceN images built from process colorants only	Greenish check marks appear because DeviceN overprints CMYK; they disappear when the images were converted to CMYK, and the images vanish where DeviceN is unsupported	Ink inventory; separation plates	applicable	outputintent	The patch carries no X
+9.0	CMYK	GWG090_Font-Support_x3.pdf	Type 1, TrueType, CID and Type 3 faces beside reference renderings	Every sample matches its reference	Viewer text rendering; font inventory	applicable	overprint,outputintent
+9.1	CMYK	GWG091_FontSupport-OpenType_X4.pdf	OpenType CFF and OpenType TrueType faces, admitted by PDF/X-4	Both text lines match the reference image below them	Viewer text rendering; font inventory	applicable	overprint,outputintent
+15.0	CMYK	GWG150_OptionalContent-OCCD_X4.pdf	Optional content driven by the optional-content configuration dictionary	The default configuration is what renders; a cross built of two check marks means every group was drawn and optional content was ignored	Layers panel; viewer rendering	applicable	overprint,ocgs,outputintent	The suite forbids combining 15.0, 15.1 and 15.2 in one file
+15.1	CMYK	GWG151_OptionalContent-RBGroup_X4.pdf	Optional content driven by a radio-button group	The default configuration is what renders	Layers panel; viewer rendering	applicable	overprint,ocgs,outputintent
+15.2	CMYK	GWG152_OptionalContent-OCMD_X4.pdf	Optional content driven by a membership dictionary	The default configuration is what renders; the two extra views are effective only through the membership group	Layers panel; viewer rendering	applicable	overprint,ocgs,outputintent
+16.0	CMYK	GWG160_Transp_Basic_BM_DeviceCMYK_Non-knockout_X4.pdf	Basic blend modes on DeviceCMYK, neither knockout nor isolated	No clear X	Viewer rendering; flattener; separation plates	applicable	overprint,outputintent	A faint X from rounding is documented as not a failure
+16.1	CMYK	GWG161_Transp_Basic_BM_DeviceCMYK_Knockout_X4.pdf	The same blend modes in a knockout group	No clear X	Viewer rendering; flattener	applicable	overprint,outputintent
+16.2	CMYK	GWG162_Transp_Basic_BM_DeviceCMYK_Isolate_X4.pdf	The same blend modes in an isolated group	No clear X	Viewer rendering; flattener	applicable	overprint,outputintent
+16.6	CMYK	GWG166_Softmasks_Images_DeviceCMYK_X4.pdf	Image soft masks on DeviceCMYK	The masked edge stays soft and matches the reference; a hard black stroked edge, a vanished image or a clearly different colour is the failure	Viewer rendering; flattener	applicable	overprint,outputintent
+16.8	CMYK	GWG168_Softmasks_Vector_part1_X4.pdf	Vector soft masks, first set	Each element matches its reference; opaque black or vanished white elements are the failure	Viewer rendering; flattener	applicable	overprint,outputintent
+16.9	CMYK	GWG169_Softmasks_Vector_part2_X4.pdf	Vector soft masks, second set	Each element matches its reference	Viewer rendering; flattener	applicable	overprint,outputintent
+16.10	CMYK	GWG1610_Softmasks_Text_part1_X4.pdf	Soft masks applied to text, first set	Each element matches its reference	Viewer rendering; flattener	applicable	overprint,outputintent
+16.11	CMYK	GWG1611_Softmasks_Text_part2_X4.pdf	Soft masks applied to text, second set	Each element matches its reference	Viewer rendering; flattener	applicable	overprint,outputintent
+17.0	CMYK	GWG170_JPEG2000_compression_DeviceCMYK_X4.pdf	JPEG 2000 compressed DeviceCMYK imagery	No clear X	Viewer rendering; image inventory; separation plates	applicable	filter:JPXDecode,outputintent
+17.3	CMYK	GWG173_JBIG2_compression_X4.pdf	JBIG2 compressed imagery	No clear X	Viewer rendering; image inventory	applicable	filter:JBIG2Decode,outputintent	A faint X is documented as possible here and is not a failure
+18.1	CMYK	GWG181_16Bit_DeviceCMYK_x4.pdf	A 16-bit-per-channel DeviceCMYK image	The image renders as a complete rectangle; a cross-shaped image means 16-bit in that space is mishandled	Viewer rendering; image inventory	applicable	bpc16,outputintent
+19.0	CMYK	GWG190_DeviceN_Overprint_Black_X1a.pdf	Overprint on DeviceN objects carrying black	Two black and two cyan squares; blue crosses mean DeviceN overprint was dropped, and a cross in the third patch means the colour was converted to DeviceCMYK first	Output Preview overprint simulation; ink inventory	applicable	family:DeviceN,overprint,opm:1,outputintent	A faint cross in the fourth patch indicates conversion through unsuitable profiles
+19.1	CMYK	GWG191_DeviceN_Overprint_Yellow_X1a.pdf	The same construct with yellow	No blue crosses	Output Preview overprint simulation; ink inventory	applicable	family:DeviceN,overprint,opm:1,outputintent
+19.2	CMYK	GWG192_DeviceN_Overprint_White_X1a.pdf	The same construct with white	No blue crosses	Output Preview overprint simulation; ink inventory	applicable	family:DeviceN,overprint,opm:1,outputintent
+2.0	SPOT	GWG020_CMYKSpot_OP_x1a.pdf	CMYK text, vector, image and image-mask objects overprinting a spot object	No clear X	Output Preview plates and overprint; ink inventory	applicable	inks:GWG Green,family:DeviceN,overprint,outputintent
+3.0	SPOT	GWG030_Gray_K_black_OP_X1.pdf	Black, gray and spot-black objects overprinting a multi-spot object under overprint mode 0	No clear X	Output Preview plates and overprint; ink inventory	applicable	inks:GWG Green,family:DeviceN,overprint,outputintent
+3.1	SPOT	GWG031_Gray Image Overprint_CMYK+Spot_X1a.pdf	The overprinting grayscale images a drop shadow over a spot colour flattens into	No white rectangle appears; one appears when the images' overprint was turned off	Output Preview plates and overprint	applicable	inks:GWG Green,overprint,outputintent	The suite calls this a basic patch every device should pass
+4.0	SPOT	GWG040_White_OP_x1a.pdf	White and near-white objects in several spaces set to overprint a spot object	No clear X: an X means a white element was forced to knock out	Output Preview plates and overprint	applicable	inks:GWG Green,overprint,outputintent
+4.1	SPOT	GWG041_White_OP_x3.pdf	The same question with a separation-defined white and a near-white CMYK element	No clear X	Output Preview plates and overprint	applicable	inks:GWG Green,overprint,outputintent	The second box's X may be red; the ReadMe documents that variant
+8.0	SPOT	GWG080_DeviceN-Support_6c_x3.pdf	DeviceN across six colorants, process plus two spots	The patch is examined by its several stated markers; missing images or a processing error mean DeviceN is unsupported	Ink inventory; separation plates	applicable	inks:GWG Green|PANTONE 265 C,family:DeviceN,overprint,outputintent
+8.1	SPOT	GWG081_DeviceN-Support_5c_X1a.pdf	DeviceN across five colorants	As 8.0	Ink inventory; separation plates	applicable	inks:GWG Green,family:DeviceN,overprint,outputintent
+12.0	SPOT	GWG120_White_OP-KO_X1.pdf	Overprint and knockout of white vector, 59 pt text and 8 pt text over process and spot	No clear X: an X means the device rewrote an element's overprint	Output Preview plates and overprint	applicable	inks:GWG Green,overprint,outputintent	The ReadMe grounds this in the PDF/X application notes: creator overprint settings must be preserved
+13.0	CMS	GWG130_ICC_Source_Profile_x4.pdf	Per-object source ICC profiles and a Perceptual source rendering intent	No red X (the source profile was respected) and no faint green X (the Perceptual intent was respected)	Soft proof; colour conversion	not_applicable	outputintent	The intent half of the documented verdict needs per-object source rendering intent (/RI) handling, which this product does not implement anywhere; the row is excluded from the tally rather than counted on its profile half alone
+13.2	CMS	GWG132_ICCbasedCMYK_OverPrint_x4.pdf	Whether a device that converts ICCBased CMYK also resets overprint mode to 0	No check mark: one means the colour was converted or the profile dropped while overprint mode stayed 1	Colour conversion; Output Preview overprint	applicable	family:ICCBased,overprint,opm:1,outputintent
+13.3	CMS	GWG133_ICCbasedRGB_OverPrint_x4.pdf	The same question for ICCBased RGB	No check mark	Colour conversion; Output Preview overprint	applicable	family:ICCBased,overprint,opm:1,outputintent
+16.1-ICC	CMS	GWG161_Transp_Basic_BM_ICCBasedRGB_x4.pdf	Basic blend modes over ICCBased RGB objects	No clearly visible X	Viewer rendering; flattener; soft proof	applicable	family:ICCBased,overprint,outputintent	The ReadMe states a faint X here is a colour-engine difference, not a failure
+16.4	CMS	GWG164_Transp_Basic_BM_ICCbasedCMYK_x4.pdf	Basic blend modes over ICCBased CMYK objects	No clearly visible X	Viewer rendering; flattener; soft proof	applicable	family:ICCBased,overprint,outputintent
+16.7	CMS	GWG167_Softmasks_Images_ICCBasedRGB_x4.pdf	Image soft masks on ICCBased RGB	The masked edge stays soft and matches the reference	Viewer rendering; flattener	applicable	family:ICCBased,overprint,outputintent
+17.2	CMS	GWG172_JPEG2000_compression_ICCBasedRGB_x4.pdf	JPEG 2000 compressed ICCBased RGB imagery	No clear X	Viewer rendering; image inventory	applicable	filter:JPXDecode,outputintent	The ReadMe allows a faint X for this patch
+18.0	CMS	GWG180_16Bit_Images_ICCbasedRGB_x4.pdf	A 16-bit ICCBased RGB image	A complete rectangular image, not a cross	Viewer rendering; image inventory	applicable	family:ICCBased,bpc16,outputintent
+18.2	CMS	GWG182_16Bit_Images_ICCbasedGray_x4.pdf	A 16-bit ICCBased gray image	A complete rectangular image, not a cross	Viewer rendering; image inventory	applicable	family:ICCBased,ocgs,bpc16,outputintent
+18.3	CMS	GWG183_16Bit_Images_DeviceGray_x4.pdf	A 16-bit DeviceGray image	A complete rectangular image, not a cross	Viewer rendering; image inventory	applicable	bpc16,outputintent
+18.4	CMS	GWG184_16Bit_Images_ICCbasedCMYK_x4.pdf	A 16-bit ICCBased CMYK image	A complete rectangular image, not a cross	Viewer rendering; image inventory	applicable	family:ICCBased,bpc16,outputintent
+20.5	CMS	GWG205_ICC-V4-CMYK-Image_x4.pdf	A CMYK image carrying an ICC version 4 source profile	The image renders intact; a disturbed or absent image reveals the red cross behind it	Viewer rendering; soft proof	applicable	family:ICCBased,overprint,outputintent	The ReadMe also admits an outright processing error as the failure
+20.6	CMS	GWG206_ICC_V4-RGB-Image_x4.pdf	An RGB image carrying an ICC version 4 source profile	The image renders intact	Viewer rendering; soft proof	applicable	family:ICCBased,overprint,outputintent
+22.0	CMS	GWG220_ColorConversionIndicator_x4.pdf	Whether a colour conversion pulled tint levels below the patch's threshold	The dark background and grey cross stay hidden; they appear where a conversion such as ink saving reduced the level	Colour conversion; soft proof	applicable	outputintent	The ReadMe states that a visible indicator does not by itself mean the workflow is wrong
+22.1	CMS	GWG221_OutputIntentChangeIndicator_x4.pdf	Whether the output intent was changed underneath the file	The grey cross stays hidden; it appears when the intent changed	Output intent handling; soft proof	applicable	family:Lab,outputintent	The ReadMe warns the indicator does not fire in every circumstance
+23.0	CMS	GWG230_Four_different Grays_x1a.pdf	Gray defined four ways beside the same value in DeviceCMYK	No X: an X means that definition is treated differently from the DeviceCMYK object, and a half X splits the verdict between the line art and the image	Ink inventory; soft proof; separation plates	applicable	family:DeviceN,outputintent
