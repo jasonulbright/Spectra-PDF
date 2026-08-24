@@ -59,6 +59,8 @@
   "app.signedEdit.lockedRefused": "חתימה על המסמך הזה נועלת את שדות הטופס האלה מפני שינוי נוסף: {{fields}}. מילוי שלהם ייצור קובץ שידווח כמשונה. שמור עותק ומלא אותו במקום זאת — העותק אינו עוד המסמך החתום.",
   "app.signedEdit.lockedTitle": "שדות הטופס נעולים",
   "app.signedEdit.title": "המסמך חתום",
+  "app.startupEntry.stale": "עותק זה הועבר לאחר שהאפשרות «הפעל עם Windows» הופעלה, ולא ניתן היה לעדכן את הרשומה, ולכן היישום לא יופעל עם Windows. כבה את ההגדרה והפעל אותה שוב ב«העדפות». ({{detail}})",
+  "app.startupEntry.staleTitle": "«הפעל עם Windows» דורש טיפול",
   "app.window.claimTitle": "פתוח בחלון אחר",
   "app.window.focusOther": "הצגת החלון הזה",
   "app.window.folderBusy": "חלון אחר כבר כותב לתיקייה הזאת: {{folder}}.",

@@ -57,6 +57,8 @@
   "app.signedEdit.lockedRefused": "En underskrift på dette dokument låser disse formularfelter mod yderligere ændring: {{fields}}. Udfyldning af dem ville give en fil, der rapporteres som ændret. Gem en kopi, og udfyld den i stedet — kopien er ikke længere det underskrevne dokument.",
   "app.signedEdit.lockedTitle": "Formularfelterne er låst",
   "app.signedEdit.title": "Dokumentet er underskrevet",
+  "app.startupEntry.stale": "Denne kopi er flyttet, siden “Start med Windows” blev slået til, og posten kunne ikke opdateres, så programmet starter ikke med Windows. Slå indstillingen fra og til igen under Indstillinger. ({{detail}})",
+  "app.startupEntry.staleTitle": "“Start med Windows” kræver opmærksomhed",
   "app.window.claimTitle": "Åben i et andet vindue",
   "app.window.focusOther": "Vis det vindue",
   "app.window.folderBusy": "Et andet vindue skriver allerede til denne mappe: {{folder}}.",

@@ -55,6 +55,8 @@
   "app.signedEdit.lockedRefused": "この文書の署名が次のフォームフィールドを以降の変更からロックしています: {{fields}}。入力すると変更済みとして報告されるファイルになります。コピーを保存し、そちらに入力してください。コピーはもう署名された文書ではありません。",
   "app.signedEdit.lockedTitle": "フォームフィールドがロックされています",
   "app.signedEdit.title": "文書は署名されています",
+  "app.startupEntry.stale": "「Windows の起動時に実行する」を有効にしたあとでこのコピーが移動され、登録内容を更新できませんでした。このため Windows の起動時に実行されません。環境設定でこの設定をいったんオフにし、もう一度オンにしてください。({{detail}})",
+  "app.startupEntry.staleTitle": "「Windows の起動時に実行する」の確認が必要です",
   "app.window.claimTitle": "別のウィンドウで開いています",
   "app.window.focusOther": "そのウィンドウを表示",
   "app.window.folderBusy": "別のウィンドウがこのフォルダーに書き込み中です: {{folder}}。",

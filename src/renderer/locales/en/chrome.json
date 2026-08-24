@@ -57,6 +57,8 @@
   "app.signedEdit.lockedRefused": "A signature on this document locks these form fields against further change: {{fields}}. Filling them would produce a file that reports as altered. Save a copy and fill that instead — the copy is no longer the signed document.",
   "app.signedEdit.lockedTitle": "Form fields are locked",
   "app.signedEdit.title": "Document is signed",
+  "app.startupEntry.stale": "This copy has moved since \"Start with Windows\" was switched on, and the entry could not be updated, so the application will not start with Windows. Switch the setting off and on again in Preferences. ({{detail}})",
+  "app.startupEntry.staleTitle": "Start with Windows needs attention",
   "app.window.claimTitle": "Open in Another Window",
   "app.window.focusOther": "Show That Window",
   "app.window.folderBusy": "Another window is already writing to this folder: {{folder}}.",

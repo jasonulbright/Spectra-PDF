@@ -59,6 +59,8 @@
   "app.signedEdit.lockedRefused": "Una firma di questo documento blocca questi campi modulo da ulteriori modifiche: {{fields}}. Compilarli produrrebbe un file segnalato come alterato. Salva una copia e compila quella — la copia non è più il documento firmato.",
   "app.signedEdit.lockedTitle": "I campi modulo sono bloccati",
   "app.signedEdit.title": "Il documento è firmato",
+  "app.startupEntry.stale": "Questa copia è stata spostata da quando «Avvia con Windows» è stato attivato e la voce non è stata aggiornata, quindi l’applicazione non si avvierà con Windows. Disattivare e riattivare l’opzione nelle Preferenze. ({{detail}})",
+  "app.startupEntry.staleTitle": "«Avvia con Windows» richiede attenzione",
   "app.window.claimTitle": "Aperto in un’altra finestra",
   "app.window.focusOther": "Mostra quella finestra",
   "app.window.folderBusy": "Un’altra finestra sta già scrivendo in questa cartella: {{folder}}.",

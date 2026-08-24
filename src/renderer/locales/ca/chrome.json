@@ -59,6 +59,8 @@
   "app.signedEdit.lockedRefused": "Una signatura d'aquest document bloqueja els camps de formulari següents contra canvis posteriors: {{fields}}. Omplir-los produiria un fitxer que es declara alterat. Deseu-ne una còpia i ompliu-la: la còpia ja no és el document signat.",
   "app.signedEdit.lockedTitle": "Els camps de formulari estan blocats",
   "app.signedEdit.title": "El document està signat",
+  "app.startupEntry.stale": "Aquesta còpia s’ha mogut des que es va activar «Inicia amb el Windows» i no s’ha pogut actualitzar l’entrada, de manera que l’aplicació no s’iniciarà amb el Windows. Desactiveu i torneu a activar l’opció a les Preferències. ({{detail}})",
+  "app.startupEntry.staleTitle": "«Inicia amb el Windows» requereix atenció",
   "app.window.claimTitle": "Obert en una altra finestra",
   "app.window.focusOther": "Mostra aquella finestra",
   "app.window.folderBusy": "Una altra finestra ja està escrivint en aquesta carpeta: {{folder}}.",
