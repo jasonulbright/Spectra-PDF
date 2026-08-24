@@ -3092,7 +3092,6 @@
   "panel.a11y.detail.header_cell_has_no_scope": "Diese Kopfzelle erklärt keinen Geltungsbereich, und keine Zelle verweist auf sie.",
   "panel.a11y.detail.heading_level_skipped": "Die Gliederung springt von Ebene {{from}} auf Ebene {{to}}.",
   "panel.a11y.detail.label_outside_list_item": "Das übergeordnete Element dieses {{role}} ist {{parent}}, kein Listenelement.",
-  "panel.a11y.detail.list_item_has_no_label": "Dieses Listenelement hat einen Rumpf, aber keine Beschriftung.",
   "panel.a11y.detail.list_item_outside_list": "Das übergeordnete Element dieses Eintrags ist {{parent}}, keine Liste.",
   "panel.a11y.detail.mark_info_missing": "Das Dokument hat einen Strukturbaum, erklärt sich aber nicht als getaggt.",
   "panel.a11y.detail.multimedia_not_tagged": "Eine {{subtype}}-Anmerkung auf Seite {{page}} liegt außerhalb des Strukturbaums.",

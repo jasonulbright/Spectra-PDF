@@ -3224,7 +3224,6 @@
   "panel.a11y.detail.header_cell_has_no_scope": "Ta komórka nagłówkowa nie deklaruje zakresu i żadna komórka na nią nie wskazuje.",
   "panel.a11y.detail.heading_level_skipped": "Konspekt przeskakuje z poziomu {{from}} na poziom {{to}}.",
   "panel.a11y.detail.label_outside_list_item": "Elementem nadrzędnym tego {{role}} jest {{parent}}, a nie element listy.",
-  "panel.a11y.detail.list_item_has_no_label": "Ten element listy ma treść, ale nie ma etykiety.",
   "panel.a11y.detail.list_item_outside_list": "Elementem nadrzędnym tej pozycji jest {{parent}}, a nie lista.",
   "panel.a11y.detail.mark_info_missing": "Dokument ma drzewo struktury, ale nie deklaruje się jako oznakowany.",
   "panel.a11y.detail.multimedia_not_tagged": "Adnotacja {{subtype}} na stronie {{page}} znajduje się poza drzewem struktury.",

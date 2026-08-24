@@ -3026,7 +3026,6 @@
   "panel.a11y.detail.header_cell_has_no_scope": "此標頭儲存格未宣告範圍，也沒有儲存格指向它。",
   "panel.a11y.detail.heading_level_skipped": "大綱從第 {{from}} 層跳至第 {{to}} 層。",
   "panel.a11y.detail.label_outside_list_item": "此 {{role}} 的父元素是 {{parent}}，而非清單項目。",
-  "panel.a11y.detail.list_item_has_no_label": "此清單項目有內文但沒有標號。",
   "panel.a11y.detail.list_item_outside_list": "此項目的父元素是 {{parent}}，而非清單。",
   "panel.a11y.detail.mark_info_missing": "文件有結構樹，卻未宣告自身為附標籤文件。",
   "panel.a11y.detail.multimedia_not_tagged": "第 {{page}} 頁的 {{subtype}} 註解位於結構樹之外。",

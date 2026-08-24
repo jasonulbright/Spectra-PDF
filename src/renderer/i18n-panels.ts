@@ -1896,7 +1896,6 @@ export const PANEL_STRINGS = {
     'The outline jumps from level {{from}} to level {{to}}.',
   'panel.a11y.detail.label_outside_list_item':
     'This {{role}}’s parent is {{parent}}, not a list item.',
-  'panel.a11y.detail.list_item_has_no_label': 'This list item has a body but no label.',
   'panel.a11y.detail.list_item_outside_list': 'This item’s parent is {{parent}}, not a list.',
   'panel.a11y.detail.mark_info_missing':
     'The document has a structure tree but does not declare itself tagged.',
