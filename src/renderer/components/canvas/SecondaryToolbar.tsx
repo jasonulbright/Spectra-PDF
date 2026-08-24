@@ -1,4 +1,4 @@
-import React, { useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invokeCommand } from '../../commands/context';
 import { COMMANDS, SECONDARY_TOOLBAR_ACTIONS, TOOL_TITLES } from '../../commands/registry';
@@ -14,6 +14,9 @@ import {
   type CustomStamp,
 } from '../../lib/stamp-library';
 import { dialog, file } from '../../lib/tauri-bridge';
+import SignatureCaptureDialog, { SignatureThumb } from '../SignatureCaptureDialog';
+import { loadSignatureAssets, type SignatureAsset } from '../../lib/signature-assets';
+import { ensureSignatureFaceLoaded } from '../../lib/signature-fonts';
 import { CountSymbolGlyph } from '../CountSymbolGlyph';
 import { SymbolPalette, symbolDisplayName } from '../SymbolPalette';
 import type { CountGroup } from '../../lib/count-marks';
@@ -37,6 +40,12 @@ const SYMBOL_STAMP_COLOR = '#e0393e';
 /** Read + downscale a picked raster into a library-sized PNG data URL (long
  * edge capped — stamps are page furniture, not photo archives, and the
  * library lives in localStorage). Returns null for an unreadable image. */
+/** A placed signature's ink colour. Blue-black, the colour a pen actually
+ * lays down — not the annotation palette's markup hues, which exist to be
+ * seen as markup. It is the annotation's `color`, so the properties bar
+ * recolours a placed signature like anything else. */
+const SIGNATURE_INK_COLOR = '#14213d';
+
 async function importStampImage(path: string): Promise<{ dataUrl: string; aspect: number } | null> {
   try {
     const bytes = await file.readBuffer(path);
@@ -303,6 +312,24 @@ export function SecondaryToolbar({
     getTakeoffSettings,
   );
   const [showNewStamp, setShowNewStamp] = useState(false);
+  // The personal-signature strip. The assets are re-read whenever the capture
+  // dialog closes rather than subscribed to: the key is shared with every
+  // other window, and a strip that mutated under the user's cursor while they
+  // aimed at a pill would be worse than one that refreshes when they look.
+  const [signatureAssets, setSignatureAssets] = useState<SignatureAsset[]>([]);
+  const [showSignatures, setShowSignatures] = useState(false);
+  useEffect(() => {
+    setSignatureAssets(loadSignatureAssets());
+  }, []);
+  // The typed pills preview in the face they will commit in, so the faces are
+  // registered before the strip draws. A face that will not load leaves the
+  // pill in the fallback stack; the dialog is where that is reported.
+  useEffect(() => {
+    if (!signatureAssets.some((s) => s.kind === 'typed')) return;
+    for (const s of signatureAssets) {
+      if (s.kind === 'typed') void ensureSignatureFaceLoaded(s.face).catch(() => {});
+    }
+  }, [signatureAssets]);
   // The symbol palette rides in the stamp picker, collapsed by
   // default — it is a searchable library, not a row of pills, and the strip is
   // a strip.
@@ -1001,7 +1028,70 @@ export function SecondaryToolbar({
           >
             {tChrome('canvas.stamp.symbols')}
           </button>
+          <span className="secondary-toolbar-sep" aria-hidden="true" />
+          <span className="sr-only">{tChrome('canvas.signature.group')}</span>
+          {signatureAssets.map((s) => {
+            const armed = stampPreset?.signature?.id === s.id;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                data-testid={`signature-preset-${s.id}`}
+                aria-pressed={armed}
+                title={tChrome('canvas.signature.arm', { name: s.name })}
+                aria-label={tChrome('canvas.signature.arm', { name: s.name })}
+                className="stamp-preset signature-preset"
+                onClick={() =>
+                  onSetStampPreset(
+                    armed
+                      ? null
+                      : {
+                          // The stamp preset is the ARMING mechanism only; the
+                          // asset decides which annotation the click places.
+                          label: s.name,
+                          color: SIGNATURE_INK_COLOR,
+                          signature: s,
+                        },
+                  )
+                }
+                style={{
+                  borderColor: '#45454c',
+                  backgroundColor: armed ? '#2f6fed33' : 'transparent',
+                }}
+              >
+                <SignatureThumb asset={s} />
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            data-testid="signature-create"
+            className="secondary-tool"
+            onClick={() => setShowSignatures(true)}
+          >
+            {signatureAssets.length === 0
+              ? tChrome('canvas.signature.create')
+              : tChrome('canvas.signature.manage')}
+          </button>
         </div>
+      )}
+      {showSignatures && (
+        <SignatureCaptureDialog
+          open
+          onClose={() => {
+            setShowSignatures(false);
+            setSignatureAssets(loadSignatureAssets());
+          }}
+          onPlace={(asset) => {
+            setShowSignatures(false);
+            setSignatureAssets(loadSignatureAssets());
+            onSetStampPreset({
+              label: asset.name,
+              color: SIGNATURE_INK_COLOR,
+              signature: asset,
+            });
+          }}
+        />
       )}
       {tool === 'stamp' && showSymbols && (
         // The SAME palette the Takeoff panel picks markers from

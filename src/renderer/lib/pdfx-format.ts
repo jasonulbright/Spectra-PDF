@@ -51,6 +51,10 @@ export interface ExportAnnotation {
   points?: number[]; // measure/shape/callout-leader: flat [x0,y0,...] in x/y/w/h space
   strokes?: number[][]; // ink only: one flat path per pen lift, same space
   imageData?: string; // stamp only: custom image stamp's data URL (the AP draws it)
+  // stamp only: a TYPED personal signature. The id of the app-bundled script
+  // face `note` is set in; the AP embeds that face's subset and draws the
+  // name in it, with no border and no fill. See lib/signature-fonts.
+  signatureFont?: string;
   markupType?: 'highlight' | 'underline' | 'strikeout' | 'squiggly'; // textmarkup only
   quads?: number[]; // textmarkup only: flat [x0,y0,x1,y1,...] per quad, in x/y/w/h space
   // measure only — the dimension class + the /Measure dict inputs.

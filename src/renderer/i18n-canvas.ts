@@ -146,6 +146,13 @@ export const CANVAS_STRINGS = {
   'canvas.stamp.symbolsHint':
     'Vector symbols — drag one onto the page, or click to place it with the next click',
 
+  // The personal-signature strip inside the stamp picker.
+  'canvas.signature.group': 'My signatures',
+  'canvas.signature.create': 'Create signature…',
+  'canvas.signature.manage': 'Manage signatures…',
+  'canvas.signature.arm': 'Place “{{name}}”',
+  'canvas.signature.empty': 'No saved signatures yet',
+
   'canvas.toolbar.colorGroup': 'Annotation colour',
 
   // ── Properties bar ──────────────────────────────────────────────────
