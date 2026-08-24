@@ -3144,3 +3144,45 @@ export async function answerAnyFilePicker(path: string | null): Promise<void> {
     (window as any).__SPECTRA_TEST__.answerAnyFilePicker(p);
   }, path);
 }
+
+/** Answer the next native raster pick — the signature capture dialog's import
+ * door, or the stamp appearance section's logo — with this path, or with
+ * `null` for a cancelled dialog. Consumed by a single pick. */
+export async function answerImagePicker(path: string | null): Promise<void> {
+  await browser.execute(function (p: string | null) {
+    (window as any).__SPECTRA_TEST__.answerImagePicker(p);
+  }, path);
+}
+
+/** The colour-profile assent answer the renderer currently holds. */
+export interface IccAssentAnswer {
+  portable: boolean;
+  assent: 'accepted' | 'declined' | 'unrecorded';
+  licensePath: string;
+  pending: boolean;
+}
+
+/**
+ * Re-read the assent record from disk and re-take the launch decision.
+ *
+ * The record is a file beside the executable; a spec arranges the unanswered
+ * state by removing it. The session read its answer once at launch, so this
+ * drops that cached answer, runs the REAL Rust read against whatever is on
+ * disk now, and — through the app's own predicate and the app's own registered
+ * opener — presents the licence dialog when nothing is on record.
+ */
+export async function iccAssentRefresh(): Promise<IccAssentAnswer> {
+  return browser.executeAsync(function (done: (a: unknown) => void) {
+    (window as any).__SPECTRA_TEST__
+      .iccAssentRefresh()
+      .then((s: unknown) => done(s))
+      .catch((e: Error) => done({ error: String(e) }));
+  }) as Promise<IccAssentAnswer>;
+}
+
+/** The renderer's current assent answer, without waiting. */
+export async function iccAssentSnapshot(): Promise<IccAssentAnswer> {
+  return browser.execute(function () {
+    return (window as any).__SPECTRA_TEST__.iccAssentSnapshot();
+  }) as Promise<IccAssentAnswer>;
+}
