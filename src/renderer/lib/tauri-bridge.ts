@@ -718,6 +718,11 @@ export const app = {
   /** Read the "Start with Windows" state. Returns [enabled, minimized]. */
   getStartupEnabled: () => invoke<[boolean, boolean]>('get_startup_enabled'),
 
+  /** The OS error from a launch that could not correct a "Start with
+   * Windows" entry left behind by a moved copy, or "" when there was none.
+   * Reading it clears it, so one launch reports once. */
+  startupEntryNotice: () => invoke<string>('startup_entry_notice'),
+
   /** Set or remove the "Start with Windows" registry entry. */
   setStartupEnabled: (enabled: boolean, startMinimized: boolean) =>
     invoke('set_startup_enabled', { enabled, startMinimized }),

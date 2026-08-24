@@ -22,6 +22,7 @@
 //! until the first-run dialog writes one.
 
 use std::path::{Path, PathBuf};
+use tauri::Manager;
 
 /// Written beside the executable by `NSIS_HOOK_POSTINSTALL`. Its presence IS
 /// the installed container; a zip never has one.
@@ -256,6 +257,73 @@ pub fn apply_webview_user_data() -> Option<PathBuf> {
     }
     std::env::set_var(WEBVIEW_USER_DATA_ENV, &wanted);
     Some(wanted)
+}
+
+// ── the writable data root ─────────────────────────────────────────────────
+
+/// Chooses between the root beside the executable and the per-user standard
+/// one, given a probe for whether the first can actually be written.
+///
+/// Pure over the probe so both outcomes are pinnable without read-only media.
+/// `standard` is an Option because resolving the per-user directory can itself
+/// fail; when it does and the preferred root is unwritable there is no root at
+/// all, which is the None the caller reports.
+pub fn resolve_data_root(
+    preferred: Option<PathBuf>,
+    standard: Option<PathBuf>,
+    writable: impl FnOnce(&Path) -> bool,
+) -> Option<PathBuf> {
+    match preferred {
+        Some(dir) if writable(&dir) => Some(dir),
+        _ => standard,
+    }
+}
+
+/// The preferred root for a container: beside the executable when portable,
+/// the per-user standard directory when installed.
+///
+/// Installed is `None` here — "no preference, take the standard one" — so an
+/// installed copy resolves byte-identically to what every prior release wrote,
+/// with no second location for its settings to be split across.
+pub fn preferred_data_root(dir: &Path, container: Container) -> Option<PathBuf> {
+    match container {
+        Container::Installed => None,
+        Container::Portable => Some(dir.join(PORTABLE_DATA_DIR)),
+    }
+}
+
+fn root_from(standard: Option<PathBuf>, what: &str) -> Result<PathBuf, String> {
+    let dir = exe_dir();
+    let preferred = preferred_data_root(&dir, container_at(&dir));
+    resolve_data_root(preferred, standard, |p| std::fs::create_dir_all(p).is_ok())
+        .ok_or_else(|| format!("Cannot resolve the {what} folder."))
+}
+
+/// Where per-user state is written: `<exe dir>\data` in the portable
+/// container, the standard per-user directory otherwise.
+///
+/// One root for everything a portable copy must carry with it — dictionaries,
+/// batch and operation logs, the session, the pre-window startup flags, the
+/// extracted portfolio members — so a copy on a stick leaves nothing behind in
+/// the profile of whatever machine it was plugged into. It is the same root
+/// the WebView2 user data folder uses, and it inherits that folder's fallback:
+/// a copy on read-only media cannot create it, and falls back to the standard
+/// directory rather than failing the feature.
+///
+/// Creating the root IS the writability probe, so the folder appears on the
+/// first launch that needs state and never before.
+///
+/// No migration exists in either direction: a portable first run starts fresh,
+/// and an installed copy resolves exactly where it always did.
+pub fn data_root<R: tauri::Runtime, M: Manager<R>>(app: &M) -> Result<PathBuf, String> {
+    root_from(app.path().app_data_dir().ok(), "data")
+}
+
+/// The configuration counterpart of [`data_root`]. Portable collapses both
+/// onto the one root — the container has a single writable place — while an
+/// installed copy keeps the standard configuration directory it always used.
+pub fn config_root<R: tauri::Runtime, M: Manager<R>>(app: &M) -> Result<PathBuf, String> {
+    root_from(app.path().app_config_dir().ok(), "config")
 }
 
 // ── the WebView2 runtime probe ─────────────────────────────────────────────
@@ -519,6 +587,53 @@ mod tests {
         // strand every existing user's settings, which live in localStorage
         // inside that folder.
         assert_eq!(webview_user_data_at(&dir, Container::Installed), None);
+    }
+
+    #[test]
+    fn a_portable_copy_keeps_its_state_beside_the_exe_and_an_installed_one_does_not() {
+        let dir = PathBuf::from(r"D:\Tools\SpectraPDF");
+        let standard = PathBuf::from(r"C:\Users\u\AppData\Roaming\com.spectrapdf.app");
+
+        assert_eq!(
+            preferred_data_root(&dir, Container::Portable),
+            Some(dir.join(PORTABLE_DATA_DIR)),
+        );
+        assert_eq!(
+            resolve_data_root(
+                preferred_data_root(&dir, Container::Portable),
+                Some(standard.clone()),
+                |_| true
+            ),
+            Some(dir.join(PORTABLE_DATA_DIR)),
+        );
+
+        // Installed expresses no preference, so it resolves to the same
+        // per-user directory every prior release wrote to.
+        assert_eq!(preferred_data_root(&dir, Container::Installed), None);
+        assert_eq!(
+            resolve_data_root(
+                preferred_data_root(&dir, Container::Installed),
+                Some(standard.clone()),
+                |_| panic!("an installed copy must not probe a root beside the exe"),
+            ),
+            Some(standard),
+        );
+    }
+
+    #[test]
+    fn unwritable_media_falls_back_rather_than_failing_the_feature() {
+        let dir = PathBuf::from(r"E:\SpectraPDF");
+        let standard = PathBuf::from(r"C:\Users\u\AppData\Roaming\com.spectrapdf.app");
+        assert_eq!(
+            resolve_data_root(Some(dir.join(PORTABLE_DATA_DIR)), Some(standard.clone()), |_| false),
+            Some(standard),
+        );
+        // And with nowhere left to write, the caller is told rather than
+        // handed a path that does not exist.
+        assert_eq!(
+            resolve_data_root(Some(dir.join(PORTABLE_DATA_DIR)), None, |_| false),
+            None,
+        );
     }
 
     #[test]

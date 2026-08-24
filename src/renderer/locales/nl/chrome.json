@@ -57,6 +57,8 @@
   "app.signedEdit.lockedRefused": "Een handtekening op dit document vergrendelt deze formuliervelden tegen verdere wijziging: {{fields}}. Ze invullen levert een bestand op dat als gewijzigd wordt gemeld. Sla een kopie op en vul die in — de kopie is niet langer het ondertekende document.",
   "app.signedEdit.lockedTitle": "Formuliervelden zijn vergrendeld",
   "app.signedEdit.title": "Document is ondertekend",
+  "app.startupEntry.stale": "Deze kopie is verplaatst sinds ‘Met Windows starten’ werd ingeschakeld en het item kon niet worden bijgewerkt, dus de toepassing start niet met Windows. Schakel de instelling in Voorkeuren uit en weer in. ({{detail}})",
+  "app.startupEntry.staleTitle": "‘Met Windows starten’ vraagt aandacht",
   "app.window.claimTitle": "Geopend in een ander venster",
   "app.window.focusOther": "Dat venster tonen",
   "app.window.folderBusy": "Een ander venster schrijft al naar deze map: {{folder}}.",

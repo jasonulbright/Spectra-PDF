@@ -61,6 +61,8 @@
   "app.signedEdit.lockedRefused": "Podpis v tem dokumentu zaklepa naslednja polja obrazca pred nadaljnjimi spremembami: {{fields}}. Njihovo izpolnjevanje bi ustvarilo datoteko, ki se javlja kot spremenjena. Shranite kopijo in izpolnite njo — kopija ni več podpisani dokument.",
   "app.signedEdit.lockedTitle": "Polja obrazca so zaklenjena",
   "app.signedEdit.title": "Dokument je podpisan",
+  "app.startupEntry.stale": "Ta kopija je bila premaknjena, odkar je bila vklopljena možnost »Zaženi z Windows«, vnosa pa ni bilo mogoče posodobiti, zato se program ne bo zagnal z Windows. V Nastavitvah možnost izklopite in znova vklopite. ({{detail}})",
+  "app.startupEntry.staleTitle": "Možnost »Zaženi z Windows« potrebuje pozornost",
   "app.window.claimTitle": "Odprto v drugem oknu",
   "app.window.focusOther": "Pokaži to okno",
   "app.window.folderBusy": "V to mapo že piše drugo okno: {{folder}}.",

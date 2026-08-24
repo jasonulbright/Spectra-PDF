@@ -57,6 +57,8 @@
   "app.signedEdit.lockedRefused": "Bu belgedeki bir imza şu form alanlarını değişikliğe karşı kilitliyor: {{fields}}. Bunların doldurulması, değiştirilmiş olarak raporlanan bir dosya üretir. Bir kopyasını kaydedip onu doldurun — kopya artık imzalı belge değildir.",
   "app.signedEdit.lockedTitle": "Form alanları kilitli",
   "app.signedEdit.title": "Belge imzalı",
+  "app.startupEntry.stale": "“Windows ile birlikte başlat” açıldıktan sonra bu kopya taşındı ve kayıt güncellenemedi; bu nedenle uygulama Windows ile birlikte başlamayacak. Tercihler bölümünde ayarı kapatıp yeniden açın. ({{detail}})",
+  "app.startupEntry.staleTitle": "“Windows ile birlikte başlat” ilgi bekliyor",
   "app.window.claimTitle": "Başka bir pencerede açık",
   "app.window.focusOther": "O pencereyi göster",
   "app.window.folderBusy": "Başka bir pencere bu klasöre zaten yazıyor: {{folder}}.",

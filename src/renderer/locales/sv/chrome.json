@@ -57,6 +57,8 @@
   "app.signedEdit.lockedRefused": "En signatur i det här dokumentet låser följande formulärfält mot vidare ändring: {{fields}}. Att fylla i dem skulle ge en fil som rapporteras som ändrad. Spara en kopia och fyll i den i stället — kopian är inte längre det signerade dokumentet.",
   "app.signedEdit.lockedTitle": "Formulärfälten är låsta",
   "app.signedEdit.title": "Dokumentet är signerat",
+  "app.startupEntry.stale": "Den här kopian har flyttats sedan ”Starta med Windows” slogs på, och posten kunde inte uppdateras, så programmet startar inte med Windows. Slå av och på inställningen igen under Inställningar. ({{detail}})",
+  "app.startupEntry.staleTitle": "”Starta med Windows” behöver åtgärdas",
   "app.window.claimTitle": "Öppen i ett annat fönster",
   "app.window.focusOther": "Visa det fönstret",
   "app.window.folderBusy": "Ett annat fönster skriver redan till den här mappen: {{folder}}.",

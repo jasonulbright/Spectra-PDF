@@ -61,6 +61,8 @@
   "app.signedEdit.lockedRefused": "Podpis v tomto dokumente blokuje zmenu týchto polí formulára: {{fields}}. Ich vyplnením vznikne súbor hlásený ako zmenený. Uložte kópiu a vyplňte ju — kópia už podpísaným dokumentom nie je.",
   "app.signedEdit.lockedTitle": "Polia formulára sú uzamknuté",
   "app.signedEdit.title": "Dokument je podpísaný",
+  "app.startupEntry.stale": "Táto kópia bola po zapnutí voľby „Spúšťať so systémom Windows“ presunutá a záznam sa nepodarilo aktualizovať, takže sa aplikácia so systémom Windows nespustí. Vypnite a znova zapnite toto nastavenie v Predvoľbách. ({{detail}})",
+  "app.startupEntry.staleTitle": "Voľba „Spúšťať so systémom Windows“ vyžaduje pozornosť",
   "app.window.claimTitle": "Otvorené v inom okne",
   "app.window.focusOther": "Zobraziť toto okno",
   "app.window.folderBusy": "Do tohto priečinka už zapisuje iné okno: {{folder}}.",

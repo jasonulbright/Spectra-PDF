@@ -292,6 +292,13 @@ export const WORKBENCH_STRINGS = {
   'app.exit.abortedTitle': 'Exit cancelled',
   'app.exit.aborted':
     'A window did not respond to the request to close, so nothing was closed. Try again, or close that window yourself first.',
+
+  // "Start with Windows" records where the application was when it was
+  // switched on. A copy that has since moved is corrected at launch; this is
+  // the report for the launch where that correction could not be written.
+  'app.startupEntry.staleTitle': 'Start with Windows needs attention',
+  'app.startupEntry.stale':
+    'This copy has moved since "Start with Windows" was switched on, and the entry could not be updated, so the application will not start with Windows. Switch the setting off and on again in Preferences. ({{detail}})',
 } as const;
 
 export type WorkbenchKey = keyof typeof WORKBENCH_STRINGS;

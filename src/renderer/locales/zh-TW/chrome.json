@@ -55,6 +55,8 @@
   "app.signedEdit.lockedRefused": "本文件上的簽章鎖定了下列表單欄位，使其無法再變更：{{fields}}。填寫這些欄位會產生一份被回報為已遭更動的檔案。請另存副本再填寫副本 — 副本不再是那份已簽章的文件。",
   "app.signedEdit.lockedTitle": "表單欄位已鎖定",
   "app.signedEdit.title": "文件已簽章",
+  "app.startupEntry.stale": "啟用「隨 Windows 啟動」之後此複本已被移動，且無法更新該項目，因此應用程式不會隨 Windows 啟動。請在偏好設定中關閉該設定後再重新開啟。({{detail}})",
+  "app.startupEntry.staleTitle": "「隨 Windows 啟動」需要處理",
   "app.window.claimTitle": "已在其他視窗中開啟",
   "app.window.focusOther": "顯示該視窗",
   "app.window.folderBusy": "另一個視窗正在寫入此資料夾：{{folder}}。",

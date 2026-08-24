@@ -406,6 +406,23 @@ function AppContent(): React.ReactElement {
     });
   }, []);
 
+  // A launch that found a "Start with Windows" entry naming a path this copy
+  // has moved away from corrects it before any window exists. Only the launch
+  // that could NOT write the correction has anything to say, and it says it
+  // here because the correction ran with no surface to say it on.
+  useEffect(() => {
+    void app
+      .startupEntryNotice()
+      .then((detail) => {
+        if (!detail) return;
+        void showNotice(
+          tChrome('app.startupEntry.staleTitle'),
+          tChrome('app.startupEntry.stale', { detail }),
+        );
+      })
+      .catch(() => {});
+  }, [showNotice]);
+
   /** A refusal that has somewhere to send the user: the affirmative button
    * carries the action's own name rather than a generic Continue. */
   const showActionConfirm = useCallback(
