@@ -128,6 +128,25 @@ export const config: WebdriverIO.Config = {
         `App binary not found at ${APP_BINARY}. Run \`npm run build:app\` first.`,
       );
     }
+    // The harness binary runs from a FOLDER, which is exactly the portable
+    // container's shape — the app finds no `install-record.json` beside it and
+    // correctly concludes it was not installed. A portable copy with no
+    // colour-profile answer on record presents its licence dialog on first
+    // run, which would stand in front of every spec in the battery.
+    //
+    // So the battery's baseline is an ANSWERED copy, seeded here once, the way
+    // a fixture is: the answer is a file the product itself writes, in the
+    // place the product itself reads. The spec that exercises the first-run
+    // presentation removes this file (or drives the state through the
+    // harness's pin) and puts it back, so the unanswered state stays reachable
+    // for the one spec that is about it.
+    const portableData = resolve(APP_BINARY, '..', 'data');
+    mkdirSync(portableData, { recursive: true });
+    writeFileSync(
+      resolve(portableData, 'icc-assent.json'),
+      '{\n  "adobeIccEulaAccepted": true\n}\n',
+    );
+
     // Always re-resolve against whatever WebView2 is installed right now —
     // never trust a previously-downloaded copy to still match (see header).
     const result = spawnSync('msedgedriver-tool', [], { cwd: __dirname, shell: true, stdio: 'pipe' });

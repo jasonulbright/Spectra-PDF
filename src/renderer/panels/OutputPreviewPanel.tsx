@@ -1,6 +1,8 @@
 import React from 'react';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { GsRequiredNotice } from '../components/GsRequiredNotice';
+import { useIccAssent } from '../hooks/useIccAssent';
+import { IccLicenceNotice } from '../components/IccLicenceNotice';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useSeparationPreview } from '../hooks/useSeparationPreview';
 import { NoFileOpen } from '../components/NoFileOpen';
@@ -69,6 +71,9 @@ function swatch(rgb: number[] | null): string {
 export function OutputPreviewPanel(): React.ReactElement {
   useTranslation();
   const gs = useGsCapability();
+  // Soft-proofing resolves a bundled press profile, so it carries the same
+  // licence gate the conversions do.
+  const icc = useIccAssent();
   const { activeFile, openNewFiles } = useActiveFile();
   const {
     armed, setArmed, inks, inkUnknown, plates, coverage, hidden, toggleInk, showAllInks,
@@ -283,6 +288,7 @@ export function OutputPreviewPanel(): React.ReactElement {
     <div className="flex flex-col gap-4">
       {/* Plates, ink coverage and soft proofing are all one render device. */}
       <GsRequiredNotice capability={gs} testId="output-preview-gs" />
+      <IccLicenceNotice state={icc} testId="output-preview-icc" />
       <div className="flex items-center justify-between">
         <div className="text-sm text-neutral-400">
           {tChrome('panel.common.workingOn')}{' '}
