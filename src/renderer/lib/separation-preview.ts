@@ -370,6 +370,63 @@ export function prunePlateCache<T>(
   return removed;
 }
 
+// ── the raster cache ───────────────────────────────────────────────────────
+
+/** One page's composited raster, held under `rasterCacheKey`. */
+export interface RasterRecord<T> {
+  docId: string;
+  pageId: string;
+  image: T;
+}
+
+/**
+ * The key a composited raster is held under: the page, and nothing else.
+ *
+ * The plate cache keys on resolution, overprint and the proof profile because
+ * a change to any of them is a different device run. A raster is not a cache
+ * of runs — it is what one page currently looks like, so a newer one REPLACES
+ * the older one and the reader can find it without knowing which settings
+ * produced it. Keying it like the plate cache leaves settings-worth of stale
+ * images behind, and a reader matching on the page alone then serves the
+ * first of them forever.
+ */
+export function rasterCacheKey(docId: string, pageId: string): string {
+  return JSON.stringify([docId, pageId]);
+}
+
+/** Publish one page's raster, displacing whatever that page held before. */
+export function putRaster<T>(
+  cache: Map<string, RasterRecord<T>>,
+  docId: string,
+  pageId: string,
+  image: T,
+): void {
+  cache.set(rasterCacheKey(docId, pageId), { docId, pageId, image });
+}
+
+/** The raster to draw for one page, or null while the page has none. */
+export function selectRaster<T>(
+  cache: ReadonlyMap<string, RasterRecord<T>>,
+  docId: string,
+  pageId: string,
+): T | null {
+  return cache.get(rasterCacheKey(docId, pageId))?.image ?? null;
+}
+
+/** Drop every raster whose page the workspace no longer has. Same reasoning
+ *  as `prunePlateCache`, keyed on the record's own `pageId` field. */
+export function pruneRasterCache<T>(
+  cache: Map<string, RasterRecord<T>>,
+  livePageIds: ReadonlySet<string>,
+): string[] {
+  const removed: string[] = [];
+  for (const [key, entry] of cache) {
+    if (!livePageIds.has(entry.pageId)) removed.push(key);
+  }
+  for (const key of removed) cache.delete(key);
+  return removed;
+}
+
 /** The per-ink page coverage readout, ordered and labelled as percentages.
  *  This is the device's page AVERAGE — it cannot answer "how much ink is on
  *  the heaviest pixel", which is what the limit alarm measures. */

@@ -19,6 +19,9 @@ import {
   plateCacheKey,
   plateProfileComponent,
   prunePlateCache,
+  pruneRasterCache,
+  putRaster,
+  selectRaster,
   previewDpi,
   aliasIsAllowed,
   moveInSequence,
@@ -36,6 +39,7 @@ import {
   type Inspection,
   type Plate,
   type PlateSet,
+  type RasterRecord,
   type SimulationProfiles,
   type SimulationRecord,
   type SimulationSource,
@@ -146,15 +150,11 @@ interface InspectTarget {
 
 const PreviewContext = createContext<SeparationPreviewValue | null>(null);
 
-interface RasterEntry {
-  /** The composite as the engine wrote it. Held as a BLOB, never an object
-   *  URL: the canvas decodes it with `createImageBitmap`, which is the only
-   *  decode path this webview honours (see `raster.ts`), and a blob owns no
-   *  lifetime there is a revoke to get wrong. */
-  image: Blob;
-  docId: string;
-  pageId: string;
-}
+/** The composite as the engine wrote it. Held as a BLOB, never an object
+ *  URL: the canvas decodes it with `createImageBitmap`, which is the only
+ *  decode path this webview honours (see `raster.ts`), and a blob owns no
+ *  lifetime there is a revoke to get wrong. */
+type RasterEntry = RasterRecord<Blob>;
 
 /** The page being read, plus one either side — the window a scroll walks. */
 const NEIGHBOURHOOD = 1;
@@ -209,7 +209,7 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [generation, setGeneration] = useState(0);
-  const [rasters, setRasters] = useState<readonly RasterEntry[]>([]);
+  const [rasters, setRasters] = useState<ReadonlyMap<string, RasterEntry>>(() => new Map());
 
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [inspectBusy, setInspectBusy] = useState(false);
@@ -226,12 +226,12 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
   // last.
   const inspectSeq = useRef(0);
 
-  const publish = useCallback(() => setRasters([...rasterRef.current.values()]), []);
+  const publish = useCallback(() => setRasters(new Map(rasterRef.current)), []);
 
   const releaseAll = useCallback(() => {
     rasterRef.current.clear();
     inspectRef.current.clear();
-    setRasters([]);
+    setRasters(new Map());
   }, []);
 
   const clearInspection = useCallback(() => {
@@ -262,9 +262,8 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
     for (const doc of documents) for (const page of doc.pages) ids.add(page.id);
     return ids;
   }, [documents]);
-  for (const key of prunePlateCache(plateCache.current, livePageIds)) {
-    rasterRef.current.delete(key);
-  }
+  prunePlateCache(plateCache.current, livePageIds);
+  pruneRasterCache(rasterRef.current, livePageIds);
   for (const pageId of [...inspectRef.current.keys()]) {
     if (!livePageIds.has(pageId)) inspectRef.current.delete(pageId);
   }
@@ -490,11 +489,15 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
           }
           const bytes = await batchBridge.readFileBuffer(composite.png);
           if (cancelled) return;
-          rasterRef.current.set(key, {
-            image: new Blob([bytes], { type: 'image/png' }),
-            docId: target.docId,
-            pageId: target.pageId,
-          });
+          // Keyed by the PAGE, never by the plate key: the newest raster for a
+          // page replaces the one before it, so a settings change cannot leave
+          // an older image sitting in front of the current one.
+          putRaster(
+            rasterRef.current,
+            target.docId,
+            target.pageId,
+            new Blob([bytes], { type: 'image/png' }),
+          );
           publish();
         }
       } catch (e: unknown) {
@@ -595,8 +598,7 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
   const rasterFor = useCallback(
     (docId: string, pageId: string): Blob | null => {
       if (!armed) return null;
-      const hit = rasters.find((r) => r.docId === docId && r.pageId === pageId);
-      return hit ? hit.image : null;
+      return selectRaster(rasters, docId, pageId);
     },
     [armed, rasters],
   );
