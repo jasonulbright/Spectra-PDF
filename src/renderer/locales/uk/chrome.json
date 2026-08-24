@@ -3224,6 +3224,7 @@
   "panel.a11y.detail.form_field_not_tagged": "Поле форми на сторінці {{page}} перебуває поза деревом структури.",
   "panel.a11y.detail.header_cell_has_no_scope": "Ця комірка заголовка не оголошує області дії, і жодна комірка на неї не посилається.",
   "panel.a11y.detail.heading_level_skipped": "Структура перестрибує з рівня {{from}} на рівень {{to}}.",
+  "panel.a11y.detail.heading_opens_below_h1": "Структура починається з рівня {{level}}, а не з рівня 1.",
   "panel.a11y.detail.label_outside_list_item": "Батьківський елемент цього {{role}} — {{parent}}, а не елемент списку.",
   "panel.a11y.detail.list_item_outside_list": "Батьківський елемент цього пункту — {{parent}}, а не список.",
   "panel.a11y.detail.mark_info_missing": "Документ має дерево структури, але не оголошує себе документом із тегами.",

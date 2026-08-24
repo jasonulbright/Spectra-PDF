@@ -3092,6 +3092,7 @@
   "panel.a11y.detail.form_field_not_tagged": "Ett formulärfält på sidan {{page}} ligger utanför strukturträdet.",
   "panel.a11y.detail.header_cell_has_no_scope": "Den här rubrikcellen anger inget omfång, och ingen cell pekar på den.",
   "panel.a11y.detail.heading_level_skipped": "Dispositionen hoppar från nivå {{from}} till nivå {{to}}.",
+  "panel.a11y.detail.heading_opens_below_h1": "Dispositionen börjar på nivå {{level}} i stället för nivå 1.",
   "panel.a11y.detail.label_outside_list_item": "Det överordnade elementet för den här {{role}} är {{parent}}, inte en listpunkt.",
   "panel.a11y.detail.list_item_outside_list": "Punktens överordnade element är {{parent}}, inte en lista.",
   "panel.a11y.detail.mark_info_missing": "Dokumentet har ett strukturträd men anger inte sig självt som taggat.",

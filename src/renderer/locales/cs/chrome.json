@@ -3224,6 +3224,7 @@
   "panel.a11y.detail.form_field_not_tagged": "Pole formuláře na stránce {{page}} je mimo strom struktury.",
   "panel.a11y.detail.header_cell_has_no_scope": "Tato záhlavní buňka nedeklaruje rozsah a žádná buňka na ni neodkazuje.",
   "panel.a11y.detail.heading_level_skipped": "Osnova přeskakuje z úrovně {{from}} na úroveň {{to}}.",
+  "panel.a11y.detail.heading_opens_below_h1": "Osnova začíná na úrovni {{level}} místo úrovně 1.",
   "panel.a11y.detail.label_outside_list_item": "Nadřazeným prvkem tohoto {{role}} je {{parent}}, nikoli položka seznamu.",
   "panel.a11y.detail.list_item_outside_list": "Nadřazeným prvkem této položky je {{parent}}, nikoli seznam.",
   "panel.a11y.detail.mark_info_missing": "Dokument má strom struktury, ale nedeklaruje se jako označkovaný.",
