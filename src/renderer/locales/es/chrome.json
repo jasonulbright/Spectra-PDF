@@ -2389,6 +2389,7 @@
   "engine.signatures.pemSignerNeedsBoth": "Un firmante PEM necesita tanto el archivo de clave como el de certificado.",
   "engine.signatures.pkcsModuleFoundGiven": "No se encontró el módulo PKCS#11 en la ruta indicada.",
   "engine.signatures.pkcsSignerNeedsModule": "Un firmante PKCS#11 necesita la ruta del módulo, la etiqueta del token y la etiqueta del certificado.",
+  "engine.signatures.signatureDocumentGivenDoes": "La firma que se dio a este documento no se verifica frente a sus propios bytes, por lo que no se escribió. La clave de firma produjo una firma que este documento no puede llevar.",
   "engine.signatures.signatureFieldAlreadyLocks": "El campo de firma «{{field_name}}» ya bloquea campos de formulario por sí mismo, y una firma no puede sustituir eso. Fírmelo tal como está o use otro campo.",
   "engine.signatures.signatureFieldAlreadySigned": "El campo de firma \"{{field_name}}\" ya está firmado.",
   "engine.signatures.signedOutputMustDifferent": "La salida firmada debe ser un archivo distinto de la entrada.",

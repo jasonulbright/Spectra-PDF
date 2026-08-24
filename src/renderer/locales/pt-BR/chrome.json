@@ -2389,6 +2389,7 @@
   "engine.signatures.pemSignerNeedsBoth": "Um signatário PEM precisa do arquivo de chave e do arquivo de certificado.",
   "engine.signatures.pkcsModuleFoundGiven": "Módulo PKCS#11 não encontrado no caminho informado.",
   "engine.signatures.pkcsSignerNeedsModule": "Um signatário PKCS#11 precisa do caminho do módulo, do rótulo do token e do rótulo do certificado.",
+  "engine.signatures.signatureDocumentGivenDoes": "A assinatura entregue a este documento não é verificada em relação aos próprios bytes dele, por isso não foi gravada. A chave de assinatura produziu uma assinatura que este documento não consegue carregar.",
   "engine.signatures.signatureFieldAlreadyLocks": "O campo de assinatura “{{field_name}}” já bloqueia campos de formulário por conta própria, e uma assinatura não pode substituir isso. Assine-o como está ou use outro campo.",
   "engine.signatures.signatureFieldAlreadySigned": "O campo de assinatura “{{field_name}}” já está assinado.",
   "engine.signatures.signedOutputMustDifferent": "A saída assinada precisa ser um arquivo diferente da entrada.",

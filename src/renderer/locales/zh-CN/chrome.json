@@ -2275,6 +2275,7 @@
   "engine.signatures.pemSignerNeedsBoth": "PEM 签名者需要密钥文件和证书文件。",
   "engine.signatures.pkcsModuleFoundGiven": "在给定路径下找不到 PKCS#11 模块。",
   "engine.signatures.pkcsSignerNeedsModule": "PKCS#11 签名者需要模块路径、令牌标签和证书标签。",
+  "engine.signatures.signatureDocumentGivenDoes": "此文档获得的签名无法针对文档自身的字节通过校验，因此未写入。签名密钥生成的签名是此文档无法承载的。",
   "engine.signatures.signatureFieldAlreadyLocks": "签名域“{{field_name}}”已按其自身的条款锁定表单域，签名无法取代它。请按原样签名，或使用其他域。",
   "engine.signatures.signatureFieldAlreadySigned": "签名字段“{{field_name}}”已经签名。",
   "engine.signatures.signedOutputMustDifferent": "签名后的输出必须是与输入不同的文件。",

@@ -2446,6 +2446,7 @@
   "engine.signatures.pemSignerNeedsBoth": "Podpisnik PEM potrebuje datoteko ključa in datoteko potrdila.",
   "engine.signatures.pkcsModuleFoundGiven": "Modula PKCS#11 na navedeni poti ni mogoče najti.",
   "engine.signatures.pkcsSignerNeedsModule": "Podpisnik PKCS#11 potrebuje pot modula, oznako žetona in oznako potrdila.",
+  "engine.signatures.signatureDocumentGivenDoes": "Podpis, ki je bil dan temu dokumentu, se ne preveri glede na njegove lastne bajte, zato ni bil zapisan. Podpisni ključ je ustvaril podpis, ki ga ta dokument ne more nositi.",
   "engine.signatures.signatureFieldAlreadyLocks": "Polje podpisa »{{field_name}}« že zaklepa polja obrazca po svojih pogojih in podpis tega ne more nadomestiti. Podpišite ga takšnega, kot je, ali uporabite drugo polje.",
   "engine.signatures.signatureFieldAlreadySigned": "Polje podpisa »{{field_name}}« je že podpisano.",
   "engine.signatures.signedOutputMustDifferent": "Podpisani izhod mora biti druga datoteka kot vhod.",

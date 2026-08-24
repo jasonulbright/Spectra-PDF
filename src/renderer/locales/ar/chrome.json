@@ -2560,6 +2560,7 @@
   "engine.signatures.pemSignerNeedsBoth": "يحتاج موقّع PEM إلى ملف المفتاح وملف الشهادة معًا.",
   "engine.signatures.pkcsModuleFoundGiven": "تعذّر العثور على وحدة PKCS#11 في المسار المحدد.",
   "engine.signatures.pkcsSignerNeedsModule": "يحتاج موقّع PKCS#11 إلى مسار الوحدة وتسمية الرمز المميز وتسمية الشهادة.",
+  "engine.signatures.signatureDocumentGivenDoes": "التوقيع الذي أُعطي لهذا المستند لا يتحقق مقابل بايتاته الخاصة، ولذلك لم يُكتب. أنتج مفتاح التوقيع توقيعًا لا يمكن لهذا المستند حمله.",
   "engine.signatures.signatureFieldAlreadyLocks": "يقفل حقل التوقيع «{{field_name}}» حقول النموذج وفق شروطه الخاصة، ولا يمكن لتوقيع أن يحل محل ذلك. وقّع عليه كما هو، أو استخدم حقلًا آخر.",
   "engine.signatures.signatureFieldAlreadySigned": "حقل التوقيع «{{field_name}}» موقّع بالفعل.",
   "engine.signatures.signedOutputMustDifferent": "يجب أن يكون الملف الموقّع الناتج مختلفًا عن ملف الإدخال.",

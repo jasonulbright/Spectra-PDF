@@ -2389,6 +2389,7 @@
   "engine.signatures.pemSignerNeedsBoth": "Un signataire PEM exige à la fois le fichier de clé et le fichier de certificat.",
   "engine.signatures.pkcsModuleFoundGiven": "Module PKCS#11 introuvable au chemin indiqué.",
   "engine.signatures.pkcsSignerNeedsModule": "Un signataire PKCS#11 exige le chemin du module, le libellé du jeton et le libellé du certificat.",
+  "engine.signatures.signatureDocumentGivenDoes": "La signature remise à ce document ne se vérifie pas par rapport à ses propres octets ; elle n’a donc pas été écrite. La clé de signature a produit une signature que ce document ne peut pas porter.",
   "engine.signatures.signatureFieldAlreadyLocks": "Le champ de signature « {{field_name}} » verrouille déjà des champs de formulaire selon ses propres termes, et une signature ne peut pas les remplacer. Signez-le tel quel, ou utilisez un autre champ.",
   "engine.signatures.signatureFieldAlreadySigned": "Le champ de signature « {{field_name}} » est déjà signé.",
   "engine.signatures.signedOutputMustDifferent": "La sortie signée doit être un fichier différent de l’entrée.",

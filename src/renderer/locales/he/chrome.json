@@ -2389,6 +2389,7 @@
   "engine.signatures.pemSignerNeedsBoth": "חותם PEM מחייב הן את קובץ המפתח והן את קובץ האישור.",
   "engine.signatures.pkcsModuleFoundGiven": "מודול PKCS#11 לא נמצא בנתיב שצוין.",
   "engine.signatures.pkcsSignerNeedsModule": "חותם PKCS#11 מחייב את נתיב המודול, את תווית האסימון ואת תווית האישור.",
+  "engine.signatures.signatureDocumentGivenDoes": "החתימה שניתנה למסמך הזה אינה מאומתת מול הבייטים שלו עצמו, ולכן היא לא נכתבה. מפתח החתימה הפיק חתימה שהמסמך הזה אינו יכול לשאת.",
   "engine.signatures.signatureFieldAlreadyLocks": "שדה החתימה \"{{field_name}}\" כבר נועל שדות טופס בתנאים משלו, וחתימה אינה יכולה להחליף זאת. חתום עליו כפי שהוא, או השתמש בשדה אחר.",
   "engine.signatures.signatureFieldAlreadySigned": "שדה החתימה \"{{field_name}}\" כבר חתום.",
   "engine.signatures.signedOutputMustDifferent": "קובץ הפלט החתום חייב להיות שונה מקובץ הקלט.",

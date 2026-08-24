@@ -2275,6 +2275,7 @@
   "engine.signatures.pemSignerNeedsBoth": "PEM 서명자에는 키 파일과 인증서 파일이 모두 필요합니다.",
   "engine.signatures.pkcsModuleFoundGiven": "지정한 경로에 PKCS#11 모듈이 없습니다.",
   "engine.signatures.pkcsSignerNeedsModule": "PKCS#11 서명자에는 모듈 경로, 토큰 레이블, 인증서 레이블이 필요합니다.",
+  "engine.signatures.signatureDocumentGivenDoes": "이 문서에 주어진 서명이 문서 자체의 바이트에 대해 검증되지 않아 기록하지 않았습니다. 서명 키가 이 문서에 담을 수 없는 서명을 생성했습니다.",
   "engine.signatures.signatureFieldAlreadyLocks": "\"{{field_name}}\" 서명 필드는 이미 자체 조건으로 양식 필드를 잠그고 있으며, 서명이 그것을 대체할 수 없습니다. 그대로 서명하거나 다른 필드를 사용하십시오.",
   "engine.signatures.signatureFieldAlreadySigned": "\"{{field_name}}\" 서명 필드는 이미 서명되어 있습니다.",
   "engine.signatures.signedOutputMustDifferent": "서명 결과물은 입력과 다른 파일이어야 합니다.",
