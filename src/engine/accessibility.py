@@ -1817,7 +1817,13 @@ def _check_other_elements_alt(check, tree, annots, fields, mcid_tables):
         if node.alt or node.has_actual_text or node.title or _described_by_ancestor(node):
             continue
         described = False
-        for objr in node.objrs:
+        # The same population the targets were drawn from. ISO 14289-1 cl.
+        # 7.18.1 places the alternate description on the annotation the
+        # element names, and cl. 7.18.5 on the link annotation's `/Contents`;
+        # neither says the naming `/OBJR` must be the element's own kid. An
+        # element weighed over its subtree and judged over its own kids would
+        # fault a `Form` whose widget carries `/TU` one level down.
+        for objr in _named_objects(node):
             key = (objr.get("page"), objr.get("index"))
             if contents_by_address.get(key):
                 described = True
@@ -2208,14 +2214,24 @@ def _check_heading_nesting(check, tree, mcid_tables):
         # ISO 14289-1 cl. 7.4.2, first bullet: if any heading tags are used,
         # H1 shall be the first. A document opening at H2 or lower has skipped
         # every level above it, so the first heading is measured against H1
-        # exactly as every later one is measured against its predecessor.
+        # exactly as every later one is measured against its predecessor. The
+        # floor stays 0 for that first heading; only the reported key differs,
+        # because `from` on the opening case would name a level no heading in
+        # the document holds.
         floor = 0 if previous is None else previous
         if node.level > floor + 1:
             preview, rect = _node_preview(node, mcid_tables)
-            findings.append(
-                _finding(_struct_address(node), "heading_level_skipped", preview=preview[:80],
-                         rect=rect, values={"from": floor, "to": node.level})
-            )
+            if previous is None:
+                finding = _finding(
+                    _struct_address(node), "heading_opens_below_h1", preview=preview[:80],
+                    rect=rect, values={"level": node.level},
+                )
+            else:
+                finding = _finding(
+                    _struct_address(node), "heading_level_skipped", preview=preview[:80],
+                    rect=rect, values={"from": floor, "to": node.level},
+                )
+            findings.append(finding)
         previous = node.level
     _verdict(check, len(headings), findings)
 

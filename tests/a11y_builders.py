@@ -880,6 +880,46 @@ def link_no_alt(path):
     return save(pdf, path)
 
 
+def form_description_on_nested_widget_ok(path):
+    """PASS fixture — the `Form` names its widget through a `Span`, and the
+    widget carries `/TU`. ISO 14289-1 cl. 7.18.1 puts the description on the
+    named annotation; it does not require the naming `/OBJR` to be the
+    element's own kid. The `Form` carries no `/T` of its own, so the only
+    thing that can answer the check is the widget's `/TU`."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    root, doc = _one_tagged_paragraph(pdf, page)
+    field = _annot(pdf, page, "Widget", [300, 500, 500, 520], FT=Name.Tx,
+                   T=String("name"), TU=String("Your full name"))
+    form = elem(pdf, "Form", doc, page=page)
+    span = elem(pdf, "Span", form, page=page,
+                kids=[Dictionary(Type=Name.OBJR, Obj=field)])
+    form[Name.K] = Array([span])
+    doc[Name.K] = Array(list(doc[Name.K]) + [form])
+    pdf.Root[Name.AcroForm] = pdf.make_indirect(
+        Dictionary(Fields=Array([field]), DA=String("/Helv 0 Tf 0 g"))
+    )
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def link_no_alt_nested_objr(path):
+    """A `Link` naming its annotation through a `Span`, with no description
+    anywhere: reaching through descendants must not silence a real defect."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    root, doc = _one_tagged_paragraph(pdf, page)
+    annot = _annot(pdf, page, "Link", [400, 400, 500, 420],
+                   A=Dictionary(S=Name.URI, URI=String("https://example.test/")))
+    link = elem(pdf, "Link", doc, page=page)
+    span = elem(pdf, "Span", link, page=page,
+                kids=[Dictionary(Type=Name.OBJR, Obj=annot)])
+    link[Name.K] = Array([span])
+    doc[Name.K] = Array(list(doc[Name.K]) + [link])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
 # ── tables ────────────────────────────────────────────────────────────────
 
 
@@ -1607,6 +1647,10 @@ ROSTER = {
     "alt_no_content": (alt_no_content, "alt_no_content", "fail"),
     "alt_hides_annot": (alt_hides_annot, "alt_hides_annotation", "fail"),
     "link_no_alt": (link_no_alt, "other_elements_alt", "fail"),
+    "link_no_alt_nested_objr": (link_no_alt_nested_objr, "other_elements_alt", "fail"),
+    "form_description_on_nested_widget_ok": (
+        form_description_on_nested_widget_ok, "other_elements_alt", "pass",
+    ),
     "tr_outside_table": (tr_outside_table, "table_rows", "fail"),
     "td_outside_tr": (td_outside_tr, "table_cells", "fail"),
     "table_no_headers": (table_no_headers, "table_headers", "warn"),
