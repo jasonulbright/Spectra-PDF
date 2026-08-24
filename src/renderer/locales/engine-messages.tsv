@@ -248,6 +248,7 @@ headers.fontSizeMust	pattern	headers	font_size must be >= {{_MIN_FONT_SIZE}}
 headers.leastOnePlacementRequired	exact	headers	at least one placement is required
 headers.positionMustOneGot	pattern	headers	position must be one of {{_POSITIONS}}, got {{pos}}
 headers.textContainsCharactersOutside	exact	headers	text contains characters outside Latin-1 and no fallback font is available
+icc_profiles.bundledColourProfilesLicensed	exact	icc_profiles	The bundled colour profiles are licensed separately and that licence has not been accepted on this computer, so no bundled profile can be opened. Accept the colour-profile licence to enable colour conversion, output intents and output preview, or name your own profile file instead.
 icc_profiles.colourProfileNamedInstalled	pattern	icc_profiles	No colour profile named "{{name}}" is installed, and it is not a profile file this engine can open.
 icc_profiles.colourProfilesInstalledThere	pattern	icc_profiles	No colour profiles are installed in {{directory}}, so there is no destination profile to convert to.
 image_export.dpiMustGot	pattern	image_export	dpi must be {{_MIN_DPI}}-{{_MAX_DPI}}, got {{dpi}}
@@ -542,7 +543,7 @@ signatures.certificatesFoundTrustRoot	pattern	signatures	no certificates found i
 signatures.certificationLevelAppliesOnly	exact	signatures	A certification level applies only to a certification signature. Certify the document, or leave the level unset.
 signatures.certificationSignatureMustFirst	exact	signatures	A certification signature must be the first signature in a document, and this document could not accept one.
 signatures.chooseOnePlacementFill	exact	signatures	Choose ONE placement: fill an existing signature field, or place a new visible stamp.
-signatures.chooseOneSignerSource	exact	signatures	Choose ONE signer source: a .pfx file, a PEM key + certificate, or a PKCS#11 token.
+signatures.chooseOneSignerSource	exact	signatures	Choose ONE signer source: a .pfx file, a PEM key + certificate, a PKCS#11 token, or a certificate from the Windows certificate store.
 signatures.couldLoadSignerWrong	exact	signatures	Could not load the signer — wrong key passphrase, no certificate matching the key, or an unsupported/corrupt key or certificate file.
 signatures.couldLoadSignerWrong2	exact	signatures	Could not load the signer — wrong password, or an unsupported/corrupt .pfx.
 signatures.documentAlreadyCarriesSignature	pattern	signatures	This document already carries {{signature_count}} signature(s), the first in field "{{first_field}}". A certification signature must be the first signature in a document.
@@ -570,13 +571,15 @@ signatures.signatureFieldAlreadySigned	pattern	signatures	Signature field "{{fie
 signatures.signedOutputMustDifferent	exact	signatures	The signed output must be a different file from the input.
 signatures.signerCertificateFileFound	exact	signatures	Signer certificate file not found.
 signatures.signerFilePfxFound	exact	signatures	Signer file (.pfx) not found.
-signatures.signerGivenProvidePfx	exact	signatures	No signer given — provide a .pfx file, a PEM key + certificate, or a PKCS#11 token.
+signatures.signerGivenProvidePfx	exact	signatures	No signer given — provide a .pfx file, a PEM key + certificate, a PKCS#11 token, or a certificate from the Windows certificate store.
 signatures.signerKeyFileFound	exact	signatures	Signer key file not found.
 signatures.signerNameCommonName	exact	signatures	A signer name (common name) is required.
+signatures.signingCancelledWindowsGiven	exact	signatures	Signing was cancelled — Windows was not given permission to use the key.
 signatures.trustRootFound	pattern	signatures	trust root not found: {{p}}
 signatures.unknownCertificationLevelChoose	pattern	signatures	Unknown certification level "{{certify_level}}". Choose none, form-fill, or annotate.
 signatures.unknownFieldLockChoose	pattern	fieldmdp	Unknown field lock "{{lock}}". Choose all, include, or exclude.
 signatures.validityMustBetweenDay	exact	signatures	Validity must be between 1 day and 20 years.
+signatures.windowsCertificateStoreAvailable	exact	signatures	The Windows certificate store is not available on this system.
 slide_export.couldRenderPageSlide	pattern	slide_export	Could not render page {{page_number}} for a slide: {{detail}}
 slide_export.presentationWrittenSlideS	pattern	slide_export	the presentation was written with {{slides}} slide(s) for {{v1}} exported page(s), so it does not carry the document
 slide_export.unknownSlideSizeChoose	pattern	slide_export	unknown slide size {{slide_size}} (choose page, 16:9 or 4:3)
@@ -794,6 +797,16 @@ watermark.watermarkScaleMustGreater	pattern	watermark	watermark scale must be gr
 watermark.watermarkScaleMustNumber	pattern	watermark	watermark scale must be a number, got {{scale}}
 watermark.watermarkTextContainsCharacters	exact	watermark	watermark text contains characters outside Latin-1 and no fallback font is available
 watermark.watermarkTileGapMust	pattern	watermark	watermark tile gap must not be negative, got {{tile_gap}}
+wincert.certificateSKeyHeld	exact	wincert	That certificate's key is held by a legacy provider, which can only produce RSA PKCS#1 v1.5 signatures.
+wincert.certificateThumbprintHexadecimalCharacters	exact	wincert	A certificate thumbprint is 40 hexadecimal characters (SHA-1).
+wincert.certificateThumbprintWindowsCertificate	exact	wincert	No certificate with that thumbprint is in the Windows certificate store.
+wincert.legacyProviderCannotSign	pattern	wincert	A legacy provider cannot sign a "{{algorithm}}" digest.
+wincert.legacySigningProviderRefused	pattern	wincert	The legacy signing provider refused the request (0x{{code}}).
+wincert.legacySigningProviderRejected	pattern	wincert	The legacy signing provider rejected the digest (0x{{code}}).
+wincert.signingKeyReturnedMalformed	exact	wincert	The signing key returned a malformed ECDSA signature.
+wincert.unsupportedDigestAlgorithmStore	pattern	wincert	Unsupported digest algorithm "{{digest_algorithm}}" for a store key.
+wincert.windowsSigningKeyRefused	pattern	wincert	The Windows signing key refused the request (0x{{code}}).
+wincert.windowsWouldReleasePrivate	pattern	wincert	Windows would not release the private key for that certificate (0x{{code}}). It may have no key, or the key may live on a device that is not present.
 xfdf.annotationRepliedPageName	pattern	xfdf	the annotation replied to on page {{v0}} has no name, so XFDF cannot reference it
 xfdf.replyRelationshipAnnotationPage	pattern	xfdf	the reply relationship of an annotation on page {{v0}} cannot be read
 xfdf.replyRelationshipXfdfCarry	pattern	xfdf	not a reply relationship XFDF can carry: {{reply_type}}

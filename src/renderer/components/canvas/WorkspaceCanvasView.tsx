@@ -86,7 +86,12 @@ import {
 } from '../../lib/spellcheck';
 import { useEngine } from '../../hooks/useEngine';
 import { app, dialog, imageClipboard } from '../../lib/tauri-bridge';
-import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../SignerSourceFields';
+import {
+  SignerSourceFields,
+  EMPTY_SIGNER_SOURCE,
+  signerSourceParams,
+  rememberStoreCertificate,
+} from '../SignerSourceFields';
 import type { SignerSource } from '../SignerSourceFields';
 import {
   certifyParams,
@@ -6005,8 +6010,13 @@ export function WorkspaceCanvasView({
         file: file.workingPath,
         output: dest,
         ...resolved.params!,
-        // A token source takes the password field as its PIN.
-        ...(resolved.params!.pkcs11_module ? { pkcs11_pin: sigPassword } : { password: sigPassword }),
+        // A token source takes the password field as its PIN; a store
+        // certificate takes no secret from us at all, so none is sent.
+        ...(resolved.params!.pkcs11_module
+          ? { pkcs11_pin: sigPassword }
+          : resolved.params!.store_cert
+            ? {}
+            : { password: sigPassword }),
         ...(sigReason.trim() ? { reason: sigReason.trim() } : {}),
         ...(sigLocation.trim() ? { location: sigLocation.trim() } : {}),
         ...placementParams,
@@ -6014,6 +6024,9 @@ export function WorkspaceCanvasView({
         ...lockParams(sigLock),
       })) as unknown as { signer: string | null; output: string; valid: boolean; intact: boolean; covers_whole_document: boolean };
       setSignDone({ signer: res.signer, output: res.output, ok: res.valid && res.intact && res.covers_whole_document });
+      if (sigSource.mode === 'store' && sigSource.thumbprint) {
+        rememberStoreCertificate(sigSource.thumbprint);
+      }
       setSigPlacement(null);
       setSigFieldTarget(null);
       setTool('select');
