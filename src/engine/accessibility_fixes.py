@@ -148,6 +148,8 @@ def _fix_heading_nesting(source: str, output: str, report: dict, allow_signed: b
     applied = 0
     current = source
     for finding in _findings(report, "heading_nesting"):
+        # `heading_opens_below_h1` carries no `from` — no heading precedes it —
+        # and the 0 floor makes the fix H1, which is what cl. 7.4.2 asks for.
         previous = int(finding.get("values", {}).get("from", 0))
         # The level that CLOSES the gap: one below the heading before it. A
         # deeper guess would be a judgment about the document's outline.
