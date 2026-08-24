@@ -2275,6 +2275,7 @@
   "engine.signatures.pemSignerNeedsBoth": "PEM 簽章者同時需要金鑰檔與憑證檔。",
   "engine.signatures.pkcsModuleFoundGiven": "在指定的路徑找不到 PKCS#11 模組。",
   "engine.signatures.pkcsSignerNeedsModule": "PKCS#11 簽章者需要模組路徑、權杖標籤與憑證標籤。",
+  "engine.signatures.signatureDocumentGivenDoes": "此文件取得的簽章無法對文件自身的位元組通過驗證，因此未寫入。簽章金鑰產生的簽章是此文件無法承載的。",
   "engine.signatures.signatureFieldAlreadyLocks": "簽章欄位「{{field_name}}」已依自己的條件鎖定表單欄位，簽章無法取代它。請就這樣簽章，或改用其他欄位。",
   "engine.signatures.signatureFieldAlreadySigned": "簽章欄位「{{field_name}}」已簽章。",
   "engine.signatures.signedOutputMustDifferent": "簽章輸出必須是與輸入不同的檔案。",

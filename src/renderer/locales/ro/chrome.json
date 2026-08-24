@@ -2389,6 +2389,7 @@
   "engine.signatures.pemSignerNeedsBoth": "Un semnatar PEM are nevoie atât de fișierul de cheie, cât și de fișierul de certificat.",
   "engine.signatures.pkcsModuleFoundGiven": "Modulul PKCS#11 nu a fost găsit la calea indicată.",
   "engine.signatures.pkcsSignerNeedsModule": "Un semnatar PKCS#11 are nevoie de calea modulului, de eticheta tokenului și de eticheta certificatului.",
+  "engine.signatures.signatureDocumentGivenDoes": "Semnătura dată acestui document nu se verifică față de proprii săi octeți, așa că nu a fost scrisă. Cheia de semnare a produs o semnătură pe care acest document nu o poate purta.",
   "engine.signatures.signatureFieldAlreadyLocks": "Câmpul de semnătură „{{field_name}}” blochează deja câmpuri de formular în termenii lui proprii, iar o semnătură nu poate înlocui asta. Semnați-l așa cum este sau folosiți alt câmp.",
   "engine.signatures.signatureFieldAlreadySigned": "Câmpul de semnătură „{{field_name}}” este deja semnat.",
   "engine.signatures.signedOutputMustDifferent": "Rezultatul semnat trebuie să fie un fișier diferit de intrare.",

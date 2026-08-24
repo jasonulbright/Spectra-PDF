@@ -2332,6 +2332,7 @@
   "engine.signatures.pemSignerNeedsBoth": "En PEM-underskriver kræver både nøglefilen og certifikatfilen.",
   "engine.signatures.pkcsModuleFoundGiven": "PKCS#11-modulet blev ikke fundet på den angivne sti.",
   "engine.signatures.pkcsSignerNeedsModule": "En PKCS#11-underskriver kræver modulstien, tokenetiketten og certifikatetiketten.",
+  "engine.signatures.signatureDocumentGivenDoes": "Den underskrift, dette dokument fik, kan ikke verificeres mod dets egne bytes, og den blev derfor ikke skrevet. Underskrivningsnøglen frembragte en signatur, som dette dokument ikke kan bære.",
   "engine.signatures.signatureFieldAlreadyLocks": "Underskriftsfeltet \"{{field_name}}\" låser allerede formularfelter på sine egne betingelser, og en underskrift kan ikke erstatte det. Underskriv det, som det er, eller brug et andet felt.",
   "engine.signatures.signatureFieldAlreadySigned": "Underskriftsfeltet \"{{field_name}}\" er allerede underskrevet.",
   "engine.signatures.signedOutputMustDifferent": "Det underskrevne output skal være en anden fil end inputtet.",
