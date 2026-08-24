@@ -1,6 +1,8 @@
 // The stamp-appearance options as the sign surfaces use them: what request
 // they build, when they build none at all, and that the preview is the
 // ENGINE's drawing rather than a second implementation of it.
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect, vi } from 'vitest';
 import {
   DEFAULT_STAMP_APPEARANCE,
@@ -170,7 +172,39 @@ describe('the preview is the engine drawing', () => {
       timestamp: '2026-01-01 00:00',
     });
     expect(params).not.toHaveProperty('location');
-    expect(params.stamp_style).toMatchObject({ fields: ['name'] });
+    expect(params.stamp_style_spec).toMatchObject({ fields: ['name'] });
+  });
+
+  // The two sides of one call, checked against each other. A name checked
+  // only against itself is a name that can drift: the engine raises a
+  // TypeError for an unexpected keyword, and a preview refusal is shown to
+  // the user verbatim.
+  it('names every parameter the engine method actually declares', () => {
+    const source = readFileSync(
+      resolve(__dirname, '..', 'src', 'engine', 'stamp_appearance.py'),
+      'utf8',
+    );
+    const signature = /def preview_appearance\(([\s\S]*?)\)\s*->/.exec(source);
+    expect(signature).not.toBeNull();
+    const declared = new Set(
+      signature![1]
+        .split(',')
+        .map((p) => p.split(':')[0].split('=')[0].trim())
+        .filter((p) => p && p !== '*' && p !== '/'),
+    );
+    expect(declared.size).toBeGreaterThan(4);
+    const params = previewParams({
+      options: options({ fields: ['name', 'label'], label: 'Approved' }),
+      face: null,
+      fontDir: FONT_DIR,
+      signer: 'Certificate holder',
+      reason: 'why',
+      location: 'here',
+      width: 220,
+      height: 70,
+      timestamp: '2026-01-01 00:00',
+    });
+    for (const key of Object.keys(params)) expect([...declared]).toContain(key);
   });
 
   it('omits the appearance for the default one, so the preview shows the plain stamp', () => {

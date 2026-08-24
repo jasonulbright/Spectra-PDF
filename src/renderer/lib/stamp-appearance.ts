@@ -198,7 +198,11 @@ export function previewParams(request: StampPreviewRequest): Record<string, unkn
     signer: request.signer,
     ...(request.reason.trim() ? { reason: request.reason.trim() } : {}),
     ...(request.location.trim() ? { location: request.location.trim() } : {}),
-    ...(style.stamp_style ? { stamp_style: style.stamp_style } : {}),
+    // `stamp_style_spec`, not `stamp_style`: the preview's engine parameter is
+    // named apart from the `stamp_style()` builder it calls. The sign method
+    // takes `stamp_style`, so the two names are NOT interchangeable — the
+    // wrong one is a TypeError that reaches the user as the preview.
+    ...(style.stamp_style ? { stamp_style_spec: style.stamp_style } : {}),
     font_dir: request.fontDir,
     timestamp: request.timestamp,
   };

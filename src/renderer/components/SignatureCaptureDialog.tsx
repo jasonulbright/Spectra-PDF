@@ -89,9 +89,18 @@ export function SignatureCaptureDialog({
   const [typedText, setTypedText] = useState('');
   const [face, setFace] = useState<SignatureFaceId>(DEFAULT_SIGNATURE_FACE);
   const [facesReady, setFacesReady] = useState(false);
+  /** A face that would not load is a STANDING condition of the type door, not
+   * a transient message: the fallback stack under the previews covers FOUT,
+   * so nothing else on screen would say the previews are not the faces they
+   * name. Held apart from `error`, which any door switch clears. */
+  const [facesFailed, setFacesFailed] = useState(false);
 
   // Import door.
   const [imported, setImported] = useState<ImportState | null>(null);
+  /** The chosen file's name AS PICKED — held separately from the decoded
+   * pixels so a decode failure never leaves the door claiming nothing was
+   * chosen while an error about that file is on screen. */
+  const [pickedName, setPickedName] = useState('');
   const [stripBackground, setStripBackground] = useState(true);
   const [threshold, setThreshold] = useState(DEFAULT_BACKGROUND_THRESHOLD);
   const importRef = useRef<HTMLCanvasElement | null>(null);
@@ -108,13 +117,17 @@ export function SignatureCaptureDialog({
   useEffect(() => {
     if (!open) return;
     let live = true;
-    void Promise.all(SIGNATURE_FACES.map((f) => ensureSignatureFaceLoaded(f.id)))
-      .then(() => {
-        if (live) setFacesReady(true);
-      })
-      .catch(() => {
-        if (live) setError(tChrome('dialog.signature.facesUnavailable'));
-      });
+    // allSettled, not all: each preview is drawn in its OWN face, so one
+    // unreadable face must not discard the two that loaded — and the door is
+    // only ready when every one of them did.
+    void Promise.allSettled(SIGNATURE_FACES.map((f) => ensureSignatureFaceLoaded(f.id))).then(
+      (results) => {
+        if (!live) return;
+        const failed = results.some((r) => r.status === 'rejected');
+        setFacesFailed(failed);
+        setFacesReady(!failed);
+      },
+    );
     return () => {
       live = false;
     };
@@ -252,8 +265,14 @@ export function SignatureCaptureDialog({
   const pickImage = async (): Promise<void> => {
     const path = await dialog.pickImageFile();
     if (!path) return;
+    const stem = path.split(/[\\/]/).pop() ?? '';
+    // The chosen name is shown from here on, decode or no decode: a visible
+    // error beside "no image chosen" describes two different states at once.
+    setPickedName(stem);
     try {
-      const bytes = await file.readBuffer(path);
+      // The picked file is on the user's own disk, outside the plugin-fs
+      // capability scope — the scoped read refuses it.
+      const bytes = await file.readExternalBuffer(path);
       const bmp = await createImageBitmap(new Blob([bytes]));
       const scale = Math.min(1, IMPORT_MAX / Math.max(bmp.width, bmp.height));
       const w = Math.max(1, Math.round(bmp.width * scale));
@@ -263,6 +282,7 @@ export function SignatureCaptureDialog({
       canvas.height = h;
       const ctx = canvas.getContext('2d');
       if (!ctx) {
+        setImported(null);
         setError(tChrome('dialog.signature.imageUnreadable'));
         return;
       }
@@ -270,10 +290,11 @@ export function SignatureCaptureDialog({
       bmp.close();
       setImported({
         original: ctx.getImageData(0, 0, w, h),
-        fileStem: path.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') ?? '',
+        fileStem: stem.replace(/\.[^.]+$/, ''),
       });
       setError(null);
     } catch {
+      setImported(null);
       setError(tChrome('dialog.signature.imageUnreadable'));
     }
   };
@@ -349,6 +370,7 @@ export function SignatureCaptureDialog({
     setStrokes([]);
     setTypedText('');
     setImported(null);
+    setPickedName('');
   };
 
   const canSave =
@@ -498,6 +520,11 @@ export function SignatureCaptureDialog({
               <div className="text-xs text-neutral-400 mb-2">
                 {tChrome('dialog.signature.typeHint')}
               </div>
+              {facesFailed && (
+                <div data-testid="signature-faces-error" className="text-xs text-red-400 mb-2">
+                  {tChrome('dialog.signature.facesUnavailable')}
+                </div>
+              )}
               <input
                 type="text"
                 value={typedText}
@@ -553,7 +580,7 @@ export function SignatureCaptureDialog({
                   {tChrome('dialog.signature.importChoose')}
                 </button>
                 <span className="text-xs text-neutral-400 truncate">
-                  {imported?.fileStem || tChrome('dialog.signature.importNone')}
+                  {pickedName || tChrome('dialog.signature.importNone')}
                 </span>
               </div>
               <canvas

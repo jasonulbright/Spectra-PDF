@@ -298,8 +298,13 @@ export function SignaturesPanel(): React.ReactElement {
         file: activeFile.workingPath,
         output,
         ...sourceParams,
-        // A token source takes the password field as its PIN.
-        ...(sourceParams.pkcs11_module ? { pkcs11_pin: pw } : { password: pw }),
+        // A token source takes the password field as its PIN; a store
+        // certificate takes no secret from us at all, so none is sent.
+        ...(sourceParams.pkcs11_module
+          ? { pkcs11_pin: pw }
+          : sourceParams.store_cert
+            ? {}
+            : { password: pw }),
         ...(rsn && rsn.trim() ? { reason: rsn.trim() } : {}),
         ...(loc && loc.trim() ? { location: loc.trim() } : {}),
         ...(appearance ? { appearance } : {}),
@@ -389,8 +394,13 @@ export function SignaturesPanel(): React.ReactElement {
       if (!activeFile) throw new Error(tChrome('refusal.file.noActiveToSign'));
       await performOperation(activeFile.path, 'sign_pdf', {
         ...sourceParams,
-        // A token source takes the password field as its PIN.
-        ...(sourceParams.pkcs11_module ? { pkcs11_pin: pw } : { password: pw }),
+        // A token source takes the password field as its PIN; a store
+        // certificate takes no secret from us at all, so none is sent.
+        ...(sourceParams.pkcs11_module
+          ? { pkcs11_pin: pw }
+          : sourceParams.store_cert
+            ? {}
+            : { password: pw }),
         // The engine refuses output == input UNLESS this opt-in is set — the
         // in-place flow is the one caller that intends it (regression).
         allow_in_place: true,
@@ -697,16 +707,21 @@ export function SignaturesPanel(): React.ReactElement {
             </button>
           )}
           <SignerSourceFields value={source} onChange={setSource} idPrefix="sign" />
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('panel.sig.password')}</span>
-            <input
-              data-testid="sign-password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
-            />
-          </div>
+          {/* A store certificate's private key never leaves the platform's
+              keystore: there is no secret for this field to carry, and one
+              offered anyway invites a password into a call that sends none. */}
+          {source.mode !== 'store' && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('panel.sig.password')}</span>
+              <input
+                data-testid="sign-password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="flex-1 px-2.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('panel.sig.reason')}</span>
             <input
