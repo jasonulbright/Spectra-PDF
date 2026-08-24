@@ -538,6 +538,13 @@ const snapshotRaw = (workingPath: string) => invoke<string>('snapshot', { workin
 
 export const file = {
   readBuffer: (filePath: string) => fsReadFile(filePath),
+  /** Bytes at a path OUTSIDE the plugin-fs scope: an app resource, or a file
+   * the user picked from their own disk. `readBuffer` is capability-scoped to
+   * `$TEMP/spectrapdf/**` and REJECTS anything else, so a picked image or a
+   * bundled font read through it fails in the built app. Raw binary IPC, the
+   * same command the batch driver uses for its out-of-workspace sources. */
+  readExternalBuffer: async (filePath: string) =>
+    new Uint8Array(await invoke<ArrayBuffer>('read_file_binary', { filePath })),
   writeBuffer: (filePath: string, bytes: Uint8Array) => fsWriteFile(filePath, bytes),
   rename: (fromPath: string, toPath: string) => fsRename(fromPath, toPath),
   remove: (filePath: string) => fsRemove(filePath),
