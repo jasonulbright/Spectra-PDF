@@ -1858,13 +1858,23 @@ fn run_value_exe(value: &str) -> &str {
 /// Paths compare case-insensitively because the value is a Windows path and
 /// the shell that reads it treats it that way; a case difference is the same
 /// executable and must not provoke a rewrite every launch.
-pub(crate) fn run_key_action(existing: Option<&str>, exe: &Path) -> RunKeyAction {
+///
+/// A recorded path that still HAS an executable at it is left alone even when
+/// it names a different copy: the user may run several builds, and the one that
+/// happens to start first must not seize the other's startup entry.
+/// `recorded_exists` is the caller's answer to that question so the decision
+/// stays testable without a filesystem.
+pub(crate) fn run_key_action(
+    existing: Option<&str>,
+    exe: &Path,
+    recorded_exists: bool,
+) -> RunKeyAction {
     let Some(value) = existing else {
         return RunKeyAction::Absent;
     };
     let recorded = run_value_exe(value);
     let exe = exe.to_string_lossy();
-    if recorded.eq_ignore_ascii_case(exe.as_ref()) {
+    if recorded.eq_ignore_ascii_case(exe.as_ref()) || recorded_exists {
         return RunKeyAction::Current;
     }
     let mut rewritten = format!("\"{}\"", exe);
@@ -1888,7 +1898,11 @@ fn refresh_startup_entry() -> Result<(), String> {
     };
     let existing: Option<String> = key.get_value(STARTUP_REG_VALUE).ok();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    match run_key_action(existing.as_deref(), &exe) {
+    let recorded_exists = existing
+        .as_deref()
+        .map(|value| Path::new(run_value_exe(value)).is_file())
+        .unwrap_or(false);
+    match run_key_action(existing.as_deref(), &exe, recorded_exists) {
         RunKeyAction::Absent | RunKeyAction::Current => Ok(()),
         RunKeyAction::Rewrite(value) => key
             .set_value(STARTUP_REG_VALUE, &value)
@@ -2006,33 +2020,65 @@ mod tests {
         let exe = Path::new(r"E:\Portable\SpectraPDF\spectrapdf.exe");
 
         // Startup was never enabled: nothing to create.
-        assert_eq!(run_key_action(None, exe), RunKeyAction::Absent);
+        assert_eq!(run_key_action(None, exe, false), RunKeyAction::Absent);
 
         // The recorded path still names this executable — including when the
         // shell spelled it differently, which is the same file.
         assert_eq!(
-            run_key_action(Some(r#""E:\Portable\SpectraPDF\spectrapdf.exe""#), exe),
+            run_key_action(Some(r#""E:\Portable\SpectraPDF\spectrapdf.exe""#), exe, true),
             RunKeyAction::Current,
         );
         assert_eq!(
-            run_key_action(Some(r#""e:\portable\spectrapdf\SPECTRAPDF.EXE" --minimized"#), exe),
+            run_key_action(
+                Some(r#""e:\portable\spectrapdf\SPECTRAPDF.EXE" --minimized"#),
+                exe,
+                true,
+            ),
             RunKeyAction::Current,
         );
 
-        // Moved: the path is corrected and the user's minimized choice travels.
+        // Moved: nothing is at the recorded path any more, so it is corrected
+        // and the user's minimized choice travels.
         assert_eq!(
-            run_key_action(Some(r#""D:\Old\spectrapdf.exe""#), exe),
+            run_key_action(Some(r#""D:\Old\spectrapdf.exe""#), exe, false),
             RunKeyAction::Rewrite(format!("\"{}\"", exe.display())),
         );
         assert_eq!(
-            run_key_action(Some(r#""D:\Old\spectrapdf.exe" --minimized"#), exe),
+            run_key_action(Some(r#""D:\Old\spectrapdf.exe" --minimized"#), exe, false),
             RunKeyAction::Rewrite(format!("\"{}\" --minimized", exe.display())),
         );
 
         // An unquoted value, from a hand-written entry, is read the same way.
         assert_eq!(
-            run_key_action(Some(r"D:\Old\spectrapdf.exe --minimized"), exe),
+            run_key_action(Some(r"D:\Old\spectrapdf.exe --minimized"), exe, false),
             RunKeyAction::Rewrite(format!("\"{}\" --minimized", exe.display())),
+        );
+    }
+
+    #[test]
+    fn another_installed_copy_keeps_the_startup_entry_it_configured() {
+        let exe = Path::new(r"E:\Portable\SpectraPDF\spectrapdf.exe");
+
+        // A DIFFERENT path that still has an executable at it is the user's own
+        // configured copy. Rewriting it would let whichever copy launched first
+        // take the entry from the other, every launch, in both directions.
+        assert_eq!(
+            run_key_action(Some(r#""C:\Program Files\SpectraPDF\spectrapdf.exe""#), exe, true),
+            RunKeyAction::Current,
+        );
+        assert_eq!(
+            run_key_action(
+                Some(r#""C:\Program Files\SpectraPDF\spectrapdf.exe" --minimized"#),
+                exe,
+                true,
+            ),
+            RunKeyAction::Current,
+        );
+
+        // Missing and matching still reports Current: there is nothing to fix.
+        assert_eq!(
+            run_key_action(Some(r#""E:\Portable\SpectraPDF\spectrapdf.exe""#), exe, false),
+            RunKeyAction::Current,
         );
     }
 
