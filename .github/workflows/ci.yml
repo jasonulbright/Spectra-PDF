@@ -184,6 +184,29 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/setup-test-softhsm.ps1
         shell: pwsh
 
+      # The Ghent PDF Output Suite is fetched, never committed (its notice
+      # permits use for testing workflow setup and forbids redistribution), so
+      # the corpus axis has to be staged here or its gate skips on a clean
+      # runner and the zero-skip gate refuses the run. The cache is keyed on
+      # the fetch script, which is where the archive digests are pinned: GWG's
+      # server is contacted on a pin change, not once per run. A cache MISS
+      # still fetches and still verifies the pins; either path then re-verifies
+      # the extracted tree against the per-file manifest, so a truncated or
+      # tampered cache entry fails the job instead of degrading to a skip.
+      - name: Cache the Ghent PDF Output Suite corpus
+        id: ghent-cache
+        uses: actions/cache@v6
+        with:
+          path: ghent-corpus
+          key: ${{ runner.os }}-ghent-suite-${{ hashFiles('scripts/fetch-ghent-suite.py') }}
+
+      - name: Fetch the Ghent PDF Output Suite corpus
+        if: steps.ghent-cache.outputs.cache-hit != 'true'
+        run: python scripts/fetch-ghent-suite.py
+
+      - name: Verify the Ghent corpus against its manifest
+        run: python scripts/fetch-ghent-suite.py --check
+
       - name: Install Ghostscript as a TEST TOOL (capability-present axis)
         # This does not vendor Ghostscript into Spectra PDF. The clean runner
         # installs the current Chocolatey package like an end user would; the
