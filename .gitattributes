@@ -47,3 +47,13 @@
 # a pinned artifact's review depends on.
 
 src/engine/trust/* -text
+
+# The pinned XMP extension schema templates. Their SHA-256 digests are recorded
+# in the corpus MANIFEST.json and asserted against the file bytes, so the pins
+# hash the exact committed blob — a checkout that translated LF->CRLF makes
+# every pin wrong (it failed on the GitHub windows runner, where
+# core.autocrlf defaults to true, while passing on a working tree that still
+# held the LF bytes the fetch script wrote). `-text` disables EOL translation
+# while keeping the textual diff a pinned artifact's review depends on.
+
+tests/fixtures/xmp-extension-schemas/*.xml -text
