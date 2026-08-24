@@ -34,6 +34,14 @@ import {
   pinGsCapability,
   type GsCapability,
 } from './lib/gs-capability';
+import {
+  ensureIccAssent,
+  iccAssent,
+  iccNeedsAssent,
+  openIccLicense,
+  pinIccAssent,
+  type IccAssentState,
+} from './lib/icc-assent';
 import type { FocusedTab } from './state/types';
 
 export interface TestStateSnapshot {
@@ -762,6 +770,39 @@ function armIccPicker(path: string | null): void {
     iccPickerIntercepted = true;
   }
   armedIccPick = { path };
+}
+
+/**
+ * The two native RASTER pickers: the signature capture dialog's import door
+ * (`pickImageFile`) and the stamp appearance section's logo (`pickWatermarkImage`).
+ *
+ * One armed answer serves both, because a spec never has both open at once and
+ * the question each asks is the same one. Answered at the DIALOG, so the decode,
+ * the background removal, the aspect measurement and the refusal branches are
+ * all the shipped ones.
+ */
+let armedImagePick: { path: string | null } | null = null;
+let imagePickerIntercepted = false;
+
+function armImagePicker(path: string | null): void {
+  if (!imagePickerIntercepted) {
+    const nativeImage = dialog.pickImageFile;
+    const nativeWatermark = dialog.pickWatermarkImage;
+    dialog.pickImageFile = async (includeSvg?: boolean) => {
+      const armed = armedImagePick;
+      if (!armed) return nativeImage(includeSvg);
+      armedImagePick = null;
+      return armed.path;
+    };
+    dialog.pickWatermarkImage = async () => {
+      const armed = armedImagePick;
+      if (!armed) return nativeWatermark();
+      armedImagePick = null;
+      return armed.path;
+    };
+    imagePickerIntercepted = true;
+  }
+  armedImagePick = { path };
 }
 
 /**
@@ -2029,6 +2070,23 @@ export interface TestHarness {
    * that opens it, so the browse handler, its probe and its store-or-refuse
    * decision are all the shipped ones. */
   answerAnyFilePicker: (path: string | null) => void;
+  /** Answer the next native raster pick — the signature capture dialog's
+   * import door or the stamp appearance section's logo — with this path, or
+   * with `null` for a cancelled one. Consumed by a single pick. */
+  answerImagePicker: (path: string | null) => void;
+  /**
+   * Re-read the colour-profile assent record from disk and re-take the
+   * launch decision.
+   *
+   * The record is a FILE beside the executable, so a spec arranges the
+   * unanswered state by removing it — but the read happens once at launch and
+   * a session that already answered has cached it. This drops the cache, runs
+   * the real Rust read, and opens the licence dialog through the app's own
+   * predicate when the answer that lands is "unrecorded".
+   */
+  iccAssentRefresh: () => Promise<IccAssentState>;
+  /** The renderer's current assent answer, without waiting. */
+  iccAssentSnapshot: () => IccAssentState;
   /** Watermark panel (panel must be mounted): select the PDF source and set
    * the file and page a native picker would have set. Apply is still clicked. */
   watermarkSetPdfSource: (path: string, page?: number) => void;
@@ -3528,6 +3586,20 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     },
     gsAnswer: () => gsCapability(),
     answerAnyFilePicker: (path) => armAnyFilePicker(path),
+    answerImagePicker: (path) => armImagePicker(path),
+    iccAssentRefresh: async () => {
+      // Drop the session's cached answer WITHOUT `resetIccAssent` — that one
+      // also clears the subscriber set and the dialog opener App registered at
+      // mount, which no later render restores. Un-pinning publishes the pending
+      // state and re-runs the REAL Rust read against whatever is on disk now.
+      pinIccAssent(null);
+      const state = await ensureIccAssent();
+      // The launch decision, re-taken: the app's own predicate and the app's
+      // own opener. Nothing here knows which dialog it is opening.
+      if (iccNeedsAssent(state)) openIccLicense();
+      return state;
+    },
+    iccAssentSnapshot: () => iccAssent(),
     watermarkSetPdfSource: (path, page) => {
       if (!watermarkPanel) {
         const msg = 'watermarkSetPdfSource: panel not mounted';
