@@ -576,7 +576,7 @@ def render_separations(
         font_dir if _carries_form_fields(file) else "",
     )
     marker = out_dir / "plates.done"
-    if reuse and marker.is_file():
+    if reuse and _set_is_whole(out_dir, marker):
         os.utime(out_dir, None)
         return _describe_set(out_dir, inks, file, page, dpi, gs_path, overprint)
 
@@ -623,9 +623,52 @@ def render_separations(
         raise RuntimeError(f"Ghostscript separation render failed: {stderr or stdout}")
 
     described = _describe_set(out_dir, inks, file, page, dpi, gs_path, overprint)
-    marker.write_text("", encoding="ascii")
+    _write_manifest(marker, out_dir, described)
     _evict_old_sets(root)
     return described
+
+
+_MANIFEST_VERSION = 1
+
+# The files a plate set cannot be rebuilt without. `staged.pdf` and
+# `regenerated.pdf` are the coverage measurement's subject: with either gone
+# the measurement silently moves to the original document, which is a figure
+# about a different page than the plates carry.
+_SET_SIDECARS = ("staged.pdf", "regenerated.pdf")
+
+
+def _write_manifest(marker: Path, out_dir: Path, described: dict) -> None:
+    """Record what the set contains, so reuse can tell whole from decayed."""
+    marker.write_text(json.dumps({
+        "version": _MANIFEST_VERSION,
+        "plates": sorted(Path(p["file"]).name for p in described["plates"]),
+        "sidecars": sorted(n for n in _SET_SIDECARS if (out_dir / n).is_file()),
+    }), encoding="utf-8")
+
+
+def _set_is_whole(out_dir: Path, marker: Path) -> bool:
+    """Whether the cached set still holds every file it was written with.
+
+    Eviction removes a set with `ignore_errors=True`, so a partially removed
+    directory is a reachable state, and the pairing in `_describe_set` cannot
+    tell a plate that decayed out of a cached set from a colorant the page
+    declared but never painted — on a fresh render the second is the only
+    possibility, on reuse both are. A set that does not match its manifest is
+    therefore treated as absent and re-rendered; a marker carrying no manifest
+    (a set written by an earlier version) is absent for the same reason.
+    """
+    try:
+        stored = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(stored, dict) or stored.get("version") != _MANIFEST_VERSION:
+        return False
+    plates, sidecars = stored.get("plates"), stored.get("sidecars")
+    if not isinstance(plates, list) or not plates or not isinstance(sidecars, list):
+        return False
+    if {p.name for p in out_dir.glob("s1(*).tif")} != set(plates):
+        return False
+    return all((out_dir / str(name)).is_file() for name in sidecars)
 
 
 def _describe_set(out_dir: Path, inks: list[dict], file: str, page: int,
@@ -638,7 +681,9 @@ def _describe_set(out_dir: Path, inks: list[dict], file: str, page: int,
     preview. An expected plate that never appeared is the other case and is
     NOT a refusal — a colorant a page declares but never paints has no plate
     by construction, and the fold that would drop a painted one is caught by
-    its own marker before this runs.
+    its own marker before this runs. That reading holds only because the set
+    is known whole: on the reuse path `_set_is_whole` establishes it against
+    the manifest before this runs, and a decayed set is re-rendered instead.
     """
     written = {p.name: p for p in out_dir.glob("s1(*).tif")}
     expected: dict[str, dict] = {}
