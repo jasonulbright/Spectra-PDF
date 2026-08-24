@@ -869,6 +869,27 @@ def _raise_mapped_signing_refusal(certify: bool, existing: dict) -> None:
     ) from None
 
 
+def _refuse_unverifiable_output(verification: dict, field_name: str) -> None:
+    """Refuse a just-written signature that does not verify against its own
+    bytes.
+
+    The write is still in its temp file when this runs, so the refusal leaves
+    the original untouched. Selecting by field name rather than by "all
+    signatures" keeps an already-broken PRIOR signature from blocking a new,
+    correct one: only what this run produced is judged."""
+    written = next(
+        (s for s in verification["signatures"] if s.get("field") == field_name),
+        verification["signatures"][-1] if verification["signatures"] else None,
+    )
+    if written is not None and written.get("valid") and written.get("intact"):
+        return
+    raise ValueError(
+        "The signature this document was given does not verify against its own bytes, "
+        "so it was not written. The signing key produced a signature this document "
+        "cannot carry."
+    )
+
+
 def _seed_existing_field_lock(writer, field_name: str, spec: FieldMDPSpec) -> None:
     """Write the ``/Lock`` onto an existing signature field, in the same
     incremental revision the signature lands in — so the bytes carrying the lock
@@ -929,10 +950,15 @@ class StoreSigner(signers.Signer):
         key = self.signing_cert.public_key
         if key.algorithm == "ec":
             # DER SEQUENCE of two INTEGERs, each at worst one leading zero byte
-            # wider than the field, plus the two tag/length pairs and the
-            # sequence header.
+            # wider than the field. The SEQUENCE header is NOT a fixed two
+            # bytes: a payload of 128 or more takes the long form, which P-521
+            # reaches (2 * (67 + 2) = 138 → 0x30 0x81 0x8A, 141 in all). A
+            # placeholder sized for the short form truncates the signature.
             field = (key.bit_size + 7) // 8
-            return 2 * (field + 1) + 6
+            integer = field + 1 + 2
+            payload = 2 * integer
+            header = 2 if payload < 0x80 else 2 + (payload.bit_length() + 7) // 8
+            return payload + header
         return (key.bit_size + 7) // 8
 
     async def async_sign_raw(self, data: bytes, digest_algorithm: str, dry_run=False) -> bytes:
@@ -1363,6 +1389,13 @@ def sign_pdf(
         # verification is the output's — computed while a failure is still fully
         # recoverable.
         verification = verify_signatures(tmp_name)
+        # Fail closed on the verdict, not only on an exception: a signature
+        # that does not verify against its own bytes is broken output, and
+        # letting it land while merely reporting `valid: false` puts a file the
+        # user believes is signed where the original was. `valid`/`intact` are
+        # crypto-and-coverage facts, independent of trust anchors, so a
+        # self-signed or untrusted-but-correct signer still passes here.
+        _refuse_unverifiable_output(verification, field_name)
         # Read back out of the WRITTEN bytes, never echoed from the request —
         # the same discipline as the valid/intact fields beside it.
         written_certification = certification_of_file(tmp_name)

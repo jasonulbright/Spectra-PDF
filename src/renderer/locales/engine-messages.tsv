@@ -566,6 +566,7 @@ signatures.passwordRequiredPfxWill	exact	signatures	A password is required — t
 signatures.pemSignerNeedsBoth	exact	signatures	A PEM signer needs both the key file and the certificate file.
 signatures.pkcsModuleFoundGiven	exact	signatures	PKCS#11 module not found at the given path.
 signatures.pkcsSignerNeedsModule	exact	signatures	A PKCS#11 signer needs the module path, the token label, and the certificate label.
+signatures.signatureDocumentGivenDoes	exact	signatures	The signature this document was given does not verify against its own bytes, so it was not written. The signing key produced a signature this document cannot carry.
 signatures.signatureFieldAlreadyLocks	pattern	signatures	Signature field "{{field_name}}" already locks form fields on its own terms, and a signature cannot replace that. Sign it as it stands, or use a different field.
 signatures.signatureFieldAlreadySigned	pattern	signatures	Signature field "{{field_name}}" is already signed.
 signatures.signedOutputMustDifferent	exact	signatures	The signed output must be a different file from the input.
