@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useActiveFile } from '../hooks/useActiveFile';
 import { useEngine } from '../hooks/useEngine';
 import { useOperations } from '../hooks/useOperations';
-import { dialog } from '../lib/tauri-bridge';
+import { app, dialog } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerSignHandler, type SignatureVerifySnapshot } from '../testHarness';
@@ -37,6 +37,16 @@ import {
   type VerifyResult,
 } from '../lib/signatures';
 import { FieldLockControl } from '../components/FieldLockControl';
+import { StampAppearanceFields } from '../components/StampAppearanceFields';
+import { loadSignatureAssets, type SignatureAsset } from '../lib/signature-assets';
+import {
+  DEFAULT_STAMP_APPEARANCE,
+  resolveStampFace,
+  stampStyleParams,
+  STAMP_FACE_MISSING,
+  STAMP_FACE_UNREADABLE,
+  type StampAppearanceOptions,
+} from '../lib/stamp-appearance';
 import { readFormFields } from '../lib/forms';
 import {
   eutlProvenance,
@@ -90,6 +100,18 @@ function harnessCertify(params: {
     : DEFAULT_CERTIFY;
 }
 
+/** The two face refusals as sentences. Sentinels, never localized text, are
+ * what the resolver throws — control flow does not read display strings. */
+function stampFaceMessage(e: unknown): string {
+  if (e instanceof Error && e.message === STAMP_FACE_MISSING) {
+    return tChrome('panel.stamp.faceMissing');
+  }
+  if (e instanceof Error && e.message === STAMP_FACE_UNREADABLE) {
+    return tChrome('panel.stamp.faceUnreadable');
+  }
+  return e instanceof Error ? e.message : String(e);
+}
+
 /** The same for the field lock; an omitted action locks nothing. */
 function harnessLock(params: { lock?: LockAction; lockFields?: string[] }): LockOptions {
   return params.lock ? { action: params.lock, fields: params.lockFields ?? [] } : DEFAULT_LOCK;
@@ -131,6 +153,39 @@ export function SignaturesPanel(): React.ReactElement {
   // names come from the document rather than from typing.
   const [lock, setLock] = useState<LockOptions>(DEFAULT_LOCK);
   const [lockableFields, setLockableFields] = useState<string[]>([]);
+  // The visible stamp's appearance, and the two things resolving it needs:
+  // the saved personal signatures it can draw as a face, and the app's fonts
+  // directory a typed face is set from.
+  const [stampAppearance, setStampAppearance] = useState<StampAppearanceOptions>(
+    DEFAULT_STAMP_APPEARANCE,
+  );
+  const [signatureAssets, setSignatureAssets] = useState<SignatureAsset[]>([]);
+  const [fontDir, setFontDir] = useState('');
+  useEffect(() => {
+    if (!showSign) return;
+    setSignatureAssets(loadSignatureAssets());
+    let cancelled = false;
+    void app
+      .getEditFontPath()
+      .then((dir) => {
+        if (!cancelled) setFontDir(dir);
+      })
+      // A typed face is the only thing this directory is needed for, and the
+      // engine refuses by name when it cannot read one. Nothing else in the
+      // form depends on it, so a failure here is not the form's failure.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [showSign]);
+
+  /** The appearance params, with the chosen face resolved. Throws the two
+   * face sentinels so a caller surfaces them as its own refusal — a signature
+   * carrying a mark the user did not choose is the outcome this prevents. */
+  const appearanceParams = useCallback((): Record<string, unknown> => {
+    const face = resolveStampFace(stampAppearance.signatureAssetId, signatureAssets);
+    return stampStyleParams(stampAppearance, face, fontDir);
+  }, [stampAppearance, signatureAssets, fontDir]);
 
   // Trust management: user-chosen CA anchors, plus an explicit opt-in to the
   // OS certificate store and one to the bundled EU trusted lists. All
@@ -197,6 +252,7 @@ export function SignaturesPanel(): React.ReactElement {
     setSignError(null);
     setCertify(DEFAULT_CERTIFY);
     setLock(DEFAULT_LOCK);
+    setStampAppearance(DEFAULT_STAMP_APPEARANCE);
   }, [path]);
 
   // The names a lock can choose from. Signature fields are excluded — a lock
@@ -235,6 +291,7 @@ export function SignaturesPanel(): React.ReactElement {
       profile?: { pades?: boolean; tsaUrl?: string; ltv?: boolean },
       certification: CertifyOptions = DEFAULT_CERTIFY,
       fieldLock: LockOptions = DEFAULT_LOCK,
+      stampParams: Record<string, unknown> = {},
     ): Promise<SignResult> => {
       if (!activeFile) throw new Error(tChrome('refusal.file.noActiveToSign'));
       return (await call('sign_pdf', {
@@ -251,6 +308,10 @@ export function SignaturesPanel(): React.ReactElement {
         ...(profile?.ltv ? { embed_revocation: true, ...trustVerifyParams(trust) } : {}),
         ...certifyParams(certification),
         ...lockParams(fieldLock),
+        // The appearance travels every placement — visible stamp, existing
+        // field, and (below) in place — and is absent from the request when
+        // it is the default one.
+        ...stampParams,
       })) as unknown as SignResult;
     },
     [activeFile, call, trust],
@@ -271,6 +332,13 @@ export function SignaturesPanel(): React.ReactElement {
       setSignError(tChrome('panel.sig.enterPassword'));
       return;
     }
+    let stampParams: Record<string, unknown>;
+    try {
+      stampParams = appearanceParams();
+    } catch (e: unknown) {
+      setSignError(stampFaceMessage(e));
+      return;
+    }
     const suggested = activeFile.name.replace(/\.pdfx?$/i, '') + '-signed.pdf';
     signingRef.current = true;
     setSigning(true);
@@ -284,6 +352,7 @@ export function SignaturesPanel(): React.ReactElement {
         { pades, tsaUrl, ltv },
         certify,
         lock,
+        stampParams,
       );
       setSignResult(res);
       if (source.mode === 'store' && source.thumbprint) rememberStoreCertificate(source.thumbprint);
@@ -298,7 +367,7 @@ export function SignaturesPanel(): React.ReactElement {
       signingRef.current = false;
       setSigning(false);
     }
-  }, [activeFile, source, password, reason, location, doSign, pades, tsaUrl, ltv, certify, lock]);
+  }, [activeFile, source, password, reason, location, doSign, pades, tsaUrl, ltv, certify, lock, appearanceParams]);
 
   // The core in-place sign, shared by the UI handler and the e2e harness
   // hook (the native .pfx picker is not WebDriver-drivable, exactly as doSign).
@@ -315,6 +384,7 @@ export function SignaturesPanel(): React.ReactElement {
       loc?: string,
       certification: CertifyOptions = DEFAULT_CERTIFY,
       fieldLock: LockOptions = DEFAULT_LOCK,
+      stampParams: Record<string, unknown> = {},
     ): Promise<VerifyResult> => {
       if (!activeFile) throw new Error(tChrome('refusal.file.noActiveToSign'));
       await performOperation(activeFile.path, 'sign_pdf', {
@@ -331,6 +401,7 @@ export function SignaturesPanel(): React.ReactElement {
         ...(ltv ? { embed_revocation: true, ...trustVerifyParams(trust) } : {}),
         ...certifyParams(certification),
         ...lockParams(fieldLock),
+        ...stampParams,
       });
       // The now-signed working copy (same path, new bytes) re-verifies under
       // the same trust configuration the panel is displaying.
@@ -354,12 +425,19 @@ export function SignaturesPanel(): React.ReactElement {
       setSignError(tChrome('panel.sig.enterPassword'));
       return;
     }
+    let stampParams: Record<string, unknown>;
+    try {
+      stampParams = appearanceParams();
+    } catch (e: unknown) {
+      setSignError(stampFaceMessage(e));
+      return;
+    }
     signInPlaceRef.current = true;
     setSigning(true);
     setSignError(null);
     setSignResult(null);
     try {
-      const v = await doSignInPlace(resolved.params!, password, reason, location, certify, lock);
+      const v = await doSignInPlace(resolved.params!, password, reason, location, certify, lock, stampParams);
       setResult(v); // the new signature lists immediately
       if (source.mode === 'store' && source.thumbprint) rememberStoreCertificate(source.thumbprint);
       setShowSign(false);
@@ -370,7 +448,7 @@ export function SignaturesPanel(): React.ReactElement {
       signInPlaceRef.current = false;
       setSigning(false);
     }
-  }, [activeFile, source, password, reason, location, doSignInPlace, certify, lock]);
+  }, [activeFile, source, password, reason, location, doSignInPlace, certify, lock, appearanceParams]);
 
   // e2e-only: register the real sign call so the harness can drive it with
   // injected paths (the native dialogs can't be driven by WebDriver).
@@ -732,6 +810,17 @@ export function SignaturesPanel(): React.ReactElement {
             value={lock}
             onChange={setLock}
             fieldNames={lockableFields}
+            idPrefix="sign"
+          />
+          <StampAppearanceFields
+            value={stampAppearance}
+            onChange={setStampAppearance}
+            assets={signatureAssets}
+            fontDir={fontDir}
+            signer={tChrome('panel.stamp.previewSigner')}
+            reason={reason}
+            location={location}
+            call={call}
             idPrefix="sign"
           />
           {signError && <div className="text-xs text-red-400">{signError}</div>}

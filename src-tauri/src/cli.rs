@@ -2060,6 +2060,28 @@ pub struct SignArgs {
     /// that scopes a subtree locks everything beneath it.
     #[arg(long = "lock-field", requires = "lock")]
     pub lock_field: Vec<String>,
+    /// Logo or background image for the visible stamp (PNG or JPEG). Its
+    /// aspect ratio is preserved.
+    #[arg(long = "stamp-image", value_name = "PATH")]
+    pub stamp_image: Option<PathBuf>,
+    /// Which lines the visible stamp renders, comma-separated and in this
+    /// order: name, date, reason, location, label. Defaults to
+    /// name,date,reason,location.
+    #[arg(long = "stamp-fields", value_name = "LIST")]
+    pub stamp_fields: Option<String>,
+    /// Where --stamp-image sits: over (behind the text) | beside it.
+    #[arg(long = "stamp-layout", value_parser = ["over", "beside"])]
+    pub stamp_layout: Option<String>,
+    /// Free text for the stamp's "label" line.
+    #[arg(long = "stamp-label", value_name = "TEXT")]
+    pub stamp_label: Option<String>,
+    /// A personal signature to draw as the stamp's face, named by FILE: a PNG
+    /// or JPEG, or a signature exported from the app as .json. The app's own
+    /// signature store lives in the window's local settings, which a
+    /// command-line run has no window to read — so this names a file rather
+    /// than a stored signature.
+    #[arg(long = "stamp-signature", value_name = "FILE")]
+    pub stamp_signature: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -4779,6 +4801,40 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             if args.eutl_trust {
                 params["eutl_trust"] = json!(true);
             }
+            // The stamp's appearance. Assembled only when something was
+            // asked for, so an unconfigured signing request reaches the
+            // engine exactly as it did before appearances existed.
+            let mut stamp_style = serde_json::Map::new();
+            if let Some(image) = &args.stamp_image {
+                stamp_style.insert(
+                    "image".into(),
+                    json!({ "path": abs(image).to_string_lossy() }),
+                );
+            }
+            if let Some(list) = &args.stamp_fields {
+                let names: Vec<String> = list
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                stamp_style.insert("fields".into(), json!(names));
+            }
+            if let Some(layout) = &args.stamp_layout {
+                stamp_style.insert("layout".into(), json!(layout));
+            }
+            if let Some(label) = &args.stamp_label {
+                stamp_style.insert("label".into(), json!(label));
+            }
+            if let Some(sig) = &args.stamp_signature {
+                stamp_style.insert(
+                    "signature".into(),
+                    json!({ "file": abs(sig).to_string_lossy() }),
+                );
+            }
+            if !stamp_style.is_empty() {
+                params["stamp_style"] = serde_json::Value::Object(stamp_style);
+                params["font_dir"] = json!(resolve_fonts().to_string_lossy().to_string());
+            }
             engine.call("sign_pdf", params)
         }
 
@@ -5846,6 +5902,48 @@ mod tests {
             "--store-cert", "AABB", "--store-machine",
         ])
         .is_ok());
+    }
+
+    // ── sign --stamp-* (the visible stamp's appearance) ───────────────────
+
+    #[test]
+    fn the_stamp_appearance_flags_parse_together() {
+        let cli = parse(&[
+            "spectrapdf", "sign", "in.pdf", "-o", "out.pdf", "--pfx", "s.pfx",
+            "--stamp-image", "logo.png",
+            "--stamp-fields", "name, date ,label",
+            "--stamp-layout", "beside",
+            "--stamp-label", "Approved for release",
+            "--stamp-signature", "jane.json",
+        ]);
+        let Some(CliCommand::Sign(args)) = cli.command else { panic!("not sign") };
+        assert_eq!(args.stamp_image.as_deref(), Some(Path::new("logo.png")));
+        assert_eq!(args.stamp_fields.as_deref(), Some("name, date ,label"));
+        assert_eq!(args.stamp_layout.as_deref(), Some("beside"));
+        assert_eq!(args.stamp_label.as_deref(), Some("Approved for release"));
+        assert_eq!(args.stamp_signature.as_deref(), Some(Path::new("jane.json")));
+    }
+
+    #[test]
+    fn an_unknown_stamp_layout_is_refused_by_the_parser() {
+        assert!(Cli::try_parse_from([
+            "spectrapdf", "sign", "in.pdf", "-o", "out.pdf", "--pfx", "s.pfx",
+            "--stamp-layout", "sideways",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn a_signature_without_stamp_flags_stays_unconfigured() {
+        // The appearance is assembled only when something asked for it, so
+        // the ordinary request is byte-for-byte the request it always was.
+        let cli = parse(&["spectrapdf", "sign", "in.pdf", "-o", "out.pdf", "--pfx", "s.pfx"]);
+        let Some(CliCommand::Sign(args)) = cli.command else { panic!("not sign") };
+        assert!(args.stamp_image.is_none());
+        assert!(args.stamp_fields.is_none());
+        assert!(args.stamp_layout.is_none());
+        assert!(args.stamp_label.is_none());
+        assert!(args.stamp_signature.is_none());
     }
 
     #[test]

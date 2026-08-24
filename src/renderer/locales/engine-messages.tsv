@@ -615,6 +615,23 @@ split.pagesPerFileMust	pattern	split	pages per file must be a whole number, got 
 split.pagesPerFileMust2	pattern	split	pages per file must be at least 1, got {{every_n}}
 split.splitModeMustOne	pattern	split	split mode must be one of {{v0}}, got {{mode}}
 split.splitNeedsOutputFolder	exact	split	split needs an output folder
+stamp_appearance.chosenSignatureFaceCannot	exact	stamp_appearance	The chosen signature face cannot set that name — choose another face, or draw or import the signature instead.
+stamp_appearance.chosenSignatureStrokesDraw	exact	stamp_appearance	The chosen signature has no strokes to draw.
+stamp_appearance.chosenSignatureUsableShape	exact	stamp_appearance	The chosen signature has no usable shape — capture or import it again.
+stamp_appearance.mustOne	pattern	stamp_appearance	{{what}} must be one of {{v1}}, not "{{value}}".
+stamp_appearance.oneSignatureFacesShip	pattern	stamp_appearance	"{{file_name}}" is not one of the signature faces that ship with the app.
+stamp_appearance.signatureFaceCouldRead	pattern	stamp_appearance	The signature face "{{file_name}}" could not be read from the app's fonts folder — the installation is incomplete.
+stamp_appearance.signatureFileCouldRead	pattern	stamp_appearance	The signature file "{{path}}" could not be read.
+stamp_appearance.signatureFileReadablePng	pattern	stamp_appearance	The signature file "{{path}}" is not a readable PNG, JPEG, or exported signature.
+stamp_appearance.signatureFileReadableSignature	pattern	stamp_appearance	The signature file "{{path}}" is not a readable signature.
+stamp_appearance.signatureStampDoesFit	exact	stamp_appearance	The signature stamp does not fit in that box — make the box bigger, or leave out the image, the signature, or some of the text lines.
+stamp_appearance.signatureStampLineChoose	pattern	stamp_appearance	"{{name}}" is not a signature stamp line — choose from {{v1}}.
+stamp_appearance.stampImageCouldRead	pattern	stamp_appearance	The stamp image "{{path}}" could not be read — check that the file exists and is a PNG or JPEG.
+stamp_appearance.stampImageCouldRead2	exact	stamp_appearance	The stamp image could not be read — it is not a readable PNG or JPEG.
+stamp_appearance.stampImageCouldRead3	exact	stamp_appearance	The stamp image could not be read — it is not valid image data.
+stamp_appearance.stampImageFileUse	pattern	stamp_appearance	The stamp image is a {{kind}} file — use a PNG or a JPEG.
+stamp_appearance.stampImageNeedsFile	exact	stamp_appearance	The stamp image needs a file path or image data.
+stamp_appearance.typedSignatureTextSet	exact	stamp_appearance	The typed signature has no text to set.
 struct_audit.namespaceDictionaryDeclaresName	exact	struct_audit	the namespace dictionary declares no name
 struct_audit.nsEntryNamespaceDictionary	exact	struct_audit	the /NS entry is not a namespace dictionary
 struct_fix.headerScopeHeaderCell	pattern	struct_fix,struct_tree	"{{scope}}" is not a header scope; a header cell reads Row, Column or Both.

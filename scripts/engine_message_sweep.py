@@ -72,6 +72,7 @@ PUBLIC_EXCEPTIONS = frozenset(
         "FieldSpecError",
         "OutlineRefusal",
         "GsUnavailable",
+        "StampAppearanceRefusal",
     }
 )
 
