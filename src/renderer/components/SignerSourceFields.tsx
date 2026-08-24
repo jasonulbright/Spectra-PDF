@@ -229,7 +229,12 @@ export function SignerSourceFields({
             <button
               key={m}
               data-testid={`${idPrefix}-source-${m}`}
-              onClick={() =>
+              onClick={() => {
+                // Picking the source already picked changes nothing. A fresh
+                // empty source would DISCARD the chosen certificate or path,
+                // and the store's pre-select is keyed on ENTERING the mode —
+                // it does not run again to put the selection back.
+                if (value.mode === m) return;
                 onChange(
                   m === 'pfx'
                     ? { mode: 'pfx', pfxPath: null }
@@ -238,8 +243,8 @@ export function SignerSourceFields({
                       : m === 'store'
                         ? { mode: 'store', thumbprint: null, machineStore: false }
                         : { mode: 'pkcs11', modulePath: null, tokenLabel: '', certLabel: '', keyLabel: '' },
-                )
-              }
+                );
+              }}
               className={`px-2.5 py-1 text-xs font-medium ${
                 value.mode === m
                   ? 'bg-neutral-600 text-neutral-100'
