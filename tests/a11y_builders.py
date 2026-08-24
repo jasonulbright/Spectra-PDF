@@ -661,6 +661,52 @@ def field_in_role_mapped_form_ok(path):
     return save(pdf, path)
 
 
+def _nested_tagged_field(pdf, page, doc, outer, inner, widget_extra=None):
+    """A widget held by an `inner` element that is itself inside `outer`.
+
+    The `outer` element carries a TITLE, not a description: it keeps that
+    element's own alt-text check quiet so the only verdict these fixtures move
+    is the nesting one.
+    """
+    field = _annot(pdf, page, "Widget", [300, 500, 500, 520], FT=Name.Tx,
+                   T=String("name"), **(widget_extra or {}))
+    outer_elem = elem(pdf, outer, doc, page=page, T=String("Name field"))
+    held = elem(pdf, inner, outer_elem, page=page,
+                kids=[Dictionary(Type=Name.OBJR, Obj=field)])
+    outer_elem[Name.K] = Array([held])
+    doc[Name.K] = Array(list(doc[Name.K]) + [outer_elem])
+    pdf.Root[Name.AcroForm] = pdf.make_indirect(
+        Dictionary(Fields=Array([field]), DA=String("/Helv 0 Tf 0 g"))
+    )
+    return field
+
+
+def field_in_form_via_span_ok(path):
+    """PASS fixture — ISO 14289-1 7.18.4 asks for the widget to be NESTED
+    WITHIN a `Form`, not held directly by one: the `Span` between them does
+    not move the widget out of the `Form`."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    root, doc = _one_tagged_paragraph(pdf, page)
+    _nested_tagged_field(pdf, page, doc, "Form", "Span",
+                         widget_extra={"TU": String("Your full name")})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def field_in_p_inside_form_ok(path):
+    """PASS fixture — the same `P` that fails under a `Document`
+    (`field_tagged_outside_form`) passes inside a `Form`. What the check
+    reads is the enclosure, not the holder's own role."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    root, doc = _one_tagged_paragraph(pdf, page)
+    _nested_tagged_field(pdf, page, doc, "Form", "P",
+                         widget_extra={"TU": String("Your full name")})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
 def field_no_tu(path):
     """The `Form` element carries a TITLE, not a description: it keeps the
     element's own check quiet while leaving the field unnamed, so the one
@@ -1545,6 +1591,10 @@ ROSTER = {
     "field_tagged_outside_form": (field_tagged_outside_form, "tagged_form_fields", "fail"),
     "field_in_role_mapped_form_ok": (
         field_in_role_mapped_form_ok, "tagged_form_fields", "pass"),
+    "field_in_form_via_span_ok": (
+        field_in_form_via_span_ok, "tagged_form_fields", "pass"),
+    "field_in_p_inside_form_ok": (
+        field_in_p_inside_form_ok, "tagged_form_fields", "pass"),
     "field_no_tu": (field_no_tu, "field_descriptions", "fail"),
     "field_named_by_element_ok": (field_named_by_element_ok, "field_descriptions", "pass"),
     "hidden_field_ok": (hidden_field_ok, "field_descriptions", "not_applicable"),
