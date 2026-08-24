@@ -181,6 +181,17 @@ let openDialogInflight: Promise<string[]> | null = null;
 let saveDialogInflight: Promise<string | null> | null = null;
 let createPdfDialogInflight: Promise<string[]> | null = null;
 
+/** One row of the Windows certificate store's signing-capable certificates. */
+export interface StoreCertificate {
+  thumbprint: string;
+  subject: string;
+  issuer: string;
+  not_after: string;
+  eku: string[];
+  hardware_backed: boolean;
+  machine_store: boolean;
+}
+
 export const dialog = {
   openFiles: () => {
     if (!openDialogInflight) {
@@ -218,6 +229,14 @@ export const dialog = {
   pickPemFile: () => invoke<string | null>('pick_pem_file'),
   pickIccFile: () => invoke<string | null>('pick_icc_file'),
   pickPkcs11Module: () => invoke<string | null>('pick_pkcs11_module'),
+  /**
+   * Certificates in the Windows certificate store that can sign a document.
+   *
+   * Read-only and key-free: the rows describe certificates, and the only
+   * thing a signing request later carries is a thumbprint. Enumeration runs
+   * under a silent context, so opening the picker never raises a PIN prompt.
+   */
+  listStoreCertificates: () => invoke<StoreCertificate[]>('list_store_certificates'),
   /** Pick ANY file to embed as a PDF attachment (no extension filter). */
   pickAnyFile: () => invoke<string | null>('pick_any_file'),
   /** Pick MULTIPLE files of any type (portfolio members). Empty if cancelled. */
@@ -633,6 +652,20 @@ export const app = {
    * Rust owns the resource path, and the engine reads the profiles itself —
    * the bytes never cross this boundary. */
   getIccPath: () => invoke<string>('get_icc_path'),
+  /** Whether the bundled profiles' licence has been accepted, and whether this
+   * container can ask. See `lib/icc-assent.ts`; the shape is
+   * `portable::AssentState`. */
+  iccAssentState: () =>
+    invoke<{ portable: boolean; assent: string; licensePath: string }>('icc_assent_state'),
+  /** The Exhibit B text, read from the file the profiles ship beside — the
+   * same file the installer's licence page presents. */
+  iccLicenseText: () => invoke<string>('icc_license_text'),
+  /** Records the answer, drops the running engine so the next call carries it,
+   * and returns the new state. */
+  recordIccAssent: (accepted: boolean) =>
+    invoke<{ portable: boolean; assent: string; licensePath: string }>('record_icc_assent', {
+      accepted,
+    }),
   getDictionaryPath: () => invoke<string>('get_dictionary_path'),
   /** The managed folder a user's own dictionaries are copied into (Rust owns
    *  the path, so an added dictionary outlives the folder it came from). */

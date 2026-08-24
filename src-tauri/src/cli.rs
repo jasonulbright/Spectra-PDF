@@ -1956,10 +1956,11 @@ pub struct VerifySignaturesArgs {
 #[derive(Args)]
 pub struct SignArgs {
     /// Input PDF file
-    pub input: PathBuf,
+    #[arg(required_unless_present = "list_store_certs")]
+    pub input: Option<PathBuf>,
     /// Output PDF file (must differ from the input; signing appends a revision)
-    #[arg(short, long)]
-    pub output: PathBuf,
+    #[arg(short, long, required_unless_present = "list_store_certs")]
+    pub output: Option<PathBuf>,
     /// PKCS#12 (.pfx/.p12) signer file (key + certificate)
     #[arg(long, conflicts_with_all = ["key", "cert"])]
     pub pfx: Option<PathBuf>,
@@ -2028,6 +2029,18 @@ pub struct SignArgs {
     /// Private-key label on the token (defaults to the certificate label)
     #[arg(long, requires = "pkcs11_module")]
     pub key_label: Option<String>,
+    /// Sign with a certificate from the Windows certificate store, named by
+    /// its SHA-1 thumbprint. The private key never leaves the platform, and
+    /// Windows collects any PIN or consent itself — never this program.
+    #[arg(long, conflicts_with_all = ["pfx", "key", "cert", "pkcs11_module"])]
+    pub store_cert: Option<String>,
+    /// Read the machine certificate store rather than the current user's.
+    #[arg(long, requires = "store_cert")]
+    pub store_machine: bool,
+    /// List the certificates in the Windows certificate store that can sign,
+    /// and exit. Takes no input or output file.
+    #[arg(long, conflicts_with_all = ["pfx", "key", "cert", "pkcs11_module", "store_cert"])]
+    pub list_store_certs: bool,
     /// Apply a CERTIFICATION (author) signature, which records what may change
     /// in the document afterwards. At most one per document, and it must be the
     /// document's first signature.
@@ -2683,6 +2696,12 @@ impl CliEngine {
             // engine reconfigures its own stdio too; both halves shipped
             // together after a live mojibake repro on non-ASCII form values).
             .env("PYTHONUTF8", "1")
+            // Same authority as the windowed spawn (engine.rs): this binary
+            // decides the container and the assent, and the engine is told.
+            .env(
+                crate::portable::ICC_ASSENT_ENV,
+                crate::portable::assent_env_value(crate::portable::icc_assent()),
+            )
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| format!("Failed to start engine: {}", e))?;
@@ -4631,12 +4650,24 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         }
 
         CliCommand::Sign(args) => {
+            // A store listing is not a signing run: it reads no document,
+            // takes no password, and must never touch stdin.
+            if args.list_store_certs {
+                let rows = crate::store_certs::list_certificates()?;
+                return Ok(json!({ "certificates": rows }));
+            }
+            let input = args.input.as_ref().expect("clap requires an input");
+            let output = args.output.as_ref().expect("clap requires an output");
             // Password from --password, else read one line from stdin (so a
             // script can pipe it without it landing in the process arg list or
             // shell history).
-            let password = match &args.password {
-                Some(p) => p.clone(),
-                None => {
+            let password = match (&args.password, args.store_cert.is_some()) {
+                (Some(p), _) => p.clone(),
+                // A store certificate carries no passphrase of ours, so
+                // reading stdin for one would block a script that correctly
+                // supplies nothing.
+                (None, true) => String::new(),
+                (None, false) => {
                     use std::io::Read;
                     let mut s = String::new();
                     std::io::stdin()
@@ -4646,14 +4677,15 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 }
             };
             let mut params = json!({
-                "file": abs(&args.input).to_string_lossy(),
-                "output": abs(&args.output).to_string_lossy(),
+                "file": abs(input).to_string_lossy(),
+                "output": abs(output).to_string_lossy(),
             });
             // A PKCS#11 source takes the password as its PIN; the
-            // file-based sources take it as the passphrase.
+            // file-based sources take it as the passphrase. A store
+            // certificate takes neither — Windows collects any secret itself.
             if args.pkcs11_module.is_some() {
                 params["pkcs11_pin"] = json!(password);
-            } else {
+            } else if args.store_cert.is_none() {
                 params["password"] = json!(password);
             }
             // Signer source: --pfx, --key + --cert, or a PKCS#11 token
@@ -4664,6 +4696,12 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 params["pkcs11_cert_label"] = json!(args.cert_label.as_deref().unwrap_or(""));
                 if let Some(kl) = &args.key_label {
                     params["pkcs11_key_label"] = json!(kl);
+                }
+            }
+            if let Some(thumbprint) = &args.store_cert {
+                params["store_cert"] = json!(thumbprint);
+                if args.store_machine {
+                    params["store_machine"] = json!(true);
                 }
             }
             if let Some(pfx) = &args.pfx {
@@ -5766,5 +5804,76 @@ mod tests {
         assert_eq!(icc.file_name().unwrap(), "icc");
         assert_eq!(icc.parent().unwrap(), exe_dir());
         assert_eq!(icc.parent(), resolve_fonts().parent());
+    }
+
+    // ── sign --store-cert / --list-store-certs ────────────────────────────
+
+    #[test]
+    fn a_store_certificate_is_one_signer_source_among_four() {
+        let cli = parse(&[
+            "spectrapdf", "sign", "in.pdf", "-o", "out.pdf", "--store-cert", "AABB",
+        ]);
+        let Some(CliCommand::Sign(args)) = cli.command else { panic!("not sign") };
+        assert_eq!(args.store_cert.as_deref(), Some("AABB"));
+        assert!(!args.store_machine);
+        assert!(args.pfx.is_none() && args.pkcs11_module.is_none());
+    }
+
+    #[test]
+    fn a_store_certificate_conflicts_with_every_other_source() {
+        for other in [
+            vec!["--pfx", "s.pfx"],
+            vec!["--key", "k.pem", "--cert", "c.pem"],
+            vec!["--pkcs11-module", "m.dll", "--token-label", "t", "--cert-label", "c"],
+        ] {
+            let mut args = vec!["spectrapdf", "sign", "in.pdf", "-o", "out.pdf", "--store-cert", "AABB"];
+            args.extend(other);
+            assert!(
+                Cli::try_parse_from(&args).is_err(),
+                "two signer sources must not parse: {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_machine_store_flag_needs_a_store_certificate() {
+        assert!(Cli::try_parse_from([
+            "spectrapdf", "sign", "in.pdf", "-o", "out.pdf", "--store-machine",
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "spectrapdf", "sign", "in.pdf", "-o", "out.pdf",
+            "--store-cert", "AABB", "--store-machine",
+        ])
+        .is_ok());
+    }
+
+    #[test]
+    fn listing_the_store_needs_no_document() {
+        // The listing reads no PDF, so demanding an input and an output would
+        // make the scripting flag unusable for what it is for.
+        let cli = parse(&["spectrapdf", "sign", "--list-store-certs"]);
+        let Some(CliCommand::Sign(args)) = cli.command else { panic!("not sign") };
+        assert!(args.list_store_certs);
+        assert!(args.input.is_none() && args.output.is_none());
+    }
+
+    #[test]
+    fn signing_still_demands_an_input_and_an_output() {
+        assert!(Cli::try_parse_from(["spectrapdf", "sign", "in.pdf"]).is_err());
+        assert!(Cli::try_parse_from(["spectrapdf", "sign", "-o", "out.pdf"]).is_err());
+    }
+
+    #[test]
+    fn listing_the_store_excludes_every_signer_source() {
+        assert!(Cli::try_parse_from([
+            "spectrapdf", "sign", "--list-store-certs", "--store-cert", "AABB",
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "spectrapdf", "sign", "in.pdf", "-o", "out.pdf",
+            "--list-store-certs", "--pfx", "s.pfx",
+        ])
+        .is_err());
     }
 }

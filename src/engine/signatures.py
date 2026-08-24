@@ -15,8 +15,10 @@ authority", never as fully trusted. PAdES/LTV/TSA are not implemented; an
 arm's-length AGPL subprocess is the documented integration path.
 
 Signing (``sign_pdf``) is shipped:
-signer sources are a .pfx/.p12 (``_load_signer_from_pfx``) or a PEM key +
-certificate pair with key-match validation (``_load_signer_from_pem``);
+signer sources are a .pfx/.p12 (``_load_signer_from_pfx``), a PEM key +
+certificate pair with key-match validation (``_load_signer_from_pem``), a
+PKCS#11 token, or a certificate in the Windows certificate store whose key
+never leaves the platform (``StoreSigner`` over ``engine.wincert``);
 placement is invisible, a visible stamp rect, or an existing empty signature
 field (``--existing-field`` / sign-into-field); ``generate_signer`` creates
 an in-app self-signed identity.
@@ -64,7 +66,7 @@ from pyhanko.sign.general import SigningError
 from pyhanko.sign.timestamps import HTTPTimeStamper
 from pyhanko.sign.validation import validate_pdf_signature
 
-from engine import eutl, os_trust
+from engine import eutl, os_trust, wincert
 from engine.acroform import form_field_forest
 from engine.docmdp import LEVEL_BY_VALUE, VALUE_BY_LEVEL, certification_of_file
 from engine.docmdp_policy import DIFF_POLICY, LockedFieldModification
@@ -894,6 +896,81 @@ def _stamp_style(reason: str | None, location: str | None) -> "stamp.TextStampSt
     return stamp.TextStampStyle(stamp_text="\n".join(lines))
 
 
+class StoreSigner(signers.Signer):
+    """A signer whose private key stays inside the Windows certificate store.
+
+    pyHanko builds the PDF object, the byte range and the signed attributes and
+    then asks for ONE thing: the raw signature over those attribute bytes. That
+    request is the whole seam — the attributes are digested here and the digest
+    is handed to ``NCryptSignHash`` under a key handle the store owns, so every
+    placement (visible stamp, existing-field fill, in-place, PAdES, TSA, LTV,
+    DocMDP, FieldMDP) works with no path of its own.
+
+    The padding follows the mechanism pyHanko settled on for this digest rather
+    than a fixed choice, so an RSA key signs PKCS#1 v1.5 or PSS as asked and an
+    EC key signs ECDSA.
+
+    ``dry_run`` sizes the placeholder and must not touch the key: a hardware
+    key would raise its consent prompt twice, once for a signature that is
+    discarded.
+    """
+
+    def __init__(self, handle, **kwargs):
+        from asn1crypto import x509 as asn1_x509
+
+        cert = asn1_x509.Certificate.load(handle.certificate)
+        registry = SimpleCertificateStore()
+        registry.register_multiple(
+            [asn1_x509.Certificate.load(der) for der in handle.chain]
+        )
+        super().__init__(signing_cert=cert, cert_registry=registry, **kwargs)
+        self._handle = handle
+
+    def _raw_signature_size(self) -> int:
+        key = self.signing_cert.public_key
+        if key.algorithm == "ec":
+            # DER SEQUENCE of two INTEGERs, each at worst one leading zero byte
+            # wider than the field, plus the two tag/length pairs and the
+            # sequence header.
+            field = (key.bit_size + 7) // 8
+            return 2 * (field + 1) + 6
+        return (key.bit_size + 7) // 8
+
+    async def async_sign_raw(self, data: bytes, digest_algorithm: str, dry_run=False) -> bytes:
+        if dry_run:
+            return self._raw_signature_size() * b"\0"
+        import hashlib
+
+        mechanism = self.get_signature_mechanism_for_digest(digest_algorithm)
+        algorithm = mechanism.signature_algo
+        # PSS salt length is a property of the mechanism the CMS DECLARES, not
+        # a constant: signing with a salt the declaration does not name yields
+        # a signature that verifies against nothing.
+        pss_salt = (
+            int(mechanism["parameters"]["salt_length"].native)
+            if algorithm == "rsassa_pss"
+            else None
+        )
+        digest = hashlib.new(digest_algorithm, data).digest()
+        try:
+            raw = self._handle.sign_digest(
+                digest,
+                digest_algorithm,
+                pss_salt=pss_salt,
+                ecdsa=algorithm == "ecdsa",
+            )
+        except wincert.SigningCancelled:
+            # A turned-down prompt is the user's answer, so it leaves the same
+            # door every other signing refusal does rather than surfacing as a
+            # library failure.
+            raise ValueError(
+                "Signing was cancelled — Windows was not given permission to use the key."
+            ) from None
+        if algorithm == "ecdsa":
+            return wincert.ecdsa_der(raw)
+        return raw
+
+
 from contextlib import contextmanager
 
 
@@ -908,22 +985,45 @@ def _signer_source(
     pkcs11_pin: str,
     pkcs11_cert_label: str | None,
     pkcs11_key_label: str | None,
+    store_cert: str | None = None,
+    store_machine: bool = False,
 ):
     """Resolve EXACTLY ONE signer source, yielding a live signer (added
     the third source). File-based signers (PKCS#12 / PEM) resolve eagerly and
-    need no cleanup; a PKCS#11 signer holds an OPEN token session for the
-    whole signing operation — the reason this is a context manager. The PIN,
-    like the password, never lands in results, errors, or logs."""
+    need no cleanup; a PKCS#11 signer holds an OPEN token session and a
+    certificate-store signer holds an OPEN key handle for the whole signing
+    operation — the reason this is a context manager. The PIN, like the
+    password, never lands in results, errors, or logs; the store source has no
+    secret of ours to leak, because Windows collects any PIN itself."""
     have_pfx = bool(pfx_path)
     have_pem = bool(key_path) or bool(cert_path)
     have_p11 = bool(pkcs11_module) or bool(pkcs11_token) or bool(pkcs11_cert_label)
-    if sum([have_pfx, have_pem, have_p11]) > 1:
+    have_store = bool(store_cert)
+    if sum([have_pfx, have_pem, have_p11, have_store]) > 1:
         raise ValueError(
             "Choose ONE signer source: a .pfx file, a PEM key + certificate, "
-            "or a PKCS#11 token."
+            "a PKCS#11 token, or a certificate from the Windows certificate store."
         )
     if have_pem and not (key_path and cert_path):
         raise ValueError("A PEM signer needs both the key file and the certificate file.")
+    if have_store:
+        if not wincert.available():
+            raise ValueError("The Windows certificate store is not available on this system.")
+        try:
+            handle = wincert.StoreCertificate(store_cert, store_machine).open()
+        except wincert.StoreUnavailable:
+            raise ValueError(
+                "The Windows certificate store is not available on this system."
+            ) from None
+        except wincert.SigningCancelled:
+            raise ValueError(
+                "Signing was cancelled — Windows was not given permission to use the key."
+            ) from None
+        try:
+            yield StoreSigner(handle)
+        finally:
+            handle.close()
+        return
     if have_p11:
         if not (pkcs11_module and pkcs11_token and pkcs11_cert_label):
             raise ValueError(
@@ -980,7 +1080,7 @@ def _signer_source(
         return
     raise ValueError(
         "No signer given — provide a .pfx file, a PEM key + certificate, "
-        "or a PKCS#11 token."
+        "a PKCS#11 token, or a certificate from the Windows certificate store."
     )
 
 
@@ -1009,6 +1109,8 @@ def sign_pdf(
     pkcs11_pin: str = "",
     pkcs11_cert_label: str | None = None,
     pkcs11_key_label: str | None = None,
+    store_cert: str | None = None,
+    store_machine: bool = False,
     certify: bool = False,
     certify_level: str | None = None,
     lock: str | None = None,
@@ -1021,9 +1123,13 @@ def sign_pdf(
 
     Signer source: EXACTLY ONE of a PKCS#12 file (``pfx_path``), a PEM/DER
     key + certificate pair (``key_path`` + ``cert_path``; ``cert_path`` may be
-    a fullchain file), or a PKCS#11 token (``pkcs11_module`` +
+    a fullchain file), a PKCS#11 token (``pkcs11_module`` +
     ``pkcs11_token`` + ``pkcs11_cert_label``, optional ``pkcs11_key_label``
-    defaulting to the cert label, ``pkcs11_pin``). ``password`` unlocks the
+    defaulting to the cert label, ``pkcs11_pin``), or a certificate in the
+    Windows certificate store named by its SHA-1 thumbprint (``store_cert``,
+    ``store_machine`` to read the machine store instead of the user's). The
+    store source takes no secret from us at all: Windows collects any PIN or
+    consent itself, inside the sign call. ``password`` unlocks the
     file-based sources (empty string for an unencrypted PEM key); the PIN
     unlocks the token, and like the password it is NEVER placed in results,
     errors, or logs. Every signing feature below — visible stamps,
@@ -1057,6 +1163,10 @@ def sign_pdf(
             when ``existing_field`` is given.
         reason / location: Optional signature metadata (not secret).
         key_path / cert_path: PEM/DER signer files (alternative to pfx_path).
+        store_cert: SHA-1 thumbprint of a certificate in the Windows
+            certificate store. Its private key stays inside the platform —
+            only the signed-attributes digest crosses to it.
+        store_machine: read the machine store rather than the user's.
         appearance: Optional visible-stamp placement (see above).
         existing_field: Name of an existing empty signature field to fill.
         trust_roots: CA certificate files anchoring the signer's own chain
@@ -1115,6 +1225,7 @@ def sign_pdf(
     signer_cm = _signer_source(
         pfx_path, password, key_path, cert_path,
         pkcs11_module, pkcs11_token, pkcs11_pin, pkcs11_cert_label, pkcs11_key_label,
+        store_cert, store_machine,
     )
 
     placement = _validated_appearance(appearance, file) if appearance is not None else None
