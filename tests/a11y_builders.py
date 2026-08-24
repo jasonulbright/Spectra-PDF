@@ -108,9 +108,10 @@ def save(pdf, path):
 # ── document ──────────────────────────────────────────────────────────────
 
 
-def _one_tagged_paragraph(pdf, page, text="Readable body copy at eleven points."):
+def _one_tagged_paragraph(pdf, page, text="Readable body copy at eleven points.",
+                          role_map=None):
     draw(pdf, page, f"/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td ({text}) Tj ET EMC")
-    root = struct_root(pdf)
+    root = struct_root(pdf, role_map=role_map)
     doc = elem(pdf, "Document", root)
     para = elem(pdf, "P", doc, page=page, mcid=0)
     doc[Name.K] = Array([para])
@@ -613,16 +614,51 @@ def untagged_field(path):
     return save(pdf, path)
 
 
-def _tagged_field(pdf, page, doc, widget_extra=None, form_extra=None):
+def _tagged_field(pdf, page, doc, widget_extra=None, form_extra=None, tag="Form"):
     field = _annot(pdf, page, "Widget", [300, 500, 500, 520], FT=Name.Tx,
                    T=String("name"), **(widget_extra or {}))
-    tagged = elem(pdf, "Form", doc, page=page,
+    tagged = elem(pdf, tag, doc, page=page,
                   kids=[Dictionary(Type=Name.OBJR, Obj=field)], **(form_extra or {}))
     doc[Name.K] = Array(list(doc[Name.K]) + [tagged])
     pdf.Root[Name.AcroForm] = pdf.make_indirect(
         Dictionary(Fields=Array([field]), DA=String("/Helv 0 Tf 0 g"))
     )
     return field, tagged
+
+
+def field_in_form_ok(path):
+    """PASS fixture — ISO 14289-1 7.18.4: the widget is nested within a `Form`
+    tag, which is what the requirement asks for."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    root, doc = _one_tagged_paragraph(pdf, page)
+    _tagged_field(pdf, page, doc, widget_extra={"TU": String("Your full name")})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def field_tagged_outside_form(path):
+    """The widget IS in the structure tree — under a `P`. Tree membership is
+    not the requirement; ISO 14289-1 7.18.4 asks for a `Form` tag."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    root, doc = _one_tagged_paragraph(pdf, page)
+    _tagged_field(pdf, page, doc, tag="P",
+                  widget_extra={"TU": String("Your full name")})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def field_in_role_mapped_form_ok(path):
+    """PASS fixture — the enclosing element's type is a custom name that
+    `/RoleMap` maps to `Form`, so the element's role IS `Form`."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    root, doc = _one_tagged_paragraph(pdf, page, role_map={"Formulier": "Form"})
+    _tagged_field(pdf, page, doc, tag="Formulier",
+                  widget_extra={"TU": String("Your full name")})
+    make_conformant(pdf, page)
+    return save(pdf, path)
 
 
 def field_no_tu(path):
@@ -1505,6 +1541,10 @@ ROSTER = {
     "has_scripts": (has_scripts, "scripts", "needs_review"),
     "repetitive_links": (repetitive_links, "navigation_links", "needs_review"),
     "untagged_field": (untagged_field, "tagged_form_fields", "fail"),
+    "field_in_form_ok": (field_in_form_ok, "tagged_form_fields", "pass"),
+    "field_tagged_outside_form": (field_tagged_outside_form, "tagged_form_fields", "fail"),
+    "field_in_role_mapped_form_ok": (
+        field_in_role_mapped_form_ok, "tagged_form_fields", "pass"),
     "field_no_tu": (field_no_tu, "field_descriptions", "fail"),
     "field_named_by_element_ok": (field_named_by_element_ok, "field_descriptions", "pass"),
     "hidden_field_ok": (hidden_field_ok, "field_descriptions", "not_applicable"),
