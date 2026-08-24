@@ -826,6 +826,38 @@ describe('commitPageEdits (transactional)', () => {
       expectBufferMatchesDisk(fs);
     });
 
+    // The identity channel is a property of the PLAN, not of how the bytes
+    // landed: the append path rewrites the staged temp in place, so the
+    // old→new mapping dispatched with COMMIT_PAGE_EDITS is the same one the
+    // rewrite publishes whether the transplant applied, refused, or threw.
+    // A mapping published on only one of those paths would leave a
+    // page-tree edit that landed incrementally with stale positional ids.
+    it.each([
+      ['applied', async () => ({ applied: true as const })],
+      ['refused', async () => ({ applied: false as const, reason: 'catalog-changed' })],
+      ['threw', async () => { throw new Error('engine unavailable'); }],
+    ])('publishes the authored mapping when the transplant %s', async (_label, preserveSignatures) => {
+      const { files, workspace, dirtyPaths } = await signedState();
+      const plans = planCommit(workspace, files, dirtyPaths);
+      const fs = emptyFs();
+      await commitPageEdits({
+        workspace, files, dirtyPaths, ...makeDeps(fs),
+        preserveSignatures: preserveSignatures as never,
+        readBack: async () => TRANSPLANTED,
+      });
+      const action = fs.dispatched[0];
+      expect(action.type).toBe('COMMIT_PAGE_EDITS');
+      if (action.type !== 'COMMIT_PAGE_EDITS') return;
+      expect(action.updates.map((u) => u.authored.pages)).toEqual(
+        plans.map((p) => p.authoredPageIds),
+      );
+      expect(action.updates.map((u) => u.authored.documents)).toEqual(
+        plans.map((p) => p.authoredDocuments),
+      );
+      // And the ids are the real ones, not two empty arrays agreeing.
+      expect(action.updates[0].authored.pages.length).toBeGreaterThan(0);
+    });
+
     // The reason, not the boolean. A signed file whose append refused is
     // rewritten — it always was — and the difference between that and an
     // unsigned file is the only thing that tells the user a signature is gone.
