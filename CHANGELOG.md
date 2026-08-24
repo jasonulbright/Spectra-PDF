@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.1.8
+
+*Released 2026-08-24*
+
+### Signing with the Windows certificate store
+
+- Documents can now be signed with certificates from the Windows certificate store — no exporting to a PFX file. The private key never leaves Windows; hardware-backed keys prompt through Windows' own PIN dialog.
+- The certificate picker lists eligible personal and machine-store certificates with subject, issuer, expiry, and hardware-key labeling, and remembers the last-used certificate.
+- Store-based signing works with every existing signing feature: visible stamps, filling signature fields, PAdES, timestamping, long-term validation, certification, and field locks.
+- The command line gains `sign --store-cert`, `--store-machine`, and `--list-store-certs`.
+
+### Signature stamp appearances
+
+- Visible signature stamps can now carry a logo or background image, a choice of text lines (name, date, reason, location, or a custom line), and text-beside or text-over layouts.
+- A saved personal signature can be the stamp's face, drawn as vector artwork.
+- A live preview shows exactly what will be written, rendered by the same code that draws the real stamp.
+- Matching command-line options: `--stamp-image`, `--stamp-fields`, `--stamp-layout`, `--stamp-label`.
+
+### Personal signatures
+
+- A new Personal Signatures manager creates reusable signatures three ways: draw with the pointer, type a name in one of three bundled handwriting styles, or import a photographed signature with optional white-background removal.
+- Saved signatures place onto any page — drawn signatures land as vector ink, typed signatures embed their font — and integrate with undo and signed-document handling like every other edit.
+- Signatures are stored on this computer only and are written into a document only when explicitly placed.
+
+### Portable version
+
+- The release now includes a portable zip alongside the installer: extract and run, no installation. Settings, dictionaries, session state, and logs live beside the app instead of in the user profile.
+- The portable first run presents the bundled color-profile license for acceptance; declining leaves the app fully working with only the profile-dependent features disabled by name.
+- A missing WebView2 runtime is reported with a link to the official download instead of failing silently.
+- "Start with Windows" now repairs its own registry entry when the app has been moved.
+
+### Fixes
+
+- Bundled handwriting fonts and imported signature images now load correctly in the packaged app.
+- Image previews and thumbnails produced by the app itself render again in the packaged app.
+- The stamp-appearance live preview no longer reports an internal error.
+- Custom image stamps import correctly from any folder.
+- The signing panel no longer asks for a password when signing with a store certificate.
+
 ## 1.1.7
 
 *Released 2026-08-19*
