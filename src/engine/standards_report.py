@@ -105,6 +105,7 @@ FACT_NAMES = (
     "encryption",
     "page_marks",
     "images",
+    "standard_identifiers",
 )
 
 
@@ -243,6 +244,53 @@ def _images_in(resources, visited: set, depth: int) -> int:
     return total
 
 
+#: XMP namespaces whose presence DECLARES conformance with an ISO subset
+#: standard, by namespace URI. `pdfaid` is deliberately absent: writing it is
+#: the conversion's own job, so its arrival is not a loss to report.
+#: The value is (designation, required property). The designation is a name
+#: rather than UI copy and travels to the report untranslated, as a colorant
+#: name does. A required property of `None` means the namespace exists only to
+#: carry the declaration, so any use of it IS the declaration; a named one is
+#: for a namespace that also carries unrelated properties — Adobe's legacy
+#: `pdfx` is the general custom-property namespace, and only
+#: `GTS_PDFXVersion` inside it declares PDF/X.
+_IDENTIFIER_NAMESPACES = {
+    "http://www.aiim.org/pdfua/ns/id/": ("PDF/UA", None),
+    "http://www.npes.org/pdfx/ns/id/": ("PDF/X", None),
+    "http://ns.adobe.com/pdfx/1.3/": ("PDF/X", "GTS_PDFXVersion"),
+    "http://www.aiim.org/pdfe/ns/id/": ("PDF/E", None),
+    "http://www.npes.org/pdfvt/ns/id/": ("PDF/VT", None),
+    "http://pdfa.org/declarations/": ("PDF Declarations", None),
+}
+
+_XMLNS = re.compile(rb'xmlns:([A-Za-z_][-\w.]*)\s*=\s*["\']([^"\']+)["\']')
+
+
+def _standard_identifiers(pdf) -> list:
+    """The ISO subset standards the document's XMP declares, by designation.
+
+    A conversion producer rebuilds XMP from the base schemas it knows plus the
+    conformance key it writes itself, so an identifier the input carried can
+    vanish without the producer saying anything. The fact is the SET of
+    identifiers, read from the namespace declarations that are actually used:
+    a namespace declared and never referenced states nothing.
+    """
+    meta = pdf.Root.get("/Metadata")
+    if meta is None:
+        return []
+    raw = bytes(meta.read_bytes())
+    found: set = set()
+    for prefix, uri in _XMLNS.findall(raw):
+        entry = _IDENTIFIER_NAMESPACES.get(uri.decode("ascii", "replace"))
+        if entry is None:
+            continue
+        name, required = entry
+        tail = (required or "").encode("ascii") if required else rb"[A-Za-z_]"
+        if re.search(rb"[<\s]" + re.escape(prefix) + rb":" + tail, raw):
+            found.add(name)
+    return sorted(found)
+
+
 def census(path: str | Path) -> _Facts:
     """Every structural fact the comparison needs, read from one document."""
     facts = _Facts()
@@ -263,6 +311,7 @@ def census(path: str | Path) -> _Facts:
         facts.probe("encryption", lambda: bool(pdf.is_encrypted))
         facts.probe("page_marks", lambda: _page_marks(pdf))
         facts.probe("images", lambda: _image_count(pdf))
+        facts.probe("standard_identifiers", lambda: _standard_identifiers(pdf))
     return facts
 
 
@@ -355,6 +404,21 @@ def colorant_shadings_lost(colorants: list):
                 [{"name": n} for n in names])
 
 
+def _compare_identifiers(before: list, after: list):
+    """Conformance declarations the input carried and the output does not.
+
+    DISCLOSURE, not preservation: the row says what stopped being claimed. A
+    document declaring both PDF/UA and PDF/A comes back declaring only PDF/A,
+    and nothing else in the report — not the tag structure, not the annotation
+    census — moves when it does.
+    """
+    lost = [n for n in before if n not in set(after)]
+    if not lost:
+        return None
+    return _row("standard_identifiers_removed", len(lost),
+                [{"name": n} for n in lost])
+
+
 def compare(before: _Facts, after: _Facts) -> list:
     """One row per fact that changed for the worse, or could not be read.
 
@@ -391,6 +455,8 @@ def compare(before: _Facts, after: _Facts) -> list:
             row = _row("encryption_removed", 1, [])
         elif name == "page_marks":
             row = _compare_marks(b, a)
+        elif name == "standard_identifiers":
+            row = _compare_identifiers(b, a)
         elif name == "images" and a < b:
             row = _row("images_removed", b - a, [{"before": b, "after": a}])
         if row is not None:

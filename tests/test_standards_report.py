@@ -18,6 +18,7 @@ from pdfa_builders import (
     encrypted_pdf,
     launch_action_pdf,
     layered_pdf,
+    pdfua_declared_pdf,
     plain_pdf,
     scripted_pdf,
     tagged_form_pdf,
@@ -202,6 +203,74 @@ class TestInPlace:
         result = convert_pdfa(work, work, level="2b", gs_path=gs_path)
         assert row_of(result, "form_fields_removed")["count"] == 1
         assert "tagged_structure_removed" in kinds(result)
+
+
+class TestStandardIdentifiers:
+    """A conformance claim the input carried and the output does not.
+
+    DISCLOSURE, not preservation: the converter is not asked to keep the other
+    standard's declaration, only to stop dropping it in silence.
+    """
+
+    def test_a_dropped_pdfua_declaration_is_named(self, tmp_dir, gs_path):
+        src = pdfua_declared_pdf(os.path.join(tmp_dir, "ua.pdf"))
+        assert standards_report.census(src).values["standard_identifiers"] == ["PDF/UA"]
+        out = os.path.join(tmp_dir, "ua-a2.pdf")
+        result = convert_pdfa(src, out, level="2b", gs_path=gs_path)
+        assert "standard_identifiers_removed" in kinds(result)
+        row = row_of(result, "standard_identifiers_removed")
+        assert row["detail"] == [{"name": "PDF/UA"}]
+        with pikepdf.open(out) as pdf:
+            assert b"pdfuaid" not in bytes(pdf.Root.Metadata.read_bytes())
+
+    def test_a_document_declaring_nothing_else_gets_no_row(self, tmp_dir, gs_path):
+        src = plain_pdf(os.path.join(tmp_dir, "plain.pdf"))
+        out = os.path.join(tmp_dir, "plain-a2.pdf")
+        result = convert_pdfa(src, out, level="2b", gs_path=gs_path)
+        assert "standard_identifiers_removed" not in kinds(result)
+
+    def test_the_legacy_pdfx_namespace_declares_only_through_its_own_key(
+        self, tmp_dir
+    ):
+        """Adobe's `pdfx` namespace carries arbitrary custom properties, so
+        only `GTS_PDFXVersion` inside it is a conformance declaration."""
+        src = plain_pdf(os.path.join(tmp_dir, "legacy.pdf"))
+        head = (
+            b'<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+            b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF '
+            b'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+            b'<rdf:Description rdf:about="" '
+            b'xmlns:pdfx="http://ns.adobe.com/pdfx/1.3/">'
+        )
+        tail = b"</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>"
+        for body, expected in (
+            (b"<pdfx:Company>Acme</pdfx:Company>", []),
+            (b"<pdfx:GTS_PDFXVersion>PDF/X-4</pdfx:GTS_PDFXVersion>", ["PDF/X"]),
+        ):
+            with pikepdf.open(src, allow_overwriting_input=True) as pdf:
+                pdf.Root.Metadata = pdf.make_stream(head + body + tail)
+                pdf.Root.Metadata[pikepdf.Name.Type] = pikepdf.Name.Metadata
+                pdf.Root.Metadata[pikepdf.Name.Subtype] = pikepdf.Name.XML
+                pdf.save(src)
+            got = standards_report.census(src).values["standard_identifiers"]
+            assert got == expected, f"{body!r} read as {got}"
+
+    def test_a_declared_namespace_nothing_uses_states_nothing(self, tmp_dir):
+        src = plain_pdf(os.path.join(tmp_dir, "bare-ns.pdf"))
+        with pikepdf.open(src, allow_overwriting_input=True) as pdf:
+            xmp = (
+                b'<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+                b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF '
+                b'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+                b'<rdf:Description rdf:about="" '
+                b'xmlns:pdfuaid="http://www.aiim.org/pdfua/ns/id/"/>'
+                b'</rdf:RDF></x:xmpmeta><?xpacket end="w"?>'
+            )
+            pdf.Root.Metadata = pdf.make_stream(xmp)
+            pdf.Root.Metadata[pikepdf.Name.Type] = pikepdf.Name.Metadata
+            pdf.Root.Metadata[pikepdf.Name.Subtype] = pikepdf.Name.XML
+            pdf.save(src)
+        assert standards_report.census(src).values["standard_identifiers"] == []
 
 
 class TestUndeterminedIsNotClean:

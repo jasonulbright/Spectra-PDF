@@ -294,6 +294,8 @@ export const PANEL_STRINGS = {
   'panel.standards.row.colorants_removed': 'Printing plates the conversion did not carry',
   'panel.standards.row.colorant_shadings_rasterized': 'Gradients converted to process colour',
   'panel.standards.row.images_removed': 'Images removed',
+  'panel.standards.row.standard_identifiers_removed':
+    'Conformance with another standard is no longer declared',
   'panel.standards.row.fonts_substituted': 'Fonts replaced with metric-compatible substitutes',
   'panel.standards.row.producer_removed_feature': 'Content the standard does not permit, removed',
   'panel.standards.row.conformance_abandoned': 'The standard was abandoned during conversion',
@@ -308,6 +310,7 @@ export const PANEL_STRINGS = {
   'panel.standards.row.outline': 'Bookmarks',
   'panel.standards.row.encryption': 'Encryption',
   'panel.standards.row.page_marks': 'What each page draws',
+  'panel.standards.row.standard_identifiers': 'Declared standards',
   'panel.standards.row.images': 'Images',
   'panel.standards.detail.change': '{{from}} → {{to}}',
   'panel.standards.detail.subtypeCount': '{{subtype}}: {{count}}',
@@ -1890,6 +1893,8 @@ export const PANEL_STRINGS = {
     'On page {{page}}, {{font}} maps to no readable characters ({{reason}}).',
   'panel.a11y.detail.form_field_not_tagged':
     'A form field on page {{page}} is outside the structure tree.',
+  'panel.a11y.detail.form_field_not_in_form':
+    'A form field on page {{page}} is tagged, but not inside a Form element.',
   'panel.a11y.detail.header_cell_has_no_scope':
     'This header cell declares no scope, and no cell points at it.',
   'panel.a11y.detail.heading_level_skipped':

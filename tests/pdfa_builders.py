@@ -38,6 +38,23 @@ def plain_pdf(path):
     return str(path)
 
 
+def pdfua_declared_pdf(path):
+    """Conformant content, plus an XMP declaration of a SECOND standard.
+
+    ISO 14289-1 5 declares PDF/UA conformance through `pdfuaid:part`. Nothing
+    on the page needs removing, so the only thing a conversion can cost this
+    document is that declaration.
+    """
+    pdf = pikepdf.new()
+    pdf.pages.append(pikepdf.Page(_page(pdf, f"BT /F1 24 Tf 72 700 Td ({TEXT}) Tj ET")))
+    with pdf.open_metadata() as meta:
+        meta["dc:title"] = "Two standards"
+        meta["pdfuaid:part"] = "1"
+    pdf.save(str(path))
+    pdf.close()
+    return str(path)
+
+
 def transparent_pdf(path):
     """Text beside a constant-alpha fill. PDF/A-1 admits no transparency."""
     pdf = pikepdf.new()

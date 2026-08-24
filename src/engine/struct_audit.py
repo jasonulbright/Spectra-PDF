@@ -270,7 +270,8 @@ def audit_tree(pdf, annots_entries: list | None = None) -> dict:
 
     Returns {"tagged", "nodes" (flat, tree order), "roots", "role_map",
     "annots" (objgen → address), "tagged_mcids" (page → set), "tagged_annots"
-    (set of objgen), "truncated" (the elements whose children the walk did not
+    (set of objgen), "annot_roles" (objgen → set of enclosing resolved
+    roles), "truncated" (the elements whose children the walk did not
     reach), "ns_unread" (the elements whose `/NS` would not resolve)}.
 
     `annots_entries` is `annots_of`'s first return. A caller that has already
@@ -287,7 +288,8 @@ def audit_tree(pdf, annots_entries: list | None = None) -> dict:
     if st is None:
         return {
             "tagged": False, "nodes": [], "roots": [], "role_map": {},
-            "tagged_mcids": {}, "tagged_annots": set(), "truncated": [],
+            "tagged_mcids": {}, "tagged_annots": set(), "annot_roles": {},
+            "truncated": [],
             "ns_unread": [],
         }
 
@@ -300,6 +302,10 @@ def audit_tree(pdf, annots_entries: list | None = None) -> dict:
     roots: list = []
     tagged_mcids: dict = {}
     tagged_annots: set = set()
+    # objgen → the resolved roles of every element naming it through an
+    # /OBJR. ISO 14289-1 7.18.4 asks WHICH element encloses a widget, not
+    # merely whether one does, so the role travels with the address.
+    annot_roles: dict = {}
     truncated: list = []
     ns_unread: list = []
     visited: set = set()
@@ -339,6 +345,9 @@ def audit_tree(pdf, annots_entries: list | None = None) -> dict:
                         address = annots.get(target.objgen)
                         if target.objgen != (0, 0):
                             tagged_annots.add(target.objgen)
+                            annot_roles.setdefault(
+                                target.objgen, set()
+                            ).add(node.role)
                     except Exception:
                         address = None
                 node.objrs.append(
@@ -437,6 +446,7 @@ def audit_tree(pdf, annots_entries: list | None = None) -> dict:
         "role_map": role_map,
         "tagged_mcids": tagged_mcids,
         "tagged_annots": tagged_annots,
+        "annot_roles": annot_roles,
         "truncated": truncated,
         "ns_unread": ns_unread,
     }
