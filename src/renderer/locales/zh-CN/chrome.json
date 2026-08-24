@@ -3026,6 +3026,7 @@
   "panel.a11y.detail.form_field_not_tagged": "第 {{page}} 页的表单字段位于结构树之外。",
   "panel.a11y.detail.header_cell_has_no_scope": "此表头单元格未声明范围，也没有单元格指向它。",
   "panel.a11y.detail.heading_level_skipped": "大纲从第 {{from}} 级跳到第 {{to}} 级。",
+  "panel.a11y.detail.heading_opens_below_h1": "大纲从第 {{level}} 级开始，而不是第 1 级。",
   "panel.a11y.detail.label_outside_list_item": "此 {{role}} 的父元素是 {{parent}}，而不是列表项。",
   "panel.a11y.detail.list_item_outside_list": "此项的父元素是 {{parent}}，而不是列表。",
   "panel.a11y.detail.mark_info_missing": "文档有结构树，却未声明自身为带标记文档。",

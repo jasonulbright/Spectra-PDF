@@ -3026,6 +3026,7 @@
   "panel.a11y.detail.form_field_not_tagged": "第 {{page}} 頁的表單欄位位於結構樹之外。",
   "panel.a11y.detail.header_cell_has_no_scope": "此標頭儲存格未宣告範圍，也沒有儲存格指向它。",
   "panel.a11y.detail.heading_level_skipped": "大綱從第 {{from}} 層跳至第 {{to}} 層。",
+  "panel.a11y.detail.heading_opens_below_h1": "大綱從第 {{level}} 層開始，而不是第 1 層。",
   "panel.a11y.detail.label_outside_list_item": "此 {{role}} 的父元素是 {{parent}}，而非清單項目。",
   "panel.a11y.detail.list_item_outside_list": "此項目的父元素是 {{parent}}，而非清單。",
   "panel.a11y.detail.mark_info_missing": "文件有結構樹，卻未宣告自身為附標籤文件。",

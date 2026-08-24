@@ -3158,6 +3158,7 @@
   "panel.a11y.detail.form_field_not_tagged": "Un câmp de formular de la pagina {{page}} se află în afara arborelui de structură.",
   "panel.a11y.detail.header_cell_has_no_scope": "Această celulă de antet nu declară un domeniu și nicio celulă nu o indică.",
   "panel.a11y.detail.heading_level_skipped": "Structura sare de la nivelul {{from}} la nivelul {{to}}.",
+  "panel.a11y.detail.heading_opens_below_h1": "Structura începe la nivelul {{level}} în loc de nivelul 1.",
   "panel.a11y.detail.label_outside_list_item": "Elementul părinte al acestui {{role}} este {{parent}}, nu un element de listă.",
   "panel.a11y.detail.list_item_outside_list": "Elementul părinte al acestui element este {{parent}}, nu o listă.",
   "panel.a11y.detail.mark_info_missing": "Documentul are un arbore de structură, dar nu se declară etichetat.",

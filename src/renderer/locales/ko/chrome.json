@@ -3026,6 +3026,7 @@
   "panel.a11y.detail.form_field_not_tagged": "{{page}}쪽의 양식 필드가 구조 트리 밖에 있습니다.",
   "panel.a11y.detail.header_cell_has_no_scope": "이 머리글 셀은 범위를 선언하지 않았고, 이 셀을 가리키는 셀도 없습니다.",
   "panel.a11y.detail.heading_level_skipped": "개요가 {{from}}수준에서 {{to}}수준으로 건너뜁니다.",
+  "panel.a11y.detail.heading_opens_below_h1": "개요가 1수준이 아니라 {{level}}수준에서 시작합니다.",
   "panel.a11y.detail.label_outside_list_item": "이 {{role}}의 상위 요소는 목록 항목이 아니라 {{parent}}입니다.",
   "panel.a11y.detail.list_item_outside_list": "이 항목의 상위 요소는 목록이 아니라 {{parent}}입니다.",
   "panel.a11y.detail.mark_info_missing": "문서에 구조 트리는 있지만 태그가 있는 문서라고 선언하지 않습니다.",

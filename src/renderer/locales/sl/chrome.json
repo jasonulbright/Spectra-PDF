@@ -3224,6 +3224,7 @@
   "panel.a11y.detail.form_field_not_tagged": "Polje obrazca na strani {{page}} je zunaj drevesa strukture.",
   "panel.a11y.detail.header_cell_has_no_scope": "Ta glava celice ne razglaša obsega in nobena celica ne kaže nanjo.",
   "panel.a11y.detail.heading_level_skipped": "Oris preskoči z ravni {{from}} na raven {{to}}.",
+  "panel.a11y.detail.heading_opens_below_h1": "Oris se začne na ravni {{level}} namesto na ravni 1.",
   "panel.a11y.detail.label_outside_list_item": "Nadrejeni element tega {{role}} je {{parent}}, ne postavka seznama.",
   "panel.a11y.detail.list_item_outside_list": "Nadrejeni element te postavke je {{parent}}, ne seznam.",
   "panel.a11y.detail.mark_info_missing": "Dokument ima drevo strukture, a se ne razglaša za označenega.",

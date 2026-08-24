@@ -3158,6 +3158,7 @@
   "panel.a11y.detail.form_field_not_tagged": "Um campo de formulário na página {{page}} está fora da árvore de estrutura.",
   "panel.a11y.detail.header_cell_has_no_scope": "Esta célula de cabeçalho não declara escopo, e nenhuma célula aponta para ela.",
   "panel.a11y.detail.heading_level_skipped": "A estrutura salta do nível {{from}} para o nível {{to}}.",
+  "panel.a11y.detail.heading_opens_below_h1": "A estrutura começa no nível {{level}} em vez do nível 1.",
   "panel.a11y.detail.label_outside_list_item": "O elemento pai deste {{role}} é {{parent}}, não um item de lista.",
   "panel.a11y.detail.list_item_outside_list": "O elemento pai deste item é {{parent}}, não uma lista.",
   "panel.a11y.detail.mark_info_missing": "O documento tem árvore de estrutura, mas não se declara marcado.",

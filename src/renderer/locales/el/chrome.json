@@ -3092,6 +3092,7 @@
   "panel.a11y.detail.form_field_not_tagged": "Ένα πεδίο φόρμας στη σελίδα {{page}} βρίσκεται εκτός του δέντρου δομής.",
   "panel.a11y.detail.header_cell_has_no_scope": "Αυτό το κελί κεφαλίδας δεν δηλώνει εμβέλεια και κανένα κελί δεν το υποδεικνύει.",
   "panel.a11y.detail.heading_level_skipped": "Η διάρθρωση πηδά από το επίπεδο {{from}} στο επίπεδο {{to}}.",
+  "panel.a11y.detail.heading_opens_below_h1": "Η διάρθρωση ξεκινά από το επίπεδο {{level}} αντί για το επίπεδο 1.",
   "panel.a11y.detail.label_outside_list_item": "Το γονικό στοιχείο αυτού του {{role}} είναι {{parent}}, όχι στοιχείο λίστας.",
   "panel.a11y.detail.list_item_outside_list": "Το γονικό στοιχείο αυτού του στοιχείου είναι {{parent}}, όχι λίστα.",
   "panel.a11y.detail.mark_info_missing": "Το έγγραφο έχει δέντρο δομής αλλά δεν δηλώνει ότι φέρει ετικέτες δομής.",
