@@ -1544,7 +1544,7 @@ def _check_navigation_links(check, annots, pages):
 
 def _first_role(roles) -> str:
     """One named role for the finding line. A widget reached by more than one
-    `/OBJR` has more than one enclosing element, and the line names one; the
+    `/OBJR` has more than one holding element, and the line names one; the
     verdict does not depend on which."""
     named = sorted(r for r in roles if r)
     return named[0] if named else ""
@@ -1555,9 +1555,12 @@ def _check_tagged_form_fields(check, tree, annots, fields):
 
     ISO 14289-1 7.18.4 requires a widget annotation to be nested within a
     `Form` tag; membership in the structure tree under any other element does
-    not satisfy it. The enclosing role is the one `/RoleMap` resolves, so a
-    document tagging its widgets with a custom type that maps to `Form`
-    conforms — the mapped role is the element's role.
+    not satisfy it. NESTED WITHIN is not HELD BY — an enclosing `Form` at any
+    ancestor depth satisfies the requirement, so `Form > Span > OBJR`
+    conforms while the same `Span` under a `Document` does not. The enclosing
+    role is the one `/RoleMap` resolves, so a document tagging its widgets
+    with a custom type that maps to `Form` conforms — the mapped role is the
+    element's role.
     """
     widget_ogs: set = set()
     for field in fields:
@@ -1567,7 +1570,8 @@ def _check_tagged_form_fields(check, tree, annots, fields):
         check.status = NA
         return
     tagged = tree["tagged_annots"] if tree["tagged"] else set()
-    roles = tree["annot_roles"] if tree["tagged"] else {}
+    roles = tree["annot_enclosing_roles"] if tree["tagged"] else {}
+    holders = tree["annot_roles"] if tree["tagged"] else {}
     findings = []
     for a in widgets:
         if a["objgen"] not in tagged:
@@ -1588,7 +1592,10 @@ def _check_tagged_form_fields(check, tree, annots, fields):
                 _object_address(page=a["page"], annotation=a["index"]),
                 "form_field_not_in_form",
                 rect=a["rect"],
-                values={"page": a["page"], "role": _first_role(enclosing)},
+                values={
+                    "page": a["page"],
+                    "role": _first_role(holders.get(a["objgen"], set())),
+                },
             )
         )
     _verdict(check, len(widgets), findings)
