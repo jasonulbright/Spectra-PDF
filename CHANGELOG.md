@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.1.9
+
+*Released 2026-08-24*
+
+### Editing signed documents
+
+- Rotating pages or changing page boxes on a document with approval signatures keeps the signatures intact, with annotations proven to stay exactly where they were.
+- Removing, reordering, or inserting pages on an approval-signed document also preserves its signatures; certified documents still refuse changes their certification forbids, with a clear choice before anything is written.
+
+### Print production verification
+
+- An internal conformance corpus now verifies rendering, separations, spot plates, overprint, and output intents against an industry-published test suite with its own documented expected results.
+- Fixed: a cached separations set that had lost a plate file on disk was served as complete — Output Preview could show a spot page without its spot plates and understate total ink. The cache now verifies itself and re-renders instead.
+- Fixed: flipping overprint simulation in Output Preview never updated the screen — a stale preview was served after any overprint, resolution, or proofing-settings change.
+
+### Accessibility checker accuracy
+
+- Every check is now sourced to the accessibility standard's own clauses, and nine checks were corrected against the standard's text. The most visible changes: a document whose title is not set to display now fails rather than warns; a title stored only in the document information dictionary no longer counts; links need a real alternate description — visible link text alone no longer passes.
+- Form fields must now be inside a Form structure element, not merely somewhere in the structure tree.
+- Fixed: the table header Scope check could never report a failure; text the reader could not decode was wrongly reported as not applicable.
+- The checker is now verified against a published corpus of accessible-PDF technique examples: every conforming example passes clean, and covered failure examples are correctly reported.
+
+### Conversion honesty
+
+- Converting to PDF/A now reports when a document's declared conformance with another standard (such as PDF/UA) does not survive the conversion, instead of dropping the declaration silently.
+
 ## 1.1.8
 
 *Released 2026-08-24*
