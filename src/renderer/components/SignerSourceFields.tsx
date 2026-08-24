@@ -1,18 +1,20 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useEngine } from '../hooks/useEngine';
 import { useTranslation } from 'react-i18next';
-import { dialog } from '../lib/tauri-bridge';
+import { dialog, type StoreCertificate } from '../lib/tauri-bridge';
 import { tChrome, tDate } from '../i18n';
 
 // The signer source both sign flows (SignaturesPanel invisible form, canvas
 // visible-signature popover) share: a PKCS#12 file, a PEM key+cert pair, a
-// PKCS#11 hardware token, or a freshly generated self-signed .pfx
-// (which becomes the selected .pfx).
+// PKCS#11 hardware token, a certificate in the Windows certificate store, or a
+// freshly generated self-signed .pfx (which becomes the selected .pfx).
 // SECURITY: this component never holds the SIGNING password or token PIN —
 // only the generator sub-form's own password, which is cleared the moment
 // generation finishes (the user then types it again as the signing
 // password/PIN; a generated signer is prompted for like any other, never
-// cached). For a token the sign form's password field IS the PIN.
+// cached). For a token the sign form's password field IS the PIN. The store
+// source has no secret here at all: Windows collects any PIN itself, inside
+// the engine's sign call, and only a thumbprint ever leaves this component.
 
 export type SignerSource =
   | { mode: 'pfx'; pfxPath: string | null }
@@ -23,18 +25,51 @@ export type SignerSource =
       tokenLabel: string;
       certLabel: string;
       keyLabel: string;
-    };
+    }
+  | { mode: 'store'; thumbprint: string | null; machineStore: boolean };
+
+/** Engine params for one signer source. Booleans ride as booleans — the
+ * engine's store-location flag is one, and a stringified "false" would read
+ * as true. */
+export type SignerParams = Record<string, string | boolean>;
 
 export const EMPTY_SIGNER_SOURCE: SignerSource = { mode: 'pfx', pfxPath: null };
+
+/** The last store certificate signed with, so the picker can OFFER it again.
+ * Pre-selection only — a remembered thumbprint never signs on its own, and a
+ * thumbprint is a public identifier, not a secret. */
+const LAST_STORE_CERT_KEY = 'spectra-signer-store-cert';
+
+export function rememberStoreCertificate(thumbprint: string): void {
+  try {
+    localStorage.setItem(LAST_STORE_CERT_KEY, thumbprint);
+  } catch {
+    // A storage quota or a locked profile costs a convenience, never a sign.
+  }
+}
+
+function lastStoreCertificate(): string | null {
+  try {
+    return localStorage.getItem(LAST_STORE_CERT_KEY);
+  } catch {
+    return null;
+  }
+}
 
 /** Engine params for the chosen source, or null (with a message) when
  * incomplete. */
 export function signerSourceParams(
   source: SignerSource,
-): { params: Record<string, string>; error?: never } | { params?: never; error: string } {
+): { params: SignerParams; error?: never } | { params?: never; error: string } {
   if (source.mode === 'pfx') {
     if (!source.pfxPath) return { error: tChrome('dialog.signer.needPfx') };
     return { params: { pfx_path: source.pfxPath } };
+  }
+  if (source.mode === 'store') {
+    if (!source.thumbprint) return { error: tChrome('dialog.signer.needStoreCert') };
+    const params: SignerParams = { store_cert: source.thumbprint };
+    if (source.machineStore) params.store_machine = true;
+    return { params };
   }
   if (source.mode === 'pkcs11') {
     if (!source.modulePath) return { error: tChrome('dialog.signer.needModule') };
@@ -80,6 +115,50 @@ export function SignerSourceFields({
   const [genBusy, setGenBusy] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
   const [genDone, setGenDone] = useState<GenerateResult | null>(null);
+  const [storeCerts, setStoreCerts] = useState<StoreCertificate[] | null>(null);
+  const [storeBusy, setStoreBusy] = useState(false);
+  const [storeError, setStoreError] = useState<string | null>(null);
+
+  const inStoreMode = value.mode === 'store';
+  const storeThumbprint = value.mode === 'store' ? value.thumbprint : null;
+
+  const loadStoreCerts = useCallback(async () => {
+    setStoreBusy(true);
+    setStoreError(null);
+    try {
+      const rows = await dialog.listStoreCertificates();
+      setStoreCerts(rows);
+      return rows;
+    } catch (e: unknown) {
+      setStoreCerts([]);
+      setStoreError(e instanceof Error ? e.message : String(e));
+      return [];
+    } finally {
+      setStoreBusy(false);
+    }
+  }, []);
+
+  // Entering the store mode reads the store once. The remembered thumbprint is
+  // pre-selected ONLY while that certificate is still one of the rows the
+  // store actually offers — a certificate that expired or was removed must not
+  // sit selected in the form.
+  useEffect(() => {
+    if (!inStoreMode) return;
+    let live = true;
+    void (async () => {
+      const rows = storeCerts ?? (await loadStoreCerts());
+      if (!live || storeThumbprint) return;
+      const remembered = lastStoreCertificate();
+      const match = rows.find((r) => r.thumbprint === remembered);
+      if (match) onChange({ mode: 'store', thumbprint: match.thumbprint, machineStore: match.machine_store });
+    })();
+    return () => {
+      live = false;
+    };
+    // `onChange` and the current selection are read, not depended on: this
+    // runs when the mode is entered, never again on every keystroke above it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inStoreMode]);
 
   const pickPfx = useCallback(async () => {
     const p = await dialog.pickCertificate();
@@ -146,7 +225,7 @@ export function SignerSourceFields({
       <div className="flex items-center gap-2">
         <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.label')}</span>
         <div className="flex rounded overflow-hidden border border-neutral-700">
-          {(['pfx', 'pem', 'pkcs11'] as const).map((m) => (
+          {(['pfx', 'pem', 'pkcs11', 'store'] as const).map((m) => (
             <button
               key={m}
               data-testid={`${idPrefix}-source-${m}`}
@@ -156,7 +235,9 @@ export function SignerSourceFields({
                     ? { mode: 'pfx', pfxPath: null }
                     : m === 'pem'
                       ? { mode: 'pem', keyPath: null, certPath: null }
-                      : { mode: 'pkcs11', modulePath: null, tokenLabel: '', certLabel: '', keyLabel: '' },
+                      : m === 'store'
+                        ? { mode: 'store', thumbprint: null, machineStore: false }
+                        : { mode: 'pkcs11', modulePath: null, tokenLabel: '', certLabel: '', keyLabel: '' },
                 )
               }
               className={`px-2.5 py-1 text-xs font-medium ${
@@ -170,7 +251,9 @@ export function SignerSourceFields({
                   ? 'dialog.signer.modePfx'
                   : m === 'pem'
                     ? 'dialog.signer.modePem'
-                    : 'dialog.signer.modeToken',
+                    : m === 'store'
+                      ? 'dialog.signer.modeStore'
+                      : 'dialog.signer.modeToken',
               )}
             </button>
           ))}
@@ -206,6 +289,79 @@ export function SignerSourceFields({
             {tChrome('dialog.signer.choose')}
           </button>
         </div>
+      ) : value.mode === 'store' ? (
+        <>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400 w-20 shrink-0">
+              {tChrome('dialog.signer.storeCertificate')}
+            </span>
+            <select
+              data-testid={`${idPrefix}-store-cert`}
+              value={value.thumbprint ?? ''}
+              disabled={storeBusy || !storeCerts || storeCerts.length === 0}
+              onChange={(e) => {
+                const row = (storeCerts ?? []).find((r) => r.thumbprint === e.target.value);
+                onChange({
+                  mode: 'store',
+                  thumbprint: row ? row.thumbprint : null,
+                  machineStore: row ? row.machine_store : false,
+                });
+              }}
+              className="flex-1 min-w-0 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500"
+            >
+              <option value="">{tChrome('dialog.signer.storeChoose')}</option>
+              {(storeCerts ?? []).map((c) => (
+                <option key={c.thumbprint} value={c.thumbprint}>
+                  {tChrome('dialog.signer.storeRow', {
+                    subject: c.subject || c.thumbprint,
+                    issuer: c.issuer || c.thumbprint,
+                    date: tDate(c.not_after),
+                  })}
+                </option>
+              ))}
+            </select>
+            <button
+              data-testid={`${idPrefix}-store-refresh`}
+              onClick={() => void loadStoreCerts()}
+              disabled={storeBusy}
+              className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium"
+            >
+              {tChrome('dialog.signer.storeRefresh')}
+            </button>
+          </div>
+          {storeError ? (
+            <div data-testid={`${idPrefix}-store-error`} className="text-xs text-red-400 ml-[5.5rem]">
+              {storeError}
+            </div>
+          ) : storeBusy ? (
+            <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
+              {tChrome('dialog.signer.storeLoading')}
+            </p>
+          ) : storeCerts && storeCerts.length === 0 ? (
+            <p
+              data-testid={`${idPrefix}-store-empty`}
+              className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]"
+            >
+              {tChrome('dialog.signer.storeNone')}
+            </p>
+          ) : null}
+          {(() => {
+            const selected = (storeCerts ?? []).find((c) => c.thumbprint === value.thumbprint);
+            if (!selected) return null;
+            const marks: string[] = [];
+            if (selected.hardware_backed) marks.push(tChrome('dialog.signer.storeHardware'));
+            if (selected.machine_store) marks.push(tChrome('dialog.signer.storeMachine'));
+            return (
+              <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem] break-all">
+                {selected.thumbprint}
+                {marks.length > 0 ? ` · ${marks.join(' · ')}` : ''}
+              </p>
+            );
+          })()}
+          <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
+            {tChrome('dialog.signer.storeNote')}
+          </p>
+        </>
       ) : value.mode === 'pkcs11' ? (
         <>
           <div className="flex items-center gap-2">

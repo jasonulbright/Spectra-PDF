@@ -6,7 +6,13 @@ import { dialog } from '../lib/tauri-bridge';
 import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerSignHandler, type SignatureVerifySnapshot } from '../testHarness';
-import { SignerSourceFields, EMPTY_SIGNER_SOURCE, signerSourceParams } from '../components/SignerSourceFields';
+import {
+  SignerSourceFields,
+  EMPTY_SIGNER_SOURCE,
+  signerSourceParams,
+  rememberStoreCertificate,
+  type SignerParams,
+} from '../components/SignerSourceFields';
 import type { SignerSource } from '../components/SignerSourceFields';
 import { getCanvasServices } from '../commands/context';
 import {
@@ -220,7 +226,7 @@ export function SignaturesPanel(): React.ReactElement {
   // — just paths in, self-verify summary out.
   const doSign = useCallback(
     async (
-      sourceParams: Record<string, string>,
+      sourceParams: SignerParams,
       pw: string,
       output: string,
       rsn?: string,
@@ -280,6 +286,7 @@ export function SignaturesPanel(): React.ReactElement {
         lock,
       );
       setSignResult(res);
+      if (source.mode === 'store' && source.thumbprint) rememberStoreCertificate(source.thumbprint);
       setShowSign(false);
     } catch (e: unknown) {
       setSignError(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
@@ -302,7 +309,7 @@ export function SignaturesPanel(): React.ReactElement {
   // log records only params.file). Returns the post-sign verification.
   const doSignInPlace = useCallback(
     async (
-      sourceParams: Record<string, string>,
+      sourceParams: SignerParams,
       pw: string,
       rsn?: string,
       loc?: string,
@@ -354,6 +361,7 @@ export function SignaturesPanel(): React.ReactElement {
     try {
       const v = await doSignInPlace(resolved.params!, password, reason, location, certify, lock);
       setResult(v); // the new signature lists immediately
+      if (source.mode === 'store' && source.thumbprint) rememberStoreCertificate(source.thumbprint);
       setShowSign(false);
     } catch (e: unknown) {
       setSignError(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));

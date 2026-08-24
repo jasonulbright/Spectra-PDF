@@ -13,6 +13,8 @@ pub mod gs;
 mod printers;
 pub mod scanner;
 pub mod app_windows;
+pub mod portable;
+pub mod store_certs;
 pub mod session;
 pub mod tabdrag;
 
@@ -73,6 +75,22 @@ pub(crate) fn is_e2e_mode() -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // BEFORE the builder, because both of these decide things that are fixed
+    // by the time the first window exists.
+    //
+    // A missing WebView2 runtime has to be reported here or not at all: past
+    // this point the only surfaces the app owns are inside a webview that
+    // cannot be created. The portable zip carries no bootstrapper — a
+    // first-party Microsoft platform runtime is never vendored — so naming the
+    // prerequisite IS the handling, the same posture Ghostscript gets.
+    if !portable::report_missing_webview2() {
+        std::process::exit(1);
+    }
+    // WebView2 reads its user-data-folder override when the environment is
+    // created, once per process, so setting it now covers every window this
+    // process later builds.
+    portable::apply_webview_user_data();
+
     let e2e = is_e2e_mode();
 
     let mut builder = tauri::Builder::default()
@@ -135,6 +153,7 @@ pub fn run() {
             commands::pick_pem_file,
             commands::pick_icc_file,
             commands::pick_pkcs11_module,
+            store_certs::list_store_certificates,
             commands::pick_any_file,
             commands::pick_any_files,
             commands::pick_folder_dialog,
@@ -240,6 +259,9 @@ pub fn run() {
             snapshot::save_snapshot_png,
             clipboard_read::read_clipboard_source,
             web_capture::capture_web_page,
+            portable::icc_assent_state,
+            portable::icc_license_text,
+            portable::record_icc_assent,
         ])
         .setup(move |app| {
             // The battery's fallback spec launches with
