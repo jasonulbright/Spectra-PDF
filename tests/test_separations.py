@@ -27,6 +27,7 @@ from engine.separations import (
 from separation_builders import (
     cmyk_spot_pdf,
     cropped_page_pdf,
+    declared_unpainted_spot_pdf,
     device_rgb_pdf,
     form_appearance_pdf,
     inks_everywhere_pdf,
@@ -289,6 +290,51 @@ class TestSeparationRaster:
         second = render_separations(src, page=1, dpi=72, gs_path=gs_path)
         assert first["dir"] == second["dir"]
         assert [p["file"] for p in first["plates"]] == [p["file"] for p in second["plates"]]
+
+    def test_a_decayed_plate_set_is_re_rendered_rather_than_served_short(
+        self, tmp_path, gs_path
+    ):
+        # Eviction removes a set with `ignore_errors=True`, so a set missing
+        # one plate is reachable. Serving it would drop an ink from the
+        # preview and from the coverage with no refusal and no mark.
+        src = cmyk_spot_pdf(tmp_path / "spot.pdf")
+        first = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        names = [p["name"] for p in first["plates"]]
+        assert "PANTONE 185 C" in names
+        Path(first["plates"][-1]["file"]).unlink()
+
+        second = render_separations(src, page=1, dpi=72, gs_path=gs_path, reuse=True)
+        assert [p["name"] for p in second["plates"]] == names
+        assert all(Path(p["file"]).is_file() for p in second["plates"])
+        assert set(second["coverage"]) == set(first["coverage"])
+
+    def test_a_declared_but_unpainted_colorant_still_has_no_plate(
+        self, tmp_path, gs_path
+    ):
+        src = declared_unpainted_spot_pdf(tmp_path / "declared.pdf")
+        first = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        names = [p["name"] for p in first["plates"]]
+        assert "PANTONE 185 C" in names
+        assert "GWG Green" not in names
+        # The absence is the document's, not decay: reuse serves the same set.
+        second = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        assert second["dir"] == first["dir"]
+        assert [p["name"] for p in second["plates"]] == names
+
+    def test_a_marker_carrying_no_manifest_is_not_trusted(self, tmp_path, gs_path):
+        # A set written by an earlier version cannot be validated, so it is
+        # absent rather than believed.
+        src = cmyk_spot_pdf(tmp_path / "spot.pdf")
+        first = render_separations(src, page=1, dpi=72, gs_path=gs_path)
+        marker = Path(first["dir"]) / "plates.done"
+        marker.write_text("", encoding="ascii")
+        Path(first["plates"][-1]["file"]).unlink()
+
+        second = render_separations(src, page=1, dpi=72, gs_path=gs_path, reuse=True)
+        assert [p["name"] for p in second["plates"]] == [
+            p["name"] for p in first["plates"]
+        ]
+        assert marker.read_text(encoding="utf-8").startswith("{")
 
     def test_a_different_overprint_setting_is_a_different_plate_set(self, tmp_path, gs_path):
         src = overprint_pdf(tmp_path / "op1.pdf", opm=1)

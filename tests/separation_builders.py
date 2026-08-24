@@ -59,6 +59,26 @@ def cmyk_spot_pdf(path, spot: str = "PANTONE 185 C"):
     return str(path)
 
 
+def declared_unpainted_spot_pdf(path, painted: str = "PANTONE 185 C",
+                                unpainted: str = "GWG Green"):
+    """One spot painted, a second declared in the resources and never used.
+
+    The inventory lists both — it reads the resource dictionary — while the
+    device writes a plate only for the painted one, which is the legitimate
+    case of an expected plate that never appeared.
+    """
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    page.Resources = Dictionary(ColorSpace=Dictionary(
+        CS0=separation_space(pdf, painted, (0.0, 1.0, 0.75, 0.0)),
+        CS1=separation_space(pdf, unpainted, (1.0, 0.0, 0.9, 0.0)),
+    ))
+    page.Contents = pdf.make_stream(b"/CS0 cs 1 scn 20 20 160 160 re f")
+    pdf.save(path)
+    pdf.close()
+    return str(path)
+
+
 def tac_ladder_pdf(path):
     """Five patches of KNOWN total ink: 0 / 100 / 200 / 300 / 340 %."""
     pdf = pikepdf.new()
