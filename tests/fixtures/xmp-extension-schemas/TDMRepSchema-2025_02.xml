@@ -1,0 +1,34 @@
+<!-- Namespace for TDMRep https://www.w3.org/community/reports/tdmrep/CG-FINAL-tdmrep-20240510/#sec-pdf -->
+   <rdf:Description rdf:about=""
+         xmlns:tdm="http://www.w3.org/ns/tdmrep/"
+         xmlns:pdfaExtension="http://www.aiim.org/pdfa/ns/extension/"
+         xmlns:pdfaSchema="http://www.aiim.org/pdfa/ns/schema#"
+         xmlns:pdfaProperty="http://www.aiim.org/pdfa/ns/property#">
+
+<!-- TDMRep Extension Schema -->
+      <pdfaExtension:schemas>
+         <rdf:Bag>
+            <rdf:li rdf:parseType="Resource">
+               <pdfaSchema:namespaceURI>http://www.w3.org/ns/tdmrep/</pdfaSchema:namespaceURI>
+               <pdfaSchema:prefix>tdm</pdfaSchema:prefix>
+               <pdfaSchema:schema>TDMRep</pdfaSchema:schema>
+               <pdfaSchema:property>
+                  <rdf:Seq>
+                     <rdf:li rdf:parseType="Resource">
+                        <pdfaProperty:category>internal</pdfaProperty:category>
+                        <pdfaProperty:description>TDM rights are reserved (1) or not reserved (0)</pdfaProperty:description>
+                        <pdfaProperty:name>reservation</pdfaProperty:name>
+                        <pdfaProperty:valueType>Closed Choice of Integer</pdfaProperty:valueType>
+                     </rdf:li>
+                     <rdf:li rdf:parseType="Resource">
+                        <pdfaProperty:category>internal</pdfaProperty:category>
+                        <pdfaProperty:description>URL pointing to a TDM Policy set by the rightsholder</pdfaProperty:description>
+                        <pdfaProperty:name>policy</pdfaProperty:name>
+                        <pdfaProperty:valueType>URI</pdfaProperty:valueType>
+                     </rdf:li>
+                  </rdf:Seq>
+               </pdfaSchema:property>
+            </rdf:li>
+         </rdf:Bag>
+      </pdfaExtension:schemas>
+   </rdf:Description>

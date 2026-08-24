@@ -1,0 +1,1621 @@
+{
+ "attribution": "PDF Association, Techniques for Accessible PDF",
+ "commit": "9772af3c93ce6409b945c1c60a4cd7c8e74c8c40",
+ "license": "CC-BY-4.0",
+ "sha256": {
+  "UA1_Tpdf-G1_01.pdf": "5124fa2917e90168f3043ed9255a2df8d74603084748bff8091e76881c730deb",
+  "UA1_Tpdf-G1_F01.pdf": "4550a83e20f571b7286c501873713e9f0bb2b2e951a332c234884338b6016fcb",
+  "UA1_Tpdf-G2_01.pdf": "7125265c92a8c501dde8ffbdbb928f8a29db5f7505010930a1a23112f46d2ac2",
+  "UA1_Tpdf-G2_02.pdf": "73042971c1a46b000a398dfcbb7cafc1a7be78bae4cb34920ee42590dd75fdd7",
+  "UA1_Tpdf-G2_03.pdf": "e47cf72f8c6c972c750f8d92cfa79100b67b469a9bc52fc6ea3e698f10a48389",
+  "UA1_Tpdf-G2_04.pdf": "d1eff0dea9877beb85b3688b7657cf96e9a9ab140db372aad7b568747ea22aa9",
+  "UA1_Tpdf-G2_05.pdf": "c1179396dc0eb4ffacbdfbadba896fb1a6e9661f272ee9cd28b2623d5b506c0d",
+  "UA1_Tpdf-G2_06.pdf": "d7de1e10e633b7e6b5e93d7c45c9153e225eee5ae1e961186b93ae21d00025f0",
+  "UA1_Tpdf-G2_F01.pdf": "f6d7372b8cbd92c0534f973f31bc62cfd029979ac095958545ada684dcc8fc42",
+  "UA1_Tpdf-G2_F02.pdf": "8b409c01ace624f977816a55901d9726e1e1e9bd300d855976611df7642ada96",
+  "UA1_Tpdf-G2_F03.pdf": "e9ab66c1ee356aae2b96bfd92adc24f63b016a37c8cac44b752c5745ba7a41da",
+  "UA1_Tpdf-G2_F04.pdf": "9361a1a6c2caefad2d71f264af25d4051833cc445020d08740d13c6a5b6d78f0",
+  "UA1_Tpdf-G3_01.pdf": "52330a43e8504cef45246ca5df382aae5262be3e8d2ea9fe5db156b35e61ba7f",
+  "UA1_Tpdf-G3_02.pdf": "9d9182552538efeff34d31c39131e80c8768579da7901fb145fa7b4177a3c85d",
+  "UA1_Tpdf-G3_F01.pdf": "787f25de746d4a634c74a9c7f87f74c07978a1e8f3ac99cc1f35639d9444bcad",
+  "UA1_Tpdf-G3_F02.pdf": "8c83d16c54234923c1b598699d32f62586fff63b0bdfce442929c9f4e95eca1e",
+  "UA1_Tpdf-G3_F03.pdf": "351dd7044a5bc052befe239a7c5af3aa2fc3167dc45c2208a7a63fe8bdf2f8ad",
+  "UA1_Tpdf-G3_F04.pdf": "086e9375b07ff8d6c6599252908af82fb0afa508a2071576c0cb0105aecd0584",
+  "UA1_Tpdf-G4_01.pdf": "86557b1f79cb278e5826813e5f968d47d28a29aeb1d53acbd7e71149b2c736dd",
+  "UA1_Tpdf-G4_02.pdf": "490a3d74cbf5c6315a06890e5d39c3261481b215bc73598b35aa7891754cd87e",
+  "UA1_Tpdf-G4_03.pdf": "b823997dc8bbecb5e2b22ff9463912aeed8e67de62ccb02fc57d36d928b3d745",
+  "UA1_Tpdf-G4_04.pdf": "54a14e90b8815b8ac884a99452b997719a26778197a2898c7df939941c8b89d7",
+  "UA1_Tpdf-G4_05.pdf": "ae8d29468f6000db0ef6c6c42a2e83d20720617879fd4e3d25255fe665411a3f",
+  "UA1_Tpdf-G4_F01.pdf": "fcfd6de6b80ca8ac7bbb34353ae693c4f388f3b828395478fff23c571754c425",
+  "UA1_Tpdf-G4_F02.pdf": "e79543cc5765b7111920293f73601addd6803b58440cb2c4d7141f7314d7e754",
+  "UA1_Tpdf-G4_F03.pdf": "9372bc131e3ba2c81a72c7ca0316b70a5545fcbf7c4b6cb8043d91ccfc4d34a4",
+  "UA1_Tpdf-G4_F04.pdf": "c5c45ea7d0b280f431fb266c28c81d77871428a1db78b59af115c492feecb5ab",
+  "UA1_Tpdf-G4_F05.pdf": "35092a00cbe78938457f26939c1cd8e044cfdec9582b02a1e128ec88e73204d2",
+  "UA1_Tpdf-G4_F06.pdf": "fe6782017642fd46c5236987364a3540cec604250a2d1abbfa0d470f4621a125",
+  "UA1_Tpdf-G4_F07.pdf": "0348680e1be68afb86221c3760d514c545e724cceb43058abc9c50ad2fe4af6d",
+  "UA1_Tpdf-G5_01.pdf": "45fd819eb0ea3c5aef3367b01d9d4f1486feabdee1bdda03919710c3707aa524",
+  "UA1_Tpdf-G5_02.pdf": "c1e209cd4caed00ddd44c64e82e6c9999d5213b544d08a353acecdd1f5da3cfb",
+  "UA1_Tpdf-G5_03.pdf": "071680cd1480e1ebe83ccab3b822b6520a0681d630fdb0975737c37c716147b7",
+  "UA1_Tpdf-G5_04.pdf": "2b2e804266581d01acc2b6f54a9c5b66b86a0b6178c97651b531f116ce5b234d",
+  "UA1_Tpdf-G5_F01.pdf": "edf87a15422b23ad0d036af392a09a16910cfbf902777af686700a90f8ed30e4",
+  "UA1_Tpdf-G5_F02.pdf": "91dbe5df72fe60408aebb9d858ccfa947ee4c06d241d42735a4430280b71ebbe",
+  "UA1_Tpdf-G5_F03.pdf": "016eb0d457144a52bc65dd48c7c5b52298c4d46785430296da0e65c8b2a705ff",
+  "UA1_Tpdf-G5_F04.pdf": "86c3c4cfbdf8d5597859c34531f9149e0490d998bb0ef05d9adde06eb51d7a00",
+  "UA1_Tpdf-G5_F05.pdf": "e78deaa1328e42497ee2abc7978f424f7ce7f6e05f0497b332327f722e88744a",
+  "UA1_Tpdf-G5_F06.pdf": "ccbde3363924d1b1cc6e6118e368a3bda2b52b73a5b7c5cca2a3622ebe3257da",
+  "UA1_Tpdf-H_01.pdf": "5a112b4a469a8384f1cd9e57d526438ae2c753216fffee8328099d329ca57456",
+  "UA1_Tpdf-H_02.pdf": "21597b622cab31700d7c1d311536cf41f9da629386882a5f51887ddab771614a",
+  "UA1_Tpdf-H_03.pdf": "5a542c854127d5c1725b900eca9c06110dffb0d047e807ef3a15ebf758e11625",
+  "UA1_Tpdf-H_04.pdf": "1e78262229e29b620912986fafc3e1e7b5ac4251972c094004147ca7e1f9020c",
+  "UA1_Tpdf-H_05.pdf": "513284c861416442cad00ce4ea47b1cb90cf99b31b5f49eac2aca5f666c0fab9",
+  "UA1_Tpdf-H_06.pdf": "e095231d2fee173d84163b924f3a8d9d3a57b617fb91159a93bc421c26fb0965",
+  "UA1_Tpdf-H_07.pdf": "13b56165c1fa0bb90b2f404cb6ad59f29a745bb846eb63058f5b3ac835aa0a11",
+  "UA1_Tpdf-H_08.pdf": "5c800f3ceb967bf1299a22a0c875c2d1b26fed96a280574da45f02d5291ff2dd",
+  "UA1_Tpdf-H_09.pdf": "490ac660fb82762c2e77c5942bf2e383b3d40408edb406d9f7e2fd7095dc4711",
+  "UA1_Tpdf-H_F01.pdf": "c2f5fd6bcf1a0be7fa8ffa5ee62e8308cacb1b8fc85450f6691fdde1e55dd3fc",
+  "UA1_Tpdf-H_F02.pdf": "fac0aace3b61f86324f58963899b4462b627e7ca312f8275e822968dc597ed50",
+  "UA1_Tpdf-H_F03.pdf": "a8b2273ba5ff080ace91a5acad104ab745c45fcd12804358495568a9275faec0",
+  "UA1_Tpdf-H_F04.pdf": "910bce53080a01c112683cfe338b6b72d780be11df112f242e09fd646572c162",
+  "UA1_Tpdf-H_F05.pdf": "76976f503d8161ba03de2f98299331756a092545ec4d3f0094dc32813b0c1ad7",
+  "UA1_Tpdf-H_F06.pdf": "c5206350b244f51c4b4ca86b890155ca5c2b95d47e35f2ad5c19cc08a3805dc1",
+  "UA1_Tpdf-H_F07.pdf": "11114f658884eeb17dcc7e587e1a35f86c05092cd48dba6ed64b8c358179eeda",
+  "UA1_Tpdf-H_F08.pdf": "7e5bbdacc15dbe4b823f19a0470db283b5ad9816dcceef6ad4de48ced17a5918",
+  "UA1_Tpdf-L_01.pdf": "ea69b0d415acc8cefbb16641381526067524854ee9bc959ff13f11fdb9cc0422",
+  "UA1_Tpdf-L_02.pdf": "08a02b03839a7e1d55b3be51fc11bfbd4181195484382f512a798fff0d6765aa",
+  "UA1_Tpdf-L_03.pdf": "dcca3855ab674dd5d9101246b5559778162a49a4fc7adac204512f0d3f04348b",
+  "UA1_Tpdf-L_04.pdf": "84ba1a539a1ffbe2fafc6f85696ef197c66d14ddc543112fe06b5eb0bd1f9e85",
+  "UA1_Tpdf-L_05.pdf": "e3d02937a2488ef981e3fb6dba3e8be77f027db1a2c69ce4ad645b4864e15724",
+  "UA1_Tpdf-L_06.pdf": "5d6009b9470873b5f2708eb4647b05a73b44f8e3f7e1f2e594470d1cb9f31f1c",
+  "UA1_Tpdf-L_07.pdf": "3756abe122170e55a5e58bb75ae4384adb4b1ba359dde257b758bd7a05e2988d",
+  "UA1_Tpdf-L_08.pdf": "035fafbb6ffe4536b8dba176b6baea1e9333f951e2f7cf5337246e3a803036ad",
+  "UA1_Tpdf-L_09.pdf": "c62552b08a18a293dd5eea4a2b0a4f93df32135c9b71bb735101558818e80315",
+  "UA1_Tpdf-L_10.pdf": "1ff4afaaccfade357a2bed0ae7638336417e3132ae06a8c57307ef3d0b4947e5",
+  "UA1_Tpdf-L_11.pdf": "891e3e7c7a449048f26693e53131635cafca280e48ec52d6a70020953cfe1bf8",
+  "UA1_Tpdf-L_12.pdf": "b600b99a9bf4a44192ef73f0b3b900f012ed578ae192a3a9be46dfc887632346",
+  "UA1_Tpdf-L_13.pdf": "91c19689a3231afcb9e78e5e570a7bc0d2eaf40f73bcccf353c2721a5752c5ea",
+  "UA1_Tpdf-L_14.pdf": "e3931d460cfcafd9be13d42c31420817552b5b26f7f9df7f8f9a7724e680e281",
+  "UA1_Tpdf-L_15.pdf": "16eb90385e0b40004b7e3ad1f1c7da16143643fbe04d73ecb53577d9d203226c",
+  "UA1_Tpdf-L_F01.pdf": "b71137abdae88998d760eb5a3608bb3aefdffd7856b517706e54c5e5cdd2fd95",
+  "UA1_Tpdf-L_F02.pdf": "5ed6eb6ded5ad786818c088553871a8d12c36f6ed9d43fd1f106567f9185daf5",
+  "UA1_Tpdf-L_F03.pdf": "ac135c407388ab9081492993d3505ed3be86f004f2f792241d6e5cb00ef9fbad",
+  "UA1_Tpdf-L_F04.pdf": "122bbd5b86cae20a78f06a21fbe53a61d4842d332913ce763d2a2af0f1ba62c4",
+  "UA1_Tpdf-L_F05.pdf": "4bf102cd6584cec7712f28a13c2270fc43e7a45bb2e3795a9cad903bf2d75330",
+  "UA1_Tpdf-L_F06.pdf": "5e630938e44bc792b4d74b150eff3329ff385a981ebc7017047f0df02d826f6d",
+  "UA1_Tpdf-L_F07.pdf": "3e1ff571cc9866e706cac08618f77650dfdf38fa0351b9d6624cd39c07cec4e8",
+  "UA1_Tpdf-L_F08.pdf": "162ce60dc603f1546956f17371a3be77ba51dda1208752eb3a5d4813a571620d",
+  "UA1_Tpdf-L_F09.pdf": "bf2994c54d6847e681f3f995c961c381fdeaa7fa474bccef04c7059c5bab77a1",
+  "UA1_Tpdf-L_F10.pdf": "2eaca3e89426f29afa6fb1f15aaba4cd8f76d7c376fcaa9d7de319523bc601a5"
+ },
+ "techniques": {
+  "UA1_Tpdf-G1_01": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G1_01.pdf",
+   "matterhorn": [
+    "02-001"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Custom tag correctly role mapped",
+   "upstream_path": "fundamentals/1-basic-technical-rules/G1_01-Custom-tag-correctly-role-mapped",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-G1_F01": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G1_F01.pdf",
+   "matterhorn": [
+    "02-001"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Custom tag role map missing",
+   "upstream_path": "fundamentals/1-basic-technical-rules/G1_F01-Custom-tag-role-map-missing",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-G2_01": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G2_01.pdf",
+   "matterhorn": [
+    "08-001",
+    "10-001",
+    "11-001",
+    "11-002",
+    "11-003",
+    "11-006"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Text content correctly tagged (in one container)",
+   "upstream_path": "fundamentals/2-text/G2_01-Text-content-correctly-tagged-in-one-container",
+   "wcag": [
+    "1.3.1",
+    "1.4.5",
+    "3.1.1",
+    "3.1.2"
+   ]
+  },
+  "UA1_Tpdf-G2_02": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G2_02.pdf",
+   "matterhorn": [
+    "08-001",
+    "10-001",
+    "11-001",
+    "11-002",
+    "11-003",
+    "11-006"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Text content correctly tagged (one container per word)",
+   "upstream_path": "fundamentals/2-text/G2_02-Text-content-correctly-tagged-one-container-per-word",
+   "wcag": [
+    "1.3.1",
+    "1.4.5",
+    "3.1.1",
+    "3.1.2"
+   ]
+  },
+  "UA1_Tpdf-G2_03": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G2_03.pdf",
+   "matterhorn": [
+    "08-001",
+    "10-001",
+    "11-001",
+    "11-002",
+    "11-003",
+    "11-006"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Text content correctly tagged (one container per character)",
+   "upstream_path": "fundamentals/2-text/G2_03-Text-content-correctly-tagged-one-container-per-character",
+   "wcag": [
+    "1.3.1",
+    "1.4.5",
+    "3.1.1",
+    "3.1.2"
+   ]
+  },
+  "UA1_Tpdf-G2_04": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G2_04.pdf",
+   "matterhorn": [
+    "08-001",
+    "08-002",
+    "10-001",
+    "31-027",
+    "31-028",
+    "31-029"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Special character with correct Unicode mapping",
+   "upstream_path": "fundamentals/2-text/G2_04-Special-character-with-correct-Unicode-mapping",
+   "wcag": [
+    "1.1.1",
+    "1.3.1",
+    "1.4.5"
+   ]
+  },
+  "UA1_Tpdf-G2_05": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G2_05.pdf",
+   "matterhorn": [
+    "01-006",
+    "08-001",
+    "08-002",
+    "10-001",
+    "11-001",
+    "11-002",
+    "11-006",
+    "13-001",
+    "13-004",
+    "13-005",
+    "13-008"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Graphics representing text correctly tagged",
+   "upstream_path": "fundamentals/2-text/G2_05-Graphics-representing-text-correctly-tagged",
+   "wcag": [
+    "1.1.1",
+    "1.3.1",
+    "1.4.5",
+    "3.1.1",
+    "3.1.2"
+   ]
+  },
+  "UA1_Tpdf-G2_06": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G2_06.pdf",
+   "matterhorn": [
+    "08-001",
+    "10-001",
+    "11-001",
+    "11-006",
+    "13-007"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "ActualText provides correct extractable characters in place of OCR errors",
+   "upstream_path": "fundamentals/2-text/G2_06-ActualText-provides-correct-extractable-characters-in-place-of-OCR-errors",
+   "wcag": [
+    "1.1.1",
+    "1.3.1",
+    "1.4.5",
+    "3.1.1",
+    "3.1.2"
+   ]
+  },
+  "UA1_Tpdf-G2_F01": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G2_F01.pdf",
+   "matterhorn": [
+    "08-001",
+    "08-002",
+    "10-001",
+    "31-027",
+    "31-028",
+    "31-029"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Special character missing Unicode mapping",
+   "upstream_path": "fundamentals/2-text/G2_F01-Special-character-missing-Unicode-mapping",
+   "wcag": [
+    "1.1.1",
+    "1.3.1",
+    "1.4.5"
+   ]
+  },
+  "UA1_Tpdf-G2_F02": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G2_F02.pdf",
+   "matterhorn": [
+    "08-001",
+    "08-002",
+    "10-001",
+    "31-027",
+    "31-028",
+    "31-029"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Special character with incorrect Unicode mapping",
+   "upstream_path": "fundamentals/2-text/G2_F02-Special-character-with-incorrect-Unicode-mapping",
+   "wcag": [
+    "1.1.1",
+    "1.3.1",
+    "1.4.5"
+   ]
+  },
+  "UA1_Tpdf-G2_F03": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G2_F03.pdf",
+   "matterhorn": [
+    "01-006",
+    "08-001",
+    "08-002",
+    "10-001",
+    "11-001",
+    "11-006",
+    "13-007",
+    "13-008"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Graphics representing text incorrectly tagged as figure",
+   "upstream_path": "fundamentals/2-text/G2_F03-Graphics-representing-text-incorrectly-tagged-as-figure",
+   "wcag": [
+    "1.3.1",
+    "1.4.5",
+    "3.1.1",
+    "3.1.2"
+   ]
+  },
+  "UA1_Tpdf-G2_F04": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G2_F04.pdf",
+   "matterhorn": [
+    "13-007"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Extractable characters are not present in a document with visible text",
+   "upstream_path": "fundamentals/2-text/G2_F04-Extractable-characters-are-not-present-in-a-document-with-visible-text",
+   "wcag": [
+    "1.3.1",
+    "1.4.5"
+   ]
+  },
+  "UA1_Tpdf-G3_01": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G3_01.pdf",
+   "matterhorn": [
+    "01-001",
+    "01-002",
+    "01-006",
+    "18-001",
+    "18-002"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Real content correctly tagged",
+   "upstream_path": "fundamentals/3-content/G3_01-Real-content-correctly-tagged",
+   "wcag": []
+  },
+  "UA1_Tpdf-G3_02": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G3_02.pdf",
+   "matterhorn": [
+    "01-001",
+    "01-002",
+    "01-006",
+    "18-001",
+    "18-002"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Decorative content correctly marked as artifact",
+   "upstream_path": "fundamentals/3-content/G3_02-Decorative-content-correctly-marked-as-artifact",
+   "wcag": [
+    "1.1.1",
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-G3_F01": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G3_F01.pdf",
+   "matterhorn": [
+    "01-001",
+    "01-002",
+    "01-006"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Real content not tagged",
+   "upstream_path": "fundamentals/3-content/G3_F01-Real-content-not-tagged",
+   "wcag": []
+  },
+  "UA1_Tpdf-G3_F02": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G3_F02.pdf",
+   "matterhorn": [
+    "01-001",
+    "01-002",
+    "01-006"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Real content incorrectly tagged",
+   "upstream_path": "fundamentals/3-content/G3_F02-Real-content-incorrectly-tagged",
+   "wcag": []
+  },
+  "UA1_Tpdf-G3_F03": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G3_F03.pdf",
+   "matterhorn": [
+    "01-001",
+    "01-002",
+    "01-006",
+    "13-001",
+    "18-001",
+    "18-002"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Decorative content incorrectly  tagged as figure",
+   "upstream_path": "fundamentals/3-content/G3_F03-Decorative-content-incorrectly-tagged-as-figure",
+   "wcag": [
+    "1.1.1"
+   ]
+  },
+  "UA1_Tpdf-G3_F04": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G3_F04.pdf",
+   "matterhorn": [
+    "01-001",
+    "01-002",
+    "01-005"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Decorative content not marked as artifact",
+   "upstream_path": "fundamentals/3-content/G3_F04-Decorative-content-not-marked-as-artifact",
+   "wcag": [
+    "1.1.1",
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-G4_01": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G4_01.pdf",
+   "matterhorn": [
+    "09-001"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Content order correctly set",
+   "upstream_path": "fundamentals/4-logical-content-order/G4_01-Content-order-correctly-set",
+   "wcag": [
+    "1.3.2"
+   ]
+  },
+  "UA1_Tpdf-G4_02": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G4_02.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-001"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Order of marked content sequences within a tag correctly set",
+   "upstream_path": "fundamentals/4-logical-content-order/G4_02-Order-of-marked-content-sequences-within-a-tag-correctly-set",
+   "wcag": [
+    "1.3.1",
+    "1.3.2"
+   ]
+  },
+  "UA1_Tpdf-G4_03": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G4_03.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-001"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Content in columns correctly ordered",
+   "upstream_path": "fundamentals/4-logical-content-order/G4_03-Content-in-columns-correctly-ordered",
+   "wcag": [
+    "1.3.1",
+    "1.3.2"
+   ]
+  },
+  "UA1_Tpdf-G4_04": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G4_04.pdf",
+   "matterhorn": [
+    "09-001"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Sidebar correctly located in the document\u2019s content order",
+   "upstream_path": "fundamentals/4-logical-content-order/G4_04-Sidebar-correctly-located-in-the-document-s-content-order",
+   "wcag": [
+    "1.3.2"
+   ]
+  },
+  "UA1_Tpdf-G4_05": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G4_05.pdf",
+   "matterhorn": [
+    "09-001",
+    "28-001",
+    "28-008",
+    "28-009"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Tab order for pages with annotations correctly set",
+   "upstream_path": "fundamentals/4-logical-content-order/G4_05-Tab-order-for-pages-with-annotations-correctly-set",
+   "wcag": [
+    "1.3.2",
+    "2.1.1",
+    "2.1.2",
+    "2.4.3"
+   ]
+  },
+  "UA1_Tpdf-G4_F01": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G4_F01.pdf",
+   "matterhorn": [
+    "09-001"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Content order incorrectly set",
+   "upstream_path": "fundamentals/4-logical-content-order/G4_F01-Content-order-incorrectly-set",
+   "wcag": [
+    "1.3.2"
+   ]
+  },
+  "UA1_Tpdf-G4_F02": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G4_F02.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-001"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Order of marked content sequences within a tag incorrectly set",
+   "upstream_path": "fundamentals/4-logical-content-order/G4_F02-Order-of-marked-content-sequences-within-a-tag-incorrectly-set",
+   "wcag": [
+    "1.3.1",
+    "1.3.2"
+   ]
+  },
+  "UA1_Tpdf-G4_F03": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G4_F03.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-001"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Content in columns incorrectly ordered",
+   "upstream_path": "fundamentals/4-logical-content-order/G4_F03-Content-in-columns-incorrectly-ordered",
+   "wcag": [
+    "1.3.1",
+    "1.3.2"
+   ]
+  },
+  "UA1_Tpdf-G4_F04": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G4_F04.pdf",
+   "matterhorn": [
+    "09-001"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Sidebar incorrectly located in the document\u2019s content order",
+   "upstream_path": "fundamentals/4-logical-content-order/G4_F04-Sidebar-incorrectly-located-in-the-document-s-content-order",
+   "wcag": []
+  },
+  "UA1_Tpdf-G4_F05": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G4_F05.pdf",
+   "matterhorn": [
+    "09-001"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Order of content within a marked content sequence incorrectly set",
+   "upstream_path": "fundamentals/4-logical-content-order/G4_F05-Order-of-content-within-a-marked-content-sequence-incorrectly-set",
+   "wcag": [
+    "1.3.2"
+   ]
+  },
+  "UA1_Tpdf-G4_F06": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G4_F06.pdf",
+   "matterhorn": [
+    "09-001",
+    "28-001",
+    "28-008",
+    "28-009"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Tab order for pages with annotations incorrectly set",
+   "upstream_path": "fundamentals/4-logical-content-order/G4_F06-Tab-order-for-pages-with-annotations-incorrectly-set",
+   "wcag": [
+    "1.3.2",
+    "2.1.1",
+    "2.1.2",
+    "2.4.3"
+   ]
+  },
+  "UA1_Tpdf-G4_F07": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G4_F07.pdf",
+   "matterhorn": [
+    "09-001",
+    "28-001",
+    "28-008",
+    "28-009"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Tab order for pages with annotations missing",
+   "upstream_path": "fundamentals/4-logical-content-order/G4_F07-Tab-order-for-pages-with-annotations-missing",
+   "wcag": [
+    "1.3.2",
+    "2.1.1",
+    "2.1.2",
+    "2.4.3"
+   ]
+  },
+  "UA1_Tpdf-G5_01": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G5_01.pdf",
+   "matterhorn": [
+    "01-001",
+    "01-002",
+    "01-006",
+    "14-001",
+    "14-002"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "H1 heading appropriately tagged",
+   "upstream_path": "fundamentals/5-appropriate-semantics/G5_01-H1-heading-appropriately-tagged",
+   "wcag": []
+  },
+  "UA1_Tpdf-G5_02": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G5_02.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Similar real content appropriately tagged",
+   "upstream_path": "fundamentals/5-appropriate-semantics/G5_02-Similar-real-content-appropriately-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-G5_03": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G5_03.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Visually-separated content appropriately tagged ",
+   "upstream_path": "fundamentals/5-appropriate-semantics/G5_03-Visually-separated-content-appropriately-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-G5_04": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-G5_04.pdf",
+   "matterhorn": [
+    "01-006",
+    "14-001",
+    "14-002",
+    "14-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Multiline content appropriately tagged",
+   "upstream_path": "fundamentals/5-appropriate-semantics/G5_04-Multiline-heading-appropriately-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-G5_F01": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G5_F01.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-003",
+    "14-001"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "H1 heading inappropriately tagged",
+   "upstream_path": "fundamentals/5-appropriate-semantics/G5_F01-H1-heading-inappropriately-tagged",
+   "wcag": [
+    "1.3.1",
+    "2.4.2"
+   ]
+  },
+  "UA1_Tpdf-G5_F02": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G5_F02.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Similar real content inappropriately tagged",
+   "upstream_path": "fundamentals/5-appropriate-semantics/G5_F02-Similar-real-content-inappropriately-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-G5_F03": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G5_F03.pdf",
+   "matterhorn": [
+    "01-006"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Single semantic unit of content inappropriately tagged",
+   "upstream_path": "fundamentals/5-appropriate-semantics/G5_F03-Single-semantic-unit-of-content-inappropriately-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-G5_F04": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G5_F04.pdf",
+   "matterhorn": [
+    "01-006"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Visually-separated content inappropriately tagged",
+   "upstream_path": "fundamentals/5-appropriate-semantics/G5_F04-Visually-separated-content-inappropriately-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-G5_F05": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G5_F05.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-003",
+    "14-001",
+    "14-002",
+    "14-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Multiline content inappropriately tagged",
+   "upstream_path": "fundamentals/5-appropriate-semantics/G5_F05-Multiline-heading-inappropriately-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-G5_F06": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-G5_F06.pdf",
+   "matterhorn": [
+    "01-006"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Table header cell inappropriately tagged",
+   "upstream_path": "fundamentals/5-appropriate-semantics/G5_F06-Table-header-cell-inappropriately-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-H_01": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-H_01.pdf",
+   "matterhorn": [
+    "01-006",
+    "14-001",
+    "14-002"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "First-level heading correctly tagged as H1",
+   "upstream_path": "headings/H_01-Top-level-heading-correctly-tagged-as-H1",
+   "wcag": [
+    "1.3.1",
+    "2.4.6"
+   ]
+  },
+  "UA1_Tpdf-H_02": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-H_02.pdf",
+   "matterhorn": [
+    "01-006",
+    "14-001",
+    "14-002"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Multiline heading correctly tagged",
+   "upstream_path": "headings/H_02-Multiline-heading-correctly-tagged",
+   "wcag": [
+    "1.3.1",
+    "2.4.6"
+   ]
+  },
+  "UA1_Tpdf-H_03": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-H_03.pdf",
+   "matterhorn": [
+    "01-006",
+    "14-001",
+    "14-002",
+    "14-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Headings with different levels correctly tagged",
+   "upstream_path": "headings/H_03-Headings-with-different-levels-correctly-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-H_04": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-H_04.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-002",
+    "09-003",
+    "13-001",
+    "13-004",
+    "14-001",
+    "14-002",
+    "14-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Image used as heading correctly tagged",
+   "upstream_path": "headings/H_04-Image-correctly-tagged-as-heading",
+   "wcag": [
+    "1.1.1",
+    "1.3.1",
+    "2.4.6"
+   ]
+  },
+  "UA1_Tpdf-H_05": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-H_05.pdf",
+   "matterhorn": [
+    "01-006",
+    "14-001",
+    "14-002",
+    "14-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Heading levels correctly not skipped",
+   "upstream_path": "headings/H_05-Heading-levels-correctly-not-skipped",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-H_06": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-H_06.pdf",
+   "matterhorn": [
+    "01-006",
+    "02-001",
+    "02-002",
+    "09-003",
+    "14-001",
+    "14-002",
+    "14-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Subtitle correctly tagged",
+   "upstream_path": "headings/H_06-Subtitle-correctly-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-H_07": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-H_07.pdf",
+   "matterhorn": [
+    "01-006",
+    "02-001",
+    "02-002",
+    "09-003",
+    "14-001",
+    "14-002",
+    "14-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Title in page content correctly tagged",
+   "upstream_path": "headings/H_07-Title-in-page-content-correctly-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-H_08": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-H_08.pdf",
+   "matterhorn": [
+    "01-006",
+    "02-001",
+    "02-002",
+    "14-001",
+    "14-002",
+    "14-003",
+    "14-005"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Heading level 7 correctly rolemapped to P",
+   "upstream_path": "headings/H_08-Heading-level-7-correctly-rolemapped-to-P",
+   "wcag": []
+  },
+  "UA1_Tpdf-H_09": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-H_09.pdf",
+   "matterhorn": [
+    "01-006",
+    "02-001",
+    "02-002",
+    "14-001",
+    "14-002",
+    "14-003",
+    "14-005"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Heading level 7 correctly rolemapped to H6",
+   "upstream_path": "headings/H_09-Heading-level-7-correctly-rolemapped-to-H6",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-H_F01": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-H_F01.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-003",
+    "14-001"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "First-level heading incorrectly tagged as P instead of H1",
+   "upstream_path": "headings/H_F01-Top-level-heading-incorrectly-tagged-as-P-instead-of-H1",
+   "wcag": [
+    "1.3.1",
+    "2.4.6"
+   ]
+  },
+  "UA1_Tpdf-H_F02": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-H_F02.pdf",
+   "matterhorn": [
+    "01-006",
+    "14-001",
+    "14-002"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Multiline heading incorrectly tagged",
+   "upstream_path": "headings/H_F02-Multiline-heading-incorrectly-tagged",
+   "wcag": [
+    "1.3.1",
+    "2.4.6"
+   ]
+  },
+  "UA1_Tpdf-H_F03": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-H_F03.pdf",
+   "matterhorn": [
+    "01-006",
+    "14-001"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Paragraph incorrectly tagged as H2",
+   "upstream_path": "headings/H_F03-Paragraph-incorrectly-tagged-as-H2",
+   "wcag": [
+    "1.3.1",
+    "2.4.6"
+   ]
+  },
+  "UA1_Tpdf-H_F04": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-H_F04.pdf",
+   "matterhorn": [
+    "01-006",
+    "14-001",
+    "15-001",
+    "15-002",
+    "15-005"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Incorrect use of headings instead of table header cells",
+   "upstream_path": "headings/H_F04-Incorrect-use-of-headings-instead-of-table-header-cells",
+   "wcag": [
+    "1.3.1",
+    "2.4.6"
+   ]
+  },
+  "UA1_Tpdf-H_F05": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-H_F05.pdf",
+   "matterhorn": [
+    "01-006",
+    "14-001",
+    "14-002",
+    "14-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Heading incorrectly tagged as P",
+   "upstream_path": "headings/H_F05-First-level-heading-incorrectly-tagged-as-H3-instead-of-H1",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-H_F06": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-H_F06.pdf",
+   "matterhorn": [
+    "01-006",
+    "14-001",
+    "14-002",
+    "14-007"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Incorrect combined use of Hn and H tags for headings",
+   "upstream_path": "headings/H_F06-Incorrect-combined-use-of-Hn-and-H-tags-for-headings",
+   "wcag": [
+    "1.3.1",
+    "2.4.6"
+   ]
+  },
+  "UA1_Tpdf-H_F07": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-H_F07.pdf",
+   "matterhorn": [
+    "01-006",
+    "02-001",
+    "02-002",
+    "09-003",
+    "14-001",
+    "14-002",
+    "14-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Both title and top level headings incorrectly tagged as H1",
+   "upstream_path": "headings/H_F07-Both-title-and-top-level-headings-incorrectly-tagged-as-H1",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-H_F08": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-H_F08.pdf",
+   "matterhorn": [
+    "01-006",
+    "14-001",
+    "14-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Heading level incorrectly skipped",
+   "upstream_path": "headings/H_F08-Heading-level-incorrectly-skipped",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_01": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_01.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-002",
+    "09-005",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Unordered list",
+   "upstream_path": "list/L_01-Unordered-list",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_02": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_02.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-005",
+    "16-001",
+    "16-002",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Ordered list with correctly set ListNumbering attribute \"UpperRoman\"",
+   "upstream_path": "list/L_02-Ordered-list-with-correctly-set-ListNumbering-attribute-UpperRoman",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_03": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_03.pdf",
+   "matterhorn": [
+    "01-006",
+    "16-001",
+    "16-002",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Ordered list with correctly set ListNumbering attribute \"Decimal\"",
+   "upstream_path": "list/L_03-Ordered-list-with-correctly-set-ListNumbering-attribute-Decimal",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_04": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_04.pdf",
+   "matterhorn": [
+    "01-006",
+    "13-001",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Unordered List with decorative images as bullets correctly tagged",
+   "upstream_path": "list/L_04-Unordered-List-with-decorative-images-as-bullets-correctly-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_05": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_05.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-002",
+    "09-005",
+    "16-001",
+    "16-002",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Multi-level list correctly tagged",
+   "upstream_path": "list/L_05-Multi-level-list-correctly-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_06": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_06.pdf",
+   "matterhorn": [
+    "01-006",
+    "13-001",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "List with semantic images as bullets correctly tagged",
+   "upstream_path": "list/L_06-List-with-semantic-images-as-bullets-correctly-tagged",
+   "wcag": [
+    "1.1.1",
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_07": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_07.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-002",
+    "09-005",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Three unordered lists with the ListNumbering correctly not set",
+   "upstream_path": "list/L_07-Three-unordered-lists-with-the-ListNumbering-correctly-not-set",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_08": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_08.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-002",
+    "09-005",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Three unordered lists with the ListNumbering correctly set to \"None\"",
+   "upstream_path": "list/L_08-Three-unordered-lists-with-the-ListNumbering-correctly-set-to-None",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_09": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_09.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-001",
+    "09-002",
+    "09-003",
+    "09-005",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Caption for List correctly tagged",
+   "upstream_path": "list/L_09-Caption-for-List-correctly-tagged",
+   "wcag": [
+    "1.3.1",
+    "1.3.2"
+   ]
+  },
+  "UA1_Tpdf-L_10": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_10.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-001",
+    "09-002",
+    "09-005",
+    "16-001",
+    "16-002",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Inline List correctly tagged",
+   "upstream_path": "list/L_10-Inline-List-correctly-tagged",
+   "wcag": [
+    "1.3.1",
+    "1.3.2"
+   ]
+  },
+  "UA1_Tpdf-L_11": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_11.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-002",
+    "09-005",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "List item spanning 2 pages correctly tagged",
+   "upstream_path": "list/L_11-List-item-spanning-2-pages-correctly-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_12": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_12.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-002",
+    "09-005",
+    "16-001",
+    "16-002",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Hierarchical list correctly tagged",
+   "upstream_path": "list/L_12-Hierarchical-list-correctly-tagged",
+   "wcag": [
+    "1.3.1",
+    "1.3.2"
+   ]
+  },
+  "UA1_Tpdf-L_13": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_13.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-001",
+    "09-005",
+    "16-001",
+    "16-002",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "LBody with additional content correctly tagged",
+   "upstream_path": "list/L_13-List-item-with-substructure-correctly-tagged",
+   "wcag": [
+    "1.3.1",
+    "1.3.2"
+   ]
+  },
+  "UA1_Tpdf-L_14": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_14.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-005",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Description list correctly tagged",
+   "upstream_path": "list/L_14-Description-list-correctly-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_15": {
+   "expectation": "Pass",
+   "file": "UA1_Tpdf-L_15.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-002",
+    "09-005",
+    "16-001",
+    "16-002",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "List spanning 2 pages correctly tagged",
+   "upstream_path": "list/L_15-List-spanning-2-pages-correctly-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_F01": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-L_F01.pdf",
+   "matterhorn": [
+    "01-006"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Unordered list with incorrectly set ListNumbering attribute",
+   "upstream_path": "list/L_F01-Unordered-list-with-incorrectly-set-ListNumbering-attribute",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_F02": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-L_F02.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-003",
+    "09-005",
+    "16-001",
+    "16-002",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "List with incorrectly tagged labels",
+   "upstream_path": "list/L_F02-List-with-incorrectly-tagged-labels",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_F03": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-L_F03.pdf",
+   "matterhorn": [
+    "01-006",
+    "16-001",
+    "16-002"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Ordered list with missing ListNumbering attribute",
+   "upstream_path": "list/L_F03-Ordered-list-with-missing-ListNumbering-attribute",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_F04": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-L_F04.pdf",
+   "matterhorn": [
+    "01-006",
+    "16-002"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Ordered list with ListNumbering attribute incorrectly set to \"Disc\"",
+   "upstream_path": "list/L_F04-Ordered-list-with-ListNumbering-attribute-incorrectly-set-to-Disc",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_F05": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-L_F05.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-002",
+    "09-005",
+    "16-001",
+    "16-002",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "List with missing LBody",
+   "upstream_path": "list/L_F05-List-with-missing-LBody",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_F06": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-L_F06.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-003",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "List incorrectly tagged",
+   "upstream_path": "list/L_F06-List-incorrectly-tagged-as-P",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_F07": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-L_F07.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-002",
+    "09-005",
+    "16-001",
+    "16-002",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "Multi-level list incorrectly tagged",
+   "upstream_path": "list/L_F07-Multi-level-list-tags-incorrectly-nested",
+   "wcag": [
+    "1.3.1",
+    "1.3.2"
+   ]
+  },
+  "UA1_Tpdf-L_F08": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-L_F08.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-001",
+    "09-002",
+    "09-003",
+    "09-005",
+    "16-001",
+    "16-002",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "LBody with substructure incorrectly tagged",
+   "upstream_path": "list/L_F08-List-item-substructure-incorrectly-tagged",
+   "wcag": [
+    "1.3.1",
+    "1.3.2"
+   ]
+  },
+  "UA1_Tpdf-L_F09": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-L_F09.pdf",
+   "matterhorn": [
+    "01-006",
+    "09-003",
+    "09-005",
+    "16-001",
+    "16-002",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "LBody with additional content incorrectly tagged as LI",
+   "upstream_path": "list/L_F09-List-item-with-missing-LBody-tag",
+   "wcag": [
+    "1.3.1"
+   ]
+  },
+  "UA1_Tpdf-L_F10": {
+   "expectation": "Fail",
+   "file": "UA1_Tpdf-L_F10.pdf",
+   "matterhorn": [
+    "01-006",
+    "16-003"
+   ],
+   "parts": [
+    "PDF/UA-1"
+   ],
+   "title": "List spanning 2 pages incorrectly tagged",
+   "upstream_path": "list/L_F10-List-spanning-multiple-pages-incorrectly-tagged",
+   "wcag": [
+    "1.3.1"
+   ]
+  }
+ },
+ "upstream": "https://github.com/pdf-association/techniques-for-accessible-pdf"
+}

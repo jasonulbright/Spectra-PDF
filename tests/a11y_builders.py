@@ -265,6 +265,20 @@ def title_not_displayed(path):
     return save(pdf, path)
 
 
+def title_docinfo_only(path):
+    """ISO 14289-1 cl. 7.1 requires dc:title in the catalog's Metadata stream
+    and requires a conforming reader to ignore the document information
+    dictionary, so a title carried only there declares nothing."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    make_conformant(pdf, page)
+    with pdf.open_metadata() as meta:
+        del meta["dc:title"]
+    pdf.docinfo[Name.Title] = String("A Test Document")
+    return save(pdf, path)
+
+
 def no_bookmarks_long(path):
     pdf = new_pdf(pages=12)
     for page in pdf.pages:
@@ -547,8 +561,9 @@ def has_scripts(path):
 
 def repetitive_links(path):
     """Two pages whose links read the same and go somewhere different. Each
-    link element carries its own text AND its OBJR, which is the conforming
-    shape — the only thing wrong with this document is the labelling."""
+    link element carries its own text, its OBJR and the annotation's own
+    /Contents — the conforming shape; the only thing wrong with this document
+    is the labelling."""
     pdf = new_pdf(pages=2)
     for page in pdf.pages:
         draw(
@@ -566,6 +581,7 @@ def repetitive_links(path):
         annot = _annot(
             pdf, page, "Link", [40, 655, 120, 675],
             A=Dictionary(S=Name.URI, URI=String(f"https://example.test/{i}")),
+            Contents=String("Read more"),
         )
         link = elem(pdf, "Link", doc, page=page,
                     kids=[1, Dictionary(Type=Name.OBJR, Obj=annot)])
@@ -883,6 +899,24 @@ def table_headers_ok(path):
     return save(pdf, path)
 
 
+def th_no_scope(path):
+    """ISO 14289-1 cl. 7.5: where a table's structure is not determinable via
+    Headers and IDs, TH elements shall carry Scope. Missing headers is the
+    clause's `should`; a header with no scope is its `shall`."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _table(
+        pdf, page,
+        [
+            [("Region", {"_role": "TH"}), ("Revenue", {"_role": "TH"})],
+            [("North", {}), ("120", {})],
+        ],
+        table_extra={"Summary": String("Revenue by region")},
+    )
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
 def table_ragged(path):
     pdf = new_pdf()
     page = pdf.pages[0]
@@ -976,7 +1010,9 @@ def li_outside_l(path):
     return save(pdf, path)
 
 
-def lbody_no_lbl(path):
+def lbody_no_lbl_ok(path):
+    """PASS fixture — ISO 14289-1 cl. 7.6 makes Lbl and LBody MAY, so a list
+    item with a body and no label is conforming."""
     pdf = new_pdf()
     page = pdf.pages[0]
     draw(
@@ -1101,7 +1137,9 @@ def _ns_list_page(pdf, page, extra_lbl=False, link_lbl=False, footnote=False):
     order = [para, lbl]
     body_kids = None
     if link_lbl:
-        link = elem(pdf, "Link", doc, page=page, NS=ns)
+        # ISO 14289-1 cl. 7.18.1 asks every Link for an alternate description;
+        # this fixture is about where the label sits, so it carries one.
+        link = elem(pdf, "Link", doc, page=page, NS=ns, Alt=String("Contents entry"))
         inner = elem(pdf, "Lbl", link, page=page, mcid=3, NS=ns)
         # The link's own content sits alongside the label it encloses, so the
         # element has text of its own to be named by.
@@ -1396,9 +1434,9 @@ def heading_skip(path):
     return save(pdf, path)
 
 
-def heading_starts_at_h2_ok(path):
-    """PASS fixture — a section extracted from a larger document legitimately
-    starts at H2."""
+def heading_starts_at_h2_fails(path):
+    """ISO 14289-1 cl. 7.4.2: where any heading tags are used, H1 shall be
+    the first. A document opening at H2 has skipped the level above it."""
     pdf = new_pdf()
     page = pdf.pages[0]
     _headings(pdf, page, ["H2", "H3"])
@@ -1450,7 +1488,8 @@ ROSTER = {
     "lang_inherited_ok": (lang_inherited_ok, "lang", "pass"),
     "lang_empty_is_unknown": (lang_empty_is_unknown, "lang", "fail"),
     "no_title": (no_title, "title", "fail"),
-    "title_not_displayed": (title_not_displayed, "title", "warn"),
+    "title_not_displayed": (title_not_displayed, "title", "fail"),
+    "title_docinfo_only": (title_docinfo_only, "title", "fail"),
     "no_bookmarks_long": (no_bookmarks_long, "bookmarks", "warn"),
     "no_bookmarks_long_with_headings": (no_bookmarks_long_with_headings, "bookmarks", "warn"),
     "low_contrast": (low_contrast, "contrast", "fail"),
@@ -1480,14 +1519,15 @@ ROSTER = {
     "link_no_alt": (link_no_alt, "other_elements_alt", "fail"),
     "tr_outside_table": (tr_outside_table, "table_rows", "fail"),
     "td_outside_tr": (td_outside_tr, "table_cells", "fail"),
-    "table_no_headers": (table_no_headers, "table_headers", "fail"),
+    "table_no_headers": (table_no_headers, "table_headers", "warn"),
+    "th_no_scope": (th_no_scope, "table_headers", "fail"),
     "table_headers_ok": (table_headers_ok, "table_headers", "pass"),
     "table_ragged": (table_ragged, "table_regularity", "fail"),
     "table_colspan_regular_ok": (table_colspan_regular_ok, "table_regularity", "pass"),
     "table_rowspan_regular_ok": (table_rowspan_regular_ok, "table_regularity", "pass"),
     "table_no_summary": (table_no_summary, "table_summary", "warn"),
     "li_outside_l": (li_outside_l, "list_items", "fail"),
-    "lbody_no_lbl": (lbody_no_lbl, "list_labels", "warn"),
+    "lbody_no_lbl_ok": (lbody_no_lbl_ok, "list_labels", "pass"),
     "lbl_outside_list_item_ok": (lbl_outside_list_item_ok, "list_labels", "pass"),
     "li_in_div_in_l_ok": (li_in_div_in_l_ok, "list_items", "pass"),
     "li_under_div_under_sect_fails": (li_under_div_under_sect_fails, "list_items", "fail"),
@@ -1510,6 +1550,6 @@ ROSTER = {
         custom_mapped_to_li_judged_as_li, "list_items", "fail",
     ),
     "heading_skip": (heading_skip, "heading_nesting", "fail"),
-    "heading_starts_at_h2_ok": (heading_starts_at_h2_ok, "heading_nesting", "pass"),
+    "heading_starts_at_h2_fails": (heading_starts_at_h2_fails, "heading_nesting", "fail"),
     "rolemap_custom_tags_ok": (rolemap_custom_tags_ok, "heading_nesting", "pass"),
 }

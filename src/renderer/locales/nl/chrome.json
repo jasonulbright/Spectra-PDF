@@ -3092,7 +3092,6 @@
   "panel.a11y.detail.header_cell_has_no_scope": "Deze kopcel geeft geen bereik op, en geen enkele cel verwijst ernaar.",
   "panel.a11y.detail.heading_level_skipped": "De structuur springt van niveau {{from}} naar niveau {{to}}.",
   "panel.a11y.detail.label_outside_list_item": "Het bovenliggende element van deze {{role}} is {{parent}}, geen lijstitem.",
-  "panel.a11y.detail.list_item_has_no_label": "Dit lijstitem heeft wel tekst maar geen label.",
   "panel.a11y.detail.list_item_outside_list": "Het bovenliggende element van dit item is {{parent}}, geen lijst.",
   "panel.a11y.detail.mark_info_missing": "Het document heeft een structuurboom maar geeft zichzelf niet op als getagd.",
   "panel.a11y.detail.multimedia_not_tagged": "Een {{subtype}}-annotatie op pagina {{page}} staat buiten de structuurboom.",

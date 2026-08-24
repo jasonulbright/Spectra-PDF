@@ -703,7 +703,14 @@ class TestCorpusGate:
             ["git", "ls-files", "-z", "*.pdf", "*.PDF"],
             cwd=str(REPO), capture_output=True, check=True,
         ).stdout.decode("utf8")
-        tracked = {name for name in listed.split("\0") if name}
+        tracked = {
+            name for name in listed.split("\0")
+            # The PDF/UA techniques corpus is accessibility material with a
+            # gate and expectations of its own; a preflight profile has
+            # nothing to say about it, and pinning 82 upstream documents here
+            # would turn an upstream re-pin into a preflight regeneration.
+            if name and not name.startswith("tests/fixtures/pdfua-techniques/")
+        }
         assert {e["path"] for e in self._pinned()["documents"]} == tracked
 
 

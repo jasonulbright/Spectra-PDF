@@ -26,6 +26,12 @@ not read is named on the checks that consumed it. Every such check degrades to
 an empty inventory that came out of a failed read is never reported as
 ``not_applicable``.
 
+**A check states which standard it speaks for.** `CHECK_SOURCES` carries the
+clause behind every check, and the kind of claim that clause supports: a
+`shall` fails, a `should` warns, and a check neither ISO 14289-1 nor
+ISO 32000-2 states at all is a practice this checker keeps under its own name
+rather than a conformance verdict wearing someone else's authority.
+
 Every walk here is bounded — the field tree by ``_FIELD_TREE_DEPTH``, the
 structure tree by ``struct_tree._MAX_DEPTH`` and its cycle guard — and a bound
 that was reached is reported rather than presented as the end of the document.
@@ -115,6 +121,54 @@ CHECK_INVENTORY = (
     ("list_labels", "lists"),
     ("heading_nesting", "headings"),
 )
+
+# id → (source, citation). The SOURCE states what kind of claim the check
+# makes, so a report never presents a recommendation as a conformance failure:
+#
+#   ua      — a `shall` in ISO 14289-1, verdict FAIL when violated.
+#   ua_soft — a `should` in ISO 14289-1, verdict WARN when short.
+#   wcag    — a WCAG success criterion 14289-1 cites in a NOTE rather than
+#             requiring; reported on its own terms, never as PDF/UA.
+#   iso     — a structural rule of ISO 32000-2 that 14289-1 tags by reference.
+#   practice— neither standard states it; a checklist item kept because it
+#             names a real defect, reported at WARN or needs_review only.
+#
+# Citations are clause numbers of ISO 14289-1:2014 unless prefixed `32000-2`.
+CHECK_SOURCES = {
+    "permissions": ("ua", "7.16"),
+    "image_only": ("ua", "7.1"),
+    "tagged": ("ua", "7.1"),
+    "structure_nesting": ("iso", "32000-2 Table 365"),
+    "reading_order": ("ua", "7.1, 7.2"),
+    "lang": ("ua", "7.2"),
+    "title": ("ua", "7.1"),
+    "bookmarks": ("ua_soft", "7.17"),
+    "contrast": ("wcag", "7.1 NOTE 4; WCAG 2 1.4.3"),
+    "tagged_content": ("ua", "7.1"),
+    "tagged_annotations": ("ua", "7.18.1"),
+    "tab_order": ("ua", "7.18.3"),
+    "character_encoding": ("ua", "7.2"),
+    "tagged_multimedia": ("ua", "7.18.1, 7.18.6"),
+    "screen_flicker": ("ua", "7.1"),
+    "scripts": ("ua_soft", "7.19"),
+    "timed_responses": ("wcag", "WCAG 2 2.2.1"),
+    "navigation_links": ("wcag", "WCAG 2 2.4.4"),
+    "tagged_form_fields": ("ua", "7.18.4"),
+    "field_descriptions": ("ua", "7.18.1"),
+    "figures_alt": ("ua", "7.3, 7.7"),
+    "nested_alt": ("practice", "32000-2 14.9.3"),
+    "alt_no_content": ("practice", "32000-2 14.9.3"),
+    "alt_hides_annotation": ("practice", "32000-2 14.9.3"),
+    "other_elements_alt": ("ua", "7.18.1, 7.18.5"),
+    "table_rows": ("ua", "7.5"),
+    "table_cells": ("ua", "7.5"),
+    "table_headers": ("ua_soft", "7.5"),
+    "table_regularity": ("iso", "32000-2 Table 337"),
+    "table_summary": ("practice", "32000-2 Table 355"),
+    "list_items": ("ua", "7.6"),
+    "list_labels": ("iso", "32000-2 Table 368"),
+    "heading_nesting": ("ua", "7.4.2"),
+}
 
 # Long enough that navigating without bookmarks is real work. The shipped
 # checker's threshold, kept.
@@ -395,6 +449,57 @@ def _visible(annot: dict) -> bool:
         and rect[0] == rect[2]
         and rect[1] == rect[3]
     )
+
+
+def _cropboxes(pdf) -> dict:
+    """page number → the effective `/CropBox`, for the one exemption ISO
+    14289-1 cl. 7.18.1 states in terms of geometry."""
+    out: dict = {}
+    for i, page in enumerate(pdf.pages):
+        try:
+            box = page.obj.get("/CropBox") or page.obj.get("/MediaBox")
+            values = [float(v) for v in box]
+        except Exception:
+            continue
+        if len(values) != 4:
+            continue
+        out[i + 1] = (
+            min(values[0], values[2]), min(values[1], values[3]),
+            max(values[0], values[2]), max(values[1], values[3]),
+        )
+    return out
+
+
+def _annotation_in_scope(annot: dict, cropboxes: dict) -> bool:
+    """Does ISO 14289-1 cl. 7.18.1 reach this annotation?
+
+    The clause states its own three exemptions and no others: the hidden flag,
+    a rectangle outside the CropBox, and subtype Popup (handled by the roster
+    the callers filter on). NoView and a zero-area rectangle are NOT among
+    them, so neither exempts here — they exempt only where the question is
+    whether an object is owed a description a reader would announce.
+    """
+    if annot["flags"] & _F_HIDDEN:
+        return False
+    box = cropboxes.get(annot["page"])
+    rect = annot["rect"]
+    if box is None or rect is None or len(rect) != 4:
+        return True
+    x0, y0 = min(rect[0], rect[2]), min(rect[1], rect[3])
+    x1, y1 = max(rect[0], rect[2]), max(rect[1], rect[3])
+    return not (x1 < box[0] or x0 > box[2] or y1 < box[1] or y0 > box[3])
+
+
+def _draws_text(run: dict) -> bool:
+    """Does this run put glyphs on the page?
+
+    Not "did we decode characters from it": a run whose encoding THIS READER
+    declines still draws, and skipping it reports "no content here" over
+    content that is there. The blank-run case is the one genuine absence.
+    """
+    if str(run.get("text") or "").strip():
+        return True
+    return bool(run.get("reader_limit"))
 
 
 def _weighable(records: list, complete: bool) -> bool:
@@ -802,6 +907,10 @@ def _check_image_only(check, pdf, pages, file):
     counted = 0
     findings = []
     any_text = False
+    # Runs this reader could not decode. A document made entirely of them has
+    # text on every page; what it does not have is a reader here that can read
+    # it, and ISO 14289-1 cl. 7.1's raster-image case is not what it is.
+    limited = []
     for i in range(len(pdf.pages)):
         page_no = i + 1
         # Both stages, not one: a page whose paint walk did not complete has
@@ -810,6 +919,18 @@ def _check_image_only(check, pdf, pages, file):
         if not pages.readable(page_no) or page_no not in pages.painted:
             continue
         counted += 1
+        for run in pages.runs[page_no]:
+            if run.get("reader_limit"):
+                limited.append(
+                    _finding(
+                        _content_address(page_no, int(run.get("index", 0))),
+                        "font_encoding_unsupported",
+                        rect=run.get("rect"),
+                        values={"page": page_no, "font": str(run.get("font_name") or ""),
+                                "reason": str(run.get("reason") or "")},
+                    )
+                )
+                break
         has_text = any(str(r.get("text") or "").strip() for r in pages.runs[page_no])
         if has_text:
             any_text = True
@@ -845,6 +966,12 @@ def _check_image_only(check, pdf, pages, file):
     check.status = PASS if extractable else FAIL
     if not extractable:
         check.findings = [_finding(_object_address(), "no_extractable_text")]
+    # A fail reached only because every run's encoding was declined states
+    # something false about the document: the glyphs are there and carry the
+    # text. It degrades to a review naming the fonts nobody could read.
+    if not extractable and limited:
+        check.findings = limited
+        check.status = REVIEW
 
 
 def _check_tagged(check, pdf, tree):
@@ -991,7 +1118,7 @@ def _check_lang(check, pdf, tree, pages):
     findings = []
     for page_no in sorted(pages.runs):
         for run in pages.runs[page_no]:
-            if not str(run.get("text") or "").strip():
+            if not _draws_text(run):
                 continue
             if run.get("artifact"):
                 continue
@@ -1024,17 +1151,31 @@ def _check_lang(check, pdf, tree, pages):
 
 
 def _meta_title(pdf) -> str:
-    try:
-        title = pdf.docinfo.get("/Title")
-        if title is not None and str(title).strip():
-            return str(title).strip()
-    except Exception:
-        pass
+    """The title ISO 14289-1 cl. 7.1 names: `dc:title` in the catalog's
+    Metadata stream.
+
+    The document information dictionary is deliberately not consulted. The
+    clause admits one in a conforming file and requires a conforming reader to
+    IGNORE it, so a document whose only title lives there has not declared one
+    for any reader bound by the standard.
+    """
     try:
         with pdf.open_metadata() as meta:
             title = meta.get("dc:title")
             if title:
                 return str(title).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _docinfo_title(pdf) -> str:
+    """The title the document information dictionary carries, reported so the
+    finding can show what is there rather than only what is missing."""
+    try:
+        title = pdf.docinfo.get("/Title")
+        if title is not None and str(title).strip():
+            return str(title).strip()
     except Exception:
         pass
     return ""
@@ -1053,10 +1194,15 @@ def _check_title(check, pdf):
     check.data = {"title": title, "display_doc_title": shown}
     if not title:
         check.status = FAIL
-        check.findings = [_finding(_object_address(), "title_missing")]
+        check.findings = [
+            _finding(_object_address(), "title_missing", preview=_docinfo_title(pdf))
+        ]
         return
     if not shown:
-        check.status = WARN
+        # cl. 7.1 states DisplayDocTitle=true as a `shall`, alongside the
+        # title itself: a title no reader announces is the defect, not a
+        # shortfall against a recommendation.
+        check.status = FAIL
         check.findings = [_finding(_object_address(), "title_not_displayed", preview=title)]
         return
     check.status = PASS
@@ -1142,7 +1288,7 @@ def _check_tagged_content(check, tree, pages):
     findings = []
     for page_no in sorted(pages.runs):
         for run in pages.runs[page_no]:
-            if not str(run.get("text") or "").strip():
+            if not _draws_text(run):
                 continue
             if run.get("nested"):
                 # A run inside a form XObject carries that stream's numbering;
@@ -1170,12 +1316,12 @@ def _check_tagged_content(check, tree, pages):
     check.status = FAIL if findings else PASS
 
 
-def _check_tagged_annotations(check, tree, annots):
+def _check_tagged_annotations(check, tree, annots, cropboxes):
     targets = [
         a for a in annots
         if a["subtype"] not in _ANNOT_EXEMPT
         and a["subtype"] not in _MULTIMEDIA
-        and _visible(a)
+        and _annotation_in_scope(a, cropboxes)
     ]
     if not targets:
         check.status = NA
@@ -1197,8 +1343,13 @@ def _check_tagged_annotations(check, tree, annots):
     _verdict(check, len(targets), findings)
 
 
-def _check_tab_order(check, pdf, annots):
-    pages_with_annots = {a["page"] for a in annots if _visible(a)}
+def _check_tab_order(check, pdf, annots, cropboxes):
+    # cl. 7.18.3 asks only whether a page HAS an annotation, under 7.18.1's
+    # three exemptions — not whether that annotation is perceivable.
+    pages_with_annots = {
+        a["page"] for a in annots
+        if a["subtype"] != "/Popup" and _annotation_in_scope(a, cropboxes)
+    }
     if not pages_with_annots:
         check.status = NA
         return
@@ -1637,10 +1788,11 @@ def _check_other_elements_alt(check, tree, annots, fields, mcid_tables):
         if described:
             continue
         preview, rect = _node_preview(node, mcid_tables)
-        # A Link element whose own text describes the destination is the
-        # normal, conforming shape — text IS the accessible name there.
-        if node.role == "Link" and preview.strip():
-            continue
+        # A Link's own visible text is NOT the description ISO 14289-1 asks
+        # for: cl. 7.18.5 requires the alternate description on the link
+        # annotation's Contents key, and cl. 7.18.1 accepts a structure-level
+        # alternate description in its place. Visible text satisfies neither,
+        # so a link carrying only text is short of the clause.
         findings.append(
             _finding(_struct_address(node), "element_missing_description",
                      preview=preview[:80], rect=rect, values={"role": node.role})
@@ -1701,7 +1853,12 @@ def _check_table_headers(check, tree, mcid_tables):
         check.status = NA
         return
     referenced = struct_audit.headers_referenced(tree["nodes"])
+    # cl. 7.5 splits the two questions and does not weigh them alike: tables
+    # SHOULD include headers, while a TH whose table is not navigable through
+    # Headers and IDs SHALL carry Scope. A table with no header cells is
+    # therefore short of a recommendation, and only the missing Scope fails.
     findings = []
+    absent = []
     for entry in found:
         table, rows = entry["table"], entry["rows"]
         # Cells are collected from the whole table, not through its rows: a
@@ -1711,7 +1868,7 @@ def _check_table_headers(check, tree, mcid_tables):
         headers = [c for c in cells if c.role == "TH"]
         if not headers:
             preview, rect = _node_preview(table, mcid_tables)
-            findings.append(
+            absent.append(
                 _finding(_struct_address(table), "table_has_no_header_cells", preview=preview[:80],
                          rect=rect, values={"rows": len(rows), "cells": len(cells)})
             )
@@ -1726,7 +1883,14 @@ def _check_table_headers(check, tree, mcid_tables):
                 _finding(_struct_address(header), "header_cell_has_no_scope", preview=preview[:80],
                          rect=rect)
             )
-    _verdict(check, len(found), findings)
+    check.counted = len(found)
+    check.findings = findings + absent
+    if findings:
+        check.status = FAIL
+    elif absent:
+        check.status = WARN
+    else:
+        check.status = PASS
 
 
 def _check_table_regularity(check, tree, mcid_tables):
@@ -1882,20 +2046,17 @@ def _check_list_labels(check, tree):
         for n, p in zip(bodies, parents)
         if not (p is not None and p.role == "LI")
     ]
-    unlabelled = [
-        _finding(_struct_address(n), "list_item_has_no_label")
-        for n in items
-        if any(c.role == "LBody" for c in n.children) and not any(c.role == "Lbl" for c in n.children)
-    ]
+    # A list item carrying no `Lbl` is reported by nothing here. ISO 14289-1
+    # cl. 7.6 states LI as the requirement and `Lbl` and `LBody` as MAY —
+    # not a recommendation short of which a document falls, so an unordered
+    # list with no bullet elements is conforming and a warning over it is a
+    # claim of shortfall the standard does not make.
     check.counted = len(bodies) + len(items)
-    check.findings = misplaced + unlabelled
+    check.findings = misplaced
     if check.counted == 0:
         check.status = NA
     elif misplaced:
         check.status = FAIL
-    elif unlabelled:
-        # An unnumbered list legitimately has no labels.
-        check.status = WARN
     else:
         check.status = PASS
 
@@ -2003,14 +2164,17 @@ def _check_heading_nesting(check, tree, mcid_tables):
     findings = []
     previous = None
     for node in headings:
-        if previous is not None and node.level > previous + 1:
+        # ISO 14289-1 cl. 7.4.2, first bullet: if any heading tags are used,
+        # H1 shall be the first. A document opening at H2 or lower has skipped
+        # every level above it, so the first heading is measured against H1
+        # exactly as every later one is measured against its predecessor.
+        floor = 0 if previous is None else previous
+        if node.level > floor + 1:
             preview, rect = _node_preview(node, mcid_tables)
             findings.append(
                 _finding(_struct_address(node), "heading_level_skipped", preview=preview[:80],
-                         rect=rect, values={"from": previous, "to": node.level})
+                         rect=rect, values={"from": floor, "to": node.level})
             )
-        # A document that legitimately starts at H2 does not fail: the first
-        # heading sets the baseline rather than being measured against H1.
         previous = node.level
     _verdict(check, len(headings), findings)
 
@@ -2217,6 +2381,7 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
         fields, fields_unread = read(lambda: _fields(pdf))
         sites, sites_unread = read(lambda: _script_sites(pdf, entries))
         mcid_tables = {p: _mcid_text(runs) for p, runs in pages.runs.items()}
+        cropboxes = _cropboxes(pdf)
 
         run = {
             "permissions": lambda c: _check_permissions(c, pdf),
@@ -2229,8 +2394,8 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
             "bookmarks": lambda c: _check_bookmarks(c, pdf, tree),
             "contrast": lambda c: _check_contrast(c, pages),
             "tagged_content": lambda c: _check_tagged_content(c, tree, pages),
-            "tagged_annotations": lambda c: _check_tagged_annotations(c, tree, annots),
-            "tab_order": lambda c: _check_tab_order(c, pdf, annots),
+            "tagged_annotations": lambda c: _check_tagged_annotations(c, tree, annots, cropboxes),
+            "tab_order": lambda c: _check_tab_order(c, pdf, annots, cropboxes),
             "character_encoding": lambda c: _check_character_encoding(c, pages),
             "tagged_multimedia": lambda c: _check_tagged_multimedia(c, tree, annots),
             "screen_flicker": lambda c: _check_screen_flicker(c, sites),

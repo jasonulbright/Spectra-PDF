@@ -3026,7 +3026,6 @@
   "panel.a11y.detail.header_cell_has_no_scope": "この見出しセルはスコープを宣言しておらず、どのセルからも参照されていません。",
   "panel.a11y.detail.heading_level_skipped": "アウトラインがレベル {{from}} からレベル {{to}} へ飛んでいます。",
   "panel.a11y.detail.label_outside_list_item": "この {{role}} の親は {{parent}} であり、リスト項目ではありません。",
-  "panel.a11y.detail.list_item_has_no_label": "このリスト項目には本文がありますがラベルがありません。",
   "panel.a11y.detail.list_item_outside_list": "この項目の親は {{parent}} であり、リストではありません。",
   "panel.a11y.detail.mark_info_missing": "文書には構造ツリーがありますが、タグ付き文書と宣言していません。",
   "panel.a11y.detail.multimedia_not_tagged": "{{page}} ページの {{subtype}} 注釈が構造ツリーの外にあります。",
