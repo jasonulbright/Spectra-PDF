@@ -66,7 +66,7 @@ from pyhanko.sign.general import SigningError
 from pyhanko.sign.timestamps import HTTPTimeStamper
 from pyhanko.sign.validation import validate_pdf_signature
 
-from engine import eutl, os_trust, wincert
+from engine import eutl, os_trust, stamp_appearance, wincert
 from engine.acroform import form_field_forest
 from engine.docmdp import LEVEL_BY_VALUE, VALUE_BY_LEVEL, certification_of_file
 from engine.docmdp_policy import DIFF_POLICY, LockedFieldModification
@@ -882,18 +882,17 @@ def _seed_existing_field_lock(writer, field_name: str, spec: FieldMDPSpec) -> No
         return
 
 
-def _stamp_style(reason: str | None, location: str | None) -> "stamp.TextStampStyle":
-    """Visible-stamp style: signer + timestamp via pyHanko's built-in
-    interpolation, plus optional reason/location lines. USER TEXT IS
-    %-ESCAPED — TextStampStyle interpolates with %(...)s, so a literal % in a
-    reason like "100% reviewed" would otherwise raise (or worse, interpolate)
-    at sign time."""
-    lines = ["Digitally signed by %(signer)s", "%(ts)s"]
-    if reason and reason.strip():
-        lines.append("Reason: " + reason.strip().replace("%", "%%"))
-    if location and location.strip():
-        lines.append("Location: " + location.strip().replace("%", "%%"))
-    return stamp.TextStampStyle(stamp_text="\n".join(lines))
+def _stamp_style(
+    reason: str | None,
+    location: str | None,
+    appearance: "stamp_appearance.StampAppearance | None" = None,
+) -> "stamp.TextStampStyle":
+    """Visible-stamp style. ONE APPEARANCE AUTHOR: the drawing lives in
+    `stamp_appearance`, which the preview calls too, so what a surface shows
+    and what a signature carries cannot diverge. With no appearance configured
+    this is the plain signer + timestamp + reason/location stamp signing has
+    always produced."""
+    return stamp_appearance.stamp_style(reason, location, appearance)
 
 
 class StoreSigner(signers.Signer):
@@ -1115,6 +1114,8 @@ def sign_pdf(
     certify_level: str | None = None,
     lock: str | None = None,
     lock_fields: list | None = None,
+    stamp_style: dict | None = None,
+    font_dir: str = "",
 ) -> dict:
     """Apply a digital signature (signing APPENDS an incremental
     revision). ``output`` may be a new file OR the
@@ -1190,6 +1191,16 @@ def sign_pdf(
             certification present, and one signature can carry both.
         lock_fields: The field names the two list actions name. Fully qualified;
             a name that scopes a subtree locks everything beneath it.
+        stamp_style: What the visible stamp LOOKS like — which text lines it
+            renders, a logo/background raster and whether the text sits over
+            or beside it, and a personal-signature face. See
+            `stamp_appearance.parse_appearance` for the full specification.
+            Ignored by an invisible signature, which draws nothing; it travels
+            every other placement, including the incremental append onto an
+            already-signed document. Omitted, the stamp is the plain signer +
+            timestamp one.
+        font_dir: The app's bundled fonts directory, which is where a typed
+            personal-signature face is resolved from. Never a system font.
     """
     input_path = Path(file)
     output_path = Path(output)
@@ -1221,6 +1232,11 @@ def sign_pdf(
     # list without refusing as a missing name first; only the existing-field
     # path can name its own target.
     lock_spec = _validated_lock(file, lock, lock_fields, existing_field)
+    # The appearance is validated and its rasters decoded HERE, before any
+    # signer is opened: a store or token signer holds a live key handle inside
+    # the `with signer_cm` block below, and a refusal or a slow image decode
+    # must never happen while a smart-card session is open.
+    stamp_appearance_spec = stamp_appearance.parse_appearance(stamp_style, font_dir)
 
     signer_cm = _signer_source(
         pfx_path, password, key_path, cert_path,
@@ -1300,7 +1316,7 @@ def sign_pdf(
                     if lock_spec is not None:
                         _seed_existing_field_lock(writer, field_name, lock_spec)
                     pdf_signer = signers.PdfSigner(
-                        meta, signer=signer, stamp_style=_stamp_style(reason, location),
+                        meta, signer=signer, stamp_style=_stamp_style(reason, location, stamp_appearance_spec),
                         timestamper=timestamper,
                     )
                     signed = pdf_signer.sign_pdf(writer, existing_fields_only=True)
@@ -1313,7 +1329,7 @@ def sign_pdf(
                         ),
                     )
                     pdf_signer = signers.PdfSigner(
-                        meta, signer=signer, stamp_style=_stamp_style(reason, location),
+                        meta, signer=signer, stamp_style=_stamp_style(reason, location, stamp_appearance_spec),
                         timestamper=timestamper,
                     )
                     signed = pdf_signer.sign_pdf(writer)
