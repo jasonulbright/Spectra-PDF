@@ -22,6 +22,10 @@ import {
   plateProfileComponent,
   previewDpi,
   prunePlateCache,
+  pruneRasterCache,
+  putRaster,
+  rasterCacheKey,
+  selectRaster,
   readInventory,
   readSimulation,
   readSimulationProfiles,
@@ -45,6 +49,7 @@ import {
   type CacheEntry,
   type InspectedObject,
   type Plate,
+  type RasterRecord,
   type SkippedShading,
 } from '../src/renderer/lib/separation-preview';
 import { displayPointToPdf, pdfPointToDisplay } from '../src/renderer/lib/pdfx-build';
@@ -270,6 +275,41 @@ describe('the plate cache', () => {
     ]);
     expect(prunePlateCache(cache, new Set(['p0']))).toEqual([]);
     expect(cache.size).toBe(1);
+  });
+});
+
+describe('the raster cache', () => {
+  it('holds one raster per page, so a settings change replaces rather than stacks', () => {
+    // The plate cache keys overprint (and dpi, and the proof profile); the
+    // raster does not. Writing the second raster under a second key and then
+    // reading the page by a partial match served the pre-change image for the
+    // rest of the session — the overprint toggle changed nothing on screen.
+    const cache = new Map<string, RasterRecord<string>>();
+    putRaster(cache, 'doc', 'p1', 'overprint-on');
+    putRaster(cache, 'doc', 'p1', 'overprint-off');
+    expect(cache.size).toBe(1);
+    expect(selectRaster(cache, 'doc', 'p1')).toBe('overprint-off');
+  });
+
+  it('separates pages and documents', () => {
+    const cache = new Map<string, RasterRecord<string>>();
+    putRaster(cache, 'doc', 'p1', 'a');
+    putRaster(cache, 'doc', 'p2', 'b');
+    putRaster(cache, 'other', 'p1', 'c');
+    expect(selectRaster(cache, 'doc', 'p1')).toBe('a');
+    expect(selectRaster(cache, 'doc', 'p2')).toBe('b');
+    expect(selectRaster(cache, 'other', 'p1')).toBe('c');
+    expect(selectRaster(cache, 'doc', 'p3')).toBeNull();
+  });
+
+  it('drops every raster whose page is gone and names them', () => {
+    const cache = new Map<string, RasterRecord<number>>();
+    putRaster(cache, 'doc', 'f#g1#p0', 1);
+    putRaster(cache, 'doc', 'f#g2#p0', 2);
+    const removed = pruneRasterCache(cache, new Set(['f#g2#p0']));
+    expect(removed).toEqual([rasterCacheKey('doc', 'f#g1#p0')]);
+    expect(selectRaster(cache, 'doc', 'f#g1#p0')).toBeNull();
+    expect(selectRaster(cache, 'doc', 'f#g2#p0')).toBe(2);
   });
 });
 

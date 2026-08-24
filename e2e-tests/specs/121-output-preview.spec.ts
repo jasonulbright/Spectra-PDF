@@ -501,15 +501,25 @@ describe('output preview', () => {
 
   it('flipping overprint simulation re-renders through the device', async () => {
     const before = await waitForSeparations();
+    expect(before.pixels).toBeGreaterThan(0);
     await $('[data-testid="output-preview-overprint"]').click();
+    // The PIXELS have to move. Asserting only that a raster exists passed
+    // while the preview served the pre-flip image for the rest of the
+    // session: the raster cache was keyed like the plate cache — overprint
+    // included — and the page read it by a partial match, so it took the
+    // first (stale) entry for that page every time. The engine was right and
+    // the screen never changed.
+    let after = before;
     await browser.waitUntil(
       async () => {
         const next = await separationFingerprint();
-        return next.found && next.pixels > 0;
+        if (!next.found || next.pixels === 0) return false;
+        after = { sum: next.sum, pixels: next.pixels };
+        return next.sum !== before.sum;
       },
-      { timeout: 90_000, timeoutMsg: 'disabling overprint never produced a raster' },
+      { timeout: 90_000, timeoutMsg: 'disabling overprint never changed the page on screen' },
     );
-    expect(before.pixels).toBeGreaterThan(0);
+    expect(after.sum).not.toBe(before.sum);
     await $('[data-testid="output-preview-overprint"]').click();
   });
 
