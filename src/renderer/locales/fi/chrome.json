@@ -2332,6 +2332,7 @@
   "engine.signatures.pemSignerNeedsBoth": "PEM-allekirjoittaja tarvitsee sekä avaintiedoston että varmennetiedoston.",
   "engine.signatures.pkcsModuleFoundGiven": "PKCS#11-moduulia ei löytynyt annetusta polusta.",
   "engine.signatures.pkcsSignerNeedsModule": "PKCS#11-allekirjoittaja tarvitsee moduulipolun, tunnisteen selitteen ja varmenteen selitteen.",
+  "engine.signatures.signatureDocumentGivenDoes": "Tälle asiakirjalle annettu allekirjoitus ei vahvistu sen omia tavuja vastaan, joten sitä ei kirjoitettu. Allekirjoitusavain tuotti allekirjoituksen, jota tämä asiakirja ei voi kantaa.",
   "engine.signatures.signatureFieldAlreadyLocks": "Allekirjoituskenttä ”{{field_name}}” lukitsee jo lomakekenttiä omilla ehdoillaan, eikä allekirjoitus voi korvata sitä. Allekirjoita se sellaisenaan tai käytä toista kenttää.",
   "engine.signatures.signatureFieldAlreadySigned": "Allekirjoituskenttä ”{{field_name}}” on jo allekirjoitettu.",
   "engine.signatures.signedOutputMustDifferent": "Allekirjoitetun tulosteen on oltava eri tiedosto kuin syötteen.",

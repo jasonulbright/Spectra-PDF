@@ -2389,6 +2389,7 @@
   "engine.signatures.pemSignerNeedsBoth": "Un signant PEM necessita tant el fitxer de clau com el fitxer de certificat.",
   "engine.signatures.pkcsModuleFoundGiven": "No s'ha trobat el mòdul PKCS#11 al camí indicat.",
   "engine.signatures.pkcsSignerNeedsModule": "Un signant PKCS#11 necessita el camí del mòdul, l'etiqueta del testimoni i l'etiqueta del certificat.",
+  "engine.signatures.signatureDocumentGivenDoes": "La signatura que s'ha donat a aquest document no es verifica contra els seus propis bytes, de manera que no s'ha escrit. La clau de signatura ha produït una signatura que aquest document no pot dur.",
   "engine.signatures.signatureFieldAlreadyLocks": "El camp de signatura «{{field_name}}» ja bloca camps de formulari amb les seves pròpies condicions, i una signatura no ho pot substituir. Signeu-lo tal com és, o useu un altre camp.",
   "engine.signatures.signatureFieldAlreadySigned": "El camp de signatura «{{field_name}}» ja està signat.",
   "engine.signatures.signedOutputMustDifferent": "La sortida signada ha de ser un fitxer diferent de l'entrada.",

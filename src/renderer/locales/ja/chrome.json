@@ -2275,6 +2275,7 @@
   "engine.signatures.pemSignerNeedsBoth": "PEM の署名者には鍵ファイルと証明書ファイルの両方が必要です。",
   "engine.signatures.pkcsModuleFoundGiven": "指定されたパスに PKCS#11 モジュールが見つかりません。",
   "engine.signatures.pkcsSignerNeedsModule": "PKCS#11 の署名者にはモジュールのパス、トークンラベル、証明書ラベルが必要です。",
+  "engine.signatures.signatureDocumentGivenDoes": "この文書に与えられた署名は文書自身のバイト列に対して検証できないため、書き込まれませんでした。署名鍵は、この文書が保持できない署名を生成しました。",
   "engine.signatures.signatureFieldAlreadyLocks": "署名フィールド「{{field_name}}」は独自の条件ですでにフォームフィールドをロックしており、署名がそれを置き換えることはできません。そのまま署名するか、別のフィールドを使用してください。",
   "engine.signatures.signatureFieldAlreadySigned": "署名フィールド「{{field_name}}」にはすでに署名されています。",
   "engine.signatures.signedOutputMustDifferent": "署名後の出力は入力とは別のファイルにしてください。",
