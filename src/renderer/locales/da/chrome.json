@@ -3092,7 +3092,6 @@
   "panel.a11y.detail.header_cell_has_no_scope": "Denne hovedcelle angiver intet omfang, og ingen celle peger på den.",
   "panel.a11y.detail.heading_level_skipped": "Dispositionen springer fra niveau {{from}} til niveau {{to}}.",
   "panel.a11y.detail.label_outside_list_item": "Det overordnede element for denne {{role}} er {{parent}}, ikke et listepunkt.",
-  "panel.a11y.detail.list_item_has_no_label": "Dette listepunkt har brødtekst, men ingen etiket.",
   "panel.a11y.detail.list_item_outside_list": "Punktets overordnede element er {{parent}}, ikke en liste.",
   "panel.a11y.detail.mark_info_missing": "Dokumentet har et strukturtræ, men angiver ikke sig selv som tagget.",
   "panel.a11y.detail.multimedia_not_tagged": "En {{subtype}}-annotation på side {{page}} ligger uden for strukturtræet.",

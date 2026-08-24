@@ -3092,7 +3092,6 @@
   "panel.a11y.detail.header_cell_has_no_scope": "Tämä otsikkosolu ei ilmoita aluetta, eikä yksikään solu viittaa siihen.",
   "panel.a11y.detail.heading_level_skipped": "Jäsennys hyppää tasolta {{from}} tasolle {{to}}.",
   "panel.a11y.detail.label_outside_list_item": "Tämän {{role}}-elementin yläelementti on {{parent}}, ei luettelon kohta.",
-  "panel.a11y.detail.list_item_has_no_label": "Tällä luettelon kohdalla on leipäteksti mutta ei nimikettä.",
   "panel.a11y.detail.list_item_outside_list": "Tämän kohdan yläelementti on {{parent}}, ei luettelo.",
   "panel.a11y.detail.mark_info_missing": "Asiakirjalla on rakennepuu, mutta se ei ilmoita olevansa merkitty tunnisteilla.",
   "panel.a11y.detail.multimedia_not_tagged": "Sivun {{page}} {{subtype}}-huomautus on rakennepuun ulkopuolella.",
