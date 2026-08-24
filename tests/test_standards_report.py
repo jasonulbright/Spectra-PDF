@@ -5,6 +5,7 @@ and nothing else: the old result carried no `altered` key at all, so each
 `kinds(...)` read raises KeyError and each refusal case returns a file.
 """
 
+import codecs
 import os
 
 import pikepdf
@@ -271,6 +272,64 @@ class TestStandardIdentifiers:
             pdf.Root.Metadata[pikepdf.Name.Subtype] = pikepdf.Name.XML
             pdf.save(src)
         assert standards_report.census(src).values["standard_identifiers"] == []
+
+    @pytest.mark.parametrize(
+        "encoding,bom",
+        [
+            ("utf-16-le", codecs.BOM_UTF16_LE),
+            ("utf-16-be", codecs.BOM_UTF16_BE),
+            ("utf-16-le", b""),
+            ("utf-16-be", b""),
+        ],
+    )
+    def test_a_utf16_packet_declares_what_it_says(self, tmp_dir, encoding, bom):
+        """ISO 16684-1 permits UTF-16 packets. A byte-level match reads only
+        UTF-8, and a census that reads nothing out of a packet spelling
+        `pdfuaid:part` drops the disclosure row in silence."""
+        src = plain_pdf(os.path.join(tmp_dir, f"utf16-{encoding}-{len(bom)}.pdf"))
+        xmp = (
+            '<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+            '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF '
+            'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+            '<rdf:Description rdf:about="" '
+            'xmlns:pdfuaid="http://www.aiim.org/pdfua/ns/id/">'
+            "<pdfuaid:part>1</pdfuaid:part>"
+            '</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>'
+        )
+        with pikepdf.open(src, allow_overwriting_input=True) as pdf:
+            pdf.Root.Metadata = pdf.make_stream(bom + xmp.encode(encoding))
+            pdf.Root.Metadata[pikepdf.Name.Type] = pikepdf.Name.Metadata
+            pdf.Root.Metadata[pikepdf.Name.Subtype] = pikepdf.Name.XML
+            # Without this pikepdf re-serializes the packet as UTF-8 while
+            # stamping the metadata version, and the fixture stops being one.
+            pdf.save(src, fix_metadata_version=False)
+        with pikepdf.open(src) as check:
+            assert bytes(check.Root.Metadata.read_bytes())[:64].count(b"\x00") > 8
+        assert standards_report.census(src).values["standard_identifiers"] == ["PDF/UA"]
+
+    def test_an_unresolvable_encoding_is_undetermined_not_empty(self, tmp_dir):
+        """`undetermined` is the honest answer for a packet that cannot be
+        read; an empty list would read as "declares nothing"."""
+        src = plain_pdf(os.path.join(tmp_dir, "bad-encoding.pdf"))
+        with pikepdf.open(src, allow_overwriting_input=True) as pdf:
+            pdf.Root.Metadata = pdf.make_stream(
+                b'<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d" '
+                b'encoding="not-a-codec"?>'
+                b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF '
+                b'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+                b'<rdf:Description rdf:about="" '
+                b'xmlns:pdfuaid="http://www.aiim.org/pdfua/ns/id/">'
+                b"<pdfuaid:part>1</pdfuaid:part>"
+                b'</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>'
+            )
+            pdf.Root.Metadata[pikepdf.Name.Type] = pikepdf.Name.Metadata
+            pdf.Root.Metadata[pikepdf.Name.Subtype] = pikepdf.Name.XML
+            # pikepdf rewrites a packet it can parse when it stamps the
+            # metadata version, which would erase the declaration under test.
+            pdf.save(src, fix_metadata_version=False)
+        facts = standards_report.census(src)
+        assert "standard_identifiers" not in facts.values
+        assert "not-a-codec" in facts.reasons["standard_identifiers"]
 
 
 class TestUndeterminedIsNotClean:

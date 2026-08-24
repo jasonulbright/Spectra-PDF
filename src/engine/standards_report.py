@@ -28,6 +28,7 @@ what it said" instead of to silence.
 
 from __future__ import annotations
 
+import codecs
 import re
 from collections import Counter
 from pathlib import Path
@@ -263,7 +264,54 @@ _IDENTIFIER_NAMESPACES = {
     "http://pdfa.org/declarations/": ("PDF Declarations", None),
 }
 
-_XMLNS = re.compile(rb'xmlns:([A-Za-z_][-\w.]*)\s*=\s*["\']([^"\']+)["\']')
+_XMLNS = re.compile(r'xmlns:([A-Za-z_][-\w.]*)\s*=\s*["\']([^"\']+)["\']')
+
+#: Byte-order marks, longest first — UTF-32's opens with UTF-16's bytes.
+_BOMS = (
+    (codecs.BOM_UTF32_LE, "utf-32-le"),
+    (codecs.BOM_UTF32_BE, "utf-32-be"),
+    (codecs.BOM_UTF8, "utf-8-sig"),
+    (codecs.BOM_UTF16_LE, "utf-16-le"),
+    (codecs.BOM_UTF16_BE, "utf-16-be"),
+)
+
+#: The `encoding` of the xpacket processing instruction, and of an XML
+#: declaration, read from whichever single-byte-per-character reading of the
+#: head shows them. A UTF-16 packet spells them with NUL padding, so the
+#: ASCII characters survive an `ascii`-with-replacement read of the head.
+_DECLARED_ENCODING = re.compile(
+    r'<\?(?:xpacket[^>]*?|xml)\s[^>]*?encoding\s*=\s*["\']([-\w.]+)["\']'
+)
+
+
+def _xmp_text(raw: bytes) -> str:
+    """One XMP packet as text.
+
+    ISO 16684-1 permits UTF-8, UTF-16 and UTF-32 packets, so matching the
+    bytes directly reads only the first of the three — and reading nothing out
+    of a packet that plainly declares an identifier is the silent drop this
+    census exists to prevent. Decoding is lossy on purpose: a stray byte in an
+    otherwise readable packet must not cost the whole row, while an encoding
+    that cannot be resolved at all raises and lands in `undetermined`.
+    """
+    for bom, encoding in _BOMS:
+        if raw.startswith(bom):
+            return raw.decode(encoding, "replace")
+    head = raw[:512].decode("ascii", "replace").replace("\x00", "")
+    declared = _DECLARED_ENCODING.search(head)
+    if declared is not None:
+        # An encoding Python cannot resolve raises LookupError out of `decode`,
+        # which `probe` records as the row's reason. It is deliberately NOT a
+        # refusal of its own: nothing here reaches the UI, and a fresh literal
+        # would owe the engine-message table a row it could never render.
+        return raw.decode(declared.group(1), "replace")
+    # No BOM and no declaration. ISO 16684-1 makes UTF-8 the default, but a
+    # BOM-less UTF-16 packet still spells its markup in NUL-padded ASCII, and
+    # that padding is what distinguishes it.
+    if raw[:4].count(b"\x00") >= 2:
+        return raw.decode("utf-16-be" if raw[:1] == b"\x00" else "utf-16-le",
+                          "replace")
+    return raw.decode("utf-8", "replace")
 
 
 def _standard_identifiers(pdf) -> list:
@@ -278,15 +326,15 @@ def _standard_identifiers(pdf) -> list:
     meta = pdf.Root.get("/Metadata")
     if meta is None:
         return []
-    raw = bytes(meta.read_bytes())
+    text = _xmp_text(bytes(meta.read_bytes()))
     found: set = set()
-    for prefix, uri in _XMLNS.findall(raw):
-        entry = _IDENTIFIER_NAMESPACES.get(uri.decode("ascii", "replace"))
+    for prefix, uri in _XMLNS.findall(text):
+        entry = _IDENTIFIER_NAMESPACES.get(uri)
         if entry is None:
             continue
         name, required = entry
-        tail = (required or "").encode("ascii") if required else rb"[A-Za-z_]"
-        if re.search(rb"[<\s]" + re.escape(prefix) + rb":" + tail, raw):
+        tail = re.escape(required) if required else r"[A-Za-z_]"
+        if re.search(r"[<\s]" + re.escape(prefix) + r":" + tail, text):
             found.add(name)
     return sorted(found)
 
