@@ -138,6 +138,10 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1
         shell: pwsh
 
+      - name: Stage the shipped signature script faces for engine tests
+        run: powershell -ExecutionPolicy Bypass -File scripts/sync-signature-fonts.ps1
+        shell: pwsh
+
       - name: Stage the shipped LibreOffice runtime for engine tests
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1
         shell: pwsh
@@ -239,6 +243,10 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1
         shell: pwsh
 
+      - name: Vendor signature script faces (3 faces, OFL 1.1, sha256-pinned)
+        run: powershell -ExecutionPolicy Bypass -File scripts/sync-signature-fonts.ps1
+        shell: pwsh
+
       - name: Vendor LibreOffice (O1 export runtime, MPL-2.0)
         # Self-sufficient: the runner has no LibreOffice, so the script downloads
         # its PINNED, checksum-verified stable .msi (the default in the script).
@@ -313,6 +321,35 @@ jobs:
           releaseDraft: false
           prerelease: false
 
+      # The portable distribution: the SAME payload the installer lays down,
+      # in a zip instead of an installer. Its tree is read out of the
+      # installer's own generated manifest (installer.nsi) rather than from a
+      # second list, so a resource added to tauri.conf.json reaches both
+      # containers or neither. Must run AFTER the bundle step, which is what
+      # writes that manifest. The bundled-binary notice gate applies here
+      # exactly as it does to the installer, and refuses with exit 1.
+      - name: Build the portable zip
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1
+        shell: pwsh
+
+      # The gate the design calls for: the zip's tree, compared entry by entry
+      # against the installer's staging manifest. It cannot drift by
+      # construction, and this proves the construction on every release rather
+      # than assuming it.
+      - name: Verify the portable tree against the installer's staging
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -Verify src-tauri/target/release/bundle/portable/tree.staging
+        shell: pwsh
+
+      - name: Publish the portable zip
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $zips = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -ErrorAction Stop)
+          if ($zips.Count -ne 1) { throw "expected one portable zip, found $($zips.Count)" }
+          gh release upload ${{ github.ref_name }} $zips[0].FullName --clobber
+          if ($LASTEXITCODE -ne 0) { throw "failed to upload $($zips[0].Name)" }
+
       - name: Publish corresponding source archives
         shell: pwsh
         env:
@@ -338,7 +375,12 @@ jobs:
           if (-not $installers) { throw "no installer found in $bundle to checksum" }
           $sources = @(Get-ChildItem release-sources -File -ErrorAction Stop)
           if (-not $sources) { throw "no corresponding-source archives found to checksum" }
-          $files = @($installers) + @($sources)
+          # The portable zip is unsigned for the same reason the installer is,
+          # so it needs its checksum for the same reason -- and it sits in the
+          # same file, beside the installer, rather than in one of its own.
+          $portable = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -ErrorAction Stop)
+          if ($portable.Count -ne 1) { throw "expected one portable zip to checksum, found $($portable.Count)" }
+          $files = @($installers) + @($portable) + @($sources)
           $lines = foreach ($f in $files) {
             $h = (Get-FileHash -Algorithm SHA256 $f.FullName).Hash.ToLowerInvariant()
             "$h  $($f.Name)"

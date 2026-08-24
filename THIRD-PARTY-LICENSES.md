@@ -321,6 +321,37 @@ License text shipped at: `resources/fonts/LICENSE-NotoMongolian-OFL.txt`
 (vendored hash-pinned from the same release; upstream copy:
 <https://github.com/notofonts/mongolian/blob/main/OFL.txt>)
 
+**Great Vibes** (Regular) —
+© TypeSETit, LLC, licensed under the **SIL Open Font License 1.1**. Bundled
+(vendored by `scripts/sync-signature-fonts.ps1`, hash-pinned from an
+immutable commit of <https://github.com/google/fonts>) as one of the three
+**script faces a typed personal signature is drawn in**. It is never reached
+by font resolution or substitution: only a signature asset that names it
+draws with it, and the typed signature embeds its subset so the result
+renders on a machine that has never had the face.
+License text shipped at: `resources/fonts/LICENSE-GreatVibes-OFL.txt`
+(vendored hash-pinned from the same commit; upstream copy:
+<https://github.com/google/fonts/blob/main/ofl/greatvibes/OFL.txt>)
+
+**Sacramento** (Regular) —
+© Astigmatic (AOETI), licensed under the **SIL Open Font License 1.1**.
+Bundled (vendored by `scripts/sync-signature-fonts.ps1`, hash-pinned from an
+immutable commit of <https://github.com/google/fonts>) as the casual
+monoline script face for typed personal signatures. Same posture as Great
+Vibes: named by an asset, never substituted into.
+License text shipped at: `resources/fonts/LICENSE-Sacramento-OFL.txt`
+(vendored hash-pinned from the same commit; upstream copy:
+<https://github.com/google/fonts/blob/main/ofl/sacramento/OFL.txt>)
+
+**Parisienne** (Regular) —
+© Astigmatic (AOETI), licensed under the **SIL Open Font License 1.1**.
+Bundled (vendored by `scripts/sync-signature-fonts.ps1`, hash-pinned from an
+immutable commit of <https://github.com/google/fonts>) as the informal
+flowing hand for typed personal signatures. Same posture as the two above.
+License text shipped at: `resources/fonts/LICENSE-Parisienne-OFL.txt`
+(vendored hash-pinned from the same commit; upstream copy:
+<https://github.com/google/fonts/blob/main/ofl/parisienne/OFL.txt>)
+
 ## OCR — Tesseract + language data
 
 - **Tesseract OCR** — **Apache-2.0** — <https://github.com/tesseract-ocr/tesseract>
@@ -569,7 +600,8 @@ the license above are offered by us alone and not by Adobe.
 ## Frontend / runtime libraries
 
 Bundled into the WebView2 renderer (see `package.json` for exact versions):
-React (MIT), pdf.js / pdfjs-dist (Apache-2.0), pdf-lib (MIT),
+React (MIT), pdf.js / pdfjs-dist (Apache-2.0), pdf-lib and @pdf-lib/fontkit
+(MIT),
 d3-selection and d3-zoom (ISC), Radix UI (MIT), the @tauri-apps JS API and
 plugin packages (MIT / Apache-2.0), Tailwind CSS (MIT), i18next and
 react-i18next (MIT).

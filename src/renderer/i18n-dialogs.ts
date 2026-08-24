@@ -58,6 +58,26 @@ export const DIALOG_STRINGS = {
   'dialog.update.viewRelease': 'View release',
   'dialog.update.dismiss': 'Dismiss',
 
+  // The colour-profile licence. Presented on a portable copy's first run,
+  // because a portable copy has no installer to present it — the installed
+  // build obtains the same acceptance through the installer's licence page and
+  // never shows this. The BODY is the licence text itself, read from the file
+  // the profiles ship beside; nothing here paraphrases it.
+  'dialog.iccLicense.aria': 'Colour profile licence',
+  'dialog.iccLicense.title': 'Colour Profile Licence',
+  'dialog.iccLicense.blurb':
+    'Spectra PDF includes a set of printing colour profiles that are licensed separately by their publisher. Read the licence below and choose whether to accept it.',
+  'dialog.iccLicense.consequence':
+    'Accepting enables colour conversion, PDF/X output intents and output preview. Declining leaves those three off and changes nothing else — you can accept later from any of them.',
+  'dialog.iccLicense.accept': 'Accept',
+  'dialog.iccLicense.decline': 'Decline',
+  'dialog.iccLicense.textLabel': 'Licence text',
+  'dialog.iccLicense.loading': 'Reading the licence…',
+  'dialog.iccLicense.unreadable':
+    'The licence text could not be read from this copy of Spectra PDF, so it cannot be accepted. The colour profiles stay unavailable.',
+  'dialog.iccLicense.recordFailed':
+    'The answer could not be saved: {{detail}}',
+
   // The operation queue's own chrome.
   'dialog.opqueue.heading': 'Operations ({{count}})',
   'dialog.opqueue.headingCollapsed': 'Operations ({{count}}) ...',
@@ -208,6 +228,19 @@ export const DIALOG_STRINGS = {
   'dialog.signer.modePfx': '.pfx file',
   'dialog.signer.modePem': 'PEM key + cert',
   'dialog.signer.modeToken': 'Token (PKCS#11)',
+  'dialog.signer.modeStore': 'Windows store',
+  'dialog.signer.storeCertificate': 'Certificate',
+  'dialog.signer.storeChoose': 'Choose a certificate…',
+  'dialog.signer.storeRow': '{{subject}} — issued by {{issuer}}, valid until {{date}}',
+  'dialog.signer.storeRefresh': 'Refresh',
+  'dialog.signer.storeLoading': 'Reading the certificate store…',
+  'dialog.signer.storeNone':
+    'No certificate in the Windows certificate store can sign a document.',
+  'dialog.signer.storeHardware': 'hardware-held key',
+  'dialog.signer.storeMachine': 'machine store',
+  'dialog.signer.storeNote':
+    'The private key stays inside Windows. If the key asks for a PIN or a confirmation, Windows asks for it — this app never sees it.',
+  'dialog.signer.needStoreCert': 'Choose a certificate from the Windows certificate store first.',
   'dialog.signer.createTitle': 'Create a new self-signed signing identity (.pfx)',
   'dialog.signer.create': 'Create new…',
   'dialog.signer.choose': 'Choose…',
@@ -1081,6 +1114,45 @@ export const DIALOG_STRINGS = {
   'dialog.scan.panelBlurb':
     'Scan pages from a connected scanner, then straighten them and make the text searchable.',
   'dialog.scan.panelStart': 'Scan pages…',
+  // ── The personal signature (draw / type / import) ────────────────────
+  'dialog.signature.aria': 'Personal signatures',
+  'dialog.signature.title': 'Personal Signatures',
+  'dialog.signature.blurb':
+    'Saved on this computer only. A signature is written into a document when you place it, and never before.',
+  'dialog.signature.saved': 'Saved',
+  'dialog.signature.empty': 'Nothing saved yet. Create one below.',
+  'dialog.signature.delete': 'Delete this signature',
+  'dialog.signature.place': 'Place',
+  'dialog.signature.tabDraw': 'Draw',
+  'dialog.signature.tabType': 'Type',
+  'dialog.signature.tabImport': 'Import',
+  'dialog.signature.drawHint': 'Draw your signature in the box.',
+  'dialog.signature.drawAria': 'Signature drawing area',
+  'dialog.signature.clear': 'Clear',
+  'dialog.signature.undoStroke': 'Undo last stroke',
+  'dialog.signature.typeHint': 'Type your name, then choose a hand.',
+  'dialog.signature.typePlaceholder': 'Your name',
+  'dialog.signature.faceGroup': 'Handwriting style',
+  'dialog.signature.importHint':
+    'Import a photographed or scanned signature (PNG or JPEG).',
+  'dialog.signature.importChoose': 'Choose image…',
+  'dialog.signature.importNone': 'No image chosen',
+  'dialog.signature.removeBackground': 'Remove the white background',
+  'dialog.signature.threshold': 'Threshold',
+  'dialog.signature.roleGroup': 'Use as',
+  'dialog.signature.roleSignature': 'Signature',
+  'dialog.signature.roleInitials': 'Initials',
+  'dialog.signature.nameLabel': 'Label',
+  'dialog.signature.namePlaceholder': 'My signature',
+  'dialog.signature.save': 'Save signature',
+  'dialog.signature.needDrawing': 'Draw your signature before saving.',
+  'dialog.signature.needText': 'Type your name before saving.',
+  'dialog.signature.needImage': 'Choose an image before saving.',
+  'dialog.signature.imageUnreadable': 'That image could not be read.',
+  'dialog.signature.imageErased':
+    'That threshold removes the whole image. Lower it to keep the ink.',
+  'dialog.signature.facesUnavailable':
+    'The bundled handwriting faces could not be read from this installation.',
 } as const;
 
 export type DialogKey = keyof typeof DIALOG_STRINGS;

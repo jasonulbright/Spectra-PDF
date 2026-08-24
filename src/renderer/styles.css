@@ -1762,6 +1762,30 @@
   opacity: 0.85;
 }
 
+/* Divides one species of pill from the next inside a strip. */
+.secondary-toolbar-sep {
+  align-self: stretch;
+  width: 1px;
+  margin-inline: 4px;
+  background: var(--border, #45454c);
+}
+
+/* A saved personal signature's pill: the mark itself at pill height, drawn by
+   the same thumbnail the capture dialog lists. */
+.signature-preset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  height: 26px;
+  padding-inline: 6px;
+  color: var(--text, #e6e6ea);
+}
+.signature-preset > * {
+  max-height: 20px;
+  max-width: 84px;
+}
+
 /* Custom stamp library. */
 .stamp-custom-wrap {
   position: relative;
@@ -2646,6 +2670,29 @@
   width: 100%;
   height: 100%;
   object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* A TYPED personal signature: the name alone in its script face, no box
+   chrome — the same look the appearance stream draws. The size is driven from
+   the box because the appearance fits the name to the rect on the face's own
+   metrics, so the preview has to scale with the box rather than sit at a
+   fixed point size. */
+.page-annot-stamp:has(.page-annot-signature-typed) {
+  border-width: 0;
+  /* Scoped to this stamp species so no other stamp's layout changes. */
+  container-type: size;
+}
+.page-annot-signature-typed {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(6px, 78cqh, 400px);
+  line-height: 1;
+  white-space: nowrap;
   pointer-events: none;
   user-select: none;
 }
