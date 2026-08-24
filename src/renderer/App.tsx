@@ -114,6 +114,8 @@ import { MainToolbar } from './components/MainToolbar';
 import { TabStrip } from './components/TabStrip';
 import { HomeTab } from './components/HomeTab';
 import { AboutDialog } from './components/AboutDialog';
+import { IccLicenseDialog } from './components/IccLicenseDialog';
+import { ensureIccAssent, iccNeedsAssent, registerIccLicenseOpener } from './lib/icc-assent';
 import { CustomizeToolbarDialog } from './components/CustomizeToolbarDialog';
 import { persistToolbarOverrides } from './lib/toolbar-layout';
 import { PropertiesDialog } from './components/PropertiesDialog';
@@ -264,6 +266,21 @@ function AppContent(): React.ReactElement {
     return () => registerGsSetupOpener(null);
   }, []);
   const [showAbout, setShowAbout] = useState(false);
+  // The colour-profile licence. It opens BY ITSELF exactly once — on a
+  // portable copy with no answer on record — because the bundling terms
+  // require the text to be presented before the profiles are used, and a
+  // portable copy has no installer to present it. Every other appearance is
+  // the user re-opening it from a disabled surface's notice, so a decline is
+  // final until they change their mind rather than a question re-asked at
+  // every launch.
+  const [showIccLicense, setShowIccLicense] = useState(false);
+  useEffect(() => {
+    registerIccLicenseOpener(() => setShowIccLicense(true));
+    void ensureIccAssent().then((state) => {
+      if (iccNeedsAssent(state)) setShowIccLicense(true);
+    });
+    return () => registerIccLicenseOpener(null);
+  }, []);
   const [showProperties, setShowProperties] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
   const [showBatchOcr, setShowBatchOcr] = useState(false);
@@ -3327,6 +3344,7 @@ function AppContent(): React.ReactElement {
         );
       })()}
       {showAbout && <AboutDialog version={appVersion} onClose={() => setShowAbout(false)} />}
+      {showIccLicense && <IccLicenseDialog onClose={() => setShowIccLicense(false)} />}
       {showCustomizeToolbar && (
         <CustomizeToolbarDialog onClose={() => setShowCustomizeToolbar(false)} />
       )}

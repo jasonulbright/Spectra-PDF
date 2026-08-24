@@ -328,6 +328,15 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
         // non-ASCII value (the engine also reconfigures its own stdio — this
         // is the spawner half of the fix).
         .env("PYTHONUTF8", "1")
+        // The colour-profile assent, told to the engine rather than looked up
+        // by it: the installed and portable containers keep the record in
+        // different places, and this binary is the one authority on which
+        // container it is. `icc_profiles` refuses to open a profile when this
+        // says "0". See `portable::assent_env_value`.
+        .env(
+            crate::portable::ICC_ASSENT_ENV,
+            crate::portable::assent_env_value(crate::portable::icc_assent()),
+        )
         .spawn()
         .map_err(|e| format!("Failed to start engine: {}", e))?;
 
@@ -365,4 +374,20 @@ pub async fn start(app: &AppHandle) -> Result<(), String> {
     });
 
     Ok(())
+}
+
+/// Drops the running engine so the next call spawns one carrying the current
+/// colour-profile assent.
+///
+/// The assent rides an environment variable, which a live subprocess read once
+/// at spawn — so a mid-session acceptance reaches the engine only through a new
+/// process. Safe at any moment the user can click the dialog's button: the
+/// engine holds nothing across calls, and `start` is idempotent, so the next
+/// operation brings one back.
+pub async fn restart_for_assent(app: &AppHandle) {
+    let state = app.state::<EngineState>();
+    let mut guard = state.child.lock().await;
+    if let Some(child) = guard.take() {
+        let _ = child.kill();
+    }
 }
