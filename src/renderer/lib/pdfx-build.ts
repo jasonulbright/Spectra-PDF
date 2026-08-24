@@ -301,6 +301,7 @@ function addAnnotations(
   annotations: ExportAnnotation[],
   removedImportedOriginals: NonNullable<ExportAnnotation['importedOriginal']>[],
   stampImages: Map<string, import('pdf-lib').PDFImage>,
+  signatureFonts: Map<string, import('pdf-lib').PDFFont>,
 ): void {
   stripImportedOriginals(copied, annotations, removedImportedOriginals);
   const context = output.context;
@@ -914,6 +915,54 @@ function addAnnotations(
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note ?? ''));
       if (a.symbolId) annot.set(PDFName.of('SpectraSymbol'), PDFName.of(a.symbolId));
       annot.set(PDFName.of('SpectraSymbolParts'), PDFHexString.fromText(partsToJson(parts)));
+    } else if (a.kind === 'stamp' && a.signatureFont) {
+      // A TYPED personal signature: the name set in an app-bundled script
+      // face, with NO border and NO fill — a signature is a mark on the page,
+      // not a labelled box. The face's SUBSET is embedded (see
+      // embedSignatureFonts), so the mark renders on a machine that has never
+      // had the face; a signature that silently reset to Helvetica somewhere
+      // else would be the wrong mark, not a degraded one.
+      const embedded = signatureFonts.get(a.signatureFont);
+      if (!embedded) throw new Error(`signature face not embedded: ${a.signatureFont}`);
+      const text = a.note ?? '';
+      // Fit the name to the box on the face's OWN metrics, uniformly: a
+      // signature stretched to fill a rect is a different hand.
+      const wAt100 = embedded.widthOfTextAtSize(text, 100);
+      const hAt100 = embedded.heightAtSize(100);
+      const size = Math.max(
+        1,
+        Math.min(wAt100 > 0 ? (dispW * 100) / wAt100 : dispH, (dispH * 100) / hAt100),
+      );
+      const textW = embedded.widthOfTextAtSize(text, size);
+      const boxH = embedded.heightAtSize(size);
+      // The baseline sits one descender above the glyph box's bottom edge,
+      // taken from the face rather than guessed as a fraction.
+      const descent = boxH - embedded.heightAtSize(size, { descender: false });
+      const tx = (dispW - textW) / 2;
+      const ty = (dispH - boxH) / 2 + descent;
+      const ap = context.register(
+        context.stream(
+          `BT /F0 ${size} Tf ${r} ${g} ${b} rg ${tx} ${ty} Td ` +
+            `${embedded.encodeText(text).toString()} Tj ET`,
+          {
+            Type: 'XObject',
+            Subtype: 'Form',
+            FormType: 1,
+            BBox: [0, 0, dispW, dispH],
+            Matrix: apMatrixFor(rotation),
+            Resources: { Font: { F0: embedded.ref } },
+          },
+        ),
+      );
+      annot = context.obj({
+        Type: 'Annot',
+        Subtype: 'Stamp',
+        Rect: [x0, y0, x1, y1],
+        C: [r, g, b],
+        F: 4, // print
+        AP: { N: ap },
+      });
+      annot.set(PDFName.of('Contents'), PDFHexString.fromText(text));
     } else if (a.kind === 'stamp' && a.imageData && stampImages.get(a.imageData)) {
       // A custom image stamp draws the pre-embedded raster without a border or
       // fill. /Contents keeps the display name.
@@ -1102,14 +1151,62 @@ function applyPageExtras(
   page: ExportPage,
   output: PDFDocument,
   stampImages: Map<string, import('pdf-lib').PDFImage>,
+  signatureFonts: Map<string, import('pdf-lib').PDFFont>,
 ): void {
   applyRotation(copied, page);
   // Must still run when `annotations` is empty but removedImportedOriginals
   // isn't — e.g. the user deleted the only imported annotation on this page,
   // leaving nothing to re-append but still needing the original stripped.
   if (page.annotations?.length || page.removedImportedOriginals?.length) {
-    addAnnotations(output, copied, page.annotations ?? [], page.removedImportedOriginals ?? [], stampImages);
+    addAnnotations(
+      output,
+      copied,
+      page.annotations ?? [],
+      page.removedImportedOriginals ?? [],
+      stampImages,
+      signatureFonts,
+    );
   }
+}
+
+/**
+ * Pre-embed every distinct script face a TYPED signature on these pages is set
+ * in (the per-page annotation emit is synchronous; pdf-lib's embed is not).
+ *
+ * Unlike the stamp-image prefetch this REFUSES on failure rather than falling
+ * back: an image stamp that cannot embed still has a bordered label to draw,
+ * whereas a signature drawn in a face the user did not choose is somebody
+ * else's mark. The faces ship in the app's own resource tree, so a failure
+ * here is a broken installation and is named as one.
+ *
+ * The fontkit registration and the module read are BOTH lazy — a document
+ * with no typed signature must embed nothing, load nothing, and produce the
+ * same bytes it did before this existed.
+ */
+async function embedSignatureFonts(
+  output: PDFDocument,
+  pages: ExportPage[],
+): Promise<Map<string, import('pdf-lib').PDFFont>> {
+  const map = new Map<string, import('pdf-lib').PDFFont>();
+  const wanted = new Set<string>();
+  for (const page of pages) {
+    for (const a of page.annotations ?? []) {
+      if (a.kind === 'stamp' && a.signatureFont) wanted.add(a.signatureFont);
+    }
+  }
+  if (wanted.size === 0) return map;
+  const [{ default: fontkit }, fonts] = await Promise.all([
+    import('@pdf-lib/fontkit'),
+    import('./signature-fonts'),
+  ]);
+  output.registerFontkit(fontkit);
+  for (const id of wanted) {
+    const face = fonts.signatureFaceById(id);
+    if (!face) throw new Error(`unknown signature face: ${id}`);
+    const bytes = await fonts.loadSignatureFontBytes(face.id);
+    map.set(id, await output.embedFont(bytes, { subset: true, customName: face.baseFontName }));
+  }
+  return map;
 }
 
 /** Pre-embed every distinct custom-stamp image (data URL → PDFImage): the
@@ -1188,6 +1285,7 @@ async function assemblePages(
     sources.set(key, { doc, copiedByIndex, contribution });
   }
   const stampImages = await embedStampImages(output, pages);
+  const signatureFonts = await embedSignatureFonts(output, pages);
   const used = new Set<PDFPage>();
   // Which source page landed at which output page — the reference-identity
   // channel every catalog/struct remap depends on (catalog-carry.ts).
@@ -1202,7 +1300,7 @@ async function assemblePages(
       [copied] = await output.copyPages(src.doc, [page.pageIndex]);
     }
     used.add(copied);
-    applyPageExtras(copied, page, output, stampImages);
+    applyPageExtras(copied, page, output, stampImages, signatureFonts);
     output.addPage(copied);
     src.contribution.copiedPages.push(copied);
     let pairs = pairsByKey.get(page.sourceKey);

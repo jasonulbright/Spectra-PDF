@@ -137,6 +137,15 @@ export interface PageAnnotation {
   // embedded image instead of the bordered label; `note` still carries the
   // stamp's display name for the comment sidebar and /Contents.
   imageData?: string;
+  // stamp only: a TYPED personal signature (F31's "type" door). The id of the
+  // app-bundled script face — see lib/signature-fonts, whose faces are
+  // outside the font-resolution ladder and named only by an asset. `note`
+  // carries the name itself and lands in /Contents like any stamp's label;
+  // the commit embeds the face's subset and draws it with no border or fill.
+  // A DRAWN signature is not this: it places as an ordinary `ink` annotation,
+  // so its strokes are vector paths by the same route a freehand drawing
+  // takes. An IMPORTED one places as an image stamp (`imageData`).
+  signatureFont?: string;
   // shape only: which figure. See ShapeType.
   shapeType?: ShapeType;
   // line/arrow/polyline only: the /LE ending names at [start, end], limited

@@ -45,6 +45,17 @@ jobs:
       - name: Build renderer (Vite)
         run: npm run build:renderer
 
+      # The portable zip's payload is the installer's payload, read out of the
+      # installer's own generated manifest -- so the two containers cannot list
+      # different files. What they CAN drift on is the notice map: a resource
+      # added to tauri.conf.json ships in both containers, and the zip's notice
+      # gate can only refuse an unclassified directory once a build has written
+      # a manifest to read. This runner never bundles, so the check runs against
+      # the declarations instead, where the directory is actually added.
+      - name: Portable payload notice map covers every declared resource
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -CheckMap
+        shell: pwsh
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -135,6 +146,10 @@ jobs:
 
       - name: Stage the shipped edit fonts
         run: powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1
+        shell: pwsh
+
+      - name: Stage the shipped signature script faces
+        run: powershell -ExecutionPolicy Bypass -File scripts/sync-signature-fonts.ps1
         shell: pwsh
 
       - name: Stage the shipped LibreOffice runtime
