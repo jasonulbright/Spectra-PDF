@@ -762,7 +762,7 @@ fn snapshot_excluding(app: &AppHandle, gone: Option<&str>) -> Session {
 // ── The file ──────────────────────────────────────────────────────────────
 
 fn session_path(app: &AppHandle) -> Option<PathBuf> {
-    let dir = app.path().app_data_dir().ok()?;
+    let dir = crate::portable::data_root(app).ok()?;
     std::fs::create_dir_all(&dir).ok();
     Some(dir.join(SESSION_FILE))
 }

@@ -103,6 +103,7 @@ pub fn run() {
         .manage(session::SessionState::new())
         .manage(session::QuitAcks::new())
         .manage(scanner::ScannerSessions::new())
+        .manage(commands::StartupEntryNotice::new())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
@@ -231,6 +232,7 @@ pub fn run() {
             commands::check_auto_update_disabled,
             commands::get_startup_enabled,
             commands::set_startup_enabled,
+            commands::startup_entry_notice,
             commands::set_start_minimized,
             commands::set_restore_windows_on_launch,
             commands::confirm_close,
@@ -269,6 +271,11 @@ pub fn run() {
             // live on a machine where Mica would compose (spec 94; the RDP/
             // transparency-off case is otherwise unreachable on a dev box).
             app_windows::build_app_window(&app.handle().clone(), app_windows::MAIN_LABEL, e2e, false)?;
+
+            // "Start with Windows" records an absolute path, so a copy the
+            // user moved — a portable one especially — has a Run entry
+            // pointing at nothing until this corrects it.
+            commands::refresh_startup_entry_at_launch(&app.handle().clone());
 
             let args: Vec<String> = std::env::args().collect();
             // Under end-to-end control the window is force-shown below, so the

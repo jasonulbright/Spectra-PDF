@@ -61,6 +61,8 @@
   "app.signedEdit.lockedRefused": "Podpis w tym dokumencie blokuje zmianę następujących pól formularza: {{fields}}. Ich wypełnienie da plik zgłaszany jako zmieniony. Zapisz kopię i wypełnij ją — kopia nie jest już dokumentem podpisanym.",
   "app.signedEdit.lockedTitle": "Pola formularza są zablokowane",
   "app.signedEdit.title": "Dokument jest podpisany",
+  "app.startupEntry.stale": "Ta kopia została przeniesiona po włączeniu opcji „Uruchamiaj razem z systemem Windows”, a wpisu nie udało się zaktualizować, więc aplikacja nie uruchomi się razem z systemem Windows. Wyłącz i ponownie włącz to ustawienie w Preferencjach. ({{detail}})",
+  "app.startupEntry.staleTitle": "„Uruchamiaj razem z systemem Windows” wymaga uwagi",
   "app.window.claimTitle": "Otwarty w innym oknie",
   "app.window.focusOther": "Pokaż to okno",
   "app.window.folderBusy": "Inne okno już zapisuje do tego folderu: {{folder}}.",

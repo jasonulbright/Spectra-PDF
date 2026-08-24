@@ -57,6 +57,8 @@
   "app.signedEdit.lockedRefused": "Tämän asiakirjan allekirjoitus lukitsee seuraavat lomakekentät muutoksilta: {{fields}}. Niiden täyttäminen tuottaisi tiedoston, joka ilmoitetaan muutetuksi. Tallenna kopio ja täytä se — kopio ei ole enää allekirjoitettu asiakirja.",
   "app.signedEdit.lockedTitle": "Lomakekentät on lukittu",
   "app.signedEdit.title": "Asiakirja on allekirjoitettu",
+  "app.startupEntry.stale": "Tämä kopio on siirretty sen jälkeen, kun ”Käynnistä Windowsin mukana” otettiin käyttöön, eikä merkintää voitu päivittää, joten sovellus ei käynnisty Windowsin mukana. Poista asetus käytöstä ja ota se uudelleen käyttöön kohdassa Asetukset. ({{detail}})",
+  "app.startupEntry.staleTitle": "”Käynnistä Windowsin mukana” vaatii huomiota",
   "app.window.claimTitle": "Avoinna toisessa ikkunassa",
   "app.window.focusOther": "Näytä kyseinen ikkuna",
   "app.window.folderBusy": "Toinen ikkuna kirjoittaa jo tähän kansioon: {{folder}}.",

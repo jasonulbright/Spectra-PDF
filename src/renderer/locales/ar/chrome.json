@@ -65,6 +65,8 @@
   "app.signedEdit.lockedRefused": "يقفل أحد التوقيعات على هذا المستند بعض حقول النموذج ضد أي تغيير إضافي، وتعبئتها تنتج ملفًا يظهر على أنه معدّل. احفظ نسخة وعبّئها بدلًا من ذلك — النسخة لم تعد هي المستند الموقّع. الحقول المقفلة: {{fields}}",
   "app.signedEdit.lockedTitle": "حقول النموذج مقفلة",
   "app.signedEdit.title": "المستند موقّع",
+  "app.startupEntry.stale": "نُقلت هذه النسخة بعد تفعيل «البدء مع Windows»، وتعذّر تحديث الإدخال، لذلك لن يبدأ التطبيق مع Windows. أوقف الإعداد ثم فعّله من جديد في «التفضيلات». ({{detail}})",
+  "app.startupEntry.staleTitle": "«البدء مع Windows» يحتاج إلى انتباه",
   "app.window.claimTitle": "مفتوح في نافذة أخرى",
   "app.window.focusOther": "إظهار تلك النافذة",
   "app.window.folderBusy": "نافذة أخرى تكتب بالفعل في هذا المجلد: {{folder}}.",

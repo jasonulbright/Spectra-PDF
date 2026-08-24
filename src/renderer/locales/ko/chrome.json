@@ -55,6 +55,8 @@
   "app.signedEdit.lockedRefused": "이 문서의 서명이 다음 양식 필드를 더 이상 변경하지 못하도록 잠갔습니다: {{fields}}. 이 필드를 채우면 변경된 것으로 보고되는 파일이 만들어집니다. 사본을 저장한 뒤 사본을 채우십시오 — 사본은 더 이상 서명된 문서가 아닙니다.",
   "app.signedEdit.lockedTitle": "양식 필드가 잠김",
   "app.signedEdit.title": "문서가 서명됨",
+  "app.startupEntry.stale": "“Windows 시작 시 실행”을 켠 뒤 이 복사본이 이동되었고 항목을 갱신하지 못했으므로 Windows 시작 시 실행되지 않습니다. 기본 설정에서 이 설정을 껐다가 다시 켜십시오. ({{detail}})",
+  "app.startupEntry.staleTitle": "“Windows 시작 시 실행” 확인 필요",
   "app.window.claimTitle": "다른 창에서 열려 있음",
   "app.window.focusOther": "해당 창 표시",
   "app.window.folderBusy": "다른 창이 이미 이 폴더에 쓰고 있습니다: {{folder}}.",

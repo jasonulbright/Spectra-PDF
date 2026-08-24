@@ -65,10 +65,7 @@ impl WatcherState {
 }
 
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("Cannot resolve the config folder: {e}"))?;
+    let dir = crate::portable::config_root(app)?;
     Ok(dir.join(CONFIG_FILE))
 }
 
@@ -224,11 +221,7 @@ fn scan_pdfs(dir: &Path) -> HashMap<String, u64> {
 /// check only ever covers the call sites you thought of.
 fn action_file_for(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
     validate_watcher_id(id)?;
-    let dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("Cannot resolve the config folder: {e}"))?
-        .join("watched-actions");
+    let dir = crate::portable::config_root(app)?.join("watched-actions");
     std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create the actions folder: {e}"))?;
     let file = dir.join(format!("{id}.json"));
     // Belt and braces: even with the charset check above, assert the result

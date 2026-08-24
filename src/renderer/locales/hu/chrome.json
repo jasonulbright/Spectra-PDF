@@ -57,6 +57,8 @@
   "app.signedEdit.lockedRefused": "A dokumentum egyik aláírása a további módosítás ellen zárolja a következő űrlapmezőket: {{fields}}. Ezek kitöltése olyan fájlt eredményezne, amely módosítottként jelenik meg. Mentsen róla másolatot, és azt töltse ki — a másolat már nem az aláírt dokumentum.",
   "app.signedEdit.lockedTitle": "Az űrlapmezők zárolva vannak",
   "app.signedEdit.title": "A dokumentum alá van írva",
+  "app.startupEntry.stale": "Ezt a példányt az „Indítás a Windowsszal” bekapcsolása óta áthelyezték, és a bejegyzést nem sikerült frissíteni, ezért az alkalmazás nem indul el a Windowszal. Kapcsolja ki, majd újra be a beállítást a Beállítások között. ({{detail}})",
+  "app.startupEntry.staleTitle": "Az „Indítás a Windowsszal” figyelmet igényel",
   "app.window.claimTitle": "Másik ablakban van megnyitva",
   "app.window.focusOther": "Ablak megjelenítése",
   "app.window.folderBusy": "Egy másik ablak már ír ebbe a mappába: {{folder}}.",

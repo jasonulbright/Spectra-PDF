@@ -57,6 +57,8 @@
   "app.signedEdit.lockedRefused": "Eine Signatur dieses Dokuments sperrt diese Formularfelder gegen weitere Änderungen: {{fields}}. Sie auszufüllen ergäbe eine Datei, die als verändert gemeldet wird. Speichern Sie eine Kopie und füllen Sie diese aus — die Kopie ist nicht mehr das signierte Dokument.",
   "app.signedEdit.lockedTitle": "Formularfelder sind gesperrt",
   "app.signedEdit.title": "Das Dokument ist signiert",
+  "app.startupEntry.stale": "Diese Kopie wurde verschoben, seit „Mit Windows starten“ eingeschaltet wurde, und der Eintrag konnte nicht aktualisiert werden. Die Anwendung startet daher nicht mit Windows. Schalten Sie die Einstellung in den Einstellungen aus und wieder ein. ({{detail}})",
+  "app.startupEntry.staleTitle": "„Mit Windows starten“ erfordert Aufmerksamkeit",
   "app.window.claimTitle": "In einem anderen Fenster geöffnet",
   "app.window.focusOther": "Dieses Fenster anzeigen",
   "app.window.folderBusy": "Ein anderes Fenster schreibt bereits in diesen Ordner: {{folder}}.",

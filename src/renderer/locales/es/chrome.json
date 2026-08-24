@@ -59,6 +59,8 @@
   "app.signedEdit.lockedRefused": "Una firma de este documento bloquea estos campos de formulario frente a cambios posteriores: {{fields}}. Rellenarlos produciría un archivo que se informa como alterado. Guarde una copia y rellene esa copia: la copia ya no es el documento firmado.",
   "app.signedEdit.lockedTitle": "Los campos de formulario están bloqueados",
   "app.signedEdit.title": "El documento está firmado",
+  "app.startupEntry.stale": "Esta copia se ha movido desde que se activó «Iniciar con Windows» y no se ha podido actualizar la entrada, por lo que la aplicación no se iniciará con Windows. Desactiva y vuelve a activar la opción en Preferencias. ({{detail}})",
+  "app.startupEntry.staleTitle": "«Iniciar con Windows» requiere atención",
   "app.window.claimTitle": "Abierto en otra ventana",
   "app.window.focusOther": "Mostrar esa ventana",
   "app.window.folderBusy": "Otra ventana ya está escribiendo en esta carpeta: {{folder}}.",
