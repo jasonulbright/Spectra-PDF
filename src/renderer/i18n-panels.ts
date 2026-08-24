@@ -26,6 +26,14 @@ export const PANEL_STRINGS = {
   'panel.common.gsTooOld':
     'The Ghostscript set in Settings ▸ Engine is older than this version needs. Install a newer one.',
   'panel.common.gsSetUp': 'Set up Ghostscript',
+  // The ONE explanation every bundled-colour-profile surface renders while the
+  // profiles' separate licence is unaccepted. Three surfaces depend on them:
+  // the destination of a CMYK conversion, a PDF/X output intent's embedded
+  // profile, and the press an output preview proofs against. Everything else
+  // in the product is unaffected, which is what the second sentence says.
+  'panel.common.iccLicenceRequired':
+    'The colour profiles that ship with Spectra PDF are licensed separately, and that licence has not been accepted on this computer. Colour conversion, output intents and output preview stay off until it is; nothing else is affected.',
+  'panel.common.iccLicenceReview': 'Review the colour-profile licence',
   'panel.common.useSelection': 'Use selection',
   'panel.common.useSelectionTitle': 'Fill this field with the pages selected in the page list',
 

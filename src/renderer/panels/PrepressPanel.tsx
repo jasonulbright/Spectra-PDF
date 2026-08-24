@@ -7,6 +7,9 @@ import { StandardsAlterations } from '../components/StandardsAlterations';
 import { gsBlocked, gsPathIfAvailable, requireGsPath } from '../lib/gs-capability';
 import { useGsCapability } from '../hooks/useGsCapability';
 import { GsRequiredNotice } from '../components/GsRequiredNotice';
+import { iccBlocked } from '../lib/icc-assent';
+import { useIccAssent } from '../hooks/useIccAssent';
+import { IccLicenceNotice } from '../components/IccLicenceNotice';
 import { app, dialog } from '../lib/tauri-bridge';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
@@ -53,6 +56,17 @@ type ProfileChoice =
 export const profileParam = (p: ProfileChoice): string =>
   p.kind === 'default' ? '' : p.kind === 'installed' ? p.name : p.path;
 
+/**
+ * Does this destination come out of the BUNDLED set?
+ *
+ * The colour-profile licence covers the profiles that SHIP with the product,
+ * so it gates those two choices and not a file the user pointed at. A declined
+ * copy therefore still converts against the user's own profile — the line
+ * between a named-disabled capability and a crippled one, and the same line
+ * `icc_profiles.resolve` draws engine-side.
+ */
+const usesBundledProfile = (p: ProfileChoice): boolean => p.kind !== 'file';
+
 export function PrepressPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
   useTranslation();
@@ -61,9 +75,13 @@ export function PrepressPanel(): React.ReactElement {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const gs = useGsCapability();
+  const icc = useIccAssent();
   const [report, setReport] = useState<StandardsReport | null>(null);
   const [renderIntent, setRenderIntent] = useState('relative');
   const [profile, setProfile] = useState<ProfileChoice>({ kind: 'default' });
+  // Both actions resolve a destination profile, so both are blocked by an
+  // unaccepted licence — but only while the destination is a bundled one.
+  const iccBlocks = iccBlocked(icc) && usesBundledProfile(profile);
   // The presses this machine actually has, and which of them an unnamed
   // destination resolves to. Read from the engine rather than named in a
   // string: the picker has to offer real profiles, and the default has to be
@@ -246,10 +264,11 @@ export function PrepressPanel(): React.ReactElement {
         )}
       </div>
       <GsRequiredNotice capability={gs} testId="prepress-gs" />
+      <IccLicenceNotice state={icc} testId="prepress-icc" />
       <button
         data-testid="cmyk-convert"
         onClick={handleConvert}
-        disabled={busy || gsBlocked(gs)}
+        disabled={busy || gsBlocked(gs) || iccBlocks}
         className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
       >
         {busy ? tChrome('panel.prepress.converting') : tChrome('panel.prepress.convertCmyk')}
@@ -294,7 +313,7 @@ export function PrepressPanel(): React.ReactElement {
         <button
           data-testid="pdfx-convert"
           onClick={handlePdfx}
-          disabled={busy || gsBlocked(gs)}
+          disabled={busy || gsBlocked(gs) || iccBlocks}
           className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
         >
           {busy ? tChrome('panel.prepress.working') : tChrome('panel.prepress.createPdfx')}

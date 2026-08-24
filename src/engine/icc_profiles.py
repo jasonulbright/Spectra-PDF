@@ -38,9 +38,26 @@ standard conditions on a registered identifier are present either way.
 
 from __future__ import annotations
 
+import os
 import struct
 from dataclasses import dataclass
 from pathlib import Path
+
+#: The launching binary's answer to "has the bundled profiles' licence been
+#: accepted on this machine?", as an environment value. `1` is accepted;
+#: anything else recorded is not.
+#:
+#: The engine is TOLD rather than left to look. The two shipped containers keep
+#: the record in different places — the installer writes one beside the
+#: executable, a portable copy writes its own under its data root — and the
+#: binary that spawns this process is the one authority on which container it
+#: is. A second resolver here would be a second answer.
+#:
+#: **An ABSENT variable means no shipped container launched this engine**: a
+#: source-tree run, a pytest, a developer driving `__startup__.py` by hand.
+#: Those read the profiles as they always have. Both shipped containers always
+#: set it, so absence is unreachable in the product.
+ASSENT_ENV = "SPECTRAPDF_ICC_ASSENT"
 
 #: The destination profile a conversion resolves to when the caller names
 #: none. See the module docstring for why this one.
@@ -79,6 +96,16 @@ def refuse_unknown_profile(name: str) -> None:
     raise ValueError(
         f'No colour profile named "{name}" is installed, and it is not a '
         "profile file this engine can open."
+    )
+
+
+def refuse_unaccepted_profiles() -> None:
+    raise RuntimeError(
+        "The bundled colour profiles are licensed separately and that licence "
+        "has not been accepted on this computer, so no bundled profile can be "
+        "opened. Accept the colour-profile licence to enable colour "
+        "conversion, output intents and output preview, or name your own "
+        "profile file instead."
     )
 
 
@@ -227,6 +254,14 @@ def profile_dir(icc_dir: str = "") -> Path:
     return here.parent.parent / "icc"
 
 
+def assent_recorded() -> bool:
+    """Whether the bundled profiles' licence has been accepted. See `ASSENT_ENV`."""
+    value = os.environ.get(ASSENT_ENV)
+    if value is None:
+        return True
+    return value.strip() == "1"
+
+
 _CACHE: dict = {}
 
 
@@ -236,7 +271,15 @@ def installed(icc_dir: str = "") -> dict:
     Cached per directory against its own listing, so a rebundled resource tree
     is picked up without a restart while a composite that asks per page does
     not re-read eight megabytes each time.
+
+    The assent gate is the FIRST thing here, ahead of the listing and ahead of
+    the cache, because this is the one door every bundled profile is read
+    through — the destination of a conversion, a PDF/X `/DestOutputProfile`,
+    and the press an output preview proofs against all arrive at it. Without
+    acceptance the directory is not listed and no profile file is opened.
     """
+    if not assent_recorded():
+        refuse_unaccepted_profiles()
     directory = profile_dir(icc_dir)
     try:
         entries = sorted(
@@ -291,19 +334,28 @@ def resolve(name: str, icc_dir: str = ""):
     Empty resolves to the default destination. A name that is neither an
     installed description string nor a readable profile file is refused by
     name — there is no third meaning it could silently take.
+
+    **A profile the user supplies is theirs, and the bundling licence has
+    nothing to say about it.** So without acceptance the file branch still
+    resolves and only the bundled set is closed; the caller keeps a way to
+    convert, which is what separates a named-disabled capability from a
+    crippled one.
     """
     wanted = str(name).strip()
     if not wanted:
         return default_cmyk(icc_dir)
-    found = installed(icc_dir).get(wanted)
-    if found is not None:
-        return found
+    if assent_recorded():
+        found = installed(icc_dir).get(wanted)
+        if found is not None:
+            return found
     path = Path(wanted)
     if path.is_file():
         profile = read_profile(path)
         if profile is None:
             refuse_unknown_profile(wanted)
         return profile
+    if not assent_recorded():
+        refuse_unaccepted_profiles()
     refuse_unknown_profile(wanted)
 
 

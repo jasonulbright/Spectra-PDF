@@ -77,6 +77,29 @@ FunctionEnd
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
+  ; The install record. Its PRESENCE is how the application knows it was
+  ; installed rather than unzipped -- the portable zip carries the same payload
+  ; tree and cannot acquire this file, so the two containers are told apart
+  ; structurally instead of by inspecting the install path (a zip extracted to
+  ; Program Files and an installer redirected by /D= would both fool a path
+  ; test, in opposite directions).
+  ;
+  ; It also carries the Adobe colour-profile EULA acceptance this installer has
+  ; already obtained: interactively through the wizard's licence page, and
+  ; unattended through /acceptEULA, which PREINSTALL above refuses to install
+  ; without. So an installed application never presents the in-app licence
+  ; dialog; the portable container, which has no record, presents it on first
+  ; run and writes its own.
+  ClearErrors
+  FileOpen $0 "$INSTDIR\install-record.json" w
+  ${IfNot} ${Errors}
+    FileWrite $0 '{$\r$\n'
+    FileWrite $0 '  "installed": true,$\r$\n'
+    FileWrite $0 '  "adobeIccEulaAccepted": true$\r$\n'
+    FileWrite $0 '}$\r$\n'
+    FileClose $0
+  ${EndIf}
+
   ; Context menu: "Open with Spectra PDF"
   WriteRegStr HKCR "SystemFileAssociations\.pdf\shell\SpectraPDF.Open" "" "Open with Spectra PDF"
   WriteRegStr HKCR "SystemFileAssociations\.pdf\shell\SpectraPDF.Open" "Icon" "$INSTDIR\spectrapdf.exe,0"
@@ -122,6 +145,11 @@ FunctionEnd
 
   ; Remove app registry key (includes DisableAutoUpdate)
   DeleteRegKey HKLM "SOFTWARE\Spectra PDF"
+
+  ; The install record. Removed with the rest of the payload so a leftover
+  ; file cannot make a later portable copy in the same folder believe it was
+  ; installed -- and believe its colour-profile licence was accepted.
+  Delete "$INSTDIR\install-record.json"
 
   ; Silent uninstall with /removeuserdata: set the checkbox state variable
   ; so Tauri's built-in post-uninstall logic handles the actual deletion.
