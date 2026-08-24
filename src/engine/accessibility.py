@@ -234,6 +234,10 @@ _STRUCTURE_CHECKS = (
 # walk cannot support those either way, so their `fail` degrades too.
 _TREE_ABSENCE_CHECKS = ("tagged_annotations", "tagged_multimedia", "tagged_form_fields")
 
+# ISO 14289-1 7.18.4: the structure element a widget annotation must be nested
+# within, after /RoleMap resolution.
+_FORM_ROLE = "Form"
+
 # The checks that read the pages, and cannot answer for one that will not parse.
 _PAGE_CHECKS = (
     "image_only", "contrast", "tagged_content", "character_encoding",
@@ -1538,7 +1542,23 @@ def _check_navigation_links(check, annots, pages):
     check.status = REVIEW if findings else PASS
 
 
+def _first_role(roles) -> str:
+    """One named role for the finding line. A widget reached by more than one
+    `/OBJR` has more than one enclosing element, and the line names one; the
+    verdict does not depend on which."""
+    named = sorted(r for r in roles if r)
+    return named[0] if named else ""
+
+
 def _check_tagged_form_fields(check, tree, annots, fields):
+    """A widget annotation enclosed in a `Form` structure element.
+
+    ISO 14289-1 7.18.4 requires a widget annotation to be nested within a
+    `Form` tag; membership in the structure tree under any other element does
+    not satisfy it. The enclosing role is the one `/RoleMap` resolves, so a
+    document tagging its widgets with a custom type that maps to `Form`
+    conforms — the mapped role is the element's role.
+    """
     widget_ogs: set = set()
     for field in fields:
         widget_ogs.update(field["widgets"])
@@ -1547,16 +1567,30 @@ def _check_tagged_form_fields(check, tree, annots, fields):
         check.status = NA
         return
     tagged = tree["tagged_annots"] if tree["tagged"] else set()
-    findings = [
-        _finding(
-            _object_address(page=a["page"], annotation=a["index"]),
-            "form_field_not_tagged",
-            rect=a["rect"],
-            values={"page": a["page"]},
+    roles = tree["annot_roles"] if tree["tagged"] else {}
+    findings = []
+    for a in widgets:
+        if a["objgen"] not in tagged:
+            findings.append(
+                _finding(
+                    _object_address(page=a["page"], annotation=a["index"]),
+                    "form_field_not_tagged",
+                    rect=a["rect"],
+                    values={"page": a["page"]},
+                )
+            )
+            continue
+        enclosing = roles.get(a["objgen"], set())
+        if _FORM_ROLE in enclosing:
+            continue
+        findings.append(
+            _finding(
+                _object_address(page=a["page"], annotation=a["index"]),
+                "form_field_not_in_form",
+                rect=a["rect"],
+                values={"page": a["page"], "role": _first_role(enclosing)},
+            )
         )
-        for a in widgets
-        if a["objgen"] not in tagged
-    ]
     _verdict(check, len(widgets), findings)
 
 
