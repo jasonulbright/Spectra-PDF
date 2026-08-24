@@ -19,7 +19,15 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { PDFDocument, PDFDict, PDFName, PDFRawStream, PDFArray } from 'pdf-lib';
+import {
+  PDFArray,
+  PDFDict,
+  PDFDocument,
+  PDFName,
+  PDFObject,
+  PDFRawStream,
+  PDFRef,
+} from 'pdf-lib';
 
 const FONT_DIR = join(__dirname, '..', 'resources', 'fonts');
 const FACE = join(FONT_DIR, 'GreatVibes-Regular.ttf');
@@ -64,12 +72,28 @@ function onlyAnnot(doc: PDFDocument): PDFDict {
   return annots.lookup(0, PDFDict);
 }
 
+/**
+ * Resolve a reference to the raw stream behind it.
+ *
+ * `lookup`'s class-taking overload set does not admit PDFRawStream, so the
+ * resolution and the narrowing are separate steps: look the reference up, then
+ * assert what came back. The assertion is the point — a lookup that returned
+ * something else would otherwise read as a passing test on an empty string.
+ */
+function rawStream(doc: PDFDocument, ref: PDFRef | PDFObject | undefined): PDFRawStream {
+  const resolved = doc.context.lookup(ref);
+  if (!(resolved instanceof PDFRawStream)) {
+    throw new Error(
+      `expected a raw stream, got ${resolved ? resolved.constructor.name : 'nothing'}`,
+    );
+  }
+  return resolved;
+}
+
 /** The normal appearance stream's decoded content. */
 function apContent(doc: PDFDocument, annot: PDFDict): string {
   const ap = annot.lookup(PDFName.of('AP'), PDFDict);
-  const n = ap.get(PDFName.of('N'));
-  const stream = doc.context.lookup(n, PDFRawStream);
-  return new TextDecoder().decode(stream.getContents());
+  return new TextDecoder().decode(rawStream(doc, ap.get(PDFName.of('N'))).getContents());
 }
 
 describe('a DRAWN signature commits as vector ink', () => {
@@ -147,9 +171,9 @@ describe.skipIf(!HAS_FACES)('a TYPED signature embeds its own face', () => {
     // The appearance's own font resource, walked to its embedded program: a
     // /FontFile2 is the proof the face travels with the document rather than
     // being resolved on the reader's machine.
-    const ap = doc.context.lookup(
+    const ap = rawStream(
+      doc,
       annot.lookup(PDFName.of('AP'), PDFDict).get(PDFName.of('N')),
-      PDFRawStream,
     );
     const font = ap.dict
       .lookup(PDFName.of('Resources'), PDFDict)
@@ -159,7 +183,7 @@ describe.skipIf(!HAS_FACES)('a TYPED signature embeds its own face', () => {
     const descriptor = descendants
       .lookup(0, PDFDict)
       .lookup(PDFName.of('FontDescriptor'), PDFDict);
-    const program = doc.context.lookup(descriptor.get(PDFName.of('FontFile2')), PDFRawStream);
+    const program = rawStream(doc, descriptor.get(PDFName.of('FontFile2')));
     expect(program.getContents().length).toBeGreaterThan(0);
     // Subset, not the whole face: the shipped Great Vibes is ~450 KB and a
     // dozen glyphs is a small fraction of it.
