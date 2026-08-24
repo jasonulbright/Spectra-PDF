@@ -3158,6 +3158,7 @@
   "panel.a11y.detail.form_field_not_tagged": "Un campo modulo a pagina {{page}} è fuori dall’albero di struttura.",
   "panel.a11y.detail.header_cell_has_no_scope": "Questa cella di intestazione non dichiara un ambito, e nessuna cella la indica.",
   "panel.a11y.detail.heading_level_skipped": "La scaletta salta dal livello {{from}} al livello {{to}}.",
+  "panel.a11y.detail.heading_opens_below_h1": "La scaletta inizia dal livello {{level}} invece che dal livello 1.",
   "panel.a11y.detail.label_outside_list_item": "L’elemento padre di questo {{role}} è {{parent}}, non una voce di elenco.",
   "panel.a11y.detail.list_item_outside_list": "L’elemento padre di questa voce è {{parent}}, non un elenco.",
   "panel.a11y.detail.mark_info_missing": "Il documento ha un albero di struttura ma non si dichiara taggato.",

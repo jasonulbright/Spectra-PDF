@@ -3092,6 +3092,7 @@
   "panel.a11y.detail.form_field_not_tagged": "A(z) {{page}}. oldal egyik űrlapmezője a szerkezeti fán kívül van.",
   "panel.a11y.detail.header_cell_has_no_scope": "Ez a fejléccella nem ad meg hatókört, és egyetlen cella sem hivatkozik rá.",
   "panel.a11y.detail.heading_level_skipped": "A vázlat a(z) {{from}}. szintről a(z) {{to}}. szintre ugrik.",
+  "panel.a11y.detail.heading_opens_below_h1": "A vázlat a(z) {{level}}. szinten kezdődik az 1. szint helyett.",
   "panel.a11y.detail.label_outside_list_item": "Ennek a(z) {{role}} elemnek a szülője {{parent}}, nem listaelem.",
   "panel.a11y.detail.list_item_outside_list": "Ennek az elemnek a szülője {{parent}}, nem lista.",
   "panel.a11y.detail.mark_info_missing": "A dokumentumnak van szerkezeti fája, de nem jelenti ki magáról, hogy címkézett.",

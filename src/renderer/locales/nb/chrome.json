@@ -3092,6 +3092,7 @@
   "panel.a11y.detail.form_field_not_tagged": "Et skjemafelt på side {{page}} ligger utenfor strukturtreet.",
   "panel.a11y.detail.header_cell_has_no_scope": "Denne overskriftscellen angir ikke noe omfang, og ingen celle peker på den.",
   "panel.a11y.detail.heading_level_skipped": "Disposisjonen hopper fra nivå {{from}} til nivå {{to}}.",
+  "panel.a11y.detail.heading_opens_below_h1": "Disposisjonen begynner på nivå {{level}} i stedet for nivå 1.",
   "panel.a11y.detail.label_outside_list_item": "Det overordnede elementet til denne {{role}} er {{parent}}, ikke et listepunkt.",
   "panel.a11y.detail.list_item_outside_list": "Punktets overordnede element er {{parent}}, ikke en liste.",
   "panel.a11y.detail.mark_info_missing": "Dokumentet har et strukturtre, men angir ikke seg selv som tagget.",

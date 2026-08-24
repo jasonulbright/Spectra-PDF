@@ -3224,6 +3224,7 @@
   "panel.a11y.detail.form_field_not_tagged": "Поле формы на странице {{page}} находится вне дерева структуры.",
   "panel.a11y.detail.header_cell_has_no_scope": "Эта ячейка заголовка не объявляет область действия, и ни одна ячейка на неё не ссылается.",
   "panel.a11y.detail.heading_level_skipped": "Структура перескакивает с уровня {{from}} на уровень {{to}}.",
+  "panel.a11y.detail.heading_opens_below_h1": "Структура начинается с уровня {{level}}, а не с уровня 1.",
   "panel.a11y.detail.label_outside_list_item": "Родитель этого элемента {{role}} — {{parent}}, а не элемент списка.",
   "panel.a11y.detail.list_item_outside_list": "Родитель этого элемента — {{parent}}, а не список.",
   "panel.a11y.detail.mark_info_missing": "У документа есть дерево структуры, но он не объявляет себя документом с тегами.",
