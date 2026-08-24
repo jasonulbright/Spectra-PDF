@@ -46,6 +46,7 @@ export const ALTERATION_KINDS: readonly string[] = [
   'colorants_removed',
   'colorant_shadings_rasterized',
   'images_removed',
+  'standard_identifiers_removed',
   'fonts_substituted',
   'producer_removed_feature',
   'conformance_abandoned',
@@ -65,6 +66,7 @@ export const FACT_KINDS: readonly string[] = [
   'encryption',
   'page_marks',
   'images',
+  'standard_identifiers',
 ];
 
 /** Structure parts a `tagged_structure_removed` row names. */
