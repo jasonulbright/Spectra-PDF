@@ -1380,6 +1380,27 @@ class TestShippedShapeStillReadable:
         assert flat == nested
 
 
+class TestHeadingNestingReportsWhichDefect:
+    """The opening case and a mid-outline jump are two different sentences.
+
+    `heading_level_skipped` names the heading it jumped FROM, so that value
+    must be a level some heading in the document actually holds. A document
+    opening at H2 has no such predecessor, and gets its own finding.
+    """
+
+    def test_opening_below_h1_names_only_the_level(self, tmp_dir):
+        res = check_accessibility(_build(tmp_dir, "heading_starts_at_h2_fails"))
+        findings = _check(res, "heading_nesting")["findings"]
+        assert [f["detail_key"] for f in findings] == ["heading_opens_below_h1"]
+        assert findings[0]["values"] == {"level": 2}
+
+    def test_a_mid_outline_jump_names_a_real_predecessor(self, tmp_dir):
+        res = check_accessibility(_build(tmp_dir, "heading_skip"))
+        findings = _check(res, "heading_nesting")["findings"]
+        assert [f["detail_key"] for f in findings] == ["heading_level_skipped"]
+        assert findings[0]["values"] == {"from": 1, "to": 3}
+
+
 class TestCategoryFilter:
     def test_one_category_runs_and_the_shape_is_unchanged(self, tmp_dir):
         src = _build(tmp_dir, "figure_no_alt")

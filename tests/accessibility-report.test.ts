@@ -100,10 +100,10 @@ function callEnd(from: number): number {
  * conditional — the value on each side of the `if … else`. */
 function armsOf(text: string): string[] {
   const ifAt = text.search(/\bif\b/);
-  if (ifAt < 0) return [...text.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  if (ifAt < 0) return [...text.matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]);
   const elseAt = text.search(/\belse\b/);
   const arms = [text.slice(0, ifAt), elseAt < 0 ? '' : text.slice(elseAt + 'else'.length)];
-  return arms.flatMap((arm) => [...arm.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]));
+  return arms.flatMap((arm) => [...arm.matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]));
 }
 
 /** The keys an argument that NAMES its value can evaluate to: every literal
@@ -113,7 +113,7 @@ function armsOf(text: string): string[] {
 function boundTo(name: string, at: number): string[] {
   const defAt = ENGINE.lastIndexOf('\ndef ', at);
   const body = ENGINE.slice(defAt < 0 ? 0 : defAt, at);
-  const assign = new RegExp(`\\n\\s*${name}\\s*=\\s*"([a-z_]+)"`, 'g');
+  const assign = new RegExp(`\\n\\s*${name}\\s*=\\s*"([a-z0-9_]+)"`, 'g');
   return [...body.matchAll(assign)].map((m) => m[1]);
 }
 
@@ -128,7 +128,7 @@ function detailKeys(): Map<string, Set<string>> {
     const values = new Set<string>();
     const body = ENGINE.slice(at + call.length, callEnd(at + call.length));
     const dict = /values=\{([^{}]*)\}/.exec(body);
-    if (dict) for (const m of dict[1].matchAll(/"([a-z_]+)":/g)) values.add(m[1]);
+    if (dict) for (const m of dict[1].matchAll(/"([a-z0-9_]+)":/g)) values.add(m[1]);
     const arg = ENGINE.slice(firstEnd + 1, secondEnd);
     let keys = armsOf(arg);
     if (keys.length === 0 && /^\s*[A-Za-z_][A-Za-z0-9_]*\s*$/.test(arg)) {

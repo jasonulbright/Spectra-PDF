@@ -1899,6 +1899,8 @@ export const PANEL_STRINGS = {
     'This header cell declares no scope, and no cell points at it.',
   'panel.a11y.detail.heading_level_skipped':
     'The outline jumps from level {{from}} to level {{to}}.',
+  'panel.a11y.detail.heading_opens_below_h1':
+    'The outline opens at level {{level}} instead of level 1.',
   'panel.a11y.detail.label_outside_list_item':
     'This {{role}}’s parent is {{parent}}, not a list item.',
   'panel.a11y.detail.list_item_outside_list': 'This item’s parent is {{parent}}, not a list.',
