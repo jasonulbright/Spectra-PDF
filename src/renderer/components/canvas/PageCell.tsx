@@ -59,6 +59,9 @@ import {
   type SpanSize,
 } from '../../lib/edit-paragraphs';
 import type { SignaturePlacement } from '../../lib/signature-placement';
+import type { SignatureAsset } from '../../lib/signature-assets';
+import { placeStrokes, signatureFootprint, smoothStrokes } from '../../lib/signature-assets';
+import { signatureCssFamily, signatureFaceById } from '../../lib/signature-fonts';
 import type { LinkRegion } from '../../lib/links';
 import type { SnapshotPlacement } from '../../lib/snapshot-capture';
 import { shownValue } from '../../lib/form-overlay';
@@ -221,6 +224,13 @@ export interface StampPreset {
    * /Contents like any other stamp's. */
   symbolId?: string;
   symbolParts?: readonly SymbolPart[];
+  /** A PERSONAL SIGNATURE armed from the signature store (F31). It rides the
+   * stamp preset because arming, sizing, undo and commit are already the
+   * stamp tool's, and a signature needs none of them re-invented — but it
+   * places as whichever ordinary annotation carries it faithfully: `ink` for
+   * a drawn one (vector strokes, no raster anywhere), an image stamp for an
+   * imported one, a typed stamp for a name set in a bundled script face. */
+  signature?: SignatureAsset;
 }
 
 export const STAMP_PRESETS: StampPreset[] = [
@@ -233,6 +243,11 @@ export const STAMP_PRESETS: StampPreset[] = [
 
 // Fixed footprint, display-normalized (0..1 of the page cell) — stamps are a
 // single click-to-place, not a drag-sized box.
+// A placed personal signature spans this much of the page's WIDTH; its height
+// follows from the artwork's own aspect, so the mark is never distorted. Sized
+// like a signature written into a ruled line on a form rather than like a
+// stamp, and resizable afterwards like any annotation.
+const SIGNATURE_W = 0.28;
 const STAMP_W = 0.32;
 const STAMP_H = 0.09;
 
@@ -1350,6 +1365,8 @@ function PageCellImpl({
     viewRotation === 0 ? r : { ...r, ...rotateNormalizedRect(r, inverseView) };
   const toStoredPoints = (pts: number[]): number[] =>
     viewRotation === 0 ? pts : rotateNormalizedPoints(pts, inverseView);
+  const toStoredStrokes = (strokes: number[][]): number[][] =>
+    viewRotation === 0 ? strokes : strokes.map((s) => rotateNormalizedPoints(s, inverseView));
 
   // ── Snapping ──────────────────────────────────────────────────────────
   // Every gesture's client→page conversion goes through `pagePoint` below,
@@ -2832,6 +2849,64 @@ function PageCellImpl({
       const { x: cx, y: cy } = pagePoint(e.currentTarget, e.clientX, e.clientY, {
         suspend: e.altKey,
       });
+      const signature = stampPreset.signature;
+      if (signature) {
+        // Built in the DISPLAY frame and stored un-projected like every other
+        // annotation. The footprint comes from the artwork's own aspect, so
+        // the mark lands undistorted on paper whatever the sheet's shape.
+        const { w: sw, h: sh } = signatureFootprint(
+          signature.aspect,
+          measDispW,
+          measDispH,
+          SIGNATURE_W,
+        );
+        const box = {
+          x: Math.max(0, Math.min(1 - sw, cx - sw / 2)),
+          y: Math.max(0, Math.min(1 - sh, cy - sh / 2)),
+          w: sw,
+          h: sh,
+        };
+        const placed = toStoredRect(box);
+        // The PRESET's colour, not the tool's: the strip offers no colour for
+        // a signature pill (a signature is ink, not markup), so an
+        // `annotationColor` left over from another mode would silently place
+        // someone's signature in highlighter yellow. Recolouring afterwards
+        // through the properties bar still works, like any annotation.
+        const color = stampPreset.color;
+        if (signature.kind === 'ink') {
+          // A DRAWN signature is an ordinary ink annotation: /InkList plus an
+          // AP of stroked paths, i.e. VECTOR, by exactly the route a freehand
+          // drawing already takes. Smoothing is applied HERE, at render, and
+          // never to the stored asset.
+          onAddAnnotation(docId, page.id, {
+            id: crypto.randomUUID(),
+            kind: 'ink',
+            ...placed,
+            color,
+            note: signature.name,
+            strokes: toStoredStrokes(placeStrokes(smoothStrokes(signature.strokes), box)),
+          });
+        } else if (signature.kind === 'typed') {
+          onAddAnnotation(docId, page.id, {
+            id: crypto.randomUUID(),
+            kind: 'stamp',
+            ...placed,
+            color,
+            note: signature.text,
+            signatureFont: signature.face,
+          });
+        } else {
+          onAddAnnotation(docId, page.id, {
+            id: crypto.randomUUID(),
+            kind: 'stamp',
+            ...placed,
+            color,
+            note: signature.name,
+            imageData: signature.imageData,
+          });
+        }
+        return;
+      }
       // Image stamps size from their own aspect (normalized height = width ×
       // aspect × the displayed page's width/height ratio, so the image is
       // undistorted on paper); text stamps keep the fixed footprint; a SYMBOL
@@ -3644,6 +3719,24 @@ function PageCellImpl({
                   draggable={false}
                   className="page-annot-stamp-image"
                 />
+              ) : a.signatureFont ? (
+                // A typed personal signature: the name in the bundled script
+                // face the asset named, with no border and no fill — what the
+                // commit draws. The face is loaded into `document.fonts` by
+                // the capture dialog and by the toolbar's signature strip; the
+                // stack's fallback is only what shows in the instant before it
+                // resolves.
+                <span
+                  className="page-annot-signature-typed"
+                  style={{
+                    fontFamily: `"${signatureCssFamily(
+                      (signatureFaceById(a.signatureFont)?.id ?? 'greatvibes'),
+                    )}", cursive`,
+                    color: a.color,
+                  }}
+                >
+                  {a.note}
+                </span>
               ) : (
                 <span className="page-annot-stamp-label">{a.note}</span>
               )

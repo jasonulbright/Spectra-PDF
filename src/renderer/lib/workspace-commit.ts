@@ -107,7 +107,7 @@ export function planCommit(
           ...(p.annotations?.length
             ? {
                 annotations: p.annotations.map(
-                  ({ kind, x, y, w, h, color, note, points, strokes, imageData, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, countGroup, countSymbol, countSeq, legendRows, legendTitle, legendTotalWord, symbolId, symbolParts, importedOriginal }) => ({
+                  ({ kind, x, y, w, h, color, note, points, strokes, imageData, signatureFont, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, countGroup, countSymbol, countSeq, legendRows, legendTitle, legendTotalWord, symbolId, symbolParts, importedOriginal }) => ({
                     kind,
                     x,
                     y,
@@ -118,6 +118,10 @@ export function planCommit(
                     points,
                     strokes, // Ink's per-pen-lift paths (the ALLOWLIST trap)
                     imageData,
+                    // A typed signature's bundled script face (the ALLOWLIST
+                    // trap again: a field absent here never reaches the
+                    // builder, however faithfully the type carries it).
+                    signatureFont,
                     markupType,
                     quads,
                     measureKind,
