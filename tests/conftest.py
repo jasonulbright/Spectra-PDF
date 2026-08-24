@@ -88,6 +88,11 @@ def pytest_sessionfinish(session, exitstatus):
     CI and the release verifier explicitly assemble every one first and set
     this switch; under that contract, even one skip means the advertised full
     suite did not run and the gate fails after reporting its normal tally.
+
+    The refusal names the axes it refused. A bare count says only that the run
+    is unprovable; the reason lines say WHICH capability the runner is missing,
+    which is the difference between reading a CI log and re-running the suite
+    locally to find out.
     """
     if os.environ.get("SPECTRAPDF_REQUIRE_ZERO_SKIPS") != "1":
         return
@@ -98,7 +103,32 @@ def pytest_sessionfinish(session, exitstatus):
             reporter.write_sep(
                 "=", f"full-capability gate refused {len(skipped)} skipped tests"
             )
+            for reason, nodes in _skips_by_reason(skipped).items():
+                reporter.write_line(f"{len(nodes):>5}  {reason}")
+                for node in nodes[:3]:
+                    reporter.write_line(f"         {node}")
+                if len(nodes) > 3:
+                    reporter.write_line(f"         ... and {len(nodes) - 3} more")
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def _skips_by_reason(skipped):
+    """Group skip reports by their reason, preserving first-seen order.
+
+    Reads defensively: a skip's `longrepr` is a (path, lineno, reason) triple
+    for a skipped test but not for every report shape pytest can put in this
+    bucket, and a report that cannot say why it skipped must not crash the
+    gate that is already failing the run.
+    """
+    grouped = {}
+    for report in skipped:
+        longrepr = getattr(report, "longrepr", None)
+        if isinstance(longrepr, tuple) and len(longrepr) == 3:
+            reason = str(longrepr[2]).removeprefix("Skipped: ")
+        else:
+            reason = "unstated reason"
+        grouped.setdefault(reason, []).append(getattr(report, "nodeid", "<unknown>"))
+    return grouped
 
 
 ICC_DIR = os.path.join(os.path.dirname(__file__), "..", "resources", "icc")
