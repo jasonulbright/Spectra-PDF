@@ -56,7 +56,7 @@ class TestReleaseContract:
         assert "scripts/stage-corresponding-source.ps1" in text
         assert "gh release upload ${{ github.ref_name }} $file.FullName" in text
         assert "$sources = @(Get-ChildItem release-sources" in text
-        assert "$files = @($installers) + @($sources)" in text
+        assert "$files = @($installers) + @($portable) + @($sources)" in text
 
     def test_the_public_notice_states_the_as_built_mechanism(self):
         text = open(NOTICE, encoding="utf-8").read()
