@@ -705,6 +705,13 @@ def _apply_page_key_delta(writer, page_ref, orig_page, mod_page, memo_mat) -> bo
     changes the dict without changing the page, and either direction would
     otherwise manufacture a delta that is not there.
 
+    Confined to the carried keys, so /Annots is never touched here: an
+    annotation's /Rect is in default user space (ISO 32000-2 Table 166) while
+    /Rotate is a display property of the page (Table 31), so a rotation moves
+    content and annotations together and rewriting rects to "follow" it would
+    both displace every annotation and reclassify the delta as annotation work,
+    which Table 257 admits only at /P 3.
+
     Writing a value is always exact — an entry on the page overrides whatever
     it would have inherited. REMOVING one is not: it is expressible only when
     the page's own dict is where the value lives and no ancestor supplies
