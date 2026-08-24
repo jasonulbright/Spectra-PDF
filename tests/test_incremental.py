@@ -1254,6 +1254,69 @@ class TestPageTree:
         assert not os.path.exists(out)
 
 
+class TestPageIdentityMapping:
+    """The append path's page ORDER is the rewrite's, page for page.
+
+    The durable-identity mapping is published renderer-side off the commit
+    plan (``lib/workspace-commit.ts`` — ``authoredPageIds`` is the plan's page
+    ids in written order, and the dispatched ``authored`` record is taken from
+    the plan whether the transplant applied, refused, or threw). That mapping
+    is only true of the file that lands if the appended revision presents the
+    SAME page sequence as the rewrite the plan built. Nothing renderer-side can
+    check that; it is pinned here, on the engine that has to hold it.
+
+    A drift — one page kept that the rewrite dropped, one pair transposed —
+    would silently re-bind a positional id to a different physical page, which
+    is exactly what generation-tagging exists to make impossible.
+    """
+
+    def _order(self, path):
+        with pikepdf.open(path) as pdf:
+            return [
+                bytes(p.obj["/Contents"].read_bytes()).decode("latin-1")
+                for p in pdf.pages
+            ]
+
+    def _remove_and_reorder(pdf):
+        # Page 0 carries the form's widget and its removal refuses on its own
+        # terms; page 1 is the free one, and the survivors then transpose.
+        del pdf.pages[1]
+        p = pdf.pages[1]
+        del pdf.pages[1]
+        pdf.pages.insert(0, p)
+
+    @pytest.mark.parametrize("mutate", [
+        _m_page_remove,
+        _m_page_reorder,
+        _m_insert_end,
+        _m_insert_start,
+        _remove_and_reorder,
+    ], ids=["remove", "reorder", "insert-end", "insert-start",
+            "remove-and-reorder"])
+    def test_the_appended_order_is_the_rewrites_order(
+        self, mutate, matrix_docs, matrix_pki, tmp_dir
+    ):
+        signed = matrix_docs["approval"]
+        modified = _rewrite_with(signed, tmp_dir, mutate)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is True, r.get("reason")
+        assert self._order(out) == self._order(modified)
+        _assert_sig_still_valid(out, matrix_pki)
+
+    def test_a_refusal_leaves_the_rewrite_the_sole_author(
+        self, matrix_docs, tmp_dir
+    ):
+        # The other half of the mapping's validity: a refused append writes
+        # NOTHING, so the plan's own rewrite is what the mapping describes.
+        signed = matrix_docs["certified-annotate"]
+        modified = _rewrite_with(signed, tmp_dir, _m_page_remove)
+        out = os.path.join(tmp_dir, "out.pdf")
+        r = transplant_incremental(signed, modified, out)
+        assert r["applied"] is False
+        assert not os.path.exists(out)
+
+
 class TestAcroFormDelta:
     """Every /AcroForm difference is judged HERE, and none is ignored.
 
