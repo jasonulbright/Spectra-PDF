@@ -2332,6 +2332,7 @@
   "engine.signatures.pemSignerNeedsBoth": "Een PEM-ondertekenaar heeft zowel het sleutelbestand als het certificaatbestand nodig.",
   "engine.signatures.pkcsModuleFoundGiven": "PKCS#11-module niet gevonden op het opgegeven pad.",
   "engine.signatures.pkcsSignerNeedsModule": "Een PKCS#11-ondertekenaar heeft het modulepad, het tokenlabel en het certificaatlabel nodig.",
+  "engine.signatures.signatureDocumentGivenDoes": "De handtekening die dit document heeft gekregen, verifieert niet tegen de eigen bytes ervan en is daarom niet geschreven. De ondertekeningssleutel leverde een handtekening op die dit document niet kan dragen.",
   "engine.signatures.signatureFieldAlreadyLocks": "Handtekeningveld \"{{field_name}}\" vergrendelt al formuliervelden op eigen voorwaarden, en een handtekening kan dat niet vervangen. Onderteken het zoals het is of gebruik een ander veld.",
   "engine.signatures.signatureFieldAlreadySigned": "Handtekeningveld \"{{field_name}}\" is al ondertekend.",
   "engine.signatures.signedOutputMustDifferent": "De ondertekende uitvoer moet een ander bestand zijn dan de invoer.",

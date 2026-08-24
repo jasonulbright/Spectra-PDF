@@ -2446,6 +2446,7 @@
   "engine.signatures.pemSignerNeedsBoth": "Podepisující PEM potřebuje soubor klíče i soubor certifikátu.",
   "engine.signatures.pkcsModuleFoundGiven": "Modul PKCS#11 nebyl na zadané cestě nalezen.",
   "engine.signatures.pkcsSignerNeedsModule": "Podepisující PKCS#11 potřebuje cestu k modulu, popisek tokenu a popisek certifikátu.",
+  "engine.signatures.signatureDocumentGivenDoes": "Podpis, který byl tomuto dokumentu předán, neprošel ověřením vůči jeho vlastním bajtům, a proto nebyl zapsán. Podpisový klíč vytvořil podpis, který tento dokument nemůže nést.",
   "engine.signatures.signatureFieldAlreadyLocks": "Pole podpisu „{{field_name}}“ už uzamyká pole formuláře podle vlastních podmínek a podpis to nemůže nahradit. Podepište je beze změny nebo zvolte jiné pole.",
   "engine.signatures.signatureFieldAlreadySigned": "Pole podpisu „{{field_name}}“ je už podepsané.",
   "engine.signatures.signedOutputMustDifferent": "Podepsaný výstup musí být jiný soubor než vstup.",

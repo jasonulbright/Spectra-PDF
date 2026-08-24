@@ -2446,6 +2446,7 @@
   "engine.signatures.pemSignerNeedsBoth": "Podpisujący PEM wymaga zarówno pliku klucza, jak i pliku certyfikatu.",
   "engine.signatures.pkcsModuleFoundGiven": "Nie znaleziono modułu PKCS#11 pod podaną ścieżką.",
   "engine.signatures.pkcsSignerNeedsModule": "Podpisujący PKCS#11 wymaga ścieżki modułu, etykiety tokenu i etykiety certyfikatu.",
+  "engine.signatures.signatureDocumentGivenDoes": "Podpis przekazany temu dokumentowi nie weryfikuje się względem jego własnych bajtów, więc nie został zapisany. Klucz podpisujący utworzył podpis, którego ten dokument nie może przenieść.",
   "engine.signatures.signatureFieldAlreadyLocks": "Pole podpisu „{{field_name}}” już blokuje pola formularza na własnych warunkach, a podpis nie może tego zastąpić. Podpisz je bez zmian albo wybierz inne pole.",
   "engine.signatures.signatureFieldAlreadySigned": "Pole podpisu „{{field_name}}” jest już podpisane.",
   "engine.signatures.signedOutputMustDifferent": "Podpisany wynik musi być plikiem innym niż wejściowy.",

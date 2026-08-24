@@ -2332,6 +2332,7 @@
   "engine.signatures.pemSignerNeedsBoth": "Bir PEM imzalayanı hem anahtar dosyasını hem de sertifika dosyasını gerektirir.",
   "engine.signatures.pkcsModuleFoundGiven": "PKCS#11 modülü verilen yolda bulunamadı.",
   "engine.signatures.pkcsSignerNeedsModule": "Bir PKCS#11 imzalayanı modül yolunu, belirteç etiketini ve sertifika etiketini gerektirir.",
+  "engine.signatures.signatureDocumentGivenDoes": "Bu belgeye verilen imza, belgenin kendi baytlarına karşı doğrulanmıyor; bu nedenle yazılmadı. İmzalama anahtarı, bu belgenin taşıyamayacağı bir imza üretti.",
   "engine.signatures.signatureFieldAlreadyLocks": "\"{{field_name}}\" imza alanı form alanlarını zaten kendi koşullarıyla kilitliyor ve bir imza bunun yerine geçemez. Olduğu gibi imzalayın veya başka bir alan kullanın.",
   "engine.signatures.signatureFieldAlreadySigned": "\"{{field_name}}\" imza alanı zaten imzalanmış.",
   "engine.signatures.signedOutputMustDifferent": "İmzalı çıktı, girişten farklı bir dosya olmalıdır.",

@@ -2332,6 +2332,7 @@
   "engine.signatures.pemSignerNeedsBoth": "Ένας υπογράφων PEM χρειάζεται και το αρχείο κλειδιού και το αρχείο πιστοποιητικού.",
   "engine.signatures.pkcsModuleFoundGiven": "Το άρθρωμα PKCS#11 δεν βρέθηκε στη διαδρομή που δόθηκε.",
   "engine.signatures.pkcsSignerNeedsModule": "Ένας υπογράφων PKCS#11 χρειάζεται τη διαδρομή του αρθρώματος, την ετικέτα της συσκευής και την ετικέτα του πιστοποιητικού.",
+  "engine.signatures.signatureDocumentGivenDoes": "Η υπογραφή που δόθηκε σε αυτό το έγγραφο δεν επαληθεύεται ως προς τα δικά του byte, γι’ αυτό και δεν γράφτηκε. Το κλειδί υπογραφής παρήγαγε μια υπογραφή που αυτό το έγγραφο δεν μπορεί να φέρει.",
   "engine.signatures.signatureFieldAlreadyLocks": "Το πεδίο υπογραφής «{{field_name}}» κλειδώνει ήδη πεδία φόρμας με τους δικούς του όρους, και μια υπογραφή δεν μπορεί να τους αντικαταστήσει. Υπογράψτε το ως έχει ή χρησιμοποιήστε άλλο πεδίο.",
   "engine.signatures.signatureFieldAlreadySigned": "Το πεδίο υπογραφής «{{field_name}}» είναι ήδη υπογεγραμμένο.",
   "engine.signatures.signedOutputMustDifferent": "Η υπογεγραμμένη έξοδος πρέπει να είναι διαφορετικό αρχείο από την είσοδο.",

@@ -2332,6 +2332,7 @@
   "engine.signatures.pemSignerNeedsBoth": "A PEM-aláíróhoz a kulcsfájl és a tanúsítványfájl is szükséges.",
   "engine.signatures.pkcsModuleFoundGiven": "A PKCS#11 modul nem található a megadott útvonalon.",
   "engine.signatures.pkcsSignerNeedsModule": "A PKCS#11 aláíróhoz a modul útvonala, a tokencímke és a tanúsítványcímke szükséges.",
+  "engine.signatures.signatureDocumentGivenDoes": "Az e dokumentumnak átadott aláírás nem igazolható a saját bájtjaival szemben, ezért nem íródott ki. Az aláírókulcs olyan aláírást állított elő, amelyet ez a dokumentum nem tud hordozni.",
   "engine.signatures.signatureFieldAlreadyLocks": "A(z) „{{field_name}}” aláírásmező már saját feltételei szerint zárol űrlapmezőket, és ezt egy aláírás nem írhatja felül. Írja alá így, vagy használjon másik mezőt.",
   "engine.signatures.signatureFieldAlreadySigned": "A(z) „{{field_name}}” aláírásmező már alá van írva.",
   "engine.signatures.signedOutputMustDifferent": "Az aláírt kimenetnek a bemenettől eltérő fájlnak kell lennie.",

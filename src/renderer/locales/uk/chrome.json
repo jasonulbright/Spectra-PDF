@@ -2446,6 +2446,7 @@
   "engine.signatures.pemSignerNeedsBoth": "Підписувачу PEM потрібні і файл ключа, і файл сертифіката.",
   "engine.signatures.pkcsModuleFoundGiven": "Модуль PKCS#11 не знайдено за вказаним шляхом.",
   "engine.signatures.pkcsSignerNeedsModule": "Підписувачу PKCS#11 потрібні шлях до модуля, мітка токена та мітка сертифіката.",
+  "engine.signatures.signatureDocumentGivenDoes": "Підпис, переданий цьому документу, не проходить перевірку за його власними байтами, тому його не було записано. Ключ підпису створив підпис, який цей документ не може нести.",
   "engine.signatures.signatureFieldAlreadyLocks": "Поле підпису «{{field_name}}» уже блокує поля форми за власними умовами, і підпис не може це замінити. Підпишіть його як є або виберіть інше поле.",
   "engine.signatures.signatureFieldAlreadySigned": "Поле підпису «{{field_name}}» уже підписано.",
   "engine.signatures.signedOutputMustDifferent": "Підписаний результат має бути файлом, відмінним від вихідного.",

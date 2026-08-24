@@ -2332,6 +2332,7 @@
   "engine.signatures.pemSignerNeedsBoth": "Ein PEM-Unterzeichner benötigt sowohl die Schlüsseldatei als auch die Zertifikatsdatei.",
   "engine.signatures.pkcsModuleFoundGiven": "PKCS#11-Modul unter dem angegebenen Pfad nicht gefunden.",
   "engine.signatures.pkcsSignerNeedsModule": "Ein PKCS#11-Unterzeichner benötigt den Modulpfad, die Token-Bezeichnung und die Zertifikatsbezeichnung.",
+  "engine.signatures.signatureDocumentGivenDoes": "Die diesem Dokument übergebene Signatur lässt sich nicht gegen seine eigenen Bytes verifizieren und wurde daher nicht geschrieben. Der Signaturschlüssel hat eine Signatur erzeugt, die dieses Dokument nicht tragen kann.",
   "engine.signatures.signatureFieldAlreadyLocks": "Das Signaturfeld „{{field_name}}“ sperrt Formularfelder bereits nach eigenen Vorgaben, und eine Signatur kann das nicht ersetzen. Signieren Sie es unverändert oder verwenden Sie ein anderes Feld.",
   "engine.signatures.signatureFieldAlreadySigned": "Das Signaturfeld „{{field_name}}“ ist bereits signiert.",
   "engine.signatures.signedOutputMustDifferent": "Die signierte Ausgabe muss eine andere Datei als die Eingabe sein.",
