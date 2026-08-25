@@ -1728,7 +1728,7 @@
   "dialog.submitConsent.cancel": "取消",
   "dialog.submitConsent.consequence": "只发送这些字节。不会附带任何 Cookie、登录状态或已保存的凭据，本次选择也不会为该地址记住。",
   "dialog.submitConsent.destinationLabel": "目标地址",
-  "dialog.submitConsent.documentSummary": "整个文档，共 {{bytes}} 字节，携带 {{count}} 个字段值。PDF 无法当作文本阅读，因此这里以说明代替显示。",
+  "dialog.submitConsent.documentSummary_other": "整个文档，共 {{bytes}} 字节，携带 {{count}} 个字段值。PDF 无法当作文本阅读，因此这里以说明代替显示。",
   "dialog.submitConsent.format": "格式：{{format}}",
   "dialog.submitConsent.formatFdf": "FDF 表单数据",
   "dialog.submitConsent.formatHtml": "HTML 表单提交",

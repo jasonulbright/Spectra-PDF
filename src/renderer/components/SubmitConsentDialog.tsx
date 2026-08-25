@@ -23,7 +23,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppModal } from '../hooks/useAppModal';
-import { tChrome } from '../i18n';
+import { tChrome, tChromeCount } from '../i18n';
 import { isPlainHttp, type PayloadPreview } from '../lib/form-submit';
 import type { SubmitFormat } from '../lib/field-actions';
 
@@ -133,9 +133,8 @@ export function SubmitConsentDialog({
               data-testid="submit-consent-payload-summary"
               className="mt-1 rounded border border-neutral-700 bg-neutral-950 p-3 text-xs text-neutral-300"
             >
-              {tChrome('dialog.submitConsent.documentSummary', {
+              {tChromeCount('dialog.submitConsent.documentSummary', fieldCount, {
                 bytes: preview.bytes,
-                count: fieldCount,
               })}
             </p>
           )}
