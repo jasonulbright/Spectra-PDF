@@ -60,6 +60,10 @@ export const AUTOMATIC_CHECKS: readonly string[] = [
   'tagged_annotations',
   'tagged_multimedia',
   'tagged_form_fields',
+  // An attachment's two file names are the SAME name in two encodings, so
+  // either one supplies the other. Nothing is authored and nothing is guessed;
+  // a specification carrying neither is left standing.
+  'embedded_file_names',
 ];
 
 /** The engine's authored set, mirrored (`AUTHORED_CHECKS`). */
