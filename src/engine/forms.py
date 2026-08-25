@@ -1911,12 +1911,17 @@ def export_form_data(
 ) -> dict:
     """Write this document's field values as FDF, XFDF, HTML or the PDF itself.
 
-    This is the whole of `/SubmitForm` except the request. **Nothing is sent.**
-    The app performs no outbound request and opens no external address; the
-    submission lands in a file the caller names and the destination is
-    reported back so a human can complete it.
+    This BUILDS `/SubmitForm`'s payload and does not send it: the engine has no
+    network code and gains none. Whether the file is then transmitted is asked
+    of a person by the app, which shows these exact bytes before it asks; a
+    headless run has nobody to ask and so only ever builds.
 
     ``format`` ``pdf`` copies the document, which is what SubmitPDF means.
+
+    ``count`` is how many field values the payload carries, in scope. It is
+    reported for every format including ``pdf`` -- the consent surface
+    describes a PDF submission rather than showing it, and a description with
+    no count describes nothing.
     """
     fmt = str(format or "fdf")
     if fmt not in formdata.FORMAT_EXTENSION:
@@ -1929,7 +1934,9 @@ def export_form_data(
     if fmt == "pdf":
         if Path(file).resolve() != output_path.resolve():
             shutil.copyfile(file, output_path)
-        return {"output": str(output_path), "format": fmt, "count": 0}
+        with pikepdf.open(file) as pdf:
+            values = form_data_values(pdf, fields, exclude, include_empty)
+        return {"output": str(output_path), "format": fmt, "count": len(values)}
     with pikepdf.open(file) as pdf:
         values = form_data_values(pdf, fields, exclude, include_empty)
     name = source or Path(file).name

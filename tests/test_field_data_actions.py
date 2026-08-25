@@ -226,6 +226,20 @@ def test_a_pdf_submission_is_the_document_itself(tmp_path):
     assert out.read_bytes() == pathlib.Path(src).read_bytes()
 
 
+def test_a_pdf_submission_still_counts_its_field_values(tmp_path):
+    # The consent surface DESCRIBES a PDF submission rather than showing it,
+    # and a description with no count describes nothing. The count obeys the
+    # same scope flags every other format's does.
+    src = _base(tmp_path)
+    filled = str(tmp_path / "filled.pdf")
+    fill_form_fields(src, filled, {"Item1": "10", "Item2": "20"})
+    assert export_form_data(filled, str(tmp_path / "a.pdf"), format="pdf")["count"] == 2
+    scoped = export_form_data(
+        filled, str(tmp_path / "b.pdf"), format="pdf", fields=["Item1"]
+    )
+    assert scoped["count"] == 1
+
+
 def test_a_submission_scopes_itself_and_can_carry_the_blanks(tmp_path):
     src = _base(tmp_path)
     filled = str(tmp_path / "filled.pdf")

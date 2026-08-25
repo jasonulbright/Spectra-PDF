@@ -727,9 +727,10 @@ pub async fn pick_form_data_file(
     }
 }
 
-/// Where a form SUBMISSION is written. The app builds the submission in full
-/// and performs no outbound request, so the payload needs a destination on
-/// disk the user chose.
+/// Where a form submission — or a submission's RESPONSE — is written to disk
+/// at a place the user chose. The transmit itself lives in `net.rs`; this is
+/// the door for the copy that stays behind, and for a response body the app
+/// hands to the system browser rather than rendering.
 #[tauri::command]
 pub async fn save_form_data_file(
     app: AppHandle,
@@ -740,7 +741,7 @@ pub async fn save_form_data_file(
         .dialog()
         .file()
         .set_parent(&window)
-        .add_filter("Form data", &["fdf", "xfdf", "txt", "pdf"])
+        .add_filter("Form data", &["fdf", "xfdf", "txt", "pdf", "html", "xml", "json"])
         .add_filter("All files", &["*"]);
     if let Some(ref name) = default_name {
         builder = builder.set_file_name(name);

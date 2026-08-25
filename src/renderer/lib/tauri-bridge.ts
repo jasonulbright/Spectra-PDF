@@ -613,8 +613,40 @@ export interface PrinterCapabilities {
   max_copies: number;
 }
 
+/** `src-tauri/src/net.rs` `NetRequest` — the one outbound request shape. */
+export interface NetRequest {
+  url: string;
+  method: 'get' | 'post';
+  bodyPath?: string;
+  contentType?: string;
+  fileName?: string;
+}
+
+/** `src-tauri/src/net.rs` `NetResponse`. Never bytes — a path to them. */
+export interface NetResponse {
+  status: number;
+  contentType: string;
+  path: string;
+  bytes: number;
+  finalUrl: string;
+}
+
 export const app = {
   getGsPath: () => invoke<string>('get_gs_path'),
+  /** The app's ONE outbound request. Rust owns the client: timeouts, a plain
+   * user agent, no cookie jar, no credential store, same-origin redirects
+   * only, and a size-capped response written to the app's temp tree. Reached
+   * only from a surface the user acted on — the submission consent dialog
+   * today, the open-from-web-address door beside it. */
+  netRequest: (request: NetRequest) => invoke<NetResponse>('net_request', { request }),
+  /** A path in the app temp tree for a payload about to be shown and sent. */
+  netPayloadPath: (stem: string, extension: string) =>
+    invoke<string>('net_payload_path', { stem, extension }),
+  /** The bytes of a built payload, for the consent dialog to SHOW. The dialog
+   * reads the same file the request sends, so the preview and the transmission
+   * cannot be two different answers to what leaves the machine. */
+  netPayloadBytes: async (path: string) =>
+    new Uint8Array(await invoke<ArrayBuffer>('read_file_binary', { filePath: path })),
   /** Whatever is on the clipboard, written to a scratch file Create PDF
    * already accepts. The BYTES never cross this boundary — a pasted
    * screenshot is megabytes and the engine needs a file anyway. */
