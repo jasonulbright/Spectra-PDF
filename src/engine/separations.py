@@ -525,6 +525,100 @@ def _stage_without_processing_steps(source: Path, out_dir: Path):
     return staged
 
 
+def _page_optional_content_groups(pdf) -> list:
+    """Every OCG dictionary the pages of this PDF can select content by."""
+    groups: list = []
+    seen: set = set()
+
+    def add(obj) -> None:
+        if not isinstance(obj, pikepdf.Dictionary):
+            return
+        key = obj.objgen
+        if key != (0, 0) and key in seen:
+            return
+        if str(obj.get("/Type", "")) == "/OCMD":
+            members = obj.get("/OCGs")
+            if isinstance(members, pikepdf.Dictionary):
+                add(members)
+            elif isinstance(members, pikepdf.Array):
+                for member in members:
+                    add(member)
+            return
+        if str(obj.get("/Type", "")) != "/OCG":
+            return
+        seen.add(key)
+        groups.append(obj)
+
+    def walk(resources, depth: int = 0) -> None:
+        if not isinstance(resources, pikepdf.Dictionary) or depth > 8:
+            return
+        properties = resources.get("/Properties")
+        if isinstance(properties, pikepdf.Dictionary):
+            for value in properties.values():
+                add(value)
+        xobjects = resources.get("/XObject")
+        if isinstance(xobjects, pikepdf.Dictionary):
+            for xobject in xobjects.values():
+                if isinstance(xobject, pikepdf.Stream):
+                    add(xobject.get("/OC"))
+                    walk(xobject.get("/Resources"), depth + 1)
+
+    for page in pdf.pages:
+        walk(page.obj.get("/Resources"))
+        for annot in page.obj.get("/Annots", []) or []:
+            if isinstance(annot, pikepdf.Dictionary):
+                add(annot.get("/OC"))
+    return groups
+
+
+def _carry_off_configuration(source: str, single: Path) -> None:
+    """Re-establish the source's default OC configuration on the extracted page.
+
+    Page extraction rebuilds the catalog, so `/OCProperties` does not survive
+    it — and with it goes every group the processing-step exclusion or the
+    Layers panel turned OFF. Without this the profile staging would hand the
+    conversion a page whose die line and varnish are visible again, and the
+    plates and every ink figure measured over them would silently carry
+    manufacturing content the preview was asked to leave out.
+
+    Groups are matched by NAME: the extracted page holds its own copies of
+    the group dictionaries, so object identity cannot cross the extraction.
+    Two groups sharing a name share the state, which is the same reading a
+    viewer's layer list gives them.
+    """
+    try:
+        with pikepdf.open(source) as src:
+            properties = src.Root.get("/OCProperties")
+            config = properties.get("/D") if isinstance(properties, pikepdf.Dictionary) else None
+            if not isinstance(config, pikepdf.Dictionary):
+                return
+            off_names = {
+                str(group.get("/Name", ""))
+                for group in (config.get("/OFF") or [])
+                if isinstance(group, pikepdf.Dictionary)
+            }
+        if not off_names:
+            return
+        with pikepdf.open(single, allow_overwriting_input=True) as pdf:
+            groups = _page_optional_content_groups(pdf)
+            off = [g for g in groups if str(g.get("/Name", "")) in off_names]
+            if not off:
+                return
+            pdf.Root["/OCProperties"] = pdf.make_indirect(pikepdf.Dictionary({
+                "/OCGs": pikepdf.Array([pdf.make_indirect(g) for g in groups]),
+                "/D": pikepdf.Dictionary({
+                    "/OFF": pikepdf.Array([pdf.make_indirect(g) for g in off]),
+                    "/Order": pikepdf.Array([]),
+                }),
+            }))
+            pdf.save(str(single))
+    except (OSError, pikepdf.PdfError):
+        # A page whose optional content cannot be read is staged as it was
+        # extracted: the plates are then a page the preview can describe,
+        # which is the same answer as a document declaring no groups.
+        return
+
+
 def _stage_for_profile(file: str, page: int, profile_path: str, out_dir: Path,
                        gs_path: str, icc_dir: str = "") -> Path:
     """One page, colour-managed to the press profile, as its own PDF.
@@ -540,6 +634,7 @@ def _stage_for_profile(file: str, page: int, profile_path: str, out_dir: Path,
 
     single = out_dir / "page.pdf"
     single.write_bytes(_render_part(file, [page - 1]))
+    _carry_off_configuration(file, single)
     staged = out_dir / "staged.pdf"
     try:
         convert_cmyk(str(single), str(staged), dest_profile=profile_path,
@@ -604,6 +699,15 @@ def render_separations(
     inventory = list_inks(file, pages=[page],
                           show_processing_steps=show_processing_steps)
     inks = inventory["inks"]
+    # The device writes a plate per `/Separation` colorant in the page
+    # RESOURCES, painted or not, so forcing the step groups off leaves the
+    # die line's plate on disk while the inventory has already dropped its
+    # colorant. Those plates are EXPECTED-BUT-SUPPRESSED: dropped from the
+    # set, never a refusal. Empty whenever the steps are being rastered.
+    suppressed = {
+        f"s1({plate_name_escape(name)}).tif"
+        for name in inventory["processing_step_inks"]
+    }
     spots = [e["name"] for e in inks if e["kind"] == "spot"]
     n = len(spots)
     limit = MAX_SPOTS_CEILING
@@ -639,7 +743,8 @@ def render_separations(
     marker = out_dir / "plates.done"
     if reuse and _set_is_whole(out_dir, marker):
         os.utime(out_dir, None)
-        return _describe_set(out_dir, inks, file, page, dpi, gs_path, overprint)
+        return _describe_set(out_dir, inks, file, page, dpi, gs_path, overprint,
+                             suppressed)
 
     shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -693,7 +798,14 @@ def render_separations(
         shutil.rmtree(out_dir, ignore_errors=True)
         raise RuntimeError(f"Ghostscript separation render failed: {stderr or stdout}")
 
-    described = _describe_set(out_dir, inks, file, page, dpi, gs_path, overprint)
+    described = _describe_set(out_dir, inks, file, page, dpi, gs_path, overprint,
+                              suppressed)
+    # The suppressed plates are removed rather than recorded, so the
+    # manifest keeps its EXACT-equality property: what the glob finds is
+    # what the set was written with. The other flag state is a different
+    # cache key with its own full render, so nothing is lost by deleting.
+    for filename in suppressed:
+        (out_dir / filename).unlink(missing_ok=True)
     _write_manifest(marker, out_dir, described)
     _evict_old_sets(root)
     return described
@@ -744,7 +856,8 @@ def _set_is_whole(out_dir: Path, marker: Path) -> bool:
 
 
 def _describe_set(out_dir: Path, inks: list[dict], file: str, page: int,
-                  dpi: int, gs_path: str, overprint: bool) -> dict:
+                  dpi: int, gs_path: str, overprint: bool,
+                  suppressed: set[str] | None = None) -> dict:
     """Pair the written plate files with the inventory, or refuse.
 
     The device names each plate by the ink it separates, so the pairing is a
@@ -756,8 +869,17 @@ def _describe_set(out_dir: Path, inks: list[dict], file: str, page: int,
     its own marker before this runs. That reading holds only because the set
     is known whole: on the reuse path `_set_is_whole` establishes it against
     the manifest before this runs, and a decayed set is re-rendered instead.
+
+    `suppressed` is the third case, and the reason the default state renders
+    at all: the device writes a plate for every colorant in the page
+    resources, so a page whose step groups were forced off still yields a die
+    line plate the inventory has deliberately dropped. Such a plate is
+    expected, and is neither served nor counted. A plate matching nothing at
+    all still refuses.
     """
     written = {p.name: p for p in out_dir.glob("s1(*).tif")}
+    for filename in (suppressed or ()):
+        written.pop(filename, None)
     expected: dict[str, dict] = {}
     for entry in inks:
         if entry["kind"] in ("all", "none"):

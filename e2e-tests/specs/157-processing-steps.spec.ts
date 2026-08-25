@@ -72,6 +72,10 @@ const STEP_INKS = [
 /** The colorant the artwork itself paints, which the exclusion never drops. */
 const ARTWORK_INK = { slug: 'orange', name: 'Orange' };
 
+/** The process plate the White group's own content paints, and so the plate
+ *  whose coverage figure moves when the step content is put back. */
+const ARTWORK_PROCESS_INK = 'cyan';
+
 /** The one reason a case here is skipped, named as an axis. */
 function corpusPresent(...files: string[]): boolean {
   return files.every((file) => existsSync(file));
@@ -130,6 +134,22 @@ async function maxTac(): Promise<number> {
       return reported > 0;
     },
     { timeout: 60_000, timeoutMsg: 'the heaviest-pixel figure never appeared' },
+  );
+  return reported;
+}
+
+/** One plate's coverage figure, read as the NUMBER for the same reason. */
+async function coverage(slug: string): Promise<number> {
+  let reported = 0;
+  await browser.waitUntil(
+    async () => {
+      const text = await $(`[data-testid="output-preview-coverage-${slug}"]`).getText();
+      const match = /([\d.]+)\s*%/.exec(text);
+      if (!match) return false;
+      reported = Number(match[1]);
+      return reported > 0;
+    },
+    { timeout: 60_000, timeoutMsg: `no coverage figure for ${slug}` },
   );
   return reported;
 }
@@ -261,13 +281,21 @@ describe('processing steps', function () {
       this.skip();
       return;
     }
-    // The White group is the varnish class: counting it in total ink is the
-    // silent-wrongness case, because a job passes or fails its coverage limit
-    // on this number.
+    // The White group is the varnish class: counting it in the ink figures is
+    // the silent-wrongness case, because a job passes or fails its coverage
+    // limit on these numbers.
+    //
+    // The figure read is per-ink COVERAGE, not max total ink. Max TAC is a
+    // maximum over pixels, and on this patch the artwork's heaviest pixel
+    // already sits above anything the step content reaches — so a correct
+    // exclusion moves it not at all. Coverage is the measurement that is
+    // sensitive to the step content by construction: it is measured over the
+    // staged copy, so ink the exclusion took off the page leaves it.
     await openOutputPreview(WHITE);
     await $('[data-testid="output-preview-alarm"]').click();
     await waitForDisplayedSelector('[data-testid="output-preview-maxtac"]', { timeout: 60_000 });
-    const excluded = await maxTac();
+    const excludedTac = await maxTac();
+    const excluded = await coverage(ARTWORK_PROCESS_INK);
     for (const ink of STEP_INKS) {
       expect(await inkListed(ink.slug)).toBe(false);
     }
@@ -284,15 +312,18 @@ describe('processing steps', function () {
     let included = 0;
     await browser.waitUntil(
       async () => {
-        included = await maxTac();
+        included = await coverage(ARTWORK_PROCESS_INK);
         return included > excluded;
       },
       {
         timeout: 120_000,
-        timeoutMsg: 'total ink did not rise when the processing steps were included',
+        timeoutMsg: 'ink coverage did not rise when the processing steps were included',
       },
     );
     expect(included).toBeGreaterThan(excluded);
+    // Whatever the step content does to the maximum, excluding it can never
+    // report MORE ink than including it.
+    expect(await maxTac()).toBeGreaterThanOrEqual(excludedTac);
   });
 
   it('reports the declaration in preflight, addressed to the layers surface', async function () {
