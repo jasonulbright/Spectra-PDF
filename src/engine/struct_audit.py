@@ -63,8 +63,8 @@ class Node:
 
     __slots__ = (
         "path", "tag", "role", "level", "alt", "actual_text", "has_actual_text",
-        "title", "lang", "attrs", "page", "mcids", "objrs", "children", "parent",
-        "sid", "ns",
+        "title", "lang", "attrs", "attr_owners", "page", "mcids", "objrs",
+        "children", "parent", "sid", "ns",
     )
 
     def __init__(self, path, tag, role, level):
@@ -87,6 +87,11 @@ class Node:
         self.title = ""
         self.lang = ""
         self.attrs: dict = {}
+        # The `/O` owner names of the element's attribute dictionaries. A
+        # family this audit does not read key-by-key is still answerable as
+        # present or absent, which is the whole question ISO 14289-1 cl. 7.14
+        # asks of `/PrintField`.
+        self.attr_owners: set = set()
         self.page = None
         self.mcids: list = []
         # Resolved annotation addresses: {"page": n, "index": i} per /OBJR,
@@ -146,6 +151,23 @@ def _attr_dicts(elem) -> list:
     for item in items:
         if isinstance(item, pikepdf.Dictionary) and not isinstance(item, pikepdf.Stream):
             out.append(item)
+    return out
+
+
+def _attr_owners(elem) -> set:
+    """The `/O` owner names of every attribute dictionary on an element.
+
+    An attribute dictionary with no `/O` names no owner and therefore no
+    family, so it contributes nothing here rather than an empty name.
+    """
+    out: set = set()
+    for attrs in _attr_dicts(elem):
+        try:
+            owner = attrs.get("/O")
+        except Exception:
+            continue
+        if owner is not None:
+            out.add(str(owner))
     return out
 
 
@@ -393,6 +415,7 @@ def audit_tree(pdf, annots_entries: list | None = None) -> dict:
         node.title = _text(elem, "/T")
         node.lang = _text(elem, "/Lang")
         node.attrs = _read_attrs(elem)
+        node.attr_owners = _attr_owners(elem)
         try:
             raw_id = elem.get("/ID")
             node.sid = bytes(raw_id) if raw_id is not None else None

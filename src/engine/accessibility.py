@@ -1,4 +1,4 @@
-"""Accessibility checker — 45 checks across seven categories.
+"""Accessibility checker — 56 checks across seven categories.
 
 A check is a CLAIM, and every claim states how it was reached. Each check
 yields one of five verdicts and, when it has something to name, a list of
@@ -45,6 +45,8 @@ longer resolves surfaces a notice rather than retargeting.
 """
 
 from __future__ import annotations
+
+import xml.etree.ElementTree as ElementTree
 
 import pikepdf
 
@@ -98,6 +100,8 @@ CHECK_INVENTORY = (
     ("title", "document"),
     ("bookmarks", "document"),
     ("contrast", "document"),
+    ("optional_content_config", "document"),
+    ("embedded_file_names", "document"),
     ("tagged_content", "page_content"),
     ("untagged_graphics", "page_content"),
     ("artifact_judgement", "page_content"),
@@ -112,8 +116,17 @@ CHECK_INVENTORY = (
     ("scripts", "page_content"),
     ("timed_responses", "page_content"),
     ("navigation_links", "page_content"),
+    ("trapnet_annotations", "page_content"),
+    ("link_ismap", "page_content"),
+    ("media_clip_data", "page_content"),
+    ("reference_xobjects", "page_content"),
+    ("font_embedding", "page_content"),
+    ("font_encodings", "page_content"),
+    ("cid_to_gid_map", "page_content"),
     ("tagged_form_fields", "forms"),
     ("field_descriptions", "forms"),
+    ("print_field_attributes", "forms"),
+    ("dynamic_xfa", "forms"),
     ("figures_alt", "alt_text"),
     ("nested_alt", "alt_text"),
     ("alt_no_content", "alt_text"),
@@ -158,6 +171,8 @@ CHECK_SOURCES = {
     "title": ("ua", "7.1"),
     "bookmarks": ("ua_soft", "7.17"),
     "contrast": ("wcag", "7.1 NOTE 4; WCAG 2 1.4.3"),
+    "optional_content_config": ("ua", "7.10"),
+    "embedded_file_names": ("ua", "7.11, 7.18.7"),
     "tagged_content": ("ua", "7.1"),
     "untagged_graphics": ("ua", "7.1"),
     "artifact_judgement": ("practice", "7.1"),
@@ -172,8 +187,17 @@ CHECK_SOURCES = {
     "scripts": ("ua_soft", "7.19"),
     "timed_responses": ("wcag", "WCAG 2 2.2.1"),
     "navigation_links": ("wcag", "WCAG 2 2.4.4"),
+    "trapnet_annotations": ("ua", "7.18.2"),
+    "link_ismap": ("ua", "7.18.5"),
+    "media_clip_data": ("ua", "7.18.6.2"),
+    "reference_xobjects": ("ua", "7.20"),
+    "font_embedding": ("ua", "7.21.4.1"),
+    "font_encodings": ("ua", "7.21.6"),
+    "cid_to_gid_map": ("ua", "7.21.3.2"),
     "tagged_form_fields": ("ua", "7.18.4"),
     "field_descriptions": ("ua", "7.18.1"),
+    "print_field_attributes": ("ua", "7.14"),
+    "dynamic_xfa": ("ua", "7.15"),
     "figures_alt": ("ua", "7.3, 7.7"),
     "nested_alt": ("practice", "32000-2 14.9.3"),
     "alt_no_content": ("practice", "32000-2 14.9.3"),
@@ -235,7 +259,7 @@ _NAME_TREE_DEPTH = 64
 _ANNOTATION_CHECKS = (
     "tagged_annotations", "tab_order", "tagged_multimedia", "navigation_links",
     "tagged_form_fields", "alt_hides_annotation", "other_elements_alt",
-    "field_descriptions",
+    "field_descriptions", "trapnet_annotations", "link_ismap",
 )
 _FIELD_CHECKS = (
     "field_descriptions", "tagged_form_fields", "alt_hides_annotation",
@@ -253,7 +277,7 @@ _STRUCTURE_CHECKS = (
     "list_labels", "heading_nesting", "structure_nesting",
     "role_map", "untagged_graphics", "artifact_judgement", "content_grouping",
     "content_order", "list_numbering", "list_item_structure", "list_semantics",
-    "heading_tag_mixing", "heading_semantics",
+    "heading_tag_mixing", "heading_semantics", "print_field_attributes",
 )
 
 # The three whose FINDINGS are themselves claims about what the tree does not
@@ -3500,6 +3524,888 @@ def _check_heading_semantics(check, tree, pages, mcid_tables):
     check.status = REVIEW if findings else PASS
 
 
+# ── annotation subtypes, links and media (cl. 7.18.2, 7.18.5, 7.18.6.2) ───
+
+
+def _check_trapnet_annotations(check, annots):
+    """ISO 14289-1 cl. 7.18.2: annotations of subtype TrapNet shall not be
+    permitted. Trapping instructions describe a press run, not the document;
+    nothing in one is content a reader could reach under any name, so the
+    clause states the prohibition flatly and this check reports it the same
+    way."""
+    if not annots:
+        check.status = NA
+        return
+    findings = [
+        _finding(
+            _object_address(page=a["page"], annotation=a["index"]),
+            "trapnet_annotation",
+            rect=a["rect"],
+            values={"page": a["page"]},
+        )
+        for a in annots
+        if a["subtype"] == "/TrapNet"
+    ]
+    _verdict(check, len(annots), findings)
+
+
+# An action chain is a linked list through `/Next` (ISO 32000-2 12.6.1); the
+# bound is what keeps a file that links one to itself from walking forever.
+_ACTION_CHAIN_DEPTH = 8
+
+
+def _uri_actions(annot) -> list:
+    """Every URI action reachable from an annotation's `/A`, following the
+    `/Next` chain and the array spelling of it."""
+    out: list = []
+    seen: set = set()
+    try:
+        first = annot.get("/A")
+    except Exception:
+        return out
+    if first is None:
+        return out
+    stack = [(first, 0)]
+    while stack:
+        action, depth = stack.pop()
+        if depth > _ACTION_CHAIN_DEPTH:
+            continue
+        try:
+            items = list(action) if isinstance(action, pikepdf.Array) else [action]
+        except Exception:
+            continue
+        for item in items:
+            if not isinstance(item, pikepdf.Dictionary):
+                continue
+            try:
+                og = item.objgen
+            except Exception:
+                og = (0, 0)
+            if og != (0, 0):
+                if og in seen:
+                    continue
+                seen.add(og)
+            try:
+                if str(item.get("/S") or "") == "/URI":
+                    out.append(item)
+                nxt = item.get("/Next")
+            except Exception:
+                continue
+            if nxt is not None:
+                stack.append((nxt, depth + 1))
+    return out
+
+
+def _check_link_ismap(check, annots):
+    """ISO 14289-1 cl. 7.18.5: `/IsMap` shall not be present with the value
+    true in a URI action dictionary UNLESS its functionality is also provided
+    in an equivalent manner elsewhere in the content without an `/IsMap` key.
+
+    A server-side image map sends a click COORDINATE to a server, so a reader
+    that cannot point at a pixel cannot use the link at all. The clause's
+    exception turns on whether some other link, widget or script does the same
+    job somewhere else in the document — the standard's own NOTE lists three
+    ways of providing it — and that is a question about what the rest of the
+    document MEANS, not a fact in the file. A set flag is therefore reported
+    with its address for a person to answer, never failed.
+    """
+    counted = 0
+    findings = []
+    for annot in annots:
+        if annot["subtype"] != "/Link":
+            continue
+        for action in _uri_actions(annot["obj"]):
+            counted += 1
+            try:
+                is_map = bool(action.get("/IsMap"))
+            except Exception:
+                is_map = False
+            if is_map:
+                findings.append(
+                    _finding(
+                        _object_address(page=annot["page"], annotation=annot["index"]),
+                        "link_uri_ismap",
+                        rect=annot["rect"],
+                        values={"page": annot["page"]},
+                    )
+                )
+    _verdict(check, counted, findings, dirty=REVIEW)
+
+
+def _typed_dictionaries(pdf, type_name: str, subtype: str = "") -> tuple:
+    """Every indirect dictionary in the file carrying `/Type` (and, where
+    given, `/S`), and the reads that did not complete.
+
+    Read off the object table rather than by walking down from the catalog:
+    the dictionaries these clauses govern hang off several different owners —
+    a rendition action, a rendition, a `/RichMediaContent` — and a walk that
+    knew only the routes this reader thought of would report a clean claim
+    over the ones it did not.
+    """
+    out: list = []
+    unread: list = []
+    try:
+        objects = list(pdf.objects)
+    except Exception as exc:
+        return [], [str(exc)]
+    for obj in objects:
+        if not isinstance(obj, pikepdf.Dictionary):
+            continue
+        try:
+            if str(obj.get("/Type") or "") != type_name:
+                continue
+            if subtype and str(obj.get("/S") or "") != subtype:
+                continue
+        except Exception as exc:
+            unread.append(str(exc))
+            continue
+        out.append(obj)
+    return out, unread
+
+
+def _check_media_clip_data(check, pdf):
+    """ISO 14289-1 cl. 7.18.6.2: in the media clip data dictionary the `/CT`
+    and `/Alt` keys, optional in ISO 32000, ARE REQUIRED.
+
+    `/CT` is the content type, which is what tells a reader what the clip even
+    is before it plays; `/Alt` is the text a reader announces in place of
+    playing it. A clip missing either is media nothing can describe.
+    """
+    clips, unread = _typed_dictionaries(pdf, "/MediaClip", "/MCD")
+    if not clips and not unread:
+        check.status = NA
+        return
+    findings = []
+    for clip in clips:
+        try:
+            has_ct = clip.get("/CT") is not None
+            has_alt = clip.get("/Alt") is not None
+        except Exception as exc:
+            unread.append(str(exc))
+            continue
+        if not has_ct:
+            findings.append(_finding(_object_address(), "media_clip_no_content_type"))
+        if not has_alt:
+            findings.append(_finding(_object_address(), "media_clip_no_alt"))
+    _verdict(check, len(clips), findings)
+    _also_review(
+        check, [_finding(_object_address(), "media_clip_unreadable") for _ in unread]
+    )
+
+
+def _check_reference_xobjects(check, pdf):
+    """ISO 14289-1 cl. 7.20: Reference XObjects shall not be used.
+
+    A reference XObject imports its content from ANOTHER file at render time
+    (ISO 32000-2 8.10.4). Nothing in the importing file's structure tree can
+    describe content that is not in it, and the proxy it falls back to is not
+    what the page claims to show — so the clause forbids the construction
+    outright rather than asking for it to be tagged.
+    """
+    forms: list = []
+    unread: list = []
+    try:
+        objects = list(pdf.objects)
+    except Exception as exc:
+        objects = []
+        unread.append(str(exc))
+    for obj in objects:
+        if not isinstance(obj, pikepdf.Stream):
+            continue
+        try:
+            if str(obj.get("/Subtype") or "") != "/Form":
+                continue
+            forms.append((obj, obj.get("/Ref") is not None))
+        except Exception as exc:
+            unread.append(str(exc))
+    if not forms and not unread:
+        check.status = NA
+        return
+    findings = [
+        _finding(_object_address(), "reference_xobject")
+        for _obj, referenced in forms
+        if referenced
+    ]
+    _verdict(check, len(forms), findings)
+    _also_review(
+        check, [_finding(_object_address(), "xobjects_unreadable") for _ in unread]
+    )
+
+
+# ── fonts (cl. 7.21) ──────────────────────────────────────────────────────
+
+# ISO 32000-2 9.4.3. The four text-showing operators; everything else in a
+# text object positions or styles, and positioning alone renders no glyph.
+_TEXT_SHOWING = frozenset({"Tj", "TJ", "'", '"'})
+
+# ISO 32000-2 9.3.6: mode 3 neither strokes, fills nor clips. ISO 14289-1
+# cl. 7.21.1 NOTE and cl. 7.21.4.1 NOTE 2 both exempt a font referenced solely
+# in it from every requirement that bears on rendering.
+_INVISIBLE_TEXT = 3
+
+_CONTENT_DEPTH = 8
+
+# ISO 32000-2 Table 121. Bit 3 is the symbolic flag and bit 6 the non-symbolic
+# one, numbered from 1.
+_FLAG_SYMBOLIC = 1 << 2
+_FLAG_NONSYMBOLIC = 1 << 5
+
+_FONT_PROGRAM_KEYS = ("/FontFile", "/FontFile2", "/FontFile3")
+
+# The two encodings ISO 14289-1 cl. 7.21.6 admits for a non-symbolic TrueType
+# font, in the font dictionary's `/Encoding` or in its `/BaseEncoding`.
+_TRUETYPE_ENCODINGS = frozenset({"/MacRomanEncoding", "/WinAnsiEncoding"})
+
+
+def _rendered_fonts(pdf) -> tuple:
+    """objgen → the font dictionary of every font a text-showing operator
+    actually draws with, plus the streams that would not parse.
+
+    ISO 14289-1 cl. 7.21.4.1 defines a font as USED when at least one of its
+    glyphs is referenced from a content stream, and cl. 7.21.1 exempts a font
+    referenced solely in text rendering mode 3. Both turn on what the stream
+    does, so the answer is taken from the operators rather than from the
+    resource table — a font a resource dictionary declares and nothing draws
+    with is not a font this clause governs, and reporting it would be a false
+    failure on a conforming file.
+
+    `q`/`Q` save and restore the selected font and the rendering mode with the
+    rest of the graphics state (ISO 32000-2 8.4.2, Table 51), so both travel
+    on the stack here rather than being read as if a stream were flat.
+    """
+    out: dict = {}
+    unread: list = []
+
+    def walk(owner, resources, page_no: int, depth: int, seen: set) -> None:
+        if depth > _CONTENT_DEPTH:
+            return
+        try:
+            operations = pikepdf.parse_content_stream(owner)
+        except Exception as exc:
+            unread.append({"page": page_no, "reason": str(exc)})
+            return
+        fonts = None
+        xobjects = None
+        if isinstance(resources, pikepdf.Dictionary):
+            try:
+                fonts = resources.get("/Font")
+                xobjects = resources.get("/XObject")
+            except Exception as exc:
+                unread.append({"page": page_no, "reason": str(exc)})
+        mode = 0
+        font = None
+        stack: list = []
+        for operands, operator in operations:
+            name = str(operator)
+            if name == "q":
+                stack.append((mode, font))
+            elif name == "Q":
+                if stack:
+                    mode, font = stack.pop()
+            elif name == "Tf" and operands:
+                font = None
+                if isinstance(fonts, pikepdf.Dictionary):
+                    try:
+                        font = fonts.get(str(operands[0]))
+                    except Exception:
+                        font = None
+            elif name == "Tr" and operands:
+                try:
+                    mode = int(operands[0])
+                except Exception:
+                    mode = 0
+            elif name in _TEXT_SHOWING:
+                if mode != _INVISIBLE_TEXT and isinstance(font, pikepdf.Dictionary):
+                    try:
+                        out[font.objgen] = font
+                    except Exception:
+                        pass
+            elif name == "Do" and operands and isinstance(xobjects, pikepdf.Dictionary):
+                try:
+                    xobj = xobjects.get(str(operands[0]))
+                except Exception:
+                    continue
+                if not isinstance(xobj, pikepdf.Stream):
+                    continue
+                try:
+                    if str(xobj.get("/Subtype") or "") != "/Form":
+                        continue
+                    og = xobj.objgen
+                    nested = xobj.get("/Resources")
+                except Exception as exc:
+                    unread.append({"page": page_no, "reason": str(exc)})
+                    continue
+                if og in seen:
+                    continue
+                seen.add(og)
+                walk(xobj, nested if nested is not None else resources,
+                     page_no, depth + 1, seen)
+
+    for i, page in enumerate(pdf.pages):
+        page_no = i + 1
+        try:
+            resources = page.resources
+        except Exception:
+            try:
+                resources = page.obj.get("/Resources")
+            except Exception as exc:
+                unread.append({"page": page_no, "reason": str(exc)})
+                continue
+        walk(page, resources, page_no, 0, set())
+        # An appearance stream renders too: the glyphs in a widget's `/AP /N`
+        # are on the page as much as the ones in its content stream.
+        try:
+            entries = list(page.obj.get("/Annots") or [])
+        except Exception:
+            entries = []
+        for annot in entries:
+            if not isinstance(annot, pikepdf.Dictionary):
+                continue
+            try:
+                normal = (annot.get("/AP") or {}).get("/N")
+            except Exception:
+                continue
+            streams = []
+            if isinstance(normal, pikepdf.Stream):
+                streams = [normal]
+            elif isinstance(normal, pikepdf.Dictionary):
+                try:
+                    streams = [s for s in normal.values() if isinstance(s, pikepdf.Stream)]
+                except Exception:
+                    streams = []
+            for stream in streams:
+                try:
+                    nested = stream.get("/Resources")
+                except Exception:
+                    nested = None
+                walk(stream, nested, page_no, 1, set())
+    return out, unread
+
+
+def _descriptor_of(font_obj):
+    """(the font descriptor, the font's `/Subtype`, the descendant CIDFont).
+
+    A composite font carries neither its descriptor nor its program: both hang
+    off the descendant CIDFont (ISO 32000-2 9.7.4), so the two cases are
+    resolved here once instead of at every reader.
+    """
+    try:
+        subtype = str(font_obj.get("/Subtype") or "")
+    except Exception:
+        return None, "", None
+    if subtype != "/Type0":
+        try:
+            return font_obj.get("/FontDescriptor"), subtype, None
+        except Exception:
+            return None, subtype, None
+    try:
+        descendants = font_obj.get("/DescendantFonts")
+        descendant = descendants[0] if descendants is not None and len(descendants) else None
+    except Exception:
+        descendant = None
+    if not isinstance(descendant, pikepdf.Dictionary):
+        return None, subtype, None
+    try:
+        return descendant.get("/FontDescriptor"), subtype, descendant
+    except Exception:
+        return None, subtype, descendant
+
+
+def _is_embedded(descriptor) -> bool:
+    if not isinstance(descriptor, pikepdf.Dictionary):
+        return False
+    for key in _FONT_PROGRAM_KEYS:
+        try:
+            if descriptor.get(key) is not None:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _base_font(font_obj) -> str:
+    try:
+        return str(font_obj.get("/BaseFont") or "").lstrip("/")
+    except Exception:
+        return ""
+
+
+def _check_font_embedding(check, rendered, unread):
+    """ISO 14289-1 cl. 7.21.4.1: the font programs for all fonts used for
+    rendering shall be embedded, and NOTE 5 states there is no exemption for
+    the 14 standard Type 1 fonts. A substituted face draws different glyphs at
+    different widths, which is exactly what cl. 7.21.1 says the whole subclause
+    exists to prevent.
+
+    Type 3 fonts are not counted. Their glyphs ARE content streams inside the
+    font dictionary (ISO 32000-2 9.6.5), so there is no font program to embed
+    and no substitution to guard against.
+
+    SCOPED OUT, and named: cl. 7.21.4.1's further requirement that an embedded
+    font "define all glyphs referenced for rendering" is not answered here —
+    deciding it means resolving every code the file draws through its encoding
+    into the program's glyph set, which is `unicode_mapping`'s machinery
+    pointed at a different question and is not attempted under this row.
+    """
+    counted = 0
+    findings = []
+    for font_obj in rendered.values():
+        descriptor, subtype, _descendant = _descriptor_of(font_obj)
+        if subtype == "/Type3":
+            continue
+        counted += 1
+        if _is_embedded(descriptor):
+            continue
+        findings.append(
+            _finding(
+                _object_address(),
+                "font_not_embedded",
+                preview=_base_font(font_obj),
+                values={"font": _base_font(font_obj)},
+            )
+        )
+    _verdict(check, counted, findings)
+    _also_review(check, _font_gaps(unread))
+
+
+def _font_gaps(unread: list) -> list:
+    """A stream the font walk could not parse, as findings. A gap the walk
+    could attribute to a page names it; one it could not is a key of its own
+    rather than a sentence rendering an uninterpolated page number."""
+    out = []
+    for gap in unread:
+        page = gap.get("page") if isinstance(gap, dict) else None
+        if page is None:
+            out.append(_finding(_object_address(), "fonts_unreadable"))
+            continue
+        out.append(
+            _finding(_object_address(page=page), "page_unreadable",
+                     values={"page": page})
+        )
+    return out
+
+
+def _cmap_subtables(descriptor) -> tuple:
+    """The (platform id, encoding id) pairs of the embedded TrueType program's
+    `cmap` table, and whether the program could be read at all."""
+    if not isinstance(descriptor, pikepdf.Dictionary):
+        return [], False
+    try:
+        program = descriptor.get("/FontFile2")
+    except Exception:
+        return [], False
+    if program is None:
+        return [], False
+    try:
+        from io import BytesIO
+
+        from fontTools.ttLib import TTFont
+
+        face = TTFont(BytesIO(program.read_bytes()), fontNumber=0, lazy=True)
+        return [(int(st.platformID), int(st.platEncID)) for st in face["cmap"].tables], True
+    except Exception:
+        return [], False
+
+
+def _differences_names(encoding) -> list:
+    """The glyph names a `/Differences` array assigns, in order. The integers
+    interleaved with them are the codes they start at, not names."""
+    if not isinstance(encoding, pikepdf.Dictionary):
+        return []
+    try:
+        differences = encoding.get("/Differences")
+        items = list(differences) if differences is not None else []
+    except Exception:
+        return []
+    out = []
+    for item in items:
+        if isinstance(item, pikepdf.Name):
+            out.append(str(item).lstrip("/"))
+    return out
+
+
+def _check_font_encodings(check, rendered, unread):
+    """ISO 14289-1 cl. 7.21.6, the TrueType half, for fonts used for rendering.
+
+    Four requirements, each decidable from the file:
+
+    — a symbolic TrueType font shall not carry an `/Encoding` entry in the font
+      dictionary, and its program's `cmap` shall either hold exactly one
+      encoding or hold at least the Microsoft Symbol (3,0) one;
+    — a non-symbolic TrueType font shall name MacRomanEncoding or
+      WinAnsiEncoding, as `/Encoding` or as the `/BaseEncoding` inside it;
+    — a non-symbolic TrueType font shall not define a `/Differences` array
+      unless every glyph name in it is listed in the Adobe Glyph List AND the
+      program's `cmap` holds at least the Microsoft Unicode (3,1) encoding;
+    — the program of a non-symbolic TrueType font shall contain non-symbolic
+      `cmap` entries.
+
+    SCOPED OUT, and named: the clause qualifies that last one with "such that
+    all necessary glyph lookups can be carried out", and the closing sentence
+    requires that character codes "be able to be mapped to glyphs … without the
+    use of a non-standard mapping chosen by the conforming reader". Both are
+    statements about the codes THIS file draws, resolved one at a time through
+    the encoding into the program — a per-code resolution this check does not
+    perform. Presence of a non-symbolic subtable is the mechanical half and is
+    all that is claimed here.
+
+    A font whose program will not read contributes a gap, not a verdict: a
+    `cmap` nobody could parse is not a `cmap` that is wrong.
+    """
+    counted = 0
+    findings = []
+    gaps = []
+    for font_obj in rendered.values():
+        descriptor, subtype, _descendant = _descriptor_of(font_obj)
+        if subtype != "/TrueType":
+            continue
+        counted += 1
+        name = _base_font(font_obj)
+        try:
+            flags = int(descriptor.get("/Flags") or 0) if descriptor is not None else 0
+        except Exception:
+            flags = 0
+        symbolic = bool(flags & _FLAG_SYMBOLIC) and not (flags & _FLAG_NONSYMBOLIC)
+        try:
+            encoding = font_obj.get("/Encoding")
+        except Exception:
+            encoding = None
+        subtables, program_read = _cmap_subtables(descriptor)
+        if symbolic:
+            if encoding is not None:
+                findings.append(
+                    _finding(_object_address(), "symbolic_truetype_has_encoding",
+                             preview=name, values={"font": name})
+                )
+            if not program_read:
+                if _is_embedded(descriptor):
+                    gaps.append(
+                        _finding(_object_address(), "font_program_cmap_unreadable",
+                                 preview=name, values={"font": name})
+                    )
+                continue
+            if len(subtables) != 1 and (3, 0) not in subtables:
+                findings.append(
+                    _finding(_object_address(), "symbolic_truetype_cmap_ambiguous",
+                             preview=name, values={"font": name})
+                )
+            continue
+        base = ""
+        if isinstance(encoding, pikepdf.Name):
+            base = str(encoding)
+        elif isinstance(encoding, pikepdf.Dictionary):
+            try:
+                raw = encoding.get("/BaseEncoding")
+            except Exception:
+                raw = None
+            base = str(raw) if raw is not None else ""
+        if base not in _TRUETYPE_ENCODINGS:
+            findings.append(
+                _finding(_object_address(), "nonsymbolic_truetype_bad_encoding",
+                         preview=name, values={"font": name})
+            )
+        if not program_read:
+            if _is_embedded(descriptor):
+                gaps.append(
+                    _finding(_object_address(), "font_program_cmap_unreadable",
+                             preview=name, values={"font": name})
+                )
+            continue
+        if not [pair for pair in subtables if pair != (3, 0)]:
+            findings.append(
+                _finding(_object_address(), "nonsymbolic_truetype_no_cmap",
+                         preview=name, values={"font": name})
+            )
+        names = _differences_names(encoding)
+        if names:
+            from fontTools.agl import AGL2UV
+
+            unlisted = sorted({g for g in names if g not in AGL2UV})
+            if unlisted:
+                findings.append(
+                    _finding(_object_address(), "nonsymbolic_truetype_unlisted_glyph_name",
+                             preview=unlisted[0],
+                             values={"font": name, "glyph": unlisted[0]})
+                )
+            if (3, 1) not in subtables:
+                findings.append(
+                    _finding(_object_address(),
+                             "nonsymbolic_truetype_differences_no_unicode_cmap",
+                             preview=name, values={"font": name})
+                )
+    _verdict(check, counted, findings)
+    _also_review(check, gaps + _font_gaps(unread))
+
+
+def _check_cid_to_gid_map(check, pdf):
+    """ISO 14289-1 cl. 7.21.3.2 makes normative what ISO 32000-1 Table 117
+    requires: every embedded Type 2 CIDFont shall carry a `/CIDToGIDMap` entry
+    that is either a stream mapping CIDs to glyph indices or the name
+    `/Identity`.
+
+    Without it there is no statement of which glyph a CID selects, so the same
+    file renders differently depending on what the reader assumes — the exact
+    outcome cl. 7.21.1 says the font requirements exist to prevent. The check
+    is document-wide rather than restricted to rendered fonts: the clause
+    governs embedded CIDFonts, not drawn ones.
+    """
+    fonts, unread = _typed_dictionaries(pdf, "/Font")
+    counted = 0
+    findings = []
+    for font_obj in fonts:
+        descriptor, subtype, descendant = _descriptor_of(font_obj)
+        if subtype != "/Type0" or not isinstance(descendant, pikepdf.Dictionary):
+            continue
+        try:
+            if str(descendant.get("/Subtype") or "") != "/CIDFontType2":
+                continue
+        except Exception as exc:
+            unread.append(str(exc))
+            continue
+        if not _is_embedded(descriptor):
+            continue
+        counted += 1
+        try:
+            mapping = descendant.get("/CIDToGIDMap")
+        except Exception as exc:
+            unread.append(str(exc))
+            continue
+        if isinstance(mapping, pikepdf.Stream):
+            continue
+        if isinstance(mapping, pikepdf.Name) and str(mapping) == "/Identity":
+            continue
+        name = _base_font(font_obj)
+        findings.append(
+            _finding(_object_address(), "cid_font_no_cid_to_gid_map",
+                     preview=name, values={"font": name})
+        )
+    if counted == 0 and not unread:
+        check.status = NA
+        return
+    _verdict(check, counted, findings)
+    _also_review(
+        check, [_finding(_object_address(), "fonts_unreadable") for _ in unread]
+    )
+
+
+# ── optional content, embedded files, forms (cl. 7.10, 7.11, 7.14, 7.15) ──
+
+
+def _check_optional_content_config(check, pdf):
+    """ISO 14289-1 cl. 7.10, both of its sentences.
+
+    `/Name` is required in EVERY optional content configuration dictionary,
+    the default one included, but only when the catalog's `/OCProperties`
+    carries a `/Configs` entry holding at least one configuration — the
+    condition the clause states, and the reason a document with only a default
+    configuration is not failed for the missing name.
+
+    `/AS` shall not appear in ANY configuration dictionary, unconditionally.
+    ISO 14289-1's NOTE 1 gives the reason: `/AS` is what lets a reader adjust
+    optional content state automatically from usage information, and a state
+    the document did not choose is a page whose content nobody can predict.
+    """
+    try:
+        properties = pdf.Root.get("/OCProperties")
+    except Exception:
+        properties = None
+    if not isinstance(properties, pikepdf.Dictionary):
+        check.status = NA
+        return
+    unread = []
+    try:
+        default = properties.get("/D")
+        raw_configs = properties.get("/Configs")
+        configs = [c for c in list(raw_configs)] if raw_configs is not None else []
+    except Exception as exc:
+        check.status = REVIEW
+        check.findings = [_finding(_object_address(), "optional_content_unreadable",
+                                   values={"reason": str(exc)})]
+        return
+    listed = [c for c in configs if isinstance(c, pikepdf.Dictionary)]
+    unread += [c for c in configs if not isinstance(c, pikepdf.Dictionary)]
+    every = ([default] if isinstance(default, pikepdf.Dictionary) else []) + listed
+    if not every:
+        check.status = NA
+        return
+    name_required = bool(listed)
+    findings = []
+    for config in every:
+        try:
+            has_as = config.get("/AS") is not None
+            title = str(config.get("/Name") or "").strip()
+        except Exception as exc:
+            unread.append(exc)
+            continue
+        if name_required and not title:
+            findings.append(_finding(_object_address(), "oc_config_no_name"))
+        if has_as:
+            findings.append(_finding(_object_address(), "oc_config_has_as"))
+    _verdict(check, len(every), findings)
+    _also_review(
+        check,
+        [
+            _finding(_object_address(), "optional_content_unreadable",
+                     values={"reason": "a configuration entry is not a dictionary"})
+            for _ in unread
+        ],
+    )
+
+
+def _check_embedded_file_names(check, pdf):
+    """ISO 14289-1 cl. 7.11: the file specification dictionary for an embedded
+    file shall contain the `/F` and `/UF` keys. Cl. 7.18.7 extends the same
+    requirement to file attachment annotations.
+
+    `/F` is the name in the system's own encoding and `/UF` the Unicode one;
+    between them they are the only thing that tells anybody what an attachment
+    IS before opening it. Only specifications carrying `/EF` are counted — a
+    file specification with no embedded file stream names something outside
+    the document, which is not what this clause governs.
+
+    SCOPED OUT, and named: the same sentence adds that the dictionary SHOULD
+    contain `/Desc`. That is a recommendation, not a requirement, and it is not
+    reported here — a missing `/Desc` would have to warn rather than fail, and
+    folding a `should` into a `shall` row would make one verdict answer two
+    different kinds of question.
+    """
+    specs, unread = _typed_dictionaries(pdf, "/Filespec")
+    counted = 0
+    findings = []
+    for spec in specs:
+        try:
+            if spec.get("/EF") is None:
+                continue
+            has_f = spec.get("/F") is not None
+            has_uf = spec.get("/UF") is not None
+        except Exception as exc:
+            unread.append(str(exc))
+            continue
+        counted += 1
+        if not has_f:
+            findings.append(_finding(_object_address(), "embedded_file_no_f"))
+        if not has_uf:
+            findings.append(_finding(_object_address(), "embedded_file_no_uf"))
+    if counted == 0 and not unread:
+        check.status = NA
+        return
+    _verdict(check, counted, findings)
+    _also_review(
+        check,
+        [_finding(_object_address(), "embedded_files_unreadable") for _ in unread],
+    )
+
+
+def _check_print_field_attributes(check, tree):
+    """ISO 14289-1 cl. 7.14: non-interactive forms shall be tagged using the
+    PrintField attributes of ISO 32000-1 14.8.5.6.
+
+    SCOPED, and the scope is the point. Whether a region of a page IS a
+    non-interactive form — a printed box someone fills in with a pen, a ruled
+    line above a caption, a row of boxes for one character each — is a
+    judgement about what the drawn content MEANS. No fact in the file decides
+    it, so a checker that guessed would manufacture failures on every ruled
+    table in every document.
+
+    What IS decidable is the case the document itself has already declared: an
+    element the file tags `Form` that reaches no annotation. A `Form` tag exists
+    to hold a widget (cl. 7.18.4); one holding none is the document saying
+    "form" about content that has no interactive control, which is the shape a
+    non-interactive form takes. Those elements are reported for review when
+    they carry no PrintField attribute owner, and pass when they do. Content
+    the document never tagged `Form` at all is outside what this can see, and
+    is not claimed either way.
+    """
+    if not tree["tagged"]:
+        check.status = NA
+        return
+    candidates = [
+        node for node in tree["nodes"]
+        if node.role == _FORM_ROLE and not node.objrs
+    ]
+    if not candidates:
+        check.status = NA
+        return
+    findings = [
+        _finding(_struct_address(node), "print_field_attributes_missing",
+                 preview=node.tag, values={"tag": node.tag})
+        for node in candidates
+        if "/PrintField" not in node.attr_owners
+    ]
+    _verdict(check, len(candidates), findings, dirty=REVIEW)
+
+
+# ISO 14289-1 cl. 7.15 names the element and the value verbatim; the packet is
+# XML, so the element is matched on its local name and any namespace it was
+# authored in.
+_DYNAMIC_RENDER = "dynamicRender"
+_DYNAMIC_REQUIRED = "required"
+
+
+def _xfa_packets(xfa) -> list:
+    """The XFA packet streams, from either spelling of `/XFA`: a single stream
+    holding the whole XDP, or an array alternating packet names with the
+    streams that hold them."""
+    if isinstance(xfa, pikepdf.Stream):
+        return [xfa]
+    if not isinstance(xfa, pikepdf.Array):
+        return []
+    try:
+        return [item for item in xfa if isinstance(item, pikepdf.Stream)]
+    except Exception:
+        return []
+
+
+def _check_dynamic_xfa(check, pdf):
+    """ISO 14289-1 cl. 7.15: an `/XFA` key in `/AcroForm` whose value is an
+    array or a stream makes the file an XFA-based form. Static XFA forms may be
+    used; DYNAMIC XFA forms shall not be.
+
+    The clause states the test itself: a conforming reader locates the
+    `dynamicRender` element and compares its value to "required"; equal means
+    dynamic. The NOTE gives its position — a child of `acrobat7`, inside
+    `acrobat`, inside `config`, inside the root `xdp` element. That is a fact
+    in the packet, so this check decides it rather than reviewing it.
+
+    The packets are parsed as XML, not scanned as bytes: `dynamicRender`
+    appearing inside a comment, an attribute or a CDATA section is not the
+    element the clause names, and a reader that matched text would call a
+    static form dynamic. A packet that will not parse is a gap — but a packet
+    that DID parse and said "required" is a failure that stands, because the
+    file has already answered.
+    """
+    try:
+        acroform = pdf.Root.get("/AcroForm")
+        xfa = acroform.get("/XFA") if isinstance(acroform, pikepdf.Dictionary) else None
+    except Exception:
+        xfa = None
+    if not isinstance(xfa, (pikepdf.Array, pikepdf.Stream)):
+        check.status = NA
+        return
+    check.counted = 1
+    packets = _xfa_packets(xfa)
+    dynamic = False
+    gaps = []
+    for packet in packets:
+        try:
+            root = ElementTree.fromstring(packet.read_bytes())
+        except Exception:
+            gaps.append(_finding(_object_address(), "xfa_packet_unreadable"))
+            continue
+        for element in root.iter():
+            tag = str(element.tag)
+            if tag.rsplit("}", 1)[-1] != _DYNAMIC_RENDER:
+                continue
+            if (element.text or "").strip() == _DYNAMIC_REQUIRED:
+                dynamic = True
+    if not packets:
+        gaps.append(_finding(_object_address(), "xfa_packet_unreadable"))
+    check.status = FAIL if dynamic else PASS
+    if dynamic:
+        check.findings = [_finding(_object_address(), "dynamic_xfa_form")]
+    _also_review(check, gaps)
+
+
 # ── the English surface ───────────────────────────────────────────────────
 
 # Every check's name and its one-line explanation, in English.
@@ -3529,6 +4435,50 @@ _ENGLISH = {
     "suspects": (
         "The document does not disclaim its own tagging",
         "The suspects flag tells readers the structure may not match the content.",
+    ),
+    "optional_content_config": (
+        "Optional content configurations are named, and set no automatic state",
+        "A configuration with no name, or one that adjusts itself, hides content unpredictably.",
+    ),
+    "embedded_file_names": (
+        "Attached files carry both of their names",
+        "An attachment with no file name tells nobody what it is before they open it.",
+    ),
+    "trapnet_annotations": (
+        "No trapping annotations are present",
+        "Trap networks describe a printing press, not anything a reader can reach.",
+    ),
+    "link_ismap": (
+        "Links do not depend on a server-side image map",
+        "A link that sends a click coordinate cannot be used by anyone who cannot point.",
+    ),
+    "media_clip_data": (
+        "Media clips state their type and their alternate text",
+        "A clip with no content type and no alternate text can only be played, never described.",
+    ),
+    "reference_xobjects": (
+        "No page imports its content from another file",
+        "Content that lives in another file is content this document cannot describe.",
+    ),
+    "font_embedding": (
+        "Every font that draws text is embedded",
+        "A substituted face draws different shapes at different widths than the file intends.",
+    ),
+    "font_encodings": (
+        "TrueType fonts use encodings a reader can follow",
+        "A font whose encoding rules are not met leaves the reader guessing which glyph is meant.",
+    ),
+    "cid_to_gid_map": (
+        "Composite fonts say which glyph each identifier selects",
+        "Without that mapping the same file renders differently in different readers.",
+    ),
+    "print_field_attributes": (
+        "Printed form fields are tagged as form fields",
+        "A box drawn for a pen is announced as a box unless PrintField attributes say otherwise.",
+    ),
+    "dynamic_xfa": (
+        "The document is not a dynamic XFA form",
+        "A dynamic form builds its own pages, so the tagged content is not what is shown.",
     ),
     "untagged_graphics": (
         "All page graphics are tagged or declared decoration",
@@ -3724,7 +4674,7 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
 
     Each inventory read is fail-OPEN at its own boundary. A read that raises
     where nothing anticipated it becomes the same gap a read that returned
-    nothing does, so the answer to "is this document accessible" is 44 checks
+    nothing does, so the answer to "is this document accessible" is 55 checks
     and one review row rather than no report at all.
     """
     if category is not None and category not in CATEGORIES:
@@ -3751,6 +4701,9 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
         sites, sites_unread = read(lambda: _script_sites(pdf, entries))
         mcid_tables = {p: _mcid_text(runs) for p, runs in pages.runs.items()}
         cropboxes = _cropboxes(pdf)
+        rendered, font_unread = read(lambda: _rendered_fonts(pdf))
+        if not isinstance(rendered, dict):
+            rendered = {}
 
         run = {
             "permissions": lambda c: _check_permissions(c, pdf),
@@ -3764,6 +4717,8 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
             "title": lambda c: _check_title(c, pdf),
             "bookmarks": lambda c: _check_bookmarks(c, pdf, tree),
             "contrast": lambda c: _check_contrast(c, pages),
+            "optional_content_config": lambda c: _check_optional_content_config(c, pdf),
+            "embedded_file_names": lambda c: _check_embedded_file_names(c, pdf),
             "tagged_content": lambda c: _check_tagged_content(c, tree, pages),
             "untagged_graphics": lambda c: _check_untagged_graphics(c, pdf, tree),
             "artifact_judgement": lambda c: _check_artifact_judgement(c, pdf, tree, pages, mcid_tables),
@@ -3778,8 +4733,17 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
             "scripts": lambda c: _check_scripts(c, sites),
             "timed_responses": lambda c: _check_timed_responses(c, sites),
             "navigation_links": lambda c: _check_navigation_links(c, annots, pages),
+            "trapnet_annotations": lambda c: _check_trapnet_annotations(c, annots),
+            "link_ismap": lambda c: _check_link_ismap(c, annots),
+            "media_clip_data": lambda c: _check_media_clip_data(c, pdf),
+            "reference_xobjects": lambda c: _check_reference_xobjects(c, pdf),
+            "font_embedding": lambda c: _check_font_embedding(c, rendered, font_unread),
+            "font_encodings": lambda c: _check_font_encodings(c, rendered, font_unread),
+            "cid_to_gid_map": lambda c: _check_cid_to_gid_map(c, pdf),
             "tagged_form_fields": lambda c: _check_tagged_form_fields(c, tree, annots, fields),
             "field_descriptions": lambda c: _check_field_descriptions(c, tree, annots, fields),
+            "print_field_attributes": lambda c: _check_print_field_attributes(c, tree),
+            "dynamic_xfa": lambda c: _check_dynamic_xfa(c, pdf),
             "figures_alt": lambda c: _check_figures_alt(c, tree, mcid_tables),
             "nested_alt": lambda c: _check_nested_alt(c, tree, mcid_tables),
             "alt_no_content": lambda c: _check_alt_no_content(c, tree, mcid_tables),
@@ -3894,7 +4858,7 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
         "summary": summary,
         "unreadable": unreadable,
         # The flat list, for a reader that has no notion of a category — the
-        # same 45 rows in the same order, each carrying the English name and
+        # same 56 rows in the same order, each carrying the English name and
         # sentence a caller with no catalog of its own renders (the CLI, and
         # the panel until it reads `categories`).
         "checks": [_with_english(c.to_json()) for c in ordered],

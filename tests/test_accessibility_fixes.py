@@ -148,6 +148,24 @@ class TestAutomaticFixes:
             assert pdf.Root[Name.MarkInfo][Name("/Suspects")] is False
             assert bool(pdf.Root[Name.MarkInfo][Name.Marked])
 
+    def test_embedded_file_names(self, tmp_dir):
+        src = _build(tmp_dir, "embedded_file_no_unicode_name")
+        _round_trip(src, "embedded_file_names",
+                    lambda p: apply_accessibility_fixes(p, p, ["embedded_file_names"]))
+        import pikepdf
+
+        with pikepdf.open(src) as pdf:
+            spec = pdf.Root[Name.Names][Name("/EmbeddedFiles")][Name.Names][1]
+            # The same name, not a new one: the two keys differ only in the
+            # encoding they are written in.
+            assert str(spec[Name("/UF")]) == str(spec[Name("/F")]) == "notes.txt"
+
+    def test_embedded_file_names_refuses_when_there_is_no_name_to_copy(self, tmp_dir):
+        src = _build(tmp_dir, "embedded_file_no_names")
+        with pytest.raises(ValueError, match="nothing here for that fix"):
+            apply_accessibility_fixes(src, src, ["embedded_file_names"])
+        assert _statuses(src)["embedded_file_names"] == "fail"
+
     def test_title_display_flag(self, tmp_dir):
         src = _build(tmp_dir, "title_not_displayed")
         _round_trip(src, "title", lambda p: apply_accessibility_fixes(p, p, ["title"]))
