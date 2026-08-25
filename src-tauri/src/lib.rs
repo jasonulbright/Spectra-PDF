@@ -100,6 +100,7 @@ pub fn run() {
         .manage(app_windows::BackdropState::new())
         .manage(app_windows::WindowRegistry::new())
         .manage(app_windows::ClaimState::new())
+        .manage(app_windows::WebOrigins::new())
         .manage(tabdrag::StripRegistry::new())
         .manage(session::SessionState::new())
         .manage(session::QuitAcks::new())
@@ -250,6 +251,8 @@ pub fn run() {
             app_windows::release_output_root,
             app_windows::focus_app_window,
             app_windows::take_pending_opens,
+            app_windows::register_web_origin,
+            app_windows::web_origins_for,
             tabdrag::register_strip_rect,
             tabdrag::tabdrag_track,
             tabdrag::tabdrag_hover_index,

@@ -66,6 +66,30 @@ describe('withRecent', () => {
     ]);
   });
 
+  it('preserves an existing sourceUrl on a re-open that supplies none', () => {
+    // A web-downloaded temp copy handed to a second window, or re-opened from
+    // recents, records the open again without re-supplying its address. The
+    // provenance must survive: otherwise the recent row re-opens a purgeable
+    // temp path with no way back to its source.
+    const before = [{ path: 't.pdf', openedAt: 1, sourceUrl: 'https://example.com/t.pdf' }];
+    expect(withRecent(before, 't.pdf', 5)).toEqual([
+      { path: 't.pdf', openedAt: 5, sourceUrl: 'https://example.com/t.pdf' },
+    ]);
+  });
+
+  it('an explicit sourceUrl overrides the prior one', () => {
+    const before = [{ path: 't.pdf', openedAt: 1, sourceUrl: 'https://old.example/t.pdf' }];
+    expect(withRecent(before, 't.pdf', 5, 'https://new.example/t.pdf')).toEqual([
+      { path: 't.pdf', openedAt: 5, sourceUrl: 'https://new.example/t.pdf' },
+    ]);
+  });
+
+  it('a plain re-open of a non-web entry gains no sourceUrl', () => {
+    expect(withRecent([{ path: 'a.pdf', openedAt: 1 }], 'a.pdf', 5)).toEqual([
+      { path: 'a.pdf', openedAt: 5 },
+    ]);
+  });
+
   it('caps the list at 10', () => {
     const ten = Array.from({ length: 10 }, (_, i) => ({ path: `f${i}.pdf`, openedAt: i }));
     const next = withRecent(ten, 'new.pdf', 11);
