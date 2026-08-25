@@ -60,7 +60,9 @@ import pikepdf
 from . import budget, icc_profiles, soft_proof
 from .acroform import has_form_fields
 from .color_spaces import build_resolver
+from .pdf_save import save_pdf
 from .preflight import COLORSPACE, walk_page_resources
+from .processing_steps import hide_processing_steps, processing_step_only_colorants
 from .validate import validate_pdf
 from .widget_faces import regenerate_appearances_file
 
@@ -295,12 +297,20 @@ def _page_numbers(pdf, pages) -> list[int]:
     return wanted
 
 
-def list_inks(file: str, pages=None) -> dict:
+def list_inks(file: str, pages=None, show_processing_steps: bool = False) -> dict:
     """The `/Separation` and `/DeviceN` colorants each page can paint with.
 
     Args:
         file: Input PDF path.
         pages: 1-based page numbers, or None for the whole document.
+        show_processing_steps: True counts the non-printing processing-step
+            layers (die lines, creases, varnish, white) as printing content.
+            The default excludes them, which is what a plate list is FOR: a
+            die line is a manufacturing instruction, not an ink, and a
+            varnish colorant on the plate list would be one more plate the
+            job does not have and one more ink in every total-ink figure
+            measured over it. A colorant the artwork also paints stays —
+            exclusion is per COLORANT, not per layer.
 
     Each entry carries the colorant name verbatim (an ink name is document
     content and is never translated), its kind, its alternate space, an sRGB
@@ -403,6 +413,23 @@ def list_inks(file: str, pages=None) -> dict:
                                 on_stream=on_stream,
                                 on_unreadable=on_unreadable)
 
+        excluded = (
+            set() if show_processing_steps
+            else processing_step_only_colorants(pdf, numbers)
+        )
+
+    # Only a SPOT can be dropped. The four process plates exist for the job
+    # by construction — the device writes them whether or not a named
+    # `/Separation` space declares one — so removing Cyan because the only
+    # named Cyan space on the page is painted on the die line would leave a
+    # plate the preview cannot label. `/All` and `/None` are not plates at
+    # all: the panel names them as the special colorants they are, and a
+    # panel that stopped naming `/All` would be hiding an ink that paints
+    # every plate.
+    excluded = {name for name in excluded if ink_kind(name) == "spot"}
+    for name in sorted(excluded):
+        found.pop(name, None)
+
     inks = sorted(
         found.values(),
         key=lambda e: (("process", "spot", "all", "none").index(e["kind"]),
@@ -416,6 +443,10 @@ def list_inks(file: str, pages=None) -> dict:
         "pages": numbers,
         "unknown": unknown,
         "color_families": sorted(families),
+        # Named, not merely absent: a plate list one ink shorter than the
+        # document declares has to say which ink and why, or it reads as a
+        # document that never had it.
+        "processing_step_inks": sorted(excluded),
     }
 
 
@@ -443,7 +474,7 @@ def _evict_old_sets(root: Path) -> None:
 
 
 def _set_key(file: str, page: int, dpi: int, overprint: bool, profile: str = "",
-             font_dir: str = "") -> str:
+             font_dir: str = "", processing_steps: bool = False) -> str:
     """The plate set's identity.
 
     `profile` is empty unless the page has to be colour-managed before it is
@@ -456,6 +487,12 @@ def _set_key(file: str, page: int, dpi: int, overprint: bool, profile: str = "",
     an appearance can be regenerated in. Where it can change them it has to be
     in the key, or a set rendered without the fallback faces would be served
     to a caller that supplied them.
+
+    `processing_steps` is in the key UNCONDITIONALLY, and that is deliberate.
+    It decides whether the die line and the varnish reached the device at
+    all, so the two states are two different plate sets of the same page; a
+    key component that does not reach the key serves the old raster after the
+    flip and the switch reads as broken.
     """
     source = Path(file)
     try:
@@ -464,7 +501,7 @@ def _set_key(file: str, page: int, dpi: int, overprint: bool, profile: str = "",
         stamp = "0:0"
     digest = hashlib.sha256(
         f"{source}\0{stamp}\0{page}\0{dpi}\0{int(overprint)}\0{profile}"
-        f"\0{font_dir}".encode("utf-8")
+        f"\0{font_dir}\0{int(processing_steps)}".encode("utf-8")
     ).hexdigest()
     return digest[:24]
 
@@ -472,6 +509,20 @@ def _set_key(file: str, page: int, dpi: int, overprint: bool, profile: str = "",
 def _carries_form_fields(file: str) -> bool:
     with pikepdf.open(file) as pdf:
         return has_form_fields(pdf)
+
+
+def _stage_without_processing_steps(source: Path, out_dir: Path):
+    """A working copy with every processing-step layer forced off, or None.
+
+    None means the document declares no processing steps at all, in which
+    case there is nothing to stage and the original is rastered directly.
+    """
+    with pikepdf.open(str(source)) as pdf:
+        if hide_processing_steps(pdf) == 0:
+            return None
+        staged = out_dir / "noprocsteps.pdf"
+        save_pdf(pdf, staged)
+    return staged
 
 
 def _stage_for_profile(file: str, page: int, profile_path: str, out_dir: Path,
@@ -508,6 +559,7 @@ def render_separations(
     simulation=None,
     font_dir: str = "",
     icc_dir: str = "",
+    show_processing_steps: bool = False,
 ) -> dict:
     """Rasterize one page to one grayscale plate per separation.
 
@@ -532,17 +584,25 @@ def render_separations(
             through the form's WinAnsi face (ISO 32000-2 7.9.2.2), which is
             mojibake for any value outside that encoding. The preview then
             shows a value the document does not state.
+        show_processing_steps: True rasters the non-printing processing-step
+            layers along with the artwork. The default excludes them: they
+            are manufacturing instructions, and a die line on a plate is a
+            die line printed. The exclusion is a VIEW — it stages a working
+            copy with those groups forced off and never writes the document.
 
     The plate set is cached on disk keyed by file identity, page, resolution,
-    overprint and — only where each applies — the profile and the fallback
-    faces, so an ink toggle re-composites without another device run and a
-    page that separates identically on every press keeps one cache entry.
+    overprint, whether processing steps were rastered and — only where each
+    applies — the profile and the fallback faces, so an ink toggle
+    re-composites without another device run and a page that separates
+    identically on every press keeps one cache entry.
     """
     validate_pdf(file)
     page = int(page)
     dpi = max(1, int(dpi))
+    show_processing_steps = bool(show_processing_steps)
 
-    inventory = list_inks(file, pages=[page])
+    inventory = list_inks(file, pages=[page],
+                          show_processing_steps=show_processing_steps)
     inks = inventory["inks"]
     spots = [e["name"] for e in inks if e["kind"] == "spot"]
     n = len(spots)
@@ -574,6 +634,7 @@ def render_separations(
     out_dir = root / _set_key(
         file, page, dpi, overprint, profile.digest if stage else "",
         font_dir if _carries_form_fields(file) else "",
+        show_processing_steps,
     )
     marker = out_dir / "plates.done"
     if reuse and _set_is_whole(out_dir, marker):
@@ -589,6 +650,16 @@ def render_separations(
     # The regenerated copy stays beside the plates because the coverage
     # measurement has to describe the same document the plates came from.
     prepared = regenerate_appearances_file(Path(file), out_dir, font_dir) or Path(file)
+
+    # The die line, the crease and the varnish come off BEFORE the device
+    # sees the page, on a working copy: forcing them off in the default
+    # configuration is what a RIP already honours, so nothing here has to
+    # rewrite content. The copy stays beside the plates because the coverage
+    # measurement has to describe the same page the plates came from.
+    if not show_processing_steps:
+        without = _stage_without_processing_steps(prepared, out_dir)
+        if without is not None:
+            prepared = without
 
     if stage:
         rastered = _stage_for_profile(str(prepared), page, profile.path, out_dir,
@@ -630,11 +701,12 @@ def render_separations(
 
 _MANIFEST_VERSION = 1
 
-# The files a plate set cannot be rebuilt without. `staged.pdf` and
-# `regenerated.pdf` are the coverage measurement's subject: with either gone
-# the measurement silently moves to the original document, which is a figure
-# about a different page than the plates carry.
-_SET_SIDECARS = ("staged.pdf", "regenerated.pdf")
+# The files a plate set cannot be rebuilt without. `staged.pdf`,
+# `noprocsteps.pdf` and `regenerated.pdf` are the coverage measurement's
+# subject: with any of them gone the measurement silently moves to a document
+# further up the staging chain, which is a figure about a different page than
+# the plates carry.
+_SET_SIDECARS = ("staged.pdf", "noprocsteps.pdf", "regenerated.pdf")
 
 
 def _write_manifest(marker: Path, out_dir: Path, described: dict) -> None:
@@ -732,10 +804,16 @@ def _describe_set(out_dir: Path, inks: list[dict], file: str, page: int,
     # Coverage describes the ink actually on the plates, so a staged set is
     # measured on the staged page: under a press profile the figure IS a
     # number about that press.
+    # The staging chain runs regenerated → processing steps off → press
+    # profile, so the LAST copy written is the one the device read. A total
+    # ink figure measured a step earlier would count the varnish.
     staged = out_dir / "staged.pdf"
+    without_steps = out_dir / "noprocsteps.pdf"
     regenerated = out_dir / "regenerated.pdf"
     if staged.is_file():
         measured, measured_page = str(staged), 1
+    elif without_steps.is_file():
+        measured, measured_page = str(without_steps), page
     elif regenerated.is_file():
         measured, measured_page = str(regenerated), page
     else:

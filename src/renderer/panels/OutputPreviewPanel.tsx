@@ -78,7 +78,8 @@ export function OutputPreviewPanel(): React.ReactElement {
   const {
     armed, setArmed, inks, inkUnknown, plates, coverage, hidden, toggleInk, showAllInks,
     hideAllInks, densities, setDensity, aliases, sequence, limitPct, setLimitPct, alarm,
-    setAlarm, overprint, setOverprint, simulationProfiles, simulationSource,
+    setAlarm, overprint, setOverprint, showProcessingSteps, setShowProcessingSteps,
+    processingStepInks, simulationProfiles, simulationSource,
     setSimulationSource, pickSimulationProfile, simulationPress, setSimulationPress,
     setPaperWhite, setBlackInk, simulation,
     stats, busy, error, inspection, inspectBusy, inspectError,
@@ -435,6 +436,29 @@ export function OutputPreviewPanel(): React.ReactElement {
           />
           {tChrome('panel.outputPreview.overprint')}
         </label>
+
+        {/* A VIEW switch. The document's own layer states are untouched: what
+            it does is stage a copy with the processing-step groups off before
+            the device runs, which is what the press will do with them. */}
+        <label className="flex items-center gap-2 text-sm text-neutral-300">
+          <input
+            type="checkbox"
+            data-testid="output-preview-processing-steps"
+            checked={showProcessingSteps}
+            onChange={(e) => setShowProcessingSteps(e.target.checked)}
+          />
+          {tChrome('panel.outputPreview.processingSteps')}
+        </label>
+        {processingStepInks.length > 0 && !showProcessingSteps && (
+          <div
+            className="text-xs text-neutral-500"
+            data-testid="output-preview-processing-step-inks"
+          >
+            {tChrome('panel.outputPreview.processingStepInks', {
+              names: processingStepInks.join(', '),
+            })}
+          </div>
+        )}
         <div className="flex items-center gap-2 text-sm text-neutral-300">
           <label className="flex items-center gap-2">
             <input

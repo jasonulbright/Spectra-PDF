@@ -365,7 +365,9 @@ describe('what the ink inventory could not read', () => {
     // `inks` empty and `unknown` empty is the shape of "nothing found",
     // which is also the shape of a response that never arrived — the guard
     // here is that neither field is invented.
-    const nothing = { inks: [], unknown: [], color_families: [''] };
+    const nothing = {
+      inks: [], unknown: [], color_families: [''], processing_step_inks: [],
+    };
     expect(readInventory({})).toEqual(nothing);
     expect(readInventory(null)).toEqual(nothing);
     expect(readInventory({ inks: 'nope', unknown: 'nope' })).toEqual(nothing);

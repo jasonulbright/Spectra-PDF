@@ -60,6 +60,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -72,63 +73,63 @@
           0,
           1,
           0,
-          29
+          30
         ],
         "web_offset_heatset": [
           7,
           0,
           1,
           0,
-          29
+          30
         ],
         "newsprint": [
           7,
           0,
           1,
           0,
-          29
+          30
         ],
         "digital_printing": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "large_format": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "pdfx_1a": [
           13,
           3,
           1,
           0,
-          20
+          21
         ],
         "pdfx_3": [
           13,
           3,
           1,
           0,
-          20
+          21
         ],
         "pdfx_4": [
           11,
           3,
           1,
           0,
-          22
+          23
         ],
         "office_print": [
           4,
           0,
           0,
           0,
-          33
+          34
         ]
       }
     },
@@ -167,6 +168,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -179,63 +181,63 @@
           1,
           1,
           0,
-          28
+          29
         ],
         "web_offset_heatset": [
           7,
           1,
           1,
           0,
-          28
+          29
         ],
         "newsprint": [
           7,
           1,
           1,
           0,
-          28
+          29
         ],
         "digital_printing": [
           6,
           1,
           1,
           0,
-          29
+          30
         ],
         "large_format": [
           6,
           1,
           1,
           0,
-          29
+          30
         ],
         "pdfx_1a": [
           11,
           6,
           1,
           0,
-          19
+          20
         ],
         "pdfx_3": [
           11,
           6,
           1,
           0,
-          19
+          20
         ],
         "pdfx_4": [
           8,
           6,
           1,
           0,
-          22
+          23
         ],
         "office_print": [
           3,
           0,
           1,
           0,
-          33
+          34
         ]
       }
     },
@@ -274,6 +276,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -286,63 +289,63 @@
           1,
           1,
           0,
-          26
+          27
         ],
         "web_offset_heatset": [
           9,
           1,
           1,
           0,
-          26
+          27
         ],
         "newsprint": [
           9,
           1,
           1,
           0,
-          26
+          27
         ],
         "digital_printing": [
           8,
           1,
           1,
           0,
-          27
+          28
         ],
         "large_format": [
           8,
           1,
           1,
           0,
-          27
+          28
         ],
         "pdfx_1a": [
           14,
           6,
           1,
           0,
-          16
+          17
         ],
         "pdfx_3": [
           13,
           6,
           1,
           0,
-          17
+          18
         ],
         "pdfx_4": [
           10,
           6,
           1,
           0,
-          20
+          21
         ],
         "office_print": [
           3,
           0,
           1,
           0,
-          33
+          34
         ]
       }
     },
@@ -381,6 +384,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -393,63 +397,63 @@
           1,
           1,
           0,
-          28
+          29
         ],
         "web_offset_heatset": [
           7,
           1,
           1,
           0,
-          28
+          29
         ],
         "newsprint": [
           8,
           0,
           1,
           0,
-          28
+          29
         ],
         "digital_printing": [
           7,
           0,
           1,
           0,
-          29
+          30
         ],
         "large_format": [
           7,
           0,
           1,
           0,
-          29
+          30
         ],
         "pdfx_1a": [
           10,
           7,
           1,
           0,
-          19
+          20
         ],
         "pdfx_3": [
           10,
           7,
           1,
           0,
-          19
+          20
         ],
         "pdfx_4": [
           8,
           6,
           1,
           0,
-          22
+          23
         ],
         "office_print": [
           4,
           0,
           0,
           0,
-          33
+          34
         ]
       }
     },
@@ -488,6 +492,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -500,63 +505,63 @@
           1,
           1,
           0,
-          26
+          27
         ],
         "web_offset_heatset": [
           9,
           1,
           1,
           0,
-          26
+          27
         ],
         "newsprint": [
           9,
           1,
           1,
           0,
-          26
+          27
         ],
         "digital_printing": [
           8,
           1,
           1,
           0,
-          27
+          28
         ],
         "large_format": [
           8,
           1,
           1,
           0,
-          27
+          28
         ],
         "pdfx_1a": [
           13,
           6,
           1,
           0,
-          17
+          18
         ],
         "pdfx_3": [
           13,
           6,
           1,
           0,
-          17
+          18
         ],
         "pdfx_4": [
           11,
           6,
           1,
           0,
-          19
+          20
         ],
         "office_print": [
           5,
           1,
           0,
           0,
-          31
+          32
         ]
       }
     },
@@ -599,6 +604,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "warn",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -611,63 +617,63 @@
           0,
           2,
           0,
-          30
+          31
         ],
         "web_offset_heatset": [
           5,
           0,
           2,
           0,
-          30
+          31
         ],
         "newsprint": [
           5,
           0,
           2,
           0,
-          30
+          31
         ],
         "digital_printing": [
           4,
           0,
           2,
           0,
-          31
+          32
         ],
         "large_format": [
           4,
           0,
           2,
           0,
-          31
+          32
         ],
         "pdfx_1a": [
           9,
           5,
           2,
           0,
-          21
+          22
         ],
         "pdfx_3": [
           9,
           5,
           2,
           0,
-          21
+          22
         ],
         "pdfx_4": [
           7,
           5,
           2,
           0,
-          23
+          24
         ],
         "office_print": [
           3,
           0,
           0,
           0,
-          34
+          35
         ]
       }
     },
@@ -706,6 +712,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -718,63 +725,63 @@
           3,
           1,
           0,
-          26
+          27
         ],
         "web_offset_heatset": [
           7,
           3,
           1,
           0,
-          26
+          27
         ],
         "newsprint": [
           7,
           3,
           1,
           0,
-          26
+          27
         ],
         "digital_printing": [
           6,
           1,
           3,
           0,
-          27
+          28
         ],
         "large_format": [
           6,
           1,
           3,
           0,
-          27
+          28
         ],
         "pdfx_1a": [
           12,
           8,
           1,
           0,
-          16
+          17
         ],
         "pdfx_3": [
           11,
           8,
           1,
           0,
-          17
+          18
         ],
         "pdfx_4": [
           8,
           8,
           1,
           0,
-          20
+          21
         ],
         "office_print": [
           3,
           0,
           1,
           0,
-          33
+          34
         ]
       }
     },
@@ -817,6 +824,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -829,63 +837,63 @@
           0,
           1,
           0,
-          27
+          28
         ],
         "web_offset_heatset": [
           9,
           0,
           1,
           0,
-          27
+          28
         ],
         "newsprint": [
           9,
           0,
           1,
           0,
-          27
+          28
         ],
         "digital_printing": [
           8,
           0,
           1,
           0,
-          28
+          29
         ],
         "large_format": [
           8,
           0,
           1,
           0,
-          28
+          29
         ],
         "pdfx_1a": [
           13,
           5,
           1,
           0,
-          18
+          19
         ],
         "pdfx_3": [
           13,
           5,
           1,
           0,
-          18
+          19
         ],
         "pdfx_4": [
           11,
           5,
           1,
           0,
-          20
+          21
         ],
         "office_print": [
           5,
           0,
           0,
           0,
-          32
+          33
         ]
       }
     },
@@ -924,6 +932,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -936,63 +945,63 @@
           0,
           1,
           0,
-          30
+          31
         ],
         "web_offset_heatset": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "newsprint": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "digital_printing": [
           5,
           0,
           1,
           0,
-          31
+          32
         ],
         "large_format": [
           5,
           0,
           1,
           0,
-          31
+          32
         ],
         "pdfx_1a": [
           10,
           5,
           1,
           0,
-          21
+          22
         ],
         "pdfx_3": [
           10,
           5,
           1,
           0,
-          21
+          22
         ],
         "pdfx_4": [
           8,
           5,
           1,
           0,
-          23
+          24
         ],
         "office_print": [
           3,
           0,
           0,
           0,
-          34
+          35
         ]
       }
     },
@@ -1031,6 +1040,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -1043,63 +1053,63 @@
           0,
           1,
           0,
-          29
+          30
         ],
         "web_offset_heatset": [
           7,
           0,
           1,
           0,
-          29
+          30
         ],
         "newsprint": [
           7,
           0,
           1,
           0,
-          29
+          30
         ],
         "digital_printing": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "large_format": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "pdfx_1a": [
           13,
           3,
           1,
           0,
-          20
+          21
         ],
         "pdfx_3": [
           13,
           3,
           1,
           0,
-          20
+          21
         ],
         "pdfx_4": [
           11,
           3,
           1,
           0,
-          22
+          23
         ],
         "office_print": [
           4,
           0,
           0,
           0,
-          33
+          34
         ]
       }
     },
@@ -1138,6 +1148,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -1150,63 +1161,63 @@
           3,
           1,
           0,
-          26
+          27
         ],
         "web_offset_heatset": [
           7,
           3,
           1,
           0,
-          26
+          27
         ],
         "newsprint": [
           7,
           3,
           1,
           0,
-          26
+          27
         ],
         "digital_printing": [
           6,
           1,
           3,
           0,
-          27
+          28
         ],
         "large_format": [
           7,
           0,
           3,
           0,
-          27
+          28
         ],
         "pdfx_1a": [
           12,
           8,
           1,
           0,
-          16
+          17
         ],
         "pdfx_3": [
           11,
           8,
           1,
           0,
-          17
+          18
         ],
         "pdfx_4": [
           8,
           8,
           1,
           0,
-          20
+          21
         ],
         "office_print": [
           4,
           0,
           0,
           0,
-          33
+          34
         ]
       }
     },
@@ -1245,6 +1256,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -1257,63 +1269,63 @@
           0,
           1,
           0,
-          28
+          29
         ],
         "web_offset_heatset": [
           8,
           0,
           1,
           0,
-          28
+          29
         ],
         "newsprint": [
           7,
           0,
           2,
           0,
-          28
+          29
         ],
         "digital_printing": [
           6,
           1,
           1,
           0,
-          29
+          30
         ],
         "large_format": [
           7,
           0,
           1,
           0,
-          29
+          30
         ],
         "pdfx_1a": [
           12,
           5,
           1,
           0,
-          19
+          20
         ],
         "pdfx_3": [
           11,
           5,
           1,
           0,
-          20
+          21
         ],
         "pdfx_4": [
           9,
           5,
           1,
           0,
-          22
+          23
         ],
         "office_print": [
           3,
           0,
           0,
           0,
-          34
+          35
         ]
       }
     },
@@ -1352,6 +1364,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -1364,63 +1377,63 @@
           0,
           1,
           0,
-          30
+          31
         ],
         "web_offset_heatset": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "newsprint": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "digital_printing": [
           5,
           0,
           1,
           0,
-          31
+          32
         ],
         "large_format": [
           5,
           0,
           1,
           0,
-          31
+          32
         ],
         "pdfx_1a": [
           10,
           5,
           1,
           0,
-          21
+          22
         ],
         "pdfx_3": [
           10,
           5,
           1,
           0,
-          21
+          22
         ],
         "pdfx_4": [
           8,
           5,
           1,
           0,
-          23
+          24
         ],
         "office_print": [
           3,
           0,
           0,
           0,
-          34
+          35
         ]
       }
     },
@@ -1459,6 +1472,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -1471,63 +1485,63 @@
           0,
           1,
           0,
-          30
+          31
         ],
         "web_offset_heatset": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "newsprint": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "digital_printing": [
           5,
           0,
           1,
           0,
-          31
+          32
         ],
         "large_format": [
           5,
           0,
           1,
           0,
-          31
+          32
         ],
         "pdfx_1a": [
           9,
           6,
           1,
           0,
-          21
+          22
         ],
         "pdfx_3": [
           9,
           6,
           1,
           0,
-          21
+          22
         ],
         "pdfx_4": [
           7,
           6,
           1,
           0,
-          23
+          24
         ],
         "office_print": [
           3,
           0,
           0,
           0,
-          34
+          35
         ]
       }
     },
@@ -1566,6 +1580,7 @@
         "live_transparency": "warn",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -1578,63 +1593,63 @@
           1,
           2,
           0,
-          27
+          28
         ],
         "web_offset_heatset": [
           7,
           1,
           2,
           0,
-          27
+          28
         ],
         "newsprint": [
           7,
           1,
           2,
           0,
-          27
+          28
         ],
         "digital_printing": [
           7,
           1,
           1,
           0,
-          28
+          29
         ],
         "large_format": [
           7,
           1,
           1,
           0,
-          28
+          29
         ],
         "pdfx_1a": [
           11,
           7,
           1,
           0,
-          18
+          19
         ],
         "pdfx_3": [
           11,
           7,
           1,
           0,
-          18
+          19
         ],
         "pdfx_4": [
           10,
           6,
           1,
           0,
-          20
+          21
         ],
         "office_print": [
           4,
           1,
           0,
           0,
-          32
+          33
         ]
       }
     },
@@ -1673,6 +1688,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -1685,63 +1701,63 @@
           0,
           1,
           0,
-          29
+          30
         ],
         "web_offset_heatset": [
           7,
           0,
           1,
           0,
-          29
+          30
         ],
         "newsprint": [
           7,
           0,
           1,
           0,
-          29
+          30
         ],
         "digital_printing": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "large_format": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "pdfx_1a": [
           11,
           5,
           1,
           0,
-          20
+          21
         ],
         "pdfx_3": [
           11,
           5,
           1,
           0,
-          20
+          21
         ],
         "pdfx_4": [
           9,
           5,
           1,
           0,
-          22
+          23
         ],
         "office_print": [
           4,
           0,
           0,
           0,
-          33
+          34
         ]
       }
     },
@@ -1780,6 +1796,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -1792,63 +1809,63 @@
           1,
           1,
           0,
-          27
+          28
         ],
         "web_offset_heatset": [
           8,
           1,
           1,
           0,
-          27
+          28
         ],
         "newsprint": [
           8,
           1,
           1,
           0,
-          27
+          28
         ],
         "digital_printing": [
           7,
           1,
           1,
           0,
-          28
+          29
         ],
         "large_format": [
           7,
           1,
           1,
           0,
-          28
+          29
         ],
         "pdfx_1a": [
           12,
           6,
           1,
           0,
-          18
+          19
         ],
         "pdfx_3": [
           12,
           6,
           1,
           0,
-          18
+          19
         ],
         "pdfx_4": [
           10,
           6,
           1,
           0,
-          20
+          21
         ],
         "office_print": [
           4,
           1,
           0,
           0,
-          32
+          33
         ]
       }
     },
@@ -1887,6 +1904,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -1899,63 +1917,63 @@
           1,
           1,
           0,
-          27
+          28
         ],
         "web_offset_heatset": [
           8,
           1,
           1,
           0,
-          27
+          28
         ],
         "newsprint": [
           8,
           1,
           1,
           0,
-          27
+          28
         ],
         "digital_printing": [
           7,
           1,
           1,
           0,
-          28
+          29
         ],
         "large_format": [
           7,
           1,
           1,
           0,
-          28
+          29
         ],
         "pdfx_1a": [
           12,
           6,
           1,
           0,
-          18
+          19
         ],
         "pdfx_3": [
           12,
           6,
           1,
           0,
-          18
+          19
         ],
         "pdfx_4": [
           10,
           6,
           1,
           0,
-          20
+          21
         ],
         "office_print": [
           4,
           1,
           0,
           0,
-          32
+          33
         ]
       }
     },
@@ -1994,6 +2012,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -2006,63 +2025,63 @@
           1,
           1,
           0,
-          29
+          30
         ],
         "web_offset_heatset": [
           6,
           1,
           1,
           0,
-          29
+          30
         ],
         "newsprint": [
           6,
           1,
           1,
           0,
-          29
+          30
         ],
         "digital_printing": [
           5,
           1,
           1,
           0,
-          30
+          31
         ],
         "large_format": [
           5,
           1,
           1,
           0,
-          30
+          31
         ],
         "pdfx_1a": [
           8,
           8,
           1,
           0,
-          20
+          21
         ],
         "pdfx_3": [
           8,
           8,
           1,
           0,
-          20
+          21
         ],
         "pdfx_4": [
           6,
           8,
           1,
           0,
-          22
+          23
         ],
         "office_print": [
           3,
           1,
           0,
           0,
-          33
+          34
         ]
       }
     },
@@ -2101,6 +2120,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -2113,63 +2133,63 @@
           0,
           1,
           0,
-          29
+          30
         ],
         "web_offset_heatset": [
           7,
           0,
           1,
           0,
-          29
+          30
         ],
         "newsprint": [
           7,
           0,
           1,
           0,
-          29
+          30
         ],
         "digital_printing": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "large_format": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "pdfx_1a": [
           13,
           3,
           1,
           0,
-          20
+          21
         ],
         "pdfx_3": [
           13,
           3,
           1,
           0,
-          20
+          21
         ],
         "pdfx_4": [
           11,
           3,
           1,
           0,
-          22
+          23
         ],
         "office_print": [
           4,
           0,
           0,
           0,
-          33
+          34
         ]
       }
     },
@@ -2208,6 +2228,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -2220,63 +2241,63 @@
           0,
           1,
           0,
-          29
+          30
         ],
         "web_offset_heatset": [
           7,
           0,
           1,
           0,
-          29
+          30
         ],
         "newsprint": [
           7,
           0,
           1,
           0,
-          29
+          30
         ],
         "digital_printing": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "large_format": [
           6,
           0,
           1,
           0,
-          30
+          31
         ],
         "pdfx_1a": [
           11,
           5,
           1,
           0,
-          20
+          21
         ],
         "pdfx_3": [
           11,
           5,
           1,
           0,
-          20
+          21
         ],
         "pdfx_4": [
           9,
           5,
           1,
           0,
-          22
+          23
         ],
         "office_print": [
           4,
           0,
           0,
           0,
-          33
+          34
         ]
       }
     },
@@ -2315,6 +2336,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -2327,63 +2349,63 @@
           2,
           1,
           0,
-          26
+          27
         ],
         "web_offset_heatset": [
           8,
           2,
           1,
           0,
-          26
+          27
         ],
         "newsprint": [
           8,
           2,
           1,
           0,
-          26
+          27
         ],
         "digital_printing": [
           7,
           0,
           3,
           0,
-          27
+          28
         ],
         "large_format": [
           6,
           0,
           4,
           0,
-          27
+          28
         ],
         "pdfx_1a": [
           13,
           7,
           1,
           0,
-          16
+          17
         ],
         "pdfx_3": [
           12,
           7,
           1,
           0,
-          17
+          18
         ],
         "pdfx_4": [
           9,
           7,
           1,
           0,
-          20
+          21
         ],
         "office_print": [
           4,
           0,
           0,
           0,
-          33
+          34
         ]
       }
     },
@@ -2422,6 +2444,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -2434,63 +2457,63 @@
           3,
           1,
           0,
-          25
+          26
         ],
         "web_offset_heatset": [
           8,
           3,
           1,
           0,
-          25
+          26
         ],
         "newsprint": [
           8,
           3,
           1,
           0,
-          25
+          26
         ],
         "digital_printing": [
           7,
           1,
           3,
           0,
-          26
+          27
         ],
         "large_format": [
           6,
           1,
           4,
           0,
-          26
+          27
         ],
         "pdfx_1a": [
           12,
           9,
           1,
           0,
-          15
+          16
         ],
         "pdfx_3": [
           11,
           9,
           1,
           0,
-          16
+          17
         ],
         "pdfx_4": [
           8,
           9,
           1,
           0,
-          19
+          20
         ],
         "office_print": [
           4,
           1,
           0,
           0,
-          32
+          33
         ]
       }
     },
@@ -2529,6 +2552,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -2541,63 +2565,63 @@
           2,
           1,
           0,
-          26
+          27
         ],
         "web_offset_heatset": [
           8,
           2,
           1,
           0,
-          26
+          27
         ],
         "newsprint": [
           8,
           2,
           1,
           0,
-          26
+          27
         ],
         "digital_printing": [
           7,
           0,
           3,
           0,
-          27
+          28
         ],
         "large_format": [
           6,
           0,
           4,
           0,
-          27
+          28
         ],
         "pdfx_1a": [
           13,
           7,
           1,
           0,
-          16
+          17
         ],
         "pdfx_3": [
           12,
           7,
           1,
           0,
-          17
+          18
         ],
         "pdfx_4": [
           9,
           7,
           1,
           0,
-          20
+          21
         ],
         "office_print": [
           4,
           0,
           0,
           0,
-          33
+          34
         ]
       }
     },
@@ -2636,6 +2660,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -2648,63 +2673,63 @@
           2,
           1,
           0,
-          26
+          27
         ],
         "web_offset_heatset": [
           8,
           2,
           1,
           0,
-          26
+          27
         ],
         "newsprint": [
           8,
           2,
           1,
           0,
-          26
+          27
         ],
         "digital_printing": [
           7,
           0,
           3,
           0,
-          27
+          28
         ],
         "large_format": [
           6,
           0,
           4,
           0,
-          27
+          28
         ],
         "pdfx_1a": [
           13,
           7,
           1,
           0,
-          16
+          17
         ],
         "pdfx_3": [
           12,
           7,
           1,
           0,
-          17
+          18
         ],
         "pdfx_4": [
           9,
           7,
           1,
           0,
-          20
+          21
         ],
         "office_print": [
           4,
           0,
           0,
           0,
-          33
+          34
         ]
       }
     },
@@ -2743,6 +2768,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -2755,63 +2781,63 @@
           2,
           1,
           0,
-          26
+          27
         ],
         "web_offset_heatset": [
           8,
           2,
           1,
           0,
-          26
+          27
         ],
         "newsprint": [
           8,
           2,
           1,
           0,
-          26
+          27
         ],
         "digital_printing": [
           7,
           0,
           3,
           0,
-          27
+          28
         ],
         "large_format": [
           6,
           0,
           4,
           0,
-          27
+          28
         ],
         "pdfx_1a": [
           13,
           7,
           1,
           0,
-          16
+          17
         ],
         "pdfx_3": [
           12,
           7,
           1,
           0,
-          17
+          18
         ],
         "pdfx_4": [
           9,
           7,
           1,
           0,
-          20
+          21
         ],
         "office_print": [
           4,
           0,
           0,
           0,
-          33
+          34
         ]
       }
     },
@@ -2850,6 +2876,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -2862,63 +2889,63 @@
           2,
           1,
           0,
-          26
+          27
         ],
         "web_offset_heatset": [
           8,
           2,
           1,
           0,
-          26
+          27
         ],
         "newsprint": [
           8,
           2,
           1,
           0,
-          26
+          27
         ],
         "digital_printing": [
           7,
           0,
           3,
           0,
-          27
+          28
         ],
         "large_format": [
           6,
           0,
           4,
           0,
-          27
+          28
         ],
         "pdfx_1a": [
           13,
           7,
           1,
           0,
-          16
+          17
         ],
         "pdfx_3": [
           12,
           7,
           1,
           0,
-          17
+          18
         ],
         "pdfx_4": [
           9,
           7,
           1,
           0,
-          20
+          21
         ],
         "office_print": [
           4,
           0,
           0,
           0,
-          33
+          34
         ]
       }
     },
@@ -2957,6 +2984,7 @@
         "live_transparency": "pass",
         "hairlines_absent": "pass",
         "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
         "printing_annotations": "pass",
         "interactive_form": "not_applicable",
         "title_present": "not_applicable",
@@ -2969,63 +2997,63 @@
           3,
           1,
           0,
-          25
+          26
         ],
         "web_offset_heatset": [
           8,
           3,
           1,
           0,
-          25
+          26
         ],
         "newsprint": [
           8,
           3,
           1,
           0,
-          25
+          26
         ],
         "digital_printing": [
           7,
           1,
           3,
           0,
-          26
+          27
         ],
         "large_format": [
           6,
           1,
           4,
           0,
-          26
+          27
         ],
         "pdfx_1a": [
           13,
           8,
           1,
           0,
-          15
+          16
         ],
         "pdfx_3": [
           12,
           8,
           1,
           0,
-          16
+          17
         ],
         "pdfx_4": [
           9,
           8,
           1,
           0,
-          19
+          20
         ],
         "office_print": [
           4,
           1,
           0,
           0,
-          32
+          33
         ]
       }
     }

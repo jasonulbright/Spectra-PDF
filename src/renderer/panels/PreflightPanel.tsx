@@ -65,7 +65,7 @@ import {
   type Verdict,
 } from '../lib/preflight-report';
 
-// The print-production preflight surface: 37 checks measured against ONE
+// The print-production preflight surface: 38 checks measured against ONE
 // profile, as a categorized tree, each finding carrying a jump to the thing it
 // names and each row carrying the rule it was measured against.
 //
@@ -127,6 +127,7 @@ const OWNING_OP: Record<string, string> = {
   live_transparency: 'flattener',
   hairlines_absent: 'hairlines',
   optional_content: 'layers',
+  processing_steps: 'layers',
   printing_annotations: 'comments',
   interactive_form: 'forms',
   document_javascript: 'document_js',
