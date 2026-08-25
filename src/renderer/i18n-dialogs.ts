@@ -95,8 +95,10 @@ export const DIALOG_STRINGS = {
   'dialog.submitConsent.formatHtml': 'HTML form post',
   'dialog.submitConsent.formatPdf': 'the whole PDF document',
   'dialog.submitConsent.payloadLabel': 'What will be sent',
-  'dialog.submitConsent.documentSummary':
-    'The whole document, {{bytes}} bytes, carrying {{count}} field value(s). A PDF is not readable as text, so it is described rather than shown.',
+  'dialog.submitConsent.documentSummary_one':
+    'The whole document, {{bytes}} bytes, carrying {{count}} field value. A PDF is not readable as text, so it is described rather than shown.',
+  'dialog.submitConsent.documentSummary_other':
+    'The whole document, {{bytes}} bytes, carrying {{count}} field values. A PDF is not readable as text, so it is described rather than shown.',
   'dialog.submitConsent.consequence':
     'Only these bytes are sent. No cookies, sign-in or stored credentials are attached, and this answer is not remembered for this address.',
   'dialog.submitConsent.submit': 'Submit',

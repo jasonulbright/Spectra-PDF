@@ -1728,7 +1728,7 @@
   "dialog.submitConsent.cancel": "취소",
   "dialog.submitConsent.consequence": "이 바이트만 전송됩니다. 쿠키, 로그인 상태, 저장된 자격 증명은 함께 보내지 않으며, 이 답변을 이 주소에 대해 기억하지도 않습니다.",
   "dialog.submitConsent.destinationLabel": "보내는 곳",
-  "dialog.submitConsent.documentSummary": "문서 전체, {{bytes}}바이트이며 필드 값 {{count}}개를 담고 있습니다. PDF는 텍스트로 읽을 수 없어 표시하는 대신 설명합니다.",
+  "dialog.submitConsent.documentSummary_other": "문서 전체, {{bytes}}바이트이며 필드 값 {{count}}개를 담고 있습니다. PDF는 텍스트로 읽을 수 없어 표시하는 대신 설명합니다.",
   "dialog.submitConsent.format": "형식: {{format}}",
   "dialog.submitConsent.formatFdf": "FDF 양식 데이터",
   "dialog.submitConsent.formatHtml": "HTML 양식 제출",
