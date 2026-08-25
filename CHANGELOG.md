@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.11
+
+*Released 2026-08-25*
+
+### Form submission
+
+- Clicking a form's Submit button can now actually send the submission. Before anything transmits, a consent dialog shows the full destination address and the exact data that will be sent — one explicit click sends, Cancel sends nothing. Only the field values the form's own submit action selects are ever transmitted.
+- Replies are handled safely: returned form data is offered as an import, a returned PDF opens as a document, and anything else is offered as a saved file — nothing received is ever executed.
+- Plain, unencrypted destinations are called out in the dialog; redirects to a different site abort with both addresses named. The app sends no cookies, no sign-in, and no stored credentials, and never remembers an answer.
+- Non-web destinations (such as mailto:) are refused by name, with the built submission file offered for sending yourself.
+- Command-line and automated runs still never transmit — they build the file and state the destination.
+
+### Open from web address
+
+- File ▸ Open from web address downloads a document from a URL you type or paste and opens it like any file. Saving a downloaded document always asks where to save — it never silently overwrites anything.
+- Recent entries from the web reopen the dialog pre-filled rather than silently re-downloading; URLs dragged from a browser do the same.
+- Nothing inside a document triggers a download by itself: links in documents keep opening in your browser, and remote content referenced by a document is never fetched automatically.
+
 ## 1.1.10
 
 *Released 2026-08-25*
