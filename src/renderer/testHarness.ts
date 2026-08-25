@@ -833,6 +833,30 @@ function armAnyFilePicker(path: string | null): void {
 }
 
 /**
+ * The native "save form data" dialog: OS-modal like every other picker, and
+ * the sole entry to the branches that hand a FILE over — a submission built
+ * for a destination this app has no transport for, and a reply routed to the
+ * door that interprets nothing. Answered at `dialog.saveFormDataFile` so the
+ * handler, its copy and its notice all run unchanged.
+ */
+let armedFormDataSave: { path: string | null } | null = null;
+let formDataSaveIntercepted = false;
+
+function armFormDataSaveDialog(path: string | null): void {
+  if (!formDataSaveIntercepted) {
+    const native = dialog.saveFormDataFile;
+    dialog.saveFormDataFile = async (defaultName?: string) => {
+      const armed = armedFormDataSave;
+      if (!armed) return native(defaultName);
+      armedFormDataSave = null;
+      return armed.path;
+    };
+    formDataSaveIntercepted = true;
+  }
+  armedFormDataSave = { path };
+}
+
+/**
  * The native SAVE dialog: OS-modal, so WebDriver cannot answer it, and it is
  * the first step of every "write the result to a new file" action — which is
  * why no Ghostscript-backed conversion had an end-to-end path at all.
@@ -2074,6 +2098,12 @@ export interface TestHarness {
    * import door or the stamp appearance section's logo — with this path, or
    * with `null` for a cancelled one. Consumed by a single pick. */
   answerImagePicker: (path: string | null) => void;
+  /** Answer the next native "save form data" dialog with this path, or with
+   * `null` for a cancelled one. This is the only door to the branches that
+   * hand a built submission or a reply over as a file — the transport-refusal
+   * path and the file route a response takes — and every one of them is
+   * reached only through that native picker. Consumed by a single save. */
+  answerNextFormDataSaveDialog: (path: string | null) => void;
   /**
    * Re-read the colour-profile assent record from disk and re-take the
    * launch decision.
@@ -3587,6 +3617,7 @@ export function installTestHarness(deps: TestHarnessDeps): void {
     gsAnswer: () => gsCapability(),
     answerAnyFilePicker: (path) => armAnyFilePicker(path),
     answerImagePicker: (path) => armImagePicker(path),
+    answerNextFormDataSaveDialog: (path) => armFormDataSaveDialog(path),
     iccAssentRefresh: async () => {
       // Drop the session's cached answer WITHOUT `resetIccAssent` — that one
       // also clears the subscriber set and the dialog opener App registered at
