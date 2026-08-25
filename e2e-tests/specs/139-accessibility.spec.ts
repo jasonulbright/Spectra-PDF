@@ -174,6 +174,11 @@ async function waitForVerdict(id: string, wanted: string[]): Promise<string> {
   return seen;
 }
 
+/** The checker's inventory. It grew 33 → 56 when the uncovered PDF/UA
+ *  techniques were covered — as mechanical checks or as honestly reviewable
+ *  ones — so the number lives in one place and a future move is one edit. */
+const CHECK_COUNT = 56;
+
 describe('the accessibility report', () => {
   let tmp: string;
   let source: string;
@@ -200,11 +205,11 @@ describe('the accessibility report', () => {
     if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('reports the nine failures the document actually has', async () => {
+  it('reports the nine defects the document actually has', async () => {
     const snapshot = (await a11ySnapshot())!;
-    expect(snapshot.checks).toHaveLength(33);
+    expect(snapshot.checks).toHaveLength(CHECK_COUNT);
     // The whole point of the round: the six-check checker called this clean.
-    expect(snapshot.summary.failed).toBeGreaterThanOrEqual(9);
+    expect(snapshot.summary.failed).toBeGreaterThanOrEqual(8);
     for (const id of [
       'lang',
       'title',
@@ -213,13 +218,15 @@ describe('the accessibility report', () => {
       'tagged_form_fields',
       'field_descriptions',
       'figures_alt',
-      'table_headers',
       'heading_nesting',
     ]) {
       expect(failed(snapshot)).toContain(id);
     }
+    // The ninth is a defect the clause states as a should, so it is reported
+    // as one: a table with no header cells warns rather than fails.
+    expect(snapshot.checks.find((c) => c.id === 'table_headers')?.status).toBe('warn');
     // Not-applicable is a state of its own and stays out of the pass tally.
-    expect(snapshot.summary.applicable).toBe(33 - snapshot.summary.not_applicable);
+    expect(snapshot.summary.applicable).toBe(CHECK_COUNT - snapshot.summary.not_applicable);
     expect(
       snapshot.summary.passed +
         snapshot.summary.failed +
@@ -245,12 +252,22 @@ describe('the accessibility report', () => {
 
   it('lists a verdict per check in the tree', async () => {
     const snapshot = (await a11ySnapshot())!;
-    for (const id of ['figures_alt', 'table_headers', 'heading_nesting']) {
+    // `table_headers` is deliberately not in this list. cl. 7.5 splits its two
+    // questions and does not weigh them alike: a table SHOULD carry header
+    // cells, while a TH that is unreachable through Headers/IDs SHALL carry
+    // Scope. This fixture's table has no TH at all, which is short of the
+    // recommendation only — so the row warns, and asserting a failure here
+    // would be asserting a should as a shall.
+    for (const id of ['figures_alt', 'heading_nesting']) {
       const row = await $(`[data-testid="a11y-check-${id}"]`);
       await row.waitForDisplayed({ timeout: 10_000 });
       expect(await row.getAttribute('data-a11y-status')).toBe('fail');
       expect(snapshot.checks.find((c) => c.id === id)?.status).toBe('fail');
     }
+    const tableRow = await $('[data-testid="a11y-check-table_headers"]');
+    await tableRow.waitForDisplayed({ timeout: 10_000 });
+    expect(await tableRow.getAttribute('data-a11y-status')).toBe('warn');
+    expect(snapshot.checks.find((c) => c.id === 'table_headers')?.status).toBe('warn');
   });
 
   it('jump 1 of 3 — a tag path selects that element in the Tags panel', async () => {
@@ -386,7 +403,7 @@ describe('the accessibility report', () => {
       timeoutMsg: 'the stale findings stayed on the page after the document changed',
     });
     // And the report itself came back rather than being left empty.
-    await browser.waitUntil(async () => (await a11ySnapshot())?.checks.length === 33, {
+    await browser.waitUntil(async () => (await a11ySnapshot())?.checks.length === CHECK_COUNT, {
       timeout: 60_000,
       interval: 250,
       timeoutMsg: 'the checker never re-ran on the new bytes',
@@ -428,7 +445,11 @@ describe('the accessibility report', () => {
     expect(await a11yFix('heading_nesting')).toBe('');
     await waitForVerdict('heading_nesting', ['pass']);
 
-    expect((await row('table_headers')).status).toBe('fail');
+    // A warning, not a failure — the missing header cells are cl. 7.5's
+    // should. The repair is offered on it all the same, and the round trip
+    // this case exists for is unchanged: the row is dirty, the computed fix
+    // runs, the row comes back clean.
+    expect((await row('table_headers')).status).toBe('warn');
     expect(await a11yFix('table_headers')).toBe('');
     await waitForVerdict('table_headers', ['pass']);
   });
