@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   WEB_URL_REFUSAL_KEYS,
   downloadStem,
+  isPrivateHost,
   readWebUrl,
   saveRouteFor,
 } from '../src/renderer/lib/web-open';
@@ -70,6 +71,42 @@ describe('readWebUrl', () => {
       const read = readWebUrl(raw);
       expect(read.ok).toBe(false);
       if (!read.ok) expect(WEB_URL_REFUSAL_KEYS[read.reason]).toBeTruthy();
+    }
+  });
+});
+
+describe('isPrivateHost', () => {
+  it('flags literal loopback, RFC1918, and link-local addresses', () => {
+    for (const h of [
+      '127.0.0.1',
+      '10.1.2.3',
+      '172.16.0.1',
+      '172.31.255.255',
+      '192.168.1.5',
+      '169.254.169.254', // cloud metadata
+      '0.0.0.0',
+      '[::1]',
+      '::1',
+      '[fe80::1]',
+      'fc00::1',
+      'fd12::1',
+      '192.168.1.5:8080',
+    ]) {
+      expect(isPrivateHost(h)).toBe(true);
+    }
+  });
+
+  it('does not flag public literals or hostnames it cannot resolve', () => {
+    for (const h of [
+      '8.8.8.8',
+      '93.184.216.34',
+      '172.32.0.1', // just past 172.16/12
+      'example.com',
+      'localhost', // a name, not a literal — Rust resolves and decides
+      'intranet.corp',
+      '2606:4700::1111',
+    ]) {
+      expect(isPrivateHost(h)).toBe(false);
     }
   });
 });

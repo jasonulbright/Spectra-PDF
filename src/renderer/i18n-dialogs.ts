@@ -90,6 +90,10 @@ export const DIALOG_STRINGS = {
   'dialog.submitConsent.plainHttp':
     'This address is plain http, so the data below travels unencrypted and can be read and altered along the way.',
   'dialog.submitConsent.format': 'Format: {{format}}',
+  'dialog.submitConsent.method': 'How: {{method}}',
+  'dialog.submitConsent.methodGet':
+    'GET — the field values are sent on the web address itself, visible in the address and in server logs.',
+  'dialog.submitConsent.methodPost': 'POST — the data below is sent in the request body.',
   'dialog.submitConsent.formatFdf': 'FDF form data',
   'dialog.submitConsent.formatXfdf': 'XFDF form data',
   'dialog.submitConsent.formatHtml': 'HTML form post',
@@ -444,6 +448,8 @@ export const DIALOG_STRINGS = {
   'dialog.openWeb.willFetch': 'Will download from:\n{{url}}',
   'dialog.openWeb.insecure':
     'This address is plain http, so what is sent and received travels unprotected and can be read or changed on the way. Only the address you typed is requested — nothing else is sent.',
+  'dialog.openWeb.privateWarning':
+    'This address is on your own computer or private network. Opening it is allowed because you typed it — but a document should never send you here on its own, and this app will not follow a redirect that lands here.',
   'dialog.openWeb.posture':
     'The file is downloaded to a temporary copy and opened like any other document. Nothing in it is executed, and no address inside a document is ever fetched by itself.',
   'dialog.openWeb.saveNote':

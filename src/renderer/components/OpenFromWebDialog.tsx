@@ -6,6 +6,7 @@ import { tChrome } from '../i18n';
 import {
   WEB_URL_REFUSAL_KEYS,
   downloadStem,
+  isPrivateHost,
   readWebUrl,
 } from '../lib/web-open';
 
@@ -76,6 +77,11 @@ export function OpenFromWebDialog({
         url: read.url,
         method: 'get',
         fileName: downloadStem(read.url),
+        // A user-typed address may legitimately name a host on the LAN, so a
+        // private first hop is fetched (with the warning shown above) rather
+        // than refused. Rust still refuses a redirect that STARTS public and
+        // lands private — that hop was never seen.
+        refusePrivate: false,
       });
       if (runRef.current.abandoned) return;
       if (response.status < 200 || response.status >= 300) {
@@ -195,6 +201,12 @@ export function OpenFromWebDialog({
           {verdict.ok && verdict.insecure && (
             <p className="text-xs text-amber-400" data-testid="open-web-insecure">
               {tChrome('dialog.openWeb.insecure')}
+            </p>
+          )}
+
+          {verdict.ok && isPrivateHost(verdict.host) && (
+            <p className="text-xs text-amber-400" data-testid="open-web-private">
+              {tChrome('dialog.openWeb.privateWarning')}
             </p>
           )}
 
