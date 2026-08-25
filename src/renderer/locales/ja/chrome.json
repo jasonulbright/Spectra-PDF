@@ -1728,7 +1728,7 @@
   "dialog.submitConsent.cancel": "キャンセル",
   "dialog.submitConsent.consequence": "送信されるのはこのバイト列だけです。Cookie、サインイン状態、保存された資格情報は一切添付されず、この回答がこのアドレス用に記憶されることもありません。",
   "dialog.submitConsent.destinationLabel": "送信先",
-  "dialog.submitConsent.documentSummary": "ドキュメント全体（{{bytes}} バイト）で、フィールド値を {{count}} 件含みます。PDF はテキストとして読めないため、表示ではなく説明で示しています。",
+  "dialog.submitConsent.documentSummary_other": "ドキュメント全体（{{bytes}} バイト）で、フィールド値を {{count}} 件含みます。PDF はテキストとして読めないため、表示ではなく説明で示しています。",
   "dialog.submitConsent.format": "形式：{{format}}",
   "dialog.submitConsent.formatFdf": "FDF フォームデータ",
   "dialog.submitConsent.formatHtml": "HTML フォーム送信",
