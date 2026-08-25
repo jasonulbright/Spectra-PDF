@@ -927,12 +927,22 @@ function AppContent(): React.ReactElement {
       // The origin is registered here on the open that downloaded it and
       // recovered here, by path, on any later open of that temp copy — so
       // `saveRouteFor` still routes Save to Save As in the window it moved to.
+      //
+      // Both the register and the recover are BEST-EFFORT: this map is only how
+      // a HAND-OFF relearns the origin. The window that downloaded the file
+      // already carries it in `opts.webOrigin` and threads it straight into
+      // OPEN_FILE below — so a failed IPC here can never keep a same-window
+      // web-open from routing Save to Save As, nor abort the open itself.
       const canonicalSet = [...new Set(canonical)];
       if (opts?.webOrigin) {
         const origin = opts.webOrigin;
-        await Promise.all(canonicalSet.map((p) => app.registerWebOrigin(p, origin)));
+        await Promise.all(
+          canonicalSet.map((p) => app.registerWebOrigin(p, origin).catch(() => {})),
+        );
       }
-      const recoveredOrigins = opts?.webOrigin ? null : await app.webOriginsFor(canonicalSet);
+      const recoveredOrigins = opts?.webOrigin
+        ? null
+        : await app.webOriginsFor(canonicalSet).catch(() => ({}) as Record<string, string>);
       const originFor = (filePath: string): string | undefined =>
         opts?.webOrigin ?? recoveredOrigins?.[filePath];
       //
