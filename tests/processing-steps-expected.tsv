@@ -1,0 +1,86 @@
+# GWG Processing Steps Test Suite v1.0 — the expected-results table.
+#
+# INTERNAL REGRESSION EVIDENCE ONLY. Passing the gate that reads this table is
+# not a Ghent Workgroup certification, and it is not an ISO 19593-1
+# conformance claim: that standard is not held in this repository at all (the
+# gap is recorded in src/engine/processing_steps.py, which names it). Nothing
+# derived from this file may be worded as certified or as conforming.
+#
+# The corpus is gitignored (scripts/fetch-processing-steps-suite.py); this
+# table, that script and the manifest are what the repository carries. Every
+# `verdict` cell is PARAPHRASED from the suite's own documentation — which
+# states the rule plainly: a patch whose name ends `G` must be accepted, one
+# ending `E` must be rejected, one ending `W` is compliant but carries a setup
+# that may be undesirable. Nothing here is a reading of what this product
+# happens to produce.
+#
+# The suite's verdict is a PREFLIGHT verdict about the whole specification. A
+# large part of that specification is not decidable here: the rules about
+# z-order, colorant reuse, transparency, knock-out, image objects and
+# off-bleed geometry each need the standard's own criteria, and guessing them
+# would fail conforming files. Those rows are `not_applicable`: excluded from
+# the verdict-agreement tally, never silently green, each carrying the rule
+# the suite tests there. Their `steps` and `ps_inks` expectations still gate —
+# what a document DECLARES is decidable whatever the rule about it says.
+#
+# The suite's documentation states 39 patches; the archive holds 40. It also
+# documents a patch PS-012-03E (a custom step with no second class name) that
+# the archive does not contain, so there is no row for it. Both are recorded
+# here rather than reconciled: a row for an absent file would make the corpus
+# permanently incomplete, and a corpus file with no row is a failure by
+# design.
+#
+# columns
+#   id        the patch id; its last letter is the suite's verdict class
+#   patch     the file name under Patches/
+#   verdict   good | error | warning, per the rule above
+#   status    applicable | not_applicable (see above)
+#   steps     what list_layers must report, as `Group/Type` (or `Group` for a
+#             group that declares no type), in /OCGs order, `;`-separated
+#   preflight the status the `processing_steps` check must report under the
+#             baseline profile
+#   ps_inks   the spot colorants list_inks must exclude as painted ONLY by
+#             processing-step content, `,`-separated
+#   notes     for a not_applicable row, the rule the suite tests there
+#
+id	patch	verdict	status	steps	preflight	ps_inks	notes
+PS-001-01G	Patch PS-001-01G.pdf	good	applicable	Structural/Cutting;Structural/Punching	pass	Structural,Structural - Punching	
+PS-001-02G	Patch PS-001-02G.pdf	good	applicable	Structural/Punching;Legend	pass	Structural - Punching	
+PS-001-03G	Patch PS-001-03G.pdf	good	applicable	Structural/Punching;Structural/Cutting	pass	Structural	
+PS-001-04E	Patch PS-001-04E.pdf	error	not_applicable	Structural/Punching;Structural/Cutting	pass	Structural	z-order of printing content over processing-step objects
+PS-002-01E	Patch PS-002-01E.pdf	error	not_applicable	Structural/Cutting;Structural/Punching	pass	Structural	processing-step objects use colorants also used by the printing content
+PS-002-02G	Patch PS-002-02G.pdf	good	applicable	Structural/Punching;Legend	pass	Structural - Punching	
+PS-003-01W	Patch PS-003-01W.pdf	warning	applicable	Structural/Cutting;Structural/Punching	pass	Structural,Structural2	
+PS-004-01E	Patch PS-004-01E.pdf	error	not_applicable	Structural/Cutting;Structural/Punching	pass	Structural	processing-step objects are knock-out
+PS-005-01E	Patch PS-005-01E.pdf	error	not_applicable	Structural/Cutting;Structural/Punching	pass	Structural	processing-step objects use transparency
+PS-005-02E	Patch PS-005-02E.pdf	error	not_applicable	Structural/Cutting;Structural/Punching	pass	Structural	processing-step objects use transparency
+PS-006-01E	Patch PS-006-01E.pdf	error	not_applicable	Structural/Cutting;Structural/Punching	pass	Structural	a step that should carry only stroked objects carries others
+PS-006-02G	Patch PS-006-02G.pdf	good	applicable	Structural/Cutting;Structural/Punching	pass	Structural	
+PS-006-03W	Patch PS-006-03W.pdf	warning	applicable	Structural/Cutting;Structural/Punching	pass	Structural,Structural - Punching	
+PS-006-04G	Patch PS-006-04G.pdf	good	applicable	White;Structural/Punching	pass	Structural,Structural - Punching	
+PS-006-05W	Patch PS-006-05W.pdf	warning	applicable	Structural/Cutting;GWGS_Test Suite Custom Group 1;GWGS_Test Suite Custom Group 2	pass	Structural,Structural - Punching	
+PS-007-01G	Patch PS-007-01G.pdf	good	applicable	Structural/Gluing;Structural/Punching	pass	Structural	
+PS-007-02G	Patch PS-007-02G.pdf	good	applicable	White;Structural/Punching	pass	Structural,Structural - Punching	
+PS-007-03W	Patch PS-007-03W.pdf	warning	applicable	Structural/Gluing;Structural/Punching	pass	Structural,Structural - Punching	
+PS-007-04G	Patch PS-007-04G.pdf	good	applicable	Structural/Gluing;Structural/Punching	pass	Structural	
+PS-008-01E	Patch PS-008-01E.pdf	error	not_applicable	Structural/Cutting;Structural/Punching	pass	Structural	processing-step OCG contains image objects
+PS-009-01E	Patch PS-009-01E.pdf	error	not_applicable	Structural/Cutting;Structural/Bleed;Structural/Punching;Legend	pass	Structural,Structural - Punching	Legend objects overlap the product surface (Structural - Bleed)
+PS-009-02G	Patch PS-009-02G.pdf	good	applicable	Structural/Cutting;Structural/Bleed;Structural/Punching;Legend	pass	Structural,Structural - Punching	
+PS-009-03E	Patch PS-009-03E.pdf	error	not_applicable	Structural/Cutting;Structural/Punching;Legend	pass	Structural,Structural - Punching	Legend objects overlap the product surface (Structural - Cutting)
+PS-009-04G	Patch PS-009-04G.pdf	good	applicable	Structural/Cutting;Structural/Punching;Legend	pass	Structural,Structural - Punching	
+PS-009-05E	Patch PS-009-05E.pdf	error	not_applicable	Structural/Punching;Legend	pass	Structural - Punching	Legend objects overlap the product surface (BleedBox)
+PS-009-06G	Patch PS-009-06G.pdf	good	applicable	Structural/Punching;Legend	pass	Structural - Punching	
+PS-009-07E	Patch PS-009-07E.pdf	error	not_applicable	Structural/Punching;Legend	pass	Structural - Punching	Legend objects overlap the product surface (TrimBox)
+PS-009-08G	Patch PS-009-08G.pdf	good	applicable	Structural/Punching;Legend	pass	Structural - Punching	
+PS-009-09E	Patch PS-009-09E.pdf	error	not_applicable	Structural/Punching;Legend	pass	Structural - Punching	Legend objects overlap the product surface (ArtBox)
+PS-009-10G	Patch PS-009-10G.pdf	good	applicable	Structural/Punching;Legend	pass	Structural - Punching	
+PS-009-11E	Patch PS-009-11E.pdf	error	not_applicable	Structural/Punching;Legend	pass	Structural - Punching	Legend objects overlap the product surface (CropBox)
+PS-009-12G	Patch PS-009-12G.pdf	good	applicable	Structural/Punching;Legend	pass	Structural - Punching	
+PS-009-13E	Patch PS-009-13E.pdf	error	not_applicable	Structural/Punching;Legend	pass	Structural - Punching	Legend objects overlap the product surface (CropBox)
+PS-009-14G	Patch PS-009-14G.pdf	good	applicable	Structural/Punching;Legend	pass	Structural - Punching	
+PS-010-01E	Patch PS-010-01E.pdf	error	not_applicable	Structural/Cutting;Structural/Punching	pass	Structural	processing-step objects use process colorants
+PS-011-01E	Patch PS-011-01E.pdf	error	not_applicable	Structural/Cutting;Structural/Punching	pass	Structural	processing-step objects use registration, All or None as colorants
+PS-012-01W	Patch PS-012-01W.pdf	warning	applicable	GWGS_Test Suite Custom Group;Structural/Punching	pass	Structural,Structural - Punching	
+PS-012-02E	Patch PS-012-02E.pdf	error	applicable	White/NotAllowed;Structural/Punching	fail	Structural,Structural - Punching	
+PS-013-01E	Patch PS-013-01E.pdf	error	applicable	Structural/NotAllowed;Structural/Punching	needs_review	Structural,Structural - Punching	
+PS-013-02W	Patch PS-013-02W.pdf	warning	applicable	Structural/GWGS_Test Suite Custom Type;Structural/Punching	pass	Structural,Structural - Punching	

@@ -1,4 +1,4 @@
-"""Preflight — 37 print-production checks across seven categories.
+"""Preflight — 38 print-production checks across seven categories.
 
 A preflight verdict is meaningless without the rule it was measured against,
 so the profile is not a filter over a fixed report: it IS the report's premise.
@@ -42,6 +42,12 @@ import pikepdf
 from pikepdf import Name  # noqa: F401  (re-exported for callers of the walk)
 
 from engine.font_embedding import font_embedded
+from engine.processing_steps import (
+    CUSTOM,
+    MISSING_GROUP,
+    TYPE_ON_UNTYPED_GROUP,
+    UNREGISTERED,
+)
 from engine.preflight_profiles import (
     CATEGORIES,
     CHECK_INVENTORY,
@@ -1309,6 +1315,91 @@ def _check_optional_content(check, reads) -> None:
     _verdict(check, len(layers), findings, none_state=PASS)
 
 
+def _check_processing_steps(check, reads) -> None:
+    """Declared processing steps, and the half of ISO 19593-1 a machine here
+    can actually decide.
+
+    WHAT THIS CHECK REPORTS, AND WHERE IT STOPS. The standard is not held in
+    this repository (`engine/processing_steps.py` records the gap and names
+    the corroborating source), so the check makes no conformance claim. It
+    answers three questions off the document's own declarations:
+
+      * whether the document declares processing steps at all;
+      * whether a declared step is PRINTING — neither hidden in the default
+        configuration nor declared off the print by its usage entry, so the
+        die line or the varnish reaches the device with the artwork. This is
+        the silent-wrongness case that costs a plate, and it is decidable
+        from the file alone. It is reported only where a profile asks for it:
+        the whole GWG corpus leaves its steps printing in this sense and the
+        whole GWG corpus is compliant, so the shipped default asks the
+        question and does not answer it as a defect;
+      * whether a declaration is structurally wrong in a way that needs no
+        vocabulary to see: no group named at all, or a type written on a
+        group that defines none.
+
+    A group or type OUTSIDE the known vocabulary reports `needs_review`, not
+    a failure. The vocabulary here is second-hand and the published
+    reproductions of it disagree on their own length; failing a conforming
+    packaging file over a type this repository has merely never heard of
+    would cost a print run to save a lookup.
+
+    THE CASE THIS CHECK CANNOT SEE, stated so nobody reads its silence as an
+    all-clear: content that IS a die line or a varnish but sits on an
+    ordinary artwork layer with nothing declaring it. There is no declaration
+    to read, and deciding it from geometry — a thin closed path near the trim
+    is a die line, or is a border — needs the standard's own criteria and
+    would guess without them. Undeclared processing-step content is out of
+    scope for a mechanical verdict and is not reported as absent.
+    """
+    steps = reads["processing_steps"]
+    if steps is None:
+        check.status = REVIEW
+        check.findings = [_finding(_page_address(), "read_failed",
+                                   values={"reason": reads["processing_steps_error"]})]
+        return
+
+    if not steps:
+        if check.params["require_steps_declared"]:
+            _verdict(check, 1, [_finding(_page_address(), "processing_steps_absent")])
+        else:
+            check.counted = 0
+            check.findings = []
+            check.status = NA
+            check.data = {"na_reason": "none"}
+        return
+
+    findings: list = []
+    review: list = []
+    for step in steps:
+        label = step["name"] or step["group"]
+        values = {"name": step["name"], "group": step["group"],
+                  "type": step["type"], "index": step["index"]}
+        if check.params["forbid_printing"] and step["printing"]:
+            findings.append(_finding(_object_address(), "processing_step_printing",
+                                     preview=label, values=values))
+        if step["status"] == MISSING_GROUP:
+            findings.append(_finding(_object_address(), "processing_step_no_group",
+                                     preview=label, values=values))
+        elif step["status"] == TYPE_ON_UNTYPED_GROUP:
+            findings.append(_finding(_object_address(),
+                                     "processing_step_type_on_untyped_group",
+                                     preview=label, values=values))
+        elif step["status"] == UNREGISTERED:
+            review.append(_finding(_object_address(), "processing_step_unregistered",
+                                   preview=label, values=values))
+        elif step["status"] == CUSTOM and not check.params["allow_custom"]:
+            findings.append(_finding(_object_address(), "processing_step_custom",
+                                     preview=label, values=values))
+
+    _verdict(check, len(steps), findings, none_state=PASS)
+    if not findings and review:
+        # A vocabulary this repository cannot close is a question for a
+        # person, and it is asked WITH its inventory: the reviewer reads a
+        # list of names, not a document.
+        check.status = REVIEW
+        check.findings = review[:_REVIEW_DETAIL_CAP]
+
+
 def _check_printing_annotations(check, reads) -> None:
     rows = reads["annotations"]
     forbidden = {str(v).lstrip("/") for v in check.params["forbidden_subtypes"]}
@@ -1424,6 +1515,7 @@ _RUNNERS = {
     "live_transparency": _check_transparency,
     "hairlines_absent": _check_hairlines,
     "optional_content": _check_optional_content,
+    "processing_steps": _check_processing_steps,
     "printing_annotations": _check_printing_annotations,
     "interactive_form": _check_interactive_form,
     "title_present": _check_title,
@@ -1598,6 +1690,13 @@ def _gather(file: str, profile: dict, gs_path: str, font_dir) -> dict:
     reads["fields"], reads["fields_error"] = _safe(
         lambda: read_form_fields(file)["fields"], None
     )
+    if "processing_steps" in wanted:
+        from engine.processing_steps import document_processing_steps
+        reads["processing_steps"], reads["processing_steps_error"] = _safe(
+            lambda: document_processing_steps(file)["steps"], None
+        )
+    else:
+        reads["processing_steps"], reads["processing_steps_error"] = [], ""
 
     if {"image_min_dpi_contone", "image_min_dpi_bitonal", "image_max_dpi",
             "image_compression"} & wanted:
@@ -1784,6 +1883,8 @@ _ENGLISH = {
                          "A hairline renders on screen and breaks up on an imagesetter."),
     "optional_content": ("No optional content",
                          "Which layers a RIP prints is a decision nobody made deliberately."),
+    "processing_steps": ("Processing steps are declared and non-printing",
+                         "A die line or a varnish left switched on reaches the plate as ink."),
     "printing_annotations": ("No printing annotations",
                              "An annotation flagged to print reaches the plate with the page."),
     "interactive_form": ("No interactive form",

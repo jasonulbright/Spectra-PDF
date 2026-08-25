@@ -81,7 +81,8 @@ class TestLayers:
     def test_no_layers(self, tmp_dir):
         src = os.path.join(tmp_dir, "s.pdf")
         _plain_pdf(src)
-        assert list_layers(src) == {"layers": [], "count": 0}
+        assert list_layers(src) == {"layers": [], "count": 0,
+                                    "processing_step_count": 0}
 
     def test_in_place(self, tmp_dir):
         src = os.path.join(tmp_dir, "s.pdf")
