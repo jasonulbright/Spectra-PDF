@@ -1937,16 +1937,18 @@ def graphics_in_artifact_ok(path):
 # ── Unicode mapping correctness ───────────────────────────────────────────
 
 
-def _type0_font(pdf, tounicode: str):
+def _type0_font(pdf, tounicode: str, encoding: str = "/Identity-H",
+                subtables=()):
     """A composite font whose only statement about what its one code spells is
     the `/ToUnicode` the caller writes.
 
-    The embedded program carries NO `cmap` table, which is the shape a CIDFont
-    program takes and is what keeps this the only statement: a Unicode cmap
-    would be a second one, and the check that compares the two would then be
-    reading a fixture about something else.
+    By default the embedded program carries NO `cmap` table, which is the shape
+    a CIDFont program takes and is what keeps this the only statement: a Unicode
+    cmap would be a second one, and the check that compares the two would then
+    be reading a fixture about something else. `subtables` adds that second
+    statement deliberately, and `encoding` names the CMap the codes run through.
     """
-    program = pdf.make_stream(truetype_program(()))
+    program = pdf.make_stream(truetype_program(subtables))
     descriptor = pdf.make_indirect(
         Dictionary(Type=Name.FontDescriptor, FontName=Name("/ABCDEF+Test"),
                    Flags=4, ItalicAngle=0, Ascent=750, Descent=-250,
@@ -1965,7 +1967,7 @@ def _type0_font(pdf, tounicode: str):
     return pdf.make_indirect(
         Dictionary(
             Type=Name.Font, Subtype=Name.Type0, BaseFont=Name("/ABCDEF+Test"),
-            Encoding=Name("/Identity-H"), DescendantFonts=Array([descendant]),
+            Encoding=Name(encoding), DescendantFonts=Array([descendant]),
             ToUnicode=pdf.make_stream(tounicode.encode("ascii")),
         )
     )
@@ -1996,9 +1998,13 @@ def _tounicode(target: str) -> str:
     )
 
 
-def _type0_page(pdf, page, target: str):
+def _type0_page(pdf, page, target: str, encoding: str = "/Identity-H",
+                subtables=()):
     page.obj[Name.Resources] = Dictionary(
-        Font=Dictionary(F1=_font(pdf), C0=_type0_font(pdf, _tounicode(target)))
+        Font=Dictionary(
+            F1=_font(pdf),
+            C0=_type0_font(pdf, _tounicode(target), encoding, subtables),
+        )
     )
     page.obj[Name.Contents] = pdf.make_stream(
         b"/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Body copy.) Tj ET EMC\n"
@@ -2030,6 +2036,34 @@ def tounicode_maps_to_a_character_ok(path):
     pdf = new_pdf()
     page = pdf.pages[0]
     _type0_page(pdf, page, "0041")
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def tounicode_under_a_predefined_cmap_ok(path):
+    """PASS fixture — a composite font whose `/Encoding` is a predefined CMap
+    rather than Identity-H.
+
+    Code <0001> declares U+0042, and the embedded program's Unicode cmap maps
+    U+0041 to glyph 1. Those two only contradict each other if the code IS the
+    glyph id, which a predefined CMap is exactly what denies: it maps codes to
+    CIDs by its own table. Reading the code as a glyph id here reports a
+    conforming CJK document as broken.
+    """
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _type0_page(pdf, page, "0042", encoding="/UniGB-UCS2-H",
+                subtables=((3, 1),))
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def tounicode_contradicts_the_program(path):
+    """FAIL fixture — the SAME disagreement under `/Identity-H`, where the code
+    is the glyph id and the two statements really do contradict."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _type0_page(pdf, page, "0042", subtables=((3, 1),))
     make_conformant(pdf, page)
     return save(pdf, path)
 
@@ -2819,6 +2853,29 @@ def embedded_file_no_unicode_name(path):
     return save(pdf, path)
 
 
+def embedded_file_no_system_name(path):
+    """One half of the pair present, and it is the Unicode half carrying a name
+    no host encoding spells. `/F` cannot be written from it without inventing an
+    encoding the document never states, so the automatic fix leaves it absent."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    _embedded_file(pdf, {"UF": String("réunion-中文.txt")})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def embedded_file_no_system_name_ascii(path):
+    """The same shape with an ASCII name, which every host encoding agrees on
+    and the fix therefore can write."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    _embedded_file(pdf, {"UF": String("notes.txt")})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
 def embedded_file_named_ok(path):
     """PASS fixture — the file specification carries both `/F` and `/UF`."""
     pdf = new_pdf()
@@ -3024,6 +3081,10 @@ ROSTER = {
     "tounicode_maps_to_nothing": (tounicode_maps_to_nothing, "unicode_mapping", "fail"),
     "tounicode_maps_to_a_character_ok": (
         tounicode_maps_to_a_character_ok, "unicode_mapping", "pass"),
+    "tounicode_contradicts_the_program": (
+        tounicode_contradicts_the_program, "unicode_mapping", "fail"),
+    "tounicode_under_a_predefined_cmap_ok": (
+        tounicode_under_a_predefined_cmap_ok, "unicode_mapping", "pass"),
     "numbered_list_declared_as_bullets": (
         numbered_list_declared_as_bullets, "list_numbering", "fail"),
     "bullet_list_no_numbering_ok": (
@@ -3075,6 +3136,10 @@ ROSTER = {
         embedded_file_no_names, "embedded_file_names", "fail"),
     "embedded_file_no_unicode_name": (
         embedded_file_no_unicode_name, "embedded_file_names", "fail"),
+    "embedded_file_no_system_name": (
+        embedded_file_no_system_name, "embedded_file_names", "fail"),
+    "embedded_file_no_system_name_ascii": (
+        embedded_file_no_system_name_ascii, "embedded_file_names", "fail"),
     "embedded_file_named_ok": (embedded_file_named_ok, "embedded_file_names", "pass"),
     "form_tag_without_print_field": (
         form_tag_without_print_field, "print_field_attributes", "needs_review"),

@@ -288,6 +288,19 @@ def _fix_embedded_file_names(source: str, output: str, report: dict,
 
     A specification carrying NEITHER is left standing: there is no name to copy,
     and inventing one would name a file something it is not.
+
+    The two keys are not the same STRING. ISO 32000-2 7.11.2 makes `/F` a byte
+    string in the host system's encoding and `/UF` a text string, so copying the
+    bytes of one into the other transcodes nothing: a non-ASCII `/UF` is
+    UTF-16BE with a byte order mark, and those bytes read as a file name spell
+    mojibake — in exactly the case the Unicode key exists for. Each direction
+    therefore decodes and re-encodes:
+      `/F` → `/UF`  always possible; a text string can spell any name.
+      `/UF` → `/F`  only where the name is ASCII, which every host encoding
+                    agrees on. A name that is not is LEFT UNWRITTEN and the
+                    finding stands: `/F` names the file to a system whose
+                    encoding this document never states, and guessing one would
+                    write a name that is wrong rather than absent.
     """
     gate = _signed_structural_gate(source, allow_signed)
     if gate == "refuse":
@@ -316,10 +329,25 @@ def _fix_embedded_file_names(source: str, output: str, report: dict,
             if name is None and unicode_name is None:
                 continue
             if name is None:
-                obj[pikepdf.Name("/F")] = unicode_name
+                try:
+                    text = str(unicode_name)
+                except Exception:
+                    continue
+                if not text.isascii():
+                    continue
+                obj[pikepdf.Name("/F")] = pikepdf.String(text)
                 applied += 1
             elif unicode_name is None:
-                obj[pikepdf.Name("/UF")] = name
+                # pikepdf decodes a byte string by the text-string rules --
+                # UTF-16 behind a byte order mark, PDFDocEncoding otherwise --
+                # which is the only reading of `/F` this document supports, and
+                # re-encoding through `String` writes `/UF` as UTF-16BE wherever
+                # that reading is not ASCII.
+                try:
+                    text = str(name)
+                except Exception:
+                    continue
+                obj[pikepdf.Name("/UF")] = pikepdf.String(text)
                 applied += 1
         if applied:
             pdf.save(output)

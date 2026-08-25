@@ -2572,10 +2572,23 @@ def _program_preimages(font_obj) -> dict:
     descendants = font_obj.get("/DescendantFonts")
     if descendants is None or len(descendants) == 0:
         return {}
+    # The caller looks these up by the `/ToUnicode` SOURCE CODE, so the keys are
+    # glyph ids only where code == CID == GID. Both halves of that equality are
+    # required, and each is a separate statement in the font:
+    #   `/Encoding`      Identity-H/-V is what makes the code the CID. A
+    #                    predefined CMap (`/UniGB-UCS2-H` and its kind) or an
+    #                    embedded CMap stream maps codes to CIDs by a table, and
+    #                    reading a code as a CID under one names a DIFFERENT
+    #                    glyph — a conflict manufactured out of the lookup.
+    #   `/CIDToGIDMap`   Identity is what makes the CID the GID.
+    # Re-deriving either mapping here would be a second implementation of what
+    # `pdf_fonts` already owns, so anything else yields no statement to compare.
+    encoding = font_obj.get("/Encoding")
+    if not isinstance(encoding, pikepdf.Name) or str(encoding) not in (
+        "/Identity-H", "/Identity-V"
+    ):
+        return {}
     descendant = descendants[0]
-    # Anything but an identity CID→GID mapping means the code this check holds
-    # is not the glyph id, and re-deriving that mapping here would be a second
-    # implementation of what `pdf_fonts` already owns.
     c2g = descendant.get("/CIDToGIDMap")
     if c2g is not None and str(c2g) != "/Identity":
         return {}
