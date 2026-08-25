@@ -2938,7 +2938,7 @@ export const PANEL_STRINGS = {
   'panel.fieldActions.actionScope': 'Fields',
   'panel.fieldActions.actionTargets': 'Fields',
   'panel.fieldActions.actionSubmitNote':
-    'The submission is built in full and saved to a file you choose. This app sends nothing over the network itself.',
+    'The submission is built in full and shown to whoever clicks the button, who decides whether to send it. Nothing is sent without that answer, and the answer is asked every time.',
   'panel.fieldActions.actionUnauthorable':
     'This field also carries an action this app does not author ({{kinds}}). Applying here removes it.',
   'panel.prepareForm.reasonRuleWithoutLabel':

@@ -78,6 +78,31 @@ export const DIALOG_STRINGS = {
   'dialog.iccLicense.recordFailed':
     'The answer could not be saved: {{detail}}',
 
+  // The form-submission consent dialog — the one surface in the app from
+  // which an outbound form post can start. The address is shown whole and the
+  // payload is shown as itself; nothing here summarizes what will be sent
+  // except a PDF submission, which says that it is a summary.
+  'dialog.submitConsent.aria': 'Submit form data',
+  'dialog.submitConsent.title': 'Submit form data',
+  'dialog.submitConsent.blurb':
+    'The button "{{field}}" sends this form\'s field values to the address below. Nothing is sent until you choose Submit.',
+  'dialog.submitConsent.destinationLabel': 'Destination',
+  'dialog.submitConsent.plainHttp':
+    'This address is plain http, so the data below travels unencrypted and can be read and altered along the way.',
+  'dialog.submitConsent.format': 'Format: {{format}}',
+  'dialog.submitConsent.formatFdf': 'FDF form data',
+  'dialog.submitConsent.formatXfdf': 'XFDF form data',
+  'dialog.submitConsent.formatHtml': 'HTML form post',
+  'dialog.submitConsent.formatPdf': 'the whole PDF document',
+  'dialog.submitConsent.payloadLabel': 'What will be sent',
+  'dialog.submitConsent.documentSummary':
+    'The whole document, {{bytes}} bytes, carrying {{count}} field value(s). A PDF is not readable as text, so it is described rather than shown.',
+  'dialog.submitConsent.consequence':
+    'Only these bytes are sent. No cookies, sign-in or stored credentials are attached, and this answer is not remembered for this address.',
+  'dialog.submitConsent.submit': 'Submit',
+  'dialog.submitConsent.cancel': 'Cancel',
+  'dialog.submitConsent.save': 'Save a copy…',
+
   // The operation queue's own chrome.
   'dialog.opqueue.heading': 'Operations ({{count}})',
   'dialog.opqueue.headingCollapsed': 'Operations ({{count}}) ...',
