@@ -1,7 +1,7 @@
 // The print preflight surface.
 //
 // The assertions that matter are the ones a unit test cannot make:
-//   · the 37 checks reach the panel as a categorized tree, with the failing
+//   · every check reaches the panel as a categorized tree, with the failing
 //     categories opened and every row carrying the rule it was measured
 //     against,
 //   · THE SAME DOCUMENT UNDER TWO PROFILES GIVES TWO ANSWERS — the round's
@@ -94,6 +94,11 @@ async function buildFailingPdf(path: string): Promise<void> {
   writeFileSync(path, await doc.save());
 }
 
+/** The profile's inventory. It grew 37 → 38 when the processing-steps check
+ *  joined the Content category, so the number lives in one place and a future
+ *  move is one edit. */
+const CHECK_COUNT = 38;
+
 describe('Print preflight', () => {
   let dir: string;
   let source: string;
@@ -119,7 +124,7 @@ describe('Print preflight', () => {
     });
   }
 
-  it('reports 37 checks as a categorized tree, with the failing categories open', async () => {
+  it('reports every check as a categorized tree, with the failing categories open', async () => {
     await openByPaths([source]);
     await setView('canvas');
     expect(await invokeAppCommand('tools.panel.preflight')).toBe(true);
@@ -129,14 +134,14 @@ describe('Print preflight', () => {
       timeoutMsg: 'the preflight report never arrived',
     });
     const snapshot = (await preflightSnapshot())!;
-    expect(snapshot.checks).toHaveLength(37);
+    expect(snapshot.checks).toHaveLength(CHECK_COUNT);
     expect(new Set(snapshot.checks.map((c) => c.category)).size).toBe(7);
-    expect(snapshot.summary.total).toBe(37);
+    expect(snapshot.summary.total).toBe(CHECK_COUNT);
     // The tally adds up, and not_applicable is excluded from the passes.
     const { passed, failed, warnings, needs_review, not_applicable, applicable } =
       snapshot.summary;
-    expect(passed + failed + warnings + needs_review + not_applicable).toBe(37);
-    expect(applicable).toBe(37 - not_applicable);
+    expect(passed + failed + warnings + needs_review + not_applicable).toBe(CHECK_COUNT);
+    expect(applicable).toBe(CHECK_COUNT - not_applicable);
     expect(not_applicable).toBeGreaterThan(0);
     // The categories carrying a finding are the ones opened.
     for (const category of snapshot.expandedCategories) {
