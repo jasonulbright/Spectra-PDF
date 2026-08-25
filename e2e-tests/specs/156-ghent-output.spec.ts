@@ -127,7 +127,13 @@ function corpusPresent(...files: string[]): boolean {
   return files.every((file) => existsSync(file));
 }
 
-describe('ghent output suite', () => {
+describe('ghent output suite', function () {
+  // The suite timeout is set HERE, never per case: wdio reads the runnable's
+  // timeout BEFORE the test body runs, so a `this.timeout()` written inside a
+  // case is captured too late to raise anything. One separation render of an
+  // assembled page outlives the 60 s default.
+  this.timeout(240_000);
+
   before(async () => {
     await waitForHarness();
   });
@@ -137,7 +143,6 @@ describe('ghent output suite', () => {
   });
 
   it('opens the six assembled pages in the viewer', async function () {
-    this.timeout(180_000);
     if (!corpusPresent(PAGES)) {
       // Ghent-corpus axis: the suite is not fetched on this machine.
       this.skip();
@@ -155,7 +160,6 @@ describe('ghent output suite', () => {
   });
 
   it('separates the assembled pages into the four process plates', async function () {
-    this.timeout(240_000);
     if (!corpusPresent(PAGES)) {
       this.skip();
       return;
@@ -175,7 +179,6 @@ describe('ghent output suite', () => {
   });
 
   it('lists both spot plates of the SPOT category page', async function () {
-    this.timeout(240_000);
     if (!corpusPresent(SPOT_PAGE)) {
       this.skip();
       return;
@@ -194,7 +197,6 @@ describe('ghent output suite', () => {
   });
 
   it('switching a spot plate off changes the composite', async function () {
-    this.timeout(240_000);
     if (!corpusPresent(SPOT_PAGE)) {
       this.skip();
       return;
@@ -212,7 +214,6 @@ describe('ghent output suite', () => {
   });
 
   it('flipping overprint simulation re-renders the spot page', async function () {
-    this.timeout(240_000);
     if (!corpusPresent(SPOT_PAGE)) {
       this.skip();
       return;
@@ -234,7 +235,6 @@ describe('ghent output suite', () => {
   });
 
   it('shows the optional-content patch its own layers', async function () {
-    this.timeout(180_000);
     if (!corpusPresent(OPTIONAL_CONTENT)) {
       this.skip();
       return;
@@ -253,7 +253,6 @@ describe('ghent output suite', () => {
   });
 
   it('leaving the preview gives the ordinary raster back', async function () {
-    this.timeout(180_000);
     if (!corpusPresent(SPOT_PAGE)) {
       this.skip();
       return;
