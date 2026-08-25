@@ -382,6 +382,48 @@ pub struct WindowRegistry {
     pending: Mutex<HashMap<String, Vec<PendingOpen>>>,
 }
 
+/// Web-download provenance, keyed by canonical path, shared app-wide.
+///
+/// A document fetched from a web address lands on a temp working path; its
+/// origin is what routes File ▸ Save to Save As instead of silently
+/// overwriting that scratch copy. The decision has to survive a cross-window
+/// hand-off — Move to New Window, a torn-off tab — where the handover carries
+/// PATHS ONLY: page and document ids are minted against a per-renderer
+/// generation counter and can never cross, but a path names the same file in
+/// every window. So the origin lives here, keyed by path, and the receiving
+/// window recovers it by looking the path up rather than by carrying an id.
+///
+/// A JS module map cannot serve this: a second renderer is a fresh module
+/// scope that starts empty, so anything that must hold app-wide lives in
+/// managed state on this side of the boundary.
+#[derive(Default)]
+pub struct WebOrigins(Mutex<HashMap<String, String>>);
+
+impl WebOrigins {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record where the downloaded copy at `path` came from.
+    pub fn set(&self, path: &str, url: &str) {
+        if let Ok(mut map) = self.0.lock() {
+            map.insert(path.to_string(), url.to_string());
+        }
+    }
+
+    /// The origins known for `paths` — canonical path → url, omitting any path
+    /// with no recorded origin.
+    pub fn lookup(&self, paths: &[String]) -> HashMap<String, String> {
+        let Ok(map) = self.0.lock() else {
+            return HashMap::new();
+        };
+        paths
+            .iter()
+            .filter_map(|p| map.get(p).map(|u| (p.clone(), u.clone())))
+            .collect()
+    }
+}
+
 impl WindowRegistry {
     pub fn new() -> Self {
         Self {
@@ -799,6 +841,30 @@ pub async fn focus_app_window(app: AppHandle, label: String) -> Result<(), Strin
 ///
 /// Uncommitted handovers stay behind: the document has changed hands but its
 /// source is still writing the file the open would read.
+/// Record the web address a downloaded copy at `path` came from, so any window
+/// that later opens that temp path — including one it was handed to across a
+/// window boundary — routes File ▸ Save to Save As.
+#[tauri::command]
+pub async fn register_web_origin(app: AppHandle, path: String, url: String) -> Result<(), String> {
+    let path = crate::commands::canonical_path(&path);
+    app.state::<WebOrigins>().set(&path, &url);
+    Ok(())
+}
+
+/// The web origins known for `paths` — the receiving window's recovery read
+/// after a cross-window hand-off carried the path but not the provenance.
+#[tauri::command]
+pub async fn web_origins_for(
+    app: AppHandle,
+    paths: Vec<String>,
+) -> Result<HashMap<String, String>, String> {
+    let canonical: Vec<String> = paths
+        .iter()
+        .map(|p| crate::commands::canonical_path(p))
+        .collect();
+    Ok(app.state::<WebOrigins>().lookup(&canonical))
+}
+
 #[tauri::command]
 pub async fn take_pending_opens(
     app: AppHandle,
@@ -812,6 +878,25 @@ pub async fn take_pending_opens(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_web_origin_round_trips_by_path_and_is_absent_otherwise() {
+        // The provenance a cross-window hand-off recovers: registered against
+        // the temp path on the download, read back by the window it moves to.
+        let origins = WebOrigins::new();
+        origins.set("C:\\Temp\\net\\a.pdf", "https://example.com/a.pdf");
+        let found = origins.lookup(&[
+            "C:\\Temp\\net\\a.pdf".to_string(),
+            "C:\\Temp\\net\\b.pdf".to_string(),
+        ]);
+        assert_eq!(
+            found.get("C:\\Temp\\net\\a.pdf").map(String::as_str),
+            Some("https://example.com/a.pdf"),
+        );
+        // A path with no recorded origin is simply absent — never a temp path
+        // masquerading as web-origined.
+        assert!(!found.contains_key("C:\\Temp\\net\\b.pdf"));
+    }
 
     #[test]
     fn only_workspace_labels_answer_window_messages() {
