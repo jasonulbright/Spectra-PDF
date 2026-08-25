@@ -9,6 +9,7 @@ mod snapshot;
 mod watchers;
 mod web_capture;
 mod engine;
+pub mod net;
 pub mod gs;
 mod printers;
 pub mod scanner;
@@ -261,6 +262,8 @@ pub fn run() {
             snapshot::save_snapshot_png,
             clipboard_read::read_clipboard_source,
             web_capture::capture_web_page,
+            net::net_request,
+            net::net_payload_path,
             portable::icc_assent_state,
             portable::icc_license_text,
             portable::record_icc_assent,
