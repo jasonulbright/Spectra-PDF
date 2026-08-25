@@ -44,6 +44,10 @@ export interface SubmitRequest {
   bodyPath: string;
   contentType: string;
   fileName: string;
+  /** A submit destination is DOCUMENT-chosen, so a private/loopback/link-local
+   * target is refused by name: a document must not steer a state-changing
+   * request at a service on the user's own machine or LAN. Always true here. */
+  refusePrivate: true;
 }
 
 /** The request for one submit action and one already-built payload file. */
@@ -58,6 +62,7 @@ export function submitRequest(
     bodyPath: payloadPath,
     contentType: SUBMIT_CONTENT_TYPE[action.format],
     fileName: stem,
+    refusePrivate: true,
   };
 }
 
