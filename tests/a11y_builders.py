@@ -342,7 +342,7 @@ def low_contrast(path):
     draw(
         pdf,
         page,
-        "0.85 0.85 0.85 rg 40 600 400 20 re f\n"
+        "/Artifact <</Type /Background>> BDC 0.85 0.85 0.85 rg 40 600 400 20 re f EMC\n"
         "/P <</MCID 0>> BDC BT 0.9 0.9 0.9 rg /F1 11 Tf 44 606 Td "
         "(Pale text on a pale box.) Tj ET EMC",
     )
@@ -370,7 +370,10 @@ def contrast_over_image_ok(path):
         Font=Dictionary(F1=_font(pdf)), XObject=Dictionary(Im0=image)
     )
     page.obj[Name.Contents] = pdf.make_stream(
-        b"q 400 0 0 40 40 590 cm /Im0 Do Q\n"
+        # The backdrop is decoration and says so: ISO 14289-1 cl. 7.1 divides
+        # content into real content and artifacts, and an image painted under
+        # neither is its own defect this fixture is not about.
+        b"/Artifact <</Type /Background>> BDC q 400 0 0 40 40 590 cm /Im0 Do Q EMC\n"
         b"/P <</MCID 0>> BDC BT 0.9 0.9 0.9 rg /F1 11 Tf 44 600 Td "
         b"(Pale text over a photograph.) Tj ET EMC"
     )
@@ -1111,6 +1114,17 @@ def table_no_summary(path):
 # ── lists ─────────────────────────────────────────────────────────────────
 
 
+def ordered_list_attrs():
+    """The `/ListNumbering` a list drawing numeric labels has to declare.
+
+    ISO 32000-2 Table 353. Every list fixture below labels its items `1.`, so
+    each of them declares the numbering that matches — otherwise the fixture
+    for one check would carry a second, real defect, and its verdict could no
+    longer be attributed to the check it is about.
+    """
+    return Dictionary(O=Name.List, ListNumbering=Name.Decimal)
+
+
 def li_outside_l(path):
     pdf = new_pdf()
     page = pdf.pages[0]
@@ -1177,6 +1191,7 @@ def lbl_outside_list_item_ok(path):
     lst = elem(pdf, "L", doc, kids=[item])
     note_lbl = elem(pdf, "Lbl", doc, page=page, mcid=3)
     note_body = elem(pdf, "P", doc, page=page, mcid=4)
+    lst[Name.A] = ordered_list_attrs()
     note = elem(pdf, "Note", doc, kids=[note_lbl, note_body])
     doc[Name.K] = Array([para, lst, note])
     root[Name.K] = doc
@@ -1206,7 +1221,8 @@ def _div_wrapped_item(pdf, page, container):
     body = elem(pdf, "LBody", doc, page=page, mcid=2)
     item = elem(pdf, "LI", doc, kids=[lbl, body])
     div = elem(pdf, "Div", doc, kids=[item])
-    outer = elem(pdf, container, doc, kids=[div])
+    outer = elem(pdf, container, doc, kids=[div],
+                 **({"A": ordered_list_attrs()} if container == "L" else {}))
     doc[Name.K] = Array([para, outer])
     root[Name.K] = doc
     parent_tree(pdf, root, page, [para, lbl, body])
@@ -1278,7 +1294,7 @@ def _ns_list_page(pdf, page, extra_lbl=False, link_lbl=False, footnote=False):
         stray = elem(pdf, "Lbl", doc, page=page, mcid=3, NS=ns)
         kids.append(stray)
         order.append(stray)
-    lst = elem(pdf, "L", doc, kids=kids, NS=ns)
+    lst = elem(pdf, "L", doc, kids=kids, NS=ns, A=ordered_list_attrs())
     top = [para, lst]
     if footnote:
         note_lbl = elem(pdf, "Lbl", doc, page=page, mcid=3, NS=ns)
@@ -1403,7 +1419,7 @@ def lbody_outside_li_fails(path):
     lbl = elem(pdf, "Lbl", doc, page=page, mcid=1)
     body = elem(pdf, "LBody", doc, page=page, mcid=2)
     item = elem(pdf, "LI", doc, kids=[lbl])
-    lst = elem(pdf, "L", doc, kids=[item, body])
+    lst = elem(pdf, "L", doc, kids=[item, body], A=ordered_list_attrs())
     doc[Name.K] = Array([para, lst])
     root[Name.K] = doc
     parent_tree(pdf, root, page, [para, lbl, body])
@@ -1577,6 +1593,632 @@ def rolemap_custom_tags_ok(path):
     return save(pdf, path)
 
 
+# ── role mapping, and the flag a document raises against itself ───────────
+
+
+def _one_paragraph_doc(pdf, page, tag="P", role_map=None, size=11, text="Body copy."):
+    """One tagged paragraph and nothing else, under a tag of the caller's
+    choosing. The smallest document the structure checks have anything to say
+    about."""
+    draw(pdf, page, f"/{tag} <</MCID 0>> BDC BT /F1 {size} Tf 40 700 Td ({text}) Tj ET EMC")
+    root = struct_root(pdf, role_map)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, tag, doc, page=page, mcid=0)
+    doc[Name.K] = Array([para])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para])
+    return root, doc, para
+
+
+def unmapped_custom_tag(path):
+    """ISO 14289-1 cl. 7.1 with ISO 32000-2 14.8.6.2: a private structure type
+    reaches a reader only through a role map, and this document ships none."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_paragraph_doc(pdf, page, tag="Alinea")
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def rolemap_chain_ok(path):
+    """PASS fixture — 14.8.6.2 states the mapping may be applied transitively,
+    so a tag reaching a standard type in two hops has reached one."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_paragraph_doc(pdf, page, tag="Alinea",
+                       role_map={"Alinea": "Bodytext", "Bodytext": "P"})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def rolemap_pdf_1_7_type_ok(path):
+    """PASS fixture — `BlockQuote` is a standard type of the PDF 1.7 namespace
+    (ISO 32000-2 Annex M) and the default namespace IS that one, so a document
+    using it has mapped nothing and needs to map nothing."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(pdf, page, "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Quoted copy.) Tj ET EMC")
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    quote = elem(pdf, "BlockQuote", doc, kids=[para])
+    doc[Name.K] = Array([quote])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def rolemap_cycle(path):
+    """A role map that closes on itself reaches no standard type at all, so
+    every tag it governs names a semantic no reader can act on."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_paragraph_doc(pdf, page, tag="Alinea",
+                       role_map={"Alinea": "Bodytext", "Bodytext": "Alinea"})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def suspects_flag(path):
+    """ISO 32000-2 Table 321: `/Suspects` true is the file disclaiming its own
+    tagging, which cl. 7.1 does not admit."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_paragraph_doc(pdf, page)
+    pdf.Root[Name.MarkInfo] = Dictionary(Marked=True, Suspects=True)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def suspects_false_ok(path):
+    """PASS fixture — the flag PRESENT and false is a document stating its
+    tagging is reliable, which is the opposite of the defect."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_paragraph_doc(pdf, page)
+    pdf.Root[Name.MarkInfo] = Dictionary(Marked=True, Suspects=False)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+# ── graphics outside every marked content sequence ────────────────────────
+
+
+def graphics_outside_marks(path):
+    """ISO 14289-1 cl. 7.1: a fill painted under neither a tag nor an
+    `/Artifact` declaration is content no reader reaches under any name."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf, page,
+        # `q`/`Q` around the fill: without them the grey stays the fill colour
+        # for the text below it, and the fixture would carry a contrast defect
+        # as well as the one it is about.
+        "q 0.5 0.5 0.5 rg 40 500 120 60 re f Q\n"
+        "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Body copy.) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    doc[Name.K] = Array([para])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def graphics_in_artifact_ok(path):
+    """PASS fixture — the same fill, declared decoration. The declaration is
+    the whole difference and the check must see it."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf, page,
+        "/Artifact <</Type /Layout>> BDC q 0.5 0.5 0.5 rg 40 500 120 60 re f Q EMC\n"
+        "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Body copy.) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    doc[Name.K] = Array([para])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+# ── Unicode mapping correctness ───────────────────────────────────────────
+
+
+def _type0_font(pdf, tounicode: str):
+    """A composite font whose only statement about what its one code spells is
+    the `/ToUnicode` the caller writes."""
+    descriptor = pdf.make_indirect(
+        Dictionary(Type=Name.FontDescriptor, FontName=Name("/ABCDEF+Test"),
+                   Flags=4, ItalicAngle=0, Ascent=750, Descent=-250,
+                   CapHeight=700, StemV=80, FontBBox=Array([0, -250, 1000, 750]))
+    )
+    descendant = pdf.make_indirect(
+        Dictionary(
+            Type=Name.Font, Subtype=Name.CIDFontType2,
+            BaseFont=Name("/ABCDEF+Test"), CIDToGIDMap=Name.Identity,
+            CIDSystemInfo=Dictionary(Registry=String("Adobe"),
+                                     Ordering=String("Identity"), Supplement=0),
+            FontDescriptor=descriptor, DW=1000,
+        )
+    )
+    return pdf.make_indirect(
+        Dictionary(
+            Type=Name.Font, Subtype=Name.Type0, BaseFont=Name("/ABCDEF+Test"),
+            Encoding=Name("/Identity-H"), DescendantFonts=Array([descendant]),
+            ToUnicode=pdf.make_stream(tounicode.encode("ascii")),
+        )
+    )
+
+
+def _tounicode(target: str) -> str:
+    return (
+        "/CIDInit /ProcSet findresource begin\n"
+        "12 dict begin\n"
+        "begincmap\n"
+        "/CIDSystemInfo\n"
+        "<< /Registry (Adobe)\n"
+        "/Ordering (UCS)\n"
+        "/Supplement 0\n"
+        ">> def\n"
+        "/CMapName /Adobe-Identity-UCS def\n"
+        "/CMapType 2 def\n"
+        "1 begincodespacerange\n"
+        "<0000> <FFFF>\n"
+        "endcodespacerange\n"
+        "1 beginbfchar\n"
+        f"<0001> <{target}>\n"
+        "endbfchar\n"
+        "endcmap\n"
+        "CMapName currentdict /CMap defineresource pop\n"
+        "end\n"
+        "end"
+    )
+
+
+def _type0_page(pdf, page, target: str):
+    page.obj[Name.Resources] = Dictionary(
+        Font=Dictionary(F1=_font(pdf), C0=_type0_font(pdf, _tounicode(target)))
+    )
+    page.obj[Name.Contents] = pdf.make_stream(
+        b"/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Body copy.) Tj ET EMC\n"
+        b"/Span <</MCID 1>> BDC BT /C0 11 Tf 40 660 Td <0001> Tj ET EMC"
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    span = elem(pdf, "Span", doc, page=page, mcid=1)
+    doc[Name.K] = Array([para, span])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para, span])
+
+
+def tounicode_maps_to_nothing(path):
+    """ISO 32000-2 9.10.2: `/ToUnicode` states what a code spells, and U+0000
+    is not a character any glyph spells — the entry is present and wrong,
+    which is the question `character_encoding` does not ask."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _type0_page(pdf, page, "0000")
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def tounicode_maps_to_a_character_ok(path):
+    """PASS fixture — the identical font with a real codepoint. Only the four
+    hex digits differ, so a moved verdict can only be about them."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _type0_page(pdf, page, "0041")
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+# ── the list checks added with the technique corpus ───────────────────────
+
+
+def _simple_list(pdf, page, labels, numbering=None, item_kids=None):
+    """One list, one item per label, each with a label and a body."""
+    parts = ["/P <</MCID 0>> BDC BT /F1 11 Tf 40 740 Td (Body copy.) Tj ET EMC"]
+    mcid = 1
+    for i, label in enumerate(labels):
+        y = 700 - i * 20
+        parts.append(
+            f"/Lbl <</MCID {mcid}>> BDC BT /F1 11 Tf 40 {y} Td ({label}) Tj ET EMC"
+        )
+        parts.append(
+            f"/LBody <</MCID {mcid + 1}>> BDC BT /F1 11 Tf 60 {y} Td (An item.) Tj ET EMC"
+        )
+        mcid += 2
+    draw(pdf, page, "\n".join(parts))
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    order = [para]
+    items = []
+    mcid = 1
+    for _label in labels:
+        lbl = elem(pdf, "Lbl", doc, page=page, mcid=mcid)
+        body = elem(pdf, "LBody", doc, page=page, mcid=mcid + 1)
+        kids = [lbl, body] if item_kids is None else item_kids(pdf, doc, page, lbl, body)
+        items.append(elem(pdf, "LI", doc, kids=kids))
+        order += [lbl, body]
+        mcid += 2
+    extra = {}
+    if numbering is not None:
+        extra["A"] = Dictionary(O=Name.List, ListNumbering=Name("/" + numbering))
+    lst = elem(pdf, "L", doc, kids=items, **extra)
+    doc[Name.K] = Array([para, lst])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, order)
+    return root, doc, lst
+
+
+def numbered_list_declared_as_bullets(path):
+    """ISO 32000-2 Table 353: the items count `1.` `2.` `3.` and the list
+    declares a bullet shape, so a reader announces the count as decoration."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _simple_list(pdf, page, ["1.", "2.", "3."], numbering="Disc")
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def bullet_list_no_numbering_ok(path):
+    """PASS fixture — bullets and no `/ListNumbering`. The entry is optional
+    and `not numbered` is TRUE of this list, so its absence is not a defect."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    # WinAnsi 0x95 is U+2022, which is what the run walk decodes it back to.
+    _simple_list(pdf, page, [chr(0x95)] * 3)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def word_labelled_list_ok(path):
+    """PASS fixture — a description list's terms are its labels. They belong
+    to no numbering system, so the check has nothing to judge and must not
+    invent an answer."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _simple_list(pdf, page, ["Alpha:", "Beta:", "Gamma:"], numbering="None")
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def _paragraph_in_item(pdf, doc, page, lbl, body):
+    return [lbl, elem(pdf, "P", doc, kids=[body])]
+
+
+def list_item_holding_a_paragraph(path):
+    """ISO 32000-2 Table 370: a list item holds a label and a body. This one
+    holds a paragraph, so the item's body is somewhere no reader looks."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _simple_list(pdf, page, ["1.", "2."], numbering="Decimal",
+                 item_kids=_paragraph_in_item)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def _nested_list_in_body(pdf, doc, page, lbl, body):
+    inner_lbl = elem(pdf, "Lbl", doc)
+    inner_body = elem(pdf, "LBody", doc)
+    inner = elem(pdf, "LI", doc, kids=[inner_lbl, inner_body])
+    nested = elem(pdf, "L", doc, kids=[inner],
+                  A=Dictionary(O=Name.List, ListNumbering=Name.Decimal))
+    # The sub-list goes INSIDE the body, alongside the content that body
+    # already tags, so the item still holds exactly a label and a body.
+    body[Name.K] = Array([body[Name.K], nested])
+    return [lbl, body]
+
+
+def nested_list_inside_lbody_ok(path):
+    """PASS fixture — a sub-list nested INSIDE the body it belongs to, which
+    is where Table 370 puts it. The item still holds exactly a label and a
+    body."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _simple_list(pdf, page, ["1.", "2."], numbering="Decimal",
+                 item_kids=_nested_list_in_body)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def list_labels_left_in_the_body(path):
+    """The labels are drawn, and they are inside the bodies rather than in
+    `Lbl` elements. Whether the author meant them as labels is a judgement, so
+    the check reports and does not decide."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    parts = ["/P <</MCID 0>> BDC BT /F1 11 Tf 40 740 Td (Body copy.) Tj ET EMC"]
+    for i in range(3):
+        parts.append(
+            f"/LBody <</MCID {i + 1}>> BDC BT /F1 11 Tf 40 {700 - i * 20} Td "
+            f"({i + 1}. An item.) Tj ET EMC"
+        )
+    draw(pdf, page, "\n".join(parts))
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    items = []
+    order = [para]
+    for i in range(3):
+        body = elem(pdf, "LBody", doc, page=page, mcid=i + 1)
+        items.append(elem(pdf, "LI", doc, kids=[body]))
+        order.append(body)
+    lst = elem(pdf, "L", doc, kids=items, A=Dictionary(O=Name.List, ListNumbering=Name.Decimal))
+    doc[Name.K] = Array([para, lst])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, order)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+# ── the judgement checks: evidence, never a verdict ───────────────────────
+
+
+def artifact_sentence(path):
+    """A sentence's worth of words, at the body size, declared decoration.
+    Whether it is decoration is the author's answer, so this is a review."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf, page,
+        "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td "
+        "(This paragraph is body copy and reads as body copy.) Tj ET EMC\n"
+        "/Artifact <</Type /Layout>> BDC BT /F1 11 Tf 40 660 Td "
+        "(This paragraph is body copy too but it is artifacted.) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    doc[Name.K] = Array([para])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def short_artifact_ok(path):
+    """PASS fixture — a page number, declared decoration. Every document has
+    one, and a checker that offered each for review would offer the whole
+    document."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf, page,
+        "/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td "
+        "(This paragraph is body copy and reads as body copy.) Tj ET EMC\n"
+        "/Artifact <</Type /Pagination>> BDC BT /F1 11 Tf 300 40 Td (12) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    doc[Name.K] = Array([para])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def _lines_paragraph(pdf, page, gaps, mcids=None):
+    """One paragraph's lines down the page, with the caller's vertical gaps.
+
+    `mcids` says which marked content sequence each line belongs to, so a
+    fixture can put two visual blocks under one element or two.
+    """
+    y = 700
+    parts = []
+    ys = []
+    for i, gap in enumerate([0] + list(gaps)):
+        y -= gap
+        ys.append(y)
+        mcid = 0 if mcids is None else mcids[i]
+        parts.append(
+            f"/P <</MCID {mcid}>> BDC BT /F1 11 Tf 40 {y} Td (Line {i + 1} of the copy.) Tj ET EMC"
+        )
+    draw(pdf, page, "\n".join(parts))
+    return ys
+
+
+def element_holds_two_blocks(path):
+    """One `P` over two blocks of lines set further apart than the lines
+    inside them. Whether that is one paragraph is the author's answer."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _lines_paragraph(pdf, page, [14, 14, 30, 14])
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    doc[Name.K] = Array([para])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def evenly_leaded_paragraph_ok(path):
+    """PASS fixture — the same five lines, evenly leaded. A paragraph is not
+    two paragraphs because it is long."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _lines_paragraph(pdf, page, [14, 14, 14, 14])
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    para = elem(pdf, "P", doc, page=page, mcid=0)
+    doc[Name.K] = Array([para])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [para])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def sequence_out_of_order(path):
+    """One marked content sequence drawing its own words right to left. A
+    rotated or bidirectional layout draws that way legitimately, so this is
+    reported with its count and never failed."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf, page,
+        "/P <</MCID 0>> BDC BT /F1 11 Tf 40 740 Td (Body copy.) Tj ET EMC\n"
+        "/P <</MCID 1>> BDC BT /F1 11 Tf 300 700 Td (second half) Tj "
+        "1 0 0 1 60 700 Tm (first half ) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    first = elem(pdf, "P", doc, page=page, mcid=0)
+    second = elem(pdf, "P", doc, page=page, mcid=1)
+    doc[Name.K] = Array([first, second])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [first, second])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def sequence_in_order_ok(path):
+    """PASS fixture — the same two halves drawn left to right."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf, page,
+        "/P <</MCID 0>> BDC BT /F1 11 Tf 40 740 Td (Body copy.) Tj ET EMC\n"
+        "/P <</MCID 1>> BDC BT /F1 11 Tf 60 700 Td (first half ) Tj "
+        "1 0 0 1 110 700 Tm (second half) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    first = elem(pdf, "P", doc, page=page, mcid=0)
+    second = elem(pdf, "P", doc, page=page, mcid=1)
+    doc[Name.K] = Array([first, second])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [first, second])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def paragraph_set_like_a_heading(path):
+    """A line set half again as large as the body, tagged `P`. Size is the
+    only signal a file carries and a size is not a semantic, so the check
+    reports the measurement and a person decides."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf, page,
+        "/P <</MCID 0>> BDC BT /F1 20 Tf 40 740 Td (A Section Title) Tj ET EMC\n"
+        "/P <</MCID 1>> BDC BT /F1 11 Tf 40 700 Td "
+        "(This paragraph is ordinary body copy set at eleven points.) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    big = elem(pdf, "P", doc, page=page, mcid=0)
+    para = elem(pdf, "P", doc, page=page, mcid=1)
+    doc[Name.K] = Array([big, para])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [big, para])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def heading_set_larger_ok(path):
+    """PASS fixture — the same page with the large line tagged `H1`, which is
+    what it looks like. Nothing here is worth anyone's time."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf, page,
+        "/H1 <</MCID 0>> BDC BT /F1 20 Tf 40 740 Td (A Section Title) Tj ET EMC\n"
+        "/P <</MCID 1>> BDC BT /F1 11 Tf 40 700 Td "
+        "(This paragraph is ordinary body copy set at eleven points.) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    head = elem(pdf, "H1", doc, page=page, mcid=0)
+    para = elem(pdf, "P", doc, page=page, mcid=1)
+    doc[Name.K] = Array([head, para])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [head, para])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def h_and_hn_together(path):
+    """ISO 14289-1 cl. 7.4 states the numbered and unnumbered heading
+    conventions as alternatives; a document using both leaves its outline with
+    two answers about the same level."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf, page,
+        "/H1 <</MCID 0>> BDC BT /F1 20 Tf 40 740 Td (A Numbered Heading) Tj ET EMC\n"
+        "/H <</MCID 1>> BDC BT /F1 16 Tf 40 700 Td (An Unnumbered Heading) Tj ET EMC\n"
+        "/P <</MCID 2>> BDC BT /F1 11 Tf 40 660 Td "
+        "(This paragraph is ordinary body copy set at eleven points.) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    numbered = elem(pdf, "H1", doc, page=page, mcid=0)
+    generic = elem(pdf, "H", doc, page=page, mcid=1)
+    para = elem(pdf, "P", doc, page=page, mcid=2)
+    doc[Name.K] = Array([numbered, generic, para])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [numbered, generic, para])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def generic_headings_only_ok(path):
+    """PASS fixture — `H` throughout, nested. One convention, consistently."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf, page,
+        "/H <</MCID 0>> BDC BT /F1 20 Tf 40 740 Td (A Section Heading) Tj ET EMC\n"
+        "/H <</MCID 1>> BDC BT /F1 16 Tf 40 700 Td (A Subsection Heading) Tj ET EMC\n"
+        "/P <</MCID 2>> BDC BT /F1 11 Tf 40 660 Td "
+        "(This paragraph is ordinary body copy set at eleven points.) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    outer = elem(pdf, "H", doc, page=page, mcid=0)
+    inner_head = elem(pdf, "H", doc, page=page, mcid=1)
+    para = elem(pdf, "P", doc, page=page, mcid=2)
+    inner = elem(pdf, "Sect", doc, kids=[inner_head, para])
+    doc[Name.K] = Array([outer, inner])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [outer, inner_head, para])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def figure_over_the_page(path):
+    """A field of colour covering a seventh of the page, tagged as a figure.
+    A full-bleed illustration measures the same, so this is a review."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    draw(
+        pdf, page,
+        "/Figure <</MCID 0>> BDC q 0.74 0.84 0.93 rg 50 620 490 140 re f Q EMC\n"
+        "/P <</MCID 1>> BDC BT /F1 11 Tf 60 700 Td (Body copy.) Tj ET EMC",
+    )
+    root = struct_root(pdf)
+    doc = elem(pdf, "Document", root)
+    fig = elem(pdf, "Figure", doc, page=page, mcid=0, Alt=String("Blue background"))
+    para = elem(pdf, "P", doc, page=page, mcid=1)
+    doc[Name.K] = Array([fig, para])
+    root[Name.K] = doc
+    parent_tree(pdf, root, page, [fig, para])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
 # ── the roster the tests walk ─────────────────────────────────────────────
 
 # Checks that share ONE inventory and therefore move together. Screen flicker,
@@ -1586,6 +2228,10 @@ def rolemap_custom_tags_ok(path):
 # mean building three documents that differ in nothing that matters.
 SHARED_INVENTORY = (
     frozenset({"screen_flicker", "scripts", "timed_responses"}),
+    # Where a list item's parts sit is ONE fact, asked from two ends: an
+    # `LBody` outside its item and an item with no body are the same misplaced
+    # element seen from either side, so a fixture for either moves both.
+    frozenset({"list_labels", "list_item_structure"}),
 )
 
 
@@ -1686,4 +2332,40 @@ ROSTER = {
     "heading_skip": (heading_skip, "heading_nesting", "fail"),
     "heading_starts_at_h2_fails": (heading_starts_at_h2_fails, "heading_nesting", "fail"),
     "rolemap_custom_tags_ok": (rolemap_custom_tags_ok, "heading_nesting", "pass"),
+    "unmapped_custom_tag": (unmapped_custom_tag, "role_map", "fail"),
+    "rolemap_chain_ok": (rolemap_chain_ok, "role_map", "pass"),
+    "rolemap_pdf_1_7_type_ok": (rolemap_pdf_1_7_type_ok, "role_map", "pass"),
+    "rolemap_cycle": (rolemap_cycle, "role_map", "fail"),
+    "suspects_flag": (suspects_flag, "suspects", "fail"),
+    "suspects_false_ok": (suspects_false_ok, "suspects", "pass"),
+    "graphics_outside_marks": (graphics_outside_marks, "untagged_graphics", "fail"),
+    "graphics_in_artifact_ok": (graphics_in_artifact_ok, "untagged_graphics", "pass"),
+    "tounicode_maps_to_nothing": (tounicode_maps_to_nothing, "unicode_mapping", "fail"),
+    "tounicode_maps_to_a_character_ok": (
+        tounicode_maps_to_a_character_ok, "unicode_mapping", "pass"),
+    "numbered_list_declared_as_bullets": (
+        numbered_list_declared_as_bullets, "list_numbering", "fail"),
+    "bullet_list_no_numbering_ok": (
+        bullet_list_no_numbering_ok, "list_numbering", "pass"),
+    "word_labelled_list_ok": (word_labelled_list_ok, "list_numbering", "not_applicable"),
+    "list_item_holding_a_paragraph": (
+        list_item_holding_a_paragraph, "list_item_structure", "fail"),
+    "nested_list_inside_lbody_ok": (
+        nested_list_inside_lbody_ok, "list_item_structure", "pass"),
+    "list_labels_left_in_the_body": (
+        list_labels_left_in_the_body, "list_semantics", "needs_review"),
+    "artifact_sentence": (artifact_sentence, "artifact_judgement", "needs_review"),
+    "short_artifact_ok": (short_artifact_ok, "artifact_judgement", "pass"),
+    "figure_over_the_page": (figure_over_the_page, "artifact_judgement", "needs_review"),
+    "element_holds_two_blocks": (
+        element_holds_two_blocks, "content_grouping", "needs_review"),
+    "evenly_leaded_paragraph_ok": (
+        evenly_leaded_paragraph_ok, "content_grouping", "pass"),
+    "sequence_out_of_order": (sequence_out_of_order, "content_order", "needs_review"),
+    "sequence_in_order_ok": (sequence_in_order_ok, "content_order", "pass"),
+    "paragraph_set_like_a_heading": (
+        paragraph_set_like_a_heading, "heading_semantics", "needs_review"),
+    "heading_set_larger_ok": (heading_set_larger_ok, "heading_semantics", "pass"),
+    "h_and_hn_together": (h_and_hn_together, "heading_tag_mixing", "fail"),
+    "generic_headings_only_ok": (generic_headings_only_ok, "heading_tag_mixing", "pass"),
 }

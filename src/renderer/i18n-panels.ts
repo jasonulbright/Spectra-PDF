@@ -939,7 +939,7 @@ export const PANEL_STRINGS = {
   'panel.preflight.reportProfile': 'Profile: {{name}}',
   'panel.preflight.reportRunAt': 'Checked: {{when}}',
   'panel.preflight.reportFooter':
-    'This report states which of 37 checks the document passes against the named profile. It is not a certificate of conformance.',
+    'This report states which of 38 checks the document passes against the named profile. It is not a certificate of conformance.',
   'panel.preflight.unreadableHeading': 'Parts that could not be read',
 
   'panel.preflight.where.page': 'Page {{page}}',
@@ -1058,6 +1058,9 @@ export const PANEL_STRINGS = {
   'panel.preflight.check.optional_content': 'No optional content',
   'panel.preflight.explain.optional_content':
     'Which layers a RIP prints is a decision nobody made deliberately.',
+  'panel.preflight.check.processing_steps': 'Processing steps are declared and non-printing',
+  'panel.preflight.explain.processing_steps':
+    'A die line or a varnish left switched on reaches the plate as ink.',
   'panel.preflight.check.printing_annotations': 'No printing annotations',
   'panel.preflight.explain.printing_annotations':
     'An annotation flagged to print reaches the plate with the page.',
@@ -1167,6 +1170,18 @@ export const PANEL_STRINGS = {
     'Page {{page}}: an annotation border {{width}} pt wide, below {{threshold}} pt.',
   'panel.preflight.detail.optional_content_layer':
     'The layer “{{name}}” leaves what prints to the RIP.',
+  'panel.preflight.detail.processing_steps_absent':
+    'This document declares no processing steps.',
+  'panel.preflight.detail.processing_step_printing':
+    'The processing step “{{name}}” ({{group}}) is not declared off the print, so it reaches the plate.',
+  'panel.preflight.detail.processing_step_no_group':
+    'The layer “{{name}}” is marked as a processing step but names no group.',
+  'panel.preflight.detail.processing_step_type_on_untyped_group':
+    'The layer “{{name}}” gives the type “{{type}}”, but the group “{{group}}” defines no types.',
+  'panel.preflight.detail.processing_step_unregistered':
+    'The layer “{{name}}” declares “{{group}}”/“{{type}}”, which is not a name this check recognizes and carries no vendor prefix. Confirm it against the standard.',
+  'panel.preflight.detail.processing_step_custom':
+    'The layer “{{name}}” declares the vendor-defined processing step “{{group}}”/“{{type}}”.',
   'panel.preflight.detail.printing_annotation':
     'Page {{page}}: a {{subtype}} annotation is flagged to print.',
   'panel.preflight.detail.form_field':
@@ -1220,6 +1235,9 @@ export const PANEL_STRINGS = {
   'panel.preflight.param.threshold_pt': 'Hairline threshold',
   'panel.preflight.param.include_annotations': 'Include annotation borders',
   'panel.preflight.param.allow_optional_content': 'Optional content allowed',
+  'panel.preflight.param.require_steps_declared': 'Processing steps required',
+  'panel.preflight.param.forbid_printing': 'Processing steps must be off the print',
+  'panel.preflight.param.allow_custom': 'Vendor-defined steps allowed',
   'panel.preflight.param.forbidden_subtypes': 'Forbidden annotation types',
   'panel.preflight.param.printing_only': 'Printing annotations only',
   'panel.preflight.param.allow_forms': 'Forms allowed',
@@ -1315,6 +1333,9 @@ export const PANEL_STRINGS = {
   'panel.outputPreview.arm': 'Show separations',
   'panel.outputPreview.disarm': 'Show the page',
   'panel.outputPreview.overprint': 'Simulate overprint',
+  'panel.outputPreview.processingSteps': 'Show processing steps',
+  'panel.outputPreview.processingStepInks':
+    'Left off the plates as processing steps: {{names}}',
   'panel.outputPreview.alarm': 'Highlight ink over',
   'panel.outputPreview.limitAria': 'Total ink limit, percent',
   'panel.outputPreview.maxTac': 'Heaviest pixel: {{pct}}% total ink',
@@ -1749,6 +1770,42 @@ export const PANEL_STRINGS = {
   'panel.a11y.check.tagged': 'Document is tagged',
   'panel.a11y.explain.tagged':
     'Structure tags let assistive technology read content in a defined order.',
+  'panel.a11y.check.role_map': 'Every tag resolves to a standard type',
+  'panel.a11y.explain.role_map':
+    'A private tag name means nothing to a reader unless the role map translates it.',
+  'panel.a11y.check.suspects': 'The document does not disclaim its own tagging',
+  'panel.a11y.explain.suspects':
+    'The suspects flag tells readers the structure may not match the content.',
+  'panel.a11y.check.untagged_graphics': 'All page graphics are tagged or declared decoration',
+  'panel.a11y.explain.untagged_graphics':
+    'A fill, image or shading outside every marked sequence is reached by nobody.',
+  'panel.a11y.check.artifact_judgement': 'Decoration and content are told apart',
+  'panel.a11y.explain.artifact_judgement':
+    'Text declared decoration that continues a sentence needs a person to look.',
+  'panel.a11y.check.content_grouping': 'Content is grouped as it reads',
+  'panel.a11y.explain.content_grouping':
+    'One paragraph split in two, or two joined into one, changes what is announced.',
+  'panel.a11y.check.content_order': 'Order holds inside columns and sequences',
+  'panel.a11y.explain.content_order':
+    'Columns and the order within one tag are what a page-wide sort cannot see.',
+  'panel.a11y.check.unicode_mapping': 'Characters map to the right text',
+  'panel.a11y.explain.unicode_mapping':
+    'A font whose own glyph table contradicts its character map spells words wrong.',
+  'panel.a11y.check.list_numbering': 'List numbering matches the labels',
+  'panel.a11y.explain.list_numbering':
+    'A numbered list announced as bullets loses the count the labels show.',
+  'panel.a11y.check.list_item_structure': 'List items hold a label and a body',
+  'panel.a11y.explain.list_item_structure':
+    'An item holding anything else has put its body where no reader looks for it.',
+  'panel.a11y.check.list_semantics': 'Lists are tagged as lists',
+  'panel.a11y.explain.list_semantics':
+    'Labelled paragraphs, and one list tagged as two, each need a person to look.',
+  'panel.a11y.check.heading_tag_mixing': 'One heading convention, not two',
+  'panel.a11y.explain.heading_tag_mixing':
+    'Numbered and unnumbered heading tags together give the outline two answers.',
+  'panel.a11y.check.heading_semantics': 'Headings are the text that reads as headings',
+  'panel.a11y.explain.heading_semantics':
+    'Size is a signal and not a semantic, so each candidate needs a person to look.',
   'panel.a11y.check.structure_nesting': 'Structure types are nested where the standard allows',
   'panel.a11y.explain.structure_nesting':
     'A tag inside a parent the standard does not allow it in breaks the structure it describes.',
@@ -1860,6 +1917,66 @@ export const PANEL_STRINGS = {
   'panel.a11y.artifactRestTitle':
     'Running heads and page numbers are furniture, not content — one step per page',
 
+  'panel.a11y.detail.role_not_mapped':
+    'The tag “{{tag}}” is not a standard structure type and the role map does not translate it, so it reaches a reader as “{{role}}” and means nothing.',
+  'panel.a11y.detail.role_map_does_not_terminate':
+    'The role map sends “{{tag}}” around in a circle, so it never reaches a standard structure type.',
+  'panel.a11y.detail.suspects_flag_set':
+    'The document flags its own tagging as possibly unreliable, which readers are entitled to act on.',
+  'panel.a11y.detail.suspects_unreadable':
+    'The mark information could not be read, so whether the document flags its own tagging is unknown.',
+  'panel.a11y.detail.graphics_outside_marked_content':
+    'Page {{page}} paints {{operations}} thing(s) outside every marked sequence, so they are neither tagged nor declared decoration.',
+  'panel.a11y.detail.unicode_never_mapped':
+    'In “{{font}}” on page {{page}}, code {{code}} claims to spell {{declared}}, which is not a character any glyph spells.',
+  'panel.a11y.detail.unicode_contradicts_font':
+    'In “{{font}}” on page {{page}}, code {{code}} claims to spell {{declared}} while the font’s own glyph table says {{program}}.',
+  'panel.a11y.detail.font_program_unreadable':
+    'A font program on page {{page}} could not be read, so its character mapping was not checked.',
+  'panel.a11y.detail.artifact_continues_real_content':
+    'This text is declared decoration but runs on from tagged content on page {{page}} — it follows “{{neighbour}}”.',
+  'panel.a11y.detail.artifact_reads_as_prose':
+    'This text is declared decoration but is {{words}} words of body copy on page {{page}}.',
+  'panel.a11y.detail.figure_inline_in_text':
+    'A {{role}} sits inside a {{parent}}, where a picture stands in the position a word occupies.',
+  'panel.a11y.detail.figure_covers_the_page':
+    'This {{role}} paints nothing but a field of colour over {{share}}% of the page.',
+  'panel.a11y.detail.element_spans_separated_blocks':
+    'This {{role}} covers {{blocks}} lines set further apart than the lines inside them.',
+  'panel.a11y.detail.siblings_share_one_block':
+    'This {{role}} sits on the line directly under the one before it, close enough to be part of it.',
+  'panel.a11y.detail.siblings_sit_side_by_side':
+    'This {{role}} sits beside the one before it rather than after it.',
+  'panel.a11y.detail.figure_splits_one_unit':
+    'A {{role}} sits between two {{around}} elements that may be one piece of content.',
+  'panel.a11y.detail.sequence_spans_columns':
+    'Sequence {{mcid}} on page {{page}} reaches across {{bands}} columns.',
+  'panel.a11y.detail.sequence_draws_backwards':
+    'Sequence {{mcid}} on page {{page}} draws its own words right to left {{jumps}} time(s).',
+  'panel.a11y.detail.list_numbering_not_ordered':
+    'The items are numbered and the list declares “{{declared}}”, so a reader announces the count as decoration.',
+  'panel.a11y.detail.list_numbering_ordered':
+    'The items are bulleted with {{drawn}} and the list declares “{{declared}}”, so a reader counts them aloud.',
+  'panel.a11y.detail.list_numbering_wrong_bullet':
+    'The items are bulleted with {{drawn}} and the list declares “{{declared}}”.',
+  'panel.a11y.detail.list_item_holds_other_roles':
+    'This list item holds {{roles}}, where only a label and a body belong.',
+  'panel.a11y.detail.list_item_holds_content_directly':
+    'This {{role}} tags page content itself instead of putting it in a body.',
+  'panel.a11y.detail.list_item_has_no_body':
+    'This {{role}} has no body, so the item’s content is somewhere no reader looks for it.',
+  'panel.a11y.detail.list_label_inside_body':
+    'This item carries no label, and its body opens with “{{label}}”.',
+  'panel.a11y.detail.labelled_paragraphs_are_not_a_list':
+    'These paragraphs open with list markers such as “{{label}}” and no list element tags them.',
+  'panel.a11y.detail.adjacent_lists_declare_alike':
+    'This list follows another declaring the same “{{numbering}}”, so the two may be one list split in half.',
+  'panel.a11y.detail.heading_conventions_mixed':
+    'The document uses {{numbered}} numbered heading(s) and {{generic}} unnumbered one(s), so its outline has two answers about each level.',
+  'panel.a11y.detail.paragraph_is_set_like_a_heading':
+    'This paragraph is set at {{size}} pt against body copy at {{body}} pt.',
+  'panel.a11y.detail.heading_is_set_like_body_text':
+    'This level {{level}} heading is set at {{size}} pt, no larger than body copy at {{body}} pt.',
   'panel.a11y.detail.alt_nested_inside_alt':
     'The alternate text here sits inside an element that already carries one, so it is never read.',
   'panel.a11y.detail.alt_references_no_content':
@@ -1962,6 +2079,13 @@ export const PANEL_STRINGS = {
   'panel.layers.showing': 'Showing {{name}}…',
   'panel.layers.hidden': '{{name}} hidden',
   'panel.layers.shown': '{{name}} shown',
+  'panel.layers.step': 'Processing step: {{step}}',
+  'panel.layers.stepTitle':
+    'This layer carries a manufacturing instruction — a die line, a crease, a varnish or a legend — not artwork a press prints.',
+  'panel.layers.stepNoGroup': 'no group named',
+  'panel.layers.stepTypeOnUntypedGroup': 'this group defines no types',
+  'panel.layers.stepUnregistered': 'unrecognized name; confirm it against the standard',
+  'panel.layers.stepCustom': 'vendor-defined',
 
   'panel.attach.open': 'Open a PDF to manage its attachments',
   'panel.attach.attaching': 'Attaching…',

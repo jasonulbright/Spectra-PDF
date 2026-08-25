@@ -44,6 +44,14 @@ from engine.struct_tree import _is_elem, _kids, _MAX_DEPTH, _page_map, _page_no
 # value is how the audit reports it.
 _TABLE_ATTRS = ("/Scope", "/Headers", "/Summary", "/ColSpan", "/RowSpan")
 
+# List attributes (ISO 32000-2 Table 353). Read through the same two places
+# and reported under the same flat `attrs` dictionary: an owner-keyed `/A`
+# entry and a direct key are the two spellings producers use for either family,
+# and a reader that knew only one of them would answer for half the documents.
+_LIST_ATTRS = ("/ListNumbering",)
+
+_ELEM_ATTRS = _TABLE_ATTRS + _LIST_ATTRS
+
 # The roles the table checks walk. `THead`/`TBody`/`TFoot` are row groups: a
 # `TR` inside one is inside its table.
 ROW_GROUPS = frozenset({"THead", "TBody", "TFoot"})
@@ -142,17 +150,17 @@ def _attr_dicts(elem) -> list:
 
 
 def _read_attrs(elem) -> dict:
-    """The table attributes this element declares, from `/A` first and from
-    direct keys second. A direct key is what several producers write and the
-    spec does not forbid reading; an `/A` entry is the spec's own place, so it
-    wins when both are present."""
+    """The table and list attributes this element declares, from `/A` first and
+    from direct keys second. A direct key is what several producers write and
+    the spec does not forbid reading; an `/A` entry is the spec's own place, so
+    it wins when both are present."""
     out: dict = {}
-    for key in _TABLE_ATTRS:
+    for key in _ELEM_ATTRS:
         value = elem.get(key)
         if value is not None:
             out[key.lstrip("/")] = value
     for attrs in _attr_dicts(elem):
-        for key in _TABLE_ATTRS:
+        for key in _ELEM_ATTRS:
             value = attrs.get(key)
             if value is not None:
                 out[key.lstrip("/")] = value

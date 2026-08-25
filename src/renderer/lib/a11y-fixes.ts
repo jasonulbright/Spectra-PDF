@@ -47,6 +47,7 @@ export interface FixOffer {
 export const AUTOMATIC_CHECKS: readonly string[] = [
   'permissions',
   'tagged',
+  'suspects',
   'title',
   'bookmarks',
   'tab_order',

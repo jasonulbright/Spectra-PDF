@@ -12,6 +12,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -19,9 +21,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -41,16 +48,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -59,6 +71,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -66,9 +80,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -88,16 +107,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -106,6 +130,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -113,9 +139,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -135,16 +166,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -153,6 +189,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -160,9 +198,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -182,16 +225,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -200,6 +248,8 @@
         "permissions": "pass",
         "image_only": "pass",
         "tagged": "pass",
+        "role_map": "pass",
+        "suspects": "pass",
         "structure_nesting": "not_applicable",
         "reading_order": "pass",
         "lang": "fail",
@@ -207,9 +257,14 @@
         "bookmarks": "not_applicable",
         "contrast": "pass",
         "tagged_content": "pass",
+        "untagged_graphics": "pass",
+        "artifact_judgement": "pass",
+        "content_grouping": "pass",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "pass",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -229,16 +284,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "pass"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "pass",
+        "heading_tag_mixing": "pass",
+        "heading_semantics": "pass"
       },
       "summary": {
-        "passed": 8,
+        "passed": 15,
         "failed": 2,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 23,
-        "applicable": 10,
-        "total": 33
+        "not_applicable": 28,
+        "applicable": 17,
+        "total": 45
       }
     },
     {
@@ -251,6 +311,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -258,9 +320,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -280,16 +347,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -298,6 +370,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -305,9 +379,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -327,16 +406,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -349,6 +433,8 @@
         "permissions": "pass",
         "image_only": "pass",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -356,9 +442,14 @@
         "bookmarks": "not_applicable",
         "contrast": "pass",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "pass",
+        "unicode_mapping": "pass",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -378,16 +469,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
-        "passed": 4,
+        "passed": 5,
         "failed": 3,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 26,
-        "applicable": 7,
-        "total": 33
+        "not_applicable": 37,
+        "applicable": 8,
+        "total": 45
       }
     },
     {
@@ -396,6 +492,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -403,9 +501,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -425,16 +528,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -443,6 +551,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -450,9 +560,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -472,16 +587,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -490,6 +610,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -497,9 +619,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -519,16 +646,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -537,6 +669,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -544,9 +678,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -566,16 +705,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -584,6 +728,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -591,9 +737,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -613,16 +764,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -631,6 +787,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -638,9 +796,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "fail",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -660,16 +823,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 5,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 39,
         "applicable": 6,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -678,6 +846,8 @@
         "permissions": "pass",
         "image_only": "pass",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -685,9 +855,14 @@
         "bookmarks": "not_applicable",
         "contrast": "pass",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "pass",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -707,16 +882,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 4,
         "failed": 3,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 26,
+        "not_applicable": 38,
         "applicable": 7,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -725,6 +905,8 @@
         "permissions": "pass",
         "image_only": "pass",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -732,9 +914,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "fail",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -754,16 +941,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 2,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 39,
         "applicable": 6,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -772,6 +964,8 @@
         "permissions": "pass",
         "image_only": "pass",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -779,9 +973,14 @@
         "bookmarks": "not_applicable",
         "contrast": "pass",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "pass",
+        "unicode_mapping": "pass",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -801,16 +1000,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
-        "passed": 4,
+        "passed": 5,
         "failed": 3,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 26,
-        "applicable": 7,
-        "total": 33
+        "not_applicable": 37,
+        "applicable": 8,
+        "total": 45
       }
     },
     {
@@ -819,6 +1023,8 @@
         "permissions": "pass",
         "image_only": "pass",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -826,9 +1032,14 @@
         "bookmarks": "not_applicable",
         "contrast": "pass",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "pass",
+        "unicode_mapping": "pass",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -848,16 +1059,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
-        "passed": 4,
+        "passed": 5,
         "failed": 3,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 26,
-        "applicable": 7,
-        "total": 33
+        "not_applicable": 37,
+        "applicable": 8,
+        "total": 45
       }
     },
     {
@@ -866,6 +1082,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -873,9 +1091,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "fail",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -895,16 +1118,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 7,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 25,
+        "not_applicable": 37,
         "applicable": 8,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -913,6 +1141,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -920,9 +1150,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -942,16 +1177,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -960,6 +1200,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -967,9 +1209,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -989,16 +1236,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -1007,6 +1259,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -1014,9 +1268,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -1036,16 +1295,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -1054,6 +1318,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -1061,9 +1327,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "fail",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -1083,16 +1354,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 7,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 25,
+        "not_applicable": 37,
         "applicable": 8,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -1101,6 +1377,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -1108,9 +1386,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -1130,16 +1413,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -1148,6 +1436,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -1155,9 +1445,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -1177,16 +1472,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -1195,6 +1495,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -1202,9 +1504,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -1224,16 +1531,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -1242,6 +1554,8 @@
         "permissions": "pass",
         "image_only": "fail",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -1249,9 +1563,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "not_applicable",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -1271,16 +1590,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 1,
         "failed": 4,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 28,
+        "not_applicable": 40,
         "applicable": 5,
-        "total": 33
+        "total": 45
       }
     },
     {
@@ -1289,6 +1613,8 @@
         "permissions": "pass",
         "image_only": "pass",
         "tagged": "fail",
+        "role_map": "not_applicable",
+        "suspects": "not_applicable",
         "structure_nesting": "not_applicable",
         "reading_order": "not_applicable",
         "lang": "fail",
@@ -1296,9 +1622,14 @@
         "bookmarks": "not_applicable",
         "contrast": "not_applicable",
         "tagged_content": "not_applicable",
+        "untagged_graphics": "not_applicable",
+        "artifact_judgement": "not_applicable",
+        "content_grouping": "not_applicable",
+        "content_order": "not_applicable",
         "tagged_annotations": "not_applicable",
         "tab_order": "not_applicable",
         "character_encoding": "pass",
+        "unicode_mapping": "not_applicable",
         "tagged_multimedia": "not_applicable",
         "screen_flicker": "not_applicable",
         "scripts": "not_applicable",
@@ -1318,16 +1649,21 @@
         "table_summary": "not_applicable",
         "list_items": "not_applicable",
         "list_labels": "not_applicable",
-        "heading_nesting": "not_applicable"
+        "list_numbering": "not_applicable",
+        "list_item_structure": "not_applicable",
+        "list_semantics": "not_applicable",
+        "heading_nesting": "not_applicable",
+        "heading_tag_mixing": "not_applicable",
+        "heading_semantics": "not_applicable"
       },
       "summary": {
         "passed": 3,
         "failed": 3,
         "warnings": 0,
         "needs_review": 0,
-        "not_applicable": 27,
+        "not_applicable": 39,
         "applicable": 6,
-        "total": 33
+        "total": 45
       }
     }
   ]
