@@ -89,6 +89,17 @@ export interface SeparationPreviewValue {
   setAlarm: (on: boolean) => void;
   overprint: boolean;
   setOverprint: (on: boolean) => void;
+  /** Show the non-printing processing-step layers — die lines, creases,
+   *  varnish, white — in the composite, the plate list and the ink figures.
+   *  VIEW state, held here and nowhere else: which layers a document turns on
+   *  is document state, and this switch must never write one. Off is the
+   *  print truth, which is what the preview is for. */
+  showProcessingSteps: boolean;
+  setShowProcessingSteps: (on: boolean) => void;
+  /** The spot colorants the inventory left out because only processing-step
+   *  content paints them. Named so a plate list one ink shorter than the
+   *  document declares says which ink and why. */
+  processingStepInks: readonly string[];
   /** The press profiles this document can be proofed against. */
   simulationProfiles: SimulationProfiles;
   /** The source the panel is ASKING for. What it renders comes from
@@ -205,6 +216,8 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
   const [limitPct, setLimitPctState] = useState(DEFAULT_TAC_LIMIT);
   const [alarm, setAlarm] = useState(false);
   const [overprint, setOverprint] = useState(true);
+  const [showProcessingSteps, setShowProcessingSteps] = useState(false);
+  const [processingStepInks, setProcessingStepInks] = useState<readonly string[]>([]);
   const [stats, setStats] = useState<CompositeResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -349,17 +362,22 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
       setInks([]);
       setInkUnknown([]);
       setFamilies(['']);
+      setProcessingStepInks([]);
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
-        const res = await call('list_inks', { file: inventoryPath });
+        const res = await call('list_inks', {
+          file: inventoryPath,
+          show_processing_steps: showProcessingSteps,
+        });
         if (cancelled) return;
         const inventory = readInventory(res);
         setInks(inventory.inks);
         setInkUnknown(inventory.unknown);
         setFamilies(inventory.color_families);
+        setProcessingStepInks(inventory.processing_step_inks);
       } catch (e: unknown) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
@@ -367,7 +385,7 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
     return () => {
       cancelled = true;
     };
-  }, [armed, inventoryPath, generation, call]);
+  }, [armed, inventoryPath, generation, showProcessingSteps, call]);
 
   // Which presses this document can be proofed against, and which one the
   // panel opens on. A read of the working file, so it runs through the GATED
@@ -441,6 +459,7 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
           if (cancelled) return;
           const key = plateCacheKey(
             target.docId, target.pageId, target.dpi, overprint, profileComponent,
+            showProcessingSteps,
           );
           let set = plateCache.current.get(key)?.value;
           if (!set) {
@@ -453,6 +472,7 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
               simulation: request,
               font_dir: fontDir,
               icc_dir: iccDir,
+              show_processing_steps: showProcessingSteps,
             });
             if (cancelled) return;
             if (!livePageIds.has(target.pageId)) continue;
@@ -512,8 +532,9 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
     // `wantedKey` stands for the page window: the array's identity changes on
     // every state tick and would restart the run for the same pages.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [armed, wantedKey, overprint, hidden, densities, aliases, limitPct, alarm, generation,
-    simulationSource, simulationProfilePath, simulationPress, paperWhite, blackInk, families]);
+  }, [armed, wantedKey, overprint, showProcessingSteps, hidden, densities, aliases, limitPct,
+    alarm, generation, simulationSource, simulationProfilePath, simulationPress, paperWhite,
+    blackInk, families]);
 
   // A plate the sequence has never seen joins the end of it, so an ink the
   // document adds is listed rather than silently sorted to the front.
@@ -541,8 +562,8 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
   // longer describes.
   useEffect(() => {
     clearInspection();
-  }, [wantedKey, overprint, generation, simulationSource, simulationProfilePath,
-    simulationPress, paperWhite, blackInk, clearInspection]);
+  }, [wantedKey, overprint, showProcessingSteps, generation, simulationSource,
+    simulationProfilePath, simulationPress, paperWhite, blackInk, clearInspection]);
 
   const inspectAt = useCallback(
     (docId: string, pageId: string, u: number, v: number, viewRotation: number) => {
@@ -614,7 +635,8 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
     () => ({
       armed, setArmed, inks, inkUnknown, plates, coverage, hidden, toggleInk, showAllInks,
       hideAllInks, densities, setDensity, aliases, setAlias, sequence, moveInk, limitPct,
-      setLimitPct, alarm, setAlarm, overprint, setOverprint, simulationProfiles,
+      setLimitPct, alarm, setAlarm, overprint, setOverprint,
+      showProcessingSteps, setShowProcessingSteps, processingStepInks, simulationProfiles,
       simulationSource, setSimulationSource, pickSimulationProfile, simulationProfilePath,
       simulationPress, setSimulationPress,
       paperWhite, setPaperWhite, blackInk, setBlackInk, simulation, stats, busy, error,
@@ -623,7 +645,8 @@ export function SeparationPreviewProvider({ children }: { children: React.ReactN
     }),
     [armed, setArmed, inks, inkUnknown, plates, coverage, hidden, toggleInk, showAllInks,
       hideAllInks, densities, setDensity, aliases, setAlias, sequence, moveInk, limitPct,
-      setLimitPct, alarm, overprint, simulationProfiles, simulationSource,
+      setLimitPct, alarm, overprint, showProcessingSteps, processingStepInks,
+      simulationProfiles, simulationSource,
       pickSimulationProfile, simulationProfilePath, simulationPress, paperWhite, blackInk,
       simulation,
       stats, busy, error, invalidate, rasterFor, inspection, inspectBusy, inspectError,

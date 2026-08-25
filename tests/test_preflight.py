@@ -69,7 +69,7 @@ class TestInventory:
         assert [c["id"] for c in report["checks"]] == list(CHECK_IDS)
         nested = [c["id"] for cat in report["categories"] for c in cat["checks"]]
         assert nested == list(CHECK_IDS)
-        assert len(CHECK_IDS) == 37
+        assert len(CHECK_IDS) == 38
 
     def test_every_row_states_the_rule_it_was_measured_against(self, tmp_dir):
         report = _run(tmp_dir, "baseline")
@@ -586,7 +586,7 @@ class TestUnreadableIsNotAPass:
         """The enumeration used to run unguarded: a table that is not a
         dictionary raised out of the walk and took the whole report with it."""
         report = _run(tmp_dir, "unreadable_colorspace")
-        assert report["summary"]["total"] == 37
+        assert report["summary"]["total"] == 38
 
     def test_a_font_only_inside_a_form_is_still_found(self, tmp_dir):
         assert _statuses(_run(tmp_dir, "font_inside_form"))["fonts_embedded"] == "fail"
@@ -639,7 +639,7 @@ class TestCorpusGate:
     Total area coverage is disabled here and pinned separately over
     constructed fixtures: running Ghostscript over every page of every
     document would make this the slowest thing in the repo, and the guard the
-    corpus provides is about verdict DRIFT, which the other 36 checks give.
+    corpus provides is about verdict DRIFT, which the other 37 checks give.
     """
 
     CORPUS = REPO / "tests" / "fixtures" / "preflight-corpus.json"

@@ -87,6 +87,7 @@ CHECK_INVENTORY = (
     ("live_transparency", "content"),
     ("hairlines_absent", "content"),
     ("optional_content", "content"),
+    ("processing_steps", "content"),
     ("printing_annotations", "content"),
     ("interactive_form", "content"),
     ("title_present", "metadata"),
@@ -201,6 +202,26 @@ CHECK_PARAMS: dict[str, dict[str, _P]] = {
         "include_annotations": _P("bool", True),
     },
     "optional_content": {"allow_optional_content": _P("bool", True)},
+    # Processing steps (die lines, creases, varnish, white, legend) are a
+    # packaging and label construct, so every parameter here is off by
+    # default: a commercial-print job that declares none must not be told it
+    # is missing something, and a job that declares them is asked only the
+    # question a machine can answer without the standard's own text —
+    # whether a step declared non-printing is actually excluded from the
+    # print. See `engine/processing_steps.py` for what is and is not
+    # decidable here.
+    # `forbid_printing` is OFF by default and that is a finding, not an
+    # oversight: every one of the 40 patches in the standard's own test
+    # corpus leaves its processing-step groups on in the default
+    # configuration and every one of them is compliant. Requiring the file to
+    # additionally declare the groups off the print (`/Usage /Print
+    # /PrintState /OFF`) is a house rule a profile opts into, never a defect
+    # this inventory pronounces on its own.
+    "processing_steps": {
+        "require_steps_declared": _P("bool", False),
+        "forbid_printing": _P("bool", False),
+        "allow_custom": _P("bool", True),
+    },
     "printing_annotations": {
         "forbidden_subtypes": _P("strings", ()),
         "printing_only": _P("bool", True),

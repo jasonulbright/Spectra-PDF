@@ -23,7 +23,19 @@ WORKFLOWS = ("ci.yml", "release.yml")
 AXIS_PROVISIONING = {
     ("gs_axis", "PRESENT_AXIS_SKIP"): "choco install ghostscript -y --no-progress",
     ("ghent_corpus", "CORPUS_AXIS_SKIP"): "python scripts/fetch-ghent-suite.py --check",
+    ("processing_steps_corpus", "PROCESSING_STEPS_AXIS_SKIP"):
+        "python scripts/fetch-processing-steps-suite.py --check",
 }
+
+#: Every fetched corpus staged the same way: an actions/cache step keyed on
+#: the fetch SCRIPT (which is where the archive digests are pinned), a fetch
+#: guarded by the cache miss, and an unconditional `--check`. One table so a
+#: new corpus cannot arrive with half the pattern.
+CACHED_CORPORA = (
+    ("ghent-cache", "ghent-corpus", "scripts/fetch-ghent-suite.py"),
+    ("processing-steps-cache", "processing-steps-corpus",
+     "scripts/fetch-processing-steps-suite.py"),
+)
 
 
 def _axis_constants() -> set[tuple[str, str]]:
@@ -74,7 +86,10 @@ def test_every_skip_axis_is_registered_with_its_provisioning() -> None:
 
 
 @pytest.mark.parametrize("workflow", WORKFLOWS)
-def test_the_ghent_corpus_fetch_is_cached_on_its_pins(workflow: str) -> None:
+@pytest.mark.parametrize("cache_id,path,script", CACHED_CORPORA)
+def test_each_corpus_fetch_is_cached_on_its_pins(
+    workflow: str, cache_id: str, path: str, script: str
+) -> None:
     """The fetch hits GWG's server on a pin change, not once per run.
 
     The key is the fetch script because that file IS the pin: the archive
@@ -83,14 +98,14 @@ def test_the_ghent_corpus_fetch_is_cached_on_its_pins(workflow: str) -> None:
     rather than presenting as an absent corpus (which would be a skip).
     """
     text = (ROOT / ".github" / "workflows" / workflow).read_text()
-    cache = text.index("id: ghent-cache")
-    fetch = text.index("run: python scripts/fetch-ghent-suite.py\n")
-    check = text.index("run: python scripts/fetch-ghent-suite.py --check")
+    cache = text.index(f"id: {cache_id}")
+    fetch = text.index(f"run: python {script}\n")
+    check = text.index(f"run: python {script} --check")
 
-    assert "hashFiles('scripts/fetch-ghent-suite.py')" in text
-    assert "path: ghent-corpus" in text
+    assert f"hashFiles('{script}')" in text
+    assert f"path: {path}" in text
     assert cache < fetch < check
-    guard = text.index("if: steps.ghent-cache.outputs.cache-hit != 'true'")
+    guard = text.index(f"if: steps.{cache_id}.outputs.cache-hit != 'true'")
     assert cache < guard < check
     assert text[fetch:check].count("cache-hit") == 0
 

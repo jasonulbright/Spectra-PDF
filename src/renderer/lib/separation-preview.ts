@@ -38,6 +38,12 @@ export interface InkInventory {
    *  device operators alike. It decides whether a profile change is a
    *  re-raster or only a re-composite. */
   color_families: string[];
+  /** The spot colorants left OUT because only processing-step content paints
+   *  them — a die line's or a varnish's colorant, which is not a plate the
+   *  job runs. Named rather than merely absent: a plate list one ink shorter
+   *  than the document declares has to say which ink and why, or it reads as
+   *  a document that never had it. */
+  processing_step_inks: string[];
 }
 
 /** One rasterized plate of a page. */
@@ -339,14 +345,27 @@ export interface CacheEntry<T> {
   value: T;
 }
 
+/**
+ * The identity of one cached plate set.
+ *
+ * EVERY setting that changes what the device rastered has to be here. That
+ * includes `showProcessingSteps`: with the processing steps hidden the device
+ * never saw the die line, so the two states are two different plate sets of
+ * the same page, and a key that omitted the flag would serve the set from
+ * before the flip and present the switch as broken. The composited raster is
+ * keyed by the PAGE alone and is replaced on every run, so the newest
+ * composite always wins there — that half needs no flag, and giving it one
+ * would leave the pre-flip image sitting beside the new one.
+ */
 export function plateCacheKey(
   fileId: string,
   pageId: string,
   dpi: number,
   overprint: boolean,
   profile = '',
+  showProcessingSteps = false,
 ): string {
-  return JSON.stringify([fileId, pageId, dpi, overprint, profile]);
+  return JSON.stringify([fileId, pageId, dpi, overprint, profile, showProcessingSteps]);
 }
 
 /**
@@ -453,6 +472,7 @@ export function readInventory(payload: unknown): InkInventory {
     inks?: unknown;
     unknown?: unknown;
     color_families?: unknown;
+    processing_step_inks?: unknown;
   };
   return {
     inks: Array.isArray(raw.inks) ? (raw.inks as Ink[]) : [],
@@ -463,6 +483,9 @@ export function readInventory(payload: unknown): InkInventory {
     color_families: Array.isArray(raw.color_families)
       ? raw.color_families.map((f) => String(f))
       : [''],
+    processing_step_inks: Array.isArray(raw.processing_step_inks)
+      ? raw.processing_step_inks.map((n) => String(n))
+      : [],
   };
 }
 

@@ -90,6 +90,7 @@ export const CHECK_INVENTORY: readonly (readonly [string, string])[] = [
   ['live_transparency', 'content'],
   ['hairlines_absent', 'content'],
   ['optional_content', 'content'],
+  ['processing_steps', 'content'],
   ['printing_annotations', 'content'],
   ['interactive_form', 'content'],
   ['title_present', 'metadata'],
