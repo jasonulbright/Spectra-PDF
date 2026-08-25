@@ -1887,6 +1887,40 @@ export const PANEL_STRINGS = {
   'panel.a11y.explain.list_items': 'An item outside a list is not announced as part of one.',
   'panel.a11y.check.list_labels': 'Labels and bodies are inside a list item',
   'panel.a11y.explain.list_labels': 'A label or body outside its item loses the item it belongs to.',
+  'panel.a11y.check.optional_content_config':
+    'Optional content configurations are named, and set no automatic state',
+  'panel.a11y.explain.optional_content_config':
+    'A configuration with no name, or one that adjusts itself, hides content unpredictably.',
+  'panel.a11y.check.embedded_file_names': 'Attached files carry both of their names',
+  'panel.a11y.explain.embedded_file_names':
+    'An attachment with no file name tells nobody what it is before they open it.',
+  'panel.a11y.check.trapnet_annotations': 'No trapping annotations are present',
+  'panel.a11y.explain.trapnet_annotations':
+    'Trap networks describe a printing press, not anything a reader can reach.',
+  'panel.a11y.check.link_ismap': 'Links do not depend on a server-side image map',
+  'panel.a11y.explain.link_ismap':
+    'A link that sends a click coordinate cannot be used by anyone who cannot point.',
+  'panel.a11y.check.media_clip_data': 'Media clips state their type and their alternate text',
+  'panel.a11y.explain.media_clip_data':
+    'A clip with no content type and no alternate text can only be played, never described.',
+  'panel.a11y.check.reference_xobjects': 'No page imports its content from another file',
+  'panel.a11y.explain.reference_xobjects':
+    'Content that lives in another file is content this document cannot describe.',
+  'panel.a11y.check.font_embedding': 'Every font that draws text is embedded',
+  'panel.a11y.explain.font_embedding':
+    'A substituted face draws different shapes at different widths than the file intends.',
+  'panel.a11y.check.font_encodings': 'TrueType fonts use encodings a reader can follow',
+  'panel.a11y.explain.font_encodings':
+    'A font whose encoding rules are not met leaves the reader guessing which glyph is meant.',
+  'panel.a11y.check.cid_to_gid_map': 'Composite fonts say which glyph each identifier selects',
+  'panel.a11y.explain.cid_to_gid_map':
+    'Without that mapping the same file renders differently in different readers.',
+  'panel.a11y.check.print_field_attributes': 'Printed form fields are tagged as form fields',
+  'panel.a11y.explain.print_field_attributes':
+    'A box drawn for a pen is announced as a box unless PrintField attributes say otherwise.',
+  'panel.a11y.check.dynamic_xfa': 'The document is not a dynamic XFA form',
+  'panel.a11y.explain.dynamic_xfa':
+    'A dynamic form builds its own pages, so the tagged content is not what is shown.',
   'panel.a11y.check.heading_nesting': 'Heading levels are not skipped',
   'panel.a11y.explain.heading_nesting':
     'Headings are how a document is skimmed; a skipped level breaks the outline.',
@@ -2016,6 +2050,58 @@ export const PANEL_STRINGS = {
     'This header cell declares no scope, and no cell points at it.',
   'panel.a11y.detail.heading_level_skipped':
     'The outline jumps from level {{from}} to level {{to}}.',
+  'panel.a11y.detail.trapnet_annotation':
+    'Page {{page}} carries a trap network annotation, which conforming files may not contain.',
+  'panel.a11y.detail.link_uri_ismap':
+    'The link on page {{page}} sends the click position to the server, so it works only for someone who can point at a pixel. Check whether the same destinations are reachable another way.',
+  'panel.a11y.detail.media_clip_no_content_type':
+    'A media clip does not say what type of media it is.',
+  'panel.a11y.detail.media_clip_no_alt':
+    'A media clip carries no alternate text, so it can only be played, never described.',
+  'panel.a11y.detail.media_clip_unreadable':
+    'A media clip could not be read, so whether it states its type and alternate text is unknown.',
+  'panel.a11y.detail.reference_xobject':
+    'A page imports its content from another file, which no structure tree in this one can describe.',
+  'panel.a11y.detail.xobjects_unreadable':
+    'The page objects could not be read, so whether any imports content from another file is unknown.',
+  'panel.a11y.detail.font_not_embedded':
+    'The font “{{font}}” draws text but its program is not embedded, so another face will be substituted.',
+  'panel.a11y.detail.fonts_unreadable':
+    'The fonts could not be read, so which of them draw text was not established.',
+  'panel.a11y.detail.font_program_cmap_unreadable':
+    'The embedded program of “{{font}}” could not be read, so its character map was not checked.',
+  'panel.a11y.detail.symbolic_truetype_has_encoding':
+    'The symbolic font “{{font}}” carries an encoding entry, which a symbolic TrueType font may not have.',
+  'panel.a11y.detail.symbolic_truetype_cmap_ambiguous':
+    'The program of “{{font}}” holds several character maps and none of them is the Microsoft Symbol one, so which glyph a code selects is undefined.',
+  'panel.a11y.detail.nonsymbolic_truetype_bad_encoding':
+    'The font “{{font}}” names neither MacRomanEncoding nor WinAnsiEncoding, which a non-symbolic TrueType font must.',
+  'panel.a11y.detail.nonsymbolic_truetype_no_cmap':
+    'The program of “{{font}}” holds no non-symbolic character map, so its glyphs cannot be looked up by character.',
+  'panel.a11y.detail.nonsymbolic_truetype_unlisted_glyph_name':
+    'The font “{{font}}” renames a code to the glyph “{{glyph}}”, which is not in the Adobe Glyph List.',
+  'panel.a11y.detail.nonsymbolic_truetype_differences_no_unicode_cmap':
+    'The font “{{font}}” renames codes but its program holds no Microsoft Unicode character map to resolve them against.',
+  'panel.a11y.detail.cid_font_no_cid_to_gid_map':
+    'The composite font “{{font}}” is embedded but never says which glyph each identifier selects.',
+  'panel.a11y.detail.oc_config_no_name':
+    'An optional content configuration has no name, so nothing can present it as a choice.',
+  'panel.a11y.detail.oc_config_has_as':
+    'An optional content configuration adjusts its own state automatically, so what a page shows cannot be predicted.',
+  'panel.a11y.detail.optional_content_unreadable':
+    'The optional content settings could not be read: {{reason}}.',
+  'panel.a11y.detail.embedded_file_no_f':
+    'An attached file has no file name in the system encoding.',
+  'panel.a11y.detail.embedded_file_no_uf':
+    'An attached file has no Unicode file name.',
+  'panel.a11y.detail.embedded_files_unreadable':
+    'An attached file specification could not be read, so whether it carries its names is unknown.',
+  'panel.a11y.detail.print_field_attributes_missing':
+    'The “{{tag}}” element reaches no interactive control, so it reads as a printed form field, and it carries no PrintField attributes. Check whether it is one.',
+  'panel.a11y.detail.dynamic_xfa_form':
+    'The document is a dynamic XFA form, which builds its own pages, so the tagged content is not what is shown.',
+  'panel.a11y.detail.xfa_packet_unreadable':
+    'An XFA packet could not be read, so whether the form is dynamic is unknown.',
   'panel.a11y.detail.heading_opens_below_h1':
     'The outline opens at level {{level}} instead of level 1.',
   'panel.a11y.detail.label_outside_list_item':

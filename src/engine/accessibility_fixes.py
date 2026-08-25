@@ -71,6 +71,10 @@ AUTOMATIC_CHECKS = (
     "tagged_annotations",
     "tagged_multimedia",
     "tagged_form_fields",
+    # An attachment's two file names are the SAME name in two encodings, so
+    # either one supplies the other. Nothing is authored and nothing is
+    # guessed; a specification carrying neither is left standing.
+    "embedded_file_names",
 )
 
 # The checks that carry an AUTHORED fix — one value the user supplies, per
@@ -273,6 +277,55 @@ def _clear_alt(check_id: str):
     return run
 
 
+def _fix_embedded_file_names(source: str, output: str, report: dict,
+                             allow_signed: bool) -> int:
+    """Supply the missing half of an attached file's name pair.
+
+    ISO 14289-1 cl. 7.11 requires both `/F` and `/UF` on the file specification
+    of an embedded file. They are the SAME name written twice — one in the
+    system's encoding, one in Unicode — so a specification carrying either can
+    have the other without anything being authored or guessed.
+
+    A specification carrying NEITHER is left standing: there is no name to copy,
+    and inventing one would name a file something it is not.
+    """
+    gate = _signed_structural_gate(source, allow_signed)
+    if gate == "refuse":
+        raise RuntimeError(
+            "this document is certified to allow no changes, so naming its attached "
+            "files would produce a file that reports as illegally modified"
+        )
+    if gate == "warn":
+        raise RuntimeError(
+            "this document is signed and naming its attached files invalidates its "
+            "signatures -- the run must state that signed documents are included before "
+            "it will touch one"
+        )
+    applied = 0
+    with pikepdf.open(source, allow_overwriting_input=True) as pdf:
+        for obj in pdf.objects:
+            if not isinstance(obj, pikepdf.Dictionary):
+                continue
+            try:
+                if str(obj.get("/Type") or "") != "/Filespec" or obj.get("/EF") is None:
+                    continue
+                name = obj.get("/F")
+                unicode_name = obj.get("/UF")
+            except Exception:
+                continue
+            if name is None and unicode_name is None:
+                continue
+            if name is None:
+                obj[pikepdf.Name("/F")] = unicode_name
+                applied += 1
+            elif unicode_name is None:
+                obj[pikepdf.Name("/UF")] = name
+                applied += 1
+        if applied:
+            pdf.save(output)
+    return applied
+
+
 _DOORS = {
     "permissions": _fix_permissions,
     "tagged": _fix_tagged,
@@ -287,6 +340,7 @@ _DOORS = {
     "tagged_annotations": _tag_annotations("tagged_annotations"),
     "tagged_multimedia": _tag_annotations("tagged_multimedia"),
     "tagged_form_fields": _tag_annotations("tagged_form_fields", "Form"),
+    "embedded_file_names": _fix_embedded_file_names,
 }
 
 
