@@ -35,6 +35,8 @@ describe('what gets sent', () => {
       bodyPath: 'C:/temp/spectrapdf/net/payload.xfdf',
       contentType: 'application/vnd.adobe.xfdf',
       fileName: 'invoice',
+      // A document-chosen destination always refuses a private target.
+      refusePrivate: true,
     });
   });
 
