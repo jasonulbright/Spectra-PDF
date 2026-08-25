@@ -160,6 +160,32 @@ class TestAutomaticFixes:
             # encoding they are written in.
             assert str(spec[Name("/UF")]) == str(spec[Name("/F")]) == "notes.txt"
 
+    def test_embedded_file_names_transcodes_rather_than_copying_bytes(self, tmp_dir):
+        src = _build(tmp_dir, "embedded_file_no_system_name_ascii")
+        _round_trip(src, "embedded_file_names",
+                    lambda p: apply_accessibility_fixes(p, p, ["embedded_file_names"]))
+        import pikepdf
+
+        with pikepdf.open(src) as pdf:
+            spec = pdf.Root[Name.Names][Name("/EmbeddedFiles")][Name.Names][1]
+            # `/F` is a BYTE string: an ASCII name is written as those bytes,
+            # never as the UTF-16 the text key may hold.
+            assert bytes(spec[Name("/F")]) == b"notes.txt"
+            assert str(spec[Name("/UF")]) == "notes.txt"
+
+    def test_embedded_file_names_will_not_write_a_name_no_encoding_spells(self, tmp_dir):
+        src = _build(tmp_dir, "embedded_file_no_system_name")
+        with pytest.raises(ValueError, match="nothing here for that fix"):
+            apply_accessibility_fixes(src, src, ["embedded_file_names"])
+        import pikepdf
+
+        with pikepdf.open(src) as pdf:
+            spec = pdf.Root[Name.Names][Name("/EmbeddedFiles")][Name.Names][1]
+            # Absent, not mojibake: copying the `/UF` bytes would have written
+            # a `/F` reading as UTF-16 code units run through a byte encoding.
+            assert Name("/F") not in spec
+        assert _statuses(src)["embedded_file_names"] == "fail"
+
     def test_embedded_file_names_refuses_when_there_is_no_name_to_copy(self, tmp_dir):
         src = _build(tmp_dir, "embedded_file_no_names")
         with pytest.raises(ValueError, match="nothing here for that fix"):
