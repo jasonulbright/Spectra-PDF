@@ -128,8 +128,13 @@ export function withRecent(
   openedAt: number,
   sourceUrl?: string,
 ): RecentEntry[] {
+  // A re-open that does not re-supply the address keeps the one already on
+  // record: `path` is a temp copy of a web download, and dropping its
+  // provenance would leave the recent row re-opening a purgeable temp path with
+  // no way back to its source. An explicit address still overrides.
+  const url = sourceUrl ?? current.find((e) => e.path === path)?.sourceUrl;
   return [
-    { path, openedAt, ...(sourceUrl ? { sourceUrl } : {}) },
+    { path, openedAt, ...(url ? { sourceUrl: url } : {}) },
     ...current.filter((e) => e.path !== path),
   ].slice(0, MAX);
 }

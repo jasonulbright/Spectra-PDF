@@ -99,6 +99,35 @@ describe('saveRouteFor', () => {
     expect(saveRouteFor(null)).toBe('save');
     expect(saveRouteFor(undefined)).toBe('save');
   });
+
+  it('still routes to Save As after a cross-window hand-off reconstructs the origin', () => {
+    // The move carries the temp path only; the receiving window recovers the
+    // address by path (Rust `web_origins_for`) and rebuilds this state. The
+    // reconstructed webOrigin is what keeps Save routed to Save As there — the
+    // temp copy is never silently overwritten in the second window.
+    const reconstructed = { webOrigin: 'https://example.com/a.pdf' };
+    expect(saveRouteFor(reconstructed)).toBe('saveAs');
+  });
+
+  it('a normal open moved to a second window recovers no origin and stays on Save', () => {
+    expect(saveRouteFor({ webOrigin: undefined })).toBe('save');
+  });
+});
+
+describe('recent provenance survives a re-open with no address', () => {
+  it('keeps the recorded sourceUrl when the move re-records the open', () => {
+    // The receiving window recovers the origin and re-records the open; even a
+    // fold that supplies no address must not erase the provenance already on
+    // the recent row (the withRecent erasure defect).
+    const before = [
+      { path: 'C:\\Temp\\net\\a-1.pdf', openedAt: 1, sourceUrl: 'https://example.com/a.pdf' },
+    ];
+    expect(withRecent(before, 'C:\\Temp\\net\\a-1.pdf', 9)[0]).toEqual({
+      path: 'C:\\Temp\\net\\a-1.pdf',
+      openedAt: 9,
+      sourceUrl: 'https://example.com/a.pdf',
+    });
+  });
 });
 
 describe('recent-list provenance', () => {

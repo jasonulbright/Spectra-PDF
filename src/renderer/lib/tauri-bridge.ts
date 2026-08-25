@@ -855,6 +855,19 @@ export const app = {
   takePendingOpens: () =>
     invoke<{ files: string[]; merge: boolean; index: number | null }[]>('take_pending_opens'),
 
+  /** Record the web address a downloaded copy came from, keyed by its temp
+   * path in app-wide Rust state. The path — never a per-realm page/document id
+   * — is what a cross-window hand-off carries, so keying by it lets any window
+   * that later opens that path recover the origin and route Save to Save As. */
+  registerWebOrigin: (path: string, url: string) =>
+    invoke<void>('register_web_origin', { path, url }),
+
+  /** The web origins Rust knows for these paths (path → url, absent when none).
+   * The receiving window's recovery read after a hand-off carried the path but
+   * not the provenance. */
+  webOriginsFor: (paths: string[]) =>
+    invoke<Record<string, string>>('web_origins_for', { paths }),
+
   /** Listen for tray actions (Quick Merge). */
   onTrayAction: (callback: (action: string) => void) => {
     return listen<string>('app:trayAction', (event) => callback(event.payload));
