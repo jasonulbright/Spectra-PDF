@@ -13,6 +13,8 @@
 key	kind	modules	message
 accessibility.unknownAccessibilityCategoryExpected	pattern	accessibility	unknown accessibility category '{{category}}' (expected one of: {{v1}})
 accessibility_fixes.automaticAccessibilityFixExists	pattern	accessibility_fixes	no automatic accessibility fix exists for {{v0}} (the automatic ones are: {{v1}})
+accessibility_fixes.documentCertifiedAllowChanges	exact	accessibility_fixes	this document is certified to allow no changes, so clearing the suspects flag would produce a file that reports as illegally modified
+accessibility_fixes.documentSignedClearingSuspects	exact	accessibility_fixes	this document is signed and clearing the suspects flag invalidates its signatures -- the run must state that signed documents are included before it will touch one
 accessibility_fixes.thereNothingHereFix	exact	accessibility_fixes	There is nothing here for that fix to repair.
 acroform.containsXmlFormXfa	pattern	acroform	{{v0}} contains an XML form (XFA). Page operations would detach the form from its pages, so {{operation}} is not available for this document. Fill the form, or flatten it with another tool first.
 acroform.regeneratedFileSPage	exact	acroform,widget_faces	The regenerated file's page count differs from the original; cannot reattach its form fields.
