@@ -60,9 +60,11 @@ export const AUTHORED_KINDS = ['goto', 'uri', 'reset', 'submit', 'hide', 'import
 export type AuthoredKind = (typeof AUTHORED_KINDS)[number];
 
 /** Whether a click on this action DOES something, as against reporting what
- * the document carries. `submit` runs as far as building the submission; the
- * request itself is the user's, through their own browser or mail client —
- * this app performs no outbound request and opens no external address. */
+ * the document carries. `submit` builds the submission and then transmits
+ * only through the consent dialog: the full destination and exact payload
+ * are shown, and one explicit click sends — a document can ask, only the
+ * user can send. Non-web transports (mailto:) refuse by name and offer the
+ * built file instead. */
 const RUNNABLE = new Set<WidgetActionKind>([
   'goto',
   'uri',
