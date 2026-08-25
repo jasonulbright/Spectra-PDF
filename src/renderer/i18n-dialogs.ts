@@ -433,6 +433,37 @@ export const DIALOG_STRINGS = {
     'Reached the page limit after {{count}} page — there were more links to follow.',
   'dialog.webCapture.truncated_other':
     'Reached the page limit after {{count}} pages — there were more links to follow.',
+  // File ▸ Open from Web Address. The address is typed or pasted by the user
+  // and shown back, in full, as the string that will be fetched — never
+  // elided, never a host on its own.
+  'dialog.openWeb.title': 'Open from Web Address',
+  'dialog.openWeb.url': 'Web address',
+  'dialog.openWeb.urlPlaceholder': 'example.com/report.pdf',
+  'dialog.openWeb.willFetch': 'Will download from:\n{{url}}',
+  'dialog.openWeb.insecure':
+    'This address is plain http, so what is sent and received travels unprotected and can be read or changed on the way. Only the address you typed is requested — nothing else is sent.',
+  'dialog.openWeb.posture':
+    'The file is downloaded to a temporary copy and opened like any other document. Nothing in it is executed, and no address inside a document is ever fetched by itself.',
+  'dialog.openWeb.saveNote':
+    'A downloaded document has no file of yours to save back to, so File ▸ Save asks where to keep it.',
+  'dialog.openWeb.open': 'Open',
+  'dialog.openWeb.opening': 'Downloading…',
+  'dialog.openWeb.cancel': 'Cancel',
+  'dialog.openWeb.refuseEmpty': 'Type a web address to open.',
+  'dialog.openWeb.refuseSpaces': '“{{url}}” contains spaces, so it is not a web address.',
+  'dialog.openWeb.refuseScheme': '“{{url}}” is not an http or https address.',
+  'dialog.openWeb.refuseHost': '“{{url}}” names no host to download from.',
+  'dialog.openWeb.failed': 'Nothing was downloaded from {{url}}.\n\n{{detail}}',
+  'dialog.openWeb.rejected':
+    'The server at {{url}} answered {{status}} rather than sending the file.',
+  'dialog.openWeb.empty': 'The server at {{url}} sent an empty file, so there was nothing to open.',
+  'dialog.openWeb.notADocument':
+    'The file downloaded from {{url}} could not be opened as a document.\n\n{{detail}}',
+  // Cancelling abandons the RESULT: a transfer already under way runs to its
+  // end into a temporary file that is then never opened. Said plainly rather
+  // than implied by a button that looks like it stops the network.
+  'dialog.openWeb.cancelled':
+    'The download was cancelled and nothing was opened. A transfer already under way finishes into a temporary file that is discarded.',
   'dialog.createPdf.converting': 'Converting…',
   'dialog.createPdf.convert': 'Convert…',
 
