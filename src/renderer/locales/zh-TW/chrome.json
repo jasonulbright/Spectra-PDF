@@ -1728,7 +1728,7 @@
   "dialog.submitConsent.cancel": "取消",
   "dialog.submitConsent.consequence": "只會送出這些位元組。不會附帶任何 Cookie、登入狀態或已儲存的憑證，本次選擇也不會為這個位址記住。",
   "dialog.submitConsent.destinationLabel": "目的地",
-  "dialog.submitConsent.documentSummary": "整份文件，共 {{bytes}} 位元組，帶有 {{count}} 個欄位值。PDF 無法當成文字閱讀，因此在此以說明代替顯示。",
+  "dialog.submitConsent.documentSummary_other": "整份文件，共 {{bytes}} 位元組，帶有 {{count}} 個欄位值。PDF 無法當成文字閱讀，因此在此以說明代替顯示。",
   "dialog.submitConsent.format": "格式：{{format}}",
   "dialog.submitConsent.formatFdf": "FDF 表單資料",
   "dialog.submitConsent.formatHtml": "HTML 表單提交",
