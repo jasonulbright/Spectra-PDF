@@ -69,3 +69,18 @@ dunce = "1"
 # rejected: more unsafe code to get wrong than this zero-frills crate.
 same-file = "1"
 clap = { version = "4", features = ["derive"] }
+# The app's one outbound HTTP client (`src/net.rs`). Already in the graph
+# because the updater plugin uses it; named directly so there is exactly one
+# client and one place the network posture is set. The `cookies` feature is
+# deliberately NOT enabled: with no jar in the build there is no ambient
+# credential for a request to pick up.
+#
+# Default features are off and TLS is the only one asked for: HTTP/2 and the
+# charset guessing are not wanted here, and taking the crate's defaults would
+# pull dependencies the rest of the graph does not already resolve.
+reqwest = { version = "0.13", default-features = false, features = ["default-tls"] }
+
+[dev-dependencies]
+# `#[tokio::test]` for the network client's tests, which drive an in-process
+# loopback listener. No test reaches a real host.
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }

@@ -199,10 +199,35 @@ export const WORKBENCH_STRINGS = {
     '"{{field}}" goes to another document ({{file}}), which this app does not follow.',
   'app.formButton.submitTitle': 'Submit form',
   'app.formButton.submit':
-    '"{{field}}" submits this form to:\n\n{{url}}\n\nThe submission will be built in full, as {{format}}, and saved to a file you choose. This app sends nothing itself. Build it now?',
+    '"{{field}}" submits this form to:\n\n{{url}}\n\nThe submission will be built in full, as {{format}}, and shown to you before anything is sent. Build it now?',
   'app.formButton.submitBuiltTitle': 'Submission built',
   'app.formButton.submitBuilt':
     'The submission was written to:\n\n{{file}}\n\nSend it to {{url}} yourself. Copy the address to the clipboard?',
+  // Destinations this app will not post to. The payload is still built and can
+  // still be saved — the refusal is about the transport, not the submission.
+  'app.formButton.submitNoUrl':
+    '"{{field}}" names no address to submit to. The submission can still be built and saved to a file.',
+  'app.formButton.submitMailto':
+    '"{{field}}" submits by email, which this app does not send. The submission can still be built and saved to a file you attach yourself.',
+  'app.formButton.submitNotWeb':
+    '"{{field}}" submits to an address that is not http or https, which this app does not use. The submission can still be built and saved to a file.',
+  'app.formButton.submitBuildInstead': 'Build the file',
+  // The transmit and what came back.
+  'app.formButton.submitSentTitle': 'Submitted',
+  'app.formButton.submitFailedTitle': 'Not submitted',
+  'app.formButton.submitFailed': 'Nothing was sent to {{url}}.\n\n{{detail}}',
+  'app.formButton.submitRejected':
+    'The server at {{url}} answered {{status}} rather than accepting the submission. Its reply is below and was not acted on.',
+  'app.formButton.submitEmptyReply':
+    'The submission was accepted by {{url}}. The server sent no reply to show.',
+  'app.formButton.submitFormDataReply':
+    'The submission was accepted by {{url}}, and the reply is form data ({{bytes}} bytes). Filling it into this form replaces the values it names. Import it now?',
+  'app.formButton.submitDocumentReply':
+    'The submission was accepted by {{url}}, and the reply is a PDF document ({{bytes}} bytes). Open it?',
+  'app.formButton.submitFileReply':
+    'The submission was accepted by {{url}}, and the reply is {{type}} ({{bytes}} bytes). This app does not display a page it was sent. Save the reply to a file you can open yourself?',
+  'app.formButton.submitFileReplyUnknown': 'a file of an unnamed type',
+  'app.formButton.submitReplySaved': 'The reply was saved to:\n\n{{file}}',
 
   'app.sanitize.title': 'Document is signed',
   'app.sanitize.signed_one':

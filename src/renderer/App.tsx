@@ -23,7 +23,25 @@ import {
 } from './lib/signatures';
 import type { LinkSpec } from './lib/links';
 import { toEngineFormat } from './lib/af-emit';
-import { toEngineAction, type AuthoredAction, type WidgetAction } from './lib/field-actions';
+import {
+  toEngineAction,
+  type AuthoredAction,
+  type SubmitFormat,
+  type WidgetAction,
+} from './lib/field-actions';
+import {
+  SUBMIT_EXTENSION as SUBMIT_PAYLOAD_EXTENSION,
+  destinationRefusal,
+  payloadPreview,
+  responseRoute,
+  statusAccepted,
+  submitRequest,
+  type PayloadPreview,
+} from './lib/form-submit';
+import {
+  SubmitConsentDialog,
+  type SubmitConsentAnswer,
+} from './components/SubmitConsentDialog';
 import type { FieldActions } from './lib/form-candidates';
 import type { EditImageMaskParam } from './lib/edit-images';
 import type { ParagraphEditOpts } from './lib/edit-paragraphs';
@@ -222,15 +240,11 @@ const panels: Record<Operation, React.ComponentType> = {
   spelling: SpellingPanel,
 };
 
-/** What a built submission is saved as. `html` is
+/** What a built submission is saved as — one table, in `lib/form-submit.ts`
+ * beside the content types it pairs with. `html` is
  * `application/x-www-form-urlencoded` text, which has no extension of its own,
  * so it takes the one a text editor will open. */
-const SUBMIT_EXTENSION: Record<'fdf' | 'xfdf' | 'html' | 'pdf', string> = {
-  fdf: '.fdf',
-  xfdf: '.xfdf',
-  html: '.txt',
-  pdf: '.pdf',
-};
+const SUBMIT_EXTENSION = SUBMIT_PAYLOAD_EXTENSION;
 
 function AppContent(): React.ReactElement {
   // Re-render on language change; the banner's buttons and every
@@ -398,6 +412,42 @@ function AppContent(): React.ReactElement {
       setConfirmState({ message, kind: 'proceed', title, resolve: (r) => resolve(r === 'save') });
     });
   }, []);
+
+  // The submission consent dialog's state. It resolves ONE answer for ONE
+  // request: there is no per-host memory to keep, deliberately, so the state
+  // is torn down with the dialog.
+  const [submitConsentState, setSubmitConsentState] = useState<{
+    fieldName: string;
+    url: string;
+    format: SubmitFormat;
+    preview: PayloadPreview;
+    fieldCount: number;
+    resolve: (answer: SubmitConsentAnswer) => void;
+  } | null>(null);
+
+  const showSubmitConsent = useCallback(
+    (
+      fieldName: string,
+      url: string,
+      format: SubmitFormat,
+      preview: PayloadPreview,
+      fieldCount: number,
+    ): Promise<SubmitConsentAnswer> =>
+      new Promise((resolve) => {
+        setSubmitConsentState({ fieldName, url, format, preview, fieldCount, resolve });
+      }),
+    [],
+  );
+
+  const handleSubmitConsent = useCallback(
+    (answer: SubmitConsentAnswer) => {
+      if (submitConsentState) {
+        submitConsentState.resolve(answer);
+        setSubmitConsentState(null);
+      }
+    },
+    [submitConsentState],
+  );
 
   /** One-button OK notice — errors and outcomes with no choice to make. */
   const showNotice = useCallback((title: string, message: string): Promise<void> => {
@@ -1281,13 +1331,24 @@ function AppContent(): React.ReactElement {
   //
   // Every kind that carries no code RUNS: go-to navigates, reset and show/hide
   // and import are engine ops (undoable through the ordinary snapshot), and
-  // submit BUILDS the submission in full. What it does not do is send it.
-  // This app performs no outbound request and opens no external address —
-  // there is no general shell-open surface for a document-supplied string to
-  // reach — so a submission lands in a file the user names and its destination
-  // is reported and offered to the clipboard, which is the treatment a `/URI`
-  // has always had here. A script, a go-to into another file and an action
-  // this build does not know are reported by name and run nothing.
+  // submit builds the submission in full and then ASKS whether to send it.
+  //
+  // The submit arm is the app's only outbound-request path, and every step of
+  // it is a person's: the document supplies an address, the app builds the
+  // payload, the consent dialog shows both, and one click on chrome the app
+  // drew is what transmits. The answer is never remembered. A `/URI` is still
+  // not opened — there is no general shell-open surface for a
+  // document-supplied string to reach — and a script, a go-to into another
+  // file and an action this build does not know are reported by name and run
+  // nothing.
+  //
+  // Reaching here at all requires the gesture the document AUTHORED on a
+  // widget: this handler is called from the widget overlay's pointer, focus
+  // and blur handlers and from nowhere else. No script path exists to it
+  // because no script runs — `engine/document_js.py` states that the app
+  // never executes document JavaScript, `lib/af-script.ts` only READS what a
+  // field's scripts say, and the `javascript` action kind is reported by name
+  // in the case below rather than run.
   const handleWidgetAction = useCallback(
     async (path: string, fieldName: string, action: WidgetAction | null) => {
       if (!action) {
@@ -1357,38 +1418,171 @@ function AppContent(): React.ReactElement {
           return;
         }
         case 'submit': {
-          const proceed = await showProceedConfirm(
-            tChrome('app.formButton.submitTitle'),
-            tChrome('app.formButton.submit', {
-              field: fieldName,
-              url: action.url,
-              format: action.format,
-            }),
-          );
-          if (!proceed) return;
           const f = state.files.get(path);
           if (!f) throw new Error(tChrome('refusal.file.noLongerOpen'));
           const stem = (f.name || 'form').replace(/\.pdf$/i, '');
-          const target = await dialog.saveFormDataFile(
-            `${stem}${SUBMIT_EXTENSION[action.format]}`,
+          // A destination this app has no transport for — an empty address, a
+          // `mailto:`, anything that is not http(s). The payload is still
+          // built and can still be saved: the refusal is about the transport,
+          // never about the submission.
+          const refusalKey = destinationRefusal(action.url);
+          const proceed = await showProceedConfirm(
+            tChrome('app.formButton.submitTitle'),
+            refusalKey
+              ? tChrome(refusalKey, { field: fieldName })
+              : tChrome('app.formButton.submit', {
+                  field: fieldName,
+                  url: action.url,
+                  format: action.format,
+                }),
           );
-          if (!target) return;
+          if (!proceed) return;
+          // The payload is built to the app's own temp tree FIRST, because the
+          // consent dialog shows that file's bytes: a preview assembled from
+          // anything else would be a second answer to what gets transmitted.
+          //
           // Read-only against the document, so it takes the gated call and
           // writes its payload beside — never through performOperation, which
           // would replace the file with its own submission.
-          await call('export_form_data', {
+          const payloadPath = await app.netPayloadPath(
+            `${stem}-submission`,
+            SUBMIT_EXTENSION[action.format].slice(1),
+          );
+          const built = (await call('export_form_data', {
             file: f.workingPath,
-            output: target,
+            output: payloadPath,
             format: action.format,
             ...(action.fields ? { fields: action.fields, exclude: action.exclude } : {}),
             include_empty: action.includeEmpty,
-          });
-          const copy = await showProceedConfirm(
-            tChrome('app.formButton.submitBuiltTitle'),
-            tChrome('app.formButton.submitBuilt', { file: target, url: action.url }),
+          })) as unknown as { count?: number };
+
+          /** The pre-transmit behaviour, kept: the built submission handed
+           * over as a file, with its destination offered to the clipboard. */
+          const saveBuiltCopy = async (): Promise<void> => {
+            const target = await dialog.saveFormDataFile(
+              `${stem}${SUBMIT_EXTENSION[action.format]}`,
+            );
+            if (!target) return;
+            await batch.copyFile(payloadPath, target);
+            const copy = await showProceedConfirm(
+              tChrome('app.formButton.submitBuiltTitle'),
+              tChrome('app.formButton.submitBuilt', { file: target, url: action.url }),
+            );
+            if (copy) await copyToClipboard(action.url);
+          };
+
+          if (refusalKey) {
+            await saveBuiltCopy();
+            return;
+          }
+
+          const answer = await showSubmitConsent(
+            fieldName,
+            action.url,
+            action.format,
+            payloadPreview(action.format, await app.netPayloadBytes(payloadPath)),
+            built.count ?? 0,
           );
-          if (copy) await copyToClipboard(action.url);
-          return;
+          if (answer === 'cancel') return;
+          if (answer === 'save') {
+            await saveBuiltCopy();
+            return;
+          }
+
+          let response;
+          try {
+            response = await app.netRequest(
+              submitRequest(action, payloadPath, `${stem}-reply`),
+            );
+          } catch (error) {
+            await showNotice(
+              tChrome('app.formButton.submitFailedTitle'),
+              tChrome('app.formButton.submitFailed', {
+                url: action.url,
+                detail: String(error),
+              }),
+            );
+            return;
+          }
+
+          /** The reply as a file the user keeps — the door that interprets
+           * nothing. An HTML reply always lands here: this app never renders a
+           * page it was sent. */
+          const saveReply = async (): Promise<void> => {
+            const suffix = response.path.slice(response.path.lastIndexOf('.'));
+            const target = await dialog.saveFormDataFile(`${stem}-reply${suffix}`);
+            if (!target) return;
+            await batch.copyFile(response.path, target);
+            await showNotice(
+              tChrome('app.formButton.submitSentTitle'),
+              tChrome('app.formButton.submitReplySaved', { file: target }),
+            );
+          };
+
+          if (!statusAccepted(response.status)) {
+            await showNotice(
+              tChrome('app.formButton.submitFailedTitle'),
+              tChrome('app.formButton.submitRejected', {
+                url: action.url,
+                status: response.status,
+              }),
+            );
+            if (response.bytes > 0) await saveReply();
+            return;
+          }
+          if (response.bytes === 0) {
+            await showNotice(
+              tChrome('app.formButton.submitSentTitle'),
+              tChrome('app.formButton.submitEmptyReply', { url: action.url }),
+            );
+            return;
+          }
+          // Everything below routes UNTRUSTED bytes into a door this app
+          // already has, and every door asks first. Nothing executes.
+          switch (responseRoute(response.contentType)) {
+            case 'formData': {
+              const importIt = await showProceedConfirm(
+                tChrome('app.formButton.submitSentTitle'),
+                tChrome('app.formButton.submitFormDataReply', {
+                  url: action.url,
+                  bytes: response.bytes,
+                }),
+              );
+              if (!importIt) return;
+              await performOperation(path, 'import_form_data', {
+                data: response.path,
+                font_dir: await app.getEditFontPath(),
+              });
+              return;
+            }
+            case 'document': {
+              const openIt = await showProceedConfirm(
+                tChrome('app.formButton.submitSentTitle'),
+                tChrome('app.formButton.submitDocumentReply', {
+                  url: action.url,
+                  bytes: response.bytes,
+                }),
+              );
+              if (!openIt) return;
+              await openByPaths([response.path]);
+              return;
+            }
+            default: {
+              const saveIt = await showProceedConfirm(
+                tChrome('app.formButton.submitSentTitle'),
+                tChrome('app.formButton.submitFileReply', {
+                  url: action.url,
+                  bytes: response.bytes,
+                  type:
+                    response.contentType ||
+                    tChrome('app.formButton.submitFileReplyUnknown'),
+                }),
+              );
+              if (!saveIt) return;
+              await saveReply();
+              return;
+            }
+          }
         }
         case 'uri': {
           const copy = await showProceedConfirm(
@@ -1432,6 +1626,8 @@ function AppContent(): React.ReactElement {
       performOperation,
       showNotice,
       showProceedConfirm,
+      showSubmitConsent,
+      openByPaths,
       copyToClipboard,
     ],
   );
@@ -3385,6 +3581,16 @@ function AppContent(): React.ReactElement {
         error={certUnlockState?.error}
         onResult={handleCertUnlockResult}
       />
+      {submitConsentState ? (
+        <SubmitConsentDialog
+          fieldName={submitConsentState.fieldName}
+          url={submitConsentState.url}
+          format={submitConsentState.format}
+          preview={submitConsentState.preview}
+          fieldCount={submitConsentState.fieldCount}
+          onAnswer={handleSubmitConsent}
+        />
+      ) : null}
     </div>
     </DropZone>
     </OperationsProvider>
