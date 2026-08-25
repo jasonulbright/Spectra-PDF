@@ -84,6 +84,7 @@ from pathlib import Path
 import pikepdf
 from pyhanko.pdf_utils import generic
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+from pyhanko.pdf_utils.metadata.model import DocumentMetadata
 
 from .docmdp import certification_of_file, certification_of_pdf
 from .fieldmdp import locked_fields, locks_of_file
@@ -1143,6 +1144,24 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
     return updated
 
 
+class _ClockFreeMeta(DocumentMetadata):
+    """Document metadata that drops the writer's ``last_modified = 'now'``.
+
+    ``BasePdfFileWriter._prep_dom_for_writing`` assigns ``'now'`` unconditionally
+    at serialisation time, and the info-dict/XMP updaters turn that into a
+    ``/ModDate`` derived from the run's clock. In an appended revision that is
+    the run's clock reaching the emitted bytes: two writes of identical inputs
+    a second apart differ. Dropping the assignment leaves the input document's
+    own ``/ModDate`` in place, since the incremental writer carries the
+    existing info dictionary forward.
+    """
+
+    def __setattr__(self, name, value):
+        if name == "last_modified" and value == "now":
+            value = None
+        super().__setattr__(name, value)
+
+
 def transplant_incremental(original: str, modified: str, output: str) -> dict:
     """Append ``modified``'s annotate/fill/geometry/page-tree delta onto
     ``original``.
@@ -1208,6 +1227,7 @@ def transplant_incremental(original: str, modified: str, output: str) -> dict:
                 plan = _plan_pages(orig, mod)
 
                 writer = IncrementalPdfFileWriter(io.BytesIO(orig_bytes))
+                writer._meta = _ClockFreeMeta()
                 memo_mat: dict = {}
 
                 classes: set[str] = set(plan["classes"])

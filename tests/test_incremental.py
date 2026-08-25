@@ -1643,6 +1643,43 @@ class TestEmissionDeterminism:
         assert open(a, "rb").read() != open(b, "rb").read()
         assert self._normalized(a) == self._normalized(b)
 
+    @pytest.mark.parametrize("delta", ["annot-add", "form-fill", "page-insert-end"])
+    def test_the_run_clock_never_reaches_the_appended_bytes(
+        self, delta, matrix_docs, tmp_dir, monkeypatch
+    ):
+        """The same property with the clock forced APART between the runs.
+
+        The test above only sees a clock-derived byte when a second happens to
+        tick between its two writes — it passed locally and failed in CI on
+        one `/ModDate` digit. Freezing the two runs a second apart makes that
+        failure deterministic: the writer's serialisation-time
+        ``last_modified = 'now'`` is refused, so the input's own date is what
+        the appended revision re-emits.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        from pyhanko.pdf_utils.metadata import info as _info
+        from pyhanko.pdf_utils.metadata import xmp_xml as _xmp
+
+        frozen = [datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)]
+
+        class _Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return frozen[0]
+
+        monkeypatch.setattr(_info, "datetime", _Clock)
+        monkeypatch.setattr(_xmp, "datetime", _Clock)
+
+        signed = matrix_docs["approval"]
+        modified = _rewrite_with(signed, tmp_dir, _DELTAS[delta][0])
+        a = os.path.join(tmp_dir, "clock-a.pdf")
+        b = os.path.join(tmp_dir, "clock-b.pdf")
+        assert transplant_incremental(signed, modified, a)["applied"] is True
+        frozen[0] += timedelta(seconds=1)
+        assert transplant_incremental(signed, modified, b)["applied"] is True
+        assert self._normalized(a) == self._normalized(b)
+
 
 class TestHardLinkAliases:
     """Both same-file refusals answer the FILESYSTEM, not the string.
