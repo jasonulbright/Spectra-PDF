@@ -16,7 +16,10 @@ import type { ChromeKey } from '../i18n-chrome';
 interface HomeTabProps {
   recentFiles: RecentEntry[];
   onOpen: () => void;
-  onOpenRecent: (path: string) => void;
+  /** Re-open one recent entry. The whole ENTRY, not its path: a downloaded
+   * document's path is a temporary copy, and its provenance is what re-opens
+   * it (pre-filled, never re-fetched by itself). */
+  onOpenRecent: (entry: RecentEntry) => void;
   onClearRecent: () => void;
   /** Show one recent file in the file manager. App owns it because the
    * failure — the file has been moved or deleted since it was listed — is
@@ -25,6 +28,16 @@ interface HomeTabProps {
   /** Home hosts the tile grid (the docless tools surface —
    * the Tools tab is gone; ops tiles run the picker-first flow). */
   onOpenTool: (id: ToolId) => void;
+}
+
+/** The host of a provenance address, or the address itself when it will not
+ * parse — a display column never invents a place. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
 }
 
 function folderOf(path: string): string {
@@ -47,7 +60,7 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onRe
   // The menu carries the path it was opened on rather than an index: the list
   // can be rewritten (a file opened in another window) between the right-click
   // and the choice, and an index would then name a different document.
-  const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; entry: RecentEntry } | null>(null);
   return (
     <div data-testid="home-tab" className="flex-1 overflow-y-auto">
       <div className="home-shell">
@@ -102,25 +115,31 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onRe
           <p className="home-empty">{tChrome('chrome.home.noRecents')}</p>
         ) : (
           <div className="home-recents">
-            {recentFiles.map(({ path, openedAt }) => (
+            {recentFiles.map((entry) => (
               <button
-                key={path}
+                key={entry.path}
                 data-testid="home-recent-item"
-                onClick={() => onOpenRecent(path)}
+                onClick={() => onOpenRecent(entry)}
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  setMenu({ x: e.clientX, y: e.clientY, path });
+                  setMenu({ x: e.clientX, y: e.clientY, entry });
                 }}
-                title={path}
+                title={entry.sourceUrl ?? entry.path}
                 className="home-recent"
               >
                 <span className="home-recent-icon">
                   <ChromeIcon icon="document" size={16} />
                 </span>
-                <span className="home-recent-name">{path.split(/[\\/]/).pop()}</span>
-                <span className="home-recent-folder ltr-notation">{folderOf(path)}</span>
+                <span className="home-recent-name">{entry.path.split(/[\\/]/).pop()}</span>
+                {/* Where it came from, for a downloaded document: its local
+                    copy sits in a temp folder that names nothing useful. */}
+                <span className="home-recent-folder ltr-notation">
+                  {entry.sourceUrl
+                    ? tChrome('chrome.recent.fromWeb', { host: hostOf(entry.sourceUrl) })
+                    : folderOf(entry.path)}
+                </span>
                 <span data-testid="home-recent-opened" className="home-recent-when">
-                  {formatOpenedAt(openedAt, Date.now())}
+                  {formatOpenedAt(entry.openedAt, Date.now())}
                 </span>
               </button>
             ))}
@@ -139,11 +158,14 @@ export function HomeTab({ recentFiles, onOpen, onOpenRecent, onClearRecent, onRe
           y={menu.y}
           onClose={() => setMenu(null)}
           items={[
-            { label: tChrome('chrome.recent.open'), onClick: () => onOpenRecent(menu.path) },
-            { label: tChrome('chrome.recent.reveal'), onClick: () => onRevealRecent(menu.path) },
+            { label: tChrome('chrome.recent.open'), onClick: () => onOpenRecent(menu.entry) },
+            { label: tChrome('chrome.recent.reveal'), onClick: () => onRevealRecent(menu.entry.path) },
             {
               label: tChrome('chrome.recent.copyPath'),
-              onClick: () => void navigator.clipboard.writeText(menu.path),
+              // The ADDRESS for a downloaded document: copying the path of a
+              // temp copy hands over something nobody can use.
+              onClick: () =>
+                void navigator.clipboard.writeText(menu.entry.sourceUrl ?? menu.entry.path),
             },
           ]}
         />

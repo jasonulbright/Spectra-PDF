@@ -18,6 +18,14 @@ export interface RecentEntry {
   path: string;
   /** Epoch ms of the last open; null for entries persisted before it was recorded. */
   openedAt: number | null;
+  /**
+   * The web address this entry was downloaded from (File ▸ Open from Web
+   * Address). Display and re-open provenance only: `path` is a temporary copy
+   * that may be gone, so re-opening one of these re-runs the download dialog
+   * PRE-FILLED with this address. It is never fetched without the user
+   * pressing Open again.
+   */
+  sourceUrl?: string;
 }
 
 // Pure, testable core: JSON-valid-but-wrong-shape (object, string, null) →
@@ -37,9 +45,14 @@ export function parseRecent(raw: string | null): RecentEntry[] {
         typeof (item as { path?: unknown }).path === 'string'
       ) {
         const at = (item as { openedAt?: unknown }).openedAt;
+        const from = (item as { sourceUrl?: unknown }).sourceUrl;
         out.push({
           path: (item as { path: string }).path,
           openedAt: typeof at === 'number' && Number.isFinite(at) ? at : null,
+          // A stored address that is not a string is dropped rather than
+          // coerced: it drives a pre-filled request, so a wrong shape must
+          // read as "no provenance", never as an address.
+          ...(typeof from === 'string' && from !== '' ? { sourceUrl: from } : {}),
         });
       }
     }
@@ -98,7 +111,12 @@ export function persistRecent(next: RecentEntry[]): RecentEntry[] {
 export function sameRecent(a: readonly RecentEntry[], b: readonly RecentEntry[]): boolean {
   return (
     a.length === b.length &&
-    a.every((e, i) => e.path === b[i].path && e.openedAt === b[i].openedAt)
+    a.every(
+      (e, i) =>
+        e.path === b[i].path &&
+        e.openedAt === b[i].openedAt &&
+        e.sourceUrl === b[i].sourceUrl,
+    )
   );
 }
 
@@ -108,9 +126,10 @@ export function withRecent(
   current: RecentEntry[],
   path: string,
   openedAt: number,
+  sourceUrl?: string,
 ): RecentEntry[] {
   return [
-    { path, openedAt },
+    { path, openedAt, ...(sourceUrl ? { sourceUrl } : {}) },
     ...current.filter((e) => e.path !== path),
   ].slice(0, MAX);
 }

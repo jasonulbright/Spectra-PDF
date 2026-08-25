@@ -53,6 +53,7 @@ function stateWith(partial: Partial<AppState>): AppState {
 const noopHandlers = (): AppCommandHandlers => ({
   openFiles: vi.fn(async () => true),
   openFilesInPlace: vi.fn(async () => {}),
+  openFromWeb: vi.fn(() => {}),
   openPath: vi.fn(async () => {}),
   openPathAtPage: vi.fn(async () => {}),
   save: vi.fn(async () => {}),
