@@ -919,6 +919,20 @@ function AppContent(): React.ReactElement {
       // funnel every open flows through — NOT a local string normalize,
       // which is what the old tracked gap warned against.
       const canonical = await app.canonicalizePaths(paths);
+      // Web-download provenance must survive a cross-window hand-off (Move to
+      // New Window, a torn-off tab), where the handover carries the PATH ONLY —
+      // never a page or document id, whose generation counters are per-realm.
+      // The origin is registered here on the open that downloaded it and
+      // recovered here, by path, on any later open of that temp copy — so
+      // `saveRouteFor` still routes Save to Save As in the window it moved to.
+      const canonicalSet = [...new Set(canonical)];
+      if (opts?.webOrigin) {
+        const origin = opts.webOrigin;
+        await Promise.all(canonicalSet.map((p) => app.registerWebOrigin(p, origin)));
+      }
+      const recoveredOrigins = opts?.webOrigin ? null : await app.webOriginsFor(canonicalSet);
+      const originFor = (filePath: string): string | undefined =>
+        opts?.webOrigin ?? recoveredOrigins?.[filePath];
       //
       // The same path twice in one batch is one open. Nothing upstream
       // dedupes: `spectrapdf.exe a.pdf a.pdf` really arrives as two
@@ -959,7 +973,7 @@ function AppContent(): React.ReactElement {
         const existing = stateRef.current.files.get(filePath);
         if (existing && !existing.importOnly) {
           dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
-          recent = withRecent(recent, filePath, Date.now(), opts?.webOrigin); // only on success — a cancel/throw
+          recent = withRecent(recent, filePath, Date.now(), originFor(filePath)); // only on success — a cancel/throw
           lastOpened = filePath;                  // must not pollute Recent (regression)
           freshlyOpened = null;
           changed = true;
@@ -985,10 +999,10 @@ function AppContent(): React.ReactElement {
           path: filePath,
           ...prepared,
           index: opts?.index === undefined ? undefined : opts.index + inserted,
-          webOrigin: opts?.webOrigin,
+          webOrigin: originFor(filePath),
         });
         inserted += 1;
-        recent = withRecent(recent, filePath, Date.now(), opts?.webOrigin);
+        recent = withRecent(recent, filePath, Date.now(), originFor(filePath));
         lastOpened = filePath;
         freshlyOpened = { path: filePath, workingPath: prepared.workingPath };
         changed = true;
