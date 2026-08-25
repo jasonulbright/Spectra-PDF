@@ -3154,6 +3154,36 @@ export async function answerImagePicker(path: string | null): Promise<void> {
   }, path);
 }
 
+/** Answer the next native "save form data" dialog with this path, or with
+ * `null` for a cancelled one. The only door to the branches that hand a built
+ * submission or a reply over as a file. Consumed by a single save. */
+export async function answerNextFormDataSaveDialog(path: string | null): Promise<void> {
+  await browser.execute(function (p: string | null) {
+    (window as any).__SPECTRA_TEST__.answerNextFormDataSaveDialog(p);
+  }, path);
+}
+
+/** Start a widget's authored action WITHOUT waiting for it.
+ *
+ * The submit flow blocks on dialogs the spec has to click, so the awaiting
+ * `fireCanvasFormAction` would deadlock: the handler cannot resolve until the
+ * consent dialog is answered, and the answer cannot be typed while the
+ * command channel is held. This fires the same handler and returns. */
+export async function startCanvasFormAction(
+  path: string,
+  fieldName: string,
+  trigger: string,
+): Promise<void> {
+  await browser.execute(
+    function (p: string, name: string, t: string) {
+      void (window as any).__SPECTRA_TEST__.canvasFireFormAction(p, name, t);
+    },
+    path,
+    fieldName,
+    trigger,
+  );
+}
+
 /** The colour-profile assent answer the renderer currently holds. */
 export interface IccAssentAnswer {
   portable: boolean;
