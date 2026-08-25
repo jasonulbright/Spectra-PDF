@@ -122,6 +122,11 @@ scripts/license-audit*.tsv
 # or sale without written permission), so they are read on a developer disk and
 # never redistributed. This repository is public.
 /ghent-corpus/
+# The GWG Processing Steps Test Suite v1.0, fetched by
+# scripts/fetch-processing-steps-suite.py. Published by the Ghent Workgroup
+# for testing workflow setup, so it is read on a developer disk and never
+# redistributed. This repository is public.
+/processing-steps-corpus/
 *.local.*
 # ...and scratch DIRECTORIES, which the pattern above misses: it needs a dot
 # after "local", so `u1-shots.local/` was landing in git status as untracked.

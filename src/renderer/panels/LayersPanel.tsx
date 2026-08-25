@@ -7,11 +7,17 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome } from '../i18n';
+import {
+  processingStepLabel,
+  processingStepNote,
+  type ProcessingStep,
+} from '../lib/processing-steps';
 
 interface Layer {
   index: number;
   name: string;
   visible: boolean;
+  processing_step: ProcessingStep | null;
 }
 
 export function LayersPanel(): React.ReactElement {
@@ -82,23 +88,39 @@ export function LayersPanel(): React.ReactElement {
       ) : (
         <div className="flex flex-col gap-1" data-testid="layers-list">
           <p className="text-xs text-neutral-500">{tChrome('panel.layers.hint')}</p>
-          {layers.map((l) => (
-            <label
-              key={l.index}
-              data-testid={`layer-${l.index}`}
-              className="flex items-center gap-2 px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded cursor-pointer"
-            >
-              <input
-                data-testid={`layer-toggle-${l.index}`}
-                type="checkbox"
-                checked={l.visible}
-                disabled={busy}
-                onChange={() => void toggle(l)}
-                className="rounded bg-neutral-800 border-neutral-700"
-              />
-              <span className="text-sm text-neutral-200 truncate" title={l.name}>{l.name}</span>
-            </label>
-          ))}
+          {layers.map((l) => {
+            const step = l.processing_step;
+            const note = step ? processingStepNote(step.status) : '';
+            return (
+              <label
+                key={l.index}
+                data-testid={`layer-${l.index}`}
+                className="flex items-start gap-2 px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded cursor-pointer"
+              >
+                <input
+                  data-testid={`layer-toggle-${l.index}`}
+                  type="checkbox"
+                  checked={l.visible}
+                  disabled={busy}
+                  onChange={() => void toggle(l)}
+                  className="mt-0.5 rounded bg-neutral-800 border-neutral-700"
+                />
+                <span className="min-w-0 flex flex-col">
+                  <span className="text-sm text-neutral-200 truncate" title={l.name}>{l.name}</span>
+                  {step && (
+                    <span
+                      data-testid={`layer-step-${l.index}`}
+                      className="text-xs text-amber-400/90 truncate"
+                      title={tChrome('panel.layers.stepTitle')}
+                    >
+                      {tChrome('panel.layers.step', { step: processingStepLabel(step) })}
+                      {note && <span className="text-neutral-500"> — {note}</span>}
+                    </span>
+                  )}
+                </span>
+              </label>
+            );
+          })}
         </div>
       )}
       <StatusBar message={status} busy={busy} />

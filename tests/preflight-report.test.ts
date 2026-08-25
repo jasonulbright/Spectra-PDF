@@ -130,8 +130,8 @@ describe('the check inventory mirror', () => {
     expect(CHECK_INVENTORY.map((r) => [r[0], r[1]])).toEqual(engineInventory());
   });
 
-  it('names 37 checks across 7 categories', () => {
-    expect(CHECK_INVENTORY).toHaveLength(37);
+  it('names 38 checks across 7 categories', () => {
+    expect(CHECK_INVENTORY).toHaveLength(38);
     expect(new Set(CHECK_INVENTORY.map((r) => r[1]))).toEqual(new Set(CATEGORY_IDS));
   });
 

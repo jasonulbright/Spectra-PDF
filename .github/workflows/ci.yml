@@ -207,6 +207,24 @@ jobs:
       - name: Verify the Ghent corpus against its manifest
         run: python scripts/fetch-ghent-suite.py --check
 
+      # The GWG Processing Steps Test Suite, same posture and same reasoning
+      # as the Ghent corpus above: published for testing workflow setup, never
+      # committed, keyed on its own fetch script because that file holds the
+      # archive digest pin.
+      - name: Cache the GWG Processing Steps Test Suite corpus
+        id: processing-steps-cache
+        uses: actions/cache@v6
+        with:
+          path: processing-steps-corpus
+          key: ${{ runner.os }}-processing-steps-suite-${{ hashFiles('scripts/fetch-processing-steps-suite.py') }}
+
+      - name: Fetch the GWG Processing Steps Test Suite corpus
+        if: steps.processing-steps-cache.outputs.cache-hit != 'true'
+        run: python scripts/fetch-processing-steps-suite.py
+
+      - name: Verify the Processing Steps corpus against its manifest
+        run: python scripts/fetch-processing-steps-suite.py --check
+
       - name: Install Ghostscript as a TEST TOOL (capability-present axis)
         # This does not vendor Ghostscript into Spectra PDF. The clean runner
         # installs the current Chocolatey package like an end user would; the

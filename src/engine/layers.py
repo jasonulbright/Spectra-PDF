@@ -10,6 +10,11 @@ default, so hiding a layer here hides it in the page.
 Layers are addressed by their INDEX into /OCGs (stable within a document, and
 names aren't guaranteed unique). Membership tests are by object identity
 (objgen), never by name.
+
+A layer may also carry a PROCESSING STEP: a declaration that its content is a
+manufacturing instruction (a die line, a crease, a varnish area) rather than
+artwork a press prints. `engine/processing_steps.py` reads it, and states the
+standard it is read against and why that reading is second-hand.
 """
 
 from pathlib import Path
@@ -17,6 +22,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Array, Name
 from engine.inplace import is_same_file, staged_write
+from engine.processing_steps import read_processing_step
 from engine.pdf_save import save_pdf
 
 
@@ -52,20 +58,34 @@ def _in_array(arr, target) -> bool:
 
 
 def list_layers(file: str) -> dict:
-    """Every optional-content group: index, name, and default visibility."""
+    """Every optional-content group: index, name, default visibility, and the
+    processing step it declares.
+
+    `processing_step` is None on an ordinary artwork layer. Where it is
+    present it carries the declared `group` and `type` verbatim (they are
+    document content and are never translated), the `status` of the
+    declaration, and the page-element subtype where the layer happens to
+    carry one. `processing_step_count` is what tells a caller whether this is
+    a packaging document at all without walking the list.
+    """
     with pikepdf.open(file) as pdf:
         ocgs = _ocgs(pdf)
         d = _default_config(pdf)
         off = d.get("/OFF") if d is not None else None
         layers = []
+        steps = 0
         for i, ocg in enumerate(ocgs):
             try:
                 name = str(ocg.get("/Name")) if ocg.get("/Name") is not None else f"Layer {i + 1}"
             except Exception:
                 name = f"Layer {i + 1}"
+            step = read_processing_step(ocg)
+            if step is not None:
+                steps += 1
             # A layer is visible unless it is explicitly in the /OFF array.
-            layers.append({"index": i, "name": name, "visible": not _in_array(off, ocg)})
-        return {"layers": layers, "count": len(layers)}
+            layers.append({"index": i, "name": name, "visible": not _in_array(off, ocg),
+                           "processing_step": step})
+        return {"layers": layers, "count": len(layers), "processing_step_count": steps}
 
 
 def set_layer_visibility(file: str, output: str, index: int, visible: bool) -> dict:
