@@ -76,6 +76,47 @@ export function readWebUrl(raw: string): WebUrlVerdict {
   };
 }
 
+/**
+ * Whether a host is a LITERAL private/loopback/link-local address.
+ *
+ * A hint for the dialog only: open-from-web is user-typed and a private address
+ * is fetched (Rust warns, does not refuse), but the address bar convention that
+ * flags "this is your own machine or LAN" does not exist here, so the dialog
+ * says so. Only literals are judged — a hostname's resolution is unknown until
+ * Rust resolves it, and guessing here would either miss or over-warn.
+ */
+export function isPrivateHost(host: string): boolean {
+  let h = host.trim().toLowerCase();
+  if (h === '') return false;
+  // Strip an IPv6 bracket/zone or an IPv4 port.
+  if (h.startsWith('[')) {
+    const end = h.indexOf(']');
+    if (end > 0) h = h.slice(1, end);
+  } else if (h.includes(':') && h.split(':').length === 2) {
+    h = h.slice(0, h.indexOf(':'));
+  }
+  h = h.split('%')[0]; // drop an IPv6 zone id
+
+  const v4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const o = v4.slice(1).map((n) => Number(n));
+    if (o.some((n) => n > 255)) return false;
+    if (o[0] === 127 || o[0] === 0) return true; // loopback, "this host"
+    if (o[0] === 10) return true; // 10/8
+    if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true; // 172.16/12
+    if (o[0] === 192 && o[1] === 168) return true; // 192.168/16
+    if (o[0] === 169 && o[1] === 254) return true; // link-local + metadata
+    return false;
+  }
+  if (h.includes(':')) {
+    if (h === '::1' || h === '::') return true; // loopback, unspecified
+    if (h.startsWith('fe8') || h.startsWith('fe9') || h.startsWith('fea') || h.startsWith('feb'))
+      return true; // fe80::/10
+    if (h.startsWith('fc') || h.startsWith('fd')) return true; // fc00::/7
+  }
+  return false;
+}
+
 /** The refusal string for a verdict — one key per reason, no composition. */
 export const WEB_URL_REFUSAL_KEYS = {
   empty: 'dialog.openWeb.refuseEmpty',

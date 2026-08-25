@@ -620,6 +620,10 @@ export interface NetRequest {
   bodyPath?: string;
   contentType?: string;
   fileName?: string;
+  /** Whether a private/loopback/link-local destination is refused by name. A
+   * document-chosen submit sets it; a user-typed open clears it and warns. Rust
+   * fails closed when it is absent, so the two callers set it explicitly. */
+  refusePrivate: boolean;
 }
 
 /** `src-tauri/src/net.rs` `NetResponse`. Never bytes — a path to them. */

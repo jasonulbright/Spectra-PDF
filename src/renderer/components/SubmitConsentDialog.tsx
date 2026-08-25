@@ -33,6 +33,10 @@ interface SubmitConsentDialogProps {
   fieldName: string;
   url: string;
   format: SubmitFormat;
+  /** How the request is made. Shown so "what the user sees is what transmits"
+   * includes HOW: a GET carries the field values on the URL, a POST in the
+   * body. */
+  method: 'get' | 'post';
   preview: PayloadPreview;
   /** How many fields the payload carries — what a PDF submission is summarized
    * by, alongside its size. */
@@ -51,6 +55,7 @@ export function SubmitConsentDialog({
   fieldName,
   url,
   format,
+  method,
   preview,
   fieldCount,
   onAnswer,
@@ -111,6 +116,15 @@ export function SubmitConsentDialog({
           <p className="mt-2 text-xs text-neutral-400">
             {tChrome('dialog.submitConsent.format', {
               format: tChrome(FORMAT_LABEL[format]),
+            })}
+          </p>
+          <p className="mt-1 text-xs text-neutral-400" data-testid="submit-consent-method">
+            {tChrome('dialog.submitConsent.method', {
+              method: tChrome(
+                method === 'get'
+                  ? 'dialog.submitConsent.methodGet'
+                  : 'dialog.submitConsent.methodPost',
+              ),
             })}
           </p>
         </div>

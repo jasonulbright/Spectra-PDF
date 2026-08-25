@@ -426,6 +426,7 @@ function AppContent(): React.ReactElement {
     fieldName: string;
     url: string;
     format: SubmitFormat;
+    method: 'get' | 'post';
     preview: PayloadPreview;
     fieldCount: number;
     resolve: (answer: SubmitConsentAnswer) => void;
@@ -436,11 +437,12 @@ function AppContent(): React.ReactElement {
       fieldName: string,
       url: string,
       format: SubmitFormat,
+      method: 'get' | 'post',
       preview: PayloadPreview,
       fieldCount: number,
     ): Promise<SubmitConsentAnswer> =>
       new Promise((resolve) => {
-        setSubmitConsentState({ fieldName, url, format, preview, fieldCount, resolve });
+        setSubmitConsentState({ fieldName, url, format, method, preview, fieldCount, resolve });
       }),
     [],
   );
@@ -1521,6 +1523,7 @@ function AppContent(): React.ReactElement {
             fieldName,
             action.url,
             action.format,
+            action.method,
             payloadPreview(action.format, await app.netPayloadBytes(payloadPath)),
             built.count ?? 0,
           );
@@ -3659,6 +3662,7 @@ function AppContent(): React.ReactElement {
           fieldName={submitConsentState.fieldName}
           url={submitConsentState.url}
           format={submitConsentState.format}
+          method={submitConsentState.method}
           preview={submitConsentState.preview}
           fieldCount={submitConsentState.fieldCount}
           onAnswer={handleSubmitConsent}
