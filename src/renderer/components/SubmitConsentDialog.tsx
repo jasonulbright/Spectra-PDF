@@ -151,7 +151,7 @@ export function SubmitConsentDialog({
             onClick={() => answer('save')}
             disabled={busy}
             data-testid="submit-consent-save"
-            className="mr-auto px-3 py-1 text-sm bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium"
+            className="me-auto px-3 py-1 text-sm bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium"
           >
             {tChrome('dialog.submitConsent.save')}
           </button>

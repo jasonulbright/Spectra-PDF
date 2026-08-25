@@ -149,6 +149,8 @@ import { ScheduledRunsDialog } from './components/ScheduledRunsDialog';
 import { WatchedFoldersDialog } from './components/WatchedFoldersDialog';
 import { CreatePdfDialog } from './components/CreatePdfDialog';
 import { CombineDialog } from './components/CombineDialog';
+import { OpenFromWebDialog, type OpenFromWebResult } from './components/OpenFromWebDialog';
+import { saveRouteFor } from './lib/web-open';
 import { classify as classifySource } from './lib/create-pdf';
 import type { CombineDestination } from './lib/combine';
 import { ExportImagesDialog } from './components/ExportImagesDialog';
@@ -306,6 +308,10 @@ function AppContent(): React.ReactElement {
   const [showSchedules, setShowSchedules] = useState(false);
   const [showWatchers, setShowWatchers] = useState(false);
   const [showCreatePdf, setShowCreatePdf] = useState(false);
+  // File ▸ Open from Web Address. `null` = closed; a string is the address the
+  // field OPENS ON — a re-opened recent entry or a dropped link. Pre-filled is
+  // as far as it goes: the request happens when the user presses Open.
+  const [openWebUrl, setOpenWebUrl] = useState<string | null>(null);
   // Which acquisition the dialog starts on, when it was opened from one of
   // the File ▸ Create siblings rather than from Create PDF itself.
   const [createPdfAutoStart, setCreatePdfAutoStart] = useState<'clipboard' | 'web' | null>(null);
@@ -886,7 +892,11 @@ function AppContent(): React.ReactElement {
   // `index` is a tab position for the opens that have one — a tab dropped in
   // from another window lands at the gap its caret marked, and a batch lands
   // in order from there. Every other open appends; a stale index clamps.
-  const openByPaths = useCallback(async (paths: string[], opts?: { focus?: boolean; index?: number }) => {
+  // `webOrigin` is the address a downloaded copy came from (File ▸ Open from
+  // Web Address). It travels with the open rather than being looked up later:
+  // it decides where File ▸ Save goes for that document, and it is the
+  // provenance the recent list shows and re-opens by.
+  const openByPaths = useCallback(async (paths: string[], opts?: { focus?: boolean; index?: number; webOrigin?: string }) => {
     let recent = stateRef.current.ui.recentFiles;
     let lastOpened: string | null = null;
     let inserted = 0;
@@ -949,7 +959,7 @@ function AppContent(): React.ReactElement {
         const existing = stateRef.current.files.get(filePath);
         if (existing && !existing.importOnly) {
           dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
-          recent = withRecent(recent, filePath, Date.now()); // only on success — a cancel/throw
+          recent = withRecent(recent, filePath, Date.now(), opts?.webOrigin); // only on success — a cancel/throw
           lastOpened = filePath;                  // must not pollute Recent (regression)
           freshlyOpened = null;
           changed = true;
@@ -975,9 +985,10 @@ function AppContent(): React.ReactElement {
           path: filePath,
           ...prepared,
           index: opts?.index === undefined ? undefined : opts.index + inserted,
+          webOrigin: opts?.webOrigin,
         });
         inserted += 1;
-        recent = withRecent(recent, filePath, Date.now());
+        recent = withRecent(recent, filePath, Date.now(), opts?.webOrigin);
         lastOpened = filePath;
         freshlyOpened = { path: filePath, workingPath: prepared.workingPath };
         changed = true;
@@ -1138,6 +1149,22 @@ function AppContent(): React.ReactElement {
     }
     return false;
   }, [openFiles, openByPaths]);
+
+  // The downloaded copy, handed to the ONE open funnel. Nothing here inspects
+  // the bytes: whether they are a document is the funnel's existing question,
+  // and its refusal comes back as text for the dialog to show beside the
+  // address rather than as a throw nobody catches.
+  const openDownloadedFile = useCallback(
+    async ({ path, url }: OpenFromWebResult): Promise<string | null> => {
+      try {
+        await openByPaths([path], { webOrigin: url });
+        return null;
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    },
+    [openByPaths],
+  );
 
   // Add-page ghost: pick file(s) and import their pages into a document.
   const handleAddPages = useCallback(
@@ -2527,6 +2554,15 @@ function AppContent(): React.ReactElement {
 
   const handleSave = useCallback(async () => {
     if (!activeFile) return;
+    // A document downloaded from a web address has no file of the user's
+    // underneath it — its `path` is a temporary copy — so Save asks where to
+    // keep it. The routing is asked of the selector rather than decided here,
+    // for the reason the ghost guard exists: a silent write to the wrong path
+    // is not a cosmetic failure.
+    if (saveRouteFor(activeFile) === 'saveAs') {
+      await handleSaveAsRef.current();
+      return;
+    }
     if (!(await commitOrAbort())) return;
     await file.saveAs(activeFile.workingPath, activeFile.path);
     dispatch({ type: 'MARK_SAVED', path: activeFile.path });
@@ -2554,6 +2590,12 @@ function AppContent(): React.ReactElement {
       void releasePaths(granted.filter((p) => !held.has(p)));
     }
   }, [activeFile, saveFile, dispatch, commitOrAbort, reportClaimRefusal]);
+
+  // Save routes INTO Save As for a downloaded document, and Save As is
+  // declared after it. One implementation either way — a second copy of the
+  // destination claim and its release is exactly the divergence this avoids.
+  const handleSaveAsRef = useRef(handleSaveAs);
+  handleSaveAsRef.current = handleSaveAs;
 
   // File ▸ Send To ▸ Email is a local OS integration. Flush pending page edits
   // and stage a copy of the current working state under the
@@ -2827,6 +2869,8 @@ function AppContent(): React.ReactElement {
       const paths = await openFiles();
       if (paths.length > 0) await openByPaths(paths, { focus: false });
     },
+    // Pre-filled, never pre-fetched: opening the dialog is not a request.
+    openFromWeb: (url) => setOpenWebUrl(url ?? ''),
     openPath: (path) => openByPaths([path]),
     openPathAtPage: async (path, pageNumber) => {
       await openByPaths([path], { focus: true });
@@ -2913,6 +2957,7 @@ function AppContent(): React.ReactElement {
     registerAppCommandHandlers({
       openFiles: () => h.current.openFiles(),
       openFilesInPlace: () => h.current.openFilesInPlace(),
+      openFromWeb: (url) => h.current.openFromWeb(url),
       openPath: (path) => h.current.openPath(path),
       openPathAtPage: (path, pageNumber) => h.current.openPathAtPage(path, pageNumber),
       save: () => h.current.save(),
@@ -3346,7 +3391,10 @@ function AppContent(): React.ReactElement {
       addFormFields={handleAddFormFields}
       confirmSignedEdit={confirmEditOfSignedDoc}
     >
-    <DropZone onFilesDropped={handleFilesDropped}>
+    <DropZone
+      onFilesDropped={handleFilesDropped}
+      onUrlDropped={(url) => setOpenWebUrl(url)}
+    >
     <div className="app-shell h-screen bg-neutral-900 text-neutral-100 flex flex-col overflow-hidden">
       <MenuBar />
       {!(state.ui.readingMode && isDocTab(state.ui.focusedTab)) && <MainToolbar />}
@@ -3382,7 +3430,11 @@ function AppContent(): React.ReactElement {
             <HomeTab
               recentFiles={recentFiles}
               onOpen={() => invokeCommand('file.open')}
-              onOpenRecent={(path) => void openByPaths([path])}
+              onOpenRecent={(entry) =>
+                entry.sourceUrl
+                  ? setOpenWebUrl(entry.sourceUrl)
+                  : void openByPaths([entry.path])
+              }
               onClearRecent={() => invokeCommand('file.clearRecent')}
               onRevealRecent={(path) => {
                 void file.reveal(path).catch(() =>
@@ -3494,6 +3546,13 @@ function AppContent(): React.ReactElement {
           onCreated={(path) => openByPaths([path])}
           onAppend={insertAnchor(state) ? (path) => insertPagesFromScan(path) : null}
           appendDir={scanAppendDir}
+        />
+      )}
+      {openWebUrl !== null && (
+        <OpenFromWebDialog
+          initialUrl={openWebUrl}
+          onClose={() => setOpenWebUrl(null)}
+          onDownloaded={openDownloadedFile}
         />
       )}
       {showCreatePdf && (

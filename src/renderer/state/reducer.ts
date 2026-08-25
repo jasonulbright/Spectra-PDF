@@ -417,6 +417,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         dirty: false,
         undoStack: [],
         redoStack: [],
+        // Absent for every ordinary open, so nothing else has to know the
+        // field exists; a re-open of the same path without one clears it,
+        // which is correct — those bytes came from the file, not the web.
+        ...(action.webOrigin ? { webOrigin: action.webOrigin } : {}),
       });
       // A tab dropped from another window lands at the gap its caret marked.
       // Every other open appends, and a stale index — the strip changed while

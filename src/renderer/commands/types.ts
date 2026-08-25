@@ -35,6 +35,10 @@ export interface AppCommandHandlers {
    * request to go and read it. Same code path as openFiles otherwise —
    * decryption, recents, the ghost upgrade and its commit gate all included. */
   openFilesInPlace(): Promise<void>;
+  /** Open the download dialog (File ▸ Open from Web Address…). `url`
+   * PRE-FILLS the field — a recent web entry re-opened, or an address dropped
+   * from a browser — and never starts a request by itself. */
+  openFromWeb(url?: string): void;
   /** Open specific path(s) and focus the (last) opened document's tab — the
    * File ▸ Open Recent and Home-tab recent/open flows. */
   openPath(path: string): Promise<void>;
