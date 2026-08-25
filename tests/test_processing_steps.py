@@ -22,6 +22,8 @@ calls `not_applicable` must each name the rule that put them there.
 
 from __future__ import annotations
 
+import pathlib
+
 import pikepdf
 import pytest
 
@@ -37,7 +39,7 @@ from engine.processing_steps import (
     prints_by_default,
     processing_step_ocgs,
 )
-from engine.separations import list_inks
+from engine.separations import PROCESS_INKS, list_inks, render_separations
 
 TABLE = corpus.load_table()
 HAS_CORPUS = corpus.corpus_present()
@@ -190,6 +192,106 @@ def test_the_raster_stages_a_copy_and_never_touches_the_document(tmp_path) -> No
         steps = processing_step_ocgs(pdf)
         off = {el.objgen for el in pdf.Root["/OCProperties"]["/D"]["/OFF"]}
         assert set(steps) <= off
+
+
+@needs_corpus
+@pytest.mark.usefixtures("gs_path")
+class TestTheDefaultStateRenders:
+    """The device writes a plate per colorant in the page RESOURCES, so the
+    staged copy's forced-off step groups still produce a die line plate the
+    inventory has already dropped. Those plates are expected-but-suppressed;
+    treating them as unexpected refused every processing-steps document in
+    the DEFAULT state, while the flag-on state rendered.
+    """
+
+    def _row(self):
+        return next(r for r in TABLE if r.excluded_inks)
+
+    def test_a_step_document_renders_with_only_its_artwork_plates(self, gs_path):
+        row = self._row()
+        result = render_separations(str(row.path), page=1, dpi=36,
+                                    gs_path=gs_path, reuse=False)
+        names = [plate["name"] for plate in result["plates"]]
+        assert set(names).isdisjoint(row.excluded_inks)
+        # The four process plates exist for the job by construction; the rest
+        # of the set is exactly the inventory.
+        inventory = {ink["name"] for ink in list_inks(str(row.path), pages=[1])["inks"]}
+        assert set(names) == inventory | set(PROCESS_INKS)
+        # Never counted either: a suppressed plate in the ink figures would
+        # be the varnish charged to the job.
+        assert set(result["coverage"]).isdisjoint(row.excluded_inks)
+
+    def test_the_flag_serves_the_full_set(self, gs_path):
+        row = self._row()
+        result = render_separations(str(row.path), page=1, dpi=36,
+                                    gs_path=gs_path, reuse=False,
+                                    show_processing_steps=True)
+        names = {plate["name"] for plate in result["plates"]}
+        assert set(row.excluded_inks) <= names
+
+    def test_the_two_states_are_different_cache_directories(self, gs_path):
+        row = self._row()
+        off = render_separations(str(row.path), page=1, dpi=36, gs_path=gs_path,
+                                 reuse=False)
+        on = render_separations(str(row.path), page=1, dpi=36, gs_path=gs_path,
+                                reuse=False, show_processing_steps=True)
+        assert off["dir"] != on["dir"]
+
+    def test_the_suppressed_plates_leave_the_manifest_exact(self, gs_path):
+        """Deleted rather than recorded: what the glob finds is what the set
+        was written with, so `_set_is_whole` keeps testing exact equality."""
+        row = self._row()
+        first = render_separations(str(row.path), page=1, dpi=36,
+                                   gs_path=gs_path, reuse=False)
+        out_dir = pathlib.Path(first["dir"])
+        assert ({p.name for p in out_dir.glob("s1(*).tif")}
+                == {pathlib.Path(p["file"]).name for p in first["plates"]})
+        second = render_separations(str(row.path), page=1, dpi=36,
+                                    gs_path=gs_path, reuse=True)
+        assert second["plates"] == first["plates"]
+
+    def test_a_plate_matching_no_colorant_at_all_still_refuses(self, tmp_path):
+        """The suppression is per-name, not a blanket amnesty."""
+        from engine.separations import _describe_set
+
+        for name in ("s1(Cyan).tif", "s1(Structural).tif", "s1(Alien).tif"):
+            (tmp_path / name).write_bytes(b"")
+        inks = [{"name": "Cyan", "kind": "process", "alternate": "DeviceCMYK",
+                 "display_rgb": None, "pages": [1], "used_in": []}]
+        with pytest.raises(ValueError, match="did not match"):
+            _describe_set(tmp_path, inks, "x.pdf", 1, 36, "gs", True,
+                          {"s1(Structural).tif"})
+
+
+@needs_corpus
+def test_the_exclusion_survives_the_page_extraction(tmp_path) -> None:
+    """The soft proof stages ONE page, and page extraction rebuilds the
+    catalog — so `/OCProperties` and every group the exclusion turned off do
+    not survive it unless they are carried. Without the carry the conversion
+    puts the die line and the varnish back, on the plates and in every ink
+    figure measured over them, with nothing saying so.
+    """
+    from engine.separations import (
+        _carry_off_configuration,
+        _stage_without_processing_steps,
+    )
+    from engine.split import _render_part
+
+    row = next(r for r in TABLE if r.declared_steps)
+    hidden = _stage_without_processing_steps(row.path, tmp_path)
+    assert hidden is not None
+
+    single = tmp_path / "page.pdf"
+    single.write_bytes(_render_part(str(hidden), [0]))
+    with pikepdf.open(single) as pdf:
+        assert pdf.Root.get("/OCProperties") is None
+
+    _carry_off_configuration(str(hidden), single)
+    with pikepdf.open(single) as pdf, pikepdf.open(str(hidden)) as before:
+        config = pdf.Root["/OCProperties"]["/D"]
+        assert {str(g["/Name"]) for g in config["/OFF"]} == {
+            str(g["/Name"]) for g in before.Root["/OCProperties"]["/D"]["/OFF"]
+        }
 
 
 def test_a_document_declaring_no_steps_stages_nothing(tmp_path) -> None:
