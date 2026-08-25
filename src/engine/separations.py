@@ -87,6 +87,19 @@ _ESCAPED_BYTES = frozenset(b'%/\\:*?"<>|')
 #: self-referential one from recursing.
 _MAX_ALTERNATE_DEPTH = 4
 
+#: How far the optional-content walk follows nested resource dictionaries
+#: (form XObjects, tiling patterns, soft-mask groups, appearance streams).
+#: Reaching it means the walk did not see every group the page can select
+#: content by, and the profile staging refuses rather than carry a partial
+#: set — see `_carry_off_configuration`.
+_MAX_OC_RESOURCE_DEPTH = 8
+
+#: Private key stamped on each source OCG dictionary before page extraction.
+#: Extraction copies the group dictionaries whole, so the key crosses it and
+#: gives the extracted page's own copies an exact identity. Stripped from the
+#: staged file once the configuration is rebuilt.
+_OC_KEY = "/SpectraOCKey"
+
 _PREVIEW_DIR_NAME = "separation-preview"
 # Plate sets left by earlier previews are evicted oldest-first past this many.
 _MAX_CACHED_SETS = 24
@@ -525,10 +538,23 @@ def _stage_without_processing_steps(source: Path, out_dir: Path):
     return staged
 
 
-def _page_optional_content_groups(pdf) -> list:
-    """Every OCG dictionary the pages of this PDF can select content by."""
+def _page_optional_content_groups(pdf) -> tuple[list, bool]:
+    """Every OCG dictionary the pages of this PDF can select content by.
+
+    Returns the groups and whether the walk was COMPLETE. False means
+    `_MAX_OC_RESOURCE_DEPTH` cut a branch off, so the list is a subset of
+    what the page can address and cannot be reasoned about as a whole.
+
+    Content selects a group from far more places than a page's own
+    `/Properties`: a tiling or shading pattern carries its own resources, an
+    ExtGState soft mask paints through a form XObject group with resources of
+    its own, and an annotation's appearance stream is a form XObject the page
+    dictionary never lists. Each of those is walked, and an OCMD is followed
+    through both `/OCGs` and the `/VE` visibility expression.
+    """
     groups: list = []
     seen: set = set()
+    complete = True
 
     def add(obj) -> None:
         if not isinstance(obj, pikepdf.Dictionary):
@@ -536,42 +562,144 @@ def _page_optional_content_groups(pdf) -> list:
         key = obj.objgen
         if key != (0, 0) and key in seen:
             return
+        if key != (0, 0):
+            seen.add(key)
         if str(obj.get("/Type", "")) == "/OCMD":
-            members = obj.get("/OCGs")
-            if isinstance(members, pikepdf.Dictionary):
-                add(members)
-            elif isinstance(members, pikepdf.Array):
-                for member in members:
-                    add(member)
+            for source in (obj.get("/OCGs"), obj.get("/VE")):
+                add_any(source)
             return
         if str(obj.get("/Type", "")) != "/OCG":
             return
-        seen.add(key)
         groups.append(obj)
 
+    def add_any(obj, depth: int = 0) -> None:
+        """An OCG, an OCMD, or any array nesting them — `/VE` included.
+
+        A visibility expression is an array whose head is an operator name
+        and whose tail is groups or further expressions. Every group named
+        anywhere in it is collected: the expression can turn its content off
+        through any one of them, and the safe direction here is the opposite
+        of the processing-step scan's. There a missed group only leaves an
+        already-visible colorant on the plate list; here a missed group
+        leaves content the document hides VISIBLE on the plates, so the carry
+        errs towards more groups, never fewer.
+        """
+        if depth > _MAX_OC_RESOURCE_DEPTH:
+            nonlocal complete
+            complete = False
+            return
+        if isinstance(obj, pikepdf.Array):
+            for item in obj:
+                add_any(item, depth + 1)
+        elif isinstance(obj, pikepdf.Dictionary):
+            add(obj)
+
     def walk(resources, depth: int = 0) -> None:
-        if not isinstance(resources, pikepdf.Dictionary) or depth > 8:
+        nonlocal complete
+        if not isinstance(resources, pikepdf.Dictionary):
+            return
+        if depth > _MAX_OC_RESOURCE_DEPTH:
+            complete = False
             return
         properties = resources.get("/Properties")
         if isinstance(properties, pikepdf.Dictionary):
             for value in properties.values():
-                add(value)
-        xobjects = resources.get("/XObject")
-        if isinstance(xobjects, pikepdf.Dictionary):
-            for xobject in xobjects.values():
-                if isinstance(xobject, pikepdf.Stream):
-                    add(xobject.get("/OC"))
-                    walk(xobject.get("/Resources"), depth + 1)
+                add_any(value)
+        for category in ("/XObject", "/Pattern", "/Shading"):
+            entries = resources.get(category)
+            if not isinstance(entries, pikepdf.Dictionary):
+                continue
+            for entry in entries.values():
+                if not isinstance(entry, (pikepdf.Dictionary, pikepdf.Stream)):
+                    continue
+                add_any(entry.get("/OC"))
+                walk(entry.get("/Resources"), depth + 1)
+        states = resources.get("/ExtGState")
+        if isinstance(states, pikepdf.Dictionary):
+            for state in states.values():
+                if not isinstance(state, pikepdf.Dictionary):
+                    continue
+                mask = state.get("/SMask")
+                if not isinstance(mask, pikepdf.Dictionary):
+                    continue
+                group = mask.get("/G")
+                if isinstance(group, pikepdf.Stream):
+                    add_any(group.get("/OC"))
+                    walk(group.get("/Resources"), depth + 1)
+
+    def walk_appearance(obj, depth: int = 0) -> None:
+        nonlocal complete
+        if depth > _MAX_OC_RESOURCE_DEPTH:
+            complete = False
+            return
+        if isinstance(obj, pikepdf.Stream):
+            add_any(obj.get("/OC"))
+            walk(obj.get("/Resources"))
+        elif isinstance(obj, pikepdf.Dictionary):
+            for state in obj.values():
+                walk_appearance(state, depth + 1)
 
     for page in pdf.pages:
         walk(page.obj.get("/Resources"))
         for annot in page.obj.get("/Annots", []) or []:
-            if isinstance(annot, pikepdf.Dictionary):
-                add(annot.get("/OC"))
-    return groups
+            if not isinstance(annot, pikepdf.Dictionary):
+                continue
+            add_any(annot.get("/OC"))
+            appearance = annot.get("/AP")
+            if isinstance(appearance, pikepdf.Dictionary):
+                for stream in appearance.values():
+                    walk_appearance(stream)
+    return groups, complete
 
 
-def _carry_off_configuration(source: str, single: Path) -> None:
+def _tag_optional_content_groups(source: str, out_dir: Path):
+    """A working copy of `source` whose OCGs carry a unique identity key.
+
+    Returns `(path, off_keys)`, or `(None, set())` when the document declares
+    no default configuration, turns nothing off, or cannot be read.
+
+    Page extraction rebuilds the catalog and hands the extracted page its own
+    COPIES of the group dictionaries, so object identity cannot cross it. A
+    name cannot stand in for identity — two groups may share one, and unnamed
+    groups all share the empty string — so the identity is manufactured
+    before the extraction instead: each group dictionary gets a private key,
+    extraction copies the dictionary whole, and the key arrives on the other
+    side naming exactly one group. The extraction runs over THIS copy, never
+    the user's file, and the key is stripped from the staged page again.
+    """
+    try:
+        with pikepdf.open(source) as src:
+            properties = src.Root.get("/OCProperties")
+            config = (properties.get("/D")
+                      if isinstance(properties, pikepdf.Dictionary) else None)
+            if not isinstance(config, pikepdf.Dictionary):
+                return None, set()
+            off = [g for g in (config.get("/OFF") or [])
+                   if isinstance(g, pikepdf.Dictionary)]
+            if not off:
+                return None, set()
+            reachable, _complete = _page_optional_content_groups(src)
+            declared = [g for g in (properties.get("/OCGs") or [])
+                        if isinstance(g, pikepdf.Dictionary)]
+            stamped: set = set()
+            for index, group in enumerate(off + declared + reachable):
+                identity = group.objgen
+                if identity != (0, 0) and identity in stamped:
+                    continue
+                if identity != (0, 0):
+                    stamped.add(identity)
+                group[_OC_KEY] = pikepdf.String(f"{index}")
+            off_keys = {str(g[_OC_KEY]) for g in off if _OC_KEY in g}
+            if not off_keys:
+                return None, set()
+            tagged = out_dir / "octagged.pdf"
+            save_pdf(src, tagged)
+        return tagged, off_keys
+    except (OSError, pikepdf.PdfError, ValueError):
+        return None, set()
+
+
+def _carry_off_configuration(single: Path, off_keys: set) -> bool:
     """Re-establish the source's default OC configuration on the extracted page.
 
     Page extraction rebuilds the catalog, so `/OCProperties` does not survive
@@ -581,46 +709,51 @@ def _carry_off_configuration(source: str, single: Path) -> None:
     plates and every ink figure measured over them would silently carry
     manufacturing content the preview was asked to leave out.
 
-    Groups are matched by NAME: the extracted page holds its own copies of
-    the group dictionaries, so object identity cannot cross the extraction.
-    Two groups sharing a name share the state, which is the same reading a
-    viewer's layer list gives them.
+    Groups are paired by the key `_tag_optional_content_groups` stamped on
+    the source before extraction, so a group's state crosses the extraction
+    on its own: two same-named groups land with their own states, and
+    unnamed groups do not collide.
+
+    True means the page is safe to stage — the configuration was carried, or
+    the walk completed and found nothing this page turns off.
+
+    False is a REFUSAL: the caller must not stage this page. It is returned
+    when the resource walk hit `_MAX_OC_RESOURCE_DEPTH`, or the page could
+    not be read. The groups found are then a SUBSET, and writing a
+    configuration from a subset declares the groups it missed VISIBLE — the
+    failure that puts hidden manufacturing content on the plates. Refusing
+    costs the profile staging, which moves ink amounts; carrying a partial
+    set changes which content is on the page at all, so the refusal is the
+    cheaper wrong answer and the only honest one.
     """
+    if not off_keys:
+        return True
     try:
-        with pikepdf.open(source) as src:
-            properties = src.Root.get("/OCProperties")
-            config = properties.get("/D") if isinstance(properties, pikepdf.Dictionary) else None
-            if not isinstance(config, pikepdf.Dictionary):
-                return
-            off_names = {
-                str(group.get("/Name", ""))
-                for group in (config.get("/OFF") or [])
-                if isinstance(group, pikepdf.Dictionary)
-            }
-        if not off_names:
-            return
         with pikepdf.open(single, allow_overwriting_input=True) as pdf:
-            groups = _page_optional_content_groups(pdf)
-            off = [g for g in groups if str(g.get("/Name", "")) in off_names]
-            if not off:
-                return
-            pdf.Root["/OCProperties"] = pdf.make_indirect(pikepdf.Dictionary({
-                "/OCGs": pikepdf.Array([pdf.make_indirect(g) for g in groups]),
-                "/D": pikepdf.Dictionary({
-                    "/OFF": pikepdf.Array([pdf.make_indirect(g) for g in off]),
-                    "/Order": pikepdf.Array([]),
-                }),
-            }))
+            groups, complete = _page_optional_content_groups(pdf)
+            if not complete:
+                return False
+            off = [g for g in groups
+                   if _OC_KEY in g and str(g[_OC_KEY]) in off_keys]
+            for group in groups:
+                if _OC_KEY in group:
+                    del group[_OC_KEY]
+            if off:
+                pdf.Root["/OCProperties"] = pdf.make_indirect(pikepdf.Dictionary({
+                    "/OCGs": pikepdf.Array([pdf.make_indirect(g) for g in groups]),
+                    "/D": pikepdf.Dictionary({
+                        "/OFF": pikepdf.Array([pdf.make_indirect(g) for g in off]),
+                        "/Order": pikepdf.Array([]),
+                    }),
+                }))
             pdf.save(str(single))
+        return True
     except (OSError, pikepdf.PdfError):
-        # A page whose optional content cannot be read is staged as it was
-        # extracted: the plates are then a page the preview can describe,
-        # which is the same answer as a document declaring no groups.
-        return
+        return False
 
 
 def _stage_for_profile(file: str, page: int, profile_path: str, out_dir: Path,
-                       gs_path: str, icc_dir: str = "") -> Path:
+                       gs_path: str, icc_dir: str = ""):
     """One page, colour-managed to the press profile, as its own PDF.
 
     The separation device ignores the destination profile, so this is where
@@ -628,13 +761,25 @@ def _stage_for_profile(file: str, page: int, profile_path: str, out_dir: Path,
     conversion runs over that alone: `convert_cmyk` stays the one door for
     source-to-CMYK conversion, and staging a whole document to separate one
     page of it would pay for every page the preview is not showing.
+
+    The source's OCGs are tagged BEFORE the extraction so the extracted page
+    can be given back the groups the document turns off. None means the carry
+    refused and the caller rasters the unstaged document, whose own
+    `/OCProperties` still hides them.
     """
     from .prepress import convert_cmyk
     from .split import _render_part
 
+    tagged, off_keys = _tag_optional_content_groups(file, out_dir)
     single = out_dir / "page.pdf"
-    single.write_bytes(_render_part(file, [page - 1]))
-    _carry_off_configuration(file, single)
+    try:
+        single.write_bytes(_render_part(str(tagged or file), [page - 1]))
+    finally:
+        if tagged is not None:
+            tagged.unlink(missing_ok=True)
+    if not _carry_off_configuration(single, off_keys):
+        single.unlink(missing_ok=True)
+        return None
     staged = out_dir / "staged.pdf"
     try:
         convert_cmyk(str(single), str(staged), dest_profile=profile_path,
@@ -766,11 +911,17 @@ def render_separations(
         if without is not None:
             prepared = without
 
+    rastered = None
     if stage:
+        # None is the optional-content carry refusing (see
+        # `_carry_off_configuration`): the page is rastered unstaged instead,
+        # keeping the document's own hidden groups hidden at the cost of the
+        # profile. The refusal is a function of the document's bytes, so the
+        # profile-keyed cache entry holds what re-running would produce.
         rastered = _stage_for_profile(str(prepared), page, profile.path, out_dir,
                                       gs_path, icc_dir)
         first = 1
-    else:
+    if rastered is None:
         rastered = prepared
         first = page
 

@@ -1290,3 +1290,303 @@ class TestSimulationProfilesOffered:
             gs_path=gs_path, icc_dir=str(empty))
         assert result["simulation"]["source"] == "none"
         assert "No colour profiles are installed" in result["simulation"]["refusal"]
+
+
+
+class TestOptionalContentCarriedAcrossExtraction:
+    """The profile staging extracts one page, and page extraction rebuilds
+    the catalog: every group the document turns OFF has to be re-established
+    on the extracted page or the die line, the varnish and every other hidden
+    layer come back on the plates with nothing saying so.
+
+    The direction of every case here is one-sided. Missing a group leaves
+    content the document hides VISIBLE; forcing an extra group off drops
+    artwork. Both are wrong output, and neither may be silent.
+    """
+
+    @staticmethod
+    def _ocg(pdf, name=None):
+        entries = {"/Type": pikepdf.Name("/OCG")}
+        if name is not None:
+            entries["/Name"] = pikepdf.String(name)
+        return pdf.make_indirect(pikepdf.Dictionary(entries))
+
+    @staticmethod
+    def _declare(pdf, groups, off):
+        pdf.Root["/OCProperties"] = pdf.make_indirect(pikepdf.Dictionary({
+            "/OCGs": pikepdf.Array(list(groups)),
+            "/D": pikepdf.Dictionary({"/OFF": pikepdf.Array(list(off))}),
+        }))
+
+    @staticmethod
+    def _stage(path, tmp_path):
+        """Extract page 1 the way `_stage_for_profile` does; the carry's
+        verdict and the resulting page."""
+        from engine.separations import (
+            _carry_off_configuration,
+            _tag_optional_content_groups,
+        )
+        from engine.split import _render_part
+
+        tagged, off_keys = _tag_optional_content_groups(str(path), tmp_path)
+        single = tmp_path / "page.pdf"
+        single.write_bytes(_render_part(str(tagged or path), [0]))
+        if tagged is not None:
+            tagged.unlink()
+        return _carry_off_configuration(single, off_keys), single
+
+    @staticmethod
+    def _off_state(single):
+        """(names of every carried group, names of the ones forced off)."""
+        with pikepdf.open(single) as pdf:
+            properties = pdf.Root.get("/OCProperties")
+            if properties is None:
+                return None, None
+
+            def names(array):
+                return sorted(str(g.get("/Name", "")) for g in array)
+
+            return names(properties["/OCGs"]), names(properties["/D"]["/OFF"])
+
+    def _page(self, pdf, resources):
+        pdf.add_blank_page(page_size=(200, 200))
+        pdf.pages[0].obj["/Resources"] = resources
+        return pdf.pages[0]
+
+    def test_two_groups_sharing_a_name_keep_their_own_states(self, tmp_path):
+        # Matching by /Name forced the VISIBLE twin off as well: a soft proof
+        # of a die-lined job dropped the artwork drawn on the same-named
+        # layer, silently and in the wrong direction.
+        src = tmp_path / "same-name.pdf"
+        with pikepdf.new() as pdf:
+            die = self._ocg(pdf, "Layer 1")
+            art = self._ocg(pdf, "Layer 1")
+            self._page(pdf, pikepdf.Dictionary({"/Properties": pikepdf.Dictionary(
+                {"/oc1": die, "/oc2": art})}))
+            self._declare(pdf, [die, art], [die])
+            pdf.save(src)
+
+        carried, single = self._stage(src, tmp_path)
+        assert carried
+        groups, off = self._off_state(single)
+        assert groups == ["Layer 1", "Layer 1"]
+        assert off == ["Layer 1"]
+
+    def test_two_unnamed_groups_do_not_collide(self, tmp_path):
+        # Both read as "" under the name match, so one OFF group forced every
+        # unnamed group on the page off.
+        src = tmp_path / "unnamed.pdf"
+        with pikepdf.new() as pdf:
+            die = self._ocg(pdf)
+            art = self._ocg(pdf)
+            self._page(pdf, pikepdf.Dictionary({"/Properties": pikepdf.Dictionary(
+                {"/oc1": die, "/oc2": art})}))
+            self._declare(pdf, [die, art], [die])
+            pdf.save(src)
+
+        carried, single = self._stage(src, tmp_path)
+        assert carried
+        groups, off = self._off_state(single)
+        assert groups == ["", ""]
+        assert off == [""]
+
+    def test_the_identity_key_never_reaches_the_staged_page(self, tmp_path):
+        src = tmp_path / "key.pdf"
+        with pikepdf.new() as pdf:
+            die = self._ocg(pdf, "Die")
+            self._page(pdf, pikepdf.Dictionary({"/Properties": pikepdf.Dictionary(
+                {"/oc1": die})}))
+            self._declare(pdf, [die], [die])
+            pdf.save(src)
+
+        carried, single = self._stage(src, tmp_path)
+        assert carried
+        with pikepdf.open(single) as pdf:
+            for group in pdf.Root["/OCProperties"]["/OCGs"]:
+                assert "/SpectraOCKey" not in group
+        # The tagging never touches the file it was pointed at.
+        with pikepdf.open(src) as pdf:
+            for group in pdf.Root["/OCProperties"]["/OCGs"]:
+                assert "/SpectraOCKey" not in group
+
+    def _reachable_only_via(self, tmp_path, name, build):
+        """One OFF group reachable ONLY through `build`'s resource branch."""
+        src = tmp_path / f"{name}.pdf"
+        with pikepdf.new() as pdf:
+            die = self._ocg(pdf, "Die")
+            self._page(pdf, build(pdf, die))
+            self._declare(pdf, [die], [die])
+            pdf.save(src)
+        carried, single = self._stage(src, tmp_path)
+        assert carried
+        return self._off_state(single)
+
+    def test_a_group_reachable_only_through_a_tiling_pattern_is_carried(
+        self, tmp_path
+    ):
+        # The walk read /Properties and /XObject only, so a group used inside
+        # a pattern's own resources was never found and the page came back
+        # with no /OCProperties at all — the die line fully visible.
+        def build(pdf, die):
+            pattern = pikepdf.Stream(pdf, b"/OC /oc1 BDC 0 0 10 10 re f EMC")
+            pattern["/PatternType"] = 1
+            pattern["/PaintType"] = 1
+            pattern["/TilingType"] = 1
+            pattern["/BBox"] = pikepdf.Array([0, 0, 10, 10])
+            pattern["/XStep"] = 10
+            pattern["/YStep"] = 10
+            pattern["/Resources"] = pikepdf.Dictionary({
+                "/Properties": pikepdf.Dictionary({"/oc1": die})})
+            return pikepdf.Dictionary({"/Pattern": pikepdf.Dictionary(
+                {"/P0": pdf.make_indirect(pattern)})})
+
+        assert self._reachable_only_via(tmp_path, "pattern", build) == (
+            ["Die"], ["Die"])
+
+    def test_a_shading_carrying_its_own_oc_is_carried(self, tmp_path):
+        def build(pdf, die):
+            shading = pikepdf.Dictionary({
+                "/ShadingType": 2,
+                "/ColorSpace": pikepdf.Name("/DeviceGray"),
+                "/Coords": pikepdf.Array([0, 0, 10, 10]),
+                "/OC": die,
+            })
+            return pikepdf.Dictionary({"/Shading": pikepdf.Dictionary(
+                {"/Sh0": pdf.make_indirect(shading)})})
+
+        assert self._reachable_only_via(tmp_path, "shading", build) == (
+            ["Die"], ["Die"])
+
+    def test_a_group_reachable_only_through_a_soft_mask_group_is_carried(
+        self, tmp_path
+    ):
+        def build(pdf, die):
+            group = pikepdf.Stream(pdf, b"/OC /oc1 BDC 0 0 10 10 re f EMC")
+            group["/Type"] = pikepdf.Name("/XObject")
+            group["/Subtype"] = pikepdf.Name("/Form")
+            group["/BBox"] = pikepdf.Array([0, 0, 10, 10])
+            group["/Resources"] = pikepdf.Dictionary({
+                "/Properties": pikepdf.Dictionary({"/oc1": die})})
+            state = pikepdf.Dictionary({"/SMask": pikepdf.Dictionary({
+                "/S": pikepdf.Name("/Luminosity"),
+                "/G": pdf.make_indirect(group),
+            })})
+            return pikepdf.Dictionary({"/ExtGState": pikepdf.Dictionary(
+                {"/GS0": pdf.make_indirect(state)})})
+
+        assert self._reachable_only_via(tmp_path, "smask", build) == (
+            ["Die"], ["Die"])
+
+    def test_a_group_reachable_only_through_an_annotation_appearance_is_carried(
+        self, tmp_path
+    ):
+        src = tmp_path / "annot-ap.pdf"
+        with pikepdf.new() as pdf:
+            die = self._ocg(pdf, "Die")
+            page = self._page(pdf, pikepdf.Dictionary({}))
+            appearance = pikepdf.Stream(pdf, b"/OC /oc1 BDC 0 0 10 10 re f EMC")
+            appearance["/Type"] = pikepdf.Name("/XObject")
+            appearance["/Subtype"] = pikepdf.Name("/Form")
+            appearance["/BBox"] = pikepdf.Array([0, 0, 10, 10])
+            appearance["/Resources"] = pikepdf.Dictionary({
+                "/Properties": pikepdf.Dictionary({"/oc1": die})})
+            page.obj["/Annots"] = pikepdf.Array([pdf.make_indirect(
+                pikepdf.Dictionary({
+                    "/Type": pikepdf.Name("/Annot"),
+                    "/Subtype": pikepdf.Name("/Square"),
+                    "/Rect": pikepdf.Array([0, 0, 10, 10]),
+                    "/AP": pikepdf.Dictionary({
+                        "/N": pdf.make_indirect(appearance)}),
+                }))])
+            self._declare(pdf, [die], [die])
+            pdf.save(src)
+
+        carried, single = self._stage(src, tmp_path)
+        assert carried
+        assert self._off_state(single) == (["Die"], ["Die"])
+
+    def test_an_ocmd_visibility_expression_carries_the_groups_it_names(
+        self, tmp_path
+    ):
+        # /VE was not read at all. The safe direction here is the opposite of
+        # the processing-step scan's: a group the expression names and the
+        # carry misses leaves hidden content visible, so every group anywhere
+        # in the expression is collected.
+        src = tmp_path / "ve.pdf"
+        with pikepdf.new() as pdf:
+            die = self._ocg(pdf, "Die")
+            crease = self._ocg(pdf, "Crease")
+            ocmd = pdf.make_indirect(pikepdf.Dictionary({
+                "/Type": pikepdf.Name("/OCMD"),
+                "/VE": pikepdf.Array([
+                    pikepdf.Name("/Or"),
+                    die,
+                    pikepdf.Array([pikepdf.Name("/Not"), crease]),
+                ]),
+            }))
+            self._page(pdf, pikepdf.Dictionary({"/Properties": pikepdf.Dictionary(
+                {"/oc1": ocmd})}))
+            self._declare(pdf, [die, crease], [die, crease])
+            pdf.save(src)
+
+        carried, single = self._stage(src, tmp_path)
+        assert carried
+        groups, off = self._off_state(single)
+        assert groups == ["Crease", "Die"]
+        assert off == ["Crease", "Die"]
+
+    def test_a_walk_cut_off_by_the_depth_limit_refuses_the_staging(
+        self, tmp_path
+    ):
+        # Proceeding with the subset would declare the groups the walk never
+        # reached VISIBLE. The refusal costs the profile staging — ink
+        # amounts — where carrying the subset would change which content is
+        # on the page at all.
+        from engine.separations import _MAX_OC_RESOURCE_DEPTH
+
+        src = tmp_path / "deep.pdf"
+        with pikepdf.new() as pdf:
+            near = self._ocg(pdf, "Near")
+            deep = self._ocg(pdf, "Deep")
+            innermost = pikepdf.Stream(pdf, b"0 0 10 10 re f")
+            innermost["/Type"] = pikepdf.Name("/XObject")
+            innermost["/Subtype"] = pikepdf.Name("/Form")
+            innermost["/BBox"] = pikepdf.Array([0, 0, 10, 10])
+            innermost["/Resources"] = pikepdf.Dictionary({
+                "/Properties": pikepdf.Dictionary({"/oc1": deep})})
+            nested = pdf.make_indirect(innermost)
+            for _ in range(_MAX_OC_RESOURCE_DEPTH + 2):
+                wrapper = pikepdf.Stream(pdf, b"/X0 Do")
+                wrapper["/Type"] = pikepdf.Name("/XObject")
+                wrapper["/Subtype"] = pikepdf.Name("/Form")
+                wrapper["/BBox"] = pikepdf.Array([0, 0, 10, 10])
+                wrapper["/Resources"] = pikepdf.Dictionary({
+                    "/XObject": pikepdf.Dictionary({"/X0": nested})})
+                nested = pdf.make_indirect(wrapper)
+            self._page(pdf, pikepdf.Dictionary({
+                "/XObject": pikepdf.Dictionary({"/X0": nested}),
+                "/Properties": pikepdf.Dictionary({"/oc1": near}),
+            }))
+            self._declare(pdf, [near, deep], [near, deep])
+            pdf.save(src)
+
+        carried, single = self._stage(src, tmp_path)
+        assert carried is False
+        # The page was left exactly as extracted: no partial configuration
+        # claiming the group the walk never reached is visible.
+        assert self._off_state(single) == (None, None)
+
+    def test_a_document_turning_nothing_off_stages_without_a_refusal(
+        self, tmp_path
+    ):
+        src = tmp_path / "all-on.pdf"
+        with pikepdf.new() as pdf:
+            art = self._ocg(pdf, "Art")
+            self._page(pdf, pikepdf.Dictionary({"/Properties": pikepdf.Dictionary(
+                {"/oc1": art})}))
+            self._declare(pdf, [art], [])
+            pdf.save(src)
+
+        carried, single = self._stage(src, tmp_path)
+        assert carried
+        assert self._off_state(single) == (None, None)

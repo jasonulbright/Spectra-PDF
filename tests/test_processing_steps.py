@@ -274,6 +274,7 @@ def test_the_exclusion_survives_the_page_extraction(tmp_path) -> None:
     from engine.separations import (
         _carry_off_configuration,
         _stage_without_processing_steps,
+        _tag_optional_content_groups,
     )
     from engine.split import _render_part
 
@@ -286,7 +287,10 @@ def test_the_exclusion_survives_the_page_extraction(tmp_path) -> None:
     with pikepdf.open(single) as pdf:
         assert pdf.Root.get("/OCProperties") is None
 
-    _carry_off_configuration(str(hidden), single)
+    tagged, off_keys = _tag_optional_content_groups(str(hidden), tmp_path)
+    assert tagged is not None and off_keys
+    single.write_bytes(_render_part(str(tagged), [0]))
+    assert _carry_off_configuration(single, off_keys)
     with pikepdf.open(single) as pdf, pikepdf.open(str(hidden)) as before:
         config = pdf.Root["/OCProperties"]["/D"]
         assert {str(g["/Name"]) for g in config["/OFF"]} == {
