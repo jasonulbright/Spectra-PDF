@@ -15,6 +15,15 @@ checker saying it did not decide.
 something no check answers is recorded there as `uncovered` with its Matterhorn
 checkpoints — a list that feeds the register, never a silent drop.
 
+**A technique whose defect is not decidable is covered as a REVIEW, and says
+why.** Some of what these files test is a judgement about the content — whether
+a graphic stands in for text, whether a run of paragraphs is a list, where a
+sidebar belongs in the reading order. A checker that guessed `fail` on those
+would be trading false failures for a coverage number, so the row records
+`covered_as_review` with the check that carries the evidence and a written
+reason. The reason is the point: a review row nobody can read the argument for
+is a silent drop wearing a different word.
+
 The corpus is pinned: every file's SHA-256 is in `MANIFEST.json`, and a file
 that is present but unlisted, or listed but absent, fails here rather than
 changing what the gate means.
@@ -65,20 +74,44 @@ def test_every_file_matches_its_pinned_digest():
         assert hashlib.sha256((CORPUS / name).read_bytes()).hexdigest() == digest, name
 
 
+def _claimed(row: dict) -> dict:
+    """The check→status claims a row makes, whichever kind of row it is."""
+    return {**(row.get("covered") or {}), **(row.get("covered_as_review") or {})}
+
+
 def test_coverage_table_names_every_technique():
     assert set(COVERAGE) == set(MANIFEST["techniques"])
     for technique, row in COVERAGE.items():
-        assert ("covered" in row) != ("uncovered" in row), technique
+        kinds = [k for k in ("covered", "covered_as_review", "uncovered") if k in row]
+        assert kinds == kinds[:1], technique
+        assert len(kinds) == 1, technique
         for cid, status in (row.get("covered") or {}).items():
             assert cid in _CHECK_IDS, (technique, cid)
             assert status in ("fail", "warn"), (technique, cid, status)
+        for cid, status in (row.get("covered_as_review") or {}).items():
+            assert cid in _CHECK_IDS, (technique, cid)
+            assert status == "needs_review", (technique, cid, status)
+
+
+def test_every_review_row_writes_down_why_it_is_one():
+    """`covered_as_review` is a claim that the defect is not mechanically
+    decidable, and a claim with no argument behind it is how a coverage table
+    starts meaning nothing. The reason is prose, per technique, and the row
+    without one fails here rather than shipping."""
+    for technique, row in COVERAGE.items():
+        if "covered_as_review" not in row:
+            assert "reason" not in row, technique
+            continue
+        assert len(row["covered_as_review"]) == 1, technique
+        reason = row.get("reason") or ""
+        assert isinstance(reason, str) and len(reason.split()) >= 12, technique
 
 
 def test_every_covered_technique_is_a_failure_technique():
     """A covered row asserts a defect is REPORTED, so it can only sit on a file
     that carries one. A pass file's guarantee is the blanket one below."""
     for technique, row in COVERAGE.items():
-        if "covered" in row:
+        if "covered" in row or "covered_as_review" in row:
             assert MANIFEST["techniques"][technique]["expectation"] == "Fail", technique
 
 
@@ -93,11 +126,12 @@ def test_conforming_technique_fails_nothing(technique):
 
 
 @pytest.mark.parametrize(
-    "technique", [t for t in _TECHNIQUES if "covered" in COVERAGE[t]]
+    "technique",
+    [t for t in _TECHNIQUES if "covered" in COVERAGE[t] or "covered_as_review" in COVERAGE[t]],
 )
 def test_failing_technique_is_reported_by_its_check(technique):
     statuses = _statuses(technique)
-    for cid, expected in COVERAGE[technique]["covered"].items():
+    for cid, expected in _claimed(COVERAGE[technique]).items():
         assert statuses[cid] == expected, f"{technique}/{cid}"
 
 

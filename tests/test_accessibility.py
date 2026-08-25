@@ -1,9 +1,9 @@
-"""Accessibility checker — 33 checks, five verdicts, addressed findings.
+"""Accessibility checker — 45 checks, five verdicts, addressed findings.
 
 Every check is pinned TWICE: once on the fixture that fails it and once on the
 conforming twin that must not. The `_ok` fixtures are the false-failure guards
 — a checker that cries wolf on a well-tagged document is worse than the
-six-check one it replaced, because the reader now has 33 reasons to doubt it.
+six-check one it replaced, because the reader now has 45 reasons to doubt it.
 """
 
 import json
@@ -49,9 +49,9 @@ class TestReportShape:
     def test_every_check_is_reported_exactly_once(self, tmp_dir):
         res = check_accessibility(_build(tmp_dir, "baseline"))
         ids = [c["id"] for c in res["checks"]]
-        assert len(ids) == 33
+        assert len(ids) == 45
         assert ids == [cid for cid, _ in CHECK_INVENTORY]
-        assert len(set(ids)) == 33
+        assert len(set(ids)) == 45
 
     def test_categories_partition_the_checks(self, tmp_dir):
         res = check_accessibility(_build(tmp_dir, "baseline"))
@@ -62,8 +62,8 @@ class TestReportShape:
     def test_not_applicable_is_excluded_from_the_pass_tally(self, tmp_dir):
         res = check_accessibility(_build(tmp_dir, "baseline"))
         s = res["summary"]
-        assert s["passed"] + s["failed"] + s["warnings"] + s["needs_review"] + s["not_applicable"] == 33
-        assert s["applicable"] == 33 - s["not_applicable"]
+        assert s["passed"] + s["failed"] + s["warnings"] + s["needs_review"] + s["not_applicable"] == 45
+        assert s["applicable"] == 45 - s["not_applicable"]
         # A document with no tables reports all five table checks as
         # not_applicable and none of them counts as passed.
         for cid in ("table_rows", "table_cells", "table_headers", "table_regularity",
@@ -829,7 +829,7 @@ class TestAReadThatRaisesStillYieldsAReport:
         pdf.Root[Name.Names] = pdf.make_indirect(pikepdf.Object.parse(b"7"))
         res = check_accessibility(B.save(pdf, src))
         statuses = _statuses(res)
-        assert len(res["checks"]) == 33
+        assert len(res["checks"]) == 45
         for cid in ("scripts", "screen_flicker", "timed_responses"):
             assert statuses[cid] == "needs_review", cid
         # The other 29 are still answered: one unreadable structure costs one
@@ -850,7 +850,7 @@ class TestAReadThatRaisesStillYieldsAReport:
 
         monkeypatch.setattr(accessibility, "annots_of", raises)
         res = check_accessibility(src)
-        assert len(res["checks"]) == 33
+        assert len(res["checks"]) == 45
         for cid in ("tagged_annotations", "tab_order", "navigation_links",
                     "scripts", "screen_flicker", "timed_responses"):
             assert _statuses(res)[cid] == "needs_review", cid
@@ -1405,7 +1405,7 @@ class TestCategoryFilter:
     def test_one_category_runs_and_the_shape_is_unchanged(self, tmp_dir):
         src = _build(tmp_dir, "figure_no_alt")
         res = check_accessibility(src, category="alt_text")
-        assert len(res["checks"]) == 33
+        assert len(res["checks"]) == 45
         assert _statuses(res)["figures_alt"] == "fail"
         assert _statuses(res)["heading_nesting"] == NA
 
