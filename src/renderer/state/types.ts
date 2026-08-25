@@ -20,6 +20,11 @@ export interface OpenFile {
   // for pages imported into another document; evicted once no page references
   // them and the page tier is empty.
   importOnly?: boolean;
+  // The web address this document was downloaded from (File ▸ Open from Web
+  // Address). Present only for those opens, and it is what routes File ▸ Save
+  // to Save As: `path` is a temporary copy, not a file of the user's to write
+  // back to. Asked through `saveRouteFor` (lib/web-open.ts), never read raw.
+  webOrigin?: string;
   // Identity channel: the ids the LAST page-tier commit
   // authored for this file's pages/partitions, valid only while `buffer`
   // IS the record's buffer object (adoption checks identity — any later
@@ -568,7 +573,7 @@ export type AppAction =
   // `index` is a position in TAB space (byte-only import sources are not in
   // it). Absent, the file appends, which is what every open but a dropped tab
   // does; given, it lands at that position, clamped.
-  | { type: 'OPEN_FILE'; path: string; workingPath: string; name: string; pageCount: number; buffer: PdfBuffer; index?: number }
+  | { type: 'OPEN_FILE'; path: string; workingPath: string; name: string; pageCount: number; buffer: PdfBuffer; index?: number; webOrigin?: string }
   // Move an open document's TAB to an index. View arrangement, not a document
   // edit: nothing is dirtied, no history is touched, and the files Map's
   // insertion order stays the one authority on tab order.

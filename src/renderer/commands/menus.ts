@@ -52,10 +52,15 @@ const recentSubmenu: MenuNode = {
         if (recent.length === 0) {
           return [{ label: tChrome('chrome.menu.noRecentFiles'), disabled: true, run: () => {} }];
         }
-        return recent.slice(0, 10).map(({ path }) => ({
+        return recent.slice(0, 10).map(({ path, sourceUrl }) => ({
           label: path.split(/[\\/]/).pop() || path,
           testid: 'menuitem-recent',
-          run: (c: CommandContext) => void c.app?.openPath(path),
+          // A downloaded entry re-opens through the DIALOG, pre-filled: its
+          // local copy is a temporary path that may already be gone, and a
+          // menu click is not consent to make a request. The user presses
+          // Open, as they did the first time.
+          run: (c: CommandContext) =>
+            sourceUrl ? c.app?.openFromWeb(sourceUrl) : void c.app?.openPath(path),
         }));
       },
     },
@@ -117,6 +122,7 @@ export const MENUS: MenuDef[] = [
     label: 'File',
     items: [
       cmd('file.open', 'menuitem-file-open'),
+      cmd('file.openFromWeb', 'menuitem-file-open-from-web'),
       recentSubmenu,
       sep,
       cmd('file.createPdf', 'menuitem-file-create-pdf'),

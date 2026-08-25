@@ -184,6 +184,7 @@ export const CANVAS_MODES: readonly CanvasTool[] = CANVAS_TOOLS;
 
 export const COMMAND_IDS = [
   'file.open',
+  'file.openFromWeb',
   'file.openInPlace',
   'file.properties',
   'file.print',
@@ -409,6 +410,15 @@ export const COMMANDS: Record<CommandId, Command> = {
     title: 'Open…',
     when: (ctx) => ctx.app !== null,
     run: (ctx) => void ctx.app!.openFiles(),
+  },
+  // The same open, from an address the USER types or pastes: downloaded to a
+  // temporary copy by the app's one outbound client, then handed to the same
+  // funnel. Needs no open document, and no document can reach it — a web
+  // address inside a PDF is still never fetched.
+  'file.openFromWeb': {
+    title: 'Open from Web Address…',
+    when: (ctx) => ctx.app !== null,
+    run: (ctx) => ctx.app!.openFromWeb(),
   },
   // Not in any menu — this is the panels' "Open a PDF to …" button. The same
   // open as file.open (decryption, recents, the ghost upgrade and its commit

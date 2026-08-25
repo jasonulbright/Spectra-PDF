@@ -95,6 +95,10 @@ export const CHROME_STRINGS = {
   'chrome.recent.reveal': 'Show in folder',
   'chrome.recent.copyPath': 'Copy full path',
   'chrome.recent.revealFailed': 'That file could not be shown — it may have been moved or deleted.',
+  // A recent entry that came from a web address shows where it came from in
+  // place of a folder — its local copy is a temporary path that tells the user
+  // nothing. Re-opening one re-asks; it never re-fetches by itself.
+  'chrome.recent.fromWeb': 'From {{host}}',
   'chrome.recent.today': 'Today {{time}}',
   'chrome.recent.yesterday': 'Yesterday {{time}}',
   'chrome.prefs.language': 'Language',
