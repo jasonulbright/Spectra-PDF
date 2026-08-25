@@ -18,13 +18,209 @@ from pikepdf import Array, Dictionary, Name, String
 PAGE = (612, 792)
 
 
+# The glyphs every synthesized program below defines. Small enough to compile
+# in milliseconds, wide enough to spell the fixture text.
+_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.:, "
+
+# A fixed timestamp in the compiled program. The face's own `head.modified`
+# travels into the file, so leaving it at the run's clock would make two builds
+# of the same fixture differ in bytes for no reason a reader could name.
+_EPOCH = 0
+
+
+def _glyph_name(character: str) -> str:
+    from fontTools.agl import UV2AGL
+
+    return UV2AGL.get(ord(character), "")
+
+
+def _character_map() -> dict:
+    """codepoint → the Adobe Glyph List name for it. Cl. 7.21.6 makes AGL
+    membership a requirement in its own right, so the fixtures' glyphs are
+    named from the list rather than invented."""
+    return {ord(c): _glyph_name(c) for c in _CHARACTERS if _glyph_name(c)}
+
+
+_GLYPHS = [".notdef"] + sorted(set(_character_map().values()))
+
+
+def _outline(pen) -> None:
+    """One filled box. What the glyph LOOKS like is not what any of these
+    fixtures are about; that it has an outline at all is."""
+    pen.moveTo((50, 0))
+    pen.lineTo((450, 0))
+    pen.lineTo((450, 700))
+    pen.lineTo((50, 700))
+    pen.closePath()
+
+
+def _builder(is_ttf: bool):
+    from fontTools.fontBuilder import FontBuilder
+
+    fb = FontBuilder(1000, isTTF=is_ttf)
+    fb.setupGlyphOrder(_GLYPHS)
+    return fb
+
+
+def _finish(fb, family: str) -> None:
+    fb.setupHorizontalMetrics({name: (500, 50) for name in _GLYPHS})
+    fb.setupHorizontalHeader(ascent=750, descent=-250)
+    fb.setupNameTable({"familyName": family, "styleName": "Regular",
+                       "psName": family, "fullName": family})
+
+
+_PROGRAMS: dict = {}
+
+
+def type1c_program(family="TestSerif") -> bytes:
+    """A compact font format program, as a `/FontFile3` of subtype Type1C
+    carries it — the bare `CFF ` table, not the OpenType wrapper."""
+    from io import BytesIO
+
+    from fontTools.pens.t2CharStringPen import T2CharStringPen
+    from fontTools.ttLib import TTFont
+
+    key = ("cff", family)
+    if key in _PROGRAMS:
+        return _PROGRAMS[key]
+    fb = _builder(is_ttf=False)
+    fb.setupCharacterMap(_character_map())
+    charstrings = {}
+    for name in _GLYPHS:
+        pen = T2CharStringPen(500, None)
+        if name not in (".notdef", "space"):
+            _outline(pen)
+        charstrings[name] = pen.getCharString()
+    fb.setupCFF(family, {"FullName": family}, charstrings, {})
+    _finish(fb, family)
+    fb.setupOS2()
+    fb.setupPost()
+    fb.font["head"].created = fb.font["head"].modified = _EPOCH
+    buf = BytesIO()
+    fb.save(buf)
+    buf.seek(0)
+    _PROGRAMS[key] = TTFont(buf).reader["CFF "]
+    return _PROGRAMS[key]
+
+
+def truetype_program(subtables=((3, 1),), family="TestSans", characters=None) -> bytes:
+    """A TrueType program whose `cmap` holds exactly the (platform, encoding)
+    subtables asked for — the fact ISO 14289-1 cl. 7.21.6 turns on. An empty
+    roster produces a program with no `cmap` table at all, which is the shape
+    an embedded CIDFont program takes."""
+    from io import BytesIO
+
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+    from fontTools.ttLib import TTFont
+
+    key = ("ttf", family, tuple(subtables), characters)
+    if key in _PROGRAMS:
+        return _PROGRAMS[key]
+    fb = _builder(is_ttf=True)
+    glyphs = {}
+    for name in _GLYPHS:
+        pen = TTGlyphPen(None)
+        if name not in (".notdef", "space"):
+            _outline(pen)
+        glyphs[name] = pen.glyph()
+    fb.setupGlyf(glyphs)
+    _finish(fb, family)
+    mapping = _character_map()
+    if characters is not None:
+        mapping = {code: name for code, name in mapping.items()
+                   if chr(code) in characters}
+    fb.setupCharacterMap(mapping)
+    fb.setupOS2()
+    fb.setupPost()
+    fb.font["head"].created = fb.font["head"].modified = _EPOCH
+    built = fb.font["cmap"].tables
+    template = built[0]
+    wanted = []
+    for platform_id, encoding_id in subtables:
+        import copy
+
+        subtable = copy.deepcopy(template)
+        subtable.platformID = platform_id
+        subtable.platEncID = encoding_id
+        subtable.language = 0
+        wanted.append(subtable)
+    if wanted:
+        fb.font["cmap"].tables = wanted
+    else:
+        del fb.font["cmap"]
+    buf = BytesIO()
+    fb.save(buf)
+    _PROGRAMS[key] = buf.getvalue()
+    return _PROGRAMS[key]
+
+
+def symbol_type1c_program(family="TestSymbol") -> bytes:
+    """A compact-font-format program that states nothing about characters: its
+    glyphs are named `g1`…`gN`, which are not Adobe Glyph List names, and it
+    carries no character map at all.
+
+    That is what a genuine symbol font looks like, and it is why a font like
+    this needs a `/ToUnicode` before anything can read the text it draws.
+    """
+    from io import BytesIO
+
+    from fontTools.fontBuilder import FontBuilder
+    from fontTools.pens.t2CharStringPen import T2CharStringPen
+    from fontTools.ttLib import TTFont
+
+    key = ("symbol", family)
+    if key in _PROGRAMS:
+        return _PROGRAMS[key]
+    names = [".notdef"] + [f"g{i}" for i in range(1, 5)]
+    fb = FontBuilder(1000, isTTF=False)
+    fb.setupGlyphOrder(names)
+    fb.setupCharacterMap({})
+    charstrings = {}
+    for name in names:
+        pen = T2CharStringPen(500, None)
+        if name != ".notdef":
+            _outline(pen)
+        charstrings[name] = pen.getCharString()
+    fb.setupCFF(family, {"FullName": family}, charstrings, {})
+    fb.setupHorizontalMetrics({name: (500, 50) for name in names})
+    fb.setupHorizontalHeader(ascent=750, descent=-250)
+    fb.setupNameTable({"familyName": family, "styleName": "Regular",
+                       "psName": family, "fullName": family})
+    fb.setupOS2()
+    fb.setupPost()
+    fb.font["head"].created = fb.font["head"].modified = _EPOCH
+    buf = BytesIO()
+    fb.save(buf)
+    buf.seek(0)
+    _PROGRAMS[key] = TTFont(buf).reader["CFF "]
+    return _PROGRAMS[key]
+
+
 def _font(pdf, base="Helvetica"):
+    """The fixtures' body font, EMBEDDED.
+
+    ISO 14289-1 cl. 7.21.4.1 NOTE 5 states there is no exemption from the
+    embedding requirement for the 14 standard Type 1 fonts, so a fixture whose
+    text is drawn with an unembedded Helvetica is not the conforming baseline
+    the rest of this file assumes. The dictionary still describes the standard
+    font, with standard metrics; the program behind it is a synthesized Type1C
+    with the same advance width for every glyph.
+    """
+    program = pdf.make_stream(type1c_program())
+    program[Name.Subtype] = Name("/Type1C")
     return pdf.make_indirect(
         Dictionary(
             Type=Name.Font,
             Subtype=Name.Type1,
             BaseFont=Name("/" + base),
             Encoding=Name.WinAnsiEncoding,
+            FontDescriptor=pdf.make_indirect(
+                Dictionary(Type=Name.FontDescriptor, FontName=Name("/" + base),
+                           Flags=32, ItalicAngle=0, Ascent=750, Descent=-250,
+                           CapHeight=700, StemV=80,
+                           FontBBox=Array([0, -250, 1000, 750]),
+                           FontFile3=program)
+            ),
         )
     )
 
@@ -511,18 +707,28 @@ def blank_runs_ok(path):
 
 def bad_encoding(path):
     """A font with no /ToUnicode and a symbolic built-in encoding: its bytes
-    map to no character, so the text reads as nothing."""
+    map to no character, so the text reads as nothing.
+
+    The program IS embedded, so cl. 7.21.4.1 is satisfied and the only thing
+    this document is missing is the statement of what its bytes spell. It is
+    a Type 1 font because cl. 7.21.6's encoding rules are written for TrueType
+    fonts: a symbolic TrueType would carry a second conformance question, and
+    a fixture that failed two checks could not attribute either.
+    """
     pdf = new_pdf()
     page = pdf.pages[0]
+    program = pdf.make_stream(symbol_type1c_program())
+    program[Name.Subtype] = Name("/Type1C")
     font = pdf.make_indirect(
         Dictionary(
-            Type=Name.Font, Subtype=Name.TrueType, BaseFont=Name("/Private"),
+            Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/Private"),
             FirstChar=65, LastChar=67, Widths=Array([500, 500, 500]),
             FontDescriptor=pdf.make_indirect(
                 Dictionary(Type=Name.FontDescriptor, FontName=Name("/Private"),
                            Flags=4, ItalicAngle=0, Ascent=700, Descent=-200,
                            CapHeight=700, StemV=80,
-                           FontBBox=Array([0, -200, 1000, 700]))
+                           FontBBox=Array([0, -200, 1000, 700]),
+                           FontFile3=program)
             ),
         )
     )
@@ -1733,11 +1939,19 @@ def graphics_in_artifact_ok(path):
 
 def _type0_font(pdf, tounicode: str):
     """A composite font whose only statement about what its one code spells is
-    the `/ToUnicode` the caller writes."""
+    the `/ToUnicode` the caller writes.
+
+    The embedded program carries NO `cmap` table, which is the shape a CIDFont
+    program takes and is what keeps this the only statement: a Unicode cmap
+    would be a second one, and the check that compares the two would then be
+    reading a fixture about something else.
+    """
+    program = pdf.make_stream(truetype_program(()))
     descriptor = pdf.make_indirect(
         Dictionary(Type=Name.FontDescriptor, FontName=Name("/ABCDEF+Test"),
                    Flags=4, ItalicAngle=0, Ascent=750, Descent=-250,
-                   CapHeight=700, StemV=80, FontBBox=Array([0, -250, 1000, 750]))
+                   CapHeight=700, StemV=80, FontBBox=Array([0, -250, 1000, 750]),
+                   FontFile2=program)
     )
     descendant = pdf.make_indirect(
         Dictionary(
@@ -2219,6 +2433,473 @@ def figure_over_the_page(path):
     return save(pdf, path)
 
 
+# ── the by-design gaps: annotations, media, XObjects, fonts, forms ────────
+
+
+def trapnet_annotation(path):
+    """ISO 14289-1 cl. 7.18.2 forbids the subtype outright, with no exemption
+    of its own. The hidden flag is set so cl. 7.18.1's own exemption keeps
+    every OTHER annotation check off it — the only verdict that can move is
+    the unconditional one."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    _annot(pdf, page, "TrapNet", [0, 0, 612, 792], F=2)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def _tagged_link(pdf, page, doc, action):
+    annot = _annot(pdf, page, "Link", [400, 400, 500, 420], A=action,
+                   Contents=String("The example site"))
+    link = elem(pdf, "Link", doc, page=page,
+                kids=[Dictionary(Type=Name.OBJR, Obj=annot)])
+    doc[Name.K] = Array(list(doc[Name.K]) + [link])
+    page.obj[Name.Tabs] = Name.S
+    return annot
+
+
+def annotation_not_trapnet_ok(path):
+    """PASS fixture — an annotation is present and it is not a trap network,
+    so cl. 7.18.2 is answered rather than skipped."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _root, doc = _one_tagged_paragraph(pdf, page)
+    _tagged_link(pdf, page, doc,
+                 Dictionary(S=Name.URI, URI=String("https://example.test/")))
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def link_uri_is_map(path):
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _root, doc = _one_tagged_paragraph(pdf, page)
+    _tagged_link(pdf, page, doc,
+                 Dictionary(S=Name.URI, URI=String("https://example.test/"),
+                            IsMap=True))
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def link_uri_no_ismap_ok(path):
+    """PASS fixture — a URI action with no `/IsMap` at all. The clause is about
+    the key being present with the value true, so its absence is a pass and
+    not a document with nothing to check."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _root, doc = _one_tagged_paragraph(pdf, page)
+    _tagged_link(pdf, page, doc,
+                 Dictionary(S=Name.URI, URI=String("https://example.test/")))
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def _screen_with_clip(pdf, page, doc, clip_extra):
+    """A tagged Screen annotation whose rendition action carries one media clip
+    data dictionary — the only place ISO 14289-1 cl. 7.18.6.2 applies."""
+    clip = pdf.make_indirect(
+        Dictionary(Type=Name("/MediaClip"), S=Name("/MCD"),
+                   D=Dictionary(Type=Name.Filespec, F=String("clip.mp4"),
+                                UF=String("clip.mp4")),
+                   **clip_extra)
+    )
+    rendition = pdf.make_indirect(
+        Dictionary(Type=Name("/Rendition"), S=Name("/MR"), C=clip)
+    )
+    annot = _annot(pdf, page, "Screen", [40, 300, 300, 460],
+                   Contents=String("A short clip"),
+                   A=Dictionary(S=Name("/Rendition"), R=rendition, OP=0))
+    # The description lives on the ANNOTATION (`/Contents`), never on the
+    # element naming it: an `/Alt` here would replace the annotation rather
+    # than describe it.
+    node = elem(pdf, "Annot", doc, page=page,
+                kids=[Dictionary(Type=Name.OBJR, Obj=annot)])
+    doc[Name.K] = Array(list(doc[Name.K]) + [node])
+    page.obj[Name.Tabs] = Name.S
+    return clip
+
+
+def media_clip_no_ct_alt(path):
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _root, doc = _one_tagged_paragraph(pdf, page)
+    _screen_with_clip(pdf, page, doc, {})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def media_clip_ct_alt_ok(path):
+    """PASS fixture — ISO 32000 calls `/CT` and `/Alt` optional; cl. 7.18.6.2
+    requires them, and this clip carries both."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _root, doc = _one_tagged_paragraph(pdf, page)
+    _screen_with_clip(pdf, page, doc,
+                      {"CT": String("video/mp4"),
+                       "Alt": Array([String("en-US"), String("A short clip")])})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def _form_xobject(pdf, page, extra=None):
+    """A Form XObject drawn inside the page's tagged sequence, so the paint it
+    performs is content the structure tree already reaches."""
+    xobj = pdf.make_stream(b"0 0 0 rg 10 10 40 40 re f")
+    xobj[Name.Type] = Name.XObject
+    xobj[Name.Subtype] = Name.Form
+    xobj[Name.BBox] = Array([0, 0, 60, 60])
+    xobj[Name.Resources] = Dictionary()
+    for key, value in (extra or {}).items():
+        xobj[Name("/" + key)] = value
+    page.obj[Name.Resources][Name.XObject] = Dictionary(Fx=xobj)
+    page.obj[Name.Contents] = pdf.make_stream(
+        b"/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Readable body copy at eleven points.) Tj ET\n"
+        b"q 1 0 0 1 400 600 cm /Fx Do Q EMC"
+    )
+    return xobj
+
+
+def reference_xobject(path):
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    _form_xobject(pdf, page, {
+        "Ref": Dictionary(F=Dictionary(Type=Name.Filespec, F=String("other.pdf"),
+                                       UF=String("other.pdf")),
+                          Page=0),
+    })
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def form_xobject_ok(path):
+    """PASS fixture — an ordinary Form XObject. Cl. 7.20 forbids the REFERENCE
+    kind; a form that carries its own content is what the same clause then asks
+    to be incorporated into the structure tree, which this one is."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    _form_xobject(pdf, page)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def font_not_embedded(path):
+    """A second font, with no font program behind it, drawn in a tagged span.
+    The baseline's own font IS embedded, so the only new thing here is the
+    unembedded one."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    root, doc = _one_tagged_paragraph(pdf, page)
+    page.obj[Name.Resources][Name.Font][Name("/F2")] = pdf.make_indirect(
+        Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/Courier"),
+                   Encoding=Name.WinAnsiEncoding)
+    )
+    page.obj[Name.Contents] = pdf.make_stream(
+        b"/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Readable body copy at eleven points.) Tj ET EMC\n"
+        b"/Span <</MCID 1>> BDC BT /F2 11 Tf 40 660 Td (Second line.) Tj ET EMC"
+    )
+    span = elem(pdf, "Span", doc, page=page, mcid=1)
+    doc[Name.K] = Array(list(doc[Name.K]) + [span])
+    parent_tree(pdf, root, page, [doc[Name.K][0], span])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def font_rendering_mode_three_ok(path):
+    """PASS fixture — the same unembedded font, referenced SOLELY in text
+    rendering mode 3. ISO 14289-1 cl. 7.21.4.1 NOTE 2 exempts it: mode 3
+    neither strokes, fills nor clips, so nothing is rendered and there is no
+    substitution to prevent."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    root, doc = _one_tagged_paragraph(pdf, page)
+    page.obj[Name.Resources][Name.Font][Name("/F2")] = pdf.make_indirect(
+        Dictionary(Type=Name.Font, Subtype=Name.Type1, BaseFont=Name("/Courier"),
+                   Encoding=Name.WinAnsiEncoding)
+    )
+    page.obj[Name.Contents] = pdf.make_stream(
+        b"/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Readable body copy at eleven points.) Tj ET EMC\n"
+        b"/Artifact BMC q BT 3 Tr /F2 11 Tf 40 660 Td (Invisible.) Tj ET Q EMC"
+    )
+    parent_tree(pdf, root, page, [doc[Name.K][0]])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def _truetype_font(pdf, symbolic: bool, subtables, encoding=None):
+    raw = truetype_program(subtables)
+    program = pdf.make_stream(raw)
+    program[Name("/Length1")] = len(raw)
+    descriptor = pdf.make_indirect(
+        Dictionary(Type=Name.FontDescriptor, FontName=Name("/TestSans"),
+                   Flags=4 if symbolic else 32, ItalicAngle=0, Ascent=750,
+                   Descent=-250, CapHeight=700, StemV=80,
+                   FontBBox=Array([0, -250, 1000, 750]), FontFile2=program)
+    )
+    d = Dictionary(Type=Name.Font, Subtype=Name.TrueType, BaseFont=Name("/TestSans"),
+                   FirstChar=32, LastChar=122,
+                   Widths=Array([500] * (122 - 32 + 1)),
+                   FontDescriptor=descriptor)
+    if encoding is not None:
+        d[Name.Encoding] = encoding
+    return pdf.make_indirect(d)
+
+
+def _truetype_page(pdf, page, font):
+    root, doc = _one_tagged_paragraph(pdf, page)
+    page.obj[Name.Resources][Name.Font][Name("/F2")] = font
+    page.obj[Name.Contents] = pdf.make_stream(
+        b"/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Readable body copy at eleven points.) Tj ET EMC\n"
+        b"/Span <</MCID 1>> BDC BT /F2 11 Tf 40 660 Td (abc) Tj ET EMC"
+    )
+    span = elem(pdf, "Span", doc, page=page, mcid=1)
+    doc[Name.K] = Array(list(doc[Name.K]) + [span])
+    parent_tree(pdf, root, page, [doc[Name.K][0], span])
+    return root, doc
+
+
+def nonsymbolic_truetype_no_base_encoding(path):
+    """Cl. 7.21.6: a non-symbolic TrueType font shall name MacRomanEncoding or
+    WinAnsiEncoding. This one names neither."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    font = _truetype_font(pdf, symbolic=False, subtables=((3, 1),), encoding=None)
+    _truetype_page(pdf, page, font)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def symbolic_truetype_no_encoding_ok(path):
+    """PASS fixture — a SYMBOLIC TrueType font, with no `/Encoding` entry and a
+    Microsoft Symbol (3,0) subtable in its program. Cl. 7.21.6 states exactly
+    that shape for symbolic fonts, and a check that applied the non-symbolic
+    encoding rule to it would fail a conforming file."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    font = _truetype_font(pdf, symbolic=True, subtables=((3, 0),), encoding=None)
+    _truetype_page(pdf, page, font)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def _cid_font(pdf, cid_to_gid):
+    program = pdf.make_stream(truetype_program(()))
+    descriptor = pdf.make_indirect(
+        Dictionary(Type=Name.FontDescriptor, FontName=Name("/ABCDEF+TestCID"),
+                   Flags=4, ItalicAngle=0, Ascent=750, Descent=-250,
+                   CapHeight=700, StemV=80,
+                   FontBBox=Array([0, -250, 1000, 750]), FontFile2=program)
+    )
+    descendant = Dictionary(
+        Type=Name.Font, Subtype=Name.CIDFontType2, BaseFont=Name("/ABCDEF+TestCID"),
+        CIDSystemInfo=Dictionary(Registry=String("Adobe"),
+                                 Ordering=String("Identity"), Supplement=0),
+        FontDescriptor=descriptor, DW=1000,
+    )
+    if cid_to_gid is not None:
+        descendant[Name("/CIDToGIDMap")] = cid_to_gid
+    return pdf.make_indirect(
+        Dictionary(Type=Name.Font, Subtype=Name.Type0,
+                   BaseFont=Name("/ABCDEF+TestCID"), Encoding=Name("/Identity-H"),
+                   DescendantFonts=Array([pdf.make_indirect(descendant)]))
+    )
+
+
+def cid_font_no_cid_to_gid_map(path):
+    """An embedded Type 2 CIDFont with no `/CIDToGIDMap`. It is declared as a
+    page resource and never drawn with, which is what keeps the embedding check
+    — whose question is about RENDERED fonts — out of this fixture."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    page.obj[Name.Resources][Name.Font][Name("/C0")] = _cid_font(pdf, None)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def cid_font_identity_ok(path):
+    """PASS fixture — the same font with `/CIDToGIDMap /Identity`, which is one
+    of the two values ISO 14289-1 cl. 7.21.3.2 admits."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    page.obj[Name.Resources][Name.Font][Name("/C0")] = _cid_font(pdf, Name.Identity)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def _optional_content(pdf, page, configs, default_extra=None):
+    group = pdf.make_indirect(
+        Dictionary(Type=Name.OCG, Name=String("A layer"))
+    )
+    default = Dictionary(Name=String("Default"), OFF=Array([]), ON=Array([group]))
+    for key, value in (default_extra or {}).items():
+        default[Name("/" + key)] = value
+    built = []
+    for extra in configs:
+        config = Dictionary(ON=Array([group]))
+        for key, value in extra.items():
+            config[Name("/" + key)] = value
+        built.append(pdf.make_indirect(config))
+    properties = Dictionary(OCGs=Array([group]), D=pdf.make_indirect(default))
+    if built:
+        properties[Name.Configs] = Array(built)
+    pdf.Root[Name.OCProperties] = properties
+
+
+def oc_config_no_name(path):
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    _optional_content(pdf, page, [{}])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def oc_config_has_as(path):
+    """The other half of cl. 7.10: `/AS` shall not appear in any optional
+    content configuration dictionary. This one is named, so only the `/AS`
+    prohibition can move the verdict."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    _optional_content(
+        pdf, page, [{"Name": String("Print")}],
+        default_extra={"AS": Array([Dictionary(Event=Name("/View"),
+                                               Category=Array([Name("/View")]),
+                                               OCGs=Array([]))])},
+    )
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def oc_config_named_ok(path):
+    """PASS fixture — a `/Configs` array holding one named configuration, and a
+    named default, with no `/AS` anywhere."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    _optional_content(pdf, page, [{"Name": String("Print")}])
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def _embedded_file(pdf, spec_extra):
+    stream = pdf.make_stream(b"attached bytes")
+    stream[Name.Type] = Name("/EmbeddedFile")
+    spec = Dictionary(Type=Name.Filespec, EF=Dictionary(F=stream))
+    for key, value in spec_extra.items():
+        spec[Name("/" + key)] = value
+    spec = pdf.make_indirect(spec)
+    pdf.Root[Name.Names] = Dictionary(
+        EmbeddedFiles=Dictionary(Names=Array([String("attachment"), spec]))
+    )
+
+
+def embedded_file_no_names(path):
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    _embedded_file(pdf, {})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def embedded_file_no_unicode_name(path):
+    """One half of the name pair present. This is the shape the automatic fix
+    repairs: `/UF` is the same name `/F` already carries, so nothing has to be
+    authored to supply it."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    _embedded_file(pdf, {"F": String("notes.txt")})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def embedded_file_named_ok(path):
+    """PASS fixture — the file specification carries both `/F` and `/UF`."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    _embedded_file(pdf, {"F": String("notes.txt"), "UF": String("notes.txt")})
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def _print_field_form(pdf, page, attrs=None):
+    root, doc = _one_tagged_paragraph(pdf, page)
+    page.obj[Name.Contents] = pdf.make_stream(
+        b"/P <</MCID 0>> BDC BT /F1 11 Tf 40 700 Td (Readable body copy at eleven points.) Tj ET EMC\n"
+        b"/Form <</MCID 1>> BDC BT /F1 11 Tf 40 660 Td (Name:) Tj ET EMC"
+    )
+    form = elem(pdf, "Form", doc, page=page, mcid=1, T=String("Name field"),
+                **(attrs or {}))
+    doc[Name.K] = Array(list(doc[Name.K]) + [form])
+    parent_tree(pdf, root, page, [doc[Name.K][0], form])
+    return root, doc, form
+
+
+def form_tag_without_print_field(path):
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _print_field_form(pdf, page)
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def form_tag_with_print_field_ok(path):
+    """PASS fixture — the same non-interactive form, carrying the PrintField
+    attribute owner ISO 14289-1 cl. 7.14 asks for."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _print_field_form(pdf, page, attrs={
+        "A": Dictionary(O=Name("/PrintField"), Role=Name("/tv")),
+    })
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+_XDP = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">'
+    "<config xmlns=\"http://www.xfa.org/schema/xci/2.6/\">"
+    "<acrobat><acrobat7><dynamicRender>{value}</dynamicRender></acrobat7></acrobat>"
+    "</config></xdp:xdp>"
+)
+
+
+def _xfa(pdf, value):
+    packet = pdf.make_stream(_XDP.format(value=value).encode("utf-8"))
+    pdf.Root[Name.AcroForm] = pdf.make_indirect(
+        Dictionary(Fields=Array([]), DA=String("/Helv 0 Tf 0 g"),
+                   XFA=Array([String("config"), packet]))
+    )
+
+
+def dynamic_xfa_form(path):
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    _xfa(pdf, "required")
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
+def static_xfa_form_ok(path):
+    """PASS fixture — an XFA form whose `dynamicRender` says `forbidden`. Cl.
+    7.15 permits static XFA; only the value "required" makes a form dynamic,
+    so a checker that failed on the presence of `/XFA` would be wrong."""
+    pdf = new_pdf()
+    page = pdf.pages[0]
+    _one_tagged_paragraph(pdf, page)
+    _xfa(pdf, "forbidden")
+    make_conformant(pdf, page)
+    return save(pdf, path)
+
+
 # ── the roster the tests walk ─────────────────────────────────────────────
 
 # Checks that share ONE inventory and therefore move together. Screen flicker,
@@ -2368,4 +3049,37 @@ ROSTER = {
     "heading_set_larger_ok": (heading_set_larger_ok, "heading_semantics", "pass"),
     "h_and_hn_together": (h_and_hn_together, "heading_tag_mixing", "fail"),
     "generic_headings_only_ok": (generic_headings_only_ok, "heading_tag_mixing", "pass"),
+    "trapnet_annotation": (trapnet_annotation, "trapnet_annotations", "fail"),
+    "annotation_not_trapnet_ok": (
+        annotation_not_trapnet_ok, "trapnet_annotations", "pass"),
+    "link_uri_is_map": (link_uri_is_map, "link_ismap", "needs_review"),
+    "link_uri_no_ismap_ok": (link_uri_no_ismap_ok, "link_ismap", "pass"),
+    "media_clip_no_ct_alt": (media_clip_no_ct_alt, "media_clip_data", "fail"),
+    "media_clip_ct_alt_ok": (media_clip_ct_alt_ok, "media_clip_data", "pass"),
+    "reference_xobject": (reference_xobject, "reference_xobjects", "fail"),
+    "form_xobject_ok": (form_xobject_ok, "reference_xobjects", "pass"),
+    "font_not_embedded": (font_not_embedded, "font_embedding", "fail"),
+    "font_rendering_mode_three_ok": (
+        font_rendering_mode_three_ok, "font_embedding", "pass"),
+    "nonsymbolic_truetype_no_base_encoding": (
+        nonsymbolic_truetype_no_base_encoding, "font_encodings", "fail"),
+    "symbolic_truetype_no_encoding_ok": (
+        symbolic_truetype_no_encoding_ok, "font_encodings", "pass"),
+    "cid_font_no_cid_to_gid_map": (
+        cid_font_no_cid_to_gid_map, "cid_to_gid_map", "fail"),
+    "cid_font_identity_ok": (cid_font_identity_ok, "cid_to_gid_map", "pass"),
+    "oc_config_no_name": (oc_config_no_name, "optional_content_config", "fail"),
+    "oc_config_has_as": (oc_config_has_as, "optional_content_config", "fail"),
+    "oc_config_named_ok": (oc_config_named_ok, "optional_content_config", "pass"),
+    "embedded_file_no_names": (
+        embedded_file_no_names, "embedded_file_names", "fail"),
+    "embedded_file_no_unicode_name": (
+        embedded_file_no_unicode_name, "embedded_file_names", "fail"),
+    "embedded_file_named_ok": (embedded_file_named_ok, "embedded_file_names", "pass"),
+    "form_tag_without_print_field": (
+        form_tag_without_print_field, "print_field_attributes", "needs_review"),
+    "form_tag_with_print_field_ok": (
+        form_tag_with_print_field_ok, "print_field_attributes", "pass"),
+    "dynamic_xfa_form": (dynamic_xfa_form, "dynamic_xfa", "fail"),
+    "static_xfa_form_ok": (static_xfa_form_ok, "dynamic_xfa", "pass"),
 }

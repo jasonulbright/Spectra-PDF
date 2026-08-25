@@ -161,13 +161,13 @@ describe('the check inventory mirrors the engine', () => {
   });
 
   it('partitions every check into a category the mirror has', () => {
-    expect(CHECK_INVENTORY).toHaveLength(45);
+    expect(CHECK_INVENTORY).toHaveLength(56);
     for (const [, category] of CHECK_INVENTORY) expect(CATEGORY_IDS).toContain(category);
   });
 });
 
 describe('every reported thing has a catalog row', () => {
-  it('names and explains all 45 checks', () => {
+  it('names and explains all 56 checks', () => {
     const ids = CHECK_INVENTORY.map(([id]) => id).sort();
     expect(CATALOG_PREFIXED('panel.a11y.check.').sort()).toEqual(ids);
     expect(CATALOG_PREFIXED('panel.a11y.explain.').sort()).toEqual(ids);
