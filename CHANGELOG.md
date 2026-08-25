@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.1.10
+
+*Released 2026-08-25*
+
+### Processing steps for packaging and labels
+
+- Layers declared as processing steps (cutting, creasing, varnish, white, and similar) are now recognized and labeled in the Layers panel, with unrecognized or malformed declarations called out.
+- Output Preview excludes processing-steps content from the composite, the plates, and total ink by default, naming the excluded inks; a toggle shows them when wanted.
+- Preflight gains a processing-steps check: declared steps are reported, and profiles can require declarations or flag steps set to print.
+- An internal conformance corpus verifies this behavior against an industry-published processing-steps test suite.
+
+### Accessibility checker coverage
+
+- The checker grows from 33 to 56 checks, each sourced to the accessibility standard's own clauses: role mapping, Unicode mapping verified against the embedded font's own tables, list numbering and structure, heading conventions, font embedding and encoding rules, optional-content configuration, embedded-file names, media clips, reference XObjects, TrapNet, and dynamic XFA detection.
+- Where a judgement genuinely cannot be decided from the file alone (artifact-vs-content, semantic appropriateness, reading order), the checker now reports it for review with the evidence, instead of guessing either way.
+- New automatic fixes: clearing a stale Suspects flag and completing embedded-file names.
+
+### Fixes
+
+- Soft proofing and print-production staging no longer silently un-hide hidden layers: layer visibility now survives page extraction.
+
 ## 1.1.9
 
 *Released 2026-08-24*
