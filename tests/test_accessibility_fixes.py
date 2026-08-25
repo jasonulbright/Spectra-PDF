@@ -136,6 +136,18 @@ class TestAutomaticFixes:
         _round_trip(src, "tagged", lambda p: apply_accessibility_fixes(p, p, ["tagged"]))
         assert get_struct_tree(src)["tagged"]
 
+    def test_suspects(self, tmp_dir):
+        src = _build(tmp_dir, "suspects_flag")
+        _round_trip(src, "suspects", lambda p: apply_accessibility_fixes(p, p, ["suspects"]))
+        import pikepdf
+
+        with pikepdf.open(src) as pdf:
+            # Written false rather than deleted: ISO 32000-2 Table 321 makes
+            # false the default, and a document that once carried the flag is
+            # clearer for saying it no longer holds.
+            assert pdf.Root[Name.MarkInfo][Name("/Suspects")] is False
+            assert bool(pdf.Root[Name.MarkInfo][Name.Marked])
+
     def test_title_display_flag(self, tmp_dir):
         src = _build(tmp_dir, "title_not_displayed")
         _round_trip(src, "title", lambda p: apply_accessibility_fixes(p, p, ["title"]))

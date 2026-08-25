@@ -32,10 +32,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pikepdf
+
 from engine.accessibility import check_accessibility
 from engine.autotag import autotag
 from engine.derived_nav import outline_from_structure
-from engine.doc_properties import set_document_title, set_page_tab_order
+from engine.doc_properties import (
+    _signed_structural_gate,
+    set_document_title,
+    set_page_tab_order,
+)
 from engine.encrypt import grant_accessibility_permission
 from engine.struct_fix import set_table_headers
 from engine.struct_tree import set_struct_props
@@ -49,6 +55,10 @@ from engine.tag_content import tag_page_content
 AUTOMATIC_CHECKS = (
     "permissions",
     "tagged",
+    # The suspects flag is cleared right after tagging and before every check
+    # that reads the tree: a document disclaiming its own structure is
+    # disclaiming what the rest of this table is about to repair.
+    "suspects",
     "title",
     "bookmarks",
     "tab_order",
@@ -122,6 +132,37 @@ def _fix_title(source: str, output: str, report: dict, allow_signed: bool) -> in
     ):
         return 0
     set_document_title(source, output, display=True, allow_signed=allow_signed)
+    return 1
+
+
+def _fix_suspects(source: str, output: str, report: dict, allow_signed: bool) -> int:
+    """Clear `/MarkInfo /Suspects`.
+
+    A one-key edit, and the only automatic fix in this table whose result is
+    decided by nothing at all: the flag says the tagging MAY be unreliable, and
+    a document that has been through this checker has a better answer than a
+    maybe. The value is written false rather than deleted — ISO 32000-2 Table
+    321 makes false the default, and a document that once carried the flag is
+    clearer for saying it no longer holds.
+    """
+    gate = _signed_structural_gate(source, allow_signed)
+    if gate == "refuse":
+        raise RuntimeError(
+            "this document is certified to allow no changes, so clearing the suspects "
+            "flag would produce a file that reports as illegally modified"
+        )
+    if gate == "warn":
+        raise RuntimeError(
+            "this document is signed and clearing the suspects flag invalidates its "
+            "signatures -- the run must state that signed documents are included before "
+            "it will touch one"
+        )
+    with pikepdf.open(source, allow_overwriting_input=True) as pdf:
+        mark_info = pdf.Root.get("/MarkInfo")
+        if mark_info is None:
+            return 0
+        mark_info[pikepdf.Name("/Suspects")] = False
+        pdf.save(output)
     return 1
 
 
@@ -235,6 +276,7 @@ def _clear_alt(check_id: str):
 _DOORS = {
     "permissions": _fix_permissions,
     "tagged": _fix_tagged,
+    "suspects": _fix_suspects,
     "title": _fix_title,
     "bookmarks": _fix_bookmarks,
     "tab_order": _fix_tab_order,

@@ -1,4 +1,4 @@
-"""Accessibility checker — 33 checks across seven categories.
+"""Accessibility checker — 45 checks across seven categories.
 
 A check is a CLAIM, and every claim states how it was reached. Each check
 yields one of five verdicts and, when it has something to name, a list of
@@ -90,6 +90,8 @@ CHECK_INVENTORY = (
     ("permissions", "document"),
     ("image_only", "document"),
     ("tagged", "document"),
+    ("role_map", "document"),
+    ("suspects", "document"),
     ("structure_nesting", "document"),
     ("reading_order", "document"),
     ("lang", "document"),
@@ -97,9 +99,14 @@ CHECK_INVENTORY = (
     ("bookmarks", "document"),
     ("contrast", "document"),
     ("tagged_content", "page_content"),
+    ("untagged_graphics", "page_content"),
+    ("artifact_judgement", "page_content"),
+    ("content_grouping", "page_content"),
+    ("content_order", "page_content"),
     ("tagged_annotations", "page_content"),
     ("tab_order", "page_content"),
     ("character_encoding", "page_content"),
+    ("unicode_mapping", "page_content"),
     ("tagged_multimedia", "page_content"),
     ("screen_flicker", "page_content"),
     ("scripts", "page_content"),
@@ -119,7 +126,12 @@ CHECK_INVENTORY = (
     ("table_summary", "tables"),
     ("list_items", "lists"),
     ("list_labels", "lists"),
+    ("list_numbering", "lists"),
+    ("list_item_structure", "lists"),
+    ("list_semantics", "lists"),
     ("heading_nesting", "headings"),
+    ("heading_tag_mixing", "headings"),
+    ("heading_semantics", "headings"),
 )
 
 # id → (source, citation). The SOURCE states what kind of claim the check
@@ -138,6 +150,8 @@ CHECK_SOURCES = {
     "permissions": ("ua", "7.16"),
     "image_only": ("ua", "7.1"),
     "tagged": ("ua", "7.1"),
+    "role_map": ("ua", "7.1; 32000-2 14.7.4"),
+    "suspects": ("ua", "7.1; 32000-2 Table 321"),
     "structure_nesting": ("iso", "32000-2 Table 365"),
     "reading_order": ("ua", "7.1, 7.2"),
     "lang": ("ua", "7.2"),
@@ -145,9 +159,14 @@ CHECK_SOURCES = {
     "bookmarks": ("ua_soft", "7.17"),
     "contrast": ("wcag", "7.1 NOTE 4; WCAG 2 1.4.3"),
     "tagged_content": ("ua", "7.1"),
+    "untagged_graphics": ("ua", "7.1"),
+    "artifact_judgement": ("practice", "7.1"),
+    "content_grouping": ("practice", "7.1; 32000-2 14.8.4.7.1"),
+    "content_order": ("practice", "7.1; 32000-2 14.8.4.2"),
     "tagged_annotations": ("ua", "7.18.1"),
     "tab_order": ("ua", "7.18.3"),
     "character_encoding": ("ua", "7.2"),
+    "unicode_mapping": ("ua", "7.2; 32000-2 9.10.2"),
     "tagged_multimedia": ("ua", "7.18.1, 7.18.6"),
     "screen_flicker": ("ua", "7.1"),
     "scripts": ("ua_soft", "7.19"),
@@ -167,7 +186,12 @@ CHECK_SOURCES = {
     "table_summary": ("practice", "32000-2 Table 355"),
     "list_items": ("ua", "7.6"),
     "list_labels": ("iso", "32000-2 Table 368"),
+    "list_numbering": ("ua", "7.6; 32000-2 Table 353"),
+    "list_item_structure": ("iso", "32000-2 Table 370"),
+    "list_semantics": ("practice", "7.6"),
     "heading_nesting": ("ua", "7.4.2"),
+    "heading_tag_mixing": ("ua", "7.4"),
+    "heading_semantics": ("practice", "7.4"),
 }
 
 # Long enough that navigating without bookmarks is real work. The shipped
@@ -227,6 +251,9 @@ _STRUCTURE_CHECKS = (
     "table_rows", "table_cells",
     "table_headers", "table_regularity", "table_summary", "list_items",
     "list_labels", "heading_nesting", "structure_nesting",
+    "role_map", "untagged_graphics", "artifact_judgement", "content_grouping",
+    "content_order", "list_numbering", "list_item_structure", "list_semantics",
+    "heading_tag_mixing", "heading_semantics",
 )
 
 # The three whose FINDINGS are themselves claims about what the tree does not
@@ -242,7 +269,95 @@ _FORM_ROLE = "Form"
 _PAGE_CHECKS = (
     "image_only", "contrast", "tagged_content", "character_encoding",
     "navigation_links", "reading_order",
+    "untagged_graphics", "unicode_mapping", "artifact_judgement",
+    "content_grouping", "content_order", "list_numbering", "list_semantics",
+    "heading_semantics",
 )
+
+# ── ISO 32000-2 Table 353: the list-numbering rosters ─────────────────────
+#
+# The three unordered classes name a bullet SHAPE; the ordered ones name a
+# counting system. `None` states the list is not numbered at all, which is a
+# declaration and not a gap. Judging a declared value against the labels the
+# document actually draws is decidable only across that split — which counting
+# system a label uses is not, because `I.` is a roman numeral and a letter and
+# the tree cannot say which the author meant.
+_BULLET_NUMBERING = frozenset({"Disc", "Circle", "Square", "Unordered"})
+_ORDERED_NUMBERING = frozenset(
+    {"Decimal", "Ordered", "UpperRoman", "LowerRoman", "UpperAlpha", "LowerAlpha"}
+)
+_NO_NUMBERING = "None"
+
+# The bullet characters each unordered class names, as a reader meets them.
+# Only these three shapes are decidable: a tick, a dash or a dingbat states no
+# class, so a list labelled with one is not judged rather than guessed at.
+_BULLET_GLYPHS = {
+    "•": "Disc", "●": "Disc", "∙": "Disc",
+    "◦": "Circle", "○": "Circle", "⚬": "Circle",
+    "▪": "Square", "■": "Square", "□": "Square", "◼": "Square",
+}
+
+# What a label's own text can be stripped of before it is classified: the
+# punctuation every enumerated list wraps its counter in.
+_LABEL_TRIM = " \t().[]:-–—"
+
+_ROMAN_LETTERS = frozenset("IVXLCDMivxlcdm")
+
+# ISO 32000-2 Table 370: `LI` holds a label and a body, and nothing else. The
+# roles a conforming list item may hold DIRECTLY, before the transparent
+# grouping types of Table 365 are seen through.
+_LIST_ITEM_ROLES = frozenset({"Lbl", "LBody"})
+
+# A heading is "visually a heading" when its text is drawn this much larger
+# than the document's dominant body size. Evidence for a review, never a
+# verdict: the ratio names a candidate, and a person decides.
+_HEADING_SIZE_RATIO = 1.15
+
+# How far apart two of one element's own content blocks must sit, as a multiple
+# of the line pitch that element itself sets, before it is offered for review
+# as two things tagged as one. Measured against the element's OWN leading
+# rather than a constant: a paragraph break is a gap wider than the lines
+# around it, and what "wider" means is set by the document, not by this file.
+_BLOCK_GAP_PITCH = 1.35
+
+# Words at the document's body size that make a declared artifact read as
+# prose. A running header or a page number is shorter than this.
+_ARTIFACT_PROSE_WORDS = 6
+
+# How close, as a multiple of the line height, two same-role siblings must sit
+# before they read as adjacent lines of ONE block rather than as two things a
+# line's leading apart. Ordinary paragraph leading is wider than this.
+_ONE_BLOCK_GAP = 0.4
+
+# How far apart, as a multiple of the drawn size, two clusters of one marked
+# content sequence's runs must sit before the sequence is offered for review as
+# one tag spanning two columns.
+_COLUMN_GAP_SIZES = 4.0
+
+# How much of a page a figure's own rectangles must cover, and nothing else,
+# before it is offered for review as a background rather than a picture.
+_FIGURE_BACKGROUND_SHARE = 0.10
+
+# The roles a figure sits INSIDE when it is standing in for a word rather than
+# illustrating a block: ISO 32000-2 Tables 366 and 368's block and inline text
+# types.
+_INLINE_TEXT_ROLES = frozenset({"P", "H", "Span", "Lbl", "Em", "Strong", "Sub",
+                                "H1", "H2", "H3", "H4", "H5", "H6", "Title"})
+
+# The roles that hold a block of prose, which is what "are these two things one
+# thing" is a question about. A cell or a list item's position in its container
+# is fixed by the container, so neither is evidence of anything.
+_PROSE_ROLES = frozenset({"P", "H", "Title", "H1", "H2", "H3", "H4", "H5", "H6"})
+
+# How much of their height two runs must share before "the later one starts to
+# the left" is a backwards jump rather than the next line.
+_SAME_LINE_OVERLAP = 0.5
+
+# Painting operators. A page that executes one of these outside every marked
+# content sequence has content that is neither tagged nor declared an artifact.
+# `Do` is included because an XObject invocation paints whatever it holds;
+# `BI`/`EI` because an inline image is painted by the same stream.
+_PAINT_OPS = frozenset({"S", "s", "f", "F", "f*", "B", "B*", "b", "b*", "sh", "Do", "EI"})
 
 
 
@@ -2236,6 +2351,1155 @@ def _check_heading_nesting(check, tree, mcid_tables):
     _verdict(check, len(headings), findings)
 
 
+# ── role mapping ──────────────────────────────────────────────────────────
+
+
+# The standard structure types the PDF 1.7 namespace defines and the PDF 2.0
+# one does not (ISO 32000-2 Annex M). The compiled rosters in `struct_nesting`
+# are built from the PDF 2.0 tables, and 14.8.6.1 makes the PDF 1.7 namespace
+# the DEFAULT — so without this list every document tagged the older way reads
+# as carrying private types it never mapped. ISO 32000-1 is the definition and
+# this repository does not hold it; Annex M enumerates the difference, and an
+# enumeration of names is what this needs.
+_PDF_1_7_ONLY_ROLES = frozenset(
+    {"Art", "BlockQuote", "TOC", "TOCI", "Index", "Private", "Quote", "Note",
+     "Reference", "BibEntry", "Code"}
+)
+
+
+def _is_standard_role(role: str) -> bool:
+    """Is this one of the standard structure types either namespace defines?
+
+    `struct_nesting` already compiled the PDF 2.0 rosters from the standard —
+    Tables 364-375 into `CATEGORY` and Annex L into `PARENTS_2_0` — so this
+    asks THEM rather than keeping a third list that would drift from both, and
+    adds only the names Annex M says the older namespace holds alone. `Hn` is
+    the name both tables give the numbered headings, which is what
+    `heading_family` folds `H4` onto.
+    """
+    named = struct_nesting.heading_family(role)
+    return (
+        named in struct_nesting.CATEGORY
+        or named in struct_nesting.PARENTS_2_0
+        or named in _PDF_1_7_ONLY_ROLES
+    )
+
+
+def _role_map_nonterminating(role_map: dict) -> set:
+    """The tags whose `/RoleMap` walk never reaches a name outside the map.
+
+    A map is a chain of substitutions, and ISO 32000-2 14.7.4 states the
+    destination as a standard type — so a chain that closes on itself names no
+    type at all. The resolver hop-bounds rather than hanging; this is the same
+    walk asked whether it TERMINATED, which is the part a verdict needs.
+    """
+    out: set = set()
+    for start in role_map:
+        seen: set = set()
+        current = start
+        while current in role_map:
+            if current in seen:
+                out.add(start)
+                break
+            seen.add(current)
+            current = role_map[current]
+    return out
+
+
+def _check_role_map(check, tree):
+    """Every structure type resolves, through `/RoleMap`, to a standard one.
+
+    ISO 14289-1 cl. 7.1 requires each structure element's type to be one of the
+    standard types or to be role mapped to one; ISO 32000-2 14.7.4 is where the
+    map itself is defined. A tag neither standard nor mapped names a semantic
+    no reader can act on, which is the same as carrying no semantic.
+
+    The count is over distinct TAGS rather than elements: one unmapped private
+    type is one defect however many times the document spells it.
+    """
+    if not tree["tagged"]:
+        check.status = NA
+        return
+    role_map = tree["role_map"] or {}
+    circular = _role_map_nonterminating(role_map)
+    findings = []
+    seen: set = set()
+    for node in tree["nodes"]:
+        if node.tag in seen:
+            continue
+        seen.add(node.tag)
+        if node.tag in circular:
+            findings.append(
+                _finding(_struct_address(node), "role_map_does_not_terminate",
+                         preview=node.tag, values={"tag": node.tag})
+            )
+            continue
+        if _is_standard_role(node.role):
+            continue
+        findings.append(
+            _finding(_struct_address(node), "role_not_mapped", preview=node.tag,
+                     values={"tag": node.tag, "role": node.role})
+        )
+    _verdict(check, len(seen), findings)
+
+
+def _check_suspects(check, pdf):
+    """`/MarkInfo /Suspects` true is the document saying its own tagging may be
+    unreliable (ISO 32000-2 Table 321). ISO 14289-1 cl. 7.1 does not admit that
+    claim: a conforming file states its structure, it does not disclaim it."""
+    mark_info = pdf.Root.get("/MarkInfo")
+    if mark_info is None:
+        check.status = NA
+        return
+    check.counted = 1
+    try:
+        flagged = bool(mark_info.get("/Suspects"))
+    except Exception:
+        check.status = REVIEW
+        check.findings = [_finding(_object_address(), "suspects_unreadable")]
+        return
+    check.status = FAIL if flagged else PASS
+    if flagged:
+        check.findings = [_finding(_object_address(), "suspects_flag_set")]
+
+
+# ── content that is neither tagged nor declared decoration ────────────────
+
+
+def _paints_outside_marks(pdf) -> tuple:
+    """Pages painting outside every marked content sequence, and the pages
+    whose stream would not parse.
+
+    Nesting is counted rather than matched: `BDC`/`BMC` open a sequence and
+    `EMC` closes one, so a painting operator executed at depth zero is content
+    the page has placed under no marked content at all — neither a tagged
+    sequence nor an `/Artifact` declaration.
+    """
+    out: list = []
+    unread: list = []
+    for i, page in enumerate(pdf.pages):
+        page_no = i + 1
+        try:
+            operations = pikepdf.parse_content_stream(page)
+        except Exception as exc:
+            unread.append({"page": page_no, "reason": str(exc)})
+            continue
+        depth = 0
+        for _operands, operator in operations:
+            name = str(operator)
+            if name in ("BDC", "BMC"):
+                depth += 1
+            elif name == "EMC":
+                depth = max(0, depth - 1)
+            elif depth == 0 and name in _PAINT_OPS:
+                out.append({"page": page_no, "operator": name})
+    return out, unread
+
+
+def _check_untagged_graphics(check, pdf, tree):
+    """ISO 14289-1 cl. 7.1: content is tagged as real content or declared an
+    artifact. Text with neither is `tagged_content`'s finding; this is the
+    other half — a fill, a stroke, an image or a shading painted outside every
+    marked content sequence, which no reader reaches under any name."""
+    if not tree["tagged"]:
+        check.status = NA
+        return
+    painted, unread = _paints_outside_marks(pdf)
+    counted = len(pdf.pages)
+    if counted == 0:
+        check.status = NA
+        return
+    by_page: dict = {}
+    for hit in painted:
+        by_page.setdefault(hit["page"], []).append(hit["operator"])
+    findings = [
+        _finding(_content_address(page_no, 0), "graphics_outside_marked_content",
+                 values={"page": page_no, "operations": len(ops)})
+        for page_no, ops in sorted(by_page.items())
+    ]
+    _verdict(check, counted, findings)
+    _also_review(
+        check,
+        [
+            _finding(_object_address(page=u["page"]), "page_unreadable",
+                     values={"page": u["page"]})
+            for u in unread
+        ],
+    )
+
+
+# ── Unicode mapping, beyond presence ──────────────────────────────────────
+
+# Codepoints a `/ToUnicode` entry may never name as the text a glyph spells:
+# the null character, the two permanent noncharacters at the end of the BMP and
+# the replacement character, which is what a decoder writes when it FAILED.
+_NEVER_MAPPED = frozenset({0x0000, 0xFFFD, 0xFFFE, 0xFFFF})
+
+
+def _program_preimages(font_obj) -> dict:
+    """glyph id → every codepoint the embedded program's Unicode cmap maps to
+    it, or {} where there is no such statement to read.
+
+    Only a UNICODE cmap subtable is read — (3,1) and (3,10) on Windows, and the
+    Unicode platform's own. A symbolic (3,0) subtable maps a private code page
+    rather than characters, so reading it as Unicode would manufacture the very
+    disagreement this looks for.
+    """
+    descendants = font_obj.get("/DescendantFonts")
+    if descendants is None or len(descendants) == 0:
+        return {}
+    descendant = descendants[0]
+    # Anything but an identity CID→GID mapping means the code this check holds
+    # is not the glyph id, and re-deriving that mapping here would be a second
+    # implementation of what `pdf_fonts` already owns.
+    c2g = descendant.get("/CIDToGIDMap")
+    if c2g is not None and str(c2g) != "/Identity":
+        return {}
+    descriptor = descendant.get("/FontDescriptor")
+    if descriptor is None:
+        return {}
+    program = descriptor.get("/FontFile2") or descriptor.get("/FontFile3")
+    if program is None:
+        return {}
+    try:
+        from io import BytesIO
+
+        from fontTools.ttLib import TTFont
+
+        face = TTFont(BytesIO(program.read_bytes()), fontNumber=0, lazy=True)
+        subtables = [
+            st for st in face["cmap"].tables
+            if (st.platformID, st.platEncID) in ((3, 1), (3, 10), (0, 3), (0, 4), (0, 6))
+        ]
+    except Exception:
+        return {}
+    out: dict = {}
+    for subtable in subtables:
+        try:
+            items = list(subtable.cmap.items())
+        except Exception:
+            continue
+        for codepoint, glyph_name in items:
+            try:
+                gid = face.getGlyphID(glyph_name)
+            except Exception:
+                continue
+            out.setdefault(gid, set()).add(int(codepoint))
+    return out
+
+
+def _unicode_conflicts(pdf) -> tuple:
+    """Codes whose `/ToUnicode` contradicts what the document ITSELF says the
+    glyph is, and the fonts that would not read.
+
+    ISO 32000-2 9.10.2 makes `/ToUnicode` the statement of what a code spells.
+    An embedded font program carrying a Unicode cmap states the same thing a
+    second time, from the other direction, so where the two disagree the
+    document contradicts itself and one of the statements is wrong whichever
+    one the author meant. That is decidable without seeing the glyph, which is
+    what separates it from "does this shape look like that letter".
+    """
+    from engine.pdf_fonts import _parse_tounicode
+
+    out: list = []
+    unread: list = []
+    seen: set = set()
+    weighed = 0
+    for i, page in enumerate(pdf.pages):
+        page_no = i + 1
+        try:
+            fonts = _resolve_resources(page).get("/Font")
+        except Exception as exc:
+            unread.append({"page": page_no, "reason": str(exc)})
+            continue
+        if fonts is None:
+            continue
+        try:
+            items = list(fonts.items())
+        except Exception as exc:
+            unread.append({"page": page_no, "reason": str(exc)})
+            continue
+        for name, font_obj in items:
+            try:
+                key = font_obj.objgen
+            except Exception:
+                key = None
+            if key is not None and key != (0, 0):
+                if key in seen:
+                    continue
+                seen.add(key)
+            try:
+                if str(font_obj.get("/Subtype") or "") != "/Type0":
+                    continue
+                raw = font_obj.get("/ToUnicode")
+                if raw is None:
+                    continue
+                declared = _parse_tounicode(raw.read_bytes())
+            except Exception as exc:
+                unread.append({"page": page_no, "reason": str(exc)})
+                continue
+            weighed += 1
+            preimages = _program_preimages(font_obj)
+            for code, text in sorted(declared.items()):
+                if len(text) != 1:
+                    # A code spelling a sequence is a ligature or a composed
+                    # form; the cmap states single characters and has nothing
+                    # to say about it either way.
+                    continue
+                point = ord(text)
+                if point in _NEVER_MAPPED:
+                    out.append(
+                        {"page": page_no, "font": str(name), "code": int(code),
+                         "declared": point, "program": None}
+                    )
+                    continue
+                expected = preimages.get(int(code))
+                if not expected or point in expected:
+                    continue
+                out.append(
+                    {"page": page_no, "font": str(name), "code": int(code),
+                     "declared": point, "program": min(expected)}
+                )
+    return out, unread, weighed
+
+
+def _u(point) -> str:
+    return "" if point is None else f"U+{int(point):04X}"
+
+
+def _check_unicode_mapping(check, pdf):
+    """Whether the Unicode a font DECLARES is the Unicode its glyphs are.
+
+    `character_encoding` asks whether a mapping exists at all — its finding is
+    text that reads as nothing. This asks the next question ISO 14289-1 cl. 7.2
+    states, which is whether the mapping is the right one, and it answers only
+    where the document contradicts itself.
+    """
+    conflicts, unread, weighed = _unicode_conflicts(pdf)
+    # The count is the FONTS this could answer for: a document whose fonts
+    # state their mapping once and nowhere else has nothing here to agree or
+    # disagree with, and reporting `pass` over it would be a claim about a
+    # comparison that never happened.
+    if weighed == 0 and not unread:
+        check.status = NA
+        return
+    findings = [
+        _finding(
+            _content_address(c["page"], 0),
+            "unicode_never_mapped" if c["program"] is None else "unicode_contradicts_font",
+            preview=_u(c["declared"]),
+            values={
+                "page": c["page"], "font": c["font"].lstrip("/"),
+                "code": c["code"], "declared": _u(c["declared"]),
+                "program": _u(c["program"]),
+            },
+        )
+        for c in conflicts
+    ]
+    _verdict(check, weighed, findings)
+    _also_review(
+        check,
+        [_finding(_object_address(page=u["page"]), "font_program_unreadable",
+                  values={"page": u["page"]}) for u in unread],
+    )
+
+
+# ── judgements this checker states rather than makes ──────────────────────
+
+
+def _runs_by_mcid(pages) -> dict:
+    """(page, mcid) → the runs that drew it, in draw order."""
+    out: dict = {}
+    for page_no, runs in pages.runs.items():
+        for run in runs:
+            mcid = run.get("mcid")
+            if mcid is None or run.get("nested"):
+                continue
+            out.setdefault((page_no, int(mcid)), []).append(run)
+    return out
+
+
+def _node_runs(node, by_mcid: dict) -> list:
+    out: list = []
+    for ref in node.mcids:
+        if ref.get("form"):
+            continue
+        out.extend(by_mcid.get((ref["page"], ref["mcid"])) or [])
+    for kid in node.descendants():
+        for ref in kid.mcids:
+            if ref.get("form"):
+                continue
+            out.extend(by_mcid.get((ref["page"], ref["mcid"])) or [])
+    return out
+
+
+def _size_of(runs: list) -> float:
+    """The largest size an element's own text is drawn at, rounded the same way
+    `_body_size` rounds — the two are compared, and a tenth of a point of
+    difference between 11.039 and 11.0 is not a difference in how the page
+    looks."""
+    sizes = [round(float(r.get("font_size") or 0.0), 1) for r in runs if _draws_text(r)]
+    sizes = [s for s in sizes if s > 0]
+    return max(sizes) if sizes else 0.0
+
+
+def _body_size(pages) -> float:
+    """The size the document sets most of its text in, by drawn length.
+
+    The comparison every "is this visually a heading" question needs. Weighted
+    by characters rather than by run count so a page of headings does not
+    become the body.
+    """
+    weight: dict = {}
+    for runs in pages.runs.values():
+        for run in runs:
+            size = round(float(run.get("font_size") or 0.0), 1)
+            text = str(run.get("text") or "").strip()
+            if size <= 0 or not text:
+                continue
+            weight[size] = weight.get(size, 0) + len(text)
+    if not weight:
+        return 0.0
+    return max(weight.items(), key=lambda kv: (kv[1], -kv[0]))[0]
+
+
+def _prose_size(pages, tree, by_mcid: dict) -> float:
+    """The size the document sets its NON-heading text in.
+
+    `_body_size` weights every run, which on a document of short sections makes
+    the headings themselves the dominant size and then reports every one of
+    them as set like body text. The structure tree already says which content
+    is a heading, so the comparison is drawn against what is left. A document
+    whose tagged text is headings only has no such measurement, and falls back
+    to the whole-page one rather than reporting nothing.
+    """
+    weight: dict = {}
+    for node in tree["nodes"]:
+        if node.level is not None:
+            continue
+        for run in _node_runs(node, by_mcid):
+            size = round(float(run.get("font_size") or 0.0), 1)
+            text = str(run.get("text") or "").strip()
+            if size <= 0 or not text:
+                continue
+            weight[size] = weight.get(size, 0) + len(text)
+    if not weight:
+        return _body_size(pages)
+    return max(weight.items(), key=lambda kv: (kv[1], -kv[0]))[0]
+
+
+def _marked_paint(pdf) -> dict:
+    """(page, mcid) → what that marked content sequence paints.
+
+    `{"share": the fraction of the page its declared rectangles cover,
+    "images": XObject and inline-image invocations, "text": text-showing
+    operators}`. The rectangles are `re` operands under the current
+    translation and scale; rotation and skew are not modelled, so this is a
+    measurement of what the stream DECLARES rather than of the rendered page —
+    which is why nothing here decides anything, only reports.
+    """
+    out: dict = {}
+    for i, page in enumerate(pdf.pages):
+        page_no = i + 1
+        try:
+            box = [float(v) for v in (page.obj.get("/CropBox") or page.obj.get("/MediaBox"))]
+            area = abs(box[2] - box[0]) * abs(box[3] - box[1])
+            operations = pikepdf.parse_content_stream(page)
+        except Exception:
+            continue
+        if area <= 0:
+            continue
+        stack: list = [(1.0, 1.0)]
+        marks: list = []
+        for operands, operator in operations:
+            name = str(operator)
+            if name == "q":
+                stack.append(stack[-1])
+            elif name == "Q" and len(stack) > 1:
+                stack.pop()
+            elif name == "cm" and len(operands) >= 4:
+                try:
+                    scale = (abs(float(operands[0])), abs(float(operands[3])))
+                except (TypeError, ValueError):
+                    scale = (1.0, 1.0)
+                stack[-1] = (stack[-1][0] * scale[0], stack[-1][1] * scale[1])
+            elif name in ("BDC", "BMC"):
+                mcid = None
+                if len(operands) >= 2 and isinstance(operands[1], pikepdf.Dictionary):
+                    value = operands[1].get("/MCID")
+                    if value is not None:
+                        try:
+                            mcid = int(value)
+                        except (TypeError, ValueError):
+                            mcid = None
+                marks.append(mcid)
+                if mcid is not None:
+                    out.setdefault((page_no, mcid), {"share": 0.0, "images": 0, "text": 0})
+            elif name == "EMC" and marks:
+                marks.pop()
+            elif not marks or marks[-1] is None:
+                continue
+            elif name == "re" and len(operands) >= 4:
+                try:
+                    width = abs(float(operands[2])) * stack[-1][0]
+                    height = abs(float(operands[3])) * stack[-1][1]
+                except (TypeError, ValueError):
+                    continue
+                out[(page_no, marks[-1])]["share"] += (width * height) / area
+            elif name in ("Do", "EI"):
+                out[(page_no, marks[-1])]["images"] += 1
+            elif name in ("Tj", "TJ", "'", '"'):
+                out[(page_no, marks[-1])]["text"] += 1
+    return out
+
+
+def _check_artifact_judgement(check, pdf, tree, pages, mcid_tables):
+    """Content declared decoration that reads like content, and content tagged
+    as a figure that paints no figure.
+
+    ISO 14289-1 cl. 7.1 divides every piece of content into real content and
+    artifacts, and NOTHING in the file records which one the author meant — so
+    this check never decides. It reports the two shapes where the division is
+    worth a person's look, each with what it measured.
+    """
+    if not tree["tagged"]:
+        check.status = NA
+        return
+    body = _body_size(pages)
+    findings = []
+    counted = 0
+    for page_no in sorted(pages.runs):
+        runs = [r for r in pages.runs[page_no] if _draws_text(r) and not r.get("nested")]
+        tagged = [r for r in runs if r.get("mcid") is not None and not r.get("artifact")]
+        counted += len(runs)
+        for run in runs:
+            if not run.get("artifact"):
+                continue
+            rect = run.get("rect") or [0, 0, 0, 0]
+            size = float(run.get("font_size") or 0.0)
+            # Contiguity with real content: the same baseline band, the same
+            # drawn size, and no horizontal gap wider than one em. Text that
+            # continues a tagged sentence is the artifact declaration worth
+            # doubting; a running header sits on a line of its own.
+            for neighbour in tagged:
+                other = neighbour.get("rect") or [0, 0, 0, 0]
+                if abs(other[1] - rect[1]) > 1.0:
+                    continue
+                if size and abs(float(neighbour.get("font_size") or 0.0) - size) > 0.5:
+                    continue
+                gap = min(abs(rect[0] - other[2]), abs(other[0] - rect[2]))
+                if gap > max(size, 1.0):
+                    continue
+                findings.append(
+                    _finding(
+                        _content_address(page_no, int(run.get("index", 0))),
+                        "artifact_continues_real_content",
+                        preview=str(run.get("text") or "")[:80],
+                        rect=run.get("rect"),
+                        values={"page": page_no,
+                                "neighbour": str(neighbour.get("text") or "")[:40]},
+                    )
+                )
+                break
+            else:
+                # Prose, declared decoration. A running header or a page number
+                # is short and set apart; a sentence's worth of words at the
+                # size the document sets its body in is the shape where the
+                # declaration is worth doubting on its own.
+                words = str(run.get("text") or "").split()
+                if len(words) < _ARTIFACT_PROSE_WORDS:
+                    continue
+                if body <= 0 or abs(size - body) > 0.5:
+                    continue
+                findings.append(
+                    _finding(
+                        _content_address(page_no, int(run.get("index", 0))),
+                        "artifact_reads_as_prose",
+                        preview=str(run.get("text") or "")[:80],
+                        rect=run.get("rect"),
+                        values={"page": page_no, "words": len(words)},
+                    )
+                )
+    by_mcid = _runs_by_mcid(pages)
+    painted = _marked_paint(pdf)
+    for node in tree["nodes"]:
+        if node.role not in _FIGURE_ROLES:
+            continue
+        counted += 1
+        preview, rect = _node_preview(node, mcid_tables)
+        # A figure standing INSIDE a run of text is a picture in the position
+        # a word occupies — the shape a graphic that spells text takes.
+        parent = struct_nesting.effective_parent(node)
+        if parent is not None and parent.role in _INLINE_TEXT_ROLES:
+            findings.append(
+                _finding(_struct_address(node), "figure_inline_in_text",
+                         preview=preview[:80], rect=rect,
+                         values={"role": node.role, "parent": parent.role})
+            )
+            continue
+        # A figure that paints nothing but a large field of colour is the
+        # shape a page background takes when it is tagged rather than declared
+        # decoration. Reported, never decided: a full-bleed illustration is the
+        # same measurement and is real content.
+        share = 0.0
+        for ref in node.mcids:
+            if ref.get("form"):
+                continue
+            record = painted.get((ref["page"], ref["mcid"]))
+            if record is None or record["images"] or record["text"]:
+                share = 0.0
+                break
+            share += record["share"]
+        if share < _FIGURE_BACKGROUND_SHARE:
+            continue
+        findings.append(
+            _finding(_struct_address(node), "figure_covers_the_page",
+                     preview=preview[:80], rect=rect,
+                     values={"role": node.role, "share": round(share * 100)})
+        )
+    if counted == 0:
+        check.status = NA
+        return
+    check.counted = counted
+    check.findings = findings
+    check.status = REVIEW if findings else PASS
+
+
+def _blocks_of(runs: list) -> list:
+    """One element's drawn text as vertical blocks: (top, bottom, height)."""
+    lines: dict = {}
+    for run in runs:
+        rect = run.get("rect")
+        if not rect or not _draws_text(run):
+            continue
+        key = round(float(rect[1]), 1)
+        box = lines.get(key)
+        rect = [float(v) for v in rect]
+        lines[key] = rect if box is None else [
+            min(box[0], rect[0]), min(box[1], rect[1]),
+            max(box[2], rect[2]), max(box[3], rect[3]),
+        ]
+    return [lines[k] for k in sorted(lines, reverse=True)]
+
+
+def _check_content_grouping(check, tree, pages, mcid_tables):
+    """Elements whose content is not one visual thing, and neighbours that are.
+
+    Whether two paragraphs are one paragraph is the author's answer and no
+    file records it, so this check states evidence and never a verdict: an
+    element whose own content sits in blocks separated by more than a line, a
+    figure tagged inside a run of text, and consecutive same-role siblings that
+    occupy adjacent lines of one block.
+    """
+    if not tree["tagged"]:
+        check.status = NA
+        return
+    by_mcid = _runs_by_mcid(pages)
+    findings = []
+    counted = 0
+    for node in tree["nodes"]:
+        # Content this element tags ITSELF. A container's subtree is many
+        # things by construction, and measuring the gaps in it would offer
+        # every document's body for review under its root element.
+        runs: list = []
+        for ref in node.mcids:
+            if not ref.get("form"):
+                runs.extend(by_mcid.get((ref["page"], ref["mcid"])) or [])
+        if not runs:
+            continue
+        counted += 1
+        blocks = _blocks_of(runs)
+        if len(blocks) < 3:
+            # Two lines set no pitch of their own, so there is nothing to
+            # measure a gap against and nothing this can say.
+            continue
+        pitches = sorted(a[1] - b[1] for a, b in zip(blocks, blocks[1:]))
+        pitch = pitches[len(pitches) // 2]
+        if pitch <= 0:
+            continue
+        for earlier, later in zip(blocks, blocks[1:]):
+            if earlier[1] - later[1] < pitch * _BLOCK_GAP_PITCH:
+                continue
+            preview, rect = _node_preview(node, mcid_tables)
+            findings.append(
+                _finding(_struct_address(node), "element_spans_separated_blocks",
+                         preview=preview[:80], rect=rect,
+                         values={"role": node.role, "blocks": len(blocks)})
+            )
+            break
+    for node in tree["nodes"]:
+        siblings = node.children
+        for index in range(len(siblings) - 1):
+            first, second = siblings[index], siblings[index + 1]
+            # Prose blocks only. Cells sit side by side and list items sit one
+            # under the next BY CONSTRUCTION, so measuring those positions
+            # would report the shape of every table and every list.
+            if first.role != second.role or first.role not in _PROSE_ROLES:
+                continue
+            first_blocks = _blocks_of(_node_runs(first, by_mcid))
+            second_blocks = _blocks_of(_node_runs(second, by_mcid))
+            if not first_blocks or not second_blocks:
+                continue
+            lower, upper = first_blocks[-1], second_blocks[0]
+            height = max(lower[3] - lower[1], 1.0)
+            stacked = (
+                0 <= lower[1] - upper[3] <= height * _ONE_BLOCK_GAP
+                and abs(lower[0] - upper[0]) <= height
+            )
+            # Side by side: horizontally clear of each other and level with
+            # each other. Two columns of one flow are tagged as one element
+            # or as two, and which the author meant is not in the file.
+            top, bottom = second_blocks[0], second_blocks[-1]
+            beside = (
+                (lower[2] <= upper[0] or lower[0] >= upper[2])
+                and min(first_blocks[0][3], top[3]) - max(first_blocks[-1][1], bottom[1]) > 0
+            )
+            if not (stacked or beside):
+                continue
+            preview, rect = _node_preview(second, mcid_tables)
+            findings.append(
+                _finding(
+                    _struct_address(second),
+                    "siblings_share_one_block" if stacked else "siblings_sit_side_by_side",
+                    preview=preview[:80], rect=rect, values={"role": second.role},
+                )
+            )
+    # A figure sitting between two elements whose text runs on through it.
+    for node in tree["nodes"]:
+        for index, child in enumerate(node.children):
+            if child.role not in _FIGURE_ROLES:
+                continue
+            before = node.children[index - 1] if index else None
+            after = node.children[index + 1] if index + 1 < len(node.children) else None
+            if before is None or after is None:
+                continue
+            if before.role != after.role or before.role in _FIGURE_ROLES:
+                continue
+            preview, rect = _node_preview(child, mcid_tables)
+            findings.append(
+                _finding(_struct_address(child), "figure_splits_one_unit",
+                         preview=preview[:80], rect=rect,
+                         values={"role": child.role, "around": before.role})
+            )
+    if counted == 0:
+        check.status = NA
+        return
+    check.counted = counted
+    check.findings = findings
+    check.status = REVIEW if findings else PASS
+
+
+def _horizontal_clusters(runs: list) -> list:
+    """One sequence's runs grouped by horizontal band, widest gap first.
+
+    Returns the groups' (left, right) extents, left to right. A sequence whose
+    runs fall into bands with a wide clear gap between them is a tag reaching
+    across a column boundary — which a page-wide top-to-bottom sort cannot see,
+    because it reads the two columns as one.
+    """
+    spans = sorted(
+        (float(r["rect"][0]), float(r["rect"][2])) for r in runs if r.get("rect")
+    )
+    if not spans:
+        return []
+    groups = [list(spans[0])]
+    for left, right in spans[1:]:
+        if left <= groups[-1][1]:
+            groups[-1][1] = max(groups[-1][1], right)
+            continue
+        groups.append([left, right])
+    return groups
+
+
+def _check_content_order(check, tree, pages, mcid_tables):
+    """The two order questions `reading_order`'s band sort cannot ask.
+
+    That sort works over merged marked-content boxes, top to bottom across the
+    whole page, so it reads a two-column page as one column and never sees
+    inside a sequence at all. Both questions are evidence rather than verdicts
+    — a layout is not a reading order, and the author's is the one that counts.
+    """
+    if not tree["tagged"]:
+        check.status = NA
+        return
+    by_mcid = _runs_by_mcid(pages)
+    findings = []
+    counted = 0
+    for (page_no, mcid), runs in sorted(by_mcid.items()):
+        drawn = [r for r in runs if _draws_text(r) and r.get("rect")]
+        if len(drawn) < 2:
+            continue
+        counted += 1
+        size = max([float(r.get("font_size") or 0.0) for r in drawn] + [1.0])
+        clusters = _horizontal_clusters(drawn)
+        if len(clusters) > 1 and any(
+            later[0] - earlier[1] > size * _COLUMN_GAP_SIZES
+            for earlier, later in zip(clusters, clusters[1:])
+        ):
+            findings.append(
+                _finding(
+                    _content_address(page_no, int(drawn[0].get("index", 0))),
+                    "sequence_spans_columns",
+                    preview=str(drawn[0].get("text") or "")[:80],
+                    rect=drawn[0].get("rect"),
+                    values={"page": page_no, "mcid": mcid, "bands": len(clusters)},
+                )
+            )
+        backwards = 0
+        for earlier, later in zip(drawn, drawn[1:]):
+            first, second = [float(v) for v in earlier["rect"]], [float(v) for v in later["rect"]]
+            overlap = min(first[3], second[3]) - max(first[1], second[1])
+            height = min(first[3] - first[1], second[3] - second[1])
+            if height <= 0 or overlap < height * _SAME_LINE_OVERLAP:
+                continue
+            # Two runs sharing a line, and the later one starts left of the
+            # earlier one: the sequence draws its own text out of order.
+            if second[0] + 0.5 < first[0]:
+                backwards += 1
+        if not backwards:
+            continue
+        findings.append(
+            _finding(
+                _content_address(page_no, int(drawn[0].get("index", 0))),
+                "sequence_draws_backwards",
+                preview=str(drawn[0].get("text") or "")[:80],
+                rect=drawn[0].get("rect"),
+                values={"page": page_no, "mcid": mcid, "jumps": backwards},
+            )
+        )
+    if counted == 0:
+        check.status = NA
+        return
+    check.counted = counted
+    check.findings = findings
+    check.status = REVIEW if findings else PASS
+
+
+# ── lists ─────────────────────────────────────────────────────────────────
+
+
+def _numbering_of(node) -> str:
+    value = node.attrs.get("ListNumbering")
+    if value is None:
+        return ""
+    try:
+        return str(value).lstrip("/")
+    except Exception:
+        return ""
+
+
+def _label_class(text: str) -> str:
+    """A label's own class: a bullet shape's name, `Ordered`, or "" for a label
+    that decides nothing.
+
+    Only the three bullet shapes ISO 32000-2 Table 353 names are read as
+    bullets; a tick, a dash or a dingbat is a label this cannot classify, and a
+    list labelled with one is left alone rather than guessed at. `Ordered` is
+    deliberately coarse — WHICH counting system a label uses is not decidable
+    (`I.` is a roman numeral and a letter), and only the ordered/unordered
+    split is what a declared value can be judged against.
+    """
+    body = text.strip()
+    if not body:
+        return ""
+    if body in _BULLET_GLYPHS:
+        return _BULLET_GLYPHS[body]
+    body = body.strip(_LABEL_TRIM)
+    if not body:
+        return ""
+    if body.isdigit():
+        return "Ordered"
+    if len(body) == 1 and body.isalpha():
+        return "Ordered"
+    if all(c in _ROMAN_LETTERS for c in body):
+        return "Ordered"
+    return ""
+
+
+def _list_label_class(node, mcid_tables) -> str:
+    """The class every one of a list's OWN item labels agrees on, or "".
+
+    A list whose direct items disagree, or whose items carry no label at all,
+    states nothing this can judge a declaration against. Labels inside a nested
+    list belong to that list and are not read here.
+    """
+    classes: set = set()
+    for item in node.children:
+        if item.role != "LI":
+            continue
+        for kid in item.children:
+            if kid.role != "Lbl":
+                continue
+            found = _label_class(_node_preview(kid, mcid_tables)[0])
+            if not found:
+                return ""
+            classes.add(found)
+    if len(classes) != 1:
+        return ""
+    return classes.pop()
+
+
+def _check_list_numbering(check, tree, mcid_tables):
+    """A list's `/ListNumbering` against the labels the document draws.
+
+    ISO 14289-1 cl. 7.6 requires list structure to reflect the list, and ISO
+    32000-2 Table 353 makes `/ListNumbering` the statement of which kind of
+    list it is. Numbered items under a bullet declaration, or none at all, are
+    announced as an unordered list; bullets under a numbering system are
+    counted aloud. Both are decidable from the document's own two statements —
+    which counting system is right is not, and is not asked.
+    """
+    if not tree["tagged"]:
+        check.status = NA
+        return
+    lists = [n for n in tree["nodes"] if n.role == "L"]
+    if not lists:
+        check.status = NA
+        return
+    counted = 0
+    findings = []
+    for node in lists:
+        drawn = _list_label_class(node, mcid_tables)
+        if not drawn:
+            continue
+        counted += 1
+        declared = _numbering_of(node)
+        preview, rect = _node_preview(node, mcid_tables)
+        if drawn == "Ordered":
+            if declared in _ORDERED_NUMBERING:
+                continue
+            findings.append(
+                _finding(_struct_address(node), "list_numbering_not_ordered",
+                         preview=preview[:80], rect=rect,
+                         values={"declared": declared or _NO_NUMBERING})
+            )
+            continue
+        # A bullet list: `None` and an absent entry both state "not numbered",
+        # which is true of it. A numbering system is wrong, and so is a bullet
+        # shape that is not the shape drawn.
+        if not declared or declared == _NO_NUMBERING or declared == drawn:
+            continue
+        findings.append(
+            _finding(
+                _struct_address(node),
+                "list_numbering_ordered" if declared in _ORDERED_NUMBERING
+                else "list_numbering_wrong_bullet",
+                preview=preview[:80], rect=rect,
+                values={"declared": declared, "drawn": drawn},
+            )
+        )
+    _verdict(check, counted, findings)
+
+
+def _check_list_item_structure(check, tree, mcid_tables):
+    """What a list item is allowed to hold.
+
+    ISO 32000-2 Table 370 states `LBody` as internal to `LI` and `Lbl` as the
+    item's label; a list item holds those and nothing else. An item holding a
+    paragraph directly, a nested list beside its body rather than inside it, or
+    page content of its own has put the item's body somewhere no reader looks
+    for it. `structure_nesting` delegates `LI` here rather than reporting the
+    same placement twice.
+    """
+    if not tree["tagged"]:
+        check.status = NA
+        return
+    items = [n for n in tree["nodes"] if n.role == "LI"]
+    if not items:
+        check.status = NA
+        return
+    findings = []
+    for node in items:
+        preview, rect = _node_preview(node, mcid_tables)
+        stray = [c.role for c in node.children if c.role not in _LIST_ITEM_ROLES]
+        if stray:
+            findings.append(
+                _finding(_struct_address(node), "list_item_holds_other_roles",
+                         preview=preview[:80], rect=rect,
+                         values={"roles": ", ".join(sorted(set(stray)))})
+            )
+            continue
+        if node.mcids or node.objrs:
+            findings.append(
+                _finding(_struct_address(node), "list_item_holds_content_directly",
+                         preview=preview[:80], rect=rect, values={"role": node.role})
+            )
+            continue
+        if not any(c.role == "LBody" for c in node.children):
+            findings.append(
+                _finding(_struct_address(node), "list_item_has_no_body",
+                         preview=preview[:80], rect=rect, values={"role": node.role})
+            )
+    _verdict(check, len(items), findings)
+
+
+def _check_list_semantics(check, tree, pages, mcid_tables):
+    """Lists the tree does not say are lists, and lists it says twice.
+
+    Whether a run of paragraphs IS a list, and whether two lists are one list
+    split, are the author's answers. Both leave a trace worth showing: content
+    carrying list labels under no list element, an item whose label was left
+    inside its own body, and consecutive lists on one page whose declarations
+    agree. Each is reported with what was measured; none is a verdict.
+    """
+    if not tree["tagged"]:
+        check.status = NA
+        return
+    by_mcid = _runs_by_mcid(pages)
+    findings = []
+    counted = 0
+    for node in tree["nodes"]:
+        if node.role != "L":
+            continue
+        counted += 1
+        # A list whose items carry no `Lbl` while their bodies OPEN with one.
+        for item in node.children:
+            if item.role != "LI" or any(c.role == "Lbl" for c in item.children):
+                continue
+            # Read through the item's own subtree: an `LI` carries its text on
+            # the `LBody` below it, and the whole point here is that the label
+            # was left down there with it.
+            text = " ".join(
+                str(r.get("text") or "") for r in _node_runs(item, by_mcid)
+            ).strip()
+            head = text.split(" ", 1)[0] if text else ""
+            if not _label_class(head):
+                continue
+            findings.append(
+                _finding(_struct_address(item), "list_label_inside_body",
+                         preview=text[:80], values={"label": head[:16]})
+            )
+    # Sibling lists that declare the same numbering: one list, tagged as two.
+    for node in tree["nodes"]:
+        siblings = [c for c in node.children if c.role == "L"]
+        if len(siblings) < 2:
+            continue
+        for first, second in zip(siblings, siblings[1:]):
+            if _numbering_of(first) != _numbering_of(second):
+                continue
+            if not _numbering_of(first):
+                continue
+            preview, rect = _node_preview(second, mcid_tables)
+            findings.append(
+                _finding(_struct_address(second), "adjacent_lists_declare_alike",
+                         preview=preview[:80], rect=rect,
+                         values={"numbering": _numbering_of(second)})
+            )
+    # Content that carries list labels while no list element tags it.
+    for node in tree["nodes"]:
+        run_of = 0
+        for child in node.children:
+            if child.role != "P":
+                run_of = 0
+                continue
+            runs = _node_runs(child, by_mcid)
+            text = " ".join(str(r.get("text") or "") for r in runs).strip()
+            head = text.split(" ", 1)[0] if text else ""
+            if not _label_class(head):
+                run_of = 0
+                continue
+            run_of += 1
+            if run_of != 2:
+                continue
+            preview, rect = _node_preview(child, mcid_tables)
+            findings.append(
+                _finding(_struct_address(child), "labelled_paragraphs_are_not_a_list",
+                         preview=preview[:80], rect=rect, values={"label": head[:16]})
+            )
+    if counted == 0 and not findings:
+        check.status = NA
+        return
+    check.counted = max(counted, len(findings))
+    check.findings = findings
+    check.status = REVIEW if findings else PASS
+
+
+# ── headings ──────────────────────────────────────────────────────────────
+
+
+def _check_heading_tag_mixing(check, tree, mcid_tables):
+    """`H` and `Hn` in one document.
+
+    ISO 14289-1 cl. 7.4 states the two heading conventions as alternatives: a
+    document either nests unnumbered `H` elements or numbers them, and mixing
+    the two leaves the outline with two answers about the same level. The
+    finding names the `H` elements, because the numbered ones already state
+    their level and the unnumbered ones are what stops being readable.
+    """
+    if not tree["tagged"]:
+        check.status = NA
+        return
+    generic = [n for n in tree["nodes"] if n.role == "H"]
+    numbered = [n for n in tree["nodes"] if n.role in ("H1", "H2", "H3", "H4", "H5", "H6")]
+    if not generic and not numbered:
+        check.status = NA
+        return
+    findings = []
+    if generic and numbered:
+        for node in generic:
+            preview, rect = _node_preview(node, mcid_tables)
+            findings.append(
+                _finding(_struct_address(node), "heading_conventions_mixed",
+                         preview=preview[:80], rect=rect,
+                         values={"numbered": len(numbered), "generic": len(generic)})
+            )
+    _verdict(check, len(generic) + len(numbered), findings)
+
+
+def _check_heading_semantics(check, tree, pages, mcid_tables):
+    """Text that looks like a heading and is not tagged as one, and the reverse.
+
+    ISO 14289-1 cl. 7.4 requires headings to be tagged as headings, and nothing
+    in a file says which text IS one — the drawn size is the only signal, and a
+    size is not a semantic. So this reports candidates with their measurements
+    and never decides: a paragraph set larger than the body, a heading set no
+    larger than it, and a document opening with more than one top-level
+    heading.
+    """
+    if not tree["tagged"]:
+        check.status = NA
+        return
+    by_mcid = _runs_by_mcid(pages)
+    body = _prose_size(pages, tree, by_mcid)
+    if body <= 0:
+        check.status = NA
+        return
+    findings = []
+    counted = 0
+    for node in tree["nodes"]:
+        if node.role != "P" and node.level is None:
+            continue
+        runs = _node_runs(node, by_mcid)
+        size = _size_of(runs)
+        if size <= 0:
+            continue
+        counted += 1
+        preview, rect = _node_preview(node, mcid_tables)
+        if node.level is None and size >= body * _HEADING_SIZE_RATIO:
+            findings.append(
+                _finding(_struct_address(node), "paragraph_is_set_like_a_heading",
+                         preview=preview[:80], rect=rect,
+                         values={"size": round(size, 1), "body": round(body, 1)})
+            )
+            continue
+        if node.level is not None and size <= body:
+            findings.append(
+                _finding(_struct_address(node), "heading_is_set_like_body_text",
+                         preview=preview[:80], rect=rect,
+                         values={"level": node.level, "size": round(size, 1),
+                                 "body": round(body, 1)})
+            )
+    # More than one `H1` is NOT reported. A document with a top-level heading
+    # per section is the ordinary shape, and a checker that offered every one
+    # of them for review would be handing the reader the document back.
+    if counted == 0:
+        check.status = NA
+        return
+    check.counted = counted
+    check.findings = findings
+    check.status = REVIEW if findings else PASS
+
+
 # ── the English surface ───────────────────────────────────────────────────
 
 # Every check's name and its one-line explanation, in English.
@@ -2257,6 +3521,54 @@ _ENGLISH = {
     "tagged": (
         "Document is tagged",
         "Structure tags let assistive technology read content in a defined order.",
+    ),
+    "role_map": (
+        "Every tag resolves to a standard type",
+        "A private tag name means nothing to a reader unless the role map translates it.",
+    ),
+    "suspects": (
+        "The document does not disclaim its own tagging",
+        "The suspects flag tells readers the structure may not match the content.",
+    ),
+    "untagged_graphics": (
+        "All page graphics are tagged or declared decoration",
+        "A fill, image or shading outside every marked sequence is reached by nobody.",
+    ),
+    "artifact_judgement": (
+        "Decoration and content are told apart",
+        "Text declared decoration that continues a sentence needs a person to look.",
+    ),
+    "content_grouping": (
+        "Content is grouped as it reads",
+        "One paragraph split in two, or two joined into one, changes what is announced.",
+    ),
+    "content_order": (
+        "Order holds inside columns and sequences",
+        "Columns and the order within one tag are what a page-wide sort cannot see.",
+    ),
+    "unicode_mapping": (
+        "Characters map to the right text",
+        "A font whose own glyph table contradicts its character map spells words wrong.",
+    ),
+    "list_numbering": (
+        "List numbering matches the labels",
+        "A numbered list announced as bullets loses the count the labels show.",
+    ),
+    "list_item_structure": (
+        "List items hold a label and a body",
+        "An item holding anything else has put its body where no reader looks for it.",
+    ),
+    "list_semantics": (
+        "Lists are tagged as lists",
+        "Labelled paragraphs, and one list tagged as two, each need a person to look.",
+    ),
+    "heading_tag_mixing": (
+        "One heading convention, not two",
+        "Numbered and unnumbered heading tags together give the outline two answers.",
+    ),
+    "heading_semantics": (
+        "Headings are the text that reads as headings",
+        "Size is a signal and not a semantic, so each candidate needs a person to look.",
     ),
     "structure_nesting": (
         "Structure types are nested where the standard allows",
@@ -2412,7 +3724,7 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
 
     Each inventory read is fail-OPEN at its own boundary. A read that raises
     where nothing anticipated it becomes the same gap a read that returned
-    nothing does, so the answer to "is this document accessible" is 31 checks
+    nothing does, so the answer to "is this document accessible" is 44 checks
     and one review row rather than no report at all.
     """
     if category is not None and category not in CATEGORIES:
@@ -2444,6 +3756,8 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
             "permissions": lambda c: _check_permissions(c, pdf),
             "image_only": lambda c: _check_image_only(c, pdf, pages, file),
             "tagged": lambda c: _check_tagged(c, pdf, tree),
+            "role_map": lambda c: _check_role_map(c, tree),
+            "suspects": lambda c: _check_suspects(c, pdf),
             "structure_nesting": lambda c: _check_structure_nesting(c, tree),
             "reading_order": lambda c: _check_reading_order(c, tree, pages, mcid_tables),
             "lang": lambda c: _check_lang(c, pdf, tree, pages),
@@ -2451,9 +3765,14 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
             "bookmarks": lambda c: _check_bookmarks(c, pdf, tree),
             "contrast": lambda c: _check_contrast(c, pages),
             "tagged_content": lambda c: _check_tagged_content(c, tree, pages),
+            "untagged_graphics": lambda c: _check_untagged_graphics(c, pdf, tree),
+            "artifact_judgement": lambda c: _check_artifact_judgement(c, pdf, tree, pages, mcid_tables),
+            "content_grouping": lambda c: _check_content_grouping(c, tree, pages, mcid_tables),
+            "content_order": lambda c: _check_content_order(c, tree, pages, mcid_tables),
             "tagged_annotations": lambda c: _check_tagged_annotations(c, tree, annots, cropboxes),
             "tab_order": lambda c: _check_tab_order(c, pdf, annots, cropboxes),
             "character_encoding": lambda c: _check_character_encoding(c, pages),
+            "unicode_mapping": lambda c: _check_unicode_mapping(c, pdf),
             "tagged_multimedia": lambda c: _check_tagged_multimedia(c, tree, annots),
             "screen_flicker": lambda c: _check_screen_flicker(c, sites),
             "scripts": lambda c: _check_scripts(c, sites),
@@ -2473,7 +3792,12 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
             "table_summary": lambda c: _check_table_summary(c, tree, mcid_tables),
             "list_items": lambda c: _check_list_items(c, tree),
             "list_labels": lambda c: _check_list_labels(c, tree),
+            "list_numbering": lambda c: _check_list_numbering(c, tree, mcid_tables),
+            "list_item_structure": lambda c: _check_list_item_structure(c, tree, mcid_tables),
+            "list_semantics": lambda c: _check_list_semantics(c, tree, pages, mcid_tables),
             "heading_nesting": lambda c: _check_heading_nesting(c, tree, mcid_tables),
+            "heading_tag_mixing": lambda c: _check_heading_tag_mixing(c, tree, mcid_tables),
+            "heading_semantics": lambda c: _check_heading_semantics(c, tree, pages, mcid_tables),
         }
         for cid, check in checks.items():
             if category is not None and check.category != category:
@@ -2570,7 +3894,7 @@ def check_accessibility(file: str, category: str | None = None) -> dict:
         "summary": summary,
         "unreadable": unreadable,
         # The flat list, for a reader that has no notion of a category — the
-        # same 32 rows in the same order, each carrying the English name and
+        # same 45 rows in the same order, each carrying the English name and
         # sentence a caller with no catalog of its own renders (the CLI, and
         # the panel until it reads `categories`).
         "checks": [_with_english(c.to_json()) for c in ordered],
