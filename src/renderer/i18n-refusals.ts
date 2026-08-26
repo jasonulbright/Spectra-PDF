@@ -76,6 +76,8 @@ export const REFUSAL_STRINGS = {
   // is its own key and FieldSpecError joins them — a joined sentence would
   // be one key carrying several unrelated grammars.
   'refusal.field.nameRequired': 'A field name is required.',
+  'refusal.field.xfa':
+    'This document contains an XML form (XFA). Adding a field would destroy the XML form, so field creation is not available for this document. Fill the form, or flatten it with another tool first.',
   'refusal.field.nameDot':
     'Field names cannot contain "." (it separates parent and child names).',
   'refusal.field.pageOutOfRange': 'Page {{page}} is out of range (1-{{count}}).',

@@ -1007,6 +1007,36 @@ def _apply_annot_delta(
     return changed, added, updated, removed, classes
 
 
+def _xfa_array_delta(orig_xfa, mod_xfa, writer, memo_mat):
+    """A new `/XFA` array in which only the CHANGED packet streams are new.
+
+    A fill on a static XFA form rewrites one packet — `datasets` — out of the
+    eight or nine an authored form carries, and the template packet alone runs
+    to hundreds of kilobytes. Materializing the whole array would append a
+    copy of every packet to a signed document on every fill. The unchanged
+    entries are re-listed by the ORIGINAL's own object references instead, so
+    the appended revision carries the one stream that actually changed.
+
+    Returns None when the arrays are not comparable entry-for-entry, leaving
+    the caller's whole-value materialization to stand.
+    """
+    if not (isinstance(orig_xfa, pikepdf.Array) and isinstance(mod_xfa, pikepdf.Array)):
+        return None
+    if len(orig_xfa) != len(mod_xfa):
+        return None
+    out = generic.ArrayObject()
+    for i in range(len(orig_xfa)):
+        ov, mv = orig_xfa[i], mod_xfa[i]
+        if _bisim(ov, mv, set()):
+            if isinstance(ov, pikepdf.Object) and ov.is_indirect:
+                out.append(_writer_ref(ov.objgen, writer))
+            else:
+                out.append(_materialize(mv, writer, memo_mat))
+            continue
+        out.append(_materialize(mv, writer, memo_mat))
+    return out
+
+
 def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> int:
     """Transplant /AcroForm differences (fill: values, appearances, flags).
 
@@ -1127,6 +1157,17 @@ def _acroform_delta(writer, orig: pikepdf.Pdf, mod: pikepdf.Pdf, memo_mat) -> in
             mv = mod_acro.get(ks)
             if ov is not None and _bisim(ov, mv, set()):
                 continue
+            if ks == "/XFA":
+                value = _xfa_array_delta(ov, mv, writer, memo_mat)
+                if value is not None:
+                    live[generic.pdf_name(ks)] = value
+                    changed = True
+                    continue
+                # None means the packet-wise delta does not apply — the
+                # single-stream `xdp:xdp` spelling (Annex K) is not an Array.
+                # Fall through to the whole-value materialization the delta's
+                # contract promises; skipping the key dropped the datasets
+                # update AND left /AcroForm unmarked, breaking the signature.
             live[generic.pdf_name(ks)] = _materialize(mv, writer, memo_mat)
             changed = True
         gone = (

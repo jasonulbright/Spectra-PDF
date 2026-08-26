@@ -150,6 +150,39 @@ describe('readFormFields — engine wiring', () => {
     expect(fields[0]).toMatchObject({ name: 'a', value: 'x' });
   });
 
+  it('makes every field of a dynamic XFA form read-only', async () => {
+    // The banner says the fields are read-only and the engine fill door
+    // refuses a dynamic form, so an editable input contradicted both.
+    const call = async () => ({
+      has_xfa: true,
+      xfa: 'dynamic',
+      fields: [ef({ name: 'a', type: 'text', value: 'x' })],
+    });
+    const { xfa, fields } = await readFormFields(call, '/w/copy.pdf');
+    expect(xfa).toBe('dynamic');
+    expect(fields[0].editable).toBe(false);
+  });
+
+  it('leaves a static XFA form editable', async () => {
+    const call = async () => ({
+      has_xfa: true,
+      xfa: 'static',
+      fields: [ef({ name: 'a', type: 'text', value: 'x' })],
+    });
+    const { fields } = await readFormFields(call, '/w/copy.pdf');
+    expect(fields[0].editable).toBe(true);
+  });
+
+  it('carries value_from_xfa through to the surface as valueFromXFA', async () => {
+    const call = async () => ({
+      has_xfa: true,
+      xfa: 'static',
+      fields: [ef({ name: 'a', type: 'text', value: 'Ada', value_from_xfa: true })],
+    });
+    const { fields } = await readFormFields(call, '/w/copy.pdf');
+    expect(fields[0].valueFromXFA).toBe(true);
+  });
+
   it('tolerates an engine result with no fields', async () => {
     const call = async () => ({});
     const { fields, hasXFA } = await readFormFields(call, '/w/copy.pdf');

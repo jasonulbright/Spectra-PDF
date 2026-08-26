@@ -18,8 +18,11 @@ every form variation found in arbitrary PDFs:
   Helvetica-based, so this matches the parity target.
 - /NeedAppearances is set false (real appearances are generated) — pdf-lib's
   posture.
-- /XFA is stripped on fill (reported), matching pdf-lib's documented
-  auto-delete: both paths' outputs are pure AcroForm.
+- /XFA SURVIVES a fill on a static XFA form, and the same value lands in
+  the datasets packet alongside /V and /AP (ISO 32000-2 Annex K's
+  consistency requirement — `engine/xfa` and `engine/xfa_datasets`). A
+  dynamic XFA form refuses by name. This is a deliberate divergence from
+  pdf-lib, which auto-deletes /XFA on getForm()/save.
 - Values with characters outside cp1252 (WinAnsi) fail with a clear error —
   the same class of failure pdf-lib surfaces for its WinAnsi Helvetica.
 
@@ -33,7 +36,7 @@ from pathlib import Path
 import pikepdf
 from pikepdf import Dictionary, Name
 
-from engine import afcalc, fieldactions, formdata
+from engine import afcalc, fieldactions, formdata, xfa, xfa_datasets
 from engine.acroform import calculation_order_names
 from engine.afscript import recognize
 from engine.content_walk import IDENTITY, as_matrix, bbox_of_corners_under_matrix
@@ -84,6 +87,99 @@ def _acroform(pdf: pikepdf.Pdf):
 def _has_xfa(pdf: pikepdf.Pdf) -> bool:
     acro = _acroform(pdf)
     return acro is not None and "/XFA" in acro
+
+
+def _open_datasets(pdf: pikepdf.Pdf):
+    """(the stream carrying the datasets packet, its parsed form), or (None, None).
+
+    A packet this build cannot read surfaces as (stream, None): the caller
+    reports it rather than filling as though the document had no XFA data.
+    """
+    stream = xfa.datasets_stream(pdf)
+    if stream is None:
+        return None, None
+    try:
+        return stream, xfa_datasets.DatasetsPacket(stream.read_bytes())
+    except Exception:
+        return stream, None
+
+
+def _xfa_value_for(field: "_Field", ftype: str, text: str):
+    """One datasets leaf's text, read back as the value this field's type has.
+
+    The datasets packet stores every value as text in the FORM's own
+    vocabulary: a checkbox's node carries the export name of the state that is
+    on, and the form's own off token (`0` in the wild corpus) otherwise. The
+    text is therefore compared against the field's real export states rather
+    than being coerced by a general truthiness rule.
+    """
+    if ftype == "checkbox":
+        on = _checkbox_export(field) or "Yes"
+        return text == on
+    if ftype == "radio":
+        return text if text in _radio_on_states(field) else ""
+    if ftype == "optionlist":
+        return [text] if text else []
+    return text
+
+
+def _xfa_text_for(field: "_Field", ftype: str, value, current: str | None):
+    """The datasets text a filled value becomes, or None to leave the node.
+
+    Checkbox and radio OFF states keep the form's own off token when the node
+    already carries one: `0` is what the wild datasets packets hold for an
+    unchecked box, and replacing it with the empty string the reference
+    implementation writes would discard the form's vocabulary for no gain.
+    """
+    if value is _CLEAR:
+        return ""
+    if ftype == "checkbox":
+        if value:
+            return _checkbox_export(field) or "Yes"
+        on = _checkbox_export(field) or "Yes"
+        return current if (current and current != on) else ""
+    if ftype == "radio":
+        return str(value)
+    if ftype == "optionlist":
+        if isinstance(value, list):
+            return [str(export) for export, _index in value]
+        return [str(value)] if value else []
+    return str(value)
+
+
+def _write_xfa_datasets(pdf: pikepdf.Pdf, edits: list) -> dict:
+    """Write each filled value into the XFA datasets packet (Annex K).
+
+    Returns the report keys the fill result carries. The stream is replaced
+    only when its bytes actually changed, so a fill that lands the value the
+    packet already held cannot perturb it.
+    """
+    kind = xfa.classify(pdf)
+    if kind == xfa.NONE:
+        return {}
+    stream, packet = _open_datasets(pdf)
+    if stream is None:
+        return {"xfa": kind, "xfa_datasets_absent": True}
+    if packet is None:
+        return {"xfa": kind, "xfa_datasets_unreadable": True}
+    written = 0
+    unbound: list[str] = []
+    for field, ftype, value in edits:
+        text = _xfa_text_for(field, ftype, value, packet.get(field.name))
+        if text is None:
+            continue
+        if packet.set(field.name, text, create=True):
+            written += 1
+        elif packet.resolve(field.name) is None:
+            unbound.append(field.name)
+    if packet.changed():
+        stream.write(packet.bytes())
+    report = {"xfa": kind, "xfa_datasets_updated": written}
+    if unbound:
+        # Named, never silent: these fields' values live in /V alone because
+        # the packet has no node for them and none could be attached.
+        report["xfa_datasets_unbound"] = unbound
+    return report
 
 
 class _Field:
@@ -582,6 +678,16 @@ def read_form_fields(file: str) -> dict:
         annot_map, page_map = _page_index_maps(pdf)
         order = _calculation_order(pdf)
         calculated = set(order)
+        kind = xfa.classify(pdf)
+        # ISO 32000-2 Annex K makes the XFA resource carry the state of the
+        # form, so a terminal field with no /V whose datasets node holds a
+        # value HAS that value — an XFA-aware reader shows it. Reporting the
+        # field blank was a silent wrong read.
+        datasets_stream, packet = _open_datasets(pdf) if kind == xfa.STATIC else (None, None)
+        # A packet present but unparseable must not read as "static XFA, no XFA
+        # values": that presented a corrupted or unsupported resource as an
+        # absence. The read carries the same key the fill does.
+        datasets_unreadable = datasets_stream is not None and packet is None
         fields = []
         for field in _all_fields(pdf):
             ftype = _classify(field)
@@ -591,10 +697,25 @@ def read_form_fields(file: str) -> dict:
                 options = _options(field)
             else:
                 options = []
+            value = _field_value(field, ftype)
+            from_xfa = False
+            if packet is not None and field.attr("/V") is None and ftype not in (
+                "button",
+                "signature",
+                "unknown",
+            ):
+                if ftype == "optionlist":
+                    listed = packet.get_list(field.name)
+                    if listed:
+                        value, from_xfa = listed, True
+                else:
+                    text = packet.get(field.name)
+                    if text:
+                        value, from_xfa = _xfa_value_for(field, ftype, text), True
             entry = {
                 "name": field.name,
                 "type": ftype,
-                "value": _field_value(field, ftype),
+                "value": value,
                 "read_only": bool(field.flags & FF_READ_ONLY),
                 "required": bool(field.flags & FF_REQUIRED),
                 # /TU — what assistive technology announces at this field. The
@@ -607,6 +728,10 @@ def read_form_fields(file: str) -> dict:
                 # and nested widgets list with geometry.
                 "widgets": _widget_geometry(field, ftype, options, annot_map, page_map),
             }
+            if from_xfa:
+                # Where the value came from, so a surface can say so rather
+                # than presenting an XFA-only value as an ordinary /V.
+                entry["value_from_xfa"] = True
             if ftype == "text":
                 entry["multiline"] = bool(field.flags & FF_MULTILINE)
             if ftype == "checkbox":
@@ -641,14 +766,29 @@ def read_form_fields(file: str) -> dict:
             if field.name in calculated:
                 entry["calculated"] = True
             fields.append(entry)
-        return {
+        result = {
             "has_xfa": _has_xfa(pdf),
+            # `none` / `static` / `dynamic` — ISO 32000-2 Table 29 plus the
+            # AcroForm shadow (`engine/xfa`). Annex K requires an interactive
+            # processor that supports XFA forms to indicate clearly to the
+            # user that they are interacting with one, and the two kinds are
+            # not the same interaction, so the kind is what travels.
+            "xfa": kind,
+            # The XFA template authors calculations or validations. They run
+            # against the XFA object model in FormCalc or XFA-scoped
+            # JavaScript, which this engine does not execute — reported so the
+            # refusal is by name rather than a value that quietly never
+            # updates.
+            "xfa_calculations": kind != xfa.NONE and xfa.has_authored_logic(pdf),
             "fields": fields,
             "count": len(fields),
             # The declared calculation order. Empty means calculations do not
             # run — see `_calculation_order`.
             "calculation_order": order,
         }
+        if datasets_unreadable:
+            result["xfa_datasets_unreadable"] = True
+        return result
 
 
 # ── Appearance generation ─────────────────────────────────────────────────
@@ -2197,6 +2337,17 @@ def fill_form_fields(
     from engine.incremental import finalize_preserving_signatures
 
     with pikepdf.open(file) as pdf:
+        if xfa.classify(pdf) == xfa.DYNAMIC:
+            # A dynamic XFA form builds its own pages from its template when
+            # it is opened (ISO 32000-2 Table 29, `NeedsRendering`), so the
+            # PDF field objects are not where its state lives and filling them
+            # would change nothing a reader of this document shows. Refused by
+            # name; the fields are still enumerated and still readable.
+            raise ValueError(
+                f"{input_path.name} is a dynamic XML form (XFA): it builds its "
+                "own pages from an XML template, so its fields cannot be "
+                "filled here."
+            )
         fields = {f.name: f for f in _all_fields(pdf)}
         acro = _acroform(pdf)
 
@@ -2414,12 +2565,13 @@ def fill_form_fields(
         if problems:
             raise ValueError("; ".join(problems))
 
-        xfa_stripped = False
-        if acro is not None and "/XFA" in acro:
-            # Parity with the GUI's pdf-lib path, which auto-deletes /XFA on
-            # getForm()/save: every fill output is pure AcroForm.
-            del acro["/XFA"]
-            xfa_stripped = True
+        # ISO 32000-2 Annex K: a PDF field object shall exist for each field
+        # the XFA resource specifies, and the XFA field values SHALL be
+        # consistent with the corresponding /V entries. A fill that wrote /V
+        # and left the datasets packet holding the old value would publish two
+        # answers for one field, so the packet is written in the same pass.
+        # Its bytes are spliced, never re-serialized (`engine/xfa_datasets`).
+        xfa_report = _write_xfa_datasets(pdf, [*plan, *derived])
 
         filled = 0
         fonts_substituted: list[str] = []
@@ -2561,7 +2713,11 @@ def fill_form_fields(
         "output": str(output_path),
         "filled": filled,
         "flattened": flattened,
-        "xfa_stripped": xfa_stripped,
+        # Retained at False: the fill no longer strips /XFA (it updates the
+        # datasets packet instead), and a reader of this key learns that the
+        # packets survived rather than finding the key gone.
+        "xfa_stripped": False,
+        **xfa_report,
         # Fields whose /DA named a font missing from /DR — their appearances
         # render (honestly) in Helvetica. Surfaced, never silent.
         "fonts_substituted": fonts_substituted,

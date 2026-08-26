@@ -220,10 +220,17 @@ export async function readFormFields(
         : {}),
     });
   }
-  // This helper reads with pdf-lib, which has no view of /AcroForm /CO — the
-  // calculation order is the engine read's to report, and the tests that use
-  // this helper are about geometry and value shapes.
-  return { fields, hasXFA, calculationOrder: [] };
+  // This helper reads with pdf-lib, which has no view of /AcroForm /CO nor of
+  // the XFA packets — the calculation order and the XFA classification are the
+  // engine read's to report, and the tests that use this helper are about
+  // geometry and value shapes.
+  return {
+    fields,
+    hasXFA,
+    xfa: hasXFA ? 'static' : 'none',
+    xfaCalculations: false,
+    calculationOrder: [],
+  };
 }
 
 function applyEdit(field: AnyField, value: FormFieldValue): void {
