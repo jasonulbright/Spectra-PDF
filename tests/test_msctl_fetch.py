@@ -90,6 +90,9 @@ def store_of(entries: list) -> bytes:
     for der, properties in entries:
         for identifier, blob in sorted(properties.items()):
             record(identifier, blob)
+        # SHA-1 here is the store format's own certificate identifier over public
+        # certificate bytes; integrity comes from the verified CMS signature over
+        # the list, never from this hash.
         record(fetch_msctl.PROP_SHA1, hashlib.sha1(der).digest())
         record(fetch_msctl.STORE_CERTIFICATE, der)
     record(0, b"")
@@ -107,6 +110,8 @@ def ctl_payload(entries: list, sequence: int = 42) -> bytes:
                 "values": [core.OctetString(blob)],
             })
         subjects.append({
+            # The trust list keys its subjects on the SHA-1 thumbprint; the
+            # identifier is dictated by the format, not chosen here.
             "subject_identifier": hashlib.sha1(der).digest(),
             "subject_attributes": attributes,
         })
