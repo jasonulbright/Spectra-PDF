@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.1.12
+
+*Released 2026-08-25*
+
+### Form field scripts
+
+- Forms whose fields carry their own JavaScript — custom calculations, validations, and formatting written by the form's author — can now run them. A new preference, "Run field scripts" (off by default), enables execution; with it off, nothing changes and the Forms panel keeps listing such scripts read-only, exactly as before.
+- Scripts run inside an isolated interpreter with no access to the network, the file system, or anything outside the form: they can read and write field values, react to typing and focus, format and validate entries, show the form's own alert messages, and call the document's own helper functions. Capabilities outside that surface do nothing and are reported by name in the Forms panel.
+- A script that hangs is stopped after a short deadline and reported by name; the app stays responsive and the rest of the form keeps working. Script errors are listed per field and trigger.
+- Values a script computes are shown live and saved through the ordinary form-fill path, with all existing protections intact — signed-document rules, locked fields, and undo behave exactly as for hand-typed values.
+- An enterprise policy key can disable field scripts machine-wide; the policy outranks the preference and the settings control says so.
+- Command-line and automated runs never execute scripts.
+
+### Fixes
+
+- Field calculations that assign a fixed text (such as a literal amount or "N/A") are no longer lost: bodies that merely resemble field-name arithmetic are routed to the script interpreter unless every name they reference is a real field.
+
 ## 1.1.11
 
 *Released 2026-08-25*
