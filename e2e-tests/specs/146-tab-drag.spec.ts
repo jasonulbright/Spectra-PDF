@@ -27,6 +27,7 @@ import {
   waitForHarness,
   type PhysicalScreenPoint,
 } from '../support/harness.js';
+import { SESSION_FILE } from '../support/app-data.js';
 
 /**
  * Dragging a document tab from one workspace window into another.
@@ -77,7 +78,7 @@ const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf'); // 5 page
 const BOOKMARKED_PDF = resolve(__dirname, '..', 'fixtures', 'bookmarked.pdf');
 
 /** Where the Rust side records window geometry and each window's paths. */
-const SESSION_FILE = resolve(process.env.APPDATA ?? '', 'com.spectrapdf.app', 'session.json');
+// `SESSION_FILE` is resolved from the binary's own container: see `support/app-data.ts`.
 
 const TAB_STRIP = '[data-testid="tab-strip"]';
 const CONFIRM_MESSAGE = '[data-testid="confirm-message"]';

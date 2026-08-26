@@ -25,6 +25,8 @@ AXIS_PROVISIONING = {
     ("ghent_corpus", "CORPUS_AXIS_SKIP"): "python scripts/fetch-ghent-suite.py --check",
     ("processing_steps_corpus", "PROCESSING_STEPS_AXIS_SKIP"):
         "python scripts/fetch-processing-steps-suite.py --check",
+    ("pdfa_conformance_corpus", "PDFA_CORPUS_AXIS_SKIP"):
+        "python scripts/fetch-pdfa-corpus.py --check",
 }
 
 #: Every fetched corpus staged the same way: an actions/cache step keyed on
@@ -35,6 +37,7 @@ CACHED_CORPORA = (
     ("ghent-cache", "ghent-corpus", "scripts/fetch-ghent-suite.py"),
     ("processing-steps-cache", "processing-steps-corpus",
      "scripts/fetch-processing-steps-suite.py"),
+    ("pdfa-corpus-cache", "pdfa-corpus", "scripts/fetch-pdfa-corpus.py"),
 )
 
 

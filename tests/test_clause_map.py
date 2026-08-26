@@ -11,21 +11,20 @@ fails a file the suite passes is either a defect or a wrong claim, and either
 way it may not sit in the map unexamined.
 """
 
-import json
 import os
 
 import pytest
 
+import pdfa_conformance_corpus as corpus_axis
 from engine import clause_map
 from engine.accessibility import CHECK_SOURCES
 from engine.preflight_profiles import CHECK_IDS, validate_profile
 
-CORPUS = os.path.join(os.path.dirname(__file__), "..", "pdfa-corpus")
-INDEX = os.path.join(CORPUS, "clause-index.json")
+CORPUS = str(corpus_axis.CORPUS)
 
 corpus_required = pytest.mark.skipif(
-    not os.path.isfile(INDEX),
-    reason="the conformance corpus is not fetched on this machine",
+    not corpus_axis.corpus_present(),
+    reason=corpus_axis.PDFA_CORPUS_AXIS_SKIP,
 )
 
 #: Files scored per clause. The whole corpus is what the maintenance
@@ -35,8 +34,7 @@ _SAMPLE = 8
 
 
 def _index():
-    with open(INDEX, encoding="utf-8") as handle:
-        return json.load(handle)
+    return corpus_axis.load_index()
 
 
 class TestCitationShape:

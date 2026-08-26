@@ -85,6 +85,240 @@ impl Default for BackdropState {
     }
 }
 
+// ── First paint, per label ────────────────────────────────────────────────
+
+/// How long a window waits for its renderer's first paint before it is shown
+/// anyway. A renderer that never signals must still produce a window.
+pub const FIRST_PAINT_FALLBACK_MS: u64 = 4000;
+
+/// What a show request resolved to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ShowDecision {
+    /// The renderer has already painted; show immediately.
+    Now,
+    /// Recorded, and this caller owns the fallback deadline.
+    Armed,
+    /// Recorded onto a request that is already waiting.
+    Pending,
+}
+
+/// Whether each window's renderer has painted, and what is waiting on it.
+///
+/// Workspace windows are transparent at creation (the backdrop design), so a
+/// window shown before its renderer has painted composites the desktop through
+/// an empty client area — the malformed launch frame. Every path that would
+/// show a window therefore asks here first: before first paint the intent is
+/// recorded and the show happens once, on the ready signal or on the fallback
+/// deadline, whichever comes first.
+///
+/// Readiness is sticky. A window hidden to the tray and brought back has a
+/// renderer that painted long ago, and must not wait for a second signal that
+/// will never come.
+#[derive(Default)]
+pub struct ShowGate {
+    inner: Mutex<ShowGateInner>,
+}
+
+#[derive(Default)]
+struct ShowGateInner {
+    ready: std::collections::HashSet<String>,
+    /// Label → whether the pending show should also raise the window.
+    pending: HashMap<String, bool>,
+}
+
+impl ShowGate {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Ask to show a window. `focus` requests that it also be raised; a raise
+    /// asked for by any caller sticks to the pending show.
+    pub fn request(&self, label: &str, focus: bool) -> ShowDecision {
+        let Ok(mut inner) = self.inner.lock() else {
+            return ShowDecision::Now;
+        };
+        if inner.ready.contains(label) {
+            return ShowDecision::Now;
+        }
+        match inner.pending.get_mut(label) {
+            Some(pending) => {
+                *pending |= focus;
+                ShowDecision::Pending
+            }
+            None => {
+                inner.pending.insert(label.to_string(), focus);
+                ShowDecision::Armed
+            }
+        }
+    }
+
+    /// Record the renderer's first paint. Returns the show that was waiting on
+    /// it, if any.
+    pub fn mark_ready(&self, label: &str) -> Option<bool> {
+        let mut inner = self.inner.lock().ok()?;
+        inner.ready.insert(label.to_string());
+        inner.pending.remove(label)
+    }
+
+    /// The fallback deadline expired: take the waiting show, if it is still
+    /// waiting. Readiness is NOT recorded — the renderer may still paint and
+    /// its signal is still the truth about this window.
+    pub fn expire(&self, label: &str) -> Option<bool> {
+        self.inner.lock().ok()?.pending.remove(label)
+    }
+
+    pub fn forget(&self, label: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.ready.remove(label);
+            inner.pending.remove(label);
+        }
+    }
+}
+
+/// How long one window must wait between placement repairs.
+///
+/// A repair changes the viewport, which is itself a resize the renderer
+/// reports — so a repair that does not fix the disagreement would ask for
+/// another one forever. This bounds that to a slow retry instead of a spin,
+/// and is long enough that the reports caused by a repair land after it.
+pub const COMPOSE_REPAIR_COOLDOWN_MS: u64 = 500;
+
+/// When each window last had its webview placement repaired.
+#[derive(Default)]
+pub struct ComposeGate {
+    inner: Mutex<HashMap<String, std::time::Instant>>,
+}
+
+impl ComposeGate {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// May this window be repaired now? Records the attempt when it may.
+    pub fn may_repair(&self, label: &str) -> bool {
+        self.may_repair_at(label, std::time::Instant::now())
+    }
+
+    pub fn may_repair_at(&self, label: &str, now: std::time::Instant) -> bool {
+        let Ok(mut inner) = self.inner.lock() else {
+            return false;
+        };
+        let cooling = inner.get(label).is_some_and(|last| {
+            now.duration_since(*last) < std::time::Duration::from_millis(COMPOSE_REPAIR_COOLDOWN_MS)
+        });
+        if cooling {
+            return false;
+        }
+        inner.insert(label.to_string(), now);
+        true
+    }
+
+    pub fn forget(&self, label: &str) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.remove(label);
+        }
+    }
+}
+
+/// Show a window as soon as its renderer has painted — now, if it already has.
+///
+/// This is the only way a workspace window becomes visible. Calling
+/// `Window::show` directly re-opens the malformed-first-frame defect.
+pub fn show_when_ready(app: &AppHandle, label: &str, focus: bool) {
+    match app.state::<ShowGate>().request(label, focus) {
+        ShowDecision::Now => show_now(app, label, focus),
+        ShowDecision::Pending => {}
+        ShowDecision::Armed => {
+            let app = app.clone();
+            let label = label.to_string();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(FIRST_PAINT_FALLBACK_MS));
+                if let Some(focus) = app.state::<ShowGate>().expire(&label) {
+                    show_now(&app, &label, focus);
+                }
+            });
+        }
+    }
+}
+
+fn show_now(app: &AppHandle, label: &str, focus: bool) {
+    if let Some(window) = app.get_webview_window(label) {
+        settle_webview_bounds(&window);
+        let _ = window.show();
+        if focus {
+            let _ = window.set_focus();
+        }
+    }
+}
+
+/// Write the webview's rectangle: the whole client area, at its origin.
+fn write_webview_bounds(window: &tauri::WebviewWindow, size: tauri::PhysicalSize<u32>) {
+    // The rectangle belongs to the WEBVIEW, not to the window that hosts it —
+    // `WebviewWindow` carries both and does not forward these.
+    let webview: &tauri::webview::Webview<tauri::Wry> = window.as_ref();
+    let _ = webview.set_bounds(tauri::Rect {
+        position: tauri::PhysicalPosition::new(0, 0).into(),
+        size: size.into(),
+    });
+}
+
+/// Re-assert that the webview covers the window's client area.
+///
+/// The webview's rectangle is normally a function of the window: the runtime
+/// re-writes it from the window's own resize message. This is the same write,
+/// asked for at a point where no resize message is involved — every path that
+/// makes a window visible, so a window is never shown carrying a rectangle
+/// some earlier write left stale.
+///
+/// A no-op when the recorded rectangle already matches, which is the ordinary
+/// case: an unconditional write costs a re-composite of a webview that was
+/// already right.
+pub fn settle_webview_bounds(window: &tauri::WebviewWindow) {
+    let Ok(client) = window.inner_size() else {
+        return;
+    };
+    if client.width == 0 || client.height == 0 {
+        return;
+    }
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let webview: &tauri::webview::Webview<tauri::Wry> = window.as_ref();
+    if let Ok(bounds) = webview.bounds() {
+        let size = bounds.size.to_physical::<u32>(scale);
+        if size.width == client.width && size.height == client.height {
+            return;
+        }
+    }
+    write_webview_bounds(window, client);
+}
+
+/// Force the webview back onto the client area after something OUTSIDE the
+/// window moved it.
+///
+/// An automation client resizes the webview directly rather than the window
+/// that hosts it. The webview is then laid out at the requested size and
+/// re-placed at twice the client origin — the shell survives only where it
+/// still overlaps the window, as a strip against the far corner — while the
+/// recorded rectangle still reads as the client area. So `settle_webview_bounds`
+/// cannot see it and re-writing the same rectangle is not a change: the write
+/// has to differ from what is recorded before it is applied at all, which is
+/// what the intermediate size here is for.
+///
+/// Costs two composites, so it runs only against a viewport the renderer has
+/// reported as disagreeing with the window.
+fn repair_webview_placement(window: &tauri::WebviewWindow) {
+    let Ok(client) = window.inner_size() else {
+        return;
+    };
+    if client.width == 0 || client.height == 0 {
+        return;
+    }
+    write_webview_bounds(
+        window,
+        tauri::PhysicalSize::new(client.width.saturating_sub(1).max(1), client.height),
+    );
+    write_webview_bounds(window, client);
+}
+
 // ── Document ownership ────────────────────────────────────────────────────
 
 /// How a window holds a path. A write claim is exclusive against everything;
@@ -582,18 +816,13 @@ pub fn show_all_app_windows(app: &AppHandle) {
         if label == target {
             continue;
         }
-        if let Some(window) = app.get_webview_window(&label) {
-            let _ = window.show();
-        }
+        show_when_ready(app, &label, false);
     }
     focus_label(app, &target);
 }
 
 pub fn focus_label(app: &AppHandle, label: &str) {
-    if let Some(window) = app.get_webview_window(label) {
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+    show_when_ready(app, label, true);
 }
 
 /// Hand `files` to the window that owns them, or to the routing target, and
@@ -716,11 +945,15 @@ pub fn deliver_open(app: &AppHandle, label: &str, files: Vec<String>, merge: boo
 /// `SPECTRAPDF_E2E_FORCE_OPAQUE` is read only under end-to-end control, so it
 /// is not a shipped configuration channel: it makes the opaque presentation
 /// reachable on a machine where Mica would compose.
+///
+/// Every window is built HIDDEN. A transparent window shown before its
+/// renderer has painted composites the desktop through an empty client area,
+/// so visibility is not a creation-time decision here: callers ask for it
+/// through `show_when_ready`, which waits for the renderer's first paint.
 pub fn build_app_window(
     app: &AppHandle,
     label: &str,
     e2e: bool,
-    visible: bool,
 ) -> tauri::Result<tauri::WebviewWindow> {
     let force_opaque = e2e && std::env::var("SPECTRAPDF_E2E_FORCE_OPAQUE").is_ok();
     let wants_backdrop = crate::wants_backdrop(
@@ -733,7 +966,7 @@ pub fn build_app_window(
         .inner_size(1200.0, 800.0)
         .min_inner_size(800.0, 600.0)
         .center()
-        .visible(visible)
+        .visible(false)
         .transparent(wants_backdrop)
         .build()?;
     let backdrop = if wants_backdrop && window_vibrancy::apply_mica(&window, None).is_ok() {
@@ -769,6 +1002,8 @@ pub fn on_window_destroyed(app: &AppHandle, label: &str) {
     }
     app.state::<ClaimState>().release_label(label);
     app.state::<BackdropState>().forget(label);
+    app.state::<ShowGate>().forget(label);
+    app.state::<ComposeGate>().forget(label);
     app.state::<WindowRegistry>().forget(label);
     app.state::<crate::engine::EngineRouter>().drop_label(label);
     crate::engine::publish_activity(app);
@@ -781,11 +1016,56 @@ pub fn on_window_destroyed(app: &AppHandle, label: &str) {
 #[tauri::command]
 pub async fn open_new_window(app: AppHandle) -> Result<String, String> {
     let label = app.state::<WindowRegistry>().next_doc_label();
-    let window = build_app_window(&app, &label, crate::is_e2e_mode(), true)
+    build_app_window(&app, &label, crate::is_e2e_mode())
         .map_err(|e| format!("Failed to open a window: {}", e))?;
-    let _ = window.set_focus();
+    show_when_ready(&app, &label, true);
     crate::engine::publish_activity(&app);
     Ok(label)
+}
+
+/// The renderer painted its first laid-out frame. Any show waiting on this
+/// window happens now.
+///
+/// Called once per renderer, after the first React commit has been through a
+/// frame. A second call is harmless: readiness is sticky and nothing is left
+/// pending after the first.
+#[tauri::command]
+pub async fn renderer_ready(app: AppHandle, window: tauri::WebviewWindow) {
+    let label = window.label().to_string();
+    if let Some(focus) = app.state::<ShowGate>().mark_ready(&label) {
+        show_now(&app, &label, focus);
+    }
+}
+
+/// The renderer's viewport changed size. Put the webview back on the client
+/// area if the two no longer describe the same rectangle.
+///
+/// The renderer's viewport IS the test. A webview re-placed by something other
+/// than the window sends no window message, and leaves the recorded rectangle
+/// reading correct, so nothing on this side can see it; what does change is
+/// the size the page is laid out at, which only the renderer can report. An
+/// ordinary resize reports a viewport that matches and writes nothing.
+///
+/// The viewport arrives in physical pixels — the renderer scales its own CSS
+/// pixels by its device pixel ratio — because that is what the window reports
+/// its client area in.
+#[tauri::command]
+pub async fn settle_window_compose(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    viewport_width: u32,
+    viewport_height: u32,
+) {
+    let Ok(client) = window.inner_size() else {
+        return;
+    };
+    if viewport_width == client.width && viewport_height == client.height {
+        return;
+    }
+    if !app.state::<ComposeGate>().may_repair(window.label()) {
+        return;
+    }
+    repair_webview_placement(&window);
 }
 
 #[tauri::command]
@@ -878,6 +1158,95 @@ pub async fn take_pending_opens(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_show_asked_for_before_first_paint_waits_for_it() {
+        let gate = ShowGate::new();
+        assert_eq!(gate.request("main", true), ShowDecision::Armed);
+        assert_eq!(gate.mark_ready("main"), Some(true));
+    }
+
+    #[test]
+    fn a_placement_repair_is_allowed_once_per_cooldown() {
+        let gate = ComposeGate::new();
+        let t0 = std::time::Instant::now();
+        assert!(gate.may_repair_at("main", t0));
+        // A repair resizes the viewport, which the renderer reports as another
+        // resize. Without the cooldown that report asks for another repair.
+        assert!(!gate.may_repair_at(
+            "main",
+            t0 + std::time::Duration::from_millis(COMPOSE_REPAIR_COOLDOWN_MS - 1)
+        ));
+        assert!(gate.may_repair_at(
+            "main",
+            t0 + std::time::Duration::from_millis(COMPOSE_REPAIR_COOLDOWN_MS)
+        ));
+    }
+
+    #[test]
+    fn one_windows_repair_does_not_hold_off_another_windows() {
+        let gate = ComposeGate::new();
+        let t0 = std::time::Instant::now();
+        assert!(gate.may_repair_at("main", t0));
+        assert!(gate.may_repair_at("doc-1", t0));
+    }
+
+    #[test]
+    fn a_forgotten_window_starts_its_cooldown_over() {
+        // Labels are reused across windows, and an inherited cooldown would
+        // hold off the first repair a new window needs.
+        let gate = ComposeGate::new();
+        let t0 = std::time::Instant::now();
+        assert!(gate.may_repair_at("doc-1", t0));
+        gate.forget("doc-1");
+        assert!(gate.may_repair_at("doc-1", t0));
+    }
+
+    #[test]
+    fn a_show_asked_for_after_first_paint_happens_immediately() {
+        let gate = ShowGate::new();
+        assert_eq!(gate.mark_ready("main"), None);
+        assert_eq!(gate.request("main", true), ShowDecision::Now);
+    }
+
+    #[test]
+    fn only_the_first_request_owns_the_deadline_and_a_raise_sticks() {
+        // The launch path asks without a raise; an inbound open asks with one
+        // while the same show is still waiting. One show, and it raises.
+        let gate = ShowGate::new();
+        assert_eq!(gate.request("doc-1", false), ShowDecision::Armed);
+        assert_eq!(gate.request("doc-1", true), ShowDecision::Pending);
+        assert_eq!(gate.mark_ready("doc-1"), Some(true));
+    }
+
+    #[test]
+    fn first_paint_after_the_deadline_expired_shows_nothing_a_second_time() {
+        let gate = ShowGate::new();
+        gate.request("main", true);
+        assert_eq!(gate.expire("main"), Some(true));
+        assert_eq!(gate.mark_ready("main"), None);
+    }
+
+    #[test]
+    fn an_expired_deadline_with_no_request_left_shows_nothing() {
+        // The renderer signalled first; the timer must not re-show a window
+        // the user has since hidden to the tray.
+        let gate = ShowGate::new();
+        gate.request("main", true);
+        assert_eq!(gate.mark_ready("main"), Some(true));
+        assert_eq!(gate.expire("main"), None);
+    }
+
+    #[test]
+    fn readiness_is_per_window_and_dropped_when_the_window_is() {
+        let gate = ShowGate::new();
+        gate.mark_ready("doc-1");
+        assert_eq!(gate.request("doc-2", false), ShowDecision::Armed);
+        assert_eq!(gate.request("doc-1", false), ShowDecision::Now);
+        // A label is reusable: the next window under it starts unpainted.
+        gate.forget("doc-1");
+        assert_eq!(gate.request("doc-1", false), ShowDecision::Armed);
+    }
 
     #[test]
     fn a_web_origin_round_trips_by_path_and_is_absent_otherwise() {

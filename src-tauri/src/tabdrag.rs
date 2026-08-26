@@ -771,7 +771,7 @@ fn reserve_tear_off(
         undo();
         return TabDragReservation::refused(from.to_string());
     }
-    match app_windows::build_app_window(app, &label, crate::is_e2e_mode(), false) {
+    match app_windows::build_app_window(app, &label, crate::is_e2e_mode()) {
         Ok(_) => TabDragReservation::held(TabDragResult::TORN_OFF, label, token),
         Err(_) => {
             let _ = strips.take_reservation(token, from);
@@ -791,9 +791,13 @@ fn show_torn_off(app: &AppHandle, reservation: &Reservation) {
     };
     if let Some((x, y)) = reservation.position {
         let _ = window.set_position(PhysicalPosition::new(x, y));
+        // Recorded from the placement itself rather than from the move event a
+        // show used to produce: the window is still hidden here and stays that
+        // way until its renderer has painted, so nothing else observes this
+        // rectangle in time for a session written before then.
+        crate::session::on_window_geometry_changed(app, &reservation.target);
     }
-    let _ = window.show();
-    let _ = window.set_focus();
+    app_windows::show_when_ready(app, &reservation.target, true);
     crate::engine::publish_activity(app);
 }
 

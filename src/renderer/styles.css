@@ -348,6 +348,23 @@
    the solid look.
    ──────────────────────────────────────────────────────────────────────── */
 
+/* The root's pre-paint ground (index.html: #171717, the solid look's own
+   `.app-shell` colour) follows the theme once one is stamped, and is cleared
+   entirely under a backdrop -- an opaque root would composite over the Mica
+   material and there would be nothing left to see through. Both attributes are
+   stamped before the first render, so no frame ever shows the wrong one. */
+:root[data-theme="light"] {
+  background: #ffffff;
+}
+
+:root[data-theme="high-contrast"] {
+  background: #000000;
+}
+
+:root[data-backdrop="mica"] {
+  background: transparent;
+}
+
 :root[data-backdrop="mica"] .app-shell {
   background: transparent;
 }
@@ -1978,11 +1995,18 @@
 .page-editpara-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  /* WRAPS: the row is wider than a narrow paragraph, and the page clips its
+     overflow — an unwrapped row loses its trailing controls to the page edge
+     rather than merely running past it. */
+  flex-wrap: wrap;
+  gap: 4px 10px;
   margin-bottom: 3px;
-  padding: 2px 4px;
-  background: rgba(59, 130, 246, 0.1);
-  border-radius: 2px;
+  padding: 3px 6px;
+  /* OPAQUE: the row sits over the paragraph's own glyphs, so a translucent
+     ground lets document text read through the controls. */
+  background: #eef2f7;
+  border: 1px solid rgba(120, 120, 120, 0.5);
+  border-radius: 4px;
   font-size: 11px;
   /* Drawn on the page, which is white in every theme — a shell token here
      would re-tint a control that sits on document paper. */

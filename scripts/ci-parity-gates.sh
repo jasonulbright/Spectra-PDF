@@ -66,7 +66,7 @@ fi
 # --- Corpus provisioning contract: a test axis with no CI provisioning is the
 #     "added tests, forgot the workflow" failure class. This asserts the fetch
 #     scripts still --check clean if the corpora are present (skips if absent). ---
-for suite in fetch-ghent-suite fetch-processing-steps-suite; do
+for suite in fetch-ghent-suite fetch-processing-steps-suite fetch-pdfa-corpus; do
   if [ -f "$R/scripts/$suite.py" ]; then
     gate "$suite-check" "$R/.venv/Scripts/python.exe" "scripts/$suite.py" --check || true
   fi
