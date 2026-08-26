@@ -12,6 +12,7 @@ import {
   setView,
   setReactInputValue,
   invokeAppCommand,
+  getWorkspacePageIds,
 } from '../support/harness.js';
 
 /** A tiny born-digital PDF with known text — so Find has something real to hit. */
@@ -452,5 +453,150 @@ describe('presentation mode (I.6 full-screen view)', () => {
     // Disabled → the command does not run (no overlay).
     expect(await invokeAppCommand('view.presentation')).toBe(false);
     expect(await $('[data-testid="presentation-view"]').isExisting()).toBe(false);
+  });
+});
+
+// The Organize board's page drags: the end state of a reorder, and the zoom
+// gate that refuses a drop nobody could have aimed. The ANIMATION itself is
+// deliberately not asserted here — it is a transient transform played between
+// two paints, and a driver-timed sample of it proves nothing either way; what
+// is assertable is that the arrangement it animates towards is the one the
+// drag asked for. The animation's own decisions are pinned in
+// tests/flip.test.ts.
+describe('organize board page drags', () => {
+  /** The board's page cells, in DOM order, with their viewport rects. */
+  async function pageCells(): Promise<
+    { id: string; x: number; y: number; w: number; h: number }[]
+  > {
+    return await browser.execute(function () {
+      const out: { id: string; x: number; y: number; w: number; h: number }[] = [];
+      for (const el of Array.from(document.querySelectorAll('.canvas-world [data-page-id]'))) {
+        const r = (el as HTMLElement).getBoundingClientRect();
+        if (r.width === 0) continue;
+        out.push({
+          id: (el as HTMLElement).dataset.pageId as string,
+          x: r.left,
+          y: r.top,
+          w: r.width,
+          h: r.height,
+        });
+      }
+      return out;
+    });
+  }
+
+  /** The on-screen height of a document card — the quantity the drop gate
+   * measures (lib/drop-gate.ts). */
+  async function cardScreenHeight(): Promise<number> {
+    return await browser.execute(function () {
+      const el = document.querySelector('.canvas-world .canvas-doc');
+      return el ? (el as HTMLElement).getBoundingClientRect().height : 0;
+    });
+  }
+
+  async function dragPage(
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+  ): Promise<void> {
+    await browser
+      .action('pointer', { parameters: { pointerType: 'mouse' } })
+      .move({ x: Math.round(from.x), y: Math.round(from.y) })
+      .down({ button: 0 })
+      // Several samples: the drag arms on travel, and the drop target is
+      // recomputed per move, exactly as a real pointer drives it.
+      .move({ x: Math.round((from.x + to.x) / 2), y: Math.round((from.y + to.y) / 2) })
+      .pause(50)
+      .move({ x: Math.round(to.x), y: Math.round(to.y) })
+      .pause(50)
+      .up({ button: 0 })
+      .perform();
+    await browser.releaseActions();
+  }
+
+  before(async () => {
+    await waitForHarness();
+    await closeAllFiles();
+    await openByPaths([SAMPLE]);
+    await browser.waitUntil(async () => (await getState()).view === 'canvas', {
+      timeoutMsg: 'opening did not focus the doc tab',
+    });
+    // The board, not the reading column.
+    await $('[data-testid="toggle-doc-view"]').click();
+    await browser.waitUntil(async () => (await pageCells()).length > 2, {
+      timeout: 15_000,
+      timeoutMsg: 'the board never rendered its page cells',
+    });
+  });
+
+  it('a drag lands the page at the slot it was dropped on', async () => {
+    const before = await getWorkspacePageIds();
+    const cells = await pageCells();
+    expect(cells.length).toBeGreaterThan(2);
+    const moving = cells[0];
+    const target = cells[2];
+    await dragPage(
+      { x: moving.x + moving.w / 2, y: moving.y + moving.h / 2 },
+      // Past the third cell's midpoint — the insertion point AFTER it.
+      { x: target.x + target.w * 0.9, y: target.y + target.h / 2 },
+    );
+    await browser.waitUntil(
+      async () => (await getWorkspacePageIds())[0] !== before[0],
+      { timeout: 10_000, timeoutMsg: 'the dragged page never left its slot' },
+    );
+    const after = await getWorkspacePageIds();
+    expect(after).toHaveLength(before.length);
+    expect(new Set(after)).toEqual(new Set(before));
+    expect(after.indexOf(before[0])).toBeGreaterThan(after.indexOf(before[1]));
+  });
+
+  it('refuses a drop onto a document too small to aim at, and moves nothing', async () => {
+    // Zoom out until the card is under the gate's minimum.
+    for (let i = 0; i < 20; i++) {
+      if ((await cardScreenHeight()) < 90) break;
+      expect(await invokeAppCommand('view.zoomOut')).toBe(true);
+    }
+    expect(await cardScreenHeight()).toBeLessThan(90);
+
+    const before = await getWorkspacePageIds();
+    const cells = await pageCells();
+    const moving = cells[0];
+    const target = cells[cells.length - 1];
+    const from = { x: moving.x + moving.w / 2, y: moving.y + moving.h / 2 };
+    const to = { x: target.x + target.w / 2, y: target.y + target.h / 2 };
+
+    // Driven in two halves so the state MID-drag is observable. "Nothing
+    // moved" on its own would also be true of a drag that never armed — and
+    // the zoomed-out arm threshold (usePageDrag DRAG_THRESHOLD_ZOOMED_OUT_PX)
+    // is larger than the travel between two cells at this zoom, so that is a
+    // live way for this test to pass for the wrong reason. The refusal chip
+    // only exists while an armed drag is over a refused target, so asserting
+    // it proves both halves: the drag armed, and the gate refused it.
+    await browser
+      .action('pointer', { parameters: { pointerType: 'mouse' } })
+      .move({ x: Math.round(from.x), y: Math.round(from.y) })
+      .down({ button: 0 })
+      // Well past the zoomed-out threshold, then onto the target.
+      .move({ x: Math.round(from.x), y: Math.round(from.y) + 60 })
+      .pause(50)
+      .move({ x: Math.round(to.x), y: Math.round(to.y) })
+      .pause(50)
+      .perform();
+    const chip = $('.drag-ghost-refusal');
+    await chip.waitForExist({
+      timeout: 5_000,
+      timeoutMsg: 'the drag ghost never showed the zoom refusal',
+    });
+    expect(await chip.getText()).not.toBe('');
+
+    await browser.action('pointer', { parameters: { pointerType: 'mouse' } }).up({ button: 0 }).perform();
+    await browser.releaseActions();
+
+    // Nothing moved, and nothing was split into a new document either.
+    await browser.pause(500);
+    expect(await getWorkspacePageIds()).toEqual(before);
+    expect((await getState()).activeFile?.pageCount).toBe(before.length);
+
+    // Restore the camera: the next spec in this file inherits it.
+    expect(await invokeAppCommand('view.fit')).toBe(true);
   });
 });

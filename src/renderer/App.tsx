@@ -1139,13 +1139,19 @@ function AppContent(): React.ReactElement {
       // A drop landing ON a document while a doc tab is focused imports its
       // pages into that document at the drop point. A miss falls
       // through to opening the files (which focuses the last one's tab).
+      // A zoom refusal from the resolver is recorded, not announced here: the
+      // routes below produce different outcomes (a Combine list, the Create-PDF
+      // dialog, nothing at all for an unsupported kind), and a notice naming an
+      // outcome fires only on the branch that actually produces it.
+      let refusedZoom = false;
       if (inDocTab && position && dropResolverRef.current) {
         const dpr = window.devicePixelRatio || 1;
         const target = dropResolverRef.current(position.x / dpr, position.y / dpr);
-        if (target) {
+        if (target && 'docId' in target) {
           await importFilesIntoDoc(paths, target.docId, target.index);
           return;
         }
+        if (target) refusedZoom = true;
       }
       // Drop-to-combine: while the Combine dialog is open a
       // drop is an ADD, whatever the kinds are — including PDFs, which the
@@ -1167,9 +1173,21 @@ function AppContent(): React.ReactElement {
         setCreatePdfSeed(convertible);
         setShowCreatePdf(true);
       }
-      if (pdfs.length > 0) await openByPaths(pdfs);
+      if (pdfs.length > 0) {
+        await openByPaths(pdfs);
+        // The documents are open by the time this fires, so the past tense is
+        // true, and it is fire-and-forget: `showNotice` resolves on dismissal,
+        // so awaiting it would hold the drop open behind an OK button for a
+        // message about work already finished.
+        if (refusedZoom) {
+          void showNotice(
+            tChrome('dialog.dropImport.zoomTitle'),
+            tChrome('dialog.dropImport.zoomBody'),
+          );
+        }
+      }
     },
-    [openByPaths, importFilesIntoDoc, inDocTab],
+    [openByPaths, importFilesIntoDoc, inDocTab, showNotice],
   );
 
   const handleOpenFile = useCallback(async (): Promise<boolean> => {

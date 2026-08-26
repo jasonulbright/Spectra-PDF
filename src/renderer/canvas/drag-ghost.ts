@@ -1,9 +1,11 @@
 // Floating drag ghost: a fixed-position snapshot of the page that follows the
-// pointer. Replaces PDFx's DataTransfer.setDragImage — with Tauri's native
+// pointer. Stands in for `DataTransfer.setDragImage` — with Tauri's native
 // drag-drop enabled, HTML5 drag events never complete inside the webview on
 // Windows, so the canvas drives drags from pointer events and draws its own
 // ghost. When `count` > 1 (a multi-page drag) the ghost stacks and shows a
 // badge with the number of pages travelling together.
+const CARD_CLASS = 'drag-ghost-card';
+
 export function buildDragGhost(pageEl: HTMLElement, rect: DOMRect, count = 1): HTMLElement {
   const w = rect.width;
   const h = rect.height;
@@ -54,6 +56,7 @@ export function buildDragGhost(pageEl: HTMLElement, rect: DOMRect, count = 1): H
   }
 
   const card = document.createElement('div');
+  card.className = CARD_CLASS;
   Object.assign(card.style, {
     position: 'absolute',
     top: '0',
@@ -108,4 +111,52 @@ export function buildDragGhost(pageEl: HTMLElement, rect: DOMRect, count = 1): H
 
 export function moveDragGhost(ghost: HTMLElement, x: number, y: number): void {
   ghost.style.transform = `translate(${x}px, ${y}px)`;
+}
+
+const REFUSAL_CLASS = 'drag-ghost-refusal';
+
+/**
+ * Show or clear the ghost's refused state: the card dims and a hint chip
+ * names the reason. Called on every pointer move, so it is idempotent and
+ * rebuilds nothing while the text is unchanged.
+ *
+ * The chip is styled inline for the reason the ghost itself is: it mounts on
+ * document.body, outside the scopes that declare the shell's custom
+ * properties.
+ */
+export function setDragGhostRefusal(ghost: HTMLElement, text: string | null): void {
+  const existing = ghost.querySelector<HTMLElement>(`.${REFUSAL_CLASS}`);
+  // Dim the CARD, not the wrapper: opacity on the wrapper composites the hint
+  // chip with it, and the hint is the one part that must stay legible.
+  const card = ghost.querySelector<HTMLElement>(`.${CARD_CLASS}`);
+  if (text === null) {
+    existing?.remove();
+    if (card) card.style.opacity = '0.9';
+    return;
+  }
+  if (card) card.style.opacity = '0.4';
+  if (existing) {
+    if (existing.textContent !== text) existing.textContent = text;
+    return;
+  }
+  const chip = document.createElement('div');
+  chip.className = REFUSAL_CLASS;
+  chip.textContent = text;
+  chip.setAttribute('role', 'status');
+  Object.assign(chip.style, {
+    position: 'absolute',
+    top: '100%',
+    left: '0',
+    marginTop: '8px',
+    maxWidth: '260px',
+    padding: '6px 10px',
+    borderRadius: '8px',
+    background: 'rgba(20, 20, 22, 0.92)',
+    color: '#fff',
+    fontSize: '12px',
+    lineHeight: '1.35',
+    boxShadow: '0 2px 10px rgba(0, 0, 0, 0.45)',
+    pointerEvents: 'none',
+  });
+  ghost.appendChild(chip);
 }

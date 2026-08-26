@@ -14,6 +14,8 @@ import {
   thumbWindow,
 } from '../../lib/thumb-grid';
 import { inlineExtent } from '../../lib/inline-direction';
+import { dropTargetGate } from '../../lib/drop-gate';
+import { useFlipReorder } from '../../hooks/useFlipReorder';
 import { ContextMenu } from '../ContextMenu';
 import type { NavPanelComponentProps } from './types';
 import type { PageRef } from '../../state/types';
@@ -214,6 +216,22 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
 
   const [menu, setMenu] = useState<{ x: number; y: number; docId: string; pageId: string } | null>(null);
 
+  // The reorder animation: the thumbnails are absolutely positioned by index,
+  // so a move rewrites `top`/`inset-inline-start` and the page would otherwise
+  // jump between slots.
+  const gridRootRef = useRef<HTMLDivElement>(null);
+  const orderKey = useMemo(() => items.map((it) => it.page.id).join(','), [items]);
+  useFlipReorder(() => gridRootRef.current, orderKey);
+
+  // A thumbnail slot has to be big enough to aim at. The grid's own MIN_COL_W
+  // keeps every column above the gate today; the check stands so the two
+  // constants cannot drift into a panel that accepts drops nobody can place.
+  const dropGate = dropTargetGate(Math.min(grid.columnWidth, ROW_H));
+  // The window-level drag handlers are installed once per drag and must see
+  // the CURRENT verdict — the pane can be resized while a drag is in flight.
+  const dropGateRef = useRef(dropGate);
+  dropGateRef.current = dropGate;
+
   // ── Drag-reorder ─────────────────────────────────────────────────────────
   // A linear-list pointer drag (window-level listeners, the canvas pattern —
   // HTML5 DnD can't complete in the webview). Below the threshold it's a click
@@ -267,6 +285,10 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
             ? itemsRef.current.filter((it) => sel.has(it.page.id)).map((it) => it.page.id)
             : [s.grabbedId];
       }
+      if (!dropGateRef.current.ok) {
+        setDropGap(null); // refused: no indicator, because no slot can be aimed at
+        return;
+      }
       setDropGap(flatIndexAt(e.clientX, e.clientY));
     },
     [flatIndexAt],
@@ -280,6 +302,7 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
       detachRef.current();
       setDropGap(null);
       if (!drop || !s || !s.started) return; // below threshold → a click; onClick selects
+      if (!dropGateRef.current.ok) return; // the slots are too small to have been aimed at
       // Swallow the click that follows a completed drag so it doesn't reselect.
       const swallow = (ev: MouseEvent): void => {
         ev.stopPropagation();
@@ -440,7 +463,7 @@ export function PagesPanel({ activeFile, onOpenPage, onExtractText }: NavPanelCo
       aria-label={tChrome('nav.pages.aria')}
       onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
     >
-      <div style={{ height: grid.rows * ROW_H, position: 'relative' }}>
+      <div ref={gridRootRef} style={{ height: grid.rows * ROW_H, position: 'relative' }}>
         {windowItems.map((item, i) => {
           const index = start + i;
           const slot = thumbSlot(index, grid);

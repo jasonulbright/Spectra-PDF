@@ -23,8 +23,8 @@ export interface DropGhosts {
   betweenPages: GhostSize[];
 }
 
-// Internal-drag variant of PDFx's deriveDropGhosts — external file drags go
-// through Tauri's window-level drop (DropZone), not the canvas.
+// Covers internal page drags only: external file drags go through Tauri's
+// window-level drop (DropZone), never the canvas.
 export function deriveDropGhosts(
   docs: OpenDocument[],
   draggingPage: DragSource | null,

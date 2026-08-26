@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { pushEscapeInterceptor } from '../commands/context';
 import { computeDropTarget, DOC_HEIGHT } from './layout';
-import { INTO_MIN_SCREEN_PX } from './drop-target';
-import { buildDragGhost, moveDragGhost } from './drag-ghost';
+import { dropTargetGate } from '../lib/drop-gate';
+import { buildDragGhost, moveDragGhost, setDragGhostRefusal } from './drag-ghost';
+import { tChrome } from '../i18n';
 import type { CanvasLayout, DropTarget } from './layout';
 import type { CanvasHandle } from './canvas-handle';
 
@@ -50,9 +51,8 @@ const DRAG_THRESHOLD_PX = 6;
 // split a page off (review finding: 6px at far zoom-out was an accident trap).
 const DRAG_THRESHOLD_ZOOMED_OUT_PX = 24;
 
-// Pointer-event drag controller for canvas pages. Semantics ported from
-// PDFx's useDragController/root-drag-handlers (drop-target math, deferred
-// collapse, commit flash); the event plumbing is pointer-based because HTML5
+// Pointer-event drag controller for canvas pages (drop-target math, deferred
+// collapse, commit flash). The event plumbing is pointer-based because HTML5
 // drag-and-drop can't complete inside a Tauri webview on Windows while native
 // file drag-drop is enabled. Supports multi-page drags: grabbing a page that is
 // part of the current selection moves the whole selection as one undo step.
@@ -124,7 +124,7 @@ export function usePageDrag(deps: PageDragDeps) {
     if (!s) return;
     if (!s.started) {
       const w = depsRef.current.canvasRef.current?.clientToWorld(e.clientX, e.clientY);
-      const zoomedOut = w != null && DOC_HEIGHT * w.k < INTO_MIN_SCREEN_PX;
+      const zoomedOut = w != null && !dropTargetGate(DOC_HEIGHT * w.k).ok;
       const threshold = zoomedOut ? DRAG_THRESHOLD_ZOOMED_OUT_PX : DRAG_THRESHOLD_PX;
       if (Math.hypot(e.clientX - s.startX, e.clientY - s.startY) < threshold) return;
       s.started = true;
@@ -135,7 +135,16 @@ export function usePageDrag(deps: PageDragDeps) {
     if (s.ghost) moveDragGhost(s.ghost, e.clientX - s.grabDX, e.clientY - s.grabDY);
     const w = depsRef.current.canvasRef.current?.clientToWorld(e.clientX, e.clientY);
     if (!w) return;
-    updateDropTarget(computeDropTarget(depsRef.current.layout, w.x, w.y, w.k, s.movingSet, true));
+    const next = computeDropTarget(depsRef.current.layout, w.x, w.y, w.k, s.movingSet, true);
+    // The ghost carries the refusal: it is the only thing under the pointer,
+    // and a drop that will not land must say so BEFORE the button comes up.
+    if (s.ghost) {
+      setDragGhostRefusal(
+        s.ghost,
+        next.kind === 'refused' ? tChrome('canvas.drop.refusedZoom') : null,
+      );
+    }
+    updateDropTarget(next);
   }
 
   function onPointerUp(e: PointerEvent): void {
@@ -153,6 +162,9 @@ export function usePageDrag(deps: PageDragDeps) {
       : dropTargetRef.current;
     const movingIds = s.movingIds;
     teardown();
+    // A refused target moves nothing — the pages stay where they were, which
+    // is the outcome the hint on the ghost has been promising all along.
+    if (target?.kind === 'refused') return;
     if (target?.kind === 'into') depsRef.current.movePagesInto(movingIds, target.docId, target.index);
     else if (target?.kind === 'between') depsRef.current.movePagesToNewDoc(movingIds, target.docIndex);
   }
@@ -207,8 +219,9 @@ export function usePageDrag(deps: PageDragDeps) {
     [],
   );
 
-  // Collapse the dragged page(s) a frame after the ghost appears (PDFx timing:
-  // lets the drag ghost paint before the strip reflows).
+  // Collapse the dragged page(s) a frame after the ghost appears: the ghost
+  // must paint before the strip reflows, or the page vanishes with nothing
+  // under the pointer.
   useEffect(() => {
     if (!draggingPage) return;
     const id = requestAnimationFrame(() => {

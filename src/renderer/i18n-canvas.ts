@@ -331,6 +331,9 @@ export const CANVAS_STRINGS = {
   'canvas.doc.remove': 'Remove document',
   'canvas.doc.addPages': 'Add pages from a file',
   'canvas.doc.addDocument': 'Add document',
+  // Shown on the drag ghost while the pointer is over a document drawn too
+  // small at the current zoom for a drop position to be aimed at.
+  'canvas.drop.refusedZoom': 'Too small to drop into — zoom in to place pages in this document',
 
   // ── Presentation view ────────────────────────────────────────────────
   'canvas.present.label': 'Presentation',

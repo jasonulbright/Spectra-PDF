@@ -1,6 +1,7 @@
-// Ported from PDFx src/renderer/src/app/useFind.ts and extended
-// with ordered match-page navigation (next/prev + centerOn jumps) — PDFx
-// filters its grid; this canvas navigates the camera instead.
+// Find state for the canvas: ordered match-page navigation (next/prev +
+// centerOn jumps). Matches move the CAMERA rather than filtering the grid —
+// the board shows every page at once, so hiding non-matching pages would
+// change the arrangement the user is working in.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SearchResult } from './engine';
 import { EMPTY_RESULT } from './engine';

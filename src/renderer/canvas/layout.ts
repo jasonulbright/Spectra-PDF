@@ -16,10 +16,9 @@ export const MIN_DOC_WIDTH =
 
 export const ADD_PAGE_WIDTH = REF_PAGE_WIDTH;
 
-// Deviation from the PDFx original (single-row strips): page strips wrap into
-// rows at this content width. PDFx's canvas hosts short assembled strips;
-// Spectra PDF's primary case is one long document, where a single row forces the
-// fit scale toward zero and makes every page illegible. Wrapping caps card
+// Page strips wrap into rows at this content width. The primary case is one
+// long document, where a single unwrapped row forces the fit scale toward
+// zero and makes every page illegible. Wrapping caps card
 // width, so fit-to-width stays legible and the canvas scrolls vertically like
 // a document. Must match the flex-wrap rendering in DocumentRow — both wrap
 // greedily over the same integer page widths and gap.

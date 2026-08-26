@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import { useAppState, useAppDispatch } from '../../state/AppStateProvider';
 import { usePdfProxies } from '../../hooks/usePdfProxies';
+import { useFlipReorder } from '../../hooks/useFlipReorder';
 import { computeLayout, computeDropTarget, betweenSlotY, BASE_PAGE_HEIGHT, MIN_DOC_WIDTH } from '../../canvas/layout';
 import { usePageDrag } from '../../canvas/usePageDrag';
 import { uniqueDocName } from '../../lib/doc-names';
@@ -434,10 +435,21 @@ export interface CanvasDropTarget {
   docId: string;
   index: number;
 }
+/** A drop point that lands on a document drawn too small at this zoom for an
+ * insertion point to be aimed at. The files still open — a file drop carries
+ * work the user would have to redo — but they open as their own documents,
+ * and the caller says why rather than importing them somewhere arbitrary. */
+export interface CanvasDropRefused {
+  refused: 'zoom';
+}
 // clientX/clientY are webview CSS pixels (App converts the Tauri physical drop
-// position). Returns the doc + insertion index under the point, or null when
-// the point isn't over a document card.
-export type CanvasDropResolver = (clientX: number, clientY: number) => CanvasDropTarget | null;
+// position). Returns the doc + insertion index under the point, a refusal when
+// the point is over a document the zoom gate rejects, or null when the point
+// isn't over a document card at all.
+export type CanvasDropResolver = (
+  clientX: number,
+  clientY: number,
+) => CanvasDropTarget | CanvasDropRefused | null;
 
 // Stable empties so the "no pending marks" hot path never breaks the layer
 // components' memoization when unrelated state changes.
@@ -614,6 +626,14 @@ export function WorkspaceCanvasView({
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const canvasRef = useRef<CanvasHandle | null>(null);
+  // The board's page arrangement, as one string: every document's page ids in
+  // order. It changes on a reorder, a move between documents, an insertion or
+  // a delete — and on nothing else, so a re-render for an unrelated reason
+  // never replays the animation.
+  const docsOrderKey = useMemo(
+    () => docs.map((d) => d.id + ':' + d.pages.map((p) => p.id).join(',')).join('|'),
+    [docs],
+  );
   // Document view: its reading-mode CanvasHandle, and a ref-mirror of the
   // mode so the registered `canvas()` getter routes to the active view.
   const documentViewRef = useRef<CanvasHandle | null>(null);
@@ -798,14 +818,16 @@ export function WorkspaceCanvasView({
   // Publish the external-drop resolver so App's drop handler can map a
   // drop point to the document + index under it. Reads live layout/canvas via
   // refs; an 'into' target imports, a 'between' target returns null so App
-  // appends a new strip (today's behavior). The clientToWorld + computeDropTarget
+  // appends a new strip, and a zoom-refused target reports the refusal so App
+  // can say why it appended instead. The clientToWorld + computeDropTarget
   // path is the same tested math the page drag uses.
   useEffect(() => {
     dropResolverRef.current = (clientX, clientY) => {
       const w = canvasRef.current?.clientToWorld(clientX, clientY);
       if (!w) return null;
       const target = computeDropTarget(layoutRef.current, w.x, w.y, w.k, null, true);
-      return target.kind === 'into' ? { docId: target.docId, index: target.index } : null;
+      if (target.kind === 'into') return { docId: target.docId, index: target.index };
+      return target.kind === 'refused' ? { refused: 'zoom' } : null;
     };
     return () => {
       dropResolverRef.current = null;
@@ -6481,6 +6503,19 @@ export function WorkspaceCanvasView({
     movePagesInto,
     movePagesToNewDoc,
   });
+
+  // The collapsed set belongs in the key: a drag takes the dragged cell out of
+  // flow without touching `docs`, and the rest of the strip visibly reflows to
+  // close the gap. Keyed on `docs` alone the hook would sleep through that
+  // reflow and, on the drop, animate every neighbour from its PRE-DRAG slot —
+  // a jump back to a layout the user stopped seeing when the drag began. With
+  // the collapse in the key the snapshot is refreshed when it lands, so each
+  // run still measures against the arrangement last painted.
+  const boardOrderKey = useMemo(
+    () => docsOrderKey + '|collapsed:' + [...(drag.collapsedIds ?? [])].sort().join(','),
+    [docsOrderKey, drag.collapsedIds],
+  );
+  useFlipReorder(() => canvasRef.current?.worldEl?.() ?? null, boardOrderKey);
 
   const onSelectPage = useCallback(
     (docId: string, pageId: string, e?: React.MouseEvent) => {

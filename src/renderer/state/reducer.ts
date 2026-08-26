@@ -269,7 +269,7 @@ function pagesForPath(documents: OpenDocument[], path: string): number {
   return documents.filter((d) => d.path === path).reduce((sum, d) => sum + d.pages.length, 0);
 }
 
-// After a cross-doc move, drop documents left with no pages (matching PDFx),
+// After a cross-doc move, drop documents left with no pages,
 // but never a path's last document — file-level lifecycle stays with CLOSE_FILE.
 function pruneEmptyDocs(documents: OpenDocument[]): OpenDocument[] {
   const pruned = documents.filter(

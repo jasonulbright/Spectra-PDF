@@ -796,10 +796,10 @@
 [data-theme="light"] .thumb-row.current .thumb-label { color: #111827; }
 
 /* ── Canvas workspace view ────────────────────────────────────────────────
-   Ported from PDFx's canvas styles, scoped under .canvas-view. PDFx's theme
-   variables are mapped onto Spectra PDF's palette here (dark default, light via
-   [data-theme="light"]); class names inside are kept verbatim so the ported
-   components stay diffable against their PDFx originals.
+   Scoped under .canvas-view: the board declares its own theme variables,
+   mapped onto Spectra PDF's palette here (dark default, light via
+   [data-theme="light"]), so the canvas components read one set of names
+   whichever theme is active.
    ──────────────────────────────────────────────────────────────────────── */
 
 .canvas-view {

@@ -1,16 +1,16 @@
-// Ported from PDFx src/renderer/src/search/engine.ts (same owner), adapted
-// to this app's Workspace/OpenDocument/PageRef model:
+// The corpus search engine, built on this app's Workspace/OpenDocument/
+// PageRef model:
 //  - pages carry {id, sourceDocId, sourcePageIndex}; the pdf.js proxy for a
 //    source comes from the proxies map (usePdfProxies), not a page-embedded
 //    handle — reconcile() takes both and simply skips pages whose proxy
 //    hasn't loaded yet (it re-runs when proxies change).
-//  - NEW invalidatePath(): this app MUTATES files (commits, whole-file ops,
+//  - invalidatePath(): this app MUTATES files (commits, whole-file ops,
 //    undo, OCR-apply itself) — when a file's buffer identity changes, every
-//    per-source cache for that path is stale and must drop. PDFx never
-//    needed this (it never rewrites its sources).
-// Everything else — born-digital extraction, needsOcr detection, OCR
-// queueing/concurrency, per-source caching that survives page moves,
-// normalized occurrence counting — is PDFx's proven logic, unchanged.
+//    per-source cache for that path is stale and must drop. A reader that
+//    never rewrites its sources has no equivalent requirement.
+// Born-digital extraction, needsOcr detection, OCR queueing/concurrency,
+// per-source caching that survives page moves, and normalized occurrence
+// counting are all handled here.
 import { normalizeIndexText, type SearchOptions } from './normalize';
 import { runCorpusSearch } from './search-core';
 import {
