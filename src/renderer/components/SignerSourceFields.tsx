@@ -3,6 +3,24 @@ import { useEngine } from '../hooks/useEngine';
 import { useTranslation } from 'react-i18next';
 import { dialog, type StoreCertificate } from '../lib/tauri-bridge';
 import { tChrome, tDate } from '../i18n';
+import {
+  CSC_GRANTS,
+  DEFAULT_SCOPE,
+  loadProviders,
+  makePkce,
+  newProviderId,
+  preselectedCredential,
+  providerProblem,
+  rememberCredential,
+  rememberSecret,
+  removeProvider,
+  saveProviders,
+  secretFor,
+  upsertProvider,
+  type CscCredentialRow,
+  type CscGrant,
+  type CscProvider,
+} from '../lib/csc-providers';
 
 // The signer source both sign flows (SignaturesPanel invisible form, canvas
 // visible-signature popover) share: a PKCS#12 file, a PEM key+cert pair, a
@@ -26,7 +44,15 @@ export type SignerSource =
       certLabel: string;
       keyLabel: string;
     }
-  | { mode: 'store'; thumbprint: string | null; machineStore: boolean };
+  | { mode: 'store'; thumbprint: string | null; machineStore: boolean }
+  | {
+      mode: 'csc';
+      providerId: string | null;
+      credentialId: string | null;
+      /** The completed browser sign-in, for an authorization-code provider.
+       * Null on a client-credentials one, which needs no person. */
+      authorization: { code: string; redirectUri: string; verifier: string } | null;
+    };
 
 /** Engine params for one signer source. Booleans ride as booleans — the
  * engine's store-location flag is one, and a stringified "false" would read
@@ -64,6 +90,32 @@ export function signerSourceParams(
   if (source.mode === 'pfx') {
     if (!source.pfxPath) return { error: tChrome('dialog.signer.needPfx') };
     return { params: { pfx_path: source.pfxPath } };
+  }
+  if (source.mode === 'csc') {
+    const provider = loadProviders().find((p) => p.id === source.providerId);
+    if (!provider) return { error: tChrome('dialog.signer.cscNeedProvider') };
+    const problem = providerProblem(provider);
+    if (problem) return { error: tChrome(problem as 'dialog.signer.cscNeedUrl') };
+    if (!source.credentialId) return { error: tChrome('dialog.signer.cscNeedCredential') };
+    const params: SignerParams = {
+      csc_url: provider.url.trim(),
+      csc_credential: source.credentialId,
+      csc_client_id: provider.clientId.trim(),
+      csc_scope: provider.scope || DEFAULT_SCOPE,
+      csc_grant: provider.grant,
+    };
+    // The secret lives in memory only; an empty one is simply omitted rather
+    // than sent as a registration that has none.
+    const secret = secretFor(provider.id);
+    if (secret) params.csc_client_secret = secret;
+    if (provider.caBundle) params.csc_ca_bundle = provider.caBundle;
+    if (provider.grant === 'authorization-code') {
+      if (!source.authorization) return { error: tChrome('dialog.signer.cscNeedSignIn') };
+      params.csc_code = source.authorization.code;
+      params.csc_redirect_uri = source.authorization.redirectUri;
+      params.csc_verifier = source.authorization.verifier;
+    }
+    return { params };
   }
   if (source.mode === 'store') {
     if (!source.thumbprint) return { error: tChrome('dialog.signer.needStoreCert') };
@@ -225,7 +277,7 @@ export function SignerSourceFields({
       <div className="flex items-center gap-2">
         <span className="text-xs text-neutral-400 w-20 shrink-0">{tChrome('dialog.signer.label')}</span>
         <div className="flex rounded overflow-hidden border border-neutral-700">
-          {(['pfx', 'pem', 'pkcs11', 'store'] as const).map((m) => (
+          {(['pfx', 'pem', 'pkcs11', 'store', 'csc'] as const).map((m) => (
             <button
               key={m}
               data-testid={`${idPrefix}-source-${m}`}
@@ -242,7 +294,9 @@ export function SignerSourceFields({
                       ? { mode: 'pem', keyPath: null, certPath: null }
                       : m === 'store'
                         ? { mode: 'store', thumbprint: null, machineStore: false }
-                        : { mode: 'pkcs11', modulePath: null, tokenLabel: '', certLabel: '', keyLabel: '' },
+                        : m === 'csc'
+                          ? { mode: 'csc', providerId: null, credentialId: null, authorization: null }
+                          : { mode: 'pkcs11', modulePath: null, tokenLabel: '', certLabel: '', keyLabel: '' },
                 );
               }}
               className={`px-2.5 py-1 text-xs font-medium ${
@@ -258,7 +312,9 @@ export function SignerSourceFields({
                     ? 'dialog.signer.modePem'
                     : m === 'store'
                       ? 'dialog.signer.modeStore'
-                      : 'dialog.signer.modeToken',
+                      : m === 'csc'
+                        ? 'dialog.signer.modeCsc'
+                        : 'dialog.signer.modeToken',
               )}
             </button>
           ))}
@@ -367,6 +423,8 @@ export function SignerSourceFields({
             {tChrome('dialog.signer.storeNote')}
           </p>
         </>
+      ) : value.mode === 'csc' ? (
+        <CscSignerFields value={value} onChange={onChange} idPrefix={idPrefix} />
       ) : value.mode === 'pkcs11' ? (
         <>
           <div className="flex items-center gap-2">
@@ -528,4 +586,409 @@ export function SignerSourceFields({
       )}
     </div>
   );
+}
+
+// ── the signing-service source ────────────────────────────────────────────
+//
+// A provider is CONFIGURED once (address, the user's own OAuth client ID,
+// scope, grant) and then its credentials are listed. Configuration and
+// selection are one panel rather than a settings page because the two are the
+// same act the first time and the list is meaningless without the former.
+//
+// Nothing here holds a PIN or a one-time password: a credential the provider
+// authorizes that way is reported unusable by the engine and cannot be
+// selected. The OAuth client secret is typed here and kept in memory only.
+
+const EMPTY_DRAFT = (): CscProvider => ({
+  id: newProviderId(),
+  name: '',
+  url: '',
+  clientId: '',
+  scope: DEFAULT_SCOPE,
+  grant: 'client-credentials',
+  caBundle: null,
+});
+
+function CscSignerFields({
+  value,
+  onChange,
+  idPrefix,
+}: {
+  value: Extract<SignerSource, { mode: 'csc' }>;
+  onChange: (next: SignerSource) => void;
+  idPrefix: string;
+}): React.ReactElement {
+  const { call } = useEngine();
+  const [providers, setProviders] = useState<CscProvider[]>(() => loadProviders());
+  const [draft, setDraft] = useState<CscProvider | null>(null);
+  const [secret, setSecret] = useState('');
+  const [rows, setRows] = useState<CscCredentialRow[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const provider = providers.find((p) => p.id === value.providerId) ?? null;
+
+  const commitDraft = useCallback(() => {
+    if (!draft) return;
+    const problem = providerProblem(draft);
+    if (problem) {
+      setError(tChrome(problem as 'dialog.signer.cscNeedUrl'));
+      return;
+    }
+    const next = upsertProvider(providers, draft);
+    setProviders(next);
+    saveProviders(next);
+    rememberSecret(draft.id, secret);
+    setSecret('');
+    setDraft(null);
+    setRows(null);
+    setError(null);
+    onChange({ mode: 'csc', providerId: draft.id, credentialId: null, authorization: null });
+  }, [draft, providers, secret, onChange]);
+
+  const forget = useCallback(
+    (id: string) => {
+      const next = removeProvider(providers, id);
+      setProviders(next);
+      saveProviders(next);
+      rememberSecret(id, '');
+      if (value.providerId === id) {
+        setRows(null);
+        onChange({ mode: 'csc', providerId: null, credentialId: null, authorization: null });
+      }
+    },
+    [providers, value.providerId, onChange],
+  );
+
+  // Listing is the FIRST thing that touches the network, and for an
+  // authorization-code provider it is what makes the user sign in — which is
+  // why it is a button and not something that happens on render.
+  const listCredentials = useCallback(async () => {
+    if (!provider) return;
+    setBusy(true);
+    setError(null);
+    try {
+      let authorization = value.authorization;
+      if (provider.grant === 'authorization-code' && !authorization) {
+        const pkce = await makePkce();
+        const returned = await dialog.cscAuthorize({
+          baseUrl: provider.url.trim(),
+          clientId: provider.clientId.trim(),
+          scope: provider.scope || DEFAULT_SCOPE,
+          challenge: pkce.challenge,
+          state: pkce.state,
+        });
+        authorization = {
+          code: returned.code,
+          redirectUri: returned.redirect_uri,
+          verifier: pkce.verifier,
+        };
+      }
+      const result = (await call('list_csc_credentials', {
+        csc_url: provider.url.trim(),
+        csc_client_id: provider.clientId.trim(),
+        csc_scope: provider.scope || DEFAULT_SCOPE,
+        csc_grant: provider.grant,
+        ...(secretFor(provider.id) ? { csc_client_secret: secretFor(provider.id) } : {}),
+        ...(provider.caBundle ? { csc_ca_bundle: provider.caBundle } : {}),
+        ...(authorization
+          ? {
+              csc_code: authorization.code,
+              csc_redirect_uri: authorization.redirectUri,
+              csc_verifier: authorization.verifier,
+            }
+          : {}),
+      })) as unknown as { credentials: CscCredentialRow[] };
+      setRows(result.credentials);
+      // The remembered credential is an OFFER: it pre-selects only while the
+      // provider still enumerates it AND still reports it usable.
+      const remembered = preselectedCredential(provider.id, result.credentials);
+      onChange({
+        mode: 'csc',
+        providerId: provider.id,
+        credentialId: value.credentialId ?? remembered,
+        authorization: authorization ?? null,
+      });
+    } catch (e: unknown) {
+      setRows([]);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [provider, call, onChange, value.authorization, value.credentialId]);
+
+  const fieldClass =
+    'flex-1 min-w-0 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500';
+  const labelClass = 'text-xs text-neutral-400 w-20 shrink-0';
+  const buttonClass =
+    'px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium';
+
+  if (draft) {
+    return (
+      <div className="rounded border border-neutral-700 bg-neutral-900/70 p-2.5 flex flex-col gap-2">
+        <div className="text-xs text-neutral-300 font-medium">
+          {tChrome('dialog.signer.cscProviderTitle')}
+        </div>
+        <p className="text-[11px] text-neutral-500 -mt-1">
+          {tChrome('dialog.signer.cscProviderNote')}
+        </p>
+        <div className="flex items-center gap-2">
+          <span className={labelClass}>{tChrome('dialog.signer.cscName')}</span>
+          <input
+            data-testid={`${idPrefix}-csc-name`}
+            value={draft.name}
+            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            className={fieldClass}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={labelClass}>{tChrome('dialog.signer.cscUrl')}</span>
+          <input
+            data-testid={`${idPrefix}-csc-url`}
+            value={draft.url}
+            placeholder={tChrome('dialog.signer.cscUrlPlaceholder')}
+            onChange={(e) => setDraft({ ...draft, url: e.target.value })}
+            className={fieldClass}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={labelClass}>{tChrome('dialog.signer.cscClientId')}</span>
+          <input
+            data-testid={`${idPrefix}-csc-client-id`}
+            value={draft.clientId}
+            onChange={(e) => setDraft({ ...draft, clientId: e.target.value })}
+            className={fieldClass}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={labelClass}>{tChrome('dialog.signer.cscClientSecret')}</span>
+          <input
+            data-testid={`${idPrefix}-csc-client-secret`}
+            type="password"
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            className={fieldClass}
+          />
+        </div>
+        <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
+          {tChrome('dialog.signer.cscSecretNote')}
+        </p>
+        <div className="flex items-center gap-2">
+          <span className={labelClass}>{tChrome('dialog.signer.cscGrant')}</span>
+          <select
+            data-testid={`${idPrefix}-csc-grant`}
+            value={draft.grant}
+            onChange={(e) => setDraft({ ...draft, grant: e.target.value as CscGrant })}
+            className={fieldClass}
+          >
+            {CSC_GRANTS.map((g) => (
+              <option key={g} value={g}>
+                {tChrome(
+                  g === 'client-credentials'
+                    ? 'dialog.signer.cscGrantClient'
+                    : 'dialog.signer.cscGrantBrowser',
+                )}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={labelClass}>{tChrome('dialog.signer.cscScope')}</span>
+          <input
+            data-testid={`${idPrefix}-csc-scope`}
+            value={draft.scope}
+            onChange={(e) => setDraft({ ...draft, scope: e.target.value })}
+            className={fieldClass}
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={labelClass}>{tChrome('dialog.signer.cscCaBundle')}</span>
+          <span
+            className="flex-1 text-xs text-neutral-300 truncate"
+            title={draft.caBundle ?? undefined}
+          >
+            {draft.caBundle ? (
+              draft.caBundle.split(/[\\/]/).pop()
+            ) : (
+              <span className="text-neutral-600">{tChrome('dialog.signer.noneChosen')}</span>
+            )}
+          </span>
+          <button
+            data-testid={`${idPrefix}-csc-pick-ca`}
+            onClick={() => {
+              void (async () => {
+                const picked = await dialog.pickPemFile();
+                if (picked) setDraft({ ...draft, caBundle: picked });
+              })();
+            }}
+            className={buttonClass}
+          >
+            {tChrome('dialog.signer.choose')}
+          </button>
+        </div>
+        {error && <div className="text-xs text-red-400">{error}</div>}
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => {
+              setDraft(null);
+              setSecret('');
+              setError(null);
+            }}
+            className={buttonClass}
+          >
+            {tChrome('dialog.common.cancel')}
+          </button>
+          <button
+            data-testid={`${idPrefix}-csc-save-provider`}
+            onClick={commitDraft}
+            className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded font-medium"
+          >
+            {tChrome('dialog.signer.cscSaveProvider')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex items-center gap-2">
+        <span className={labelClass}>{tChrome('dialog.signer.cscProvider')}</span>
+        <select
+          data-testid={`${idPrefix}-csc-provider`}
+          value={value.providerId ?? ''}
+          onChange={(e) => {
+            setRows(null);
+            setError(null);
+            onChange({
+              mode: 'csc',
+              providerId: e.target.value || null,
+              credentialId: null,
+              authorization: null,
+            });
+          }}
+          className={fieldClass}
+        >
+          <option value="">{tChrome('dialog.signer.cscChooseProvider')}</option>
+          {providers.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name || p.url}
+            </option>
+          ))}
+        </select>
+        <button
+          data-testid={`${idPrefix}-csc-add-provider`}
+          onClick={() => {
+            setDraft(provider ? { ...provider } : EMPTY_DRAFT());
+            setSecret(provider ? secretFor(provider.id) : '');
+            setError(null);
+          }}
+          className={buttonClass}
+        >
+          {tChrome(provider ? 'dialog.signer.cscEditProvider' : 'dialog.signer.cscAddProvider')}
+        </button>
+        {provider && (
+          <button
+            data-testid={`${idPrefix}-csc-forget-provider`}
+            onClick={() => forget(provider.id)}
+            className={buttonClass}
+          >
+            {tChrome('dialog.signer.cscForgetProvider')}
+          </button>
+        )}
+      </div>
+
+      {provider && (
+        <div className="flex items-center gap-2">
+          <span className={labelClass}>{tChrome('dialog.signer.cscCredential')}</span>
+          <select
+            data-testid={`${idPrefix}-csc-credential`}
+            value={value.credentialId ?? ''}
+            disabled={busy || !rows || rows.length === 0}
+            onChange={(e) => {
+              const row = (rows ?? []).find((r) => r.credential_id === e.target.value);
+              onChange({
+                mode: 'csc',
+                providerId: provider.id,
+                credentialId: row && row.usable ? row.credential_id : null,
+                authorization: value.authorization,
+              });
+            }}
+            className={fieldClass}
+          >
+            <option value="">{tChrome('dialog.signer.cscChooseCredential')}</option>
+            {(rows ?? []).map((r) => (
+              <option key={r.credential_id} value={r.credential_id} disabled={!r.usable}>
+                {r.subject || r.credential_id}
+              </option>
+            ))}
+          </select>
+          <button
+            data-testid={`${idPrefix}-csc-list`}
+            onClick={() => void listCredentials()}
+            disabled={busy}
+            className={buttonClass}
+          >
+            {tChrome(
+              provider.grant === 'authorization-code' && !value.authorization
+                ? 'dialog.signer.cscSignIn'
+                : 'dialog.signer.cscList',
+            )}
+          </button>
+        </div>
+      )}
+
+      {error ? (
+        <div data-testid={`${idPrefix}-csc-error`} className="text-xs text-red-400 ml-[5.5rem]">
+          {error}
+        </div>
+      ) : busy ? (
+        <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
+          {tChrome('dialog.signer.cscLoading')}
+        </p>
+      ) : rows && rows.length === 0 ? (
+        <p
+          data-testid={`${idPrefix}-csc-empty`}
+          className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]"
+        >
+          {tChrome('dialog.signer.cscNone')}
+        </p>
+      ) : null}
+
+      {(() => {
+        // An unusable credential is SHOWN with its reason rather than hidden:
+        // a user staring at a short list must be able to learn why it is short.
+        const selected = (rows ?? []).find((r) => r.credential_id === value.credentialId);
+        const unusable = (rows ?? []).filter((r) => !r.usable);
+        return (
+          <>
+            {selected && (
+              <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem] break-all">
+                {selected.credential_id}
+              </p>
+            )}
+            {unusable.map((r) => (
+              <p key={r.credential_id} className="text-[11px] text-amber-400/80 -mt-1 ml-[5.5rem]">
+                {tChrome('dialog.signer.cscUnusable', {
+                  subject: r.subject || r.credential_id,
+                  reason: r.unusable_reason ?? '',
+                })}
+              </p>
+            ))}
+          </>
+        );
+      })()}
+
+      <p className="text-[11px] text-neutral-500 -mt-1 ml-[5.5rem]">
+        {tChrome('dialog.signer.cscNote')}
+      </p>
+    </>
+  );
+}
+
+/** Record the credential a signature actually used, so the picker can offer it
+ * again. Selection only — a remembered credential never signs on its own, and
+ * a credential id is a public identifier, not a secret. */
+export function rememberCscCredential(providerId: string, credentialId: string): void {
+  rememberCredential(providerId, credentialId);
 }

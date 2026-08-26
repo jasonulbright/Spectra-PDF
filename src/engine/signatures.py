@@ -40,8 +40,10 @@ never as a fallback: it goes through ``engine.os_trust``, which respects the
 store's per-purpose (EKU) restrictions and is not read at all while the option
 is off. The bundled EU trusted-list certificates (``engine.eutl``) are a third
 source on the same terms — opt-in per source (``eutl_trust``), off by default,
-never read while off, and offline: the bundle ships, nothing fetches it. Which
-anchor set a chain reached is reported per signature as ``trust_source``.
+never read while off, and offline: the bundle ships, nothing fetches it. The
+bundled platform root-program certificates (``engine.msctl``) are a fourth on
+exactly those terms (``msctl_trust``). Which anchor set a chain reached is
+reported per signature as ``trust_source``.
 
 Uses pyHanko (MIT) — the ByteRange / CMS / incremental-update handling is
 exactly the security-critical plumbing not to hand-roll.
@@ -66,11 +68,12 @@ from pyhanko.sign.general import SigningError
 from pyhanko.sign.timestamps import HTTPTimeStamper
 from pyhanko.sign.validation import validate_pdf_signature
 
-from engine import eutl, os_trust, stamp_appearance, wincert
+from engine import eutl, msctl, os_trust, stamp_appearance, wincert
 from engine.acroform import form_field_forest
 from engine.docmdp import LEVEL_BY_VALUE, VALUE_BY_LEVEL, certification_of_file
 from engine.docmdp_policy import DIFF_POLICY, LockedFieldModification
 from engine.inplace import is_same_file
+from engine.signature_size import raw_signature_size
 from engine.fieldmdp import (
     ACTION_BY_NAME,
     lock_of_field_dict,
@@ -132,32 +135,39 @@ def _fingerprints(certs: list) -> set:
 class _TrustSources:
     """The anchors in force for one verification, and which set each came from.
 
-    Three sources, each opt-in and off by default: the user's own anchors, the
-    platform certificate store, and the bundled EU trusted-list certificates.
+    Four sources, each opt-in and off by default: the user's own anchors, the
+    platform certificate store, the bundled EU trusted-list certificates, and
+    the bundled platform root-program certificates.
 
     Two contexts, not one: a signature validation builds a signer chain and a
-    timestamp chain, and both optional sources record a DIFFERENT anchor set for
-    each — the store as EKU restrictions, the trusted lists as service types.
-    ``validate_pdf_signature`` already takes the two contexts separately.
+    timestamp chain, and every optional source records a DIFFERENT anchor set
+    for each — the store as EKU restrictions, the trusted lists as service
+    types, the root-program bundle as the purposes its list grants.
+    ``validate_pdf_signature`` already takes the two contexts separately, so an
+    anchor a source records for one chain kind alone can never reach the other.
 
-    With both options off, nothing here reads the store or the bundle and the
+    With every option off, nothing here reads a store or a bundle and the
     contexts collapse to the single user-anchored (or empty) context of the
     original explicit-trust posture.
     """
 
     def __init__(self, trust_roots: list | None, system_trust: bool,
-                 eutl_trust: bool = False):
+                 eutl_trust: bool = False, msctl_trust: bool = False):
         user = _load_trust_roots(trust_roots or [])
         self.user_prints = _fingerprints(user)
         self.system_prints: set = set()
         self.eutl_prints: set = set()
+        self.msctl_prints: set = set()
         self.system_requested = bool(system_trust)
         self.system_available = os_trust.available() if system_trust else False
         self.system_anchor_count = 0
         self.eutl_requested = bool(eutl_trust)
         self.eutl_available = eutl.available() if eutl_trust else False
         self.eutl_provenance = eutl.provenance() if eutl_trust else {}
-        if not system_trust and not eutl_trust:
+        self.msctl_requested = bool(msctl_trust)
+        self.msctl_available = msctl.available() if msctl_trust else False
+        self.msctl_provenance = msctl.provenance() if msctl_trust else {}
+        if not system_trust and not eutl_trust and not msctl_trust:
             ctx = _trust_context(trust_roots) if trust_roots else None
             self.signer_context = ctx
             self.timestamp_context = ctx
@@ -182,6 +192,18 @@ class _TrustSources:
             self.eutl_prints = _fingerprints(list_signers) | _fingerprints(list_timestampers)
             signer_anchors += list_signers
             timestamp_anchors += list_timestampers
+        if msctl_trust:
+            # Two disjoint reads, not one filtered set: the bundle records a
+            # subject under the chain kinds its list grants, so a subject
+            # granted only timestamping is absent from the signer anchors and
+            # cannot terminate a signer chain.
+            program_signers = msctl.anchors(msctl.SIGNER)
+            program_timestampers = msctl.anchors(msctl.TIMESTAMP)
+            self.msctl_prints = (
+                _fingerprints(program_signers) | _fingerprints(program_timestampers)
+            )
+            signer_anchors += program_signers
+            timestamp_anchors += program_timestampers
 
         self.signer_context = ValidationContext(
             trust_roots=[*user, *signer_anchors],
@@ -200,7 +222,12 @@ class _TrustSources:
     def anchored(self) -> bool:
         """Whether any anchor at all is in force — the precondition for a
         trusted verdict being meaningful."""
-        return bool(self.user_prints) or bool(self.system_prints) or bool(self.eutl_prints)
+        return (
+            bool(self.user_prints)
+            or bool(self.system_prints)
+            or bool(self.eutl_prints)
+            or bool(self.msctl_prints)
+        )
 
     def source_of(self, status) -> str | None:
         """Which anchor set the validated path terminated at.
@@ -208,8 +235,9 @@ class _TrustSources:
         Ordered by how specific the statement is, so a certificate carried by
         more than one source is reported as the narrowest thing that vouches for
         it: the user chose THIS certificate; a trusted list says this authority
-        is a granted qualified one; the platform store says only that the
-        machine carries the root.
+        is a granted qualified one; a curated root program says the authority is
+        in the program and has not been withdrawn from it; the platform store
+        says only that the machine carries the root.
         """
         path = getattr(status, "validation_path", None)
         if path is None:
@@ -222,6 +250,8 @@ class _TrustSources:
             return "user"
         if anchor.sha256 in self.eutl_prints:
             return "eutl"
+        if anchor.sha256 in self.msctl_prints:
+            return "msctl"
         if anchor.sha256 in self.system_prints:
             return "system"
         return None
@@ -241,6 +271,16 @@ class _TrustSources:
             "available": self.eutl_available,
             "anchor_count": len(self.eutl_prints),
             **self.eutl_provenance,
+        }
+
+    def msctl_report(self) -> dict:
+        """What the bundled root-program certificates contributed, plus the
+        provenance a surface needs to say how old the bundle is."""
+        return {
+            "requested": self.msctl_requested,
+            "available": self.msctl_available,
+            "anchor_count": len(self.msctl_prints),
+            **self.msctl_provenance,
         }
 
 
@@ -445,7 +485,7 @@ def _verify_one(embedded, sources: "_TrustSources | None" = None,
 
 def verify_signatures(
     file: str, trust_roots: list | None = None, system_trust: bool = False,
-    eutl_trust: bool = False,
+    eutl_trust: bool = False, msctl_trust: bool = False,
 ) -> dict:
     """Verify every embedded signature in a PDF (read-only).
 
@@ -461,8 +501,12 @@ def verify_signatures(
         eutl_trust: also anchor on the bundled EU trusted-list certificates
             (``engine.eutl``). OFF by default and read only when True. The
             bundle ships; nothing is fetched here.
+        msctl_trust: also anchor on the bundled platform root-program
+            certificates (``engine.msctl``). OFF by default and read only when
+            True. Additive to ``system_trust``, never a replacement for it: a
+            locally installed root is in the store and not in the program.
     """
-    sources = _TrustSources(trust_roots, system_trust, eutl_trust)
+    sources = _TrustSources(trust_roots, system_trust, eutl_trust, msctl_trust)
     # /Perms /DocMDP is a CATALOG property, so the certification is
     # document-level; the per-signature level below says which signature wrote
     # it. Read first: every signature's policy verdict is relative to it.
@@ -535,6 +579,9 @@ def verify_signatures(
         # the bundle's fetch date: a trust feed that cannot say how old it is
         # invites being read as current.
         "eutl_trust": sources.eutl_report(),
+        # What the bundled root-program certificates contributed, on the same
+        # terms.
+        "msctl_trust": sources.msctl_report(),
         "certification": {
             "certified": bool(certification["certified"]),
             "level": certification["level"],
@@ -947,19 +994,7 @@ class StoreSigner(signers.Signer):
         self._handle = handle
 
     def _raw_signature_size(self) -> int:
-        key = self.signing_cert.public_key
-        if key.algorithm == "ec":
-            # DER SEQUENCE of two INTEGERs, each at worst one leading zero byte
-            # wider than the field. The SEQUENCE header is NOT a fixed two
-            # bytes: a payload of 128 or more takes the long form, which P-521
-            # reaches (2 * (67 + 2) = 138 → 0x30 0x81 0x8A, 141 in all). A
-            # placeholder sized for the short form truncates the signature.
-            field = (key.bit_size + 7) // 8
-            integer = field + 1 + 2
-            payload = 2 * integer
-            header = 2 if payload < 0x80 else 2 + (payload.bit_length() + 7) // 8
-            return payload + header
-        return (key.bit_size + 7) // 8
+        return raw_signature_size(self.signing_cert.public_key)
 
     async def async_sign_raw(self, data: bytes, digest_algorithm: str, dry_run=False) -> bytes:
         if dry_run:
@@ -1012,25 +1047,40 @@ def _signer_source(
     pkcs11_key_label: str | None,
     store_cert: str | None = None,
     store_machine: bool = False,
+    csc: dict | None = None,
 ):
     """Resolve EXACTLY ONE signer source, yielding a live signer (added
     the third source). File-based signers (PKCS#12 / PEM) resolve eagerly and
     need no cleanup; a PKCS#11 signer holds an OPEN token session and a
     certificate-store signer holds an OPEN key handle for the whole signing
-    operation — the reason this is a context manager. The PIN, like the
-    password, never lands in results, errors, or logs; the store source has no
-    secret of ours to leak, because Windows collects any PIN itself."""
+    operation — the reason this is a context manager. A remote signing service
+    holds an authorized client, which outlives one signing operation on
+    purpose, so that source yields without closing anything here. The PIN, like
+    the password, never lands in results, errors, or logs; the store and
+    signing-service sources have no secret of ours to leak at all — Windows
+    collects any PIN itself, and the provider's own sign-in collects the
+    remote one."""
     have_pfx = bool(pfx_path)
     have_pem = bool(key_path) or bool(cert_path)
     have_p11 = bool(pkcs11_module) or bool(pkcs11_token) or bool(pkcs11_cert_label)
     have_store = bool(store_cert)
-    if sum([have_pfx, have_pem, have_p11, have_store]) > 1:
+    have_csc = bool(csc)
+    if sum([have_pfx, have_pem, have_p11, have_store, have_csc]) > 1:
         raise ValueError(
             "Choose ONE signer source: a .pfx file, a PEM key + certificate, "
-            "a PKCS#11 token, or a certificate from the Windows certificate store."
+            "a PKCS#11 token, a certificate from the Windows certificate store, "
+            "or a credential at a signing service."
         )
     if have_pem and not (key_path and cert_path):
         raise ValueError("A PEM signer needs both the key file and the certificate file.")
+    if have_csc:
+        from engine import csc_signer
+
+        # The client stays open past this block deliberately: its token is the
+        # session's, not this signature's, and closing it here would re-run the
+        # provider's sign-in for the next signature in the same run.
+        yield csc_signer.CscSigner(csc_signer.open_session(**csc))
+        return
     if have_store:
         if not wincert.available():
             raise ValueError("The Windows certificate store is not available on this system.")
@@ -1105,8 +1155,47 @@ def _signer_source(
         return
     raise ValueError(
         "No signer given — provide a .pfx file, a PEM key + certificate, "
-        "a PKCS#11 token, or a certificate from the Windows certificate store."
+        "a PKCS#11 token, a certificate from the Windows certificate store, "
+        "or a credential at a signing service."
     )
+
+
+def _csc_source(
+    url: str | None,
+    credential_id: str | None,
+    client_id: str,
+    client_secret: str,
+    scope: str,
+    ca_bundle: str | None,
+    grant: str,
+    code: str,
+    redirect_uri: str,
+    verifier: str,
+    headless: bool,
+) -> dict | None:
+    """The signing-service source as one value, or None when unasked for.
+
+    Collapsing eleven parameters into one dict is what lets the source count in
+    ``_signer_source`` stay a count of SOURCES: a partially filled remote
+    configuration is still one source that is incomplete, never a second source
+    silently combined with a local one. The address alone selects it, so a
+    request that names a provider and forgets the credential refuses by name
+    instead of falling through to "no signer given"."""
+    if not url and not credential_id:
+        return None
+    return {
+        "url": url or "",
+        "credential_id": credential_id or "",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scope": scope or "service",
+        "ca_bundle": ca_bundle or None,
+        "grant": grant or "client-credentials",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "verifier": verifier,
+        "headless": bool(headless),
+    }
 
 
 def sign_pdf(
@@ -1129,6 +1218,7 @@ def sign_pdf(
     trust_roots: list | None = None,
     system_trust: bool = False,
     eutl_trust: bool = False,
+    msctl_trust: bool = False,
     pkcs11_module: str | None = None,
     pkcs11_token: str | None = None,
     pkcs11_pin: str = "",
@@ -1136,6 +1226,17 @@ def sign_pdf(
     pkcs11_key_label: str | None = None,
     store_cert: str | None = None,
     store_machine: bool = False,
+    csc_url: str | None = None,
+    csc_credential: str | None = None,
+    csc_client_id: str = "",
+    csc_client_secret: str = "",
+    csc_scope: str = "service",
+    csc_ca_bundle: str | None = None,
+    csc_grant: str = "client-credentials",
+    csc_code: str = "",
+    csc_redirect_uri: str = "",
+    csc_verifier: str = "",
+    csc_headless: bool = False,
     certify: bool = False,
     certify_level: str | None = None,
     lock: str | None = None,
@@ -1154,9 +1255,20 @@ def sign_pdf(
     ``pkcs11_token`` + ``pkcs11_cert_label``, optional ``pkcs11_key_label``
     defaulting to the cert label, ``pkcs11_pin``), or a certificate in the
     Windows certificate store named by its SHA-1 thumbprint (``store_cert``,
-    ``store_machine`` to read the machine store instead of the user's). The
-    store source takes no secret from us at all: Windows collects any PIN or
-    consent itself, inside the sign call. ``password`` unlocks the
+    ``store_machine`` to read the machine store instead of the user's), or a
+    credential at a remote signing service (``csc_url`` + ``csc_credential``,
+    with the user's own OAuth registration in ``csc_client_id`` /
+    ``csc_client_secret``; ``csc_grant`` names which grant that registration
+    uses, and the authorization-code grant additionally carries ``csc_code`` /
+    ``csc_redirect_uri`` / ``csc_verifier`` from the sign-in the user just
+    completed in their browser). ``csc_headless`` marks a run with nobody
+    present, where a browser sign-in is refused by name rather than attempted.
+    Neither the store source nor the signing service takes a secret from us at
+    all: Windows collects any PIN or consent itself, inside the sign call, and
+    the signing service's own sign-in collects the remote one — this
+    application never accepts a PIN or one-time password for either, and the
+    document's bytes never leave the machine for a remote signature, only its
+    digest. ``password`` unlocks the
     file-based sources (empty string for an unencrypted PEM key); the PIN
     unlocks the token, and like the password it is NEVER placed in results,
     errors, or logs. Every signing feature below — visible stamps,
@@ -1202,6 +1314,8 @@ def sign_pdf(
             certificate store. Off by default, read only when True.
         eutl_trust: also anchor that gathering on the bundled EU trusted-list
             certificates. Off by default, read only when True.
+        msctl_trust: also anchor that gathering on the bundled platform
+            root-program certificates. Off by default, read only when True.
         certify: Apply an AUTHOR (certification) signature, which records in
             the catalog what may change in the document afterwards. At most one
             per document, and it must be the document's first signature.
@@ -1268,6 +1382,11 @@ def sign_pdf(
         pfx_path, password, key_path, cert_path,
         pkcs11_module, pkcs11_token, pkcs11_pin, pkcs11_cert_label, pkcs11_key_label,
         store_cert, store_machine,
+        _csc_source(
+            csc_url, csc_credential, csc_client_id, csc_client_secret, csc_scope,
+            csc_ca_bundle, csc_grant, csc_code, csc_redirect_uri, csc_verifier,
+            csc_headless,
+        ),
     )
 
     placement = _validated_appearance(appearance, file) if appearance is not None else None
@@ -1315,6 +1434,8 @@ def sign_pdf(
                 anchors = [*anchors, *os_trust.anchors(os_trust.SIGNER_PURPOSES)]
             if eutl_trust:
                 anchors = [*anchors, *eutl.anchors(eutl.SIGNER)]
+            if msctl_trust:
+                anchors = [*anchors, *msctl.anchors(msctl.SIGNER)]
             if not anchors:
                 anchors = [signer.signing_cert, *signer.cert_registry]
             meta_kwargs["embed_validation_info"] = True

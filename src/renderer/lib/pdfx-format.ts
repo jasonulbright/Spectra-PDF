@@ -50,6 +50,8 @@ export interface ExportAnnotation {
   note?: string;
   points?: number[]; // measure/shape/callout-leader: flat [x0,y0,...] in x/y/w/h space
   strokes?: number[][]; // ink only: one flat path per pen lift, same space
+  // ink only: 'highlighter' builds the translucent /Multiply appearance.
+  inkStyle?: 'pen' | 'highlighter';
   imageData?: string; // stamp only: custom image stamp's data URL (the AP draws it)
   // stamp only: a TYPED personal signature. The id of the app-bundled script
   // face `note` is set in; the AP embeds that face's subset and draws the

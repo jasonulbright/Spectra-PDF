@@ -237,6 +237,23 @@ export const dialog = {
    * under a silent context, so opening the picker never raises a PIN prompt.
    */
   listStoreCertificates: () => invoke<StoreCertificate[]>('list_store_certificates'),
+  /**
+   * Sign in to a remote signing service in the SYSTEM BROWSER (RFC 8252) and
+   * return the authorization code its redirect carried.
+   *
+   * The dance is native-side because it needs a loopback listener: a native
+   * application cannot hold a client secret, and a loopback redirect is the
+   * one redirect target it can prove it owns. The PKCE verifier stays in this
+   * window and is never passed here — only its S256 challenge is — so the code
+   * and the verifier meet for the first time at the token request.
+   */
+  cscAuthorize: (args: {
+    baseUrl: string;
+    clientId: string;
+    scope: string;
+    challenge: string;
+    state: string;
+  }) => invoke<{ code: string; redirect_uri: string }>('csc_authorize', args),
   /** Pick ANY file to embed as a PDF attachment (no extension filter). */
   pickAnyFile: () => invoke<string | null>('pick_any_file'),
   /** Pick MULTIPLE files of any type (portfolio members). Empty if cancelled. */

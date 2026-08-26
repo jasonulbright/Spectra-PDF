@@ -1,0 +1,260 @@
+sha1	purposes	restricted_after	subject
+010c0695a6981914ffbf5fc6b0b695ea29e912a6	signer,timestamp		Hellenic Academic and Research Institutions RootCA 2015
+0119e81be9a14cd8e22f40ac118c687ecba3f4d8	timestamp		Microsoft Time Stamp Root Certificate Authority 2014
+0563b8630d62d75abbc8ab1e4bdfb5a899b24d43	signer,timestamp		DigiCert Assured ID Root CA
+06083f593f15a104a069a46ba903d006b7970991	signer,timestamp		NetLock Arany (Class Gold) Főtanúsítvány
+06f1aa330b927b753a40e68cdf22e34bcbef3352	signer,timestamp		Microsoft ECC Product Root Certificate Authority 2018
+07e032e020b72c3f192f0628a2593a19a70f069e	signer,timestamp		Certum Trusted Network CA
+093c61f38b8bdc7d55df7538020500e125f5c836	signer,timestamp		QuoVadis Root CA 2 G3
+0ab5c3cd7448b86d711e77a549838b87ce525f7f	signer,timestamp		Netrust Root CA 2
+0d44dd8c3c8c1a1a58756481e90f2e2affb3d26e	signer,timestamp		Amazon Root CA 3
+0d9e9ab20765a89ed9cd8df2c7a63bc77495ef31	timestamp		SSL.com Code Signing ECC Root CA 2022
+0f36385b811a25c39b314e83cae9346670cc74b4	signer,timestamp		GDCA TrustAUTH R5 ROOT
+0f523a6b4e7d1d1805a548f94dcde4c31e1be9e6	signer		D-Trust SBR Root CA 1 2022
+0ff9407618d3d76a4b98f0a8359e0cfd27accced	signer,timestamp		OISTE WISeKey Global Root GB CA
+104fe73700186e692e78a0156a3f9ed807b0608e	signer,timestamp		Entrust Digital Signing Root Certification Authority - DSR1
+1139a49e8484aaf2d90d985ec4741a65dd5d94e2	signer		GLOBAL CHAMBERSIGN ROOT - 2016
+139b1c712fd17c3ca5da6e5701afba0158f9d45d	timestamp		GlobalSign Timestamping Root R45
+14884e862637b026af59625c4077ec3529ba9601	signer,timestamp		Entrust Root Certification Authority - G4
+14d76562741050479f8b32c6868a18fae11999b0	signer		SwissSign RSA SMIME Root CA 2022 - 1
+1736afda873ce58200d3e100e41305ede44dbfcb	signer		IdenTrust Commercial Root SMIME RSA CA 2
+182e1f324f89dfbefe8889f093c2c4a02b677521	signer		GlobalSign Secure Mail Root E45
+1b8eea5796291ac939eab80a811a7373c0937967	signer,timestamp		QuoVadis Root CA 1 G3
+1cb8a708c90d207901a0b2367ff09565e45324fe	signer		DigiCert SMIME ECC P384 Root G5
+1e6577b9cf70d017cae1bda1351d4725a973c06d	timestamp		emSign Root CA - G2
+1e70283209903c9472c79b2c103e8ebb238beb62	signer		I.CA Root CA/ECC 12/2016
+1f24c630cda418ef2069ffad4fdd5f463a1b69aa	signer,timestamp		GlobalSign
+1f3f1486b531882802e87b624d420295a0fc721a	signer		Notarius Root Certificate Authority
+1f4914f7d874951dddae02c0befd3a2d82755185	signer,timestamp		QuoVadis Root CA 3
+204285dcf7eb764195578e136bd4b7d1e98e46a5	signer		VeriSign Class 1 Public Primary Certification Authority - G3
+20d80640df9b25f512253a11eaf7598aeb14b547	signer,timestamp		Entrust Root Certification Authority - EC1
+225e108f13b93e35b5c4c7bca6a11f750eae5037	signer,timestamp		QuoVadis Signing RSA 4096 Root G4
+23d731fedc5c8bb97de6dc8e13b411bd4f24004f	signer,timestamp		Halcom Root Certificate Authority
+26f993b4ed3d2827b0b94ba7e9151da38d92e532	signer		CERTSIGN SA
+2796bae63f1801e277261ba0d77770028f20eee4	signer		The Go Daddy Group, Inc.
+27ff63b9ef34293103381ad86060dacc602835e1	signer		D-Trust SBR Root CA 2 2022
+28903a635b5280fae6774c0b6da7d6baa64af2e8	signer,timestamp		EC-ACC
+28f97816197aff182518aa44fec1a0ce5cb64c8a	signer,timestamp		UCA Global G2 Root
+293621028b20ed02f566c532d1d6ed909f45002f	signer,timestamp		AffirmTrust Networking
+29a8332b0c37793270404ed57942f557e2b30796	timestamp		IdenTrust Commercial Root Timestamp ECC CA 2
+2a1d6027d94ab10a1c4d915ccd33a0cb3e2d54cb	signer,timestamp		GTS Root R4
+2b8f1b57330dbba2d07a6c51f70ee90ddab9ad8e	signer,timestamp		USERTrust RSA Certification Authority
+2bb1f53e550c1dc5f1d4e6b76a464b550602ac21	signer,timestamp		Atos TrustedRoot 2011
+2d0d5214ff9ead9924017420476e6c852727f543	signer,timestamp		Certigna Root CA
+2de16a5677baca39e1d68c30dcb14abe22a6179b	signer,timestamp		CHAMBERS OF COMMERCE ROOT - 2016
+2f686dc8d4e39553ed32938e6357133bb7d9910c	signer		SSL.com Document Signing RSA Root CA 2022
+2f7f1fc907b84e71eacc5695e186a144136e595a	signer		Buypass Class 3 Root CA G2 HT
+2f8f364fe1589744215987a52a9ad06995267fb5	signer,timestamp		Trustwave Global Certification Authority
+2fa44348e80e240ed04b685be4de792866955258	timestamp		e-Szigno TSA Root CA 2024
+3043fa4ff257dca0c380ee2e58ea78b23fe6bbc1	signer,timestamp		emSign ECC Root CA - G3
+30d4246f07ffdb91898a0be9496611eb8c5e46e5	signer,timestamp		GTS Root R3
+31f9fc8ba3805986b721ea7295c65b3a44534274	signer,timestamp		Microsoft ECC TS Root Certificate Authority 2018
+32d127fa93b1c14c99e24a40bc7f94411b5aaca4	signer		Atos TrustedRoot Root CA RSA G2 2020
+335a7ff00927cf2df278e2c9192f7a4d5534f80c	signer		LAWtrust Root Certification Authority 2048
+33ea1c7e79cf3166fdb9fa324773fbb78901004f	signer		Telia EC Email Root CA v3
+33f3820a9838680bf90da57815019e9ffdf31718	signer		CA Disig SMIME Root R4
+3403f0513b6768ad304a9e98fd673185ddc1ca08	signer		Telia RSA Signing Root CA v3
+342cd9d3062da48c346965297f081ebc2ef68fdc	signer,timestamp		GLOBALTRUST
+3679ca35668772304d30a5fb873b0fa77bb70d54	signer,timestamp		VeriSign Universal Root Certification Authority
+3753d295fc6d8bc39b375650bffc821aed504e1a	signer,timestamp		ZETES TSP ROOT CA 001
+3a44735ae581901f248661461e3b9cc45ff53a1b	signer,timestamp		Secure Global CA
+3a4979b40fa841488200b582fbeeb63aab9919ae	signer,timestamp		SI-TRUST Root
+3a8756534e5a2838bdb06f1c981176b3f9bd0c09	signer		IdenTrust Commercial Root SMIME ECC CA 2
+3ac5c378345be1829246ed1786b393917b51f214	signer		Sectigo Public Email Protection Root E46
+3b1efd3a66ea28b16697394703a72ca340a05bd5	signer,timestamp		Microsoft Root Certificate Authority 2010
+3bc49f48f8f373a09c1ebdf85bb1c365c7d811b3	signer,timestamp		SecureSign RootCA11
+3cc1a683ffe66836491af36be1d3fe0a37f59dae	signer		SSL.com Document Signing ECC Root CA 2022
+3f0feb17a7ef5804cfd90a77b7bb021ea69c6418	signer,timestamp		BYTE Root Certification Authority 001
+40b331a0e9bfe855bc3993ca704f4ec251d41d8f	signer		Symantec Class 2 Public Primary Certification Authority - G6
+4313bb96f1d5869bc14e6a92f6cff63469878237	signer,timestamp		TeliaSonera Root CA v1
+451c14c78b6b9cb290973e9de25972d1c9c0f24a	signer		Actalis SMIME RSA Root CA 2025
+461fdd19e71cd4329aadf224dc8c8628cd10fae8	signer,timestamp		I.CA Root CA/RSA 05/2022
+465b26bebe7106dd8544c1139d9fa25700c1d7bd	signer,timestamp		GLOBALTRUST 2015
+46af7a31b599460d469d6041145b13651df9170a	signer,timestamp		MULTICERT Root Certification Authority 01
+46c6900a773ab6bcf465adacfce3f707006ede6e	signer		HARICA Client RSA Root CA 2021
+4712175fc49806bdc6a52fba7f7838b382b0e857	timestamp		IdenTrust Commercial Root Timestamp RSA CA 2
+47beabc922eae80e78783462a79f45c254fde68b	signer,timestamp		Go Daddy Root Certificate Authority - G2
+4812bd923ca8c43906e7306d2796e6a4cf222e7d	signer,timestamp		QuoVadis Root CA 3 G3
+490a7574de870a47fe58eef6c76bebc60b124099	signer,timestamp		Buypass Class 2 Root CA
+49a2493755861f9ae1afb9438e3519ba9135a75f	timestamp		emSign Root TSA CA - G3
+4abdeeec950d359c89aec752a12c5b29f6d6aa0c	signer,timestamp		Global Chambersign Root - 2008
+4acadab14b74bf4fba7bace64b91801c44b8cc66	signer,timestamp		Autoridade Certificadora Raiz Brasileira v5
+4b6bd2d3884e46c80ce2b962bc598cd9d5d84013	signer		OATI WebCARES Root CA
+4cdd51a3d1f5203214b0c6c532230391c746426d	signer,timestamp		SSL.com EV Root Certification Authority ECC
+4dcf7d1b9b2608ed2c96b66b29610fcee76ac7f4	signer		Japanese Government Root CA
+4e004413485c145d9fde64adb16756e8f26aac8a	signer		SECOM RSA Root CA 2023
+4eb6d578499b1ccf5f581ead56be3d9b6744a5e5	signer		VeriSign Class 3 Public Primary Certification Authority - G5
+4f79df635510276969e823c4b87f793b9748d3ea	signer		GlobalSign Document Signing Root R45
+503006091d97d4f5ae39f7cbe7927d7d652d3431	signer,timestamp		Entrust.net Certification Authority (2048)
+51501fbfce69189d609cfaf140c576755dcc1fdf	signer		Hotspot 2.0 Trust Root CA - 03
+517f611e29916b5382fb72e744d98dc3cc536d64	signer		Symantec Class 1 Public Primary Certification Authority - G6
+52421aeac424c2435e7f5355a30437a3b1745879	timestamp		Sectigo Public Time Stamping Root R46
+5463283b6793ff55277cede39098e80422f912f7	signer,timestamp		AC Raíz Certicámara S.A.
+559bba7b0ffe80d6d3829b1fd07aa4d322194790	signer,timestamp		CAEDICOM Root
+55a6723ecbf2eccdc3237470199d2abe11e381d1	signer		T-TeleSec GlobalRoot Class 3
+58e8abb0361533fb80f79b1b6d29d3ff8d5f00f0	signer,timestamp		D-TRUST Root Class 3 CA 2 2009
+590d2d7d884f402e617ea562321765cf17d894e9	signer		T-TeleSec GlobalRoot Class 2
+5922a1e15aea163521f898396a4646b0441b0fa9	signer,timestamp		OISTE WISeKey Global Root GA CA
+5a4d0e8b5fdcfdf64e7299a36c060db222ca78e4	signer		Visa Information Delivery Root CA
+5a8cef45d7a69859767a8c8b4496b578cf474b1a	signer,timestamp		Amazon Root CA 2
+5af85b7b85ec6aa0b6b491ca0cfc05e9f51a3590	signer		Sectigo Public Document Signing Root E46
+5b27e1e3c91fd30e6e6ee66edfed12f5bcdf9236	signer		QuoVadis SMIME ECC P384 Root G4
+5bc5ade29aa754da848953a5fed75b4686d05708	signer		DigiCert SMIME RSA4096 Root G5
+5eeed86fa37c675230642f55c84ddbf67cd33c80	timestamp		DigiCert CS RSA4096 Root G5
+5f3b8cf2f810b37d78b4ceec1919c37334b9c774	signer,timestamp		SECOM Trust Systems CO.,LTD.
+5fb7ee0633e259dbad0c4c9ae6d38f1a61c7dc25	signer,timestamp		DigiCert High Assurance EV Root CA
+612556da6294e5aeb33cf811bdb1dcf8a5d8b3e4	signer		Atos TrustedRoot Root CA ECC G2 2020
+61ef43d77fcad46151bc98e0c35912af9feb6311	signer		VeriSign Class 2 Public Primary Certification Authority - G3
+6202bf169af27fa67ed0cec66b782b83226126e9	signer,timestamp		Fina Root CA
+6252dc40f71143a22fde9ef7348e064251b18118	signer,timestamp		Certum CA
+66f2dcfb3f814ddee9b3206f11defe1bfbdfe132	signer,timestamp		Thailand National Root Certification Authority - G1
+67650df17e8e7e5b8240a4f4564bcfe23d69c6f0	signer,timestamp		Chunghwa Telecom Co., Ltd.
+6969562e4080f424a1e7199f14baf3ee58ab6abb	signer,timestamp		GlobalSign
+6ba0b098e171ef5aadfe4815807710f4bd6f0b28	signer		GlobalSign
+6c155ed7271a904a0dc040f0c857ff53bf6db290	signer		Autoridade Certificadora Raiz Brasileira v10
+6c7ccce7d4ae515f9908cd3ff6e8c378df6fef97	signer		D-TRUST Root CA 3 2013
+6f62deb86c85585ae42e478db4d76db367585ae6	signer,timestamp		ANCERT Certificados Notariales V2
+702723132527203947e0a97829a0731372b03917	signer,timestamp		I.CA Root CA/ECC 05/2022
+73fe922f836391ffc8c6c4dad6202f6b072e7f1b	signer,timestamp		TWCA Global Root CA G2
+742731e462463f808cfcb50475053cbff6615c1b	signer		Thailand National Root Certification Authority - G3
+743af0529bd032a0f44a83cdd4baa97b7c2ec49a	signer,timestamp		SSL.com EV Root Certification Authority RSA R2
+746f88f9ac163c53009eef920c4067756a15717e	signer,timestamp		Swedish Government Root Authority v3
+7612ed9e49b365b4dad3120c01e603748dae8cf0	signer		GPKIRootCA1
+7618d1f380243d5240c6116aad5777097d8130a0	signer		GlobalSign Secure Mail Root R45
+77d30367b5e00c15f60c3861df7ce13b92464d47	signer		GTS Root R4
+786a74ac76ab147f9c6a3050ba9ea87efe9ace3c	signer,timestamp		Chambers of Commerce Root - 2008
+7a221e3dde1b06ac9ec84770168e3ce5f76b06f4	signer		SecureSign Root CA12
+7e04de896a3e666d00e687d33ffad93be83d349e	signer,timestamp		DigiCert Global Root G3
+7eb1a0429be5f428ac2b93971d7c8448a536070c	signer,timestamp		ANCERT Certificados CGN V2
+803870b772d138ce19f16bf50557bcaa5437c72e	timestamp		Actalis Time Stamping ECC Root CA 2025
+807b1d9d65723dc756f9ecc5008349f6f2acf486	signer		SSL.com Client ECC Root CA 2022
+8094640eb5a7a1ca119c1fddd59f810263a7fbd1	signer,timestamp		GlobalSign
+8351509b7df8cfe87bae62aeb9b03a52f4e62c79	signer,timestamp		National Center for Digital Certification
+843573112a3b319344e5e4ecabc9f26c7cd54d07	timestamp		DigiCert CS ECC P384 Root G5
+85a6693ed12c4aad8db69c8860b580134ebf2c77	signer,timestamp		ePKI Root Certification Authority - G4
+8782c6c304353bcfd29692d2593e7d44d934ff11	signer,timestamp		SecureTrust CA
+87b8e6d38f1a39cd97f04a9e174b3c9ee7ee1115	signer,timestamp		DigiCert RSA4096 Root G5
+893f6f1ce24d7ffbc3d3147a0580a7dee10a5e4d	signer		Telekom Security SMIME RSA Root 2023
+897424053a4a887ac098380291034d885c8714b9	timestamp		Entrust Code Signing Root Certification Authority - CSBR1
+89d483034f9e9a48805f7237d4a9a6efcb7c1fd1	signer,timestamp		e-Szigno Root CA 2017
+89d6447851f93bdf7992d61e6bbdddcb7ebc837c	timestamp		Actalis Time Stamping RSA Root CA 2025
+89df74fe5cf40f4a80f9e3377d54da91e101318e	signer,timestamp		Microsec e-Szigno Root CA 2009
+8ac7ad8f73ac4ec1b5754da540f4fccf7cb58e8c	signer		emSign Root CA - G1
+8cf427fd790c3ad166068de81e57efbb932272d4	signer,timestamp		Entrust Root Certification Authority - G2
+8da7f965ec5efc37910f1c6e59fdc1cc6a6ede16	signer,timestamp		Amazon Root CA 1
+8ddeb82046b6227c79246a3ead7b32c3e88ffcac	timestamp		HARICA Code Signing RSA Root CA 2021
+8f43288ad272f3103b6fb1428485ea3014c0bcfe	signer,timestamp		Microsoft Root Certificate Authority 2011
+8f6bf2a9274ada14a0c4f48e6127f9c01e785dd1	signer		NAVER Global Root Certification Authority
+90a5e1bdc53f6908c2e3739fe755e37f75f38447	signer		SECOM SMIME RSA Root CA 2024
+912198eef23dcac40939312fee97dd560bae49b1	signer,timestamp		Verizon Global Root CA
+91c6d6ee3e8ac86384e548c299295c756c817b81	signer		thawte Primary Root CA
+925a8f8d2c6d04e0665f596aff22d863e8256f3f	signer,timestamp		Starfield Services Root Certificate Authority - G2
+93057a8815c64fce882ffa9116522878bc536417	signer		ACCVRAIZ1
+96c91b0b95b4109842fad0d82279fe60fab91683	signer,timestamp		D-TRUST Root Class 3 CA 2 EV 2009
+9a44497632dbdefad0bcfb5a7b17bd9e56092494	signer		GTS Root R2
+9a839afc3549e4c1dfa89863d28e536c8eadc608	signer		emSign Root SMIME CA - G3
+9b0959898154081bf6a90e9b9e58a4690c9ba104	signer,timestamp		I.CA Root CA/RSA
+9baae59f56ee21cb435abe2593dfa7f040d11dcb	signer		SwissSign Silver CA - G2
+9cbb4853f6a4f6d352a4e83252556013f5adaf65	signer		TWCA Global Root CA
+9d319381546ea6a12811e09cf90a20c840be944d	signer,timestamp		eSignTrust Root Certification Authority (G03)
+9d70bb01a5a4a018112ef71c01b932c534e788a8	signer,timestamp		Certinomis - Root CA
+9e18140954e92d527a508146c3993e067a29c9f9	signer		Telia EC Signing Root CA v3
+9f744e9f2b4dbaec0f312c50b6563b8e2d93c311	signer,timestamp		COMODO ECC Certification Authority
+9ff1718d92d59af37d7497b4bc6f84680bbab666	signer,timestamp		Hellenic Academic and Research Institutions ECC RootCA 2015
+a14b48d943ee0a0e40904f3ce0a4c09193515d3f	signer,timestamp		DigiCert Assured ID Root G2
+a1585187156586cef9c454e22ab15c58745607b4	signer,timestamp		Swiss Government Root CA I
+a247917adac4d274501ebaec52d45b02ba593d12	signer		Sectigo Public Document Signing Root R46
+a4d6b770e765a9bf17ecd7b5e03b852d612fa71d	signer		AC RAIZ FNMT-RCM G2
+a79e41380bab3ed7f5188d9a5209cefcb3ca6991	signer,timestamp		CCA India 2022
+a8985d3a65e5e5c4b2d7d66d40c6dd2fb19c5436	signer,timestamp		DigiCert Global Root CA
+a9cafe9dfd67f4145ad397d0e2f3050d198de6ee	signer,timestamp		Australian Defence Public Root CA
+aa40d2579ba82424cd27719b1d6b1f3571738099	signer,timestamp		PostSignum Root QCA 4
+aa5970e520329fcbd0d5799ffb1b821dfd1f7965	signer		SSL.com Client RSA Root CA 2022
+aa6c3caff096c64dc32784be9d8a3e3a7bb44ec2	signer		Telia RSA Email Root CA v3
+ad4eb39a75b72a4eb1e3224fcd4053504d0d8ef6	signer		emSign Root SMIME CA - G1
+ad7e1c28b064ef8f6003402014c3d0e3370eb58a	signer		Starfield Technologies, Inc.
+ae3b31bf8fd891079cf1df34cbce6e70d37fb5b0	signer,timestamp		ComSign Global Root CA
+aec5fb3fc8e1bfc4e54f03075a9ae800b7f7b6fa	signer,timestamp		Autoridad de Certificacion Firmaprofesional CIF A62634068
+aecc6124a6cb7f7c1bc0d63623723e8a09cf587e	timestamp		emSign Root TSA CA - G2
+afe5d244a8d1194230ff479fe2f897bbcd7a8cb4	signer,timestamp		COMODO RSA Certification Authority
+b12e13634586a46f1ab2606837582dc4acfd9497	signer,timestamp		Certigna
+b1bc968bd4f49d622aa89a81f2150152a41d829c	signer,timestamp		GlobalSign Root CA
+b1c3ac0977aaf147e5821a87f8da32226a210693	signer,timestamp		Notarius Root Certificate Authority
+b31eb1b740e36c8402dadc37d44df5d4674952f9	signer,timestamp		Entrust Root Certification Authority
+b49082dd450cbe8b5bb166d3e2a40826cded42cf	signer,timestamp		Trustwave Global ECC P256 Certification Authority
+b51c067cee2b0c3df855ab2d92f4fe39d4e70f0e	signer,timestamp		Starfield Root Certificate Authority - G2
+b561ebeaa4dee4254b691a98a55747c234c7d971	signer,timestamp		CA Disig Root R2
+b6af43c29b81537df6ef6bc31f1f60150cee4866	signer,timestamp		emSign ECC Root CA - C3
+b7ab3308d1ea4477ba1480125a6fbda936490cbb	signer,timestamp		SSL.com Root Certification Authority RSA
+b7f91d98ec2593f35014849aa87e22103cc43927	signer		Telekom Security SMIME ECC Root 2021
+b80186d1eb9c86a54104cf3054f34c52b7e558c6	signer,timestamp		XRamp Global Certification Authority
+b80e26a9bfd2b23bc0ef46c9bac7bbf61d0d4141	signer,timestamp		Security Communication ECC RootCA1
+b8236b002f1d16865301556c11a437caebffc3bb	signer,timestamp		AffirmTrust Premium ECC
+b8b1c5aac29bedf0ad71b2f14bfeaa38f817535e	signer		Entrust SMIME Root CA - 2022
+b999cdd173508ac44705089c8c88fbbea02b40cd	signer		Telia Root CA v2
+ba29416077983ff4f3eff231053b2eea6d4d45fd	signer,timestamp		IdenTrust Public Sector Root CA 1
+bca2188074c3147e16f4c48c5910a89ef752f479	timestamp		emSign Root CA - C2
+be64d3da144bd26bcdaf8fdba6a672f8de26f900	signer		HARICA Client ECC Root CA 2021
+c16355e18199a0281a86f036746127833264f053	signer		Actalis SMIME ECC Root CA 2025
+c303c8227492e561a29c5f79912b1e441391303a	signer,timestamp		Security Communication RootCA3
+c3197c3924e654af1bc4ab20957ae2c30e13026a	signer,timestamp		SSL.com Root Certification Authority ECC
+c88344c018ae9fccf187b78f22d1c5d74584bae5	signer,timestamp		Certum Trusted Root CA
+c95e9c79d60752386209c1e4c68a6b8bd54ff2db	timestamp		Sectigo Public Time Stamping Root E46
+c9b8dbf79c9a3d54b7e46ee63d72f9435e32bfa6	signer		QuoVadis SMIME RSA 4096 Root G4
+ca3afbcf1240364b44b216208880483919937cf7	signer,timestamp		QuoVadis Root CA 2
+cb658264ea8cda186e1752fb52c397367ea387be	signer		Echoworx Root CA2
+cbba83c8c15a5df1f9736fcad7ef2813064a077d	signer		SecureSign Root CA15
+ce71315dc098611f608c6cdeccedc35d18d08548	signer		GlobalSign Document Signing Root E45
+cf9e876dd3ebfc422697a3b5a37aa076a9062348	signer,timestamp		TWCA Root Certification Authority
+d067c11351010caad0c76a65373116264f5371a2	signer,timestamp		GLOBALTRUST 2020
+d17917ec45e2a0cad774513010a4c65caab33c49	signer		SecureSign Root CA16
+d1cbca5db2d52a7f693b674de5f05a1d0c957df0	signer,timestamp		USERTrust ECC Certification Authority
+d1eb23a46d17d68fd92564c2f1f1601764d8e349	signer,timestamp		AAA Certificate Services
+d1eeb1e8c09020bab85d3de27f78ee33a06caedb	signer,timestamp		DigiCert ECC P384 Root G5
+d273962a2a5e399f733fe1c71e643f033834fc4d	signer,timestamp		GTS Root R2
+d37b8b0ae84244fb6b8038eeae9180261a487066	signer		Sectigo Public Email Protection Root R46
+d3dd483e2bbf4c05e8af10f5fa7626cfd3dc3092	signer		Certum Trusted Network CA 2
+d4695284cd1798d9cb1699464c064994c4e2bbfd	timestamp		SSL.com Code Signing RSA Root CA 2022
+d496592b305707386cc5f3cdb259ae66d7661fca	signer,timestamp		ACA ROOT
+d4de20d05e66fc53fe1a50882c78db2852cae474	signer,timestamp		Baltimore CyberTrust Root
+d69b561148f01c77c54578c10926df5b856976ad	signer,timestamp		GlobalSign
+d884ef31b85cdbcb0f95a6f4cd038f8848135d25	signer		Cybertrust iTrust Root Certification Authority
+d8a6332ce0036fb185f6634f7d6a066526322827	signer,timestamp		AffirmTrust Premium
+d8c5388ab7301b1b6ed47ae645253a6f9f1a2761	signer		SwissSign Gold CA - G2
+d8eb6b41519259e0f3e78500c03db68897c9eefc	signer		Staat der Nederlanden Root CA - G3
+d99b104298594763f0b9a927b79269cb47dd158b	signer,timestamp		ePKI Root Certification Authority - G2
+dafaf7fa6684ec068f1450bdc7c281a5bca96457	signer,timestamp		Buypass Class 3 Root CA
+dd50c0f779b3642e74a2b89d9fd340ddbbf0f24f	signer		SecureSign Root CA14
+ddfb16cd4931c973a2037d3fc83a4d7d775d05e4	signer,timestamp		DigiCert Trusted Root G4
+de010808e41ec41930d44095f8fe596b582c8ca2	signer		Hongkong Post Root CA 2
+df3c24f9bfd666761b268073fe06d1cc8d4f82a4	signer,timestamp		DigiCert Global Root G2
+df717eaa4ad94ec9558499602d48de5fbcf03a25	signer,timestamp		IdenTrust Commercial Root CA 1
+e011845e34debe8881b99cf61626d1961fc3b931	signer,timestamp		OISTE WISeKey Global Root GC CA
+e1c950e6ef22f84c5645728b922060d7d5a7a3e8	signer,timestamp		GTS Root R1
+e1e1ba90daa51e5d7ba35a9f070422988ad4634b	signer		e-Szigno SMIME Root CA 2024
+e252fa953feddb2460bd6e28f39ccccf5eb33fde	signer		SZAFIR ROOT CA2
+e2b8294b5584ab6b58c290466cac3fb8398f8483	signer,timestamp		CFCA EV ROOT
+e436e537b71342b62e8e00305ad9a3d1d73347e9	timestamp		HARICA Code Signing ECC Root CA 2021
+e58c1cc4913b38634be9106ee3ad8e6b9dd9814a	signer		GTS Root R1
+e72ef1dffcb20928cf5dd4d56737b151cb864f01	signer		emSign Root CA - C1
+e7f3a3c8cf6fc3042e6d0e6732c59e68950d5ed2	signer,timestamp		Trustwave Global ECC P384 Certification Authority
+eb9237b72076f8cc8bc13e7046f2fcabc18199d3	signer,timestamp		Carillon PKI Services G2 Root CA 1
+ec503507b215c4956219e2a89a5b42992c4c2c20	signer,timestamp		FNMT-RCM
+ec93de083c93d933a986b3d5cde25acb2feecf8e	signer,timestamp		NetLock Platina (Class Platinum) Főtanúsítvány
+eca2d530a9ab2c7d0e7561644e0ae016a154387d	signer		LAWtrust Root CA2 (4096)
+ede571802bc892b95b833cd232683f09cda01e46	signer		GTS Root R3
+ee869387fffd8349ab5ad14322588789a457b012	signer,timestamp		COMODO Certification Authority
+f02b70bde4eae02b207377b9fd4785e4c9cc55dc	signer		CFCA Identity CA
+f33e783cacdff4a2ccac67556956d7e5163ce1ed	signer,timestamp		Certum EC-384 CA
+f373b387065a28848af2f34ace192bddc78e9cac	signer,timestamp		Actalis Authentication Root CA
+f40042e2e5f7e8ef8189fed15519aece42c3bfa2	timestamp		Microsoft Identity Verification Root Certificate Authority 2020
+f435f85f0108da684e7bfd517c90c627bb9a6cf5	signer		VRK Gov. Root CA - G2
+f517a24f9a48c6c9f8a200269fdc0f482cab3089	signer,timestamp		DigiCert Assured ID Root G3
+f6108407d6f8bb67980cc2e244c2ebae1cef63be	signer,timestamp		Amazon Root CA 4
+f90cc7521eab33f228eaa835e4e50292e31d281e	signer		TrustFactory Client Root Certificate Authority
+f9b5b632455f9cbeec575f80dce96e2cc7b278b7	signer,timestamp		AffirmTrust Commercial
+fab7ee36972662fb2db02af6bf03fde87c4b2f9b	signer,timestamp		certSIGN
+fdd93b294972ba743a0c2e6abcfa10050652a047	signer,timestamp		SECOM Document Signing RSA Root CA 2023
+fe45659b79035b98a161b5512eacda580948224d	signer,timestamp		Hellenic Academic and Research Institutions RootCA 2011
+ff54e2961172ceda5a4c97494f1b5d0df0f17d6f	signer,timestamp		QuoVadis Signing ECC P384 Root G4
+ffb7e08f66e1d0c2582f0245c4970292a46e8803	signer,timestamp		Főtanúsítványkiadó - Kormányzati Hitelesítés Szolgáltató

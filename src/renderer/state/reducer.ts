@@ -111,6 +111,10 @@ export const initialUiState: UiState = {
   recentFiles: [],
   navPane: { open: false, panel: 'pages', width: NAV_PANE_DEFAULT_WIDTH },
   toolDock: { open: false, width: TOOL_DOCK_DEFAULT_WIDTH },
+  // Locked by default: an armed annotation mode has always survived its own
+  // placements, and the control makes that a stated choice rather than an
+  // accident. Unlocking is the one-shot behaviour.
+  toolLock: true,
 };
 
 // Leaving doc-tab-land re-applies the board's parked-state semantics: the
@@ -378,6 +382,45 @@ function openTool(ui: UiState, toolId: string | null): UiState {
   const tool = canvasModeAfterOpening(ui, owner);
   if (toolId === ui.activeToolId && tool === ui.tool) return ui;
   return { ...ui, activeToolId: toolId, tool };
+}
+
+/**
+ * The canvas modes a completed PLACEMENT finishes: every mode whose gesture
+ * ends by adding a PageAnnotation. `afterPlacement` is the ONE seam that
+ * decides whether such a mode stays armed, so tool locking is a single rule
+ * rather than a per-tool convention the next author has to remember — the same
+ * reasoning `openTool` records about the mode a tool arms.
+ */
+const PLACEMENT_MODES: ReadonlySet<CanvasTool> = new Set<CanvasTool>([
+  'highlight', 'freetext', 'ink', 'inkhighlight', 'stamp', 'shape', 'callout', 'note', 'count',
+  // The measure modes belong here on their own behaviour, not by analogy: a
+  // finished measurement lands as a real dimension annotation through the same
+  // ADD_ANNOTATION the modes above use, and the lock control renders for the
+  // Measure tool like every other mode group. The one gesture this seam cannot
+  // reach is measuring with leave-markup switched OFF, which places nothing —
+  // there is no placement to follow, so the mode stays armed.
+  'measuredist', 'measureperim', 'measurearea',
+]);
+
+/**
+ * What `ui` becomes once a placement lands.
+ *
+ * Locked (the default): unchanged — the mode stays armed, so marking up a long
+ * scan costs one arming gesture and N drags. Unlocked: the mode disarms to
+ * 'select' while `activeToolId` is left alone, so the tool and its pane stay
+ * open and the next click selects what was just placed.
+ *
+ * This can never outrank `openTool`. Locking decides what happens BETWEEN
+ * placements of an armed mode; `openTool` decides what is armed at all, and it
+ * recomputes `ui.tool` from the opened tool every time — so closing the tool,
+ * opening one that owns no mode, or landing on the tile grid disarms whatever
+ * the lock was holding. A locked mode cannot go silently live on the next
+ * document, which is the invariant `openTool` exists to hold.
+ */
+function afterPlacement(ui: UiState): UiState {
+  if (ui.toolLock) return ui;
+  if (!PLACEMENT_MODES.has(ui.tool)) return ui;
+  return { ...ui, tool: 'select' };
 }
 
 /** What `ui.tool` becomes when `owner` is opened (undefined owner = closed). */
@@ -1061,7 +1104,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             : p,
         ),
       }));
-      return applyPageEdit(state, documents, [doc.path]);
+      const placed = applyPageEdit(state, documents, [doc.path]);
+      return { ...placed, ui: afterPlacement(placed.ui) };
     }
     case 'REGROUP_COUNT_MARKS': {
       // Re-file marks into the armed group (the Ctrl-marquee gesture). Colour
@@ -1578,6 +1622,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UI_SET_TOOL':
       if (action.tool === state.ui.tool) return state;
       return { ...state, ui: { ...state.ui, tool: action.tool } };
+    case 'UI_SET_TOOL_LOCK':
+      if (action.locked === state.ui.toolLock) return state;
+      return { ...state, ui: { ...state.ui, toolLock: action.locked } };
     case 'UI_SET_DOC_VIEW_MODE':
       if (action.mode === state.ui.docViewMode) return state;
       return { ...state, ui: { ...state.ui, docViewMode: action.mode } };

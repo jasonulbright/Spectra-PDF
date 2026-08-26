@@ -458,6 +458,10 @@ export interface PageAnnotationSnapshot {
   opacity?: number;
   /** The vertex list, for the geometry assertions a snap needs. */
   points?: number[];
+  /** ink only: which pen drew it ('highlighter' = the freehand highlighter),
+   * and how many pen lifts it carries. */
+  inkStyle?: string;
+  strokeCount?: number;
   /** Which count group a mark belongs to, its marker symbol and
    * its sequence — spec 107 asserts these RECONSTITUTE from the saved file. */
   countGroup?: string;

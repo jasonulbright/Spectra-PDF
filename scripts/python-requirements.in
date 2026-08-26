@@ -47,6 +47,13 @@ openpyxl==3.1.5
 # list. MIT; a `py2.py3-none-any` wheel, so nothing compiles at packaging
 # time and it has no dependencies of its own.
 spylls==0.1.7
+# Remote signing (Cloud Signature Consortium): the HTTP client engine/csc.py
+# speaks to a user-configured signing service with. Already resolved here as a
+# transitive dependency, promoted to a top-level pin because a first-party
+# module now imports it directly — a dependency reached only through somebody
+# else's requirements can disappear under a bump that has nothing to do with
+# this feature. Apache-2.0.
+requests==2.34.2
 # Presentation export: the deck writer for the pptx target. MIT, `none-any`.
 # Its binary transitive dependencies (lxml, Pillow) already resolve here at the
 # same versions, so nothing is duplicated or upgraded.

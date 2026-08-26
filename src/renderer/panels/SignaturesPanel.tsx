@@ -11,6 +11,7 @@ import {
   EMPTY_SIGNER_SOURCE,
   signerSourceParams,
   rememberStoreCertificate,
+  rememberCscCredential,
   type SignerParams,
 } from '../components/SignerSourceFields';
 import type { SignerSource } from '../components/SignerSourceFields';
@@ -52,7 +53,10 @@ import {
   eutlProvenance,
   eutlUnavailable,
   loadTrustConfig,
+  msctlProvenance,
+  msctlUnavailable,
   saveEutl,
+  saveMsctl,
   saveSystemStore,
   saveTrustAnchors,
   systemStoreUnavailable,
@@ -206,10 +210,15 @@ export function SignaturesPanel(): React.ReactElement {
     setTrust((t) => ({ ...t, eutl: on }));
     saveEutl(on);
   }, []);
+  const setMsctl = useCallback((on: boolean) => {
+    setTrust((t) => ({ ...t, msctl: on }));
+    saveMsctl(on);
+  }, []);
 
   // The bundle's own provenance, which only a verification can report — the
   // panel never asserts a fetch date the engine did not just state.
   const provenance = eutlProvenance(result);
+  const programProvenance = msctlProvenance(result);
 
   const path = activeFile?.path ?? null;
   const workingPath = activeFile?.workingPath ?? null;
@@ -299,10 +308,11 @@ export function SignaturesPanel(): React.ReactElement {
         output,
         ...sourceParams,
         // A token source takes the password field as its PIN; a store
-        // certificate takes no secret from us at all, so none is sent.
+        // certificate and a signing-service credential take no secret from us
+        // at all, so none is sent.
         ...(sourceParams.pkcs11_module
           ? { pkcs11_pin: pw }
-          : sourceParams.store_cert
+          : sourceParams.store_cert || sourceParams.csc_url
             ? {}
             : { password: pw }),
         ...(rsn && rsn.trim() ? { reason: rsn.trim() } : {}),
@@ -361,6 +371,8 @@ export function SignaturesPanel(): React.ReactElement {
       );
       setSignResult(res);
       if (source.mode === 'store' && source.thumbprint) rememberStoreCertificate(source.thumbprint);
+      if (source.mode === 'csc' && source.providerId && source.credentialId)
+        rememberCscCredential(source.providerId, source.credentialId);
       setShowSign(false);
     } catch (e: unknown) {
       setSignError(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
@@ -395,10 +407,11 @@ export function SignaturesPanel(): React.ReactElement {
       await performOperation(activeFile.path, 'sign_pdf', {
         ...sourceParams,
         // A token source takes the password field as its PIN; a store
-        // certificate takes no secret from us at all, so none is sent.
+        // certificate and a signing-service credential take no secret from us
+        // at all, so none is sent.
         ...(sourceParams.pkcs11_module
           ? { pkcs11_pin: pw }
-          : sourceParams.store_cert
+          : sourceParams.store_cert || sourceParams.csc_url
             ? {}
             : { password: pw }),
         // The engine refuses output == input UNLESS this opt-in is set — the
@@ -450,6 +463,8 @@ export function SignaturesPanel(): React.ReactElement {
       const v = await doSignInPlace(resolved.params!, password, reason, location, certify, lock, stampParams);
       setResult(v); // the new signature lists immediately
       if (source.mode === 'store' && source.thumbprint) rememberStoreCertificate(source.thumbprint);
+      if (source.mode === 'csc' && source.providerId && source.credentialId)
+        rememberCscCredential(source.providerId, source.credentialId);
       setShowSign(false);
     } catch (e: unknown) {
       setSignError(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
@@ -672,6 +687,34 @@ export function SignaturesPanel(): React.ReactElement {
               date: provenance.fetched,
               lists: provenance.lists,
               anchors: provenance.anchors,
+            })}
+          </p>
+        )}
+        {/* The fourth source: the certificates a root-certificate program
+            publishes, bundled with the app rather than fetched. It ADDS to the
+            certificate-store source rather than standing in for it — a root an
+            administrator installed locally is in the store and not in any
+            published program. */}
+        <label className="flex items-center gap-2 text-xs text-neutral-300 mt-1">
+          <input
+            data-testid="trust-msctl"
+            type="checkbox"
+            checked={trust.msctl}
+            onChange={(e) => setMsctl(e.target.checked)}
+          />
+          {tChrome('panel.sig.msctl')}
+        </label>
+        <p className="text-[11px] text-neutral-500">{tChrome('panel.sig.msctlHint')}</p>
+        {msctlUnavailable(result) && (
+          <p data-testid="trust-msctl-unavailable" className="text-[11px] text-amber-200/90">
+            {tChrome('panel.sig.msctlUnavailable')}
+          </p>
+        )}
+        {programProvenance && (
+          <p data-testid="trust-msctl-provenance" className="text-[11px] text-neutral-500">
+            {tChrome('panel.sig.msctlProvenance', {
+              date: programProvenance.fetched,
+              anchors: programProvenance.anchors,
             })}
           </p>
         )}
@@ -926,9 +969,11 @@ function TrustStatusBox({
         ? tChrome('panel.sig.trustVerifiedSystem')
         : summary === 'eutl'
           ? tChrome('panel.sig.trustVerifiedEutl')
-          : summary === 'mixed'
-            ? tChrome('panel.sig.trustVerifiedMixed')
-            : tChromeCount('panel.sig.trustVerified', trust.anchors.length);
+          : summary === 'msctl'
+            ? tChrome('panel.sig.trustVerifiedMsctl')
+            : summary === 'mixed'
+              ? tChrome('panel.sig.trustVerifiedMixed')
+              : tChromeCount('panel.sig.trustVerified', trust.anchors.length);
   return (
     <div
       data-testid="trust-status"

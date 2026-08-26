@@ -7,7 +7,10 @@ import {
   eutlUnavailable,
   hasTrustSource,
   loadTrustConfig,
+  msctlProvenance,
+  msctlUnavailable,
   saveEutl,
+  saveMsctl,
   saveSystemStore,
   saveTrustAnchors,
   systemStoreUnavailable,
@@ -68,11 +71,11 @@ describe('trust configuration', () => {
 
   it('persists anchors and the store opt-in independently', () => {
     saveTrustAnchors(['C:/ca.pem']);
-    expect(loadTrustConfig()).toEqual({ anchors: ['C:/ca.pem'], systemStore: false, eutl: false });
+    expect(loadTrustConfig()).toEqual({ anchors: ['C:/ca.pem'], systemStore: false, eutl: false, msctl: false });
     saveSystemStore(true);
-    expect(loadTrustConfig()).toEqual({ anchors: ['C:/ca.pem'], systemStore: true, eutl: false });
+    expect(loadTrustConfig()).toEqual({ anchors: ['C:/ca.pem'], systemStore: true, eutl: false, msctl: false });
     saveTrustAnchors([]);
-    expect(loadTrustConfig()).toEqual({ anchors: [], systemStore: true, eutl: false });
+    expect(loadTrustConfig()).toEqual({ anchors: [], systemStore: true, eutl: false, msctl: false });
   });
 
   it('reads a corrupted anchor list as no anchors rather than throwing', () => {
@@ -90,16 +93,40 @@ describe('trust configuration', () => {
     expect(loadTrustConfig().systemStore).toBe(false);
     store.set('spectra.trustEutl', 'yes');
     expect(loadTrustConfig().eutl).toBe(false);
+    store.set('spectra.trustMsctl', 'yes');
+    expect(loadTrustConfig().msctl).toBe(false);
   });
 
   it('persists the trusted-list opt-in as its own source', () => {
     saveEutl(true);
-    expect(loadTrustConfig()).toEqual({ anchors: [], systemStore: false, eutl: true });
+    expect(loadTrustConfig()).toEqual({ anchors: [], systemStore: false, eutl: true, msctl: false });
     expect(hasTrustSource(loadTrustConfig())).toBe(true);
     saveSystemStore(true);
-    expect(loadTrustConfig()).toEqual({ anchors: [], systemStore: true, eutl: true });
+    expect(loadTrustConfig()).toEqual({ anchors: [], systemStore: true, eutl: true, msctl: false });
     saveEutl(false);
-    expect(loadTrustConfig()).toEqual({ anchors: [], systemStore: true, eutl: false });
+    expect(loadTrustConfig()).toEqual({ anchors: [], systemStore: true, eutl: false, msctl: false });
+  });
+
+  it('persists the root-program opt-in as its own source', () => {
+    saveMsctl(true);
+    expect(loadTrustConfig()).toEqual({
+      anchors: [],
+      systemStore: false,
+      eutl: false,
+      msctl: true,
+    });
+    expect(hasTrustSource(loadTrustConfig())).toBe(true);
+    // Additive, not a substitute: turning the store on must not turn this off,
+    // and turning this off must not disturb the store.
+    saveSystemStore(true);
+    expect(loadTrustConfig().msctl).toBe(true);
+    saveMsctl(false);
+    expect(loadTrustConfig()).toEqual({
+      anchors: [],
+      systemStore: true,
+      eutl: false,
+      msctl: false,
+    });
   });
 });
 
@@ -107,40 +134,59 @@ describe('engine params', () => {
   it('sends NO system_trust key while the option is off', () => {
     // The engine's default path reads no certificate store at all; emitting
     // the key as false would still be a deliberate request.
-    expect(trustVerifyParams({ anchors: [], systemStore: false, eutl: false })).toEqual({});
-    expect(trustVerifyParams({ anchors: ['C:/ca.pem'], systemStore: false, eutl: false })).toEqual({
+    expect(trustVerifyParams({ anchors: [], systemStore: false, eutl: false, msctl: false })).toEqual({});
+    expect(trustVerifyParams({ anchors: ['C:/ca.pem'], systemStore: false, eutl: false, msctl: false })).toEqual({
       trust_roots: ['C:/ca.pem'],
     });
   });
 
   it('sends the opt-in with or without anchors', () => {
-    expect(trustVerifyParams({ anchors: [], systemStore: true, eutl: false })).toEqual({ system_trust: true });
-    expect(trustVerifyParams({ anchors: ['C:/ca.pem'], systemStore: true, eutl: false })).toEqual({
+    expect(trustVerifyParams({ anchors: [], systemStore: true, eutl: false, msctl: false })).toEqual({ system_trust: true });
+    expect(trustVerifyParams({ anchors: ['C:/ca.pem'], systemStore: true, eutl: false, msctl: false })).toEqual({
       trust_roots: ['C:/ca.pem'],
       system_trust: true,
     });
   });
 
   it('sends each source separately, so one opt-in never implies another', () => {
-    expect(trustVerifyParams({ anchors: [], systemStore: false, eutl: true })).toEqual({
+    expect(trustVerifyParams({ anchors: [], systemStore: false, eutl: true, msctl: false })).toEqual({
       eutl_trust: true,
     });
-    expect(trustVerifyParams({ anchors: ['C:/ca.pem'], systemStore: true, eutl: true })).toEqual({
+    expect(trustVerifyParams({ anchors: ['C:/ca.pem'], systemStore: true, eutl: true, msctl: false })).toEqual({
       trust_roots: ['C:/ca.pem'],
       system_trust: true,
       eutl_trust: true,
     });
   });
+
+  it('sends NO msctl_trust key while the root-program option is off', () => {
+    // The engine never reads the bundle without the key, so an off toggle has
+    // to emit nothing at all rather than an explicit false.
+    expect(
+      trustVerifyParams({ anchors: [], systemStore: true, eutl: true, msctl: false }),
+    ).toEqual({ system_trust: true, eutl_trust: true });
+    expect(
+      trustVerifyParams({ anchors: [], systemStore: false, eutl: false, msctl: true }),
+    ).toEqual({ msctl_trust: true });
+    expect(
+      trustVerifyParams({ anchors: ['C:/ca.pem'], systemStore: true, eutl: true, msctl: true }),
+    ).toEqual({
+      trust_roots: ['C:/ca.pem'],
+      system_trust: true,
+      eutl_trust: true,
+      msctl_trust: true,
+    });
+  });
 });
 
 describe('aggregate trust readout', () => {
-  const anchorsOnly: TrustConfig = { anchors: ['C:/ca.pem'], systemStore: false, eutl: false };
-  const storeOnly: TrustConfig = { anchors: [], systemStore: true, eutl: false };
-  const both: TrustConfig = { anchors: ['C:/ca.pem'], systemStore: true, eutl: false };
+  const anchorsOnly: TrustConfig = { anchors: ['C:/ca.pem'], systemStore: false, eutl: false, msctl: false };
+  const storeOnly: TrustConfig = { anchors: [], systemStore: true, eutl: false, msctl: false };
+  const both: TrustConfig = { anchors: ['C:/ca.pem'], systemStore: true, eutl: false, msctl: false };
 
   it('separates "no source configured" from "did not verify"', () => {
     const trusted = result([sig({ trusted: true, trust_source: 'user' })]);
-    expect(trustSummary({ anchors: [], systemStore: false, eutl: false }, trusted)).toBe('none');
+    expect(trustSummary({ anchors: [], systemStore: false, eutl: false, msctl: false }, trusted)).toBe('none');
     expect(trustSummary(anchorsOnly, result([sig()]))).toBe('failed');
   });
 
@@ -167,7 +213,7 @@ describe('aggregate trust readout', () => {
   });
 
   it('names the trusted lists when the bundle is what vouched', () => {
-    const listsOnly: TrustConfig = { anchors: [], systemStore: false, eutl: true };
+    const listsOnly: TrustConfig = { anchors: [], systemStore: false, eutl: true, msctl: false };
     expect(trustSummary(listsOnly, result([sig({ trusted: true, trust_source: 'eutl' })]))).toBe(
       'eutl',
     );
@@ -175,9 +221,41 @@ describe('aggregate trust readout', () => {
       sig({ field: 'A', trusted: true, trust_source: 'eutl' }),
       sig({ field: 'B', trusted: true, trust_source: 'user' }),
     ]);
-    expect(trustSummary({ anchors: ['C:/ca.pem'], systemStore: false, eutl: true }, r)).toBe(
+    expect(trustSummary({ anchors: ['C:/ca.pem'], systemStore: false, eutl: true, msctl: false }, r)).toBe(
       'mixed',
     );
+  });
+
+  it('names the root program when its bundle is what vouched', () => {
+    const programOnly: TrustConfig = {
+      anchors: [],
+      systemStore: false,
+      eutl: false,
+      msctl: true,
+    };
+    expect(
+      trustSummary(programOnly, result([sig({ trusted: true, trust_source: 'msctl' })])),
+    ).toBe('msctl');
+  });
+
+  it('prefers the narrower source when a chain could be claimed by two', () => {
+    // The store and the program can carry the same root. The readout names the
+    // one that says more about the authority, and only calls it mixed when
+    // DIFFERENT signatures actually reached different sources.
+    const storeAndProgram: TrustConfig = {
+      anchors: [],
+      systemStore: true,
+      eutl: false,
+      msctl: true,
+    };
+    expect(
+      trustSummary(storeAndProgram, result([sig({ trusted: true, trust_source: 'system' })])),
+    ).toBe('system');
+    const split = result([
+      sig({ field: 'A', trusted: true, trust_source: 'msctl' }),
+      sig({ field: 'B', trusted: true, trust_source: 'system' }),
+    ]);
+    expect(trustSummary(storeAndProgram, split)).toBe('mixed');
   });
 });
 
@@ -249,5 +327,55 @@ describe('trusted-list bundle', () => {
       ),
     ).toBeNull();
     expect(eutlProvenance(result([sig()]))).toBeNull();
+  });
+});
+
+describe('root-program bundle', () => {
+  it('distinguishes an installation without a bundle from one that anchored nothing', () => {
+    expect(
+      msctlUnavailable(
+        result([sig()], { msctl_trust: { requested: true, available: false, anchor_count: 0 } }),
+      ),
+    ).toBe(true);
+    expect(
+      msctlUnavailable(
+        result([sig()], { msctl_trust: { requested: true, available: true, anchor_count: 0 } }),
+      ),
+    ).toBe(false);
+    expect(
+      msctlUnavailable(
+        result([sig()], { msctl_trust: { requested: false, available: false, anchor_count: 0 } }),
+      ),
+    ).toBe(false);
+    expect(msctlUnavailable(result([sig()]))).toBe(false);
+  });
+
+  it('shows provenance only when there is a date to show', () => {
+    expect(
+      msctlProvenance(
+        result([sig()], {
+          msctl_trust: {
+            requested: true,
+            available: true,
+            anchor_count: 238,
+            fetched: '2026-08-26',
+            sequence: '369069143887839448588',
+          },
+        }),
+      ),
+    ).toEqual({ fetched: '2026-08-26', anchors: 238 });
+    expect(
+      msctlProvenance(
+        result([sig()], { msctl_trust: { requested: true, available: false, anchor_count: 0 } }),
+      ),
+    ).toBeNull();
+    expect(
+      msctlProvenance(
+        result([sig()], {
+          msctl_trust: { requested: true, available: true, anchor_count: 5, fetched: null },
+        }),
+      ),
+    ).toBeNull();
+    expect(msctlProvenance(result([sig()]))).toBeNull();
   });
 });
