@@ -67,7 +67,7 @@ import type { SnapshotPlacement } from '../../lib/snapshot-capture';
 import { shownValue } from '../../lib/form-overlay';
 import type { OverlayWidget } from '../../lib/form-overlay';
 import { ACTION_KIND_LABEL, type ActionTrigger } from '../../lib/field-actions';
-import type { FormFieldValue } from '../../lib/forms';
+import type { FormFieldValue, FormValuePhase } from '../../lib/forms';
 import { PageView } from './PageView';
 import { useSeparationInspector, useSeparationRaster } from '../../hooks/useSeparationPreview';
 import { isInspectClick, pointerTravel } from '../../lib/separation-preview';
@@ -403,19 +403,37 @@ function FormTextInput({
   fontPx: number;
   spellLang?: string;
   common: Record<string, unknown>;
-  onChange: (value: FormFieldValue) => void;
+  onChange: (value: FormFieldValue, phase: FormValuePhase, previous?: string) => void;
 }): React.JSX.Element {
   const [focused, setFocused] = useState(false);
   const shown = focused ? raw : shownValue(widget.format, raw);
+  // The focus pair `common` carries is the document's own `/Fo` `/Bl` wiring;
+  // this control's own focus tracking is what decides raw-vs-formatted. Both
+  // run — an override here would silently drop the document's.
+  const outerFocus = common.onFocus as (() => void) | undefined;
+  const outerBlur = common.onBlur as (() => void) | undefined;
   const props = {
     ...common,
     className: 'page-form-widget page-form-input' + (hasPending ? ' pending' : ''),
     style: { ...style, fontSize: fontPx },
     value: shown,
+    // Per character: a keystroke, and nothing else. The commit — which is what
+    // drives validate, store, calculate and format inside the object model —
+    // belongs to the gestures below.
     onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-      onChange(e.target.value),
-    onFocus: () => setFocused(true),
-    onBlur: () => setFocused(false),
+      onChange(e.target.value, 'keystroke', raw),
+    onFocus: () => {
+      setFocused(true);
+      outerFocus?.();
+    },
+    onBlur: () => {
+      setFocused(false);
+      onChange(raw, 'commit');
+      outerBlur?.();
+    },
+    onKeyDown: (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (e.key === 'Enter' && !widget.multiline) onChange(raw, 'commit');
+    },
     spellCheck: true,
     lang: spellLang,
   };
@@ -450,7 +468,13 @@ function FormWidgetView({
    * two checkers agreeing about which one to use; the Spelling panel stays
    * the authority for the document-wide pass. */
   spellLang?: string;
-  onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
+  onSetFormValue: (
+    path: string,
+    fieldName: string,
+    value: FormFieldValue,
+    phase?: FormValuePhase,
+    previous?: string,
+  ) => void;
   onSignFieldRequest: (path: string, fieldName: string) => void;
   onWidgetAction: (
     path: string,
@@ -480,7 +504,8 @@ function FormWidgetView({
       />
     );
   }
-  const set = (v: FormFieldValue): void => onSetFormValue(widget.path, widget.fieldName, v);
+  const set = (v: FormFieldValue, phase: FormValuePhase = 'commit', previous?: string): void =>
+    onSetFormValue(widget.path, widget.fieldName, v, phase, previous);
   const effective = pending ?? widget.value;
   // The document's own data actions, fired by the gesture each was authored
   // on. A trigger the widget does not carry attaches no handler at all, so a
@@ -490,16 +515,25 @@ function FormWidgetView({
     const action = actions?.[trigger];
     if (action) onWidgetAction(widget.path, widget.fieldName, action);
   };
-  const triggers = actions
-    ? {
-        ...(actions.D ? { onPointerDown: (e: React.PointerEvent) => { stop(e); fire('D'); } } : {}),
-        ...(actions.U ? { onPointerUp: () => fire('U') } : {}),
-        ...(actions.E ? { onPointerEnter: () => fire('E') } : {}),
-        ...(actions.X ? { onPointerLeave: () => fire('X') } : {}),
-        ...(actions.Fo ? { onFocus: () => fire('Fo') } : {}),
-        ...(actions.Bl ? { onBlur: () => fire('Bl') } : {}),
-      }
-    : {};
+  // Focus and blur are always wired: `/Fo` and `/Bl` carry the document's own
+  // data action AND its `/JS`, and the second is dispatched through the value
+  // channel because that is where the sandbox session lives.
+  const triggers = {
+    ...(actions?.D
+      ? { onPointerDown: (e: React.PointerEvent) => { stop(e); fire('D'); } }
+      : {}),
+    ...(actions?.U ? { onPointerUp: () => fire('U') } : {}),
+    ...(actions?.E ? { onPointerEnter: () => fire('E') } : {}),
+    ...(actions?.X ? { onPointerLeave: () => fire('X') } : {}),
+    onFocus: (): void => {
+      fire('Fo');
+      set(effective, 'focus');
+    },
+    onBlur: (): void => {
+      fire('Bl');
+      set(effective, 'blur');
+    },
+  };
   const common = {
     'data-testid': `form-widget-${widget.fieldName}`,
     onPointerDown: stop,
@@ -886,7 +920,13 @@ interface PageCellProps {
   formWidgets?: OverlayWidget[];
   // Pending values for THIS page's file, keyed by field name.
   formValues?: ReadonlyMap<string, FormFieldValue>;
-  onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
+  onSetFormValue: (
+    path: string,
+    fieldName: string,
+    value: FormFieldValue,
+    phase?: FormValuePhase,
+    previous?: string,
+  ) => void;
   // Clicking an empty signature widget in forms mode targets it for signing
   // (the sign card opens in fill-this-field mode).
   onSignFieldRequest: (path: string, fieldName: string) => void;

@@ -634,6 +634,25 @@ export const PANEL_STRINGS = {
   'panel.forms.scriptsTitle': 'Scripts this app does not run',
   'panel.forms.scriptsPosition':
     'This app runs no form script it cannot verify. It runs the standard formatting, validation and calculation calls, which are declarative and carry no code; anything else is left in the document exactly as it was, and reported here.',
+  // F26: the same list, once scripts can actually run. Off is still the
+  // default, so the wording above stands and these only add what the reader
+  // needs to act: which switch decides it, and what happened to each script
+  // that did run.
+  'panel.forms.scriptsPreferenceHint':
+    'Turn on “Run unrecognized field scripts” in Preferences ▸ General to run these in the sandboxed interpreter.',
+  'panel.forms.scriptsPolicyHint':
+    'Field scripting is turned off for this machine by policy, so the preference cannot enable it.',
+  'panel.forms.scriptsRunningTitle': 'Scripts this document runs',
+  'panel.forms.scriptsRunningPosition':
+    'Standard formatting, validation and calculation calls are evaluated directly and carry no code. Everything else runs in a sandboxed interpreter with no access to the network, the file system, printing or your documents. Scripts that ran without incident are not listed.',
+  'panel.forms.scriptsAllClean': 'Every script in this document ran without incident.',
+  'panel.forms.scriptRefused':
+    'Left this call out: {{capabilities}}. The rest of the script ran.',
+  'panel.forms.scriptErrored': 'Stopped with an error: {{message}}',
+  'panel.forms.scriptTimedOut':
+    'Did not finish within {{ms}} ms and was stopped. The rest of the form still computes.',
+  'panel.forms.scriptTrigger.Fo': 'When the field is entered',
+  'panel.forms.scriptTrigger.Bl': 'When the field is left',
   'panel.forms.scriptShow': 'Show the script',
   'panel.forms.scriptHide': 'Hide the script',
   'panel.forms.scriptTrigger.K': 'When a value is typed',
@@ -2504,6 +2523,12 @@ export const PANEL_STRINGS = {
   'panel.settings.restoreWindows': 'Reopen last session on launch',
   'panel.settings.restoreWindowsHint':
     'Reopens the windows and documents that were open when you last quit. Window size and position are always remembered; this decides whether the documents come back too.',
+  'panel.settings.fieldScripts': 'Form field scripts',
+  'panel.settings.runFieldScripts': 'Run unrecognized field scripts',
+  'panel.settings.fieldScriptsHint':
+    'Off by default. Standard formatting and calculation calls always run and carry no code; this decides whether a form’s own custom scripts execute, in a sandboxed interpreter with no access to the network, the file system or printing.',
+  'panel.settings.fieldScriptsPolicy':
+    'Turned off for this machine by policy — this setting has no effect.',
   'panel.settings.updates': 'Updates',
   'panel.settings.checkOnLaunch': 'Check for updates on launch',
   'panel.settings.updatesHint':

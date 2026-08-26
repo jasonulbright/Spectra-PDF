@@ -232,6 +232,7 @@ pub fn run() {
             commands::start_engine,
             commands::send_to_engine,
             commands::check_auto_update_disabled,
+            commands::check_field_scripts_disabled,
             commands::get_startup_enabled,
             commands::set_startup_enabled,
             commands::startup_entry_notice,

@@ -88,6 +88,14 @@ export interface Settings {
   readAloudVoice: string;
   /** Speaking rate as a multiple of the voice's own (0.5–3). */
   readAloudRate: number;
+  /** Execute the field scripts this app's declarative evaluator does not
+   * recognize, in the sandboxed interpreter.
+   *
+   * Default OFF. The declarative `AF*` set runs either way and never reaches
+   * the interpreter; this switch decides only whether a custom body executes
+   * or is reported. Suppress it machine-wide with the DisableFieldScripts
+   * policy, which still wins over this preference. */
+  runUnrecognizedFieldScripts: boolean;
   /** The UI language — 'system' resolves against the shipped locales
    * (falling back to en), an explicit code pins one. Stored values are
    * locale-independent keys, never display names. */
@@ -114,6 +122,7 @@ export const DEFAULTS: Settings = {
   spellCheckAsYouType: true,
   readAloudVoice: '',
   readAloudRate: 1,
+  runUnrecognizedFieldScripts: false,
   language: 'system',
 };
 
@@ -138,8 +147,22 @@ export function loadSettings(): Settings {
   } catch { return DEFAULTS; }
 }
 
+// Consumers that latch a preference rather than re-reading it per use need to
+// know when it moved. A listener set rather than a DOM event: this module is a
+// leaf and may not touch the DOM, and a second window is a second module scope
+// anyway, so a broadcast would be wrong as well as unavailable.
+const settingsListeners = new Set<(settings: Settings) => void>();
+
+export function subscribeSettings(listener: (settings: Settings) => void): () => void {
+  settingsListeners.add(listener);
+  return () => {
+    settingsListeners.delete(listener);
+  };
+}
+
 export function saveSettings(settings: Settings): void {
   localStorage.setItem('spectra-settings', JSON.stringify(settings));
+  for (const listener of settingsListeners) listener(settings);
 }
 
 export function getSettings(): Settings {

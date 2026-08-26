@@ -620,11 +620,50 @@ notices are what govern; the table names what is redistributed:
 | `pdfjs/wasm/jbig2.wasm` | pdf.js JBIG2 decoder (also serves `/CCITTFaxDecode`) | Apache-2.0 | `LICENSE_PDFJS_JBIG2`, `LICENSE_JBIG2` |
 | `pdfjs/wasm/openjpeg.wasm` | OpenJPEG, built by the pdf.js project | BSD-2-Clause | `LICENSE_PDFJS_OPENJPEG`, `LICENSE_OPENJPEG` |
 | `pdfjs/wasm/qcms_bg.wasm` | qcms (ICC colour management) | MIT | `LICENSE_PDFJS_QCMS`, `LICENSE_QCMS` |
+| `pdfjs/wasm/quickjs-eval.wasm`, `quickjs-eval.js` | QuickJS, built by the pdf.js project — the AcroForm field-script interpreter | MIT (QuickJS) / Apache-2.0 (the build) | "QuickJS" below |
 | `pdfjs/wasm/*_nowasm_fallback.js` | the pure-JS fallbacks for the above | same as their module | as above |
 | `pdfjs/cmaps/*.bcmap` | Adobe CMap resources, packed by pdf.js | BSD-3-Clause (Adobe) | `pdfjs/cmaps/LICENSE` |
 | `pdfjs/standard_fonts/Foxit*.pfb` | Foxit standard-14 substitutes | see notice | `LICENSE_FOXIT` |
 | `pdfjs/standard_fonts/Liberation*.ttf` | Liberation fonts | SIL OFL 1.1 | `LICENSE_LIBERATION` |
 | `pdfjs/iccs/CGATS001Compat-v2-micro.icc` | CGATS/SWOP-compatible CMYK profile | see notice | `pdfjs/iccs/LICENSE` |
+
+#### QuickJS
+
+Upstream ships a notice pair beside every module in `pdfjs/wasm/` except the
+QuickJS one, so this row's notice is carried here instead of as a file staged
+beside the binary. `quickjs-eval.wasm` is a WebAssembly build of QuickJS
+produced by the pdf.js project: the interpreter is MIT and the build is
+Apache-2.0, covered by the licence at the head of this section. The shipped
+artifact embeds no copyright string of its own, so the holders below are named
+from QuickJS's own upstream headers rather than read out of the binary. This
+notice is a property of the pinned artifact and does not change when upstream
+relicenses a later release.
+
+```
+QuickJS Javascript Engine
+
+Copyright (c) 2017-2024 Fabrice Bellard
+Copyright (c) 2017-2024 Charlie Gordon
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
 
 Rust crates compiled into the backend are listed in `src-tauri/Cargo.toml` /
 `Cargo.lock`; the complete per-crate license and notice listing ships with the

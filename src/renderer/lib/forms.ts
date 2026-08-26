@@ -24,6 +24,13 @@ export type FormFieldType =
 // none); optionlist -> selected strings.
 export type FormFieldValue = string | boolean | string[];
 
+/** Which AcroForm event a widget gesture means. A controlled input reports
+ * every typed character as a change, and only some of those are commits: the
+ * document's validate → store → calculate → format pass belongs to the commit
+ * alone, so a per-character dispatch of it lets a rejecting Validate script
+ * empty the field the user is still typing into. */
+export type FormValuePhase = 'keystroke' | 'commit' | 'focus' | 'blur';
+
 // One widget annotation of a field, located on a page (the on-canvas
 // overlay's geometry source). `rect` is the raw PDF user-space /Rect
 // [x0,y0,x1,y1]; the overlay projects it into display space with the same
@@ -49,6 +56,11 @@ export interface FormFieldActions {
   V?: string;
   C?: string;
   F?: string;
+  /** Focus and blur. No value semantics — a script here drives appearance —
+   * so the declarative evaluator never runs one and `scriptsNotRun` never
+   * names one. They exist for the sandbox, which does. */
+  Fo?: string;
+  Bl?: string;
 }
 
 export interface FormField {
@@ -56,6 +68,11 @@ export interface FormField {
   type: FormFieldType;
   value: FormFieldValue;
   options?: string[]; // radio / dropdown / optionlist
+  // checkbox only: the on-state name from the widget's /AP /N — what the file
+  // stores when the box is checked. A document whose on-state is /1 or /On
+  // stores that, not the conventional `Yes`. Absent when the widget carries no
+  // appearance states to read one from.
+  exportValue?: string;
   readOnly: boolean;
   required: boolean;
   multiline?: boolean; // text only
@@ -126,6 +143,7 @@ interface EngineField {
   read_only: boolean;
   required: boolean;
   multiline?: boolean;
+  export_value?: string;
   filled?: boolean;
   lock?: { action?: string; fields?: unknown[] } | null;
   widgets?: EngineWidget[];
@@ -149,7 +167,7 @@ interface EngineReadResult {
   calculation_order?: string[];
 }
 
-const TRIGGERS = ['K', 'V', 'C', 'F'] as const;
+const TRIGGERS = ['K', 'V', 'C', 'F', 'Fo', 'Bl'] as const;
 
 /** The engine's raw `/JS` bodies, narrowed to the four field triggers. A key
  * this build does not know is dropped rather than carried as an unusable
@@ -214,6 +232,9 @@ export function mapEngineField(ef: EngineField): FormField | null {
     type,
     value: coerceValue(type, ef.value),
     ...(ef.options ? { options: ef.options } : {}),
+    ...(type === 'checkbox' && typeof ef.export_value === 'string' && ef.export_value
+      ? { exportValue: ef.export_value }
+      : {}),
     readOnly,
     required: Boolean(ef.required),
     ...(ef.multiline !== undefined ? { multiline: Boolean(ef.multiline) } : {}),

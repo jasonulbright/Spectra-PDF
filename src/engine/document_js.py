@@ -1,13 +1,15 @@
 """Document-level JavaScript: read and EDIT the catalog's /Names /JavaScript
 name tree ("AcroJS editor").
 
-The app EDITS document-level JavaScript — the scripts the industry-standard
-editor lists under "Document JavaScripts" — as TEXT IN, TEXT OUT. It NEVER
-EXECUTES that JavaScript: no eval, no JS engine, no sandbox. Running document
-JS is a security surface this app deliberately does not build. So this
-module only reads and
-rewrites the `/Root /Names /JavaScript` name tree; the scripts run in no
-process of ours.
+This module handles document-level JavaScript as TEXT IN, TEXT OUT: it reads
+and rewrites the `/Root /Names /JavaScript` name tree and nothing else. No
+eval, no JavaScript engine, no sandbox runs in this process — a script reaching
+the engine is bytes, whatever it says.
+
+Execution, where it happens at all, is the renderer's and is off by default
+(`docs/architecture/98-f26-field-js.md`). The listing here is the read that
+feeds it; this module gains no interpreter from that and must not acquire one,
+because the CLI, the guided actions and the batch arms all run through here.
 
 Scope: the document-level name tree only. Per-field and page /AA additional
 actions and /OpenAction are separate action sites — a later extension,
