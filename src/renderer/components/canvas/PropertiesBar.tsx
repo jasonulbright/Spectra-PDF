@@ -106,11 +106,14 @@ const NEW_COLOR_KEYS: Record<string, UiKey> = {
   highlight: 'canvas.pbar.newColor.highlight',
   freetext: 'canvas.pbar.newColor.freetext',
   ink: 'canvas.pbar.newColor.ink',
+  inkhighlight: 'canvas.pbar.newColor.inkhighlight',
   stamp: 'canvas.pbar.newColor.stamp',
 };
 
 // The comment modes whose tool defaults the bar can show.
-const COMMENT_MODES: readonly CanvasTool[] = ['highlight', 'freetext', 'ink', 'stamp'];
+const COMMENT_MODES: readonly CanvasTool[] = [
+  'highlight', 'inkhighlight', 'freetext', 'ink', 'stamp',
+];
 
 // The align wording is shared with the image align/distribute row on the
 // secondary toolbar — same glyphs, same sentence, one key each.

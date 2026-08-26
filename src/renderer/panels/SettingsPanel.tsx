@@ -448,6 +448,20 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         </p>
       </div>
       <div>
+        <label className="flex items-center gap-2 text-sm text-neutral-400">
+          <input
+            type="checkbox"
+            data-testid="pref-scan-select-recognition"
+            checked={settings.scanSelectRecognition}
+            onChange={(e) => update('scanSelectRecognition', e.target.checked)}
+          />
+          {tChrome('panel.settings.scanSelectRecognition')}
+        </label>
+        <p className="text-xs text-neutral-500 mt-1">
+          {tChrome('panel.settings.scanSelectRecognitionHint')}
+        </p>
+      </div>
+      <div>
         <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.settings.compressionQuality')}</label>
         <select
           aria-label={tChrome('panel.settings.compressionQuality')}

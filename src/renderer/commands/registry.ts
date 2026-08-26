@@ -146,7 +146,8 @@ export function cycledTab(state: AppState, delta: 1 | -1): FocusedTab {
 // Canvas interaction modes. Activation toggles: picking the active one returns
 // to Select. Which TOOL owns each is `commands/tools.ts`'s `canvasTools`.
 const CANVAS_TOOLS = [
-  'select', 'hand', 'highlight', 'freetext', 'ink', 'stamp', 'redact', 'signature', 'forms',
+  'select', 'hand', 'highlight', 'freetext', 'ink', 'inkhighlight', 'stamp', 'redact',
+  'signature', 'forms',
   'formfields', 'edit', 'addtext', 'addimage', 'measuredist', 'measureperim', 'measurearea',
   'measurecal', 'shape', 'callout', 'note', 'inkerase', 'zoommarquee', 'cropdraw', 'count',
   'outputpreview', 'flattenpreview', 'tablereview', 'beaddraw', 'snapshot', 'linkdraw',
@@ -154,6 +155,7 @@ const CANVAS_TOOLS = [
 
 export const TOOL_TITLES: Record<CanvasTool, string> = {
   select: 'Select', hand: 'Hand', highlight: 'Highlight', freetext: 'Text', ink: 'Draw',
+  inkhighlight: 'Freehand Highlight',
   stamp: 'Stamp', redact: 'Redact', signature: 'Sign', forms: 'Fill Fields',
   formfields: 'Add Field', edit: 'Select Image', addtext: 'Add Text',
   addimage: 'Add Image',

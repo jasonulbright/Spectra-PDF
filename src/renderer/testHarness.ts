@@ -1614,7 +1614,7 @@ export interface TestHarness {
   getPageAnnotations: (
     docId: string,
     pageId: string,
-  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number; points?: number[]; countGroup?: string; countSymbol?: string; countSeq?: number; symbolId?: string; symbolParts?: number }[];
+  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number; points?: number[]; inkStyle?: string; strokeCount?: number; countGroup?: string; countSymbol?: string; countSeq?: number; symbolId?: string; symbolParts?: number }[];
   /** Materialize pending page-tier edits (annotations, moves, etc.) via the
    * real commit bridge — same path as the "Apply changes" button. */
   commitPendingEdits: () => Promise<void>;
@@ -2379,7 +2379,7 @@ export interface TestHarnessDeps {
   getPageAnnotations: (
     docId: string,
     pageId: string,
-  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number; points?: number[]; countGroup?: string; countSymbol?: string; countSeq?: number; symbolId?: string; symbolParts?: number }[];
+  ) => { id: string; kind: string; x: number; y: number; w: number; h: number; color: string; note?: string; shapeType?: string; strokeWidth?: number; fillColor?: string; opacity?: number; points?: number[]; inkStyle?: string; strokeCount?: number; countGroup?: string; countSymbol?: string; countSeq?: number; symbolId?: string; symbolParts?: number }[];
   dispatchAddAnnotation: (docId: string, pageId: string, annotation: TestAnnotationInput & { id: string }) => void;
   dispatchRecolorAnnotation: (docId: string, pageId: string, annotationId: string, color: string) => void;
   dispatchRemoveAnnotation: (docId: string, pageId: string, annotationId: string) => void;

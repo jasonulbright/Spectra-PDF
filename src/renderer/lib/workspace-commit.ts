@@ -107,7 +107,7 @@ export function planCommit(
           ...(p.annotations?.length
             ? {
                 annotations: p.annotations.map(
-                  ({ kind, x, y, w, h, color, note, points, strokes, imageData, signatureFont, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, countGroup, countSymbol, countSeq, legendRows, legendTitle, legendTotalWord, symbolId, symbolParts, importedOriginal }) => ({
+                  ({ kind, x, y, w, h, color, note, points, strokes, inkStyle, imageData, signatureFont, markupType, quads, measureKind, measureRatio, measureUnitsPerPt, measureUnit, shapeType, strokeWidth, fillColor, opacity, calloutBox, lineEndings, cloudIntensity, countGroup, countSymbol, countSeq, legendRows, legendTitle, legendTotalWord, symbolId, symbolParts, importedOriginal }) => ({
                     kind,
                     x,
                     y,
@@ -117,6 +117,9 @@ export function planCommit(
                     note,
                     points,
                     strokes, // Ink's per-pen-lift paths (the ALLOWLIST trap)
+                    // Which pen drew the ink (the same trap): without it a
+                    // freehand highlight commits as an opaque pen stroke.
+                    inkStyle,
                     imageData,
                     // A typed signature's bundled script face (the ALLOWLIST
                     // trap again: a field absent here never reaches the

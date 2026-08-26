@@ -13,7 +13,14 @@ from pathlib import Path
 
 import pytest
 
-from engine.recognize import _LANG_RE, _parse_tsv, _png_size, recognize
+from engine.recognize import (
+    _LANG_RE,
+    _parse_tsv,
+    _png_size,
+    _png_size_bytes,
+    recognize,
+    recognize_raster,
+)
 
 import gs_axis
 
@@ -28,6 +35,11 @@ LANGUAGES_TS = ROOT / "src" / "renderer" / "ocr" / "languages.ts"
 needs_ocr_stack = pytest.mark.skipif(
     not (TESSERACT.is_file() and GS and SCANNED.is_file()),
     reason=f"{gs_axis.PRESENT_AXIS_SKIP}, or the tesseract stack is not vendored",
+)
+
+needs_tesseract = pytest.mark.skipif(
+    not TESSERACT.is_file(),
+    reason="the tesseract stack is not vendored",
 )
 
 needs_cjk_stack = pytest.mark.skipif(
@@ -604,3 +616,112 @@ class TestBatchInPlace:
         # No staging litter, no mirror.
         assert not list(src.glob("*.inplace.tmp"))
         assert not (tmp_path / "out").exists()
+
+
+# -- The view-tier door ----------------------------------------------------
+# `recognize_raster` recognises PNG bytes handed straight in: no PDF, no
+# Ghostscript, and nothing written. It is what makes a scanned page selectable
+# in the reading view, where the viewer has already
+# rasterised the page and the distribution ships no Ghostscript to re-render
+# it with.
+
+
+def _text_png(phrase: str, width: int = 1000, height: int = 220) -> bytes:
+    """A page image with KNOWN text on it, built here rather than fixtured.
+
+    Large, black on white, and rendered with Pillow's own scalable default
+    face -- the point of the fixture is that the phrase is recoverable, so it
+    must not depend on a system font being installed.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+    import io as _io
+
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.load_default(size=72)
+    except TypeError:  # Pillow without a sizeable default face
+        font = ImageFont.load_default()
+    draw.text((40, 60), phrase, fill="black", font=font)
+    buf = _io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+class TestPngSizeBytes:
+    def test_reads_the_ihdr(self):
+        raw = _text_png("x", width=321, height=123)
+        assert _png_size_bytes(raw[:24]) == (321, 123)
+
+    def test_refuses_something_that_is_not_a_png(self):
+        with pytest.raises(RuntimeError):
+            _png_size_bytes(b"%PDF-1.7" + b"\0" * 16)
+
+
+class TestRecognizeRaster:
+    def test_refuses_input_that_is_not_base64(self):
+        with pytest.raises(ValueError):
+            recognize_raster("not base64!!", tesseract_path=str(TESSERACT))
+
+    def test_refuses_empty_input(self):
+        with pytest.raises(ValueError):
+            recognize_raster("", tesseract_path=str(TESSERACT))
+
+    def test_has_no_file_parameter(self):
+        # The op cannot be pointed at a document by construction -- that is
+        # what makes the view tier structurally unable to read or touch one.
+        import inspect
+
+        assert "file" not in inspect.signature(recognize_raster).parameters
+
+    @needs_tesseract
+    def test_recovers_the_phrase_and_reports_confidence(self):
+        import base64
+
+        png = _text_png("SELECTABLE SCAN")
+        out = recognize_raster(
+            base64.b64encode(png).decode("ascii"),
+            tesseract_path=str(TESSERACT),
+        )
+        assert "SELECTABLE" in out["text"].upper()
+        assert out["words"], "no word boxes came back"
+        for w in out["words"]:
+            # Normalised to fractions of the image, y from the top -- the same
+            # contract the PDF-page arm returns, so the selection layer has one
+            # geometry idiom rather than two.
+            assert 0.0 <= w["x"] <= 1.0 and 0.0 <= w["y"] <= 1.0
+            assert 0.0 < w["w"] <= 1.0 and 0.0 < w["h"] <= 1.0
+            assert "conf" in w
+        # The view tier gates SNAPPING on this number; a page of clean large
+        # type is exactly the case it must not refuse.
+        best = max(w["conf"] for w in out["words"])
+        assert best > 40
+
+    @needs_tesseract
+    def test_writes_nothing(self, tmp_path, monkeypatch):
+        # The bytes go to tesseract's stdin. A view-tier gesture over a
+        # document the user has not asked to modify must not put its content
+        # on disk, so a temp file here would be the defect.
+        import base64
+
+        monkeypatch.setenv("TMPDIR", str(tmp_path))
+        monkeypatch.setenv("TEMP", str(tmp_path))
+        monkeypatch.setenv("TMP", str(tmp_path))
+        recognize_raster(
+            base64.b64encode(_text_png("QUIET")).decode("ascii"),
+            tesseract_path=str(TESSERACT),
+        )
+        assert list(tmp_path.iterdir()) == []
+
+
+class TestConfidenceIsCarried:
+    def test_word_rows_carry_tesseract_confidence(self):
+        _, words = _parse_tsv(tsv("5\t1\t1\t1\t1\t1\t10\t20\t40\t30\t87\tWord"), 1000, 500)
+        assert words[0]["conf"] == pytest.approx(87.0)
+
+    def test_an_unparseable_confidence_reads_as_unclassified(self):
+        # -1 is tesseract's own "not classified as text", and the view tier
+        # drops anything below its floor -- so a malformed number fails closed
+        # rather than snapping a selection to a box nobody stands behind.
+        _, words = _parse_tsv(tsv("5\t1\t1\t1\t1\t1\t10\t20\t40\t30\t?\tWord"), 1000, 500)
+        assert words[0]["conf"] == -1.0

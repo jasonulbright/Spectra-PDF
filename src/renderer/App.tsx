@@ -612,11 +612,16 @@ function AppContent(): React.ReactElement {
   // (regression). Each change reschedules; only the settled value persists.
   useEffect(() => {
     const t = setTimeout(
-      () => writeWorkbenchUi({ navPane: state.ui.navPane, toolDock: state.ui.toolDock }),
+      () =>
+        writeWorkbenchUi({
+          navPane: state.ui.navPane,
+          toolDock: state.ui.toolDock,
+          toolLock: state.ui.toolLock,
+        }),
       200,
     );
     return () => clearTimeout(t);
-  }, [state.ui.navPane, state.ui.toolDock]);
+  }, [state.ui.navPane, state.ui.toolDock, state.ui.toolLock]);
 
   const activeFile = state.activeFileId ? state.files.get(state.activeFileId) : null;
   // Commit-failure banner: commits triggered from gates/effects have no
@@ -3354,6 +3359,12 @@ function AppContent(): React.ReactElement {
           strokeWidth: a.strokeWidth,
           fillColor: a.fillColor,
           opacity: a.opacity,
+          // Which pen drew an ink mark, and how many pen lifts it holds — a
+          // freehand highlight and a pen stroke are the same `kind`, so a spec
+          // asserting the highlighter placed a HIGHLIGHT needs this to tell
+          // them apart at all.
+          inkStyle: a.inkStyle,
+          strokeCount: a.strokes?.length,
           // The VERTEX list. A snapped point is exact where a
           // raw pointer is not, so the spec's honest question is "is this
           // coordinate the geometry's own?" — which needs the points, not

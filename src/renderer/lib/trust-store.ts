@@ -1,6 +1,7 @@
 // The signature-verification trust configuration: the user's own CA anchors,
-// the opt-in to the operating system's certificate store, and the opt-in to
-// the bundled EU trusted-list certificates.
+// the opt-in to the operating system's certificate store, the opt-in to the
+// bundled EU trusted-list certificates, and the opt-in to the bundled
+// root-program certificates.
 //
 // A leaf module (no React, no Tauri) because two surfaces consume it — the
 // signing panel and the nav-pane status readout — and there is no DOM test
@@ -13,9 +14,10 @@ import type { VerifyResult } from './signatures';
 const ANCHORS_KEY = 'spectra.trustAnchors';
 const SYSTEM_STORE_KEY = 'spectra.trustSystemStore';
 const EUTL_KEY = 'spectra.trustEutl';
+const MSCTL_KEY = 'spectra.trustMsctl';
 
 /** Which anchor set a chain terminated at, as the engine reports it. */
-export type TrustSource = 'user' | 'system' | 'eutl';
+export type TrustSource = 'user' | 'system' | 'eutl' | 'msctl';
 
 export interface TrustConfig {
   /** CA certificate files (PEM/DER) the user picked. */
@@ -26,14 +28,24 @@ export interface TrustConfig {
   /** Also anchor on the bundled EU trusted-list certificates. Off on the same
    * terms — each source is opted into separately. */
   eutl: boolean;
+  /** Also anchor on the bundled root-program certificates. Off on the same
+   * terms. Additive to `systemStore`, never a replacement for it: a locally
+   * installed root is in the store and not in the program. */
+  msctl: boolean;
 }
 
-export const NO_TRUST_CONFIG: TrustConfig = { anchors: [], systemStore: false, eutl: false };
+export const NO_TRUST_CONFIG: TrustConfig = {
+  anchors: [],
+  systemStore: false,
+  eutl: false,
+  msctl: false,
+};
 
 export function loadTrustConfig(): TrustConfig {
   let anchors: string[] = [];
   let systemStore: boolean;
   let eutl: boolean;
+  let msctl: boolean;
   try {
     const raw = localStorage.getItem(ANCHORS_KEY);
     const parsed = raw ? (JSON.parse(raw) as unknown) : [];
@@ -51,7 +63,12 @@ export function loadTrustConfig(): TrustConfig {
   } catch {
     eutl = false;
   }
-  return { anchors, systemStore, eutl };
+  try {
+    msctl = localStorage.getItem(MSCTL_KEY) === 'true';
+  } catch {
+    msctl = false;
+  }
+  return { anchors, systemStore, eutl, msctl };
 }
 
 /** Persistence is best-effort on both writes: the session state still holds
@@ -80,10 +97,18 @@ export function saveEutl(on: boolean): void {
   }
 }
 
+export function saveMsctl(on: boolean): void {
+  try {
+    localStorage.setItem(MSCTL_KEY, String(on));
+  } catch {
+    /* empty */
+  }
+}
+
 /** Whether any anchor source is configured at all. With none, `trusted` is
  * deterministically false and the result says nothing about identity. */
 export function hasTrustSource(config: TrustConfig): boolean {
-  return config.anchors.length > 0 || config.systemStore || config.eutl;
+  return config.anchors.length > 0 || config.systemStore || config.eutl || config.msctl;
 }
 
 /** The verify/sign params for this configuration. An unset source emits NO
@@ -94,13 +119,21 @@ export function trustVerifyParams(config: TrustConfig): Record<string, unknown> 
     ...(config.anchors.length > 0 ? { trust_roots: config.anchors } : {}),
     ...(config.systemStore ? { system_trust: true } : {}),
     ...(config.eutl ? { eutl_trust: true } : {}),
+    ...(config.msctl ? { msctl_trust: true } : {}),
   };
 }
 
 /** What the aggregate trust box should say. `failed` and `none` are different
  * results: one is a chain that reached no configured anchor, the other is no
  * anchor having been configured. */
-export type TrustSummary = 'none' | 'failed' | 'user' | 'system' | 'eutl' | 'mixed';
+export type TrustSummary =
+  | 'none'
+  | 'failed'
+  | 'user'
+  | 'system'
+  | 'eutl'
+  | 'msctl'
+  | 'mixed';
 
 export function trustSummary(config: TrustConfig, result: VerifyResult | null): TrustSummary {
   if (!hasTrustSource(config)) return 'none';
@@ -111,6 +144,7 @@ export function trustSummary(config: TrustConfig, result: VerifyResult | null): 
   }
   if (sources.size > 1) return 'mixed';
   if (sources.has('system')) return 'system';
+  if (sources.has('msctl')) return 'msctl';
   return sources.has('eutl') ? 'eutl' : 'user';
 }
 
@@ -125,6 +159,12 @@ export function systemStoreUnavailable(result: VerifyResult | null): boolean {
  * missing its bundle, which must not read as a chain that failed. */
 export function eutlUnavailable(result: VerifyResult | null): boolean {
   const report = result?.eutl_trust;
+  return report?.requested === true && report.available === false;
+}
+
+/** The same distinction for the root-program bundle. */
+export function msctlUnavailable(result: VerifyResult | null): boolean {
+  const report = result?.msctl_trust;
   return report?.requested === true && report.available === false;
 }
 
@@ -143,9 +183,20 @@ export function eutlProvenance(
   };
 }
 
+/** The root-program bundle's provenance for display, on the same terms: shown
+ * only with a date to put in it, so it can never read as current by omission. */
+export function msctlProvenance(
+  result: VerifyResult | null,
+): { fetched: string; anchors: number } | null {
+  const report = result?.msctl_trust;
+  if (!report?.requested || !report.available || !report.fetched) return null;
+  return { fetched: report.fetched, anchors: report.anchor_count ?? 0 };
+}
+
 /** Per-signature wording naming which set vouched for the chain. */
 export const TRUST_SOURCE_LABEL = {
   user: 'panel.sig.trustedViaAnchor',
   system: 'panel.sig.trustedViaSystem',
   eutl: 'panel.sig.trustedViaEutl',
+  msctl: 'panel.sig.trustedViaMsctl',
 } as const satisfies Record<TrustSource, string>;

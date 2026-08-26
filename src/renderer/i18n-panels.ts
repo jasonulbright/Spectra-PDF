@@ -2322,6 +2322,8 @@ export const PANEL_STRINGS = {
     'Signer identity verified against the system certificate store.',
   'panel.sig.trustVerifiedEutl':
     'Signer identity verified against the bundled EU trusted lists.',
+  'panel.sig.trustVerifiedMsctl':
+    'Signer identity verified against the bundled root-program certificates.',
   'panel.sig.trustVerifiedMixed':
     'Signer identity verified — against more than one of your trust sources.',
   'panel.sig.trustAnchors': 'Trust anchors',
@@ -2337,9 +2339,17 @@ export const PANEL_STRINGS = {
     'This installation carries no trusted-list bundle, so only your other trust sources apply.',
   'panel.sig.eutlProvenance':
     'Bundled {{date}} from {{lists}} national lists — {{anchors}} certificate authorities.',
+  'panel.sig.msctl': 'Also trust the bundled root-program certificates',
+  'panel.sig.msctlHint':
+    'Off by default. When on, a signer whose certificate authority the bundled root-certificate program lists for document signing verifies as trusted here. Authorities the program has withdrawn are not included. This adds to the certificate-store source rather than replacing it, and nothing is downloaded.',
+  'panel.sig.msctlUnavailable':
+    'This installation carries no root-program bundle, so only your other trust sources apply.',
+  'panel.sig.msctlProvenance':
+    'Bundled {{date}} — {{anchors}} certificate authorities.',
   'panel.sig.trustedViaAnchor': 'identity trusted (your anchor)',
   'panel.sig.trustedViaSystem': 'identity trusted (system store)',
   'panel.sig.trustedViaEutl': 'identity trusted (EU trusted lists)',
+  'panel.sig.trustedViaMsctl': 'identity trusted (root-certificate program)',
   'panel.sig.addCa': 'Add CA certificate…',
   'panel.sig.removeAnchor': 'Remove trust anchor {{path}}',
   'panel.sig.signHeading': 'Sign this document',
@@ -2497,6 +2507,9 @@ export const PANEL_STRINGS = {
   'panel.settings.snapshotDpi': 'Snapshot resolution (pixels per inch)',
   'panel.settings.snapshotDpiHint':
     'The Snapshot tool captures at this resolution, not at the current zoom. {{min}}–{{max}}.',
+  'panel.settings.scanSelectRecognition': 'Recognize text in scanned pages for selection',
+  'panel.settings.scanSelectRecognitionHint':
+    'Lets you select and highlight words on a scanned page. Recognition runs on this computer and never changes the file; use Scan & OCR to add a searchable text layer.',
   'panel.settings.spellCheckAsYouType': 'Underline misspellings while editing text',
   'panel.settings.spellCheckAsYouTypeHint':
     'The paragraph editor marks words that are not in the chosen dictionary. Which dictionary that is, and any words you have added yourself, are set in the Spelling panel.',
