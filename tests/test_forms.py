@@ -686,18 +686,26 @@ class TestFlatten:
             assert pdf.pages[0].obj.get("/Annots") is None  # but still removed
 
 
-class TestXfaParity:
-    def test_xfa_detected_and_stripped(self, tmp_dir):
+class TestXfa:
+    def test_xfa_survives_a_fill_and_the_absent_packet_is_reported(self, tmp_dir):
+        """Superseded behaviour: the fill USED to delete /XFA (pdf-lib
+        parity). ISO 32000-2 Annex K asks a writer to keep the XFA resource
+        consistent with /V instead, so the packets now survive — and an /XFA
+        entry carrying no datasets packet is reported rather than dropped.
+        Full coverage of the static-XFA path is `tests/test_xfa.py`."""
         src = os.path.join(tmp_dir, "xfa.pdf")
         with pikepdf.open(PDFLIB_FORM) as pdf:
             pdf.Root["/AcroForm"]["/XFA"] = pikepdf.Array([])
             pdf.save(src)
-        assert read_form_fields(src)["has_xfa"] is True
+        read = read_form_fields(src)
+        assert read["has_xfa"] is True
+        assert read["xfa"] == "static"
         out = os.path.join(tmp_dir, "out.pdf")
         r = fill_form_fields(src, out, {"applicant.name": "x"})
-        assert r["xfa_stripped"] is True
+        assert r["xfa_stripped"] is False
+        assert r["xfa_datasets_absent"] is True
         with pikepdf.open(out) as pdf:
-            assert "/XFA" not in pdf.Root["/AcroForm"]
+            assert "/XFA" in pdf.Root["/AcroForm"]
 
 
 class TestReviewFindings2l:

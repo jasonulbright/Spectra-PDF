@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PDFDict,
   PDFDocument,
+  PDFHexString,
   PDFName,
   PDFRawStream,
   PDFStream,
@@ -260,6 +261,38 @@ describe('addFormFields', () => {
       expect(msg).toContain('out of range');
       expect(msg).not.toContain('ok:');
     }
+  });
+
+  it('refuses an XFA document instead of silently deleting its packets', async () => {
+    // pdf-lib deletes /XFA on both getForm() and save(), so this path used to
+    // destroy the template, datasets, config and localeSet packets with no
+    // notice — while the engine twin refuses at every authoring door.
+    const doc = await PDFDocument.create();
+    doc.addPage([600, 800]);
+    const acro = doc.context.obj({
+      Fields: doc.context.obj([]),
+      XFA: doc.context.obj([
+        PDFHexString.fromText('datasets'),
+        doc.context.register(doc.context.flateStream('<xfa:data/>')),
+      ]),
+    }) as PDFDict;
+    doc.catalog.set(PDFName.of('AcroForm'), doc.context.register(acro));
+    const bytes = await doc.save();
+    let caught: unknown;
+    try {
+      await addFormFields(bytes, [
+        { name: 'notes', type: 'text', pageIndex: 0, rect: [10, 10, 110, 40] },
+      ]);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(FieldSpecError);
+    expect((caught as FieldSpecError).problems.map((p) => p.key)).toEqual(['refusal.field.xfa']);
+    // Nothing written: the original bytes still carry the packet.
+    const after = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+    expect(
+      after.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict)?.get(PDFName.of('XFA')),
+    ).toBeDefined();
   });
 
   it('refuses two specs in one batch that would share a name, writing nothing', async () => {
