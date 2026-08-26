@@ -201,6 +201,7 @@ form_detect.scanMustAutoNever	exact	form_detect	scan must be "auto", "never" or 
 form_prepare.unknownFieldKindChoose	pattern	form_prepare	unknown field kind: {{v0}} (choose from {{v1}})
 forms.acroformFieldTreeNested	exact	forms	AcroForm field tree nested too deeply
 forms.couldnTRegenerateAppearance	pattern	forms	couldn't regenerate the appearance for {{v0}}: {{exc}}
+forms.dynamicXmlFormXfa	pattern	forms	{{v0}} is a dynamic XML form (XFA): it builds its own pages from an XML template, so its fields cannot be filled here.
 forms.fieldWritesVerticallyFallback	exact	forms	this field writes vertically and no fallback font is available
 forms.nameFormDataFile	exact	forms	Name the form-data file to import.
 forms.nameFormFieldsShow	exact	forms	Name the form fields to show or hide.

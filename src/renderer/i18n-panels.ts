@@ -601,8 +601,21 @@ export const PANEL_STRINGS = {
   'panel.hf.batesDigitsAria': 'Bates digit count',
 
   'panel.forms.open': 'Open a PDF to fill its form fields',
-  'panel.forms.xfaWarning':
-    "This form uses XFA (dynamic forms), which isn't supported. Only its standard AcroForm fields are shown below; filling will save a plain AcroForm copy.",
+  // ISO 32000-2 Annex K requires a processor that supports XFA forms to
+  // indicate clearly that the user is interacting with one. Static and
+  // dynamic are different interactions, so each says what it actually is.
+  'panel.forms.xfaStatic':
+    'This is an XML form (XFA). Values you fill are saved into both its XML form data and its standard form fields, so every reader shows the same answers.',
+  'panel.forms.xfaDynamic':
+    'This is a dynamic XML form (XFA): it builds its own pages from an XML template, so its fields cannot be filled here. The fields below are read-only.',
+  'panel.forms.xfaCalculations':
+    "This form's XML template authors its own calculations. They are not run here, so a value another field computes from stays as the document last saved it.",
+  // The value shown came from the XFA datasets packet rather than from the
+  // field's own /V (ISO 32000-2 Annex K): the XFA resource carries the state
+  // of the form, so a reader that understands XFA shows this answer.
+  'panel.forms.fromXfa': 'From XML data',
+  'panel.forms.fromXfaTitle':
+    "This value comes from the form's XML data, not from the PDF field itself. Filling the form writes it into both.",
   'panel.forms.reading': 'Reading form fields…',
   'panel.forms.noFields': 'This PDF has no form fields.',
   'panel.forms.fieldsAria': 'Form fields',

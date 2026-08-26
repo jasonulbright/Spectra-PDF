@@ -324,8 +324,23 @@ function batchCalculations(specs: readonly NewFieldSpec[]): [string, string[]][]
   return entries;
 }
 
+/** Whether the catalog registers an XFA resource.
+ *
+ * Read off the RAW /AcroForm dict: pdf-lib deletes /XFA on both `getForm()`
+ * and `save()`, so any check that runs after either sees a document that no
+ * longer has one. */
+function hasXfa(doc: PDFDocument): boolean {
+  const acro = doc.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+  return acro?.get(PDFName.of('XFA')) !== undefined;
+}
+
 function validateSpecs(doc: PDFDocument, specs: readonly NewFieldSpec[]): void {
   const problems: FieldProblem[] = [];
+  // Refused before any other rule, and before anything calls getForm(): the
+  // engine twin refuses field authoring on an XFA document at every door, and
+  // this path would instead delete the template, datasets, config and
+  // localeSet packets with no notice.
+  if (hasXfa(doc)) throw new FieldSpecError([{ key: 'refusal.field.xfa' }]);
   const taken = topLevelFieldNames(doc);
   // Only walked when the batch actually carries a lock: the terminal-field walk
   // is work no other rule needs.
@@ -485,8 +500,9 @@ function validateSpecs(doc: PDFDocument, specs: readonly NewFieldSpec[]): void {
       });
     }
   }
-  // Ensure /AcroForm exists (getForm() lazily creates it, and strips /XFA —
-  // the standing pure-AcroForm posture); addSignatureField relies on it.
+  // Ensure /AcroForm exists (getForm() lazily creates it); addSignatureField
+  // relies on it. getForm() also strips /XFA, which is why an XFA document is
+  // refused above rather than reaching this line.
   doc.getForm();
   if (problems.length > 0) throw new FieldSpecError(problems);
 }
