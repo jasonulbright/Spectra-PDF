@@ -1813,6 +1813,25 @@ pub async fn check_auto_update_disabled() -> Result<bool, String> {
     }
 }
 
+/// Whether this machine forbids running field scripts, whatever the user's
+/// preference says. Same key and same shape as `DisableAutoUpdate`: an
+/// administrator sets it, and it outranks the preference in one direction only
+/// — it can turn scripting off, never on.
+#[tauri::command]
+pub async fn check_field_scripts_disabled() -> Result<bool, String> {
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+    use winreg::RegKey;
+
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    match hklm.open_subkey("SOFTWARE\\Spectra PDF") {
+        Ok(key) => {
+            let value: Result<u32, _> = key.get_value("DisableFieldScripts");
+            Ok(value.unwrap_or(0) == 1)
+        }
+        Err(_) => Ok(false),
+    }
+}
+
 // ── Startup (Start with Windows) ─────────────────────────────────────────
 
 const STARTUP_REG_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";

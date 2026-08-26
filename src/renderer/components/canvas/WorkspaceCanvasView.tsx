@@ -168,6 +168,8 @@ import { runCommitGate } from '../../lib/commit-gate';
 
 import { buildMergedPageRefs, pathBlockedFromClose } from '../../lib/merge-docs';
 import { useWorkspaceForms } from '../../hooks/useWorkspaceForms';
+import { useFieldScripts } from '../../hooks/useFieldScripts';
+import { useFieldScriptsAllowed } from '../../hooks/useFieldScriptsAllowed';
 import {
   computedValues,
   formatScriptOf,
@@ -177,7 +179,7 @@ import {
   valueShapeMatches,
 } from '../../lib/form-overlay';
 import type { OverlayWidget } from '../../lib/form-overlay';
-import { readFormFields, type FormFieldValue } from '../../lib/forms';
+import { readFormFields, type FormFieldValue, type FormValuePhase } from '../../lib/forms';
 import type { NewFieldSpec, NewFieldType } from '../../lib/form-authoring';
 import {
   FIELD_SCRIPTS,
@@ -417,6 +419,9 @@ interface WorkspaceCanvasViewProps {
     path: string,
     specs: readonly NewFieldSpec[],
   ) => Promise<void | typeof EDIT_DECLINED>;
+  /** `app.alert` from a document's own field script, shown with the app's own
+   * dialog. A script never reaches a platform alert. */
+  onScriptAlert?: (text: string) => void;
   // Per-position external drop: the canvas publishes a resolver here so
   // App's drop handler can map a drop point to the document + index under it
   // (returns null for a between/empty drop → App falls back to appending).
@@ -595,6 +600,7 @@ export function WorkspaceCanvasView({
   onFillFormValues,
   onAddFormField,
   onAddFormFields,
+  onScriptAlert,
   dropResolverRef,
 }: WorkspaceCanvasViewProps): React.ReactElement {
   useTranslation();
@@ -1202,15 +1208,67 @@ export function WorkspaceCanvasView({
     setPendingFormValues((prev) => pruneFormValues(prev, formsByPath));
   }, [workspaceForms]);
 
-  const onSetFormValue = useCallback((path: string, fieldName: string, value: FormFieldValue) => {
-    setPendingFormValues((prev) => {
-      const next = new Map(prev);
-      const inner = new Map(next.get(path) ?? []);
-      inner.set(fieldName, value);
-      next.set(path, inner);
-      return next;
-    });
-  }, []);
+  // Field scripting: default off, and off entirely under the machine policy.
+  // A document whose scripts are all declarative never builds a sandbox — the
+  // `AF*` set is `af-calc`'s and always has been.
+  const fieldScriptsAllowed = useFieldScriptsAllowed();
+  const setPendingValue = useCallback(
+    (path: string, fieldName: string, value: FormFieldValue) => {
+      setPendingFormValues((prev) => {
+        const next = new Map(prev);
+        const inner = new Map(next.get(path) ?? []);
+        inner.set(fieldName, value);
+        next.set(path, inner);
+        return next;
+      });
+    },
+    [],
+  );
+  const fieldScripts = useFieldScripts(workspaceForms, engineCall, {
+    enabled: fieldScriptsAllowed.enabled,
+    workingPathFor: (path) => state.files.get(path)?.workingPath,
+    numPagesFor: (path) => state.files.get(path)?.pageCount,
+    // A keystroke the document refused, or a commit its Validate rejected, has
+    // to reach the PENDING map: the fill names what that map holds, so leaving
+    // the typed characters there would apply a value the document's own
+    // validation turned down while the canvas drew something else.
+    onCorrectValue: setPendingValue,
+    ...(onScriptAlert ? { onAlert: onScriptAlert } : {}),
+  });
+  const {
+    keystroke: fieldScriptKeystroke,
+    commit: fieldScriptCommit,
+    focus: fieldScriptFocus,
+    blur: fieldScriptBlur,
+  } = fieldScripts;
+
+  // The AcroForm event model, wired to the gestures that actually mean each
+  // event: a keystroke per character (no validate, no calculate, no format —
+  // dispatching a COMMIT per character is what made a field with a rejecting
+  // Validate script impossible to type into), and the committing keystroke
+  // only where the user actually commits.
+  const onSetFormValue = useCallback(
+    (
+      path: string,
+      fieldName: string,
+      value: FormFieldValue,
+      phase: FormValuePhase = 'commit',
+      previous = '',
+    ) => {
+      if (phase === 'focus' || phase === 'blur') {
+        if (phase === 'focus') fieldScriptFocus(path, fieldName, value);
+        else fieldScriptBlur(path, fieldName, value);
+        return;
+      }
+      setPendingValue(path, fieldName, value);
+      if (phase === 'keystroke' && typeof value === 'string') {
+        fieldScriptKeystroke(path, fieldName, previous, value);
+        return;
+      }
+      fieldScriptCommit(path, fieldName, value);
+    },
+    [setPendingValue, fieldScriptKeystroke, fieldScriptCommit, fieldScriptFocus, fieldScriptBlur],
+  );
 
   const clearFormValues = useCallback(() => setPendingFormValues(NO_FORM_VALUES), []);
 
@@ -1227,14 +1285,19 @@ export function WorkspaceCanvasView({
     const next = new Map<string, ReadonlyMap<string, FormFieldValue>>(pendingFormValues);
     for (const [path, info] of workspaceForms) {
       const computed = computedValues(info.calculation, info.fields, pendingFormValues.get(path));
-      if (computed.size === 0) continue;
+      const scripted = fieldScripts.values.get(path);
+      if (computed.size === 0 && !scripted) continue;
       const merged = new Map<string, FormFieldValue>(next.get(path) ?? []);
       for (const [name, value] of computed) merged.set(name, value);
+      // The sandbox runs AFTER the declarative pass and wins where the two
+      // name the same field: a custom body is the one the document's author
+      // wrote for that field, and the declarative pass never saw it.
+      for (const [name, value] of scripted ?? []) merged.set(name, value);
       next.set(path, merged);
       changed = true;
     }
     return changed ? next : pendingFormValues;
-  }, [workspaceForms, pendingFormValues]);
+  }, [workspaceForms, pendingFormValues, fieldScripts.values]);
 
   // pageId -> widgets, resolved through (sourceDocId, sourcePageIndex) — an
   // in-memory moved page keeps its widgets because both travel with the ref.
@@ -5219,6 +5282,8 @@ export function WorkspaceCanvasView({
   pendingFormValuesRef.current = pendingFormValues;
   const formDisplayValuesRef = useRef(formDisplayValues);
   formDisplayValuesRef.current = formDisplayValues;
+  const fieldScriptsRef = useRef(fieldScripts);
+  fieldScriptsRef.current = fieldScripts;
   const applyFormValuesRef = useRef(applyFormValues);
   applyFormValuesRef.current = applyFormValues;
   const setFormValueRef = useRef(onSetFormValue);
@@ -5308,7 +5373,21 @@ export function WorkspaceCanvasView({
         ) {
           return false;
         }
-        setFormValueRef.current(path, fieldName, value);
+        // A text field is TYPED and then committed, because that is the only
+        // way a user produces a value: a harness that jumped straight to the
+        // commit would never exercise the keystroke half, and a `/K` action
+        // reading `event.change` would never see the characters.
+        if (field.type === 'text' && typeof value === 'string') {
+          const pendingNow = pendingFormValuesRef.current.get(path)?.get(fieldName);
+          const before =
+            typeof pendingNow === 'string'
+              ? pendingNow
+              : typeof field.value === 'string'
+                ? field.value
+                : '';
+          setFormValueRef.current(path, fieldName, value, 'keystroke', before);
+        }
+        setFormValueRef.current(path, fieldName, value, 'commit');
         return true;
       },
       pendingCount: () => {
@@ -5318,6 +5397,10 @@ export function WorkspaceCanvasView({
       },
       apply: () => applyFormValuesRef.current(),
       shownValueFor: (path, fieldName) => {
+        // A document's own Format script, when it ran, is the display string —
+        // it is what the author wrote for exactly this field.
+        const scripted = fieldScriptsRef.current.formatted.get(path)?.get(fieldName);
+        if (typeof scripted === 'string') return scripted;
         const value = formDisplayValuesRef.current.get(path)?.get(fieldName);
         if (typeof value !== 'string') return null;
         const field = workspaceFormsRef.current.get(path)?.fields.find((f) => f.name === fieldName);
