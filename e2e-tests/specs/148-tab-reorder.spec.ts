@@ -17,6 +17,7 @@ import {
   waitForHarness,
   type PhysicalScreenPoint,
 } from '../support/harness.js';
+import { SESSION_FILE } from '../support/app-data.js';
 
 /**
  * Tab order is the user's order.
@@ -48,7 +49,7 @@ const BOOKMARKED_PDF = resolve(__dirname, '..', 'fixtures', 'bookmarked.pdf');
 
 /** Where the Rust side records window geometry, each window's paths, and the
  * order it holds them in. */
-const SESSION_FILE = resolve(process.env.APPDATA ?? '', 'com.spectrapdf.app', 'session.json');
+// `SESSION_FILE` is resolved from the binary's own container: see `support/app-data.ts`.
 
 const TAB_STRIP = '[data-testid="tab-strip"]';
 const DROP_CARET = '[data-testid="tab-drop-caret"]';

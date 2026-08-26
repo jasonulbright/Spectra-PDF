@@ -138,3 +138,6 @@ userinput.md
 # large, gitignored like resources/python & resources/ghostscript).
 resources/libreoffice/
 tests/softhsm2/
+
+# instruction file for a different tool; not part of this repo
+AGENTS.md

@@ -20,6 +20,7 @@ import {
   waitForDisplayedSelector,
   waitForHarness,
 } from '../support/harness.js';
+import { SESSION_FILE, STARTUP_FILE } from '../support/app-data.js';
 
 /**
  * An app Exit that nobody cancels, and the launch that reads what it left.
@@ -60,11 +61,9 @@ import {
 const SAMPLE_PDF = resolve(__dirname, '..', 'fixtures', 'sample.pdf');
 const BOOKMARKED_PDF = resolve(__dirname, '..', 'fixtures', 'bookmarked.pdf');
 
-const APP_DATA = resolve(process.env.APPDATA ?? '', 'com.spectrapdf.app');
-const SESSION_FILE = resolve(APP_DATA, 'session.json');
-/** The Rust-readable startup flags — read while the windows are being built,
- * before any renderer exists to be asked. */
-const STARTUP_FILE = resolve(APP_DATA, 'startup.json');
+// `SESSION_FILE` and `STARTUP_FILE` — the Rust-readable startup flags, read
+// while the windows are being built, before any renderer exists to be asked —
+// are resolved from the binary's own container: see `support/app-data.ts`.
 
 interface SessionRecord {
   labelKind: 'main' | 'doc';
