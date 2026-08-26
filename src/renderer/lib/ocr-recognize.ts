@@ -57,3 +57,43 @@ export async function recognizePage(
   })) as OcrResult | undefined;
   return { text: res?.text ?? '', words: res?.words ?? [] };
 }
+
+/**
+ * Recognise PNG BYTES the caller already holds — the view-tier door.
+ *
+ * No `file`, and no Ghostscript: the viewer has already rasterised the page it
+ * is showing, and the engine op takes those pixels on stdin. That matters
+ * beyond saving a render — the distribution ships no Ghostscript, so a
+ * reading-view capability that is on by default cannot route through the
+ * page-rendering arm above.
+ *
+ * `callRaw` rather than `call` deliberately, and by a wider margin than the
+ * redaction-mark seed's documented exception: that one at least names a
+ * workspace path. This op has NO file parameter at all — it is a pure function
+ * of bytes, targets no workspace file, writes nothing, and must not queue a
+ * visible operation or run the commit gate for a selection gesture.
+ */
+export async function recognizeRaster(
+  callRaw: RawEngineCall,
+  png: Uint8Array,
+  lang: string,
+): Promise<OcrResult> {
+  const tesseract = await tesseractPath();
+  const res = (await callRaw('recognize_raster', {
+    data: toBase64(png),
+    lang,
+    tesseract_path: tesseract,
+  })) as OcrResult | undefined;
+  return { text: res?.text ?? '', words: res?.words ?? [] };
+}
+
+/** Chunked so a multi-megabyte page raster cannot blow the argument limit that
+ *  `String.fromCharCode(...all)` hits. */
+function toBase64(bytes: Uint8Array): string {
+  const CHUNK = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}

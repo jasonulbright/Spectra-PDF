@@ -99,7 +99,13 @@ export const TOOL_DEFS: readonly ToolDef[] = [
     // Six modes belong to one tool. 'shape' fans out through
     // the secondary toolbar's figure picker (rect/ellipse/line/arrow/polygon/
     // polyline/cloud — rung 2); 'callout' is the leadered text box.
-    canvasTools: ['highlight', 'freetext', 'ink', 'stamp', 'shape', 'callout', 'note', 'inkerase'],
+    // 'inkhighlight' sits beside 'highlight' deliberately: text-selection
+    // markup cannot mark an image-only scan at all, so the freehand pen is the
+    // only highlighter such a page has. Both highlight, so both are here.
+    canvasTools: [
+      'highlight', 'inkhighlight', 'freetext', 'ink', 'stamp', 'shape', 'callout', 'note',
+      'inkerase',
+    ],
   },
   {
     id: 'edit',

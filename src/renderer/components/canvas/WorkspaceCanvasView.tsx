@@ -75,7 +75,8 @@ import type { PageRef } from '../../state/types';
 import { buildSignatureAppearance } from '../../lib/signature-placement';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import { captureSnapshot, type SnapshotPlacement } from '../../lib/snapshot-capture';
-import { getSettings, saveSettings } from '../../lib/app-settings';
+import { getSettings, saveSettings, subscribeSettings } from '../../lib/app-settings';
+import { DEFAULT_OCR_LANGUAGE } from '../../ocr/languages';
 import { readingLocale, type PageReadAloud } from '../../lib/read-aloud';
 import { useReadAloud, type ReadAloudTarget } from '../../hooks/useReadAloud';
 import { ReadAloudBar } from './ReadAloudBar';
@@ -92,6 +93,7 @@ import {
   EMPTY_SIGNER_SOURCE,
   signerSourceParams,
   rememberStoreCertificate,
+  rememberCscCredential,
 } from '../SignerSourceFields';
 import type { SignerSource } from '../SignerSourceFields';
 import {
@@ -826,6 +828,10 @@ export function WorkspaceCanvasView({
     (t: CanvasTool) => dispatch({ type: 'UI_SET_TOOL', tool: t }),
     [dispatch],
   );
+  const setToolLock = useCallback(
+    (locked: boolean) => dispatch({ type: 'UI_SET_TOOL_LOCK', locked }),
+    [dispatch],
+  );
   // Color picker for the annotation tools: null keeps each tool's own default
   // (yellow highlight, dark freetext, blue ink); a pick applies to whichever
   // tool creates the next annotation, across tool switches.
@@ -920,6 +926,23 @@ export function WorkspaceCanvasView({
   const [signError, setSignError] = useState<string | null>(null);
   const [signDone, setSignDone] = useState<{ signer: string | null; output: string; ok: boolean } | null>(null);
   const { call: engineCall, callRaw: engineCallRaw } = useEngine();
+
+  // View-tier scanned-page recognition. Latched rather than
+  // re-read per render, and subscribed so the preference takes effect on the
+  // page already on screen instead of at the next document open.
+  //
+  // The language is the catalog default rather than a preference of its own:
+  // this tier places BOXES for a selection gesture, and choosing which models
+  // to load is a decision the Scan & OCR door exists to ask.
+  const [scanSelectOn, setScanSelectOn] = useState(() => getSettings().scanSelectRecognition);
+  useEffect(
+    () => subscribeSettings((s) => setScanSelectOn(s.scanSelectRecognition)),
+    [],
+  );
+  const ocrSelection = useMemo(
+    () => (scanSelectOn ? { callRaw: engineCallRaw, lang: DEFAULT_OCR_LANGUAGE } : null),
+    [scanSelectOn, engineCallRaw],
+  );
   // Prime the installed-font listing ONCE per session. It is a
   // property of the machine, not of any document, so it is fetched here
   // (where the engine handle lives) and read from the module cache by the
@@ -6150,10 +6173,11 @@ export function WorkspaceCanvasView({
         output: dest,
         ...resolved.params!,
         // A token source takes the password field as its PIN; a store
-        // certificate takes no secret from us at all, so none is sent.
+        // certificate and a signing-service credential take no secret from us
+        // at all, so none is sent.
         ...(resolved.params!.pkcs11_module
           ? { pkcs11_pin: sigPassword }
-          : resolved.params!.store_cert
+          : resolved.params!.store_cert || resolved.params!.csc_url
             ? {}
             : { password: sigPassword }),
         ...(sigReason.trim() ? { reason: sigReason.trim() } : {}),
@@ -6166,6 +6190,9 @@ export function WorkspaceCanvasView({
       setSignDone({ signer: res.signer, output: res.output, ok: res.valid && res.intact && res.covers_whole_document });
       if (sigSource.mode === 'store' && sigSource.thumbprint) {
         rememberStoreCertificate(sigSource.thumbprint);
+      }
+      if (sigSource.mode === 'csc' && sigSource.providerId && sigSource.credentialId) {
+        rememberCscCredential(sigSource.providerId, sigSource.credentialId);
       }
       setSigPlacement(null);
       setSigFieldTarget(null);
@@ -6617,6 +6644,8 @@ export function WorkspaceCanvasView({
         activeToolId={state.ui.activeToolId}
         toolColor={toolColor}
         onSetToolColor={setToolColor}
+        toolLock={state.ui.toolLock}
+        onSetToolLock={setToolLock}
         stampPreset={stampPreset}
         onSetStampPreset={setStampPreset}
         countGroups={countGroups}
@@ -6708,6 +6737,7 @@ export function WorkspaceCanvasView({
           // commit. Passive overlays (annotations, marks, find highlights,
           // form values, selections) mirror in both panes.
           const dvProps = {
+            ocrSelection,
             onCreateLinks: createLinks,
             pageLayout: state.ui.pageLayout,
             twoUpCover: state.ui.twoUpCover,

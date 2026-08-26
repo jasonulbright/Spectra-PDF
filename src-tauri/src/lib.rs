@@ -16,6 +16,7 @@ pub mod scanner;
 pub mod app_windows;
 pub mod portable;
 pub mod store_certs;
+pub mod csc_oauth;
 pub mod session;
 pub mod tabdrag;
 
@@ -157,6 +158,7 @@ pub fn run() {
             commands::pick_icc_file,
             commands::pick_pkcs11_module,
             store_certs::list_store_certificates,
+            csc_oauth::csc_authorize,
             commands::pick_any_file,
             commands::pick_any_files,
             commands::pick_folder_dialog,

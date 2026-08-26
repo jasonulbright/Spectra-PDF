@@ -73,7 +73,7 @@ import { useSeparationInspector, useSeparationRaster } from '../../hooks/useSepa
 import { isInspectClick, pointerTravel } from '../../lib/separation-preview';
 import { useFlattenerRegions } from '../../hooks/useFlattenerPreview';
 import FlattenRegionOverlay from './FlattenRegionOverlay';
-import { PageTextLayer } from './PageTextLayer';
+import { PageTextLayer, type OcrSelectionContext } from './PageTextLayer';
 
 // The tool union moved to the ui state slice (commands and the
 // keymap read it for enablement); re-exported here for the overlay consumers.
@@ -298,6 +298,13 @@ const FREETEXT_FONT_PT = 12;
 // signature is one annotation). Long enough for a deliberate lift-and-cross,
 // short enough that a new thought starts a new drawing.
 const INK_MERGE_WINDOW_MS = 2500;
+// The freehand highlighter's pen. The width is in PDF POINTS and is a marker
+// nib, not a pen's: wide enough to cover a line of body text in one pass at any
+// zoom, because the gesture has no text to snap to on a scanned page. The alpha
+// is the mark's own — the appearance multiplies as well, so the printed ink
+// darkens the page rather than replacing it.
+const HIGHLIGHTER_WIDTH_PT = 14;
+const HIGHLIGHTER_OPACITY = 0.4;
 
 function defaultColorFor(kind: PageAnnotation['kind']): string {
   if (kind === 'freetext') return FREETEXT_COLOR;
@@ -746,6 +753,10 @@ interface PageCellProps {
    * the board is an arrangement surface, where text at thumbnail size isn't
    * usefully selectable and the spans would fight the page-drag. */
   textLayer?: boolean;
+  /** Recognise a scanned page's words so the Select tool has geometry to snap
+   *  to. View-tier and read-only — see lib/ocr-selection. Absent turns the
+   *  text layer back into pdf.js's alone. */
+  ocrSelection?: OcrSelectionContext | null;
   // Overrides the kind-default color for newly created annotations (color
   // picker in the floating toolbar); undefined keeps the per-kind default.
   annotationColor?: string;
@@ -1226,6 +1237,7 @@ function PageCellImpl({
   visibleNumber,
   tool,
   textLayer,
+  ocrSelection,
   annotationColor,
   stampPreset,
   measureScale,
@@ -2522,7 +2534,20 @@ function PageCellImpl({
       const w = Math.max(...xs) - minX;
       const h = Math.max(...ys) - minY;
       if (commit && (w > 0.005 || h > 0.005)) {
-        const color = annotationColor ?? INK_COLOR;
+        // ONE capture pipeline, two pens. The highlighter differs only in what
+        // the finished annotation says about itself (style, width, alpha,
+        // default colour) — the stroke, its un-projection and its merge window
+        // are the pen's, unchanged, so there is no second pointer path to keep
+        // in step with this one.
+        const highlighter = tool === 'inkhighlight';
+        const color = annotationColor ?? (highlighter ? HIGHLIGHT_COLOR : INK_COLOR);
+        const style: Pick<PageAnnotation, 'inkStyle' | 'strokeWidth' | 'opacity'> = highlighter
+          ? {
+              inkStyle: 'highlighter',
+              strokeWidth: HIGHLIGHTER_WIDTH_PT,
+              opacity: HIGHLIGHTER_OPACITY,
+            }
+          : {};
         // Pen lifts within the merge window EXTEND the previous ink
         // annotation instead of spawning a new one — a signature drawn in
         // four strokes is ONE annotation (one /InkList with four paths),
@@ -2533,7 +2558,15 @@ function PageCellImpl({
         const target =
           prev && prev.pageId === page.id && prev.color === color &&
           performance.now() - prev.time < INK_MERGE_WINDOW_MS
-            ? page.annotations?.find((a) => a.id === prev.id && a.kind === 'ink' && a.strokes)
+            ? page.annotations?.find(
+                (a) =>
+                  a.id === prev.id &&
+                  a.kind === 'ink' &&
+                  a.strokes &&
+                  // A pen stroke never joins a highlighter mark: they are two
+                  // pens, and one annotation carries one appearance.
+                  (a.inkStyle === 'highlighter') === highlighter,
+              )
             : undefined;
         if (target) {
           const strokes = [...(target.strokes ?? []), stored];
@@ -2561,6 +2594,7 @@ function PageCellImpl({
             w,
             h,
             color,
+            ...style,
             strokes: [stored],
           });
           lastInkRef.current = { id, pageId: page.id, color, time: performance.now() };
@@ -2775,7 +2809,7 @@ function PageCellImpl({
     if (tool === 'forms' || tool === 'edit') return;
     e.preventDefault();
     e.stopPropagation();
-    if (tool === 'ink') {
+    if (tool === 'ink' || tool === 'inkhighlight') {
       handleInkDown(e);
       return;
     }
@@ -3291,6 +3325,7 @@ function PageCellImpl({
           displayWidth={displayWidth}
           displayHeight={pageHeight}
           active={tool === 'select'}
+          ocrSelection={ocrSelection}
         />
       )}
       {(page.annotations ?? []).map((raw) => {
@@ -3527,7 +3562,13 @@ function PageCellImpl({
               className="page-annot-ink-svg"
               viewBox="0 0 1 1"
               preserveAspectRatio="none"
-              style={a.opacity !== undefined && a.opacity < 1 ? { opacity: a.opacity } : undefined}
+              style={{
+                ...(a.opacity !== undefined && a.opacity < 1 ? { opacity: a.opacity } : {}),
+                // On screen the marker multiplies onto the page raster, which
+                // is what the committed appearance's /Multiply ExtGState does
+                // on paper — the two views agree or the drawing lies.
+                ...(a.inkStyle === 'highlighter' ? { mixBlendMode: 'multiply' as const } : {}),
+              }}
             >
               {/* Ink draws one polyline PER STROKE (da.strokes); measure
                   keeps its single vertex path (da.points). */}
@@ -3549,6 +3590,12 @@ function PageCellImpl({
                   {...(a.strokeWidth !== undefined
                     ? { strokeWidth: Math.max(0.75, a.strokeWidth * (pageHeight / measDispH)) }
                     : {})}
+                  // The AP already strokes every ink path `1 J 1 j`; saying so
+                  // here keeps a wide marker's ends and corners the same shape
+                  // on screen as on paper (butt caps at 14pt read as a
+                  // different mark entirely).
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
                   vectorEffect="non-scaling-stroke"
                 />
               ))}
@@ -4661,7 +4708,19 @@ function PageCellImpl({
         />
       )}
       {inkPoints && (
-        <svg className="page-annot-ink-svg page-annot-ink-live" viewBox="0 0 1 1" preserveAspectRatio="none">
+        <svg
+          className="page-annot-ink-svg page-annot-ink-live"
+          viewBox="0 0 1 1"
+          preserveAspectRatio="none"
+          // The live stroke previews the pen it is being drawn with — a
+          // highlighter that draws thin and opaque until release is a
+          // different tool for the length of the gesture.
+          style={
+            tool === 'inkhighlight'
+              ? { opacity: HIGHLIGHTER_OPACITY, mixBlendMode: 'multiply' }
+              : undefined
+          }
+        >
           <polyline
             points={inkPoints.reduce<string[]>((acc, v, i) => {
               if (i % 2 === 0) acc.push(`${v}`);
@@ -4669,7 +4728,16 @@ function PageCellImpl({
               return acc;
             }, []).join(' ')}
             fill="none"
-            stroke={annotationColor ?? INK_COLOR}
+            stroke={
+              annotationColor ?? (tool === 'inkhighlight' ? HIGHLIGHT_COLOR : INK_COLOR)
+            }
+            {...(tool === 'inkhighlight'
+              ? {
+                  strokeWidth: Math.max(0.75, HIGHLIGHTER_WIDTH_PT * (pageHeight / measDispH)),
+                  strokeLinecap: 'round' as const,
+                  strokeLinejoin: 'round' as const,
+                }
+              : {})}
             vectorEffect="non-scaling-stroke"
           />
         </svg>

@@ -49,6 +49,10 @@ export interface RawAnnotStyle {
    * Carried so the drawing redraws where the SET it came from
    * was never imported. Sanitized at the importer, never trusted here. */
   spectraSymbolParts?: string;
+  /** The private /SpectraInkStyle — which pen drew an /Ink annotation. The
+   * appearance already carries the look; this is what lets the drawing
+   * re-EDIT as the highlighter it was drawn with. */
+  spectraInkStyle?: string;
 }
 
 function num(v: unknown): number | undefined {
@@ -172,6 +176,7 @@ export async function readRawAnnotationStyles(buffer: PdfBuffer): Promise<RawAnn
             spectraSymbol: textOf(dict.lookup(PDFName.of('SpectraSymbol'))),
             spectraLegend: textOf(dict.lookup(PDFName.of('SpectraLegend'))),
             spectraSymbolParts: textOf(dict.lookup(PDFName.of('SpectraSymbolParts'))),
+            spectraInkStyle: textOf(dict.lookup(PDFName.of('SpectraInkStyle'))),
             ...(rd && rd.length === 4 ? { rd: rd as [number, number, number, number] } : {}),
           });
           } catch {

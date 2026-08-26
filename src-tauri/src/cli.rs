@@ -1951,15 +1951,20 @@ pub struct VerifySignaturesArgs {
     /// downloaded.
     #[arg(long)]
     pub eutl_trust: bool,
+    /// Also anchor on the bundled root-program certificates, per purpose. Off
+    /// unless given; the bundle ships with the app and nothing is downloaded.
+    /// Additive to --system-trust rather than a replacement for it.
+    #[arg(long)]
+    pub msctl_trust: bool,
 }
 
 #[derive(Args)]
 pub struct SignArgs {
     /// Input PDF file
-    #[arg(required_unless_present = "list_store_certs")]
+    #[arg(required_unless_present_any = ["list_store_certs", "list_csc_credentials"])]
     pub input: Option<PathBuf>,
     /// Output PDF file (must differ from the input; signing appends a revision)
-    #[arg(short, long, required_unless_present = "list_store_certs")]
+    #[arg(short, long, required_unless_present_any = ["list_store_certs", "list_csc_credentials"])]
     pub output: Option<PathBuf>,
     /// PKCS#12 (.pfx/.p12) signer file (key + certificate)
     #[arg(long, conflicts_with_all = ["key", "cert"])]
@@ -2016,6 +2021,10 @@ pub struct SignArgs {
     /// certificates (used with --embed-revocation)
     #[arg(long)]
     pub eutl_trust: bool,
+    /// Also anchor revocation gathering on the bundled root-program
+    /// certificates (used with --embed-revocation)
+    #[arg(long)]
+    pub msctl_trust: bool,
     /// PKCS#11 provider module (.dll) — sign with a hardware token/HSM.
     /// Use with --token-label and --cert-label; --password is the PIN.
     #[arg(long, conflicts_with_all = ["pfx", "key", "cert"], requires_all = ["token_label", "cert_label"])]
@@ -2041,6 +2050,36 @@ pub struct SignArgs {
     /// and exit. Takes no input or output file.
     #[arg(long, conflicts_with_all = ["pfx", "key", "cert", "pkcs11_module", "store_cert"])]
     pub list_store_certs: bool,
+    /// Sign with a credential at a remote signing service (Cloud Signature
+    /// Consortium API), named by this service address. Only the document's
+    /// DIGEST is sent; the document itself never leaves this machine.
+    #[arg(long, conflicts_with_all = ["pfx", "key", "cert", "pkcs11_module", "store_cert"])]
+    pub csc_url: Option<String>,
+    /// Credential to sign with at the signing service. List them with
+    /// --list-csc-credentials.
+    #[arg(long, requires = "csc_url")]
+    pub csc_credential: Option<String>,
+    /// OAuth client ID of YOUR OWN registration with that signing service.
+    /// This application ships no registration and holds no relationship with
+    /// any provider.
+    #[arg(long, requires = "csc_url")]
+    pub csc_client_id: Option<String>,
+    /// OAuth scope to ask the signing service for. Defaults to `service`.
+    #[arg(long, requires = "csc_url")]
+    pub csc_scope: Option<String>,
+    /// PEM bundle of certificate authorities to trust for the signing
+    /// service's TLS certificate, for a provider inside a private PKI.
+    /// Verification is never disabled.
+    #[arg(long, requires = "csc_url", value_name = "PATH")]
+    pub csc_ca_bundle: Option<PathBuf>,
+    /// List the credentials the signing service offers, and exit. Takes no
+    /// input or output file.
+    #[arg(
+        long,
+        requires = "csc_url",
+        conflicts_with_all = ["pfx", "key", "cert", "pkcs11_module", "store_cert", "list_store_certs"]
+    )]
+    pub list_csc_credentials: bool,
     /// Apply a CERTIFICATION (author) signature, which records what may change
     /// in the document afterwards. At most one per document, and it must be the
     /// document's first signature.
@@ -2926,6 +2965,35 @@ fn abs(p: &Path) -> PathBuf {
     } else {
         std::env::current_dir().unwrap().join(p)
     }
+}
+
+/// The signing-service half of a `sign` request, shared by the credential
+/// listing and the sign itself so the two cannot address different providers.
+///
+/// `csc_headless` is set here and is never a flag: a command-line or scheduled
+/// run has nobody to complete a browser sign-in, so the engine refuses such a
+/// provider by name instead of hanging. The client secret arrives as an
+/// argument to this function because it is read from stdin — it is never a
+/// flag, which would put it in the process arg list and the shell history.
+fn csc_params(args: &SignArgs, client_secret: &str) -> serde_json::Value {
+    let mut params = json!({
+        "csc_url": args.csc_url.as_deref().unwrap_or(""),
+        "csc_client_id": args.csc_client_id.as_deref().unwrap_or(""),
+        "csc_headless": true,
+    });
+    if !client_secret.is_empty() {
+        params["csc_client_secret"] = json!(client_secret);
+    }
+    if let Some(credential) = &args.csc_credential {
+        params["csc_credential"] = json!(credential);
+    }
+    if let Some(scope) = &args.csc_scope {
+        params["csc_scope"] = json!(scope);
+    }
+    if let Some(bundle) = &args.csc_ca_bundle {
+        params["csc_ca_bundle"] = json!(abs(bundle).to_string_lossy());
+    }
+    params
 }
 
 /// Parse comma-separated page numbers into a JSON value.
@@ -4668,6 +4736,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             if args.eutl_trust {
                 params["eutl_trust"] = json!(true);
             }
+            if args.msctl_trust {
+                params["msctl_trust"] = json!(true);
+            }
             engine.call("verify_signatures", params)
         }
 
@@ -4678,16 +4749,40 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 let rows = crate::store_certs::list_certificates()?;
                 return Ok(json!({ "certificates": rows }));
             }
+            // A signing-service run has a secret of its own — the OAuth client
+            // secret of the user's registration — and it is read the way every
+            // other secret here is read: from stdin, never from a flag, so it
+            // stays out of the process arg list and the shell history. A
+            // listing needs it too, which is why this precedes the listing
+            // branch below.
+            let csc_secret = if args.csc_url.is_some() {
+                use std::io::Read;
+                let mut s = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut s)
+                    .map_err(|e| format!("failed to read the client secret from stdin: {}", e))?;
+                s.trim_end_matches(['\r', '\n']).to_string()
+            } else {
+                String::new()
+            };
+            if args.list_csc_credentials {
+                return engine.call("list_csc_credentials", csc_params(&args, &csc_secret));
+            }
             let input = args.input.as_ref().expect("clap requires an input");
             let output = args.output.as_ref().expect("clap requires an output");
             // Password from --password, else read one line from stdin (so a
             // script can pipe it without it landing in the process arg list or
             // shell history).
-            let password = match (&args.password, args.store_cert.is_some()) {
+            let password = match (
+                &args.password,
+                args.store_cert.is_some() || args.csc_url.is_some(),
+            ) {
                 (Some(p), _) => p.clone(),
-                // A store certificate carries no passphrase of ours, so
-                // reading stdin for one would block a script that correctly
-                // supplies nothing.
+                // Neither a store certificate nor a signing-service credential
+                // carries a passphrase of ours, so reading stdin for one would
+                // block a script that correctly supplies nothing. The signing
+                // service's own secret is read above, from the same stdin, and
+                // this branch must not consume it a second time.
                 (None, true) => String::new(),
                 (None, false) => {
                     use std::io::Read;
@@ -4707,8 +4802,14 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             // certificate takes neither — Windows collects any secret itself.
             if args.pkcs11_module.is_some() {
                 params["pkcs11_pin"] = json!(password);
-            } else if args.store_cert.is_none() {
+            } else if args.store_cert.is_none() && args.csc_url.is_none() {
                 params["password"] = json!(password);
+            }
+            if args.csc_url.is_some() {
+                let csc = csc_params(&args, &csc_secret);
+                for (name, value) in csc.as_object().expect("csc_params builds an object") {
+                    params[name] = value.clone();
+                }
             }
             // Signer source: --pfx, --key + --cert, or a PKCS#11 token
             // (clap enforces the pairing/conflicts; the engine re-validates).
@@ -4800,6 +4901,9 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
             }
             if args.eutl_trust {
                 params["eutl_trust"] = json!(true);
+            }
+            if args.msctl_trust {
+                params["msctl_trust"] = json!(true);
             }
             // The stamp's appearance. Assembled only when something was
             // asked for, so an unconfigured signing request reaches the
@@ -5902,6 +6006,113 @@ mod tests {
             "--store-cert", "AABB", "--store-machine",
         ])
         .is_ok());
+    }
+
+    // ── sign --csc-* (the remote signing service) ─────────────────────────
+
+    #[test]
+    fn a_signing_service_is_one_signer_source_among_five() {
+        let cli = parse(&[
+            "spectrapdf", "sign", "in.pdf", "-o", "out.pdf",
+            "--csc-url", "https://signing.example/csc/v2",
+            "--csc-credential", "cred-1",
+            "--csc-client-id", "the-client",
+        ]);
+        let Some(CliCommand::Sign(args)) = cli.command else { panic!("not sign") };
+        assert_eq!(args.csc_url.as_deref(), Some("https://signing.example/csc/v2"));
+        assert_eq!(args.csc_credential.as_deref(), Some("cred-1"));
+        assert!(args.pfx.is_none() && args.store_cert.is_none());
+    }
+
+    #[test]
+    fn a_signing_service_conflicts_with_every_other_source() {
+        for other in [
+            vec!["--pfx", "s.pfx"],
+            vec!["--key", "k.pem", "--cert", "c.pem"],
+            vec!["--pkcs11-module", "m.dll", "--token-label", "t", "--cert-label", "c"],
+            vec!["--store-cert", "AABB"],
+        ] {
+            let mut argv = vec![
+                "spectrapdf", "sign", "in.pdf", "-o", "out.pdf",
+                "--csc-url", "https://signing.example/csc/v2",
+            ];
+            argv.extend(other.iter());
+            assert!(
+                Cli::try_parse_from(argv.clone()).is_err(),
+                "two signer sources must not parse: {argv:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_signing_service_flag_needs_the_service_address() {
+        for flag in [
+            vec!["--csc-credential", "cred-1"],
+            vec!["--csc-client-id", "the-client"],
+            vec!["--csc-scope", "service"],
+            vec!["--csc-ca-bundle", "ca.pem"],
+            vec!["--list-csc-credentials"],
+        ] {
+            let mut argv = vec!["spectrapdf", "sign", "in.pdf", "-o", "out.pdf"];
+            argv.extend(flag.iter());
+            assert!(
+                Cli::try_parse_from(argv.clone()).is_err(),
+                "a signing-service flag without an address must not parse: {argv:?}"
+            );
+        }
+    }
+
+    /// A credential listing reads no document, so it takes neither an input
+    /// nor an output -- the same shape --list-store-certs already has.
+    #[test]
+    fn listing_signing_service_credentials_takes_no_document() {
+        let cli = parse(&[
+            "spectrapdf", "sign",
+            "--csc-url", "https://signing.example/csc/v2",
+            "--csc-client-id", "the-client",
+            "--list-csc-credentials",
+        ]);
+        let Some(CliCommand::Sign(args)) = cli.command else { panic!("not sign") };
+        assert!(args.list_csc_credentials);
+        assert!(args.input.is_none() && args.output.is_none());
+    }
+
+    /// The OAuth client secret is NEVER a flag. A flag would put it in the
+    /// process argument list and the shell history; it is read from stdin,
+    /// exactly like the signer passphrase.
+    #[test]
+    fn the_client_secret_is_not_a_flag() {
+        assert!(Cli::try_parse_from([
+            "spectrapdf", "sign", "in.pdf", "-o", "out.pdf",
+            "--csc-url", "https://signing.example/csc/v2",
+            "--csc-client-secret", "shhh",
+        ])
+        .is_err());
+    }
+
+    /// A command-line run has nobody to complete a browser sign-in, so the
+    /// request it builds always says so -- there is no flag that turns this
+    /// off, and the engine refuses a browser-only provider by name.
+    #[test]
+    fn a_command_line_signing_service_request_is_always_headless() {
+        let cli = parse(&[
+            "spectrapdf", "sign", "in.pdf", "-o", "out.pdf",
+            "--csc-url", "https://signing.example/csc/v2",
+            "--csc-credential", "cred-1",
+            "--csc-client-id", "the-client",
+            "--csc-scope", "service credential",
+        ]);
+        let Some(CliCommand::Sign(args)) = cli.command else { panic!("not sign") };
+        let params = csc_params(&args, "");
+        assert_eq!(params["csc_headless"], json!(true));
+        assert_eq!(params["csc_url"], json!("https://signing.example/csc/v2"));
+        assert_eq!(params["csc_credential"], json!("cred-1"));
+        assert_eq!(params["csc_scope"], json!("service credential"));
+        // An absent secret is absent, not an empty string a provider would
+        // then be sent as if it were a registration with no secret.
+        assert!(params.get("csc_client_secret").is_none());
+        let with_secret = csc_params(&args, "the-secret");
+        assert_eq!(with_secret["csc_client_secret"], json!("the-secret"));
     }
 
     // ── sign --stamp-* (the visible stamp's appearance) ───────────────────

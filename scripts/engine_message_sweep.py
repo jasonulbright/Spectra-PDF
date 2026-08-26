@@ -73,6 +73,9 @@ PUBLIC_EXCEPTIONS = frozenset(
         "OutlineRefusal",
         "GsUnavailable",
         "StampAppearanceRefusal",
+        # The remote signing service client. A ValueError subclass whose
+        # messages are the user-facing refusals of that source.
+        "CscError",
     }
 )
 

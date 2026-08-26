@@ -30,6 +30,9 @@ const PANELS: readonly NavPanelId[] = NAV_PANEL_IDS;
 interface WorkbenchUi {
   navPane: NavPaneState;
   toolDock: ToolDockState;
+  /** Whether a completed placement leaves the canvas mode armed. Per window
+   * like the pane widths: it describes how you are working in THIS window. */
+  toolLock: boolean;
 }
 
 /** Validate one persisted nav-pane shape against `fallback`, field by field. */
@@ -77,6 +80,7 @@ export function readWorkbenchUi(defaults: WorkbenchUi): WorkbenchUi {
   return {
     navPane: coerceNavPane(r.navPane, defaults.navPane),
     toolDock: coerceToolDock(r.toolDock, defaults.toolDock),
+    toolLock: typeof r.toolLock === 'boolean' ? r.toolLock : defaults.toolLock,
   };
 }
 

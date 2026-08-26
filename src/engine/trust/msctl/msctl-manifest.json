@@ -1,0 +1,39 @@
+{
+  "source": "http://ctldl.windowsupdate.com/msdownload/update/v3/static/trustedr/en/authrootstl.cab",
+  "fetched": "2026-08-26",
+  "list": {
+    "sequence_number": "369069143887839448588",
+    "this_update": "2026-06-18T07:29:24+00:00",
+    "subjects": 554,
+    "signer_sha256": "9f825c4310c005ab8ad2d16e2a1e429ed9b9fb51dfa1dcfc9049a62810012365",
+    "signer_authenticated": "pinned",
+    "issuer_sha256": [
+      "56625ec7886445706fe74ccd2abf69b7c9c9ccde3c7354903af1c8f0e30e9d1c"
+    ]
+  },
+  "files": {
+    "msctl-signers.pem": {
+      "sha256": "050f1fc9207daff1aa34b353c64cc09876ad86ce41f110a8dd3c1677ea76c570",
+      "count": 238
+    },
+    "msctl-timestamp.pem": {
+      "sha256": "2b5ce94ccb6cf7f04d29429dc73cdb37beb23cc9341eac8ff769267b80045953",
+      "count": 167
+    }
+  },
+  "material": {
+    "certificates": 554,
+    "unrestricted_no_purpose_property": 6,
+    "purposes_trimmed_by_denial": 13
+  },
+  "excluded": {
+    "not_named_by_signed_list": 0,
+    "properties_disagree_with_signed_list": 0,
+    "disallowed_after_a_past_moment": 203,
+    "no_purpose_this_bundle_anchors": 92
+  },
+  "naive_read_would_have_anchored": {
+    "signer": 428,
+    "timestamp": 334
+  }
+}
