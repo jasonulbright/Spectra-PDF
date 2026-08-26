@@ -22,6 +22,7 @@ import {
   closeAllFiles,
   openMenuItem,
   saveActiveAs,
+  commitPendingEdits,
   getFirstAnnotation,
   getActiveDocPages,
   getPageAnnotations,
@@ -41,20 +42,41 @@ async function makeThreePageScan(dest: string): Promise<void> {
   writeFileSync(dest, await out.save());
 }
 
-/** The displayed rect of one page cell, by its page id. */
-async function pageRect(
-  pageId: string,
-): Promise<{ x: number; y: number; w: number; h: number } | null> {
-  return (await browser.execute(function (id) {
-    const el = document.querySelector(`[data-page-id="${id}"]`);
-    if (!el) return null as any;
+interface CellRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** The ON-SCREEN part of one page cell, by its page id.
+ *
+ *  A page id embeds the file's own path, so on Windows it carries backslashes
+ *  — the CSS escape character. Interpolating one into an attribute selector
+ *  silently matches nothing; the id is compared as an attribute VALUE instead.
+ *
+ *  The rect is clipped to the viewport because a W3C pointer move outside it
+ *  hard-fails: a cell taller than the window puts its own top band off-screen
+ *  even centred, so the fractional targets must be taken against what is
+ *  actually visible rather than against the whole cell. */
+async function pageRect(pageId: string): Promise<CellRect | null> {
+  return await browser.execute(function (id): CellRect | null {
+    const el = Array.from(document.querySelectorAll('[data-page-id]')).find(
+      (n) => n.getAttribute('data-page-id') === id,
+    );
+    if (!el) return null;
     const r = el.getBoundingClientRect();
-    return { x: r.left, y: r.top, w: r.width, h: r.height };
-  }, pageId)) as { x: number; y: number; w: number; h: number } | null;
+    const left = Math.max(r.left, 1);
+    const top = Math.max(r.top, 1);
+    const right = Math.min(r.right, window.innerWidth - 2);
+    const bottom = Math.min(r.bottom, window.innerHeight - 2);
+    if (right - left < 10 || bottom - top < 10) return null;
+    return { x: left, y: top, w: right - left, h: bottom - top };
+  }, pageId);
 }
 
 async function drawStroke(
-  r: { x: number; y: number; w: number; h: number },
+  r: CellRect,
   from: [number, number],
   to: [number, number],
 ): Promise<void> {
@@ -179,7 +201,9 @@ describe('freehand highlighting on a scanned document', () => {
     // standing trap in every canvas spec.
     for (const page of pages) {
       await browser.execute(function (id) {
-        document.querySelector(`[data-page-id="${id}"]`)?.scrollIntoView({ block: 'center' });
+        Array.from(document.querySelectorAll('[data-page-id]'))
+          .find((n) => n.getAttribute('data-page-id') === id)
+          ?.scrollIntoView({ block: 'center' });
       }, page.id);
       await browser.pause(250);
       const r = await pageRect(page.id);
@@ -206,6 +230,7 @@ describe('freehand highlighting on a scanned document', () => {
 
     // ── Save, then read the FILE back. The saved bytes are the deliverable;
     // the pending tier is not.
+    await commitPendingEdits();
     await saveActiveAs(saved);
     const out = await PDFDocument.load(readFileSync(saved));
     const marks = inkMarks(out);
