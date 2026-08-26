@@ -244,6 +244,10 @@ class MockCsc:
                 )
             )
         self._context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        # PROTOCOL_TLS_SERVER leaves TLS 1.0/1.1 reachable; the client under test
+        # negotiates 1.2 or better, so a handshake below that is a defect, not a
+        # fallback to accept.
+        self._context.minimum_version = ssl.TLSVersion.TLSv1_2
         self._context.load_cert_chain(chain)
 
     def stop(self):
