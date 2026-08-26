@@ -41,6 +41,7 @@ import {
   saveActiveAs,
   getWorkspacePageIds,
   selectCanvasPages,
+  getSelectedCanvasPageIds,
   rotateSelectedCanvasPages,
 } from '../support/harness.js';
 
@@ -256,12 +257,47 @@ async function typeUrl(url: string): Promise<void> {
  * all — Save is disabled on a document nothing has touched. */
 async function dirtyTheDocument(): Promise<void> {
   await setView('canvas');
-  const pages = await getWorkspacePageIds();
+  // Both the page listing and the rotate go through the canvas selection
+  // service, and BOTH are silent no-ops until it registers: the listing
+  // answers `[]` and the rotate does nothing at all. `setView` returns before
+  // the canvas has mounted, so a non-empty listing is the first honest
+  // evidence that there is anything to act on — without it the rotate lands
+  // nowhere, the document stays clean, and File ▸ Save is never enabled.
+  // (The second window makes this reliable rather than occasional: it mounts
+  // its canvas from scratch after the hand-off.)
+  let pages: string[] = [];
+  await browser.waitUntil(
+    async () => {
+      pages = await getWorkspacePageIds();
+      return pages.length > 0;
+    },
+    { timeout: 30_000, timeoutMsg: 'the canvas never listed any pages to edit' },
+  );
+
   await selectCanvasPages([pages[0]]);
+  // The rotate acts on THE SELECTION, so it also has to have landed.
+  await browser.waitUntil(
+    async () => (await getSelectedCanvasPageIds()).includes(pages[0]),
+    { timeout: 20_000, timeoutMsg: 'the page selection never landed' },
+  );
   await rotateSelectedCanvasPages(90);
-  await browser.waitUntil(async () => (await getState()).activeFile !== null, {
-    timeout: 20_000,
-    timeoutMsg: 'the rotate never settled',
+}
+
+/**
+ * Run File ▸ Save once it is enabled.
+ *
+ * Its enablement is `f.dirty || pageDirtyPaths.includes(f.path)`, and a
+ * page-tier rotate lands in the SECOND of those — which the state snapshot
+ * does not carry, so there is nothing to wait on directly. `invokeCommand`
+ * returns the enablement verdict and does nothing at all when the answer is
+ * no, so polling it IS the wait: the first `true` is also the one invocation
+ * that ran.
+ */
+async function saveWhenEnabled(): Promise<void> {
+  await browser.waitUntil(async () => invokeAppCommand('file.save'), {
+    timeout: 30_000,
+    interval: 250,
+    timeoutMsg: 'File ▸ Save never became enabled after the page edit',
   });
 }
 
@@ -608,7 +644,7 @@ describe('the network doors: form submission and open from a web address', () =>
       await dirtyTheDocument();
       const kept = resolve(tmp, 'kept-from-the-web.pdf');
       await answerNextSaveDialog(kept);
-      expect(await invokeAppCommand('file.save')).toBe(true);
+      await saveWhenEnabled();
 
       await browser.waitUntil(async () => existsSync(kept), {
         timeout: 40_000,
@@ -626,7 +662,7 @@ describe('the network doors: form submission and open from a web address', () =>
       const again = resolve(tmp, 'kept-again.pdf');
       await dirtyTheDocument();
       await answerNextSaveDialog(again);
-      expect(await invokeAppCommand('file.save')).toBe(true);
+      await saveWhenEnabled();
       await browser.waitUntil(async () => existsSync(again), {
         timeout: 40_000,
         timeoutMsg: 'the second Save did not route to Save As as well',
@@ -854,9 +890,13 @@ describe('the network doors: form submission and open from a web address', () =>
 
       await browser.switchToWindow(popped);
       await waitForHarness(30_000);
-      const state = await getState();
-      expect(state.fileCount).toBe(1);
-      expect(state.activeFile?.path.toLowerCase()).toBe(moved.toLowerCase());
+      // The handover is a queued open on the receiving side: the harness
+      // answering does not mean the document has landed yet.
+      await browser.waitUntil(async () => (await getState()).fileCount === 1, {
+        timeout: 30_000,
+        timeoutMsg: 'the moved document never arrived in the new window',
+      });
+      expect((await getState()).activeFile?.path.toLowerCase()).toBe(moved.toLowerCase());
     });
 
     it('still routes Save to Save As over there', async () => {
@@ -864,7 +904,7 @@ describe('the network doors: form submission and open from a web address', () =>
       await dirtyTheDocument();
       const onTemp = (await getState()).activeFile!.path;
       await answerNextSaveDialog(kept);
-      expect(await invokeAppCommand('file.save')).toBe(true);
+      await saveWhenEnabled();
 
       await browser.waitUntil(async () => existsSync(kept), {
         timeout: 40_000,
