@@ -11,6 +11,7 @@
 // Pure module: no worker, no DOM, no Tauri. `field-js-host.ts` owns the
 // engine; this owns the rules about it.
 import { recognize, unrunnable } from './af-calc';
+import { sfnFields, type SfnNode } from './af-script';
 import type { FormField, FormFieldActions } from './forms';
 
 /** The `/AA` triggers whose `/JS` this app can execute. `/K` `/F` `/V` `/C`
@@ -69,12 +70,46 @@ export function refusedCapabilities(js: string): string[] {
   return found;
 }
 
+/** The names Simplified Field Notation may resolve against: every field the
+ * document carries, plus the parent prefixes an authored name can take (a
+ * reference to `Item` covers the terminals `Item.1`, `Item.2`). */
+export function fieldNameSet(fields: readonly FormField[]): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const field of fields) {
+    out.add(field.name);
+    const parts = field.name.split('.');
+    for (let i = 1; i < parts.length; i += 1) out.add(parts.slice(0, i).join('.'));
+  }
+  return out;
+}
+
+/** Whether every name an SFN expression reads is one this document carries.
+ *
+ * The notation's factor grammar has no string literal: a quoted token is a
+ * field name and `event.value` parses as a dotted one, so `event.value = "N/A"`
+ * and `event.value = "$" + event.value` are both accepted as arithmetic over
+ * fields that do not exist. Routed to the declarative evaluator such a body
+ * yields nothing at all — the assigned string is silently dropped. Requiring
+ * the names to resolve is what separates a real SFN calculation from a
+ * JavaScript body that only looks like one. */
+function sfnNamesResolve(expr: SfnNode, fieldNames: ReadonlySet<string>): boolean {
+  return sfnFields(expr).every((name) => fieldNames.has(name));
+}
+
 /** Whether a body is one the declarative evaluator runs. A recognized script
  * that `unrunnable` rejects (a shape recognized but not executable for any
- * value) is NOT declarative — it is exactly what F23 refused. */
-export function isDeclarative(js: string): boolean {
+ * value) is NOT declarative — it is exactly what F23 refused.
+ *
+ * `fieldNames` is the document's own name set. Without it an SFN body cannot be
+ * told from a string-assigning JavaScript body, and the answer is the safe one:
+ * custom, which runs the source as written. */
+export function isDeclarative(js: string, fieldNames?: ReadonlySet<string>): boolean {
   const script = recognize(js);
-  return script !== null && !unrunnable(script);
+  if (script === null || unrunnable(script)) return false;
+  if (script.fn === 'SFN') {
+    return sfnNamesResolve((script as { expr: SfnNode }).expr, fieldNames ?? new Set());
+  }
+  return true;
 }
 
 export interface ScriptEntry {
@@ -102,6 +137,7 @@ function actionsOf(field: FormField): FormFieldActions | undefined {
  * declarative/custom split is made. */
 export function scriptInventory(fields: readonly FormField[]): ScriptInventory {
   const entries: ScriptEntry[] = [];
+  const names = fieldNameSet(fields);
   for (const field of fields) {
     const actions = actionsOf(field);
     if (!actions) continue;
@@ -112,7 +148,7 @@ export function scriptInventory(fields: readonly FormField[]): ScriptInventory {
         field: field.name,
         trigger,
         js,
-        declarative: isDeclarative(js),
+        declarative: isDeclarative(js, names),
         refused: refusedCapabilities(js),
       });
     }

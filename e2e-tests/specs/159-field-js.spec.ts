@@ -204,6 +204,20 @@ describe('field JavaScript: off by default, real when switched on', () => {
     await setActiveOp('forms');
   }
 
+  /**
+   * The canvas RUNS the scripts; the FormsPanel REPORTS on them, and that panel
+   * is an operations-view surface (`App.tsx`'s `panels` table). The run state
+   * crosses between them through the module-level store in
+   * `lib/field-js-reports.ts`, keyed by path — so a gesture is driven on the
+   * canvas and the report is read here, after the view actually mounts the
+   * panel. Reading the panel from the canvas view asserts against a component
+   * that was never rendered.
+   */
+  async function showFormsPanel(): Promise<void> {
+    await setView('operations');
+    await setActiveOp('forms');
+  }
+
   // ── (a) the default: nothing runs, and the panel reads as it always did ──
 
   describe('with the preference off, which is how it ships', () => {
@@ -214,6 +228,21 @@ describe('field JavaScript: off by default, real when switched on', () => {
     });
 
     it('lists the custom scripts as not run, naming the preference', async () => {
+      // The canvas's own view of the refusal, read while the canvas is
+      // mounted. The projection rides the async forms read, so it is polled
+      // rather than sampled once.
+      let notRun: string[] = [];
+      await browser.waitUntil(
+        async () => {
+          notRun = await canvasFormScriptsNotRun(scripted);
+          return notRun.length > 0;
+        },
+        { timeout: 30_000, timeoutMsg: 'the canvas never listed a not-run script' },
+      );
+      expect(notRun).toContain('Total');
+      expect(notRun).toContain('Name');
+
+      await showFormsPanel();
       await $('[data-testid="forms-scripts-not-run"]').waitForDisplayed({
         timeout: 20_000,
         timeoutMsg: 'the off-state script list never appeared',
@@ -222,10 +251,8 @@ describe('field JavaScript: off by default, real when switched on', () => {
       // says which switch decides.
       expect(await textOf('[data-testid="forms-scripts-switch"]')).not.toBe('');
       expect(await present('[data-testid="forms-scripts-running"]')).toBe(false);
-
-      const notRun = await canvasFormScriptsNotRun(scripted);
-      expect(notRun).toContain('Total');
-      expect(notRun).toContain('Name');
+      await setView('canvas');
+      await setActiveOp('forms');
     });
 
     it('computes nothing: a typed quantity leaves the total alone', async () => {
@@ -278,20 +305,25 @@ describe('field JavaScript: off by default, real when switched on', () => {
     });
 
     it('reports a clean run rather than a refusal list', async () => {
+      await showFormsPanel();
       await $('[data-testid="forms-scripts-running"]').waitForDisplayed({
         timeout: 20_000,
         timeoutMsg: 'the on-state script list never appeared',
       });
       expect(await present('[data-testid="forms-scripts-not-run"]')).toBe(false);
       expect(await present('[data-testid="forms-scripts-all-clean"]')).toBe(true);
+      await setView('canvas');
+      await setActiveOp('forms');
     });
 
     it('commits the TYPED values through Save, and only those', async () => {
-      // Script results are DERIVED: they are drawn, never written into the
-      // pending map, because the fill names what that map holds and a
-      // calculated total is routinely read-only. So the saved bytes carry what
-      // the user typed — this asserts the design, and pins it against a change
-      // that would silently start writing computed values.
+      // The split the design draws: the field the gesture TOUCHED carries its
+      // own script's answer into the pending map — otherwise the canvas draws a
+      // rewrite the fill would then discard — while every OTHER field a script
+      // computes stays derived, drawn and never written, because a calculated
+      // total is routinely read-only and the fill names what that map holds.
+      // So `Name` saves as its keystroke action rewrote it, and `Total`, which
+      // no gesture touched, is absent from the saved bytes.
       await applyCanvasFormValues();
       const saved = resolve(tmp, 'saved.pdf');
       await saveActiveAs(saved);
@@ -299,7 +331,8 @@ describe('field JavaScript: off by default, real when switched on', () => {
       const form = doc.getForm();
       expect(form.getTextField('Qty').getText()).toBe('3');
       expect(form.getTextField('Price').getText()).toBe('2');
-      expect(form.getTextField('Name').getText()).toBe('acme');
+      expect(form.getTextField('Name').getText()).toBe('ACME');
+      expect(form.getTextField('Total').getText()).toBeUndefined();
     });
   });
 
@@ -317,6 +350,9 @@ describe('field JavaScript: off by default, real when switched on', () => {
 
     it('costs one worker, names the script, and leaves the app answering', async () => {
       expect(await setCanvasFormValue(runaway, 'Spin', 'go')).toBe(true);
+
+      // The gesture ran on the canvas; the report is read from the panel.
+      await showFormsPanel();
 
       // The watchdog's deadline is 2s; give it room and then require the
       // report. The script is named by the field and trigger the dispatch

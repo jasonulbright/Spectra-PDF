@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DECLARATIVE_TRIGGERS,
   JS_TRIGGERS,
+  fieldNameSet,
   fieldScriptsEnabled,
   isDeclarative,
   needsSandbox,
@@ -74,6 +75,33 @@ describe('declarative vs custom routing', () => {
     // The off-state report is the four value triggers and stays that way.
     expect([...DECLARATIVE_TRIGGERS]).toEqual(['K', 'V', 'C', 'F']);
     expect([...JS_TRIGGERS]).toEqual(['K', 'F', 'V', 'C', 'Fo', 'Bl']);
+  });
+
+  it('keeps a field-notation body whose names resolve declarative', () => {
+    const inventory = scriptInventory([
+      field('Line Total'),
+      field('Half', { C: 'event.value = "Line Total" / 2;' }),
+    ]);
+    expect(inventory.custom).toEqual([]);
+  });
+
+  it('treats a string literal assignment as custom, not field notation', () => {
+    // SFN has no string literal, so the recognizer reads `"N/A"` as a field
+    // name; run declaratively the assigned string is silently dropped.
+    const inventory = scriptInventory([
+      field('T', { C: 'event.value = "N/A";' }),
+      field('Fee', { F: 'event.value = "$" + event.value;' }),
+    ]);
+    expect(inventory.custom.map((e) => `${e.field}:${e.trigger}`)).toEqual(['T:C', 'Fee:F']);
+  });
+
+  it('answers custom for a field-notation body when no name set is offered', () => {
+    expect(isDeclarative('event.value = A + B;')).toBe(false);
+    expect(isDeclarative('event.value = A + B;', new Set(['A', 'B']))).toBe(true);
+  });
+
+  it('resolves a parent name against its dotted terminals', () => {
+    expect(isDeclarative('event.value = Item / 2;', fieldNameSet([field('Item.1')]))).toBe(true);
   });
 
   it('ignores an empty body', () => {
