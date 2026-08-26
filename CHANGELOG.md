@@ -1,10 +1,8 @@
 # Changelog
 
-## 1.1.15
+## 1.1.14
 
 *Released 2026-08-26*
-
-> Version 1.1.14 was prepared but never published; its changes ship here.
 
 ### Highlighting on scanned pages
 
