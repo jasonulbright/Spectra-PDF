@@ -1,8 +1,10 @@
 # Changelog
 
-## 1.1.14
+## 1.1.15
 
 *Released 2026-08-26*
+
+> Version 1.1.14 was prepared but never published; its changes ship here.
 
 ### Highlighting on scanned pages
 
@@ -15,10 +17,20 @@
 - Remote signing through a signing service (Cloud Signature Consortium API) joins the existing certificate sources: configure a provider, sign in through your browser, pick a credential, and sign — the private key never leaves the service, and the app never sees a PIN or password. Every existing placement and profile works: visible stamps, field fill, certification, timestamping, long-term validation. Signatures returned by the service are verified against the credential's own certificate before anything is written.
 - Signature trust verification gains another source: an offline snapshot of a platform root-trust program, honestly filtered — authorities the program has withdrawn or restricted are excluded, and per-purpose restrictions are enforced, so a timestamp-only authority can never vouch for a signer. Off by default, additive to the existing sources, verified against the program's own signed list.
 
+### Recognition language
+
+- Text recognition for selecting on scanned pages now follows the document's own declared language, or a language you pick in Settings, instead of always assuming English. Chinese region codes resolve to the correct script; a genuinely ambiguous declaration falls back rather than guessing.
+
+### Conformance honesty
+
+- Conversion and preflight results now state exactly what the saved file declares, read back from the file itself, instead of restating what was requested. Where a report does not verify a standard's full requirements, it now says so by name.
+- Signature trust verdicts now enforce per-authority issuance-date restrictions published by the root-trust program: a certificate issued after its authority's cutoff is refused with the cutoff and issuance dates stated, on both the signer's and the timestamp's chain.
+
 ### Fixes
 
 - Wide ink strokes imported from other applications are no longer thinned to a 2-point line when the document is saved; stroke width and translucency now survive import and save.
 - Ink annotation appearances no longer clip wide nibs: the drawn stroke now fits fully inside its appearance bounds in the saved file.
+- Trust-bundle files are now exempt from line-ending translation on checkout, so a fresh installation's bundle verifies byte-for-byte against its manifest.
 
 ## 1.1.13
 
