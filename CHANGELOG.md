@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.1.14
+
+*Released 2026-08-26*
+
+### Highlighting on scanned pages
+
+- A freehand highlighter joins the annotation tools: drag to mark any part of a page — including scans and images with no text layer — with a translucent marker stroke that blends with the page like a real highlighter, in every viewer. Strokes are ordinary annotations: erasable, movable, undoable, and preserved on save.
+- Text in scanned pages can now be selected and highlighted as text. When a page has images but no text layer, the first selection gesture recognizes the words on that page locally and in memory — the document is never modified, nothing leaves the machine, and the resulting highlight is a standard text highlight. A preference (on by default) turns this off; writing a searchable text layer into the file remains the explicit Scan & OCR feature. Pages that recognize poorly fall back to the freehand marker rather than snapping badly.
+- Annotation tools now carry a lock control: locked, the tool stays armed after each placement, so marking hundreds of places costs one arming click; unlocked, a tool places once and disarms.
+
+### Signing
+
+- Remote signing through a signing service (Cloud Signature Consortium API) joins the existing certificate sources: configure a provider, sign in through your browser, pick a credential, and sign — the private key never leaves the service, and the app never sees a PIN or password. Every existing placement and profile works: visible stamps, field fill, certification, timestamping, long-term validation. Signatures returned by the service are verified against the credential's own certificate before anything is written.
+- Signature trust verification gains another source: an offline snapshot of a platform root-trust program, honestly filtered — authorities the program has withdrawn or restricted are excluded, and per-purpose restrictions are enforced, so a timestamp-only authority can never vouch for a signer. Off by default, additive to the existing sources, verified against the program's own signed list.
+
+### Fixes
+
+- Wide ink strokes imported from other applications are no longer thinned to a 2-point line when the document is saved; stroke width and translucency now survive import and save.
+- Ink annotation appearances no longer clip wide nibs: the drawn stroke now fits fully inside its appearance bounds in the saved file.
+
 ## 1.1.13
 
 *Released 2026-08-26*
