@@ -5708,6 +5708,7 @@
   "refusal.scan.notResponding": "Skanneren svarer ikke lenger.",
   "refusal.scan.paperJam": "Fjern papirstoppen, og skann på nytt.",
   "refusal.scan.paperProblem": "Kontroller papiret i materen.",
+  "refusal.scan.scratchFull": "For mange skanninger er åpne. Lukk noen, eller fjern mappene i {{folder}}, og prøv igjen.",
   "refusal.scan.settingRejected": "Skanneren avviste en av innstillingene som ble bedt om.",
   "refusal.symbolSet.builtinId": "\"{{id}}\" er et innebygd sett — gi det importerte settet sin egen id.",
   "refusal.symbolSet.duplicateId": "Settet bruker id-en \"{{id}}\" to ganger.",

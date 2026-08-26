@@ -5586,6 +5586,7 @@
   "refusal.scan.notResponding": "스캐너가 응답하지 않습니다.",
   "refusal.scan.paperJam": "걸린 용지를 제거한 다음 다시 스캔하세요.",
   "refusal.scan.paperProblem": "공급 장치의 용지를 확인하세요.",
+  "refusal.scan.scratchFull": "열려 있는 스캔이 너무 많습니다. 일부를 닫거나 {{folder}}의 폴더를 삭제한 후 다시 시도하십시오.",
   "refusal.scan.settingRejected": "스캐너가 요청한 설정 중 하나를 거부했습니다.",
   "refusal.symbolSet.builtinId": "\"{{id}}\" 집합은 기본 제공 집합입니다 — 가져오는 집합에 고유한 id를 지정하십시오.",
   "refusal.symbolSet.duplicateId": "이 집합은 다음 id를 두 번 사용합니다: \"{{id}}\"",

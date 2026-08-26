@@ -5830,6 +5830,7 @@
   "refusal.scan.notResponding": "Scanerul nu mai răspunde.",
   "refusal.scan.paperJam": "Îndepărtează hârtia blocată, apoi scanează din nou.",
   "refusal.scan.paperProblem": "Verifică hârtia din alimentator.",
+  "refusal.scan.scratchFull": "Sunt prea multe scanări deschise. Închideți câteva sau ștergeți folderele din {{folder}}, apoi încercați din nou.",
   "refusal.scan.settingRejected": "Scanerul a respins una dintre setările cerute.",
   "refusal.symbolSet.builtinId": "„{{id}}” este un set predefinit — dați setului importat un identificator propriu.",
   "refusal.symbolSet.duplicateId": "Setul folosește identificatorul „{{id}}” de două ori.",

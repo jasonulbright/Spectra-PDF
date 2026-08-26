@@ -5708,6 +5708,7 @@
   "refusal.scan.notResponding": "Skannern slutade svara.",
   "refusal.scan.paperJam": "Åtgärda pappersstoppet och skanna igen.",
   "refusal.scan.paperProblem": "Kontrollera papperet i mataren.",
+  "refusal.scan.scratchFull": "För många skanningar är öppna. Stäng några eller ta bort mapparna i {{folder}} och försök igen.",
   "refusal.scan.settingRejected": "Skannern avvisade en av de begärda inställningarna.",
   "refusal.symbolSet.builtinId": "\"{{id}}\" är en inbyggd uppsättning — ge den importerade uppsättningen ett eget id.",
   "refusal.symbolSet.duplicateId": "Uppsättningen använder id:t \"{{id}}\" två gånger.",

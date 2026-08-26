@@ -32,6 +32,7 @@ import {
   pagesFromResult,
   refusalKey,
   refusalText,
+  refusalVars,
   removePage,
   reportFor,
   sourceOptions,
@@ -400,6 +401,22 @@ export function ScanDialog({
     }
   }, []);
 
+  /**
+   * Close, having AWAITED the discard of everything staged.
+   *
+   * The teardown effect below can only fire the discard and let go — a React
+   * cleanup cannot await — so closing through the dialog's own control does
+   * the wait here instead, while the process is certainly still alive. The
+   * teardown stays as the path for an unmount that did not come through here,
+   * and the scratch sweeper is what makes even that self-healing.
+   */
+  const closeAndDiscard = useCallback(async () => {
+    const staged = pages;
+    setPages([]);
+    await discardScratches(staged);
+    onClose();
+  }, [pages, discardScratches, onClose]);
+
   const saveAsPdf = useCallback(async () => {
     if (pages.length === 0) return;
     const output = await dialog.saveFile({ defaultPath: defaultScanOutputName() });
@@ -463,7 +480,7 @@ export function ScanDialog({
     [],
   );
 
-  const guardedClose = busy ? () => {} : onClose;
+  const guardedClose = busy ? () => {} : () => void closeAndDiscard();
 
   // ── Harness ──────────────────────────────────────────────────────────
   // The device layer needs a scanner and the destination pickers are native,
@@ -995,7 +1012,7 @@ export function ScanDialog({
             type="button"
             data-testid="scan-close"
             className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium"
-            onClick={onClose}
+            onClick={() => void closeAndDiscard()}
             disabled={busy}
           >
             {tChrome('dialog.common.close')}
@@ -1034,7 +1051,7 @@ const PAPER_LABEL_KEYS: Record<PaperSize, UiKey> = {
  * "[object Object]". */
 function refusalMessage(value: unknown): string {
   const key = refusalKey(value);
-  return key ? tChrome(key as UiKey) : refusalText(value);
+  return key ? tChrome(key as UiKey, refusalVars(value)) : refusalText(value);
 }
 
 /**

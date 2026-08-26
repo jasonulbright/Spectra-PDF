@@ -2858,12 +2858,20 @@ fn resolve_scan_device(requested: Option<&str>) -> Result<String, String> {
         return Ok(id.to_string());
     }
     let list = crate::scanner::enumerate(None).map_err(|e| e.to_string())?;
-    match list.scanners.len() {
+    choose_scan_device(&list.scanners)
+}
+
+/// Which device a headless run scans from, given what enumerated.
+///
+/// Split from `resolve_scan_device` so the decision is testable: the live
+/// enumeration answers differently on a box with a scanner attached than on
+/// one without, and every branch here has to hold on both.
+fn choose_scan_device(scanners: &[crate::scanner::ScannerDevice]) -> Result<String, String> {
+    match scanners.len() {
         0 => Err("No scanners found.".to_string()),
-        1 => Ok(list.scanners[0].id.clone()),
+        1 => Ok(scanners[0].id.clone()),
         _ => {
-            let names: Vec<String> = list
-                .scanners
+            let names: Vec<String> = scanners
                 .iter()
                 .map(|d| format!("{} ({})", d.name, d.id))
                 .collect();
@@ -5740,11 +5748,27 @@ mod tests {
 
     #[test]
     fn a_headless_run_refuses_to_pick_between_scanners() {
-        // A named device is taken as given; the enumeration only decides when
-        // none was named, and this box has no scanner.
+        use crate::scanner::ScannerDevice;
+        let device = |id: &str, name: &str| ScannerDevice {
+            id: id.into(),
+            name: name.into(),
+        };
+        // A named device is taken as given, whatever is attached.
         assert_eq!(resolve_scan_device(Some("dev")).as_deref(), Ok("dev"));
-        let refusal = resolve_scan_device(None).expect_err("no scanner is attached here");
+        // Nothing attached refuses by name.
+        let refusal = choose_scan_device(&[]).expect_err("nothing to choose");
         assert!(refusal.contains("No scanners found"), "{refusal}");
+        // Exactly one is used without asking.
+        assert_eq!(
+            choose_scan_device(&[device("id-1", "Only")]).as_deref(),
+            Ok("id-1")
+        );
+        // Several refuse BY NAME rather than guessing which tray has paper.
+        let refusal = choose_scan_device(&[device("id-1", "First"), device("id-2", "Second")])
+            .expect_err("cannot choose between two");
+        assert!(refusal.contains("--device"), "{refusal}");
+        assert!(refusal.contains("First (id-1)"), "{refusal}");
+        assert!(refusal.contains("Second (id-2)"), "{refusal}");
     }
 
     #[test]

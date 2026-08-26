@@ -5952,6 +5952,7 @@
   "refusal.scan.notResponding": "Skener přestal odpovídat.",
   "refusal.scan.paperJam": "Odstraňte uvíznutý papír a skenujte znovu.",
   "refusal.scan.paperProblem": "Zkontrolujte papír v podavači.",
+  "refusal.scan.scratchFull": "Je otevřeno příliš mnoho skenování. Některá zavřete nebo odstraňte složky v {{folder}} a zkuste to znovu.",
   "refusal.scan.settingRejected": "Skener odmítl jedno z požadovaných nastavení.",
   "refusal.symbolSet.builtinId": "„{{id}}“ je vestavěná sada — dejte importované sadě vlastní ID.",
   "refusal.symbolSet.duplicateId": "Sada používá ID „{{id}}“ dvakrát.",

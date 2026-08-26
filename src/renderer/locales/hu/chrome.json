@@ -5708,6 +5708,7 @@
   "refusal.scan.notResponding": "A lapolvasó nem válaszol többé.",
   "refusal.scan.paperJam": "Szüntesse meg a papírelakadást, majd olvassa be újra.",
   "refusal.scan.paperProblem": "Ellenőrizze az adagolóban lévő papírt.",
+  "refusal.scan.scratchFull": "Túl sok beolvasás van nyitva. Zárjon be néhányat, vagy törölje a(z) {{folder}} mappáit, majd próbálja újra.",
   "refusal.scan.settingRejected": "A lapolvasó elutasította az egyik kért beállítást.",
   "refusal.symbolSet.builtinId": "A(z) „{{id}}” beépített készlet — adjon saját azonosítót az importált készletnek.",
   "refusal.symbolSet.duplicateId": "A készlet kétszer használja a(z) „{{id}}” azonosítót.",

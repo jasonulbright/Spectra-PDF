@@ -5586,6 +5586,7 @@
   "refusal.scan.notResponding": "スキャナーが応答しなくなりました。",
   "refusal.scan.paperJam": "紙詰まりを解消してから、もう一度読み取ってください。",
   "refusal.scan.paperProblem": "フィーダーの用紙を確認してください。",
+  "refusal.scan.scratchFull": "スキャンが多すぎます。いくつか閉じるか、{{folder}} 内のフォルダーを削除してから、もう一度お試しください。",
   "refusal.scan.settingRejected": "スキャナーが要求された設定の一つを拒否しました。",
   "refusal.symbolSet.builtinId": "「{{id}}」は内蔵のセットです — 読み込むセットには別の id を付けてください。",
   "refusal.symbolSet.duplicateId": "このセットは id「{{id}}」を 2 回使っています。",

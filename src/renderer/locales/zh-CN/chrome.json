@@ -5586,6 +5586,7 @@
   "refusal.scan.notResponding": "扫描仪已停止响应。",
   "refusal.scan.paperJam": "请排除卡纸，然后重新扫描。",
   "refusal.scan.paperProblem": "请检查送稿器中的纸张。",
+  "refusal.scan.scratchFull": "打开的扫描过多。请关闭部分扫描，或删除 {{folder}} 中的文件夹，然后重试。",
   "refusal.scan.settingRejected": "扫描仪拒绝了请求的某项设置。",
   "refusal.symbolSet.builtinId": "“{{id}}”是内置符号集 — 请给导入的符号集另取一个 id。",
   "refusal.symbolSet.duplicateId": "该符号集把 id“{{id}}”用了两次。",

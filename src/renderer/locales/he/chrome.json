@@ -5830,6 +5830,7 @@
   "refusal.scan.notResponding": "הסורק הפסיק להגיב.",
   "refusal.scan.paperJam": "שחרר את תקיעת הנייר, ואז סרוק שוב.",
   "refusal.scan.paperProblem": "בדוק את הנייר במזין.",
+  "refusal.scan.scratchFull": "יותר מדי סריקות פתוחות. סגור חלק מהן או מחק את התיקיות ב-{{folder}}, ונסה שוב.",
   "refusal.scan.settingRejected": "הסורק דחה אחת מההגדרות שהתבקשו.",
   "refusal.symbolSet.builtinId": "\"{{id}}\" היא ערכה מובנית — הענק לערכה המיובאת מזהה משלה.",
   "refusal.symbolSet.duplicateId": "הערכה משתמשת במזהה \"{{id}}\" פעמיים.",

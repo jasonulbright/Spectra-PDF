@@ -5830,6 +5830,7 @@
   "refusal.scan.notResponding": "El escáner dejó de responder.",
   "refusal.scan.paperJam": "Retira el papel atascado y vuelve a escanear.",
   "refusal.scan.paperProblem": "Revisa el papel del alimentador.",
+  "refusal.scan.scratchFull": "Hay demasiados escaneos abiertos. Cierre algunos o elimine las carpetas de {{folder}} y vuelva a intentarlo.",
   "refusal.scan.settingRejected": "El escáner rechazó uno de los ajustes solicitados.",
   "refusal.symbolSet.builtinId": "«{{id}}» es un conjunto integrado: dele al conjunto importado su propio id.",
   "refusal.symbolSet.duplicateId": "El conjunto usa el id «{{id}}» dos veces.",

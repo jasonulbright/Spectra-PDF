@@ -5708,6 +5708,7 @@
   "refusal.scan.notResponding": "De scanner reageert niet meer.",
   "refusal.scan.paperJam": "Verhelp de papierstoring en scan opnieuw.",
   "refusal.scan.paperProblem": "Controleer het papier in de invoer.",
+  "refusal.scan.scratchFull": "Er zijn te veel scans geopend. Sluit er enkele of verwijder de mappen in {{folder}} en probeer het opnieuw.",
   "refusal.scan.settingRejected": "De scanner heeft een van de gevraagde instellingen geweigerd.",
   "refusal.symbolSet.builtinId": "\"{{id}}\" is een ingebouwde set — geef de geïmporteerde set een eigen id.",
   "refusal.symbolSet.duplicateId": "De set gebruikt de id \"{{id}}\" twee keer.",
