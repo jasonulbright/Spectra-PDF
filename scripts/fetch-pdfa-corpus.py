@@ -137,6 +137,27 @@ def main() -> int:
             print("pdfa-corpus/manifest.json is absent — the corpus is not fetched")
             return 1
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        index_path = DEST / "clause-index.json"
+        if not index_path.is_file():
+            print(
+                "pdfa-corpus/clause-index.json is absent — run "
+                "scripts/pdfa-clause-index.py"
+            )
+            return 1
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        if not index.get("clauses"):
+            print("pdfa-corpus/clause-index.json carries no clauses")
+            return 1
+        for source in manifest["sources"]:
+            extracted = sum(
+                1 for p in (DEST / source["into"]).rglob("*") if p.is_file()
+            )
+            if extracted != source["files"]:
+                print(
+                    f"{source['repo']}: {extracted} files on disk, manifest "
+                    f"records {source['files']} — the corpus is incomplete"
+                )
+                return 1
         for source in manifest["sources"]:
             print(f"{source['repo']:>16} @ {source['sha'][:12]}  {source['files']} files")
         print(f"{'total':>16}    {manifest['total_files']} files, {manifest['total_pdfs']} PDFs")
