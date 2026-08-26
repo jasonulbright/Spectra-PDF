@@ -15,7 +15,7 @@ import type { SnapshotPlacement } from '../../lib/snapshot-capture';
 import type { OcrWord } from '../../ocr/types';
 import type { PageReadAloud } from '../../lib/read-aloud';
 import type { OverlayWidget } from '../../lib/form-overlay';
-import type { FormFieldValue } from '../../lib/forms';
+import type { FormFieldValue, FormValuePhase } from '../../lib/forms';
 import type { CanvasTool, StampPreset } from './PageCell';
 import type { ShapeType } from '../../state/types';
 import type { MeasureScale } from '../../lib/measure';
@@ -132,7 +132,13 @@ interface DocumentRowProps {
   // Form widgets keyed by pageId + pending values keyed by file path.
   formWidgetsByPage: ReadonlyMap<string, OverlayWidget[]>;
   formValuesByPath: ReadonlyMap<string, ReadonlyMap<string, FormFieldValue>>;
-  onSetFormValue: (path: string, fieldName: string, value: FormFieldValue) => void;
+  onSetFormValue: (
+    path: string,
+    fieldName: string,
+    value: FormFieldValue,
+    phase?: FormValuePhase,
+    previous?: string,
+  ) => void;
   onSignFieldRequest: (path: string, fieldName: string) => void;
   onWidgetAction: (
     path: string,

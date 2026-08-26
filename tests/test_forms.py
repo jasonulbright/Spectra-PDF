@@ -103,6 +103,37 @@ class TestReadFormFields:
         assert by_name["size"]["type"] == "dropdown"
         assert by_name["size"]["options"] == ["small", "medium", "large"]
 
+    def test_checkbox_export_value_is_the_documents_own_on_state(self, tmp_dir):
+        # A check box whose /AP /N on-state is /1 stores "1" when checked. A
+        # consumer that assumes "Yes" compares against a string this document
+        # never uses.
+        src = os.path.join(tmp_dir, "cb.pdf")
+        pdf = pikepdf.new()
+        page = pdf.add_blank_page(page_size=(300, 300))
+        ap = Dictionary(
+            N=Dictionary(
+                **{"1": pdf.make_stream(b"q Q"), "Off": pdf.make_stream(b"q Q")}
+            )
+        )
+        widget = pdf.make_indirect(
+            Dictionary(
+                Type=Name.Annot,
+                Subtype=Name.Widget,
+                Rect=[40, 200, 56, 216],
+                FT=Name.Btn,
+                T=pikepdf.String("optin"),
+                AP=ap,
+            )
+        )
+        page.obj["/Annots"] = pikepdf.Array([widget])
+        pdf.Root["/AcroForm"] = pdf.make_indirect(Dictionary(Fields=pikepdf.Array([widget])))
+        pdf.save(src)
+        pdf.close()
+
+        entry = {f["name"]: f for f in read_form_fields(src)["fields"]}["optin"]
+        assert entry["type"] == "checkbox"
+        assert entry["export_value"] == "1"
+
     def test_raw_fixture_inheritance_and_dotted_names(self, tmp_dir):
         src = os.path.join(tmp_dir, "raw.pdf")
         _make_raw_form(src)

@@ -3510,6 +3510,9 @@ function AppContent(): React.ReactElement {
                   onFillFormValues={handleFillFormValues}
                   onAddFormField={handleAddFormField}
                   onAddFormFields={handleAddFormFields}
+                  onScriptAlert={(text) =>
+                    void showNotice(tChrome('canvas.forms.scriptAlertTitle'), text)
+                  }
                   dropResolverRef={dropResolverRef}
                 />
               </div>
