@@ -22,6 +22,10 @@ export interface CanvasHandle {
   actualSize?(): void;
   fitWidth?(): void;
   clientToWorld(clientX: number, clientY: number): { x: number; y: number; k: number } | null;
+  /** The world element that holds the document cards. The reorder animation
+   * measures page positions inside it, where offsets are camera-independent.
+   * Optional in the TYPE because minimal handles (presentation) omit it. */
+  worldEl?(): HTMLElement | null;
   /** Pan/zoom the camera to center the given page (by its data-page-id
    * cell). Built for Find navigation; outline click-to-jump
    * reuses it. No-op when the page isn't in the DOM. */
@@ -127,6 +131,9 @@ export function createCanvasHandle({
       // window resizes keep re-fitting until the user pans/zooms again.
       userMovedRef.current = false;
       zoomRef.current.transform(select(vp), fitTransform());
+    },
+    worldEl() {
+      return worldRef.current;
     },
     clientToWorld(clientX, clientY) {
       const vp = viewportRef.current;

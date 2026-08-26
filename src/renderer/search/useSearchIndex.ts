@@ -1,5 +1,5 @@
-// Ported from PDFx src/renderer/src/search/useSearchIndex.ts,
-// adapted: reconcile takes the proxies map, and a buffer-identity watcher
+// The search index's React binding: reconcile takes the proxies map, and a
+// buffer-identity watcher
 // invalidates a file's cached text/OCR whenever its bytes change underneath
 // (commit, whole-file op, undo, OCR-apply itself) — the same invalidation
 // signal redaction marks and signature placements key on.

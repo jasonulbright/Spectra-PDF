@@ -44,6 +44,11 @@ export const DIALOG_STRINGS = {
   'dialog.certUnlock.pickFirst': 'Choose your key file (.pfx / .p12) first.',
 
   'dialog.dropZone.hint': 'Drop PDF files here',
+  // A file dropped onto a document that is drawn too small at the current
+  // zoom to name a place inside it. The files still open, on their own.
+  'dialog.dropImport.zoomTitle': 'Opened as separate documents',
+  'dialog.dropImport.zoomBody':
+    'The document under the drop point is too small at this zoom to place pages in. Zoom in and drop again to import the pages into it.',
 
   'dialog.customize.aria': 'Customize toolbar',
   'dialog.customize.title': 'Customize Toolbar',

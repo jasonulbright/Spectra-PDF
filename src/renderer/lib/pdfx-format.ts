@@ -28,7 +28,7 @@ export interface PagePartition {
 
 // Display-normalized annotation (0..1 in the rendered, rotation-inclusive
 // orientation); the builder maps it into PDF user space. Spectra PDF extension —
-// absent keeps PDFx-identical output.
+// absent keeps the base-format output.
 export interface ExportAnnotation {
   kind:
     | 'highlight'
@@ -104,8 +104,8 @@ export interface ExportPage {
   sourceKey: string;
   pageIndex: number;
   // Extra quarter-turns applied on top of the page's inherent /Rotate.
-  // Deviation from the PDFx original: carries PageRef.rotation through the
-  // commit bridge. Absent/0 keeps PDFx-identical output.
+  // Carries PageRef.rotation through the commit bridge. Absent/0 keeps the
+  // base-format output.
   rotation?: 0 | 90 | 180 | 270;
   annotations?: ExportAnnotation[];
   // Fingerprints of imported annotations the user removed — see

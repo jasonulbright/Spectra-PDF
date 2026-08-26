@@ -188,10 +188,12 @@ describe('computeDropTarget', () => {
     ).toEqual({ kind: 'into', docId: 'm', index: 1 });
   });
 
-  it('falls back to between-slots when zoomed too far out', () => {
-    // DOC_HEIGHT * scale below the 90px screen threshold
+  it('refuses an into-drop when zoomed too far out', () => {
+    // DOC_HEIGHT * scale below the 90px screen threshold. Over a CARD this is
+    // a refusal, not a between-slot: falling back turned an aimed-at strip
+    // into a new document nobody asked for (see lib/drop-gate.ts).
     const target = computeDropTarget(layout, 10, DOC_HEIGHT / 2, 0.1, null, true);
-    expect(target.kind).toBe('between');
+    expect(target.kind).toBe('refused');
   });
 
   it('targets the gap between rows', () => {
