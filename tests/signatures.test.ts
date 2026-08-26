@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ANCHOR_RESTRICTION_LABEL,
+  anchorRestrictionLabel,
   CERTIFICATION_LEVEL_LABEL,
   classifySignature,
   isFieldLocked,
@@ -308,5 +310,39 @@ describe('field locks', () => {
 
   it('every action has a catalog label', () => {
     for (const action of LOCK_ACTIONS) expect(PANEL_STRINGS[LOCK_ACTION_LABEL[action]]).toBeTruthy();
+  });
+});
+
+describe('the anchor-restriction wording', () => {
+  it('names the chain the cutoff actually caught', () => {
+    // A signature whose own chain is fine can still be refused on the chain
+    // inside its RFC-3161 timestamp. Rendering the signer sentence there is a
+    // false statement about which certificate was refused.
+    expect(anchorRestrictionLabel({ chain: 'signer' })).toBe(ANCHOR_RESTRICTION_LABEL.signer);
+    expect(anchorRestrictionLabel({ chain: 'timestamp' })).toBe(
+      ANCHOR_RESTRICTION_LABEL.timestamp,
+    );
+    expect(ANCHOR_RESTRICTION_LABEL.signer).not.toBe(ANCHOR_RESTRICTION_LABEL.timestamp);
+  });
+
+  it('falls back to the signer sentence for a chain this build cannot read', () => {
+    expect(anchorRestrictionLabel(null)).toBe(ANCHOR_RESTRICTION_LABEL.signer);
+    expect(anchorRestrictionLabel(undefined)).toBe(ANCHOR_RESTRICTION_LABEL.signer);
+    expect(anchorRestrictionLabel({ chain: 'something-later' })).toBe(
+      ANCHOR_RESTRICTION_LABEL.signer,
+    );
+  });
+
+  it('each sentence is in the catalog and speaks about its own certificate', () => {
+    const signer = PANEL_STRINGS[ANCHOR_RESTRICTION_LABEL.signer];
+    const timestamp = PANEL_STRINGS[ANCHOR_RESTRICTION_LABEL.timestamp];
+    expect(signer).toContain('signer');
+    expect(signer).not.toContain('timestamp');
+    expect(timestamp).toContain('timestamp');
+    // Both carry the same two structured instants, interpolated not glued.
+    for (const text of [signer, timestamp]) {
+      expect(text).toContain('{{cutoff}}');
+      expect(text).toContain('{{issued}}');
+    }
   });
 });

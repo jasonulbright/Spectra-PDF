@@ -10,7 +10,9 @@ import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
 import { clampSnapshotDpi, MAX_SNAPSHOT_DPI, MIN_SNAPSHOT_DPI } from '../lib/snapshot-image';
 import { useFieldScriptsAllowed } from '../hooks/useFieldScriptsAllowed';
 import { useTranslation } from 'react-i18next';
-import { tChrome, setAppLanguage, SHIPPED_LOCALES, LOCALE_NATIVE_NAMES } from '../i18n';
+import { tChrome, tOcrLanguage, setAppLanguage, SHIPPED_LOCALES, LOCALE_NATIVE_NAMES } from '../i18n';
+import { OCR_LANGUAGES } from '../ocr/languages';
+import { AUTO_OCR_LANGUAGE } from '../ocr/language-selection';
 import type { PanelKey } from '../i18n-panels';
 // Re-exported for the ~6 existing panel consumers; the implementation is the
 // leaf module (the keymap reads it too — see lib/app-settings.ts).
@@ -460,6 +462,34 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         <p className="text-xs text-neutral-500 mt-1">
           {tChrome('panel.settings.scanSelectRecognitionHint')}
         </p>
+        {/* Only while the recognizer is on: a model chosen for something that
+            never runs is a preference that does nothing. */}
+        {settings.scanSelectRecognition && (
+          <div className="mt-2">
+            <label className="block text-sm text-neutral-400 mb-1" htmlFor="pref-scan-select-language">
+              {tChrome('panel.settings.scanSelectLanguage')}
+            </label>
+            <select
+              id="pref-scan-select-language"
+              data-testid="pref-scan-select-language"
+              value={settings.scanSelectLanguage}
+              onChange={(e) => update('scanSelectLanguage', e.target.value)}
+              className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+            >
+              <option value={AUTO_OCR_LANGUAGE}>
+                {tChrome('panel.settings.scanSelectLanguageAuto')}
+              </option>
+              {OCR_LANGUAGES.map((l) => (
+                <option key={l.code} value={l.code}>
+                  {tOcrLanguage(l.code)}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-neutral-500 mt-1">
+              {tChrome('panel.settings.scanSelectLanguageHint')}
+            </p>
+          </div>
+        )}
       </div>
       <div>
         <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.settings.compressionQuality')}</label>

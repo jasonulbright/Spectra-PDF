@@ -537,7 +537,10 @@ def main() -> int:
                 f"{hashlib.sha256(der).hexdigest()}\t{purpose}\t"
                 f"{','.join(sorted(table[der]))}\t{subject_of(der)}"
             )
-    index.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # `newline="\n"` because this tree checks out with EOL translation
+    # disabled: the fetching host's platform newline would otherwise be frozen
+    # into the committed blob and a refresh run elsewhere rewrites every line.
+    index.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
     manifest = {
         "source": LOTL_URL,
@@ -561,7 +564,9 @@ def main() -> int:
         "territories": sorted(rows, key=lambda row: row["territory"] or ""),
     }
     (destination / "eutl-manifest.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+        newline="\n",
     )
 
     log("")

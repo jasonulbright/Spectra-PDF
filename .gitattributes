@@ -40,13 +40,15 @@
 # ship a profile we have no right to ship.
 *.icc   binary
 
-# The bundled EU trusted-list files record their own sha256 digests in
-# eutl-manifest.json, so a checkout that translates LF->CRLF makes every
-# recorded digest wrong and the bundle no longer verifies as the artifact that
-# was reviewed. `-text` disables EOL translation while keeping the textual diff
-# a pinned artifact's review depends on.
+# The bundled trusted-list files record their own sha256 digests in their
+# manifests, so a checkout that translates LF->CRLF makes every recorded digest
+# wrong and the bundle no longer verifies as the artifact that was reviewed.
+# `-text` disables EOL translation while keeping the textual diff a pinned
+# artifact's review depends on. The pattern is `**`, not `*`: a gitattributes
+# `*` does not cross a slash, so `*` reaches none of the files in a
+# subdirectory of this tree.
 
-src/engine/trust/* -text
+src/engine/trust/** -text
 
 # The pinned XMP extension schema templates. Their SHA-256 digests are recorded
 # in the corpus MANIFEST.json and asserted against the file bytes, so the pins

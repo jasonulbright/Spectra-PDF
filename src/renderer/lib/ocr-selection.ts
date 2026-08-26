@@ -190,12 +190,21 @@ export function wordSpanBox(word: OcrWord, layoutW: number, layoutH: number): Wo
 // dimensions. Serving the pre-rotation boxes transposes every hit-box: the
 // sweep selects a different word than the pointer is over, and the /Highlight
 // quads it authors land on the wrong part of the page.
+//
+// The effective LANGUAGE is part of it for the identical reason, one step
+// further out: the recognition language changes the words and their boxes
+// while leaving the buffer, the page number and the rotation untouched. Pinning
+// a model in Preferences must re-recognise the page on screen, and without the
+// language in the key it would instead serve the boxes the previous model
+// produced for as long as the buffer lived.
 
 const cache = new WeakMap<object, Map<string, Promise<OcrSelectPage>>>();
 
-/** Absolute display rotation, normalised to one of 0/90/180/270. */
-function entryKey(pageNumber: number, spin: number): string {
-  return `${pageNumber}:${((Math.round(spin / 90) * 90) % 360 + 360) % 360}`;
+/** Page, absolute display rotation normalised to one of 0/90/180/270, and the
+ *  '+'-joined model string the boxes were produced by. */
+function entryKey(pageNumber: number, spin: number, lang: string): string {
+  const turn = (((Math.round(spin / 90) * 90) % 360) + 360) % 360;
+  return `${pageNumber}:${turn}:${lang}`;
 }
 
 let inFlight = 0;
@@ -216,10 +225,10 @@ async function withSlot<T>(job: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Recognise one page once per buffer per rotation. `key` is the
+ * Recognise one page once per buffer per rotation per language. `key` is the
  * buffer-identity object (the pdf.js proxy); `run` produces a raw result and
- * is called at most once per (key, page, spin), and only once a concurrency
- * slot is free.
+ * is called at most once per (key, page, spin, lang), and only once a
+ * concurrency slot is free.
  *
  * A failure is CACHED as 'failed' rather than left to retry: a recognizer that
  * refused this page will refuse it again, and re-running Tesseract on every
@@ -229,11 +238,12 @@ export function recognizeForSelection(
   key: object,
   pageNumber: number,
   spin: number,
+  lang: string,
   run: () => Promise<OcrResult | null>,
 ): Promise<OcrSelectPage> {
   let pages = cache.get(key);
   if (!pages) cache.set(key, (pages = new Map()));
-  const id = entryKey(pageNumber, spin);
+  const id = entryKey(pageNumber, spin, lang);
   const existing = pages.get(id);
   if (existing) return existing;
   const started = withSlot(run).then(gateRecognition, () => ({
@@ -249,8 +259,9 @@ export function peekSelectionCache(
   key: object,
   pageNumber: number,
   spin: number,
+  lang: string,
 ): Promise<OcrSelectPage> | null {
-  return cache.get(key)?.get(entryKey(pageNumber, spin)) ?? null;
+  return cache.get(key)?.get(entryKey(pageNumber, spin, lang)) ?? null;
 }
 
 /**
