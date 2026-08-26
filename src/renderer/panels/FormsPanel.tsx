@@ -8,7 +8,7 @@ import { StatusBar } from '../components/StatusBar';
 import { readFormFields } from '../lib/forms';
 import { fillClosure, formCalculation } from '../lib/form-overlay';
 import { mergeUntouched } from '../lib/late-read';
-import type { FormField, FormFieldValue } from '../lib/forms';
+import type { FormField, FormFieldValue, XFAKind } from '../lib/forms';
 import {
   ACTION_KIND_LABEL,
   ACTION_TRIGGERS,
@@ -96,7 +96,8 @@ export function FormsPanel(): React.ReactElement {
   // the seed) is the correct shape.
   const touched = useRef<Set<string>>(new Set());
   const [fields, setFields] = useState<FormField[]>([]);
-  const [hasXFA, setHasXFA] = useState(false);
+  const [xfaKind, setXfaKind] = useState<XFAKind>('none');
+  const [xfaCalculations, setXfaCalculations] = useState(false);
   const [calculationOrder, setCalculationOrder] = useState<string[]>([]);
   const [values, setValues] = useState<Record<string, FormFieldValue>>({});
   const [flatten, setFlatten] = useState(false);
@@ -119,7 +120,8 @@ export function FormsPanel(): React.ReactElement {
     let cancelled = false;
     if (!buffer || !workingPath) {
       setFields([]);
-      setHasXFA(false);
+      setXfaKind('none');
+      setXfaCalculations(false);
       setCalculationOrder([]);
       setValues({});
       touched.current.clear();
@@ -134,7 +136,8 @@ export function FormsPanel(): React.ReactElement {
       .then((result) => {
         if (cancelled) return;
         setFields(result.fields);
-        setHasXFA(result.hasXFA);
+        setXfaKind(result.xfa);
+        setXfaCalculations(result.xfaCalculations);
         setCalculationOrder(result.calculationOrder);
         const seed: Record<string, FormFieldValue> = {};
         for (const f of result.fields) seed[f.name] = f.value;
@@ -147,7 +150,8 @@ export function FormsPanel(): React.ReactElement {
       .catch((e: unknown) => {
         if (cancelled) return;
         setFields([]);
-        setHasXFA(false);
+        setXfaKind('none');
+        setXfaCalculations(false);
         setCalculationOrder([]);
         setStatus(tChrome('panel.forms.errorReading', { message: e instanceof Error ? e.message : String(e) }));
       })
@@ -287,12 +291,24 @@ export function FormsPanel(): React.ReactElement {
         {tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span> ({tChromeCount('panel.common.pageCount', activeFile.pageCount)})
       </div>
 
-      {hasXFA && (
+      {/* ISO 32000-2 Annex K: a processor that supports XFA forms shall
+          indicate clearly that the user is interacting with one. Static and
+          dynamic are different interactions and say so separately. */}
+      {xfaKind !== 'none' && (
         <div
-          data-testid="forms-xfa-warning"
+          data-testid={xfaKind === 'dynamic' ? 'forms-xfa-dynamic' : 'forms-xfa-static'}
           className="shrink-0 px-3 py-2 bg-amber-500/15 border border-amber-500/40 rounded text-xs text-amber-200"
         >
-          {tChrome('panel.forms.xfaWarning')}
+          {tChrome(xfaKind === 'dynamic' ? 'panel.forms.xfaDynamic' : 'panel.forms.xfaStatic')}
+        </div>
+      )}
+
+      {xfaCalculations && (
+        <div
+          data-testid="forms-xfa-calculations"
+          className="shrink-0 px-3 py-2 bg-amber-500/15 border border-amber-500/40 rounded text-xs text-amber-200"
+        >
+          {tChrome('panel.forms.xfaCalculations')}
         </div>
       )}
 
@@ -508,6 +524,15 @@ function FieldRow({
       {field.calculated && (
         <span data-testid={`form-calculated-${field.name}`} className="text-[10px] text-sky-400 uppercase">
           {tChrome('panel.forms.calculated')}
+        </span>
+      )}
+      {field.valueFromXFA && (
+        <span
+          data-testid={`form-from-xfa-${field.name}`}
+          title={tChrome('panel.forms.fromXfaTitle')}
+          className="text-[10px] text-emerald-400 uppercase"
+        >
+          {tChrome('panel.forms.fromXfa')}
         </span>
       )}
       {(field.type === 'button' || field.type === 'signature') && (

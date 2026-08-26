@@ -90,6 +90,10 @@ export interface FormField {
   // Where this field's widgets sit (empty for a pure-data field with no page
   // presence). A widget whose page couldn't be resolved is omitted.
   widgets: FormWidgetPlacement[];
+  // The value came from the XFA datasets packet rather than from /V — the
+  // XFA resource carries the state of the form (ISO 32000-2 Annex K), so a
+  // field blank in /V is not necessarily blank.
+  valueFromXFA?: boolean;
   // signature only: the field already holds a signature (/V present).
   filled?: boolean;
   // signature only: the `/Lock` the field itself carries — the seed whoever
@@ -101,9 +105,18 @@ export interface FormField {
   fieldActions?: Partial<Record<ActionTrigger, WidgetAction>>;
 }
 
+/** ISO 32000-2 Table 29 plus the AcroForm shadow, decided at the engine
+ * (`engine/xfa.py`): a static XFA form fills through its PDF field objects
+ * and its XML data together; a dynamic one builds its own pages and cannot
+ * be filled here. */
+export type XFAKind = 'none' | 'static' | 'dynamic';
+
 export interface FormReadResult {
   fields: FormField[];
   hasXFA: boolean;
+  xfa: XFAKind;
+  /** The XML template authors its own calculations, which are not run here. */
+  xfaCalculations: boolean;
   /** The document's declared calculation order, as fully-qualified names.
    * Empty means calculations do not run at all — the format puts the order
    * here, and inventing one would compute a number no other viewer computes. */
@@ -151,6 +164,7 @@ interface EngineField {
   field_actions?: Record<string, unknown>;
   scripts_not_run?: string[];
   calculated?: boolean;
+  value_from_xfa?: boolean;
 }
 
 /** The engine's lock read, narrowed to the wire vocabulary. An action this
@@ -163,6 +177,8 @@ function lockOfEngineField(raw: EngineField['lock']): FieldLock | null {
 }
 interface EngineReadResult {
   has_xfa?: boolean;
+  xfa?: string;
+  xfa_calculations?: boolean;
   fields?: EngineField[];
   calculation_order?: string[];
 }
@@ -242,6 +258,7 @@ export function mapEngineField(ef: EngineField): FormField | null {
     ...(Object.keys(fieldActions).length > 0 ? { fieldActions } : {}),
     ...(ef.scripts_not_run?.length ? { scriptsNotRun: [...ef.scripts_not_run] } : {}),
     ...(ef.calculated ? { calculated: true } : {}),
+    ...(ef.value_from_xfa ? { valueFromXFA: true } : {}),
     editable: EDITABLE_TYPES.has(type) && !readOnly,
     widgets,
     ...(type === 'signature' ? { filled: Boolean(ef.filled), lock: lockOfEngineField(ef.lock) } : {}),
@@ -257,14 +274,24 @@ export function mapEngineField(ef: EngineField): FormField | null {
 // here stay consistent with geometry resolved from that buffer's pdf.js proxy.
 export async function readFormFields(call: EngineCall, path: string): Promise<FormReadResult> {
   const res = (await call('read_form_fields', { file: path })) as unknown as EngineReadResult;
+  const xfa: XFAKind =
+    res.xfa === 'static' || res.xfa === 'dynamic' ? res.xfa : 'none';
   const fields: FormField[] = [];
   for (const ef of res.fields ?? []) {
     const mapped = mapEngineField(ef);
-    if (mapped) fields.push(mapped);
+    if (!mapped) continue;
+    // A dynamic XFA form builds its own pages from its template, so the fill
+    // door refuses it (engine `fill_form_fields`). Every surface fed by this
+    // read is therefore read-only over its fields — the banner says so, and
+    // an editable input that only ever reaches a refusal contradicts it.
+    if (xfa === 'dynamic') mapped.editable = false;
+    fields.push(mapped);
   }
   return {
     fields,
     hasXFA: Boolean(res.has_xfa),
+    xfa,
+    xfaCalculations: Boolean(res.xfa_calculations),
     calculationOrder: (res.calculation_order ?? []).map((n) => String(n)),
   };
 }
