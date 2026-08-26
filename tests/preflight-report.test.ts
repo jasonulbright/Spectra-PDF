@@ -36,6 +36,7 @@ import {
   formatPreflightHtml,
   formatPreflightText,
   hiddenFindings,
+  standardsNote,
   orderedCategories,
   paramsLine,
   type Check,
@@ -271,6 +272,42 @@ describe('both emitters render one model', () => {
       ],
     });
     expect(formatPreflightHtml({ ...RUN, report: na })).toContain('class="na"');
+  });
+});
+
+describe('a report under a profile named for a standard', () => {
+  // The three PDF/X profiles carry the standard's NAME, which invites a clean
+  // report to be read as a conformance verdict. It is not one: the profile
+  // carries the rules these checks can decide from the file.
+  it('says which standard it does not claim, in both emitters', () => {
+    const standards = report({
+      profile: {
+        id: 'pdfx_1a',
+        name: 'PDF/X-1a:2001',
+        name_key: 'profile.preflight.pdfx_1a',
+        based_on: '',
+      },
+    });
+    for (const rendered of [
+      formatPreflightText({ ...RUN, report: standards }),
+      formatPreflightHtml({ ...RUN, report: standards }),
+    ]) {
+      expect(rendered).toContain('PDF/X-1a:2001');
+      expect(rendered).toContain('does not cover the whole standard');
+    }
+  });
+
+  it('is silent under a press profile, which claims no standard', () => {
+    expect(standardsNote(report().profile)).toBe('');
+    expect(formatPreflightText({ ...RUN, report: report() })).not.toContain(
+      'does not cover the whole standard',
+    );
+  });
+
+  it('follows a derived profile through based_on — a rule set renamed is still that rule set', () => {
+    expect(
+      standardsNote({ id: 'my-x4', name: 'Mine', name_key: '', based_on: 'pdfx_4' }),
+    ).toContain('PDF/X-4');
   });
 });
 

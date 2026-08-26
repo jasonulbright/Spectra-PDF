@@ -76,7 +76,7 @@ import { buildSignatureAppearance } from '../../lib/signature-placement';
 import type { SignaturePlacement } from '../../lib/signature-placement';
 import { captureSnapshot, type SnapshotPlacement } from '../../lib/snapshot-capture';
 import { getSettings, saveSettings, subscribeSettings } from '../../lib/app-settings';
-import { DEFAULT_OCR_LANGUAGE } from '../../ocr/languages';
+import { resolveSelectionLanguage } from '../../ocr/language-selection';
 import { readingLocale, type PageReadAloud } from '../../lib/read-aloud';
 import { useReadAloud, type ReadAloudTarget } from '../../hooks/useReadAloud';
 import { ReadAloudBar } from './ReadAloudBar';
@@ -931,17 +931,20 @@ export function WorkspaceCanvasView({
   // re-read per render, and subscribed so the preference takes effect on the
   // page already on screen instead of at the next document open.
   //
-  // The language is the catalog default rather than a preference of its own:
-  // this tier places BOXES for a selection gesture, and choosing which models
-  // to load is a decision the Scan & OCR door exists to ask.
+  // The language is RESOLVED rather than fixed at the catalog default: a
+  // non-English scan recognised with the English model produces English-shaped
+  // guesses, and wrong word boxes are wrong selection geometry. The ladder
+  // itself lives in `ocr/language-selection.resolveSelectionLanguage` — this is
+  // only where its two inputs are gathered.
   const [scanSelectOn, setScanSelectOn] = useState(() => getSettings().scanSelectRecognition);
+  const [scanSelectPref, setScanSelectPref] = useState(() => getSettings().scanSelectLanguage);
   useEffect(
-    () => subscribeSettings((s) => setScanSelectOn(s.scanSelectRecognition)),
+    () =>
+      subscribeSettings((s) => {
+        setScanSelectOn(s.scanSelectRecognition);
+        setScanSelectPref(s.scanSelectLanguage);
+      }),
     [],
-  );
-  const ocrSelection = useMemo(
-    () => (scanSelectOn ? { callRaw: engineCallRaw, lang: DEFAULT_OCR_LANGUAGE } : null),
-    [scanSelectOn, engineCallRaw],
   );
   // Prime the installed-font listing ONCE per session. It is a
   // property of the machine, not of any document, so it is fetched here
@@ -964,6 +967,53 @@ export function WorkspaceCanvasView({
   // dispatch is a denial of service on it.
   const focusedFile = focusedPath ? state.files.get(focusedPath) : undefined;
   const focusedWorkingPath = focusedFile?.workingPath;
+  // The focused document's own `/Lang`, for the recognition ladder above.
+  //
+  // Read lazily and cached per working path: it costs a file open, and the
+  // preference alone answers for most documents. `null` covers both "no /Lang"
+  // and "could not be read" — neither is an error here, the ladder just carries
+  // on. The read is skipped entirely while the preference is off, so a
+  // capability nobody enabled opens no files.
+  const docOcrLangRef = useRef<Map<string, string | null>>(new Map());
+  const [docOcrLang, setDocOcrLang] = useState<string | null>(null);
+  useEffect(() => {
+    if (!scanSelectOn || !focusedWorkingPath) {
+      setDocOcrLang(null);
+      return;
+    }
+    const cached = docOcrLangRef.current;
+    if (cached.has(focusedWorkingPath)) {
+      setDocOcrLang(cached.get(focusedWorkingPath) ?? null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      let lang: string | null;
+      try {
+        const res = (await engineCall('document_language', {
+          file: focusedWorkingPath,
+        })) as unknown as { language: string | null };
+        lang = res.language ?? null;
+      } catch {
+        lang = null;
+      }
+      cached.set(focusedWorkingPath, lang);
+      if (!cancelled) setDocOcrLang(lang);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [scanSelectOn, focusedWorkingPath, engineCall]);
+  const ocrSelection = useMemo(
+    () =>
+      scanSelectOn
+        ? {
+            callRaw: engineCallRaw,
+            lang: resolveSelectionLanguage(scanSelectPref, docOcrLang),
+          }
+        : null,
+    [scanSelectOn, scanSelectPref, docOcrLang, engineCallRaw],
+  );
   // ── the editor's own spell check ────────────────────────────────────────
   //
   // The paragraph editor renders its own glyph spans, so it draws its own

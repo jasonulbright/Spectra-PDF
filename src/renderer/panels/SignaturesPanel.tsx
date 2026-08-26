@@ -17,6 +17,7 @@ import {
 import type { SignerSource } from '../components/SignerSourceFields';
 import { getCanvasServices } from '../commands/context';
 import {
+  anchorRestrictionLabel,
   classifySignature,
   policyVerdict,
   POLICY_VERDICT_LABEL,
@@ -1097,6 +1098,18 @@ function SignatureCard({
             {sig.trust_source
               ? tChrome(TRUST_SOURCE_LABEL[sig.trust_source])
               : tChrome('panel.sig.identityTrusted')}
+          </span>
+        )}
+        {/* An untrusted chain that a trust source explicitly REFUSED reads the
+            same as one that reached no anchor at all unless the reason is
+            stated. The dates come from the structured field, never parsed back
+            out of a message. */}
+        {sig.anchor_restriction && (
+          <span data-testid="signature-anchor-restriction">
+            {tChrome(anchorRestrictionLabel(sig.anchor_restriction), {
+              cutoff: sig.anchor_restriction.cutoff,
+              issued: sig.anchor_restriction.issued,
+            })}
           </span>
         )}
       </div>

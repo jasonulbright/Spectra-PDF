@@ -167,6 +167,9 @@ class _TrustSources:
         self.msctl_requested = bool(msctl_trust)
         self.msctl_available = msctl.available() if msctl_trust else False
         self.msctl_provenance = msctl.provenance() if msctl_trust else {}
+        # Read only under the opt-in, like every other read of this bundle: with
+        # the source off there are no constraints because there are no anchors.
+        self.msctl_constraints: dict = msctl.constraints() if msctl_trust else {}
         if not system_trust and not eutl_trust and not msctl_trust:
             ctx = _trust_context(trust_roots) if trust_roots else None
             self.signer_context = ctx
@@ -256,6 +259,73 @@ class _TrustSources:
             return "system"
         return None
 
+    def anchor_restriction(self, status) -> dict | None:
+        """Why this validated chain is NOT anchored after all, or None.
+
+        The root-program list states, per subject, a moment after which nothing
+        that subject issued is an authority's work — the authority stays valid
+        for its earlier issuance, so the anchor cannot simply be dropped and the
+        constraint has to be applied against the certificates UNDER it. pyHanko
+        builds and judges the path with no notion of a per-anchor date, so this
+        runs after it: the chain validated, and then the program's own statement
+        about that chain is applied to it.
+
+        Every verify path reaches this the same way, because every one of them
+        is the single ``validate_pdf_signature`` call in ``_verify_one`` — a
+        direct verification, an LTV gathering and a PAdES check differ in what
+        revocation information they carry, not in who builds the chain.
+
+        Both chains are examined: a timestamp chain terminating at a
+        cutoff-bearing anchor is as much a refusal as a signer chain doing so,
+        and reporting the signer chain alone would leave a timestamp anchored by
+        an authority the program no longer vouches for at that date.
+        """
+        if not self.msctl_constraints:
+            return None
+        for kind, path in (
+            ("signer", getattr(status, "validation_path", None)),
+            ("timestamp", getattr(
+                getattr(status, "timestamp_validity", None), "validation_path", None
+            )),
+        ):
+            found = self._restriction_on(path, kind)
+            if found is not None:
+                return found
+        return None
+
+    def _restriction_on(self, path, kind: str) -> dict | None:
+        if path is None:
+            return None
+        try:
+            chain = list(path)
+        except Exception:  # noqa: BLE001
+            return None
+        if not chain:
+            return None
+        constraint = self.msctl_constraints.get(chain[0].sha256.hex())
+        if constraint is None:
+            return None
+        cutoff, purposes = constraint
+        # The purposes the cutoff names are the chain's purposes, which is what
+        # the END certificate declares. A certificate declaring none is
+        # unrestricted, so the cutoff applies to it — the same reading of an
+        # absent purpose the bundle itself is built on.
+        if purposes is not None and not (_purposes_of(chain[-1]) & purposes):
+            return None
+        for certificate in chain[1:]:
+            issued = getattr(certificate, "not_valid_before", None)
+            if issued is None or issued < cutoff:
+                continue
+            return {
+                "source": "msctl",
+                "chain": kind,
+                "issued": issued.isoformat(),
+                "cutoff": cutoff.isoformat(),
+                "subject": _subject_name(certificate),
+                "anchor": _subject_name(chain[0]),
+            }
+        return None
+
     def report(self) -> dict:
         return {
             "requested": self.system_requested,
@@ -282,6 +352,44 @@ class _TrustSources:
             "anchor_count": len(self.msctl_prints),
             **self.msctl_provenance,
         }
+
+
+def _purposes_of(certificate) -> frozenset:
+    """The purpose OIDs a certificate declares, or every purpose when it
+    declares none — an absent extended key usage is unrestricted, which is the
+    same reading the root-program bundle is built on."""
+    try:
+        usage = certificate.extended_key_usage_value
+    except Exception:  # noqa: BLE001
+        return _ALL_PURPOSES
+    if usage is None:
+        return _ALL_PURPOSES
+    try:
+        return frozenset(oid.dotted for oid in usage)
+    except Exception:  # noqa: BLE001
+        return _ALL_PURPOSES
+
+
+class _EveryPurpose(frozenset):
+    """Intersects to something non-empty against any set of purposes, so a
+    certificate declaring no usage is matched by a constraint naming any."""
+
+    def __and__(self, other):
+        return frozenset(other)
+
+    __rand__ = __and__
+
+
+_ALL_PURPOSES = _EveryPurpose()
+
+
+def _subject_name(certificate) -> str | None:
+    try:
+        name = certificate.subject.native
+        return str(name.get("common_name") or name.get("organization_name")
+                   or certificate.subject.human_friendly)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _make_timestamper(tsa_url: str):
@@ -422,6 +530,7 @@ def _verify_one(embedded, sources: "_TrustSources | None" = None,
             "intact": False,
             "trusted": False,
             "trust_source": None,
+            "anchor_restriction": None,
             "coverage": "UNKNOWN",
             "covers_whole_document": False,
             "modified_after_signing": True,
@@ -440,6 +549,17 @@ def _verify_one(embedded, sources: "_TrustSources | None" = None,
         }
     coverage = status.coverage.name if status.coverage is not None else "UNKNOWN"
     tsv = getattr(status, "timestamp_validity", None)
+    # The chain validated; the root program's own statement about it has not
+    # been applied yet. A restriction here is a REFUSAL to call the chain
+    # anchored, reported as its own structured fact rather than folded into the
+    # error string — a caller deciding what to show must be able to tell an
+    # anchor restriction from a broken signature without reading prose.
+    restriction = (
+        sources.anchor_restriction(status)
+        if sources is not None and status.trusted
+        else None
+    )
+    trusted = bool(status.trusted) and restriction is None
     return {
         "field": field,
         "signer": _signer_name(status),
@@ -451,10 +571,14 @@ def _verify_one(embedded, sources: "_TrustSources | None" = None,
         # opt-in to the OS store, validation runs against an EXPLICIT empty
         # trust context and no certificate can chain. Reported (not hidden) so
         # the UI can state the identity caveat honestly.
-        "trusted": bool(status.trusted),
+        "trusted": trusted,
         # WHICH anchor set the path terminated at, so a trusted result can say
         # whether the user vouched for the chain or the machine did.
-        "trust_source": sources.source_of(status) if sources is not None and status.trusted else None,
+        "trust_source": sources.source_of(status) if sources is not None and trusted else None,
+        # Why an otherwise valid chain is not anchored: the root program admits
+        # this authority only for certificates issued before a stated moment,
+        # and this chain's is later. None whenever no such statement applies.
+        "anchor_restriction": restriction,
         "coverage": coverage,
         "covers_whole_document": coverage == "ENTIRE_FILE",
         # Content was added/changed after this signature was applied.

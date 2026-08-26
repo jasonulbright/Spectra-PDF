@@ -248,17 +248,23 @@ export function PageTextLayer({
         }
         if (cancelled) return;
         const spin = (page.rotate + rotation) % 360;
-        const known = peekSelectionCache(pdf, pageNumber, spin);
+        const known = peekSelectionCache(pdf, pageNumber, spin, ocrSelection.lang);
         // No answer yet and no gesture yet: stay out of the recognizer.
         if (!known && !gestured) return;
         // Nothing already known means work is about to start; a cached answer
         // resolves without ever flashing a busy badge.
         if (!known) setOcrStatus('pending');
-        const recognised = await recognizeForSelection(pdf, pageNumber, spin, async () => {
-          const png = await renderPageToPng(page, spin);
-          if (!png) return null;
-          return recognizeRaster(ocrSelection.callRaw, png, ocrSelection.lang);
-        });
+        const recognised = await recognizeForSelection(
+          pdf,
+          pageNumber,
+          spin,
+          ocrSelection.lang,
+          async () => {
+            const png = await renderPageToPng(page, spin);
+            if (!png) return null;
+            return recognizeRaster(ocrSelection.callRaw, png, ocrSelection.lang);
+          },
+        );
         if (cancelled) return;
         setOcrStatus(recognised.status);
         if (recognised.status !== 'ready') return;

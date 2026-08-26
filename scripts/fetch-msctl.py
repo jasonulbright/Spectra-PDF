@@ -48,15 +48,30 @@ WHAT THIS PROVES BEFORE IT WRITES ANYTHING
 
 Anything that does not hold is a refusal, and nothing is written after one.
 
-WHAT IS NOT MODELLED, STATED RATHER THAN IMPLIED
+THE ISSUANCE-DATE CONSTRAINT, AND WHICH PROPERTY ACTUALLY CARRIES IT
 
-  Property 83 (root-program certificate policies) additionally constrains the
-  ISSUANCE DATES of the certificates a subject may have signed — "trusted only
-  for certificates issued before X". That is a path-validation input the
-  validator takes no per-anchor form of, so it is not honoured here: a subject
-  carrying an 83 restriction anchors normally. Dropping such subjects instead
-  would be over-strict, and honouring the constraint needs per-anchor policy
-  support that does not exist yet. The gap is recorded rather than papered over.
+  A subject may be in the program only for certificates it issued BEFORE a
+  stated moment: the authority is not withdrawn, but nothing it signed after
+  that moment is an authority's work. That constraint is carried by property
+  126, an 8-byte FILETIME, optionally narrowed by property 127, a list of the
+  purpose OIDs it applies to. Property 127 absent means it applies to every
+  purpose.
+
+  Property 83 is root-program certificate POLICIES and carries no date: it
+  decodes as an X.509 CertificatePolicies whose every qualifier is the
+  program's own flags identifier (1.3.6.1.4.1.311.60.1.1) over a BIT STRING.
+  It is parsed and counted here, and the parse REFUSES if a qualifier ever
+  carries a time — the reading that says "83 holds no date" has to be
+  re-proven on every fetch rather than remembered from one measurement.
+
+  The cutoff is written out per anchor (``msctl-constraints.json``, keyed by
+  the SHA-256 the runtime identifies an anchor by) because a PEM file has no
+  room for it. ``engine/msctl.py`` reads it and the validator refuses a chain
+  whose issued certificate postdates its anchor's cutoff.
+
+  A subject whose cutoff has already passed is NOT dropped: it stays a valid
+  authority for everything it issued before that moment, and dropping it would
+  refuse signatures the program still vouches for.
 
 REFRESH
 
@@ -117,10 +132,23 @@ PROP_ENHANCED_KEY_USAGE = 9  # the grant: a SEQUENCE OF purpose OIDs
 PROP_SHA1 = 3  # store-only; the signed list uses it as the subject identifier
 PROP_DISALLOWED_AFTER = 104  # a FILETIME; past means the subject is dropped
 PROP_DISALLOWED_PURPOSES = 122  # purposes SUBTRACTED from the grant
-#: Root-program certificate policies. NOT modelled (see the module docstring);
-#: counted so the size of that gap is a number in the manifest rather than a
-#: paragraph, and so a refresh shows it moving.
+#: Root-program certificate policies: an X.509 CertificatePolicies carrying the
+#: program's own flags. Parsed to PROVE it carries no date (see the module
+#: docstring) rather than to model anything, and counted.
 PROP_ROOT_PROGRAM_POLICIES = 83
+#: The issuance cutoff: a FILETIME, after which nothing the subject issued is an
+#: authority's work. The subject itself stays an authority.
+PROP_NOT_BEFORE = 126
+#: The purposes PROP_NOT_BEFORE applies to. Absent means every purpose.
+PROP_NOT_BEFORE_PURPOSES = 127
+
+#: The one qualifier identifier property 83 is observed to carry. Its value is a
+#: BIT STRING of program flags.
+OID_ROOT_PROGRAM_FLAGS = "1.3.6.1.4.1.311.60.1.1"
+#: ASN.1 tags for the two time types. A property-83 qualifier carrying one of
+#: these would mean the date constraint lives somewhere this tool does not read,
+#: so it is a refusal rather than a silently ignored field.
+_TIME_TAGS = (0x17, 0x18)
 
 #: The store format: an 8-byte header, then property records, where a record
 #: with this id carries a DER certificate and closes the group before it.
@@ -595,6 +623,47 @@ def disallowed_after(blob: bytes | None) -> datetime.datetime | None:
     return _FILETIME_EPOCH + datetime.timedelta(microseconds=ticks // 10)
 
 
+#: The issuance cutoff shares the disallowed-after encoding exactly — one
+#: FILETIME — and differs only in what it means, so it shares the reader.
+not_before_cutoff = disallowed_after
+
+
+def root_program_policies(blob: bytes | None) -> int:
+    """How many policy entries property 83 carries, having PROVEN it carries no
+    date.
+
+    The proof, not the count, is the reason this parses at all: the constraint
+    on issuance dates lives in property 126, and the claim that 83 does not also
+    carry one must be re-established against each published list rather than
+    remembered. A qualifier holding a time means that claim has stopped being
+    true and the tool refuses rather than writing a bundle whose date modelling
+    is now incomplete.
+    """
+    if not blob:
+        return 0
+    try:
+        policies = ax509.CertificatePolicies.load(blob)
+        entries = [
+            (qualifier["policy_qualifier_id"].dotted, qualifier["qualifier"].dump())
+            for policy in policies
+            for qualifier in (policy["policy_qualifiers"] or [])
+        ]
+    except Exception:  # noqa: BLE001
+        raise Refused("a root-program policy property does not parse as policies")
+    for identifier, value in entries:
+        if identifier != OID_ROOT_PROGRAM_FLAGS:
+            raise Refused(
+                f"a root-program policy carries an unknown qualifier {identifier}; "
+                "review it before trusting this bundle's date modelling"
+            )
+        if value and value[0] in _TIME_TAGS:
+            raise Refused(
+                "a root-program policy qualifier carries a time; the issuance "
+                "constraint is no longer only property 126"
+            )
+    return len(policies)
+
+
 # ──────────────────── the grant, minus the distrust ────────────────────────
 
 
@@ -633,7 +702,8 @@ def classify(material: dict, subjects: dict, now: datetime.datetime | None = Non
     }
     trimmed_by_denial = 0
     unrestricted = 0
-    unmodelled_policy_restriction = 0
+    root_program_policy_subjects = 0
+    constraints: dict = {}
 
     for fingerprint, (der, store_properties) in sorted(material.items()):
         properties = subjects.get(fingerprint)
@@ -678,19 +748,37 @@ def classify(material: dict, subjects: dict, now: datetime.datetime | None = Non
             excluded["no_purpose_this_bundle_anchors"] += 1
             continue
         if PROP_ROOT_PROGRAM_POLICIES in properties:
-            unmodelled_policy_restriction += 1
+            # Parsed for its refusals, not its count — see root_program_policies.
+            root_program_policies(properties[PROP_ROOT_PROGRAM_POLICIES])
+            root_program_policy_subjects += 1
         if is_signer:
             signer_anchors.append(der)
         if is_timestamp:
             timestamp_anchors.append(der)
+
+        # The issuance cutoff is carried per anchor rather than applied here: a
+        # subject past its cutoff is still the authority for everything it
+        # issued before it, so this is an input to path validation and not a
+        # reason to drop anything.
+        cutoff = not_before_cutoff(properties.get(PROP_NOT_BEFORE))
+        cutoff_purposes = purposes_in(properties.get(PROP_NOT_BEFORE_PURPOSES))
+        if cutoff is not None:
+            constraints[hashlib.sha256(der).hexdigest()] = {
+                "not_before": cutoff.isoformat(),
+                # None, not the empty list: no purpose property means EVERY
+                # purpose, and the empty list would mean none of them.
+                "purposes": sorted(cutoff_purposes) if cutoff_purposes else None,
+            }
         rows.append({
             "sha1": fingerprint,
+            "sha256": hashlib.sha256(der).hexdigest(),
             "purposes": ",".join(
                 name
                 for name, on in (("signer", is_signer), ("timestamp", is_timestamp))
                 if on
             ),
             "restricted": expiry.date().isoformat() if expiry is not None else "",
+            "issued_before": cutoff.date().isoformat() if cutoff is not None else "",
             "subject": subject_of(der),
         })
 
@@ -701,7 +789,8 @@ def classify(material: dict, subjects: dict, now: datetime.datetime | None = Non
         "excluded": excluded,
         "trimmed_by_denial": trimmed_by_denial,
         "unrestricted": unrestricted,
-        "unmodelled_policy_restriction": unmodelled_policy_restriction,
+        "root_program_policy_subjects": root_program_policy_subjects,
+        "constraints": constraints,
         "naive_signer": naive_signer,
         "naive_timestamp": naive_timestamp,
         "dropped_by_date": dropped_by_date,
@@ -728,11 +817,32 @@ def prove(verdict: dict, require_a_dated_exclusion: bool = False) -> None:
     leaked = verdict["dropped_by_date"] & (honest_signer | honest_timestamp)
     if leaked:
         raise Refused(f"{len(leaked)} distrusted subject(s) reached the anchor set")
+
+    # Every anchor the list gives an issuance cutoff must carry that cutoff into
+    # the output, and nothing else may. An anchor whose constraint went missing
+    # is an anchor that silently widened back to unrestricted, which is the same
+    # failure class as a distrust rule that stopped being applied.
+    written = {r["sha256"] for r in verdict["rows"]}
+    constraints = verdict["constraints"] or {}
+    if not set(constraints) <= written:
+        raise Refused("an issuance cutoff was written for a certificate that is not an anchor")
+    expected = {r["sha256"] for r in verdict["rows"] if r["issued_before"]}
+    if expected != set(constraints):
+        raise Refused(
+            f"{len(expected ^ set(constraints))} anchor(s) carry an issuance cutoff "
+            "the bundle does not record"
+        )
+
     if require_a_dated_exclusion:
         if not verdict["excluded"]["disallowed_after_a_past_moment"]:
             raise Refused(
                 "no subject was excluded by a past disallowed-after moment; the "
                 "distrust properties are not being applied"
+            )
+        if not constraints:
+            raise Refused(
+                "no anchor carries an issuance cutoff; the constraint property is "
+                "not being read"
             )
         if not honest_signer or not honest_timestamp:
             raise Refused("the honest read produced no anchors for one of the two chains")
@@ -830,7 +940,8 @@ def main() -> int:
     excluded = verdict["excluded"]
     trimmed_by_denial = verdict["trimmed_by_denial"]
     unrestricted = verdict["unrestricted"]
-    policy_restricted = verdict["unmodelled_policy_restriction"]
+    policy_subjects = verdict["root_program_policy_subjects"]
+    constraints = verdict["constraints"]
     naive_signer = verdict["naive_signer"]
     naive_timestamp = verdict["naive_timestamp"]
 
@@ -840,17 +951,41 @@ def main() -> int:
     timestamp_sha = write_pem(timestamp_path, timestamp_anchors)
 
     index = destination / "msctl-certificates.tsv"
+    # `newline=""` for the same reason the constraints file is written as
+    # bytes: this tree checks out with EOL translation disabled, so whatever
+    # newline the fetching host's `write_text` chose is frozen into the
+    # committed blob and a refresh run elsewhere rewrites every line.
     index.write_text(
         "\n".join(
-            ["sha1\tpurposes\trestricted_after\tsubject"]
+            ["sha1\tpurposes\trestricted_after\tissued_before\tsubject"]
             + [
-                f"{r['sha1']}\t{r['purposes']}\t{r['restricted']}\t{r['subject']}"
+                f"{r['sha1']}\t{r['purposes']}\t{r['restricted']}\t"
+                f"{r['issued_before']}\t{r['subject']}"
                 for r in sorted(rows, key=lambda r: r["sha1"])
             ]
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
+
+    # Keyed by SHA-256 because that is what identifies an anchor at validation
+    # time; the TSV's SHA-1 is the list's own subject identifier and belongs to
+    # the fetch, not to the runtime.
+    constraints_path = destination / "msctl-constraints.json"
+    # Written as BYTES: the manifest records this file's digest and the reader
+    # checks it, so the platform's newline translation must not sit between the
+    # two.
+    constraints_body = (
+        json.dumps(
+            {key: constraints[key] for key in sorted(constraints)},
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+    constraints_path.write_bytes(constraints_body)
+    constraints_sha = hashlib.sha256(constraints_body).hexdigest()
 
     manifest = {
         "source": CTL_URL,
@@ -869,14 +1004,24 @@ def main() -> int:
                 "sha256": timestamp_sha,
                 "count": len(timestamp_anchors),
             },
+            "msctl-constraints.json": {
+                "sha256": constraints_sha,
+                "count": len(constraints),
+            },
         },
         "material": {
             "certificates": len(material),
             "unrestricted_no_purpose_property": unrestricted,
             "purposes_trimmed_by_denial": trimmed_by_denial,
-            # The size of the property-83 gap the module docstring records: how
-            # many anchors carry a restriction this bundle does not model.
-            "anchored_with_unmodelled_policy_restriction": policy_restricted,
+            # Modelled, not merely counted: each of these anchors carries an
+            # issuance cutoff into msctl-constraints.json and the validator
+            # refuses a certificate issued after it.
+            "anchored_with_issuance_cutoff": len(constraints),
+            "anchored_with_issuance_cutoff_for_some_purposes": sum(
+                1 for entry in constraints.values() if entry["purposes"]
+            ),
+            # Property 83, re-proven date-free on this list rather than modelled.
+            "anchored_with_root_program_policies": policy_subjects,
         },
         "excluded": excluded,
         "naive_read_would_have_anchored": {
@@ -885,7 +1030,9 @@ def main() -> int:
         },
     }
     (destination / "msctl-manifest.json").write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+        newline="\n",
     )
 
     log("")
@@ -896,6 +1043,7 @@ def main() -> int:
     for reason, count in excluded.items():
         log(f"excluded, {reason}: {count}")
     log(f"purposes trimmed by a per-purpose denial: {trimmed_by_denial}")
+    log(f"anchors carrying an issuance cutoff: {len(constraints)}")
     log("REVIEW THE GIT DIFF and commit — these files are what ships.")
     return 0
 
