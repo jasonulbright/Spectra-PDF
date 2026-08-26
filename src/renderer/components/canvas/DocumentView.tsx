@@ -255,6 +255,9 @@ export interface DocumentViewProps {
   /** The file's existing links, projected onto the canvas, and the pick that
    * opens one in the panel. Shown while the Links tool is open only. */
   linkRegions: readonly LinkRegion[];
+  /** View-tier scanned-page recognition for the Select tool; null when the
+   *  preference is off. Reading view only — the board has no text layer. */
+  ocrSelection?: import('./PageTextLayer').OcrSelectionContext | null;
   onPickLink: (region: LinkRegion) => void;
   selectedLink: { page: number; index: number } | null;
   /** The captured snapshot's card, and its two actions. */
@@ -1092,6 +1095,7 @@ export const DocumentView = forwardRef<CanvasHandle, DocumentViewProps>(function
           onPageContextMenu={props.onPageContextMenu}
           onPagePointerDown={NO_PAGE_POINTER}
           textLayer
+          ocrSelection={props.ocrSelection}
           onAddAnnotation={props.onAddAnnotation}
           onUpdateAnnotation={props.onUpdateAnnotation}
           onRecolorAnnotation={props.onRecolorAnnotation}

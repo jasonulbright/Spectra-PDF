@@ -295,6 +295,20 @@ function stripImportedOriginals(
   }
 }
 
+/** The stroke width every dimension annotation is drawn at. */
+const MEASURE_STROKE_WIDTH = 2;
+
+/**
+ * How far a stroked path's rect/BBox must sit outside the path's own point
+ * bounds. A round cap and a round join (`1 J 1 j`) both reach exactly half the
+ * stroke width past the geometry, so the half-width is the true extent and the
+ * extra point is float-rounding slack. The 2pt default nib yields exactly 2 —
+ * the value ink and measure output were pinned at.
+ */
+function strokeBboxPad(strokeWidth: number): number {
+  return Math.max(2, strokeWidth / 2 + 1);
+}
+
 function addAnnotations(
   output: PDFDocument,
   copied: import('pdf-lib').PDFPage,
@@ -323,13 +337,15 @@ function addAnnotations(
     if (!pointsKind && (rx1 - rx0 <= 0 || ry1 - ry0 <= 0)) continue;
     // Pad the points kinds' rect/BBox past the stroke's half-width so a flat
     // line's edge isn't sitting exactly on the BBox boundary (a Form XObject
-    // clips to BBox, and that's a knife-edge float-rounding risk at pad ==
-    // half-width). Ink/measure keep their original 2 (byte-stable output);
-    // shapes pad enough to cover arrowheads and cloud bumps at any stroke
-    // width. Box shapes draw inset instead.
+    // CLIPS to BBox, and that's a knife-edge float-rounding risk at pad ==
+    // half-width). The pad therefore has to scale with the NIB: a 14pt
+    // highlighter reaches 7pt past its centreline in every direction, round
+    // caps included, so a fixed 2 shaved 5pt off every outer edge and left 4pt
+    // of a 14pt marker in the file. Shapes pad enough to cover arrowheads and
+    // cloud bumps at any stroke width. Box shapes draw inset instead.
     const pad =
       a.kind === 'ink' || a.kind === 'measure'
-        ? 2
+        ? strokeBboxPad(a.kind === 'measure' ? MEASURE_STROKE_WIDTH : (a.strokeWidth ?? 2))
         : pointsKind
           ? Math.max(2, (a.strokeWidth ?? 2) * 5 + 6)
           : 0;
@@ -400,7 +416,25 @@ function addAnnotations(
         }
         return flat;
       });
-      let content = `${r} ${g} ${b} RG ${strokeW} w 1 J 1 j `;
+      // The FREEHAND HIGHLIGHTER is ink drawn with a marker: the same
+      // /InkList, stroked through an ExtGState that both multiplies and sets
+      // the alpha. /Multiply is what makes it read as marker over a scanned
+      // page IMAGE — a plain alpha wash lightens the ink underneath it, while
+      // a multiply darkens toward the page and leaves the scan legible. The
+      // blend mode belongs to a graphics state, so it is set in the
+      // appearance's own resources rather than asserted on the annotation.
+      const highlighter = a.inkStyle === 'highlighter';
+      const alpha = a.opacity ?? 1;
+      let apResources: { ExtGState: { GS0: import('pdf-lib').PDFRef } } | undefined;
+      let content = '';
+      if (highlighter) {
+        const gsRef = context.register(
+          context.obj({ Type: 'ExtGState', BM: 'Multiply', CA: alpha, ca: alpha }),
+        );
+        apResources = { ExtGState: { GS0: gsRef } };
+        content += '/GS0 gs ';
+      }
+      content += `${r} ${g} ${b} RG ${strokeW} w 1 J 1 j `;
       for (const flat of strokesPdf) {
         for (let i = 0; i < flat.length; i += 2) {
           const px = flat[i] - x0;
@@ -415,6 +449,7 @@ function addAnnotations(
           Subtype: 'Form',
           FormType: 1,
           BBox: [0, 0, w, h],
+          ...(apResources ? { Resources: apResources } : {}),
         }),
       );
       annot = context.obj({
@@ -427,6 +462,14 @@ function addAnnotations(
         BS: { W: strokeW },
         AP: { N: ap },
       });
+      // Which PEN drew it, for the round trip. The appearance already carries
+      // the LOOK; a reader that has never heard of this key still sees the
+      // marker. Re-opening in this app reads the key back so the drawing
+      // re-edits as the highlighter it was drawn with (the /SpectraSymbol
+      // precedent — a private key naming intent, never the rendering).
+      if (highlighter) {
+        annot.set(PDFName.of('SpectraInkStyle'), PDFHexString.fromText('highlighter'));
+      }
       if (a.opacity !== undefined && a.opacity < 1) annot.set(PDFName.of('CA'), context.obj(a.opacity));
       if (a.note) annot.set(PDFName.of('Contents'), PDFHexString.fromText(a.note));
     } else if (a.kind === 'measure') {
@@ -434,7 +477,7 @@ function addAnnotations(
       // //Polygon with /IT + /Measure, so other tools can RE-MEASURE it —
       // the value in /Contents is a convenience, the geometry + /Measure /C
       // factors are the contract. The AP mirrors ink's stroke look.
-      const strokeW = 2;
+      const strokeW = MEASURE_STROKE_WIDTH;
       const flatPdf: number[] = [];
       for (let i = 0; i < (a.points?.length ?? 0); i += 2) {
         const [px, py] = displayPointToPdf(a.points![i], a.points![i + 1], { x, y, width, height }, rotation);

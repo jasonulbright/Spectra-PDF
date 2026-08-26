@@ -137,6 +137,13 @@ export interface PageAnnotation {
   // a single-stroke drawing is strokes.length === 1 — so a multi-stroke
   // /InkList (a signature) round-trips whole instead of being refused.
   strokes?: number[][];
+  // ink only: which pen drew it. Absent (or 'pen') is the ordinary opaque
+  // stroke. 'highlighter' commits the same /Ink geometry with a translucent
+  // /Multiply appearance and a marker-scale width, and round-trips through the
+  // private /SpectraInkStyle — the /SpectraSymbol precedent. It is a STYLE of
+  // ink and not a kind of its own: eraser, manipulation, import and undo all
+  // reach it unchanged because it is the same annotation.
+  inkStyle?: 'pen' | 'highlighter';
   // stamp only: a custom IMAGE stamp's raster as a data URL (PNG/JPEG,
   // downscaled at library-import time). Present → the appearance draws the
   // embedded image instead of the bordered label; `note` still carries the
@@ -287,6 +294,12 @@ export type CanvasTool =
   | 'highlight'
   | 'freetext'
   | 'ink'
+  // Freehand HIGHLIGHTER: the same pointer pipeline as 'ink' (one capture, not
+  // a second one), committing an /Ink annotation whose appearance draws the
+  // stroke translucently through a /Multiply ExtGState — so it reads as marker
+  // over a scanned page image instead of painting over it. It anchors to no
+  // text, which is the point: an image-only scan has none to select.
+  | 'inkhighlight'
   | 'stamp'
   | 'redact'
   | 'signature'
@@ -515,6 +528,15 @@ export interface UiState {
   // The right-hand TOOL DOCK: where ops-tool panels render
   // over an always-visible document. Persisted with navPane in workbench-ui.
   toolDock: ToolDockState;
+  // Tool lock: whether a completed placement LEAVES the canvas mode armed.
+  // True (the default) keeps the armed mode for the next placement, so marking
+  // up a long scan costs one arming gesture; false disarms to 'select' after
+  // each placement. It is consulted at ONE seam — `afterPlacement` in the
+  // reducer, on ADD_ANNOTATION — never per tool. It cannot outrank `openTool`:
+  // closing a tool or switching to one that owns no mode recomputes `tool` from
+  // the owner, so a locked mode can never go silently live on the next
+  // document. Persisted per window in workbench-ui.
+  toolLock: boolean;
   // WHICH document the reading view shows, as an `OpenDocument.id`.
   // The board renders every doc at once, but the reading view renders exactly
   // one — and a tab addresses a FILE, while a `.pdfx` partitions one file into
@@ -728,6 +750,7 @@ export type AppAction =
   | { type: 'UI_SET_ACTIVE_OP'; op: string }
   | { type: 'UI_OPEN_TOOL'; toolId: string | null }
   | { type: 'UI_SET_TOOL'; tool: CanvasTool }
+  | { type: 'UI_SET_TOOL_LOCK'; locked: boolean }
   | { type: 'UI_SET_DOC_VIEW_MODE'; mode: DocViewMode }
   | { type: 'UI_SET_PAGE_LAYOUT'; layout: PageLayoutMode }
   | { type: 'UI_TOGGLE_TWOUP_COVER' }

@@ -25,6 +25,7 @@ invisible text layer written back into the document sits away from the glyphs
 it transcribes and no reader's text selection lands on the words.
 """
 
+import base64
 import csv
 import io
 import os
@@ -111,15 +112,13 @@ def _render_page_png(file: str, page: int, gs_path: str, out_png: Path) -> None:
         raise RuntimeError(f"Could not render page {page} for OCR: {detail}")
 
 
-def _png_size(path: Path) -> tuple[int, int]:
+def _png_size_bytes(header: bytes) -> tuple[int, int]:
     """Width/height straight out of the PNG IHDR.
 
     Deliberately not Pillow: the normalisation below divides by these numbers,
-    so reading them from the file we just wrote keeps the denominator exact and
+    so reading them from the header keeps the denominator exact and
     avoids a decode of a 300-dpi page purely to learn its dimensions.
     """
-    with open(path, "rb") as fh:
-        header = fh.read(24)
     if len(header) < 24 or header[:8] != b"\x89PNG\r\n\x1a\n":
         raise RuntimeError("OCR rasteriser did not produce a PNG")
     width = int.from_bytes(header[16:20], "big")
@@ -127,6 +126,11 @@ def _png_size(path: Path) -> tuple[int, int]:
     if width <= 0 or height <= 0:
         raise RuntimeError("OCR rasteriser produced a zero-sized page image")
     return width, height
+
+
+def _png_size(path: Path) -> tuple[int, int]:
+    with open(path, "rb") as fh:
+        return _png_size_bytes(fh.read(24))
 
 
 def _parse_tsv(tsv_text: str, width: int, height: int) -> tuple[str, list[dict]]:
@@ -156,6 +160,15 @@ def _parse_tsv(tsv_text: str, width: int, height: int) -> tuple[str, list[dict]]
             continue
         if w <= 0 or h <= 0:
             continue
+        # `conf` is tesseract's own per-word confidence, 0..100, and -1 on a
+        # row it did not classify as text. Carried through rather than
+        # thresholded here: the view-tier selection layer gates SNAPPING on
+        # it, while the text-layer writer wants every word it recognised, and
+        # one number filtered at the source could not serve both.
+        try:
+            conf = float(row.get("conf", "-1"))
+        except (TypeError, ValueError):
+            conf = -1.0
         words.append(
             {
                 "text": text,
@@ -163,6 +176,7 @@ def _parse_tsv(tsv_text: str, width: int, height: int) -> tuple[str, list[dict]]
                 "y": top / height,
                 "w": w / width,
                 "h": h / height,
+                "conf": conf,
             }
         )
     # The plain text is the words in reading order -- the same thing the search
@@ -205,19 +219,27 @@ class _TesseractFailure(Exception):
         self.detail = detail
 
 
-def _run_tesseract(png: Path, lang: str, exe: Path, tessdata: Path) -> tuple[str, list[dict]]:
+def _run_tesseract(png: Path | bytes, lang: str, exe: Path, tessdata: Path) -> tuple[str, list[dict]]:
     """One tesseract invocation over one PNG -> (text, normalised word boxes).
 
-    The ONE place the recognizer is spawned. `recognize` (page of a PDF) and
+    The ONE place the recognizer is spawned. `recognize` (page of a PDF),
     `recognize_image` (a raster somebody else produced -- the MRC text-
-    verification gate) differ only in how the PNG arrives; two invocations
-    that could drift apart in flags or parsing would be two recognizers, which
-    is the silent-degradation class this module exists to have exactly one of.
+    verification gate) and `recognize_raster` (PNG bytes handed straight in)
+    differ only in how the PNG arrives; two invocations that could drift apart
+    in flags or parsing would be two recognizers, which is the
+    silent-degradation class this module exists to have exactly one of.
+
+    PNG BYTES take tesseract's `-` input, so a raster handed in for
+    recognition never reaches the filesystem. That is a requirement, not an
+    optimisation: the view-tier selection layer recognises pages of documents
+    the user has not asked to modify, and a temp file would put their content
+    on disk for a read-only gesture.
     """
-    width, height = _png_size(png)
+    from_bytes = isinstance(png, (bytes, bytearray))
+    width, height = _png_size_bytes(bytes(png[:24])) if from_bytes else _png_size(png)
     cmd = [
         str(exe),
-        str(png),
+        "-" if from_bytes else str(png),
         "stdout",
         "-l",
         lang,
@@ -227,7 +249,16 @@ def _run_tesseract(png: Path, lang: str, exe: Path, tessdata: Path) -> tuple[str
     ]
     env = dict(os.environ)
     env["TESSDATA_PREFIX"] = str(tessdata)
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=env)
+    # Binary stdin for the bytes arm, so `text=True` cannot mangle the PNG on
+    # the way in; stdout is decoded either way.
+    proc = subprocess.run(
+        cmd,
+        input=bytes(png) if from_bytes else None,
+        capture_output=True,
+        env=env,
+    )
+    proc.stdout = (proc.stdout or b"").decode("utf-8", "replace")
+    proc.stderr = (proc.stderr or b"").decode("utf-8", "replace")
     if proc.returncode != 0:
         raise _TesseractFailure((proc.stderr or "").strip()[:400])
     # A missing configs/tsv makes tesseract print PLAIN TEXT, exit 0, and
@@ -272,6 +303,42 @@ def recognize_image(
     return {"text": text, "words": words}
 
 
+def recognize_raster(
+    data: str,
+    lang: str = "eng",
+    tesseract_path: str = "",
+) -> dict:
+    """Recognise a caller-supplied PNG handed in as base64 -- ``{text, words}``.
+
+    The view-tier door: the viewer has already rasterised the page it is
+    showing, so recognising THOSE pixels costs no second render and needs no
+    PDF interpreter. It also needs no Ghostscript, which matters -- the
+    distribution no longer bundles one, and a default-on reading-view
+    capability cannot depend on a component the user may not have installed.
+
+    Nothing is written: the bytes go to tesseract's stdin and the word boxes
+    come back. There is no `file` parameter by construction, so this op cannot
+    read or touch a document.
+    """
+    exe = _tesseract_exe(tesseract_path)
+    # ONE refusal for both ways the payload can be unusable: a caller that
+    # sends garbage and a caller that sends nothing have made the same
+    # mistake, and two rows in the refusal table would be two translations of
+    # one sentence.
+    try:
+        raw = base64.b64decode(data or "", validate=True)
+    except Exception as exc:
+        raise ValueError("Recognition input is not a readable image") from exc
+    if not raw:
+        raise ValueError("Recognition input is not a readable image")
+    try:
+        text, words = _run_tesseract(raw, _validated_lang(lang), exe, _tessdata_for(exe))
+    except _TesseractFailure as exc:
+        detail = exc.detail  # see recognize_image -- the placeholder's name
+        raise RuntimeError(f"OCR failed on the page image: {detail}") from exc
+    return {"text": text, "words": words}
+
+
 def recognize(
     file: str,
     page: int,
@@ -292,7 +359,7 @@ def recognize(
         gs_path: Path to the Ghostscript to drive ("" resolves one).
 
     Returns:
-        ``{"text": str, "words": [{text, x, y, w, h}]}`` with coordinates
+        ``{"text": str, "words": [{text, x, y, w, h, conf}]}`` with coordinates
         normalised to the rendered page (y from the top) -- the tesseract.js
         contract, unchanged.
     """

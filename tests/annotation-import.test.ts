@@ -5,6 +5,7 @@ import { PDFDocument, PDFName, PDFHexString, degrees } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { importPageAnnotations } from '../src/renderer/lib/annotation-import';
+import { readRawAnnotationStyles } from '../src/renderer/lib/annotation-raw-style';
 import { planCommit, buildCommitBytes } from '../src/renderer/lib/workspace-commit';
 import { appReducer, initialState } from '../src/renderer/state/reducer';
 import type { OpenDocument, OpenFile, PageRef, Workspace } from '../src/renderer/state/types';
@@ -137,6 +138,55 @@ describe('importPageAnnotations', () => {
     // The bbox spans ALL strokes, not just the first.
     expect(imported[0].x).toBeCloseTo(30 / 300, 5);
     expect(imported[0].w).toBeCloseTo(180 / 300, 5);
+    await pdf.loadingTask.destroy();
+  });
+
+  it('floors a carried /BS /W 0 rather than re-committing a device hairline', async () => {
+    // `/BS /W 0` means NO BORDER for the shapes that have one to omit. An
+    // /Ink is nothing but its border, so carrying the 0 through to `0 w`
+    // would redraw an existing document's mark at the output device's
+    // thinnest line instead of the document's.
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const annot = ctx.obj({
+      Type: 'Annot',
+      Subtype: 'Ink',
+      Rect: [30, 200, 210, 300],
+      C: [0.2, 0.4, 0.9],
+      F: 4,
+      BS: { W: 0 },
+      InkList: [[30, 200, 210, 300]],
+    });
+    page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(annot)]));
+    const bytes = await doc.save();
+    const styles = await readRawAnnotationStyles(bytes);
+    const pdf = await loadPdf(bytes);
+    const imported = await importPageAnnotations(await pdf.getPage(1), styles![0]);
+    expect(imported[0].kind).toBe('ink');
+    expect(imported[0].strokeWidth).toBeGreaterThan(0);
+    await pdf.loadingTask.destroy();
+  });
+
+  it('keeps a carried nib the file actually specifies', async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([300, 400]);
+    const ctx = doc.context;
+    const annot = ctx.obj({
+      Type: 'Annot',
+      Subtype: 'Ink',
+      Rect: [30, 200, 210, 300],
+      C: [0.2, 0.4, 0.9],
+      F: 4,
+      BS: { W: 8 },
+      InkList: [[30, 200, 210, 300]],
+    });
+    page.node.set(PDFName.of('Annots'), ctx.obj([ctx.register(annot)]));
+    const bytes = await doc.save();
+    const styles = await readRawAnnotationStyles(bytes);
+    const pdf = await loadPdf(bytes);
+    const imported = await importPageAnnotations(await pdf.getPage(1), styles![0]);
+    expect(imported[0].strokeWidth).toBe(8);
     await pdf.loadingTask.destroy();
   });
 });

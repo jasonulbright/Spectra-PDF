@@ -43,6 +43,15 @@ const RECOGNIZED_SUBTYPES = new Set([
 // import carrying any other ending is left untouched rather than degraded.
 const AUTHORABLE_ENDINGS = new Set(['None', 'OpenArrow', 'ClosedArrow']);
 
+/**
+ * Floor for an imported ink's nib. `/BS /W 0` means NO BORDER for the shapes
+ * that have one to omit; an /Ink is nothing but its border, so re-emitting a
+ * carried 0 as `0 w` would draw a device hairline whose thickness is the
+ * output device's, not the document's. An imported ink therefore never
+ * re-commits thinner than this.
+ */
+const INK_MIN_STROKE_WIDTH = 0.5;
+
 // The four text-markup subtypes and the style each renders/round-trips as.
 const MARKUP_TYPE: Record<string, TextMarkupType> = {
   Highlight: 'highlight',
@@ -298,6 +307,19 @@ export async function importPageAnnotations(
         color,
         note: contents,
         strokes,
+        // The pen, its nib and its alpha. `/SpectraInkStyle` is what says the
+        // drawing was made with the freehand HIGHLIGHTER: a re-commit must
+        // rebuild the translucent /Multiply appearance rather than silently
+        // re-emitting it as an opaque pen stroke. Width and alpha come from
+        // the file's own /BS /W and /CA — the mark keeps the weight it was
+        // saved with, whatever this build's default nib happens to be.
+        ...(sidecar?.spectraInkStyle === 'highlighter'
+          ? { inkStyle: 'highlighter' as const }
+          : {}),
+        ...(sidecar?.strokeWidth !== undefined
+          ? { strokeWidth: Math.max(INK_MIN_STROKE_WIDTH, sidecar.strokeWidth) }
+          : {}),
+        ...(sidecar?.opacity !== undefined ? { opacity: sidecar.opacity } : {}),
         importedOriginal,
       });
       continue;

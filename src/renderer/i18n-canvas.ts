@@ -33,6 +33,13 @@ export const CANVAS_STRINGS = {
   // as a variable rather than being glued to the word "tools".
   'canvas.toolbar.modes': '{{tool}} tools',
 
+  // The tool lock. Two labels rather than one with a state suffix: the button
+  // says what it currently IS, and the hint says what that means.
+  'canvas.toolbar.locked': 'Locked',
+  'canvas.toolbar.unlocked': 'Unlocked',
+  'canvas.toolbar.lockHint':
+    'Keep the selected tool ready after each mark, so you can mark page after page without picking it again.',
+
   // Shape mode options (rung 2).
   'canvas.toolbar.shapeGroup': 'Shape',
   'canvas.shape.rect': 'Rectangle',
@@ -239,6 +246,8 @@ export const CANVAS_STRINGS = {
   'canvas.pbar.newColor.highlight': 'New highlight color',
   'canvas.pbar.newColor.freetext': 'New text box color',
   'canvas.pbar.newColor.ink': 'New ink color',
+  'canvas.ocrSelect.busy': 'Recognizing text…',
+  'canvas.pbar.newColor.inkhighlight': 'New freehand highlight color',
   'canvas.pbar.newColor.stamp': 'New stamp color',
   'canvas.pbar.useForNew': 'Use {{color}} for new annotations',
 

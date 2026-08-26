@@ -89,6 +89,41 @@ create_pdf.unreadableImage	pattern	create_pdf	unreadable image: {{src_path}} ({{
 create_pdf_folders.destinationFolderRequired	exact	create_pdf_folders	A destination folder is required.
 create_pdf_folders.destinationMustOutsideSource	exact	create_pdf_folders	The destination must be outside the source folder -- choose a separate folder for the assembled documents.
 create_pdf_folders.unknownSourceSet	pattern	create_pdf_folders	unknown source set {{sources}} ({{v1}})
+csc.credentialUsesExplicitAuthorization	exact	csc	This credential uses explicit authorization, which requires this application to collect a PIN or one-time password and send it to the signing service. This application does not collect or transmit authentication secrets. Use a credential authorized through the provider's own sign-in instead.
+csc.credentialUsesUnsupportedAuthorization	pattern	csc	This credential uses an unsupported authorization mode ({{v0}}).
+csc.mustUseHttpsRefusing	pattern	csc	The {{what}} must use HTTPS. Refusing to send signing credentials to a {{v1}} address.
+csc.sendingWholeDocumentSigning	exact	csc	Sending a whole document to a signing service is not supported. Only the document's digest is ever transmitted.
+csc.signatureCouldNotBeChecked	exact	csc	The signature the signing service returned could not be checked against this credential's own certificate. Nothing was signed.
+csc.signatureNotVerifiedAgainstCredential	exact	csc	The signature the signing service returned does not verify against this credential's own certificate. Nothing was signed.
+csc.signingServiceAuthorizationExpired	exact	csc	The signing service authorization has expired and cannot be renewed without signing in again.
+csc.signingServiceBeenAuthorized	exact	csc	The signing service has not been authorized yet.
+csc.signingServiceCouldReached	pattern	csc	The signing service at {{v0}} could not be reached.
+csc.signingServiceDidPresent	pattern	csc	The signing service at {{v0}} did not present a trusted TLS certificate.
+csc.signingServiceDidRespond	pattern	csc	The signing service at {{v0}} did not respond in time.
+csc.signingServiceNeedsOauth	exact	csc	The signing service needs an OAuth client ID registered with that provider.
+csc.signingServicePointsAuthorization	pattern	csc	The signing service at {{v0}} points its authorization at {{v1}}. Refusing to authorize against a different host.
+csc.signingServiceRedirectedRefusing	pattern	csc	The signing service at {{v0}} redirected to {{there}}. Refusing to follow a redirect while carrying signing credentials.
+csc.signingServiceReturnedAccess	exact	csc	The signing service returned no access token.
+csc.signingServiceReturnedCertificate	exact	csc,csc_signer	The signing service returned no certificate for this credential.
+csc.signingServiceReturnedDifferent	exact	csc	The signing service returned a different number of signatures than it was asked for.
+csc.signingServiceReturnedMalformed	exact	csc	The signing service returned a malformed ECDSA signature.
+csc.signingServiceReturnedOversized	pattern	csc	The signing service at {{v0}} returned an oversized response.
+csc.signingServiceReturnedResponse	pattern	csc	The signing service at {{v0}} returned a response that is not valid CSC JSON.
+csc.signingServiceReturnedSignature	exact	csc	The signing service returned no signature authorization.
+csc.signingServiceReturnedUnreadable	exact	csc	The signing service returned an unreadable credential list.
+csc.signingServiceReturnedUnreadable2	pattern	csc	The signing service returned an unreadable {{what}}.
+csc.signingServiceSpeaksCsc	pattern	csc	The signing service speaks CSC API {{specs}}; this application speaks {{SPEC_VERSION}}.
+csc.signingServiceWillAuthorize	exact	csc	The signing service will not authorize that many signatures for this credential in one operation.
+csc.tlsCertificateVerificationCannot	exact	csc	TLS certificate verification cannot be disabled for a signing service.
+csc.usableWebAddress	pattern	csc	The {{what}} is not a usable web address.
+csc_signer.signatureCannotRequestedSigning	pattern	csc_signer	A {{algorithm}} signature cannot be requested from a signing service.
+csc_signer.signingServiceAuthorizationExpired	exact	csc_signer	The signing service authorization expired. Sign in to the signing service again and repeat the signature.
+csc_signer.signingServiceCannotAsked	pattern	csc_signer	A signing service cannot be asked for a {{digest_algorithm}} digest.
+csc_signer.signingServiceNeedsCredential	exact	csc_signer	A signing service needs the credential to sign with.
+csc_signer.signingServiceNeedsOauth	exact	csc_signer	A signing service needs the OAuth client ID you registered with that provider.
+csc_signer.signingServiceNeedsWeb	exact	csc_signer	A signing service needs its web address.
+csc_signer.signingServiceSignsThrough	exact	csc_signer	This signing service signs in through a browser, which a command-line or scheduled run cannot do. Register the provider for the client-credentials grant to sign without a person present.
+csc_signer.unknownSigningServiceAuthorization	pattern	csc_signer	Unknown signing-service authorization ({{grant}}).
 derived_nav.documentTaggedHeadingsBuild	exact	derived_nav	This document is not tagged, so it has no headings to build bookmarks from. Tag it first — automatically, or in the Tags panel.
 derived_nav.headingDepthMustNumber	pattern	derived_nav	heading depth must be a number from 1 to {{MAX_LEVEL}}
 derived_nav.headingsFoundStructureTree	exact	derived_nav	No headings found in the structure tree — nothing to build bookmarks from.
@@ -509,6 +544,7 @@ recognize.ocrProducedWordBoxes	exact	recognize	OCR produced no word boxes: tessd
 recognize.ocrRasteriserDidProduce	exact	recognize	OCR rasteriser did not produce a PNG
 recognize.ocrRasteriserProducedZero	exact	recognize	OCR rasteriser produced a zero-sized page image
 recognize.pageMustBased	exact	recognize	page must be 1-based
+recognize.recognitionInputReadableImage	exact	recognize	Recognition input is not a readable image
 recognize.tessdataBesideRunScripts	pattern	enhance_scan,recognize	No tessdata beside {{exe}}; run scripts/bundle-tesseract.ps1.
 recover.cannotOpenFileRecovery	pattern	recover	Cannot open file for recovery: {{e}}. File may be completely unreadable.
 recover.pagesCouldRecoveredFile	exact	recover	No pages could be recovered. File is completely unreadable.
@@ -548,7 +584,7 @@ signatures.certificatesFoundTrustRoot	pattern	signatures	no certificates found i
 signatures.certificationLevelAppliesOnly	exact	signatures	A certification level applies only to a certification signature. Certify the document, or leave the level unset.
 signatures.certificationSignatureMustFirst	exact	signatures	A certification signature must be the first signature in a document, and this document could not accept one.
 signatures.chooseOnePlacementFill	exact	signatures	Choose ONE placement: fill an existing signature field, or place a new visible stamp.
-signatures.chooseOneSignerSource	exact	signatures	Choose ONE signer source: a .pfx file, a PEM key + certificate, a PKCS#11 token, or a certificate from the Windows certificate store.
+signatures.chooseOneSignerSource	exact	signatures	Choose ONE signer source: a .pfx file, a PEM key + certificate, a PKCS#11 token, a certificate from the Windows certificate store, or a credential at a signing service.
 signatures.couldLoadSignerWrong	exact	signatures	Could not load the signer — wrong key passphrase, no certificate matching the key, or an unsupported/corrupt key or certificate file.
 signatures.couldLoadSignerWrong2	exact	signatures	Could not load the signer — wrong password, or an unsupported/corrupt .pfx.
 signatures.documentAlreadyCarriesSignature	pattern	signatures	This document already carries {{signature_count}} signature(s), the first in field "{{first_field}}". A certification signature must be the first signature in a document.
@@ -577,7 +613,7 @@ signatures.signatureFieldAlreadySigned	pattern	signatures	Signature field "{{fie
 signatures.signedOutputMustDifferent	exact	signatures	The signed output must be a different file from the input.
 signatures.signerCertificateFileFound	exact	signatures	Signer certificate file not found.
 signatures.signerFilePfxFound	exact	signatures	Signer file (.pfx) not found.
-signatures.signerGivenProvidePfx	exact	signatures	No signer given — provide a .pfx file, a PEM key + certificate, a PKCS#11 token, or a certificate from the Windows certificate store.
+signatures.signerGivenProvidePfx	exact	signatures	No signer given — provide a .pfx file, a PEM key + certificate, a PKCS#11 token, a certificate from the Windows certificate store, or a credential at a signing service.
 signatures.signerKeyFileFound	exact	signatures	Signer key file not found.
 signatures.signerNameCommonName	exact	signatures	A signer name (common name) is required.
 signatures.signingCancelledWindowsGiven	exact	signatures	Signing was cancelled — Windows was not given permission to use the key.

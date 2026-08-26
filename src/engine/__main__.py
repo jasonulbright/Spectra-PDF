@@ -157,7 +157,7 @@ from engine.forms import (
 )
 from engine.enhance_scan import analyze_scan, enhance_scan
 from engine.ocr_layer import apply_ocr_layer
-from engine.recognize import recognize
+from engine.recognize import recognize, recognize_raster
 from engine.batch_ocr import batch_ocr, ocr_file
 from engine.guided_actions import run_action
 from engine.autotag import autotag
@@ -205,6 +205,7 @@ from engine.printer import print_pdf, print_preview, print_preview_cleanup
 from engine.incremental import signature_policy, transplant_incremental
 from engine.redact_marks import list_redact_annotations, save_redaction_marks
 from engine.signatures import verify_signatures, sign_pdf, generate_signer
+from engine.csc_signer import list_csc_credentials
 from engine.stamp_appearance import preview_appearance
 from engine.struct_fix import set_table_headers
 from engine.tag_content import tag_page_content
@@ -370,6 +371,7 @@ def main() -> None:
     server.register("set_field_description", set_field_description)
     server.register("apply_ocr_layer", apply_ocr_layer)
     server.register("recognize", recognize)
+    server.register("recognize_raster", recognize_raster)
     server.register("analyze_scan", analyze_scan)
     server.register("enhance_scan", enhance_scan)
     server.register("batch_ocr", batch_ocr)
@@ -419,6 +421,7 @@ def main() -> None:
     server.register("verify_signatures", verify_signatures)
     server.register("sign_pdf", sign_pdf)
     server.register("generate_signer", generate_signer)
+    server.register("list_csc_credentials", list_csc_credentials)
     server.register("preview_stamp_appearance", preview_appearance)
     server.register("transplant_incremental", transplant_incremental)
     server.register("signature_policy", signature_policy)

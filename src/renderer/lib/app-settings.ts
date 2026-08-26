@@ -72,6 +72,17 @@ export interface Settings {
    * wants the English dictionary — so this pins one when the user knows
    * better than the file does. */
   spellLanguage: string;
+  /** Recognise text on scanned pages so it can be SELECTED and highlighted.
+   *
+   * Default ON, and it writes nothing: the page's own rendered pixels go to
+   * the bundled offline recognizer, the word boxes live in view state for as
+   * long as the buffer does, and what a sweep authors is an ordinary
+   * /Highlight with QuadPoints — valid with or without a text layer. Writing
+   * a text layer INTO the document stays the explicit Scan & OCR door.
+   *
+   * Off restores the older behaviour exactly: a scanned page has no
+   * selectable text and the freehand highlighter covers it. */
+  scanSelectRecognition: boolean;
   /** Underline misspellings in the paragraph editor as it is typed in.
    *
    * Default ON. The marks are drawn by this app's own checker rather than the
@@ -120,6 +131,7 @@ export const DEFAULTS: Settings = {
   snapshotDpi: 150,
   spellLanguage: 'auto',
   spellCheckAsYouType: true,
+  scanSelectRecognition: true,
   readAloudVoice: '',
   readAloudRate: 1,
   runUnrecognizedFieldScripts: false,

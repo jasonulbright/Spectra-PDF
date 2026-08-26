@@ -10,6 +10,7 @@ import { NAV_PANE_DEFAULT_WIDTH, NAV_PANE_MAX_WIDTH, TOOL_DOCK_DEFAULT_WIDTH } f
 const DEFAULTS = {
   navPane: { open: false, panel: 'pages' as const, width: NAV_PANE_DEFAULT_WIDTH },
   toolDock: { open: false, width: TOOL_DOCK_DEFAULT_WIDTH },
+  toolLock: true,
 };
 
 const store = new Map<string, string>();
@@ -32,10 +33,12 @@ describe('readWorkbenchUi', () => {
     writeWorkbenchUi({
       navPane: { open: true, panel: 'bookmarks', width: 260 },
       toolDock: { open: true, width: 420 },
+      toolLock: false,
     });
     const read = readWorkbenchUi(DEFAULTS);
     expect(read.navPane).toEqual({ open: true, panel: 'bookmarks', width: 260 });
     expect(read.toolDock).toEqual({ open: true, width: 420 });
+    expect(read.toolLock).toBe(false);
   });
 
   it('drops a legacy entry\'s retired toolDock.view instead of choking on it', () => {

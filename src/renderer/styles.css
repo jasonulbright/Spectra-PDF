@@ -894,6 +894,27 @@
   transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
 }
 .textLayer .markedContent { display: contents; }
+
+/* Recognition-in-progress badge for a scanned page whose words are being
+   recognised for selection. Deliberately quiet: recognition
+   is a side effect of arming the Select tool, not an operation the user
+   started, so it reads as a page state rather than as progress. A page that
+   recognises nothing, or badly, shows nothing at all and falls back to the
+   freehand highlighter. */
+.page-ocr-busy {
+  position: absolute;
+  top: 8px;
+  inset-inline-end: 8px;
+  z-index: 2;
+  pointer-events: none;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgb(212 212 212);
+  background: rgb(38 38 38 / 0.82);
+  border: 1px solid rgb(82 82 82 / 0.9);
+}
 /* THE ROTATION. pdf.js does NOT bake rotation into span positions — its
    `PageViewport.rawDims` is derived from the viewBox alone, never from
    scale/rotation, so passing `rotation` to getViewport leaves every span's
@@ -3543,6 +3564,16 @@
 .secondary-tool:hover { background: #262626; color: #e5e5e5; }
 .secondary-tool.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
 .secondary-tool:focus-visible { outline: 2px solid var(--accent-text, #0078d4); outline-offset: 1px; }
+/* The lock is about the modes beside it, not one of them: the rule separates
+   it so an armed mode and the lock never read as two active modes. */
+.secondary-tool-lock {
+  margin-inline-start: 6px;
+  border-inline-start: 1px solid #333333;
+  padding-inline-start: 10px;
+  border-radius: 0 4px 4px 0;
+}
+[data-theme="light"] .secondary-tool-lock { border-inline-start-color: #d1d5db; }
+[data-theme="high-contrast"] .secondary-tool-lock { border-inline-start-color: #ffffff; }
 .stamp-preset {
   padding: 1px 7px;
   font-size: 10px;

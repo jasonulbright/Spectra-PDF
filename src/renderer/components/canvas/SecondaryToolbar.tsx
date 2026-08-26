@@ -97,6 +97,11 @@ export interface SecondaryToolbarProps {
   /** Colour for NEW annotations; null = the kind's default. */
   toolColor: string | null;
   onSetToolColor: (color: string | null) => void;
+  /** Whether a completed placement leaves the armed mode armed (ui.toolLock).
+   * One control for every mode, because the rule it drives lives at one seam
+   * in the reducer rather than in each tool. */
+  toolLock: boolean;
+  onSetToolLock: (locked: boolean) => void;
   /** Stamp text preset; null = the default stamp. */
   stampPreset: StampPreset | null;
   onSetStampPreset: (preset: StampPreset | null) => void;
@@ -267,6 +272,8 @@ export function SecondaryToolbar({
   activeToolId,
   toolColor,
   onSetToolColor,
+  toolLock,
+  onSetToolLock,
   stampPreset,
   onSetStampPreset,
   countGroups,
@@ -428,6 +435,21 @@ export function SecondaryToolbar({
               {tCommandTitle(`tools.${m}`, TOOL_TITLES[m])}
             </button>
           ))}
+          {/* The lock. It belongs beside the mode buttons because it is about
+              THEM: locked, the armed mode survives its own placements, so a
+              200-page scan is marked with one arming gesture; unlocked, each
+              placement returns to Select. It never overrides the tool — closing
+              this tool disarms the mode either way. */}
+          <button
+            type="button"
+            data-testid="tool-lock"
+            aria-pressed={toolLock}
+            className={'secondary-tool secondary-tool-lock' + (toolLock ? ' active' : '')}
+            title={tChrome('canvas.toolbar.lockHint')}
+            onClick={() => onSetToolLock(!toolLock)}
+          >
+            {tChrome(toolLock ? 'canvas.toolbar.locked' : 'canvas.toolbar.unlocked')}
+          </button>
       </div>
 
       {actions.length > 0 && (
