@@ -340,6 +340,19 @@ def _widget_on_state(widget) -> str | None:
     return None
 
 
+def _checkbox_export(field: _Field) -> str | None:
+    """A check box's on-state name, read from the widget's own ``/AP`` ``/N``.
+
+    The stored value of a checked box is this name, not the conventional
+    ``Yes``: a document whose on-state is ``/1`` or ``/On`` stores that. A
+    consumer that assumes ``Yes`` compares the wrong string."""
+    for widget in field.widgets:
+        state = _widget_on_state(widget)
+        if state:
+            return state
+    return None
+
+
 def _field_description(field: _Field) -> str:
     """The field's ``/TU``. Read off the field's OWN dictionary: `/TU` is not
     among the inheritable field attributes, so a parent's description does not
@@ -494,15 +507,23 @@ def _widget_actions(pdf: pikepdf.Pdf, field: _Field) -> dict:
 # /AA key is a widget trigger and carries no value semantics.
 _TRIGGERS = {"/K": "K", "/V": "V", "/C": "C", "/F": "F"}
 
+# The focus pair carries no value semantics — a script there drives appearance,
+# not the stored value — so it is REPORTED but never evaluated by the
+# declarative path. It is exported alongside the four so a renderer with a
+# JavaScript engine can run it; `_field_scripts` deliberately keeps to
+# `_TRIGGERS`, because `scripts_not_run` is the no-engine report and that
+# report does not change.
+_REPORTED_TRIGGERS = {**_TRIGGERS, "/Fo": "Fo", "/Bl": "Bl"}
 
-def _field_action_sources(field: _Field) -> dict:
+
+def _field_action_sources(field: _Field, triggers: dict | None = None) -> dict:
     """{trigger: raw /JS text} for the field's `/AA`. An action whose `/S` is
     not `/JavaScript` carries no script and is not one."""
     aa = field.obj.get("/AA")
     if aa is None or not isinstance(aa, pikepdf.Dictionary):
         return {}
     out: dict = {}
-    for key, trigger in _TRIGGERS.items():
+    for key, trigger in (triggers or _TRIGGERS).items():
         action = aa.get(key)
         if action is None or not isinstance(action, pikepdf.Dictionary):
             continue
@@ -588,6 +609,10 @@ def read_form_fields(file: str) -> dict:
             }
             if ftype == "text":
                 entry["multiline"] = bool(field.flags & FF_MULTILINE)
+            if ftype == "checkbox":
+                export = _checkbox_export(field)
+                if export:
+                    entry["export_value"] = export
             if ftype in ("radio", "dropdown", "optionlist"):
                 entry["options"] = options
             if ftype == "signature":
@@ -607,7 +632,7 @@ def read_form_fields(file: str) -> dict:
             # against tests/fixtures/af-corpus.json. `scripts_not_run` is this
             # side's verdict, so a panel can report the refusal by name without
             # re-deriving it.
-            sources = _field_action_sources(field)
+            sources = _field_action_sources(field, _REPORTED_TRIGGERS)
             if sources:
                 entry["actions"] = sources
                 _, not_run = _field_scripts(field)

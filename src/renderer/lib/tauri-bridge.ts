@@ -757,6 +757,7 @@ export const app = {
   getWindowBackdrop: () => invoke<string>('get_window_backdrop'),
   appendOperationLog: (line: string) => invoke('append_operation_log', { line }),
   checkAutoUpdateDisabled: () => invoke<boolean>('check_auto_update_disabled'),
+  checkFieldScriptsDisabled: () => invoke<boolean>('check_field_scripts_disabled'),
 
   /** Read the "Start with Windows" state. Returns [enabled, minimized]. */
   getStartupEnabled: () => invoke<[boolean, boolean]>('get_startup_enabled'),

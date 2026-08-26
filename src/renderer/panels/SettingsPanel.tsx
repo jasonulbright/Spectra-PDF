@@ -8,6 +8,7 @@ import { deriveAccentVars, type ThemeName } from '../lib/accent';
 import { StatusBar } from '../components/StatusBar';
 import { loadSettings, saveSettings, type Settings } from '../lib/app-settings';
 import { clampSnapshotDpi, MAX_SNAPSHOT_DPI, MIN_SNAPSHOT_DPI } from '../lib/snapshot-image';
+import { useFieldScriptsAllowed } from '../hooks/useFieldScriptsAllowed';
 import { useTranslation } from 'react-i18next';
 import { tChrome, setAppLanguage, SHIPPED_LOCALES, LOCALE_NATIVE_NAMES } from '../i18n';
 import type { PanelKey } from '../i18n-panels';
@@ -368,6 +369,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
     }).catch(() => {});
   }, []);
 
+  const fieldScripts = useFieldScriptsAllowed();
   const update = useCallback((key: keyof Settings, value: string | boolean | number) => {
     setSettings((prev) => {
       const next = { ...prev, [key]: value };
@@ -729,6 +731,34 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
         <p className="text-xs text-neutral-500 mt-1.5">
           {tChrome('panel.settings.updatesHint')}
         </p>
+      </div>
+      <div data-testid="field-scripts-pref" className="mb-4">
+        <label className="block text-sm text-neutral-400 mb-2">
+          {tChrome('panel.settings.fieldScripts')}
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            data-testid="pref-run-field-scripts"
+            checked={settings.runUnrecognizedFieldScripts}
+            disabled={fieldScripts.policyDisabled === true}
+            onChange={() =>
+              update('runUnrecognizedFieldScripts', !settings.runUnrecognizedFieldScripts)
+            }
+            className="rounded bg-neutral-800 border-neutral-700 disabled:opacity-50"
+          />
+          <span className="text-sm text-neutral-400">
+            {tChrome('panel.settings.runFieldScripts')}
+          </span>
+        </label>
+        <p className="text-xs text-neutral-500 mt-1.5">
+          {tChrome('panel.settings.fieldScriptsHint')}
+        </p>
+        {fieldScripts.policyDisabled === true && (
+          <p data-testid="field-scripts-policy" className="text-xs text-amber-300/80 mt-1.5">
+            {tChrome('panel.settings.fieldScriptsPolicy')}
+          </p>
+        )}
       </div>
       <div data-testid="licenses-note">
         <label className="block text-sm text-neutral-400 mb-2">{tChrome('panel.settings.thirdParty')}</label>

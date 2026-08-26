@@ -497,6 +497,9 @@ export const CANVAS_STRINGS = {
   // the ENGINE's own message, verbatim); each op's banner is its own whole
   // sentence around the joined reasons — never a glued suffix.
   'canvas.common.fileFailure': '{{name}}: {{message}}',
+  // The title over a document's own `app.alert` text. The body is the
+  // document author's words, never this app's.
+  'canvas.forms.scriptAlertTitle': 'Message from this form',
   'canvas.forms.fillFailed': 'Filling failed — {{reasons}}. Those values are still pending.',
   'canvas.ocr.applyFailed': 'Applying OCR text failed — {{reasons}}',
   'canvas.ocr.skipped_one': '{{count}} scanned page skipped (no longer available)',

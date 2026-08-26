@@ -15,6 +15,10 @@ import {
   ACTION_TRIGGER_LABEL,
   isRunnable,
 } from '../lib/field-actions';
+import { useFieldScriptsAllowed } from '../hooks/useFieldScriptsAllowed';
+import { scriptInventory } from '../lib/field-js-policy';
+import type { JsTrigger, ScriptRunReport } from '../lib/field-js-policy';
+import { scriptReportsFor, subscribeScriptReports } from '../lib/field-js-reports';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 
@@ -28,7 +32,38 @@ const SCRIPT_TRIGGER_LABEL = {
   V: 'panel.forms.scriptTrigger.V',
   C: 'panel.forms.scriptTrigger.C',
   F: 'panel.forms.scriptTrigger.F',
-} as const satisfies Record<(typeof SCRIPT_TRIGGERS)[number], string>;
+  Fo: 'panel.forms.scriptTrigger.Fo',
+  Bl: 'panel.forms.scriptTrigger.Bl',
+} as const satisfies Record<JsTrigger, string>;
+
+/** What a report says, in the reader's language. The report itself carries
+ * facts (capability names, engine text, a millisecond budget); the wording is
+ * decided here so control flow never matches on a localized string. */
+function reportText(report: ScriptRunReport): string {
+  if (report.kind === 'refused') {
+    return tChrome('panel.forms.scriptRefused', { capabilities: report.detail });
+  }
+  if (report.kind === 'timeout') {
+    return tChrome('panel.forms.scriptTimedOut', { ms: report.detail });
+  }
+  return tChrome('panel.forms.scriptErrored', { message: report.detail });
+}
+
+/** The live report set for one document. */
+function useScriptReports(path: string | null): readonly ScriptRunReport[] {
+  const [reports, setReports] = useState<readonly ScriptRunReport[]>(() =>
+    path ? scriptReportsFor(path) : [],
+  );
+  useEffect(() => {
+    if (!path) {
+      setReports([]);
+      return;
+    }
+    setReports(scriptReportsFor(path));
+    return subscribeScriptReports(() => setReports(scriptReportsFor(path)));
+  }, [path]);
+  return reports;
+}
 
 /** Value equality across the FormFieldValue union (arrays compared element-wise). */
 function valueEquals(a: FormFieldValue | undefined, b: FormFieldValue | undefined): boolean {
@@ -148,6 +183,19 @@ export function FormsPanel(): React.ReactElement {
       )
       .map((trigger) => ({ field: f.name, trigger, js: f.actions?.[trigger] ?? '' })),
   );
+  // With scripting on, the list stops being a refusal list: it names the
+  // custom scripts that DID NOT run cleanly, and says why. A script that ran
+  // is not listed, because there is nothing about it the reader needs.
+  const scriptsAllowed = useFieldScriptsAllowed();
+  const runReports = useScriptReports(activeFile?.path ?? null);
+  const customScripts = scriptInventory(fields).custom;
+  const reportedScripts = runReports.map((report) => ({
+    field: report.field,
+    trigger: report.trigger,
+    js:
+      customScripts.find((e) => e.field === report.field && e.trigger === report.trigger)?.js ?? '',
+    note: reportText(report),
+  }));
 
   const handleApply = useCallback(async () => {
     if (!activeFile) return;
@@ -257,7 +305,7 @@ export function FormsPanel(): React.ReactElement {
         </div>
       )}
 
-      {scriptsNotRunCount > 0 && (
+      {!scriptsAllowed.enabled && scriptsNotRunCount > 0 && (
         <div
           data-testid="forms-scripts-not-run"
           className="shrink-0 px-3 py-2 bg-neutral-800/60 border border-neutral-700 rounded text-xs text-neutral-300 flex flex-col gap-2"
@@ -267,11 +315,46 @@ export function FormsPanel(): React.ReactElement {
           <p className="text-[11px] text-neutral-400">
             {tChrome('panel.forms.scriptsPosition')}
           </p>
+          {/* Nothing is worded while the machine key read is still in flight:
+              naming a policy that has not been read yet claims an
+              administrator lockout on every machine that has none. */}
+          {scriptsAllowed.suppression !== 'unknown' && (
+            <p data-testid="forms-scripts-switch" className="text-[11px] text-neutral-400">
+              {tChrome(
+                scriptsAllowed.suppression === 'policy'
+                  ? 'panel.forms.scriptsPolicyHint'
+                  : 'panel.forms.scriptsPreferenceHint',
+              )}
+            </p>
+          )}
           <div className="flex flex-col gap-1.5">
             {refusedScripts.map((row) => (
               <RefusedScript key={`${row.field}:${row.trigger}`} {...row} />
             ))}
           </div>
+        </div>
+      )}
+
+      {scriptsAllowed.enabled && customScripts.length > 0 && (
+        <div
+          data-testid="forms-scripts-running"
+          className="shrink-0 px-3 py-2 bg-neutral-800/60 border border-neutral-700 rounded text-xs text-neutral-300 flex flex-col gap-2"
+        >
+          <div className="text-neutral-200">{tChrome('panel.forms.scriptsRunningTitle')}</div>
+          <p className="text-[11px] text-neutral-400">
+            {tChrome('panel.forms.scriptsRunningPosition')}
+          </p>
+          {reportedScripts.length === 0 ? (
+            <p data-testid="forms-scripts-all-clean" className="text-[11px] text-neutral-400">
+              {tChrome('panel.forms.scriptsAllClean')}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {reportedScripts.map((row) => (
+                <RefusedScript key={`${row.field}:${row.trigger}`} {...row} />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -326,10 +409,14 @@ function RefusedScript({
   field,
   trigger,
   js,
+  note,
 }: {
   field: string;
-  trigger: (typeof SCRIPT_TRIGGERS)[number];
+  trigger: JsTrigger;
   js: string;
+  /** Why this row is here, when scripting is on and the script ran. Absent in
+   * the off state, where the heading already says why every row is listed. */
+  note?: string;
 }): React.ReactElement {
   const [open, setOpen] = useState(false);
   return (
@@ -350,6 +437,14 @@ function RefusedScript({
           </button>
         )}
       </div>
+      {note !== undefined && (
+        <p
+          data-testid={`forms-script-note-${field}-${trigger}`}
+          className="mt-1 text-[11px] text-amber-200/80"
+        >
+          {note}
+        </p>
+      )}
       {open && (
         <pre
           data-testid={`forms-script-body-${field}-${trigger}`}

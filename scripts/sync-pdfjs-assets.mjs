@@ -54,11 +54,15 @@ export const PDFJS_ASSET_SETS = [
       'openjpeg.wasm',
       'openjpeg_nowasm_fallback.js',
       'qcms_bg.wasm',
+      // The AcroForm scripting interpreter. Absent, a form's own field
+      // scripts silently stop running wherever the preference is on.
+      'quickjs-eval.js',
+      'quickjs-eval.wasm',
       'LICENSE_JBIG2',
       'LICENSE_OPENJPEG',
       'LICENSE_QCMS',
     ],
-    minFiles: 8,
+    minFiles: 10,
   },
   {
     dir: 'iccs',
