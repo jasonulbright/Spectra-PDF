@@ -99,6 +99,8 @@ pub fn run() {
         .manage(engine::EngineState::new())
         .manage(engine::EngineRouter::new())
         .manage(app_windows::BackdropState::new())
+        .manage(app_windows::ShowGate::new())
+        .manage(app_windows::ComposeGate::new())
         .manage(app_windows::WindowRegistry::new())
         .manage(app_windows::ClaimState::new())
         .manage(app_windows::WebOrigins::new())
@@ -210,6 +212,8 @@ pub fn run() {
             commands::open_releases_page,
             commands::get_system_accent_color,
             commands::get_window_backdrop,
+            app_windows::renderer_ready,
+            app_windows::settle_window_compose,
             commands::append_operation_log,
             commands::move_file_creating_dirs,
             commands::create_batch_scratch,
@@ -279,7 +283,7 @@ pub fn run() {
             // SPECTRAPDF_E2E_FORCE_OPAQUE=1 so the opaque presentation runs
             // live on a machine where Mica would compose (spec 94; the RDP/
             // transparency-off case is otherwise unreachable on a dev box).
-            app_windows::build_app_window(&app.handle().clone(), app_windows::MAIN_LABEL, e2e, false)?;
+            app_windows::build_app_window(&app.handle().clone(), app_windows::MAIN_LABEL, e2e)?;
 
             // "Start with Windows" records an absolute path, so a copy the
             // user moved — a portable one especially — has a Run entry
@@ -317,10 +321,7 @@ pub fn run() {
             if e2e {
                 // E2E: skip tray + force-show window; every launch must be
                 // self-contained and exit cleanly when the WDIO session ends.
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                app_windows::show_when_ready(app.handle(), app_windows::MAIN_LABEL, true);
                 return Ok(());
             }
             // Build system tray
@@ -365,13 +366,11 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Window starts hidden (visible: false in tauri.conf.json).
-            // Show it unless --minimized flag or startup config says to stay hidden.
+            // The window is built hidden and shown on the renderer's first
+            // painted frame — unless --minimized or the startup preference
+            // says it stays hidden, in which case nothing ever asks.
             if !start_minimized {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                app_windows::show_when_ready(app.handle(), app_windows::MAIN_LABEL, true);
             }
 
             // Handle CLI file args on first launch

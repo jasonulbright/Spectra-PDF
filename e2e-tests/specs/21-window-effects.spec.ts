@@ -48,6 +48,57 @@ describe('window effects + accent theming', () => {
     }
   });
 
+  // Regression, from a live defect: a driver-issued window resize re-places
+  // the webview from the host window's SCREEN origin rather than its client
+  // origin. The page is then laid out at the requested size and drawn at twice
+  // the client offset, so the shell composes as a strip against the far corner
+  // of an otherwise empty window — and it PERSISTS, because no window message
+  // follows and the recorded rectangle still reads correct. Nothing inside the
+  // webview shows it: a webdriver screenshot of that window is clean.
+  //
+  // Both halves are asserted because either alone passes while malformed: the
+  // size (the page must be laid out at the client area) and the ORIGIN (the
+  // viewport must sit at the window's client origin, not at twice it).
+  it('keeps the webview on the window client area across a driver resize', async () => {
+    await waitForHarness();
+    const hostBefore = await invokeCommand<{ width: number; height: number }>(
+      'plugin:window|inner_size',
+    );
+    const originBefore = await browser.execute(() => [window.screenLeft, window.screenTop]);
+
+    await browser.setWindowSize(hostBefore.width + 240, hostBefore.height + 120);
+    await browser.waitUntil(
+      async () => {
+        const v = await browser.execute(() => [
+          Math.round(window.innerWidth * (window.devicePixelRatio || 1)),
+          Math.round(window.innerHeight * (window.devicePixelRatio || 1)),
+        ]);
+        const host = await invokeCommand<{ width: number; height: number }>(
+          'plugin:window|inner_size',
+        );
+        return v[0] === host.width && v[1] === host.height;
+      },
+      {
+        timeout: 10000,
+        timeoutMsg: 'webview viewport never came back to the window client area',
+      },
+    );
+
+    // And it stays there: the repair must not be undone a moment later, and
+    // must not be fighting the resize report it causes itself.
+    await browser.pause(2000);
+    const host = await invokeCommand<{ width: number; height: number }>('plugin:window|inner_size');
+    const after = await browser.execute(() => ({
+      viewport: [
+        Math.round(window.innerWidth * (window.devicePixelRatio || 1)),
+        Math.round(window.innerHeight * (window.devicePixelRatio || 1)),
+      ],
+      origin: [window.screenLeft, window.screenTop],
+    }));
+    expect(after.viewport).toEqual([host.width, host.height]);
+    expect(after.origin).toEqual(originBefore);
+  });
+
   it('renders the shell per the backdrop: translucent frame, opaque content', async () => {
     const kind = await invokeCommand<string>('get_window_backdrop');
     // Computed styles, not class lists — this is what actually composes. The

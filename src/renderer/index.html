@@ -13,6 +13,23 @@
        blank preview. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:" />
   <title>Spectra PDF</title>
+  <!-- Pre-paint ground. A window that composes before the bundle has painted
+       anything shows whatever is behind it, because the workspace window is
+       transparent wherever a backdrop can compose. This paints the SOLID
+       look's own ground (`.app-shell` is bg-neutral-900 = #171717), so an
+       unpainted window is a clean dark rectangle rather than a hole.
+
+       It cannot regress the backdrop design: the solid look has no
+       `data-backdrop` attribute at all and already paints exactly this colour
+       one layer up, so under it this is invisible by construction; and
+       `styles.css` clears the root back to transparent the moment
+       `data-backdrop="mica"` is stamped, which happens before the first
+       render. The theme remaps also live in `styles.css`, which is where the
+       attribute they key on is available -- this literal is only what a
+       window that has not run the bundle yet shows. -->
+  <style>
+    html { background: #171717; }
+  </style>
 </head>
 <body>
   <div id="root"></div>

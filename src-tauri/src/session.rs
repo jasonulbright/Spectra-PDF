@@ -1108,11 +1108,11 @@ pub fn apply_launch(app: &AppHandle, restore_windows: bool, e2e: bool, show: boo
         }
         // Built hidden and placed before it is shown: a window that appears
         // centred and then jumps to its saved corner reads as two windows.
-        match app_windows::build_app_window(app, &label, e2e, false) {
+        match app_windows::build_app_window(app, &label, e2e) {
             Ok(window) => {
                 apply_placement(app, &window, record.placement());
                 if show {
-                    let _ = window.show();
+                    app_windows::show_when_ready(app, &label, false);
                 }
             }
             Err(_) => {

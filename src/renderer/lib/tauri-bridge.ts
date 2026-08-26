@@ -772,6 +772,15 @@ export const app = {
   getSystemAccentColor: () => invoke<string | null>('get_system_accent_color'),
   /** Which backdrop the window was created with: "mica" or "none". */
   getWindowBackdrop: () => invoke<string>('get_window_backdrop'),
+  /** This window's renderer has painted its first laid-out frame. The window
+   *  is created hidden and becomes visible on this signal. */
+  rendererReady: () => invoke('renderer_ready'),
+  /** This window's viewport changed size; put the webview back on the client
+   *  area if the two no longer describe the same rectangle. Physical pixels —
+   *  the window reports its client area in those. A no-op unless they
+   *  disagree. */
+  settleWindowCompose: (viewportWidth: number, viewportHeight: number) =>
+    invoke('settle_window_compose', { viewportWidth, viewportHeight }),
   appendOperationLog: (line: string) => invoke('append_operation_log', { line }),
   checkAutoUpdateDisabled: () => invoke<boolean>('check_auto_update_disabled'),
   checkFieldScriptsDisabled: () => invoke<boolean>('check_field_scripts_disabled'),

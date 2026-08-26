@@ -225,6 +225,29 @@ jobs:
       - name: Verify the Processing Steps corpus against its manifest
         run: python scripts/fetch-processing-steps-suite.py --check
 
+      # The PDF/A conformance corpus (bfocom + veraPDF): fetched, never
+      # committed — neither upstream declares a licence, so redistribution
+      # terms cannot be satisfied and the files stay on disk. The clause-map
+      # gate reads the DERIVED clause index, so the index is rebuilt on every
+      # run from whatever the cache restored; the fetch itself is keyed on the
+      # fetch script, which is where the commit SHA pins live.
+      - name: Cache the PDF/A conformance corpus
+        id: pdfa-corpus-cache
+        uses: actions/cache@v6
+        with:
+          path: pdfa-corpus
+          key: ${{ runner.os }}-pdfa-corpus-${{ hashFiles('scripts/fetch-pdfa-corpus.py') }}
+
+      - name: Fetch the PDF/A conformance corpus
+        if: steps.pdfa-corpus-cache.outputs.cache-hit != 'true'
+        run: python scripts/fetch-pdfa-corpus.py
+
+      - name: Build the PDF/A clause index
+        run: python scripts/pdfa-clause-index.py
+
+      - name: Verify the PDF/A corpus and its clause index
+        run: python scripts/fetch-pdfa-corpus.py --check
+
       - name: Install Ghostscript as a TEST TOOL (capability-present axis)
         # This does not vendor Ghostscript into Spectra PDF. The clean runner
         # installs the current Chocolatey package like an end user would; the
