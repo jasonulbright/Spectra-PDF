@@ -29,6 +29,8 @@
 - Wide ink strokes imported from other applications are no longer thinned to a 2-point line when the document is saved; stroke width and translucency now survive import and save.
 - Ink annotation appearances no longer clip wide nibs: the drawn stroke now fits fully inside its appearance bounds in the saved file.
 - Trust-bundle files are now exempt from line-ending translation on checkout, so a fresh installation's bundle verifies byte-for-byte against its manifest.
+- Windows no longer flash unstyled or transparent at launch: every window appears only after its content has painted, over a solid theme ground, and window sizing driven by automation can no longer leave the content misplaced.
+- The paragraph editor's inline toolbar now sits on an opaque ground (document text no longer bleeds through its controls), and its controls wrap on narrow paragraphs instead of running off the page.
 
 ## 1.1.13
 
