@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.13
+
+*Released 2026-08-26*
+
+### XML forms (XFA)
+
+- Static XML forms — the common kind, carrying both an XML form layer and standard form fields — now fill and save correctly. Values are written into both the standard fields and the form's XML data, as the PDF standard requires, so the saved document reads the same in every viewer.
+- Values stored only in a form's XML data (previously shown blank) now display and print. This fixes forms filled by other applications that wrote only the XML side.
+- Filling no longer strips the XML form layer from the document: all form packets are preserved byte-for-byte apart from the values actually changed, and signed documents keep their signatures valid through an incremental save.
+- Dynamic XML forms — those that build their own pages — are clearly indicated and open read-only, with filling and field editing refused by name rather than producing a wrong result. The Forms panel states whether an XML form is static or dynamic, and reports form-authored calculations that are not executed.
+- Adding form fields to an XML form document is refused by name; previously the editing tool silently discarded the XML form layer.
+
 ## 1.1.12
 
 *Released 2026-08-25*
