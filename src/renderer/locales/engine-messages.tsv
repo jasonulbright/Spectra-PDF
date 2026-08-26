@@ -39,6 +39,7 @@ batch_ocr.sourceDestinationSameFile	exact	batch_ocr	source and destination are t
 batch_ocr.sourceFolderFound	pattern	batch_ocr,create_pdf_folders,guided_actions,preflight_sweep	Source folder not found: {{source}}
 budget.timeBudgetNeedsPositive	exact	budget	a time budget needs a positive floor
 check.fileFound	pattern	check,rebuild,recognize,recover,repair	File not found: {{file}}
+clause_map.checkCitesClause	pattern	clause_map	No check cites a clause of {{part}}.
 color_spaces.expectedNumberGotProcedure	exact	color_spaces	expected number, got procedure
 comment_summary.commentColumnDoesFit	pattern	comment_summary	the comment column does not fit the sheet: {{gutter}}
 comment_summary.commentColumnPlacement	pattern	comment_summary	not a comment column placement: {{placement}}
@@ -545,6 +546,7 @@ recognize.ocrRasteriserDidProduce	exact	recognize	OCR rasteriser did not produce
 recognize.ocrRasteriserProducedZero	exact	recognize	OCR rasteriser produced a zero-sized page image
 recognize.pageMustBased	exact	recognize	page must be 1-based
 recognize.recognitionInputReadableImage	exact	recognize	Recognition input is not a readable image
+recognize.recognitionLanguageInstalled	pattern	recognize	Recognition language is not installed: {{code}}
 recognize.tessdataBesideRunScripts	pattern	enhance_scan,recognize	No tessdata beside {{exe}}; run scripts/bundle-tesseract.ps1.
 recover.cannotOpenFileRecovery	pattern	recover	Cannot open file for recovery: {{e}}. File may be completely unreadable.
 recover.pagesCouldRecoveredFile	exact	recover	No pages could be recovered. File is completely unreadable.

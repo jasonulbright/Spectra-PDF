@@ -117,8 +117,8 @@ describe('recognizeForSelection', () => {
   it('recognises a page once per buffer', async () => {
     const key = {};
     const run = vi.fn(async () => result(confidentPage()));
-    const a = await recognizeForSelection(key, 1, 0, run);
-    const b = await recognizeForSelection(key, 1, 0, run);
+    const a = await recognizeForSelection(key, 1, 0, 'eng', run);
+    const b = await recognizeForSelection(key, 1, 0, 'eng', run);
     expect(run).toHaveBeenCalledTimes(1);
     expect(a).toBe(b);
   });
@@ -126,8 +126,8 @@ describe('recognizeForSelection', () => {
   it('keys pages separately', async () => {
     const key = {};
     const run = vi.fn(async () => result(confidentPage()));
-    await recognizeForSelection(key, 1, 0, run);
-    await recognizeForSelection(key, 2, 0, run);
+    await recognizeForSelection(key, 1, 0, 'eng', run);
+    await recognizeForSelection(key, 2, 0, 'eng', run);
     expect(run).toHaveBeenCalledTimes(2);
   });
 
@@ -139,19 +139,38 @@ describe('recognizeForSelection', () => {
     // it authors land on the wrong part of the page.
     const key = {};
     const run = vi.fn(async () => result(confidentPage()));
-    const upright = await recognizeForSelection(key, 1, 0, run);
-    const turned = await recognizeForSelection(key, 1, 90, run);
+    const upright = await recognizeForSelection(key, 1, 0, 'eng', run);
+    const turned = await recognizeForSelection(key, 1, 90, 'eng', run);
     expect(run).toHaveBeenCalledTimes(2);
     expect(turned).not.toBe(upright);
     // …and turning back reaches the entry recognised at that orientation.
-    expect(await recognizeForSelection(key, 1, 0, run)).toBe(upright);
+    expect(await recognizeForSelection(key, 1, 0, 'eng', run)).toBe(upright);
     expect(run).toHaveBeenCalledTimes(2);
     // The peek answers per rotation too, or the component would skip the
     // gesture gate on the strength of a different orientation's answer.
-    expect(peekSelectionCache(key, 1, 180)).toBeNull();
-    expect(peekSelectionCache(key, 1, 90)).not.toBeNull();
+    expect(peekSelectionCache(key, 1, 180, 'eng')).toBeNull();
+    expect(peekSelectionCache(key, 1, 90, 'eng')).not.toBeNull();
     // 360 is 0: the key is normalised, not the raw sum of two rotations.
-    expect(peekSelectionCache(key, 1, 360)).toBe(peekSelectionCache(key, 1, 0));
+    expect(peekSelectionCache(key, 1, 360, 'eng')).toBe(peekSelectionCache(key, 1, 0, 'eng'));
+  });
+
+  it('re-recognises when the effective LANGUAGE changes', async () => {
+    // The language changes the words and their boxes while leaving the buffer,
+    // the page number and the rotation untouched. Pinning a model in
+    // Preferences must re-recognise the page on screen; without the language in
+    // the key the old model's boxes would be served for the buffer's lifetime.
+    const key = {};
+    const run = vi.fn(async () => result(confidentPage()));
+    const english = await recognizeForSelection(key, 1, 0, 'eng', run);
+    const french = await recognizeForSelection(key, 1, 0, 'fra', run);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(french).not.toBe(english);
+    // Switching back reaches the entry recognised under that model.
+    expect(await recognizeForSelection(key, 1, 0, 'eng', run)).toBe(english);
+    expect(run).toHaveBeenCalledTimes(2);
+    // A multi-model string is its own entry, not a hit on either half.
+    expect(peekSelectionCache(key, 1, 0, 'eng+fra')).toBeNull();
+    expect(peekSelectionCache(key, 1, 0, 'fra')).not.toBeNull();
   });
 
   it('re-recognises after the buffer changes', async () => {
@@ -159,8 +178,8 @@ describe('recognizeForSelection', () => {
     // buffer). A commit retires it, so the next gesture recognises the page
     // that is actually on screen rather than being handed the old boxes.
     const run = vi.fn(async () => result(confidentPage()));
-    await recognizeForSelection({}, 1, 0, run);
-    await recognizeForSelection({}, 1, 0, run);
+    await recognizeForSelection({}, 1, 0, 'eng', run);
+    await recognizeForSelection({}, 1, 0, 'eng', run);
     expect(run).toHaveBeenCalledTimes(2);
   });
 
@@ -169,20 +188,20 @@ describe('recognizeForSelection', () => {
     const run = vi.fn(async () => {
       throw new Error('no tesseract');
     });
-    expect((await recognizeForSelection(key, 1, 0, run)).status).toBe('failed');
-    expect((await recognizeForSelection(key, 1, 0, run)).status).toBe('failed');
+    expect((await recognizeForSelection(key, 1, 0, 'eng', run)).status).toBe('failed');
+    expect((await recognizeForSelection(key, 1, 0, 'eng', run)).status).toBe('failed');
     expect(run).toHaveBeenCalledTimes(1);
   });
 
   it('peeks without starting work, and forgets on demand', async () => {
     const key = {};
-    expect(peekSelectionCache(key, 1, 0)).toBeNull();
+    expect(peekSelectionCache(key, 1, 0, 'eng')).toBeNull();
     const run = vi.fn(async () => result(confidentPage()));
-    await recognizeForSelection(key, 1, 0, run);
-    expect(peekSelectionCache(key, 1, 0)).not.toBeNull();
+    await recognizeForSelection(key, 1, 0, 'eng', run);
+    expect(peekSelectionCache(key, 1, 0, 'eng')).not.toBeNull();
     forgetSelectionCache(key);
-    expect(peekSelectionCache(key, 1, 0)).toBeNull();
-    await recognizeForSelection(key, 1, 0, run);
+    expect(peekSelectionCache(key, 1, 0, 'eng')).toBeNull();
+    await recognizeForSelection(key, 1, 0, 'eng', run);
     expect(run).toHaveBeenCalledTimes(2);
   });
 
@@ -201,7 +220,7 @@ describe('recognizeForSelection', () => {
       live--;
       return result(confidentPage());
     });
-    const all = [1, 2, 3, 4, 5].map((p) => recognizeForSelection(key, p, 0, run));
+    const all = [1, 2, 3, 4, 5].map((p) => recognizeForSelection(key, p, 0, 'eng', run));
     // Let the slots that are free start.
     await Promise.resolve();
     await Promise.resolve();
@@ -247,11 +266,11 @@ describe('releaseOcrSelection', () => {
     // true after a gesture the user did not make for that reason.
     const key = {};
     const run = vi.fn(async () => result(confidentPage()));
-    await recognizeForSelection(key, 1, 0, run);
+    await recognizeForSelection(key, 1, 0, 'eng', run);
     let cleared = 0;
     expect(releaseOcrSelection(key, { hasOcrSpans: true, clear: () => void cleared++ })).toBe(true);
     expect(cleared).toBe(1);
-    expect(peekSelectionCache(key, 1, 0)).toBeNull();
+    expect(peekSelectionCache(key, 1, 0, 'eng')).toBeNull();
   });
 
   it('reports nothing to unmount when no recognised spans are mounted', () => {

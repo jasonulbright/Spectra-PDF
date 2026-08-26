@@ -134,6 +134,28 @@ export function profileName(profile: ReportProfile): string {
   return profile.name || profile.id;
 }
 
+/** The shipped profiles whose NAME is a standard's name.
+ *
+ * A profile called "PDF/X-1a:2001" invites the report to be read as a verdict
+ * on that standard, which it is not: the profile carries the rules these
+ * checks can decide from the file. Derived profiles inherit the sentence
+ * through `based_on` — a rule set renamed is still that rule set.
+ */
+const STANDARDS_PROFILES: Record<string, string> = {
+  pdfx_1a: 'PDF/X-1a:2001',
+  pdfx_3: 'PDF/X-3:2002',
+  pdfx_4: 'PDF/X-4',
+};
+
+/** The standards note for one profile, or '' where the profile claims no
+ * standard and the sentence would be noise. */
+export function standardsNote(profile: ReportProfile): string {
+  const standard =
+    STANDARDS_PROFILES[profile.id] ?? STANDARDS_PROFILES[profile.based_on];
+  if (!standard) return '';
+  return tChrome('panel.preflight.reportStandardsNote', { standard });
+}
+
 /** One finding's sentence, interpolated from its measured `values`.
  *
  * Findings are matched by `detail_key`, never by their rendered sentence:
@@ -334,6 +356,8 @@ export function formatPreflightText(run: ReportRun): string {
     lines.push('');
   }
   lines.push(tChrome('panel.preflight.reportFooter'));
+  const note = standardsNote(report.profile);
+  if (note) lines.push(note);
   return lines.join('\n') + '\n';
 }
 
@@ -466,6 +490,8 @@ export function formatPreflightHtml(run: ReportRun): string {
     out.push('</ul>');
   }
   out.push(`<p class="meta">${escapeHtml(tChrome('panel.preflight.reportFooter'))}</p>`);
+  const note = standardsNote(report.profile);
+  if (note) out.push(`<p class="meta">${escapeHtml(note)}</p>`);
   out.push('</body></html>');
   return out.join('\n') + '\n';
 }

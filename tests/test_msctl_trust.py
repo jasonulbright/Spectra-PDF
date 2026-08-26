@@ -10,6 +10,8 @@ a distrust that was actually applied.
 """
 
 import hashlib
+import pathlib
+import subprocess
 import json
 import os
 
@@ -22,7 +24,7 @@ from engine import eutl, msctl, os_trust
 from engine.signatures import sign_pdf, verify_signatures
 # Sibling helper, imported BARE like every other one in this suite — see the
 # note in test_os_trust.py.
-from test_pades import _build_pki
+from test_pades import _build_pki, dummy_tsa  # noqa: F401  (fixture)
 
 
 _PKI: dict | None = None
@@ -62,7 +64,7 @@ def _der_of(pem_path: str) -> bytes:
 
 
 def _fake_bundle(monkeypatch, tmp_path, signers=(), timestampers=(),
-                 manifest: dict | None = None) -> list:
+                 manifest: dict | None = None, constraints: dict | None = None) -> list:
     """Write a bundle of the suite's own certificates and point the seam at it.
     Returns a list that records every read, so a test can assert the bundle was
     NOT opened."""
@@ -73,6 +75,10 @@ def _fake_bundle(monkeypatch, tmp_path, signers=(), timestampers=(),
     if manifest is not None:
         (directory / "msctl-manifest.json").write_text(
             json.dumps(manifest), encoding="utf-8"
+        )
+    if constraints is not None:
+        (directory / "msctl-constraints.json").write_text(
+            json.dumps(constraints), encoding="utf-8"
         )
 
     reads: list = []
@@ -103,6 +109,99 @@ def _signed(path: str, pki: dict) -> str:
     out = path.replace(".pdf", "-signed.pdf")
     sign_pdf(path, out, pfx_path=pki["pfx"], password="pw")
     return out
+
+
+def _pki_with_eku(directory: str, *eku: str) -> dict:
+    """A throwaway CA and a leaf declaring exactly these purposes.
+
+    The shared fixture's leaf declares none, which is unrestricted — the right
+    default and the wrong input for testing a cutoff narrowed to purposes. The
+    key usage matters too: a signer without it fails validation for a reason
+    that has nothing to do with the cutoff.
+    """
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes as chashes
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives.serialization import pkcs12
+    from cryptography.x509.oid import NameOID
+    import datetime
+
+    def name(cn):
+        return x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
+
+    ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    ca = (
+        x509.CertificateBuilder()
+        .subject_name(name("EKU Test CA")).issuer_name(name("EKU Test CA"))
+        .public_key(ca_key.public_key()).serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.datetime(2000, 1, 1))
+        .not_valid_after(datetime.datetime(2100, 1, 1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(ca_key, chashes.SHA256())
+    )
+    leaf_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    leaf = (
+        x509.CertificateBuilder()
+        .subject_name(name("EKU Test Signer")).issuer_name(name("EKU Test CA"))
+        .public_key(leaf_key.public_key()).serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.datetime(2000, 1, 1))
+        .not_valid_after(datetime.datetime(2100, 1, 1))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True, content_commitment=True,
+                key_encipherment=False, data_encipherment=False, key_agreement=False,
+                key_cert_sign=False, crl_sign=False, encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.ExtendedKeyUsage([x509.ObjectIdentifier(o) for o in eku]),
+            critical=False,
+        )
+        .sign(ca_key, chashes.SHA256())
+    )
+    ca_pem = os.path.join(directory, "eku-ca.pem")
+    with open(ca_pem, "wb") as f:
+        f.write(ca.public_bytes(serialization.Encoding.PEM))
+    pfx = os.path.join(directory, "eku-leaf.pfx")
+    with open(pfx, "wb") as f:
+        f.write(
+            pkcs12.serialize_key_and_certificates(
+                b"leaf", leaf_key, leaf, [ca],
+                serialization.BestAvailableEncryption(b"pw"),
+            )
+        )
+    return {"ca_pem": ca_pem, "pfx": pfx}
+
+
+def _signed_with(path: str, pfx: str, tsa_url: str | None = None) -> str:
+    """Signed by a credential OTHER than the suite's ordinary leaf, so a test
+    can choose what extended key usage the signer declares. A `tsa_url` embeds
+    an RFC-3161 timestamp — which is a SECOND chain, anchored independently of
+    the signer's."""
+    doc = pikepdf.new()
+    doc.add_blank_page(page_size=(400, 400))
+    doc.save(path)
+    doc.close()
+    out = path.replace(".pdf", "-signed.pdf")
+    sign_pdf(path, out, pfx_path=pfx, password="pw", tsa_url=tsa_url)
+    return out
+
+
+DOCUMENT_SIGNING = "1.3.6.1.4.1.311.10.3.12"
+EMAIL_PROTECTION = "1.3.6.1.5.5.7.3.4"
+TIME_STAMPING = "1.3.6.1.5.5.7.3.8"
+
+
+def _sha256_of(pem_path: str) -> str:
+    """The fingerprint an anchor is identified by in the constraints file."""
+    return hashlib.sha256(_der_of(pem_path)).hexdigest()
+
+
+def _cutoff(pem_path: str, moment: str, purposes=None) -> dict:
+    return {_sha256_of(pem_path): {"not_before": moment, "purposes": purposes}}
 
 
 class TestOffMeansOff:
@@ -326,6 +425,229 @@ class TestProvenance:
         assert "anchor_count" not in msctl.provenance()
 
 
+class TestTheIssuanceCutoff:
+    """The root program admits some subjects only for certificates issued before
+    a stated moment. The anchor stays in the bundle — it is still the authority
+    for its earlier issuance — so the constraint is applied to the certificates
+    UNDER it, after the chain has otherwise validated.
+
+    Every case here runs through ``verify_signatures``, which is the one call
+    site every verify path shares: a direct verification, an LTV gathering and a
+    PAdES check differ in the revocation information they carry, not in who
+    builds the chain, so a check placed after that call reaches all of them.
+    """
+
+    def test_a_leaf_issued_after_the_cutoff_refuses(self, monkeypatch, tmp_path, pki):
+        # The signer certificate's notBefore is 2000-01-01, so a 1999 cutoff
+        # puts its issuance on the wrong side of the program's statement.
+        _fake_bundle(
+            monkeypatch, tmp_path, signers=[_pem_of(pki["ca_pem"])],
+            constraints=_cutoff(pki["ca_pem"], "1999-01-01T00:00:00+00:00"),
+        )
+        out = _signed(os.path.join(str(tmp_path), "doc.pdf"), pki)
+        result = verify_signatures(out, msctl_trust=True)
+        signature = result["signatures"][0]
+        # The signature itself is intact and cryptographically valid — what
+        # fails is the claim that a trusted authority vouched for the signer.
+        assert signature["valid"] is True and signature["intact"] is True
+        assert signature["trusted"] is False
+        assert signature["trust_source"] is None
+        assert result["summary"]["trust_verified"] is False
+        restriction = signature["anchor_restriction"]
+        assert restriction["source"] == "msctl"
+        assert restriction["chain"] == "signer"
+        assert restriction["cutoff"].startswith("1999-01-01")
+        assert restriction["issued"].startswith("2000-01-01")
+        assert restriction["subject"] == "Spectra Leaf Signer"
+        assert restriction["anchor"] == "Spectra Test CA"
+
+    def test_a_leaf_issued_before_the_cutoff_still_validates(
+        self, monkeypatch, tmp_path, pki
+    ):
+        # The other half, and the reason the subject is not simply dropped:
+        # everything it issued before the moment is still an authority's work.
+        _fake_bundle(
+            monkeypatch, tmp_path, signers=[_pem_of(pki["ca_pem"])],
+            constraints=_cutoff(pki["ca_pem"], "2010-01-01T00:00:00+00:00"),
+        )
+        out = _signed(os.path.join(str(tmp_path), "doc.pdf"), pki)
+        signature = verify_signatures(out, msctl_trust=True)["signatures"][0]
+        assert signature["trusted"] is True
+        assert signature["trust_source"] == "msctl"
+        assert signature["anchor_restriction"] is None
+
+    def test_a_cutoff_naming_other_purposes_does_not_bite(
+        self, monkeypatch, tmp_path, pki
+    ):
+        # The program may narrow a cutoff to particular purposes. This signer
+        # declares document signing and nothing else, so a cutoff about email
+        # protection says nothing about it — the purposes and the date compose,
+        # and either one alone is not the constraint.
+        other = _pki_with_eku(str(tmp_path), DOCUMENT_SIGNING)
+        _fake_bundle(
+            monkeypatch, tmp_path, signers=[_pem_of(other["ca_pem"])],
+            constraints=_cutoff(
+                other["ca_pem"], "1999-01-01T00:00:00+00:00", [EMAIL_PROTECTION]
+            ),
+        )
+        out = _signed_with(os.path.join(str(tmp_path), "eku.pdf"), other["pfx"])
+        signature = verify_signatures(out, msctl_trust=True)["signatures"][0]
+        assert signature["trusted"] is True
+        assert signature["anchor_restriction"] is None
+
+    def test_a_cutoff_naming_this_purpose_does_bite(self, monkeypatch, tmp_path, pki):
+        other = _pki_with_eku(str(tmp_path), DOCUMENT_SIGNING)
+        _fake_bundle(
+            monkeypatch, tmp_path, signers=[_pem_of(other["ca_pem"])],
+            constraints=_cutoff(
+                other["ca_pem"], "1999-01-01T00:00:00+00:00", [DOCUMENT_SIGNING]
+            ),
+        )
+        out = _signed_with(os.path.join(str(tmp_path), "eku.pdf"), other["pfx"])
+        signature = verify_signatures(out, msctl_trust=True)["signatures"][0]
+        assert signature["trusted"] is False
+        assert signature["anchor_restriction"]["cutoff"].startswith("1999-01-01")
+
+    def test_a_certificate_declaring_no_purpose_is_matched_by_any_cutoff(
+        self, monkeypatch, tmp_path, pki
+    ):
+        # An absent extended key usage is unrestricted, which is the reading the
+        # bundle itself is built on. Treating it as "matches nothing" would let
+        # every purpose-narrowed cutoff be evaded by declaring no purpose.
+        _fake_bundle(
+            monkeypatch, tmp_path, signers=[_pem_of(pki["ca_pem"])],
+            constraints=_cutoff(
+                pki["ca_pem"], "1999-01-01T00:00:00+00:00", [EMAIL_PROTECTION]
+            ),
+        )
+        out = _signed(os.path.join(str(tmp_path), "doc.pdf"), pki)
+        signature = verify_signatures(out, msctl_trust=True)["signatures"][0]
+        assert signature["trusted"] is False
+        assert signature["anchor_restriction"]["source"] == "msctl"
+
+    def test_the_same_chain_under_a_user_anchor_is_unaffected(
+        self, monkeypatch, tmp_path, pki
+    ):
+        # The cutoff is this source's statement about its own anchors. A chain
+        # the user anchored terminates at the user's certificate, and nothing
+        # about the root program applies to it.
+        _fake_bundle(
+            monkeypatch, tmp_path,
+            constraints=_cutoff(pki["ca_pem"], "1999-01-01T00:00:00+00:00"),
+        )
+        out = _signed(os.path.join(str(tmp_path), "doc.pdf"), pki)
+        signature = verify_signatures(
+            out, trust_roots=[pki["ca_pem"]]
+        )["signatures"][0]
+        assert signature["trusted"] is True
+        assert signature["trust_source"] == "user"
+        assert signature["anchor_restriction"] is None
+
+    def test_the_constraints_are_not_read_without_the_option(
+        self, monkeypatch, tmp_path, pki
+    ):
+        # Off means off for this file too: with the source disabled the cutoff
+        # must not reach a chain the user or the store anchored.
+        _fake_bundle(
+            monkeypatch, tmp_path, signers=[_pem_of(pki["ca_pem"])],
+            constraints=_cutoff(pki["ca_pem"], "1999-01-01T00:00:00+00:00"),
+        )
+        out = _signed(os.path.join(str(tmp_path), "doc.pdf"), pki)
+        signature = verify_signatures(
+            out, trust_roots=[pki["ca_pem"]]
+        )["signatures"][0]
+        assert signature["trusted"] is True
+        assert signature["anchor_restriction"] is None
+
+    def test_a_bundle_with_no_constraints_file_enforces_nothing(
+        self, monkeypatch, tmp_path, pki
+    ):
+        _fake_bundle(monkeypatch, tmp_path, signers=[_pem_of(pki["ca_pem"])])
+        out = _signed(os.path.join(str(tmp_path), "doc.pdf"), pki)
+        signature = verify_signatures(out, msctl_trust=True)["signatures"][0]
+        assert signature["trusted"] is True
+        assert signature["anchor_restriction"] is None
+
+    def test_an_unreadable_cutoff_is_dropped_rather_than_guessed(
+        self, monkeypatch, tmp_path, pki
+    ):
+        # A cutoff this build cannot read must not become a cutoff at some
+        # guessed moment — in either direction.
+        _fake_bundle(
+            monkeypatch, tmp_path, signers=[_pem_of(pki["ca_pem"])],
+            constraints={_sha256_of(pki["ca_pem"]): {"not_before": "whenever"}},
+        )
+        out = _signed(os.path.join(str(tmp_path), "doc.pdf"), pki)
+        signature = verify_signatures(out, msctl_trust=True)["signatures"][0]
+        assert signature["trusted"] is True
+        assert signature["anchor_restriction"] is None
+
+    def test_a_cutoff_on_the_timestamp_chain_refuses_and_says_so(
+        self, monkeypatch, tmp_path, pki, dummy_tsa
+    ):
+        # The docstring's whole claim: BOTH chains are examined. The signer is
+        # anchored by a CA under no cutoff, so its own chain is clean; the
+        # RFC-3161 timestamp inside it chains to an authority the program
+        # admits only for earlier issuance. The refusal must name the TIMESTAMP
+        # chain — the surface renders a different sentence for each, and
+        # telling this user their signing certificate was issued too late is a
+        # false statement about which certificate was refused.
+        signer = _pki_with_eku(str(tmp_path), DOCUMENT_SIGNING)
+        _fake_bundle(
+            monkeypatch, tmp_path,
+            signers=[_pem_of(signer["ca_pem"]), _pem_of(pki["ca_pem"])],
+            timestampers=[_pem_of(pki["ca_pem"])],
+            constraints=_cutoff(
+                pki["ca_pem"], "1999-01-01T00:00:00+00:00", [TIME_STAMPING]
+            ),
+        )
+        out = _signed_with(
+            os.path.join(str(tmp_path), "tsa-cutoff.pdf"), signer["pfx"],
+            tsa_url="http://tsa.example/rfc3161",
+        )
+        signature = verify_signatures(out, msctl_trust=True)["signatures"][0]
+        assert signature["valid"] is True and signature["intact"] is True
+        assert signature["trusted"] is False
+        restriction = signature["anchor_restriction"]
+        assert restriction["source"] == "msctl"
+        assert restriction["chain"] == "timestamp"
+        assert restriction["subject"] == "Spectra Test TSA"
+        assert restriction["anchor"] == "Spectra Test CA"
+        assert restriction["cutoff"].startswith("1999-01-01")
+
+    def test_a_timestamp_chain_under_no_cutoff_leaves_the_signature_trusted(
+        self, monkeypatch, tmp_path, pki, dummy_tsa
+    ):
+        # The other half of the same arrangement: without the cutoff both
+        # chains anchor, so the timestamp branch is a refusal that fired, not
+        # one that always fires.
+        signer = _pki_with_eku(str(tmp_path), DOCUMENT_SIGNING)
+        _fake_bundle(
+            monkeypatch, tmp_path,
+            signers=[_pem_of(signer["ca_pem"]), _pem_of(pki["ca_pem"])],
+            timestampers=[_pem_of(pki["ca_pem"])],
+        )
+        out = _signed_with(
+            os.path.join(str(tmp_path), "tsa-clean.pdf"), signer["pfx"],
+            tsa_url="http://tsa.example/rfc3161",
+        )
+        signature = verify_signatures(out, msctl_trust=True)["signatures"][0]
+        assert signature["trusted"] is True
+        assert signature["anchor_restriction"] is None
+
+    def test_a_cutoff_for_another_anchor_says_nothing_about_this_chain(
+        self, monkeypatch, tmp_path, pki
+    ):
+        _fake_bundle(
+            monkeypatch, tmp_path, signers=[_pem_of(pki["ca_pem"])],
+            constraints=_cutoff(pki["other_pem"], "1999-01-01T00:00:00+00:00"),
+        )
+        out = _signed(os.path.join(str(tmp_path), "doc.pdf"), pki)
+        signature = verify_signatures(out, msctl_trust=True)["signatures"][0]
+        assert signature["trusted"] is True
+        assert signature["anchor_restriction"] is None
+
+
 class TestTheShippedBundle:
     """The committed bundle itself — parsed, counted, and cross-checked against
     its own manifest. No network, and no assertion about any particular
@@ -394,6 +716,31 @@ class TestTheShippedBundle:
         assert signers != timestampers
         assert signers - timestampers
 
+    def test_the_shipped_bundle_carries_issuance_cutoffs(self, bundle_dir, manifest):
+        # The published list always states cutoffs. None here would mean the
+        # constraint stopped being carried and every one of those anchors
+        # silently widened back to unrestricted.
+        carried = msctl.constraints()
+        assert carried
+        assert len(carried) == manifest["material"]["anchored_with_issuance_cutoff"]
+
+    def test_every_cutoff_names_an_anchor_this_bundle_actually_ships(self, bundle_dir):
+        anchored = {
+            a.sha256.hex()
+            for kind in (msctl.SIGNER, msctl.TIMESTAMP)
+            for a in msctl.anchors(kind)
+        }
+        assert set(msctl.constraints()) <= anchored
+
+    def test_every_cutoff_is_an_instant_and_a_purpose_set_or_all(self, bundle_dir):
+        for moment, purposes in msctl.constraints().values():
+            assert moment.tzinfo is not None
+            # None is EVERY purpose; an empty set would be none of them and
+            # would make the cutoff unreachable.
+            assert purposes is None or purposes
+            for oid in purposes or ():
+                assert all(part.isdigit() for part in oid.split("."))
+
     def test_the_bundle_is_read_once_and_kept(self, bundle_dir):
         msctl._CACHE.clear()
         msctl.available()
@@ -401,3 +748,36 @@ class TestTheShippedBundle:
         msctl.anchors(msctl.SIGNER)
         msctl.provenance()
         assert msctl._CACHE.get(bundle_dir) is first
+
+
+class TestTheCheckoutPreservesTheBundleBytes:
+    """A bundle whose files record their own digests is only the reviewed
+    artifact if every checkout produces the committed bytes. With
+    `core.autocrlf=true` — the default on the Windows CI runner — git
+    translates LF to CRLF for any path whose `text` attribute is not `unset`,
+    and every recorded digest goes wrong. A gitattributes `*` does not cross a
+    slash, so a pattern written `src/engine/trust/*` reaches the files beside
+    it and none of the files in a subdirectory below it."""
+
+    def _repo_root(self):
+        root = pathlib.Path(__file__).resolve().parent.parent
+        if not (root / ".git").exists():
+            pytest.skip("not a git checkout")
+        return root
+
+    def _bundle_files(self, root):
+        trust = root / "src" / "engine" / "trust"
+        return sorted(p for p in trust.rglob("*") if p.is_file())
+
+    def test_every_bundle_file_is_exempt_from_line_ending_translation(self):
+        root = self._repo_root()
+        files = self._bundle_files(root)
+        assert files, "no trust bundle files in this tree"
+        rel = [str(p.relative_to(root)).replace("\\", "/") for p in files]
+        out = subprocess.run(
+            ["git", "check-attr", "text", "--"] + rel,
+            cwd=root, capture_output=True, text=True, check=True,
+        ).stdout
+        for line in out.splitlines():
+            path, _, value = line.rpartition(": text: ")
+            assert value == "unset", f"{path} would be EOL-translated on checkout"

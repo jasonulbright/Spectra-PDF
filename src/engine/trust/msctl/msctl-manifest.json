@@ -19,12 +19,19 @@
     "msctl-timestamp.pem": {
       "sha256": "2b5ce94ccb6cf7f04d29429dc73cdb37beb23cc9341eac8ff769267b80045953",
       "count": 167
+    },
+    "msctl-constraints.json": {
+      "sha256": "7eebdf4bb7f531519278086e17441aa7041529f53db1d051d61264d43a42c73c",
+      "count": 116
     }
   },
   "material": {
     "certificates": 554,
     "unrestricted_no_purpose_property": 6,
-    "purposes_trimmed_by_denial": 13
+    "purposes_trimmed_by_denial": 13,
+    "anchored_with_issuance_cutoff": 116,
+    "anchored_with_issuance_cutoff_for_some_purposes": 112,
+    "anchored_with_root_program_policies": 96
   },
   "excluded": {
     "not_named_by_signed_list": 0,

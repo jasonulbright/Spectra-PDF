@@ -83,6 +83,18 @@ export interface Settings {
    * Off restores the older behaviour exactly: a scanned page has no
    * selectable text and the freehand highlighter covers it. */
   scanSelectRecognition: boolean;
+  /** Which recognition model the selection tier above runs, as a '+'-joined
+   * Tesseract language string, or `auto`.
+   *
+   * `auto` (the default) takes the document's own `/Lang` where it maps to a
+   * model unambiguously, and `eng` otherwise. An explicit value outranks the
+   * document — see `ocr/language-selection.resolveSelectionLanguage`, which is
+   * the whole ladder and the only place it is decided.
+   *
+   * Only meaningful while `scanSelectRecognition` is on, which is why the
+   * picker appears only then: a model chosen for a recognizer that never runs
+   * is a preference that does nothing. */
+  scanSelectLanguage: string;
   /** Underline misspellings in the paragraph editor as it is typed in.
    *
    * Default ON. The marks are drawn by this app's own checker rather than the
@@ -132,6 +144,7 @@ export const DEFAULTS: Settings = {
   spellLanguage: 'auto',
   spellCheckAsYouType: true,
   scanSelectRecognition: true,
+  scanSelectLanguage: 'auto',
   readAloudVoice: '',
   readAloudRate: 1,
   runUnrecognizedFieldScripts: false,

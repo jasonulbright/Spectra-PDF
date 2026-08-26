@@ -268,6 +268,9 @@ _CERTIFICATION_SIGNATURE_KEYS = {
 # Named separately from the certification keys so the delta assertion still
 # says which capability each addition came from.
 _TRUST_SOURCE_SIGNATURE_KEYS = {"trust_source"}
+# Why a chain a trust source could otherwise anchor is refused — a third fact
+# beside which source vouched and whether it was trusted at all.
+_ANCHOR_RESTRICTION_SIGNATURE_KEYS = {"anchor_restriction"}
 _FIELD_LOCK_SIGNATURE_KEYS = {"lock", "lock_violation"}
 
 
@@ -296,6 +299,7 @@ def test_an_approval_signature_reports_no_certification_and_keeps_its_keys(tmp_d
     assert keys - _PRIOR_SIGNATURE_KEYS == (
         _CERTIFICATION_SIGNATURE_KEYS
         | _TRUST_SOURCE_SIGNATURE_KEYS
+        | _ANCHOR_RESTRICTION_SIGNATURE_KEYS
         | _FIELD_LOCK_SIGNATURE_KEYS
     )
     # No policy is in force, so there is nothing to violate and nothing unmade.

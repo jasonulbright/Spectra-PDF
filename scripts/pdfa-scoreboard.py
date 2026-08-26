@@ -31,10 +31,38 @@ genuinely does with an arbitrary file is therefore what gets measured:
              be attributed to a clause.
 
 A run records raw outcomes per file. Attributing a check to a clause is a
-separate judgement and is NOT done here; the mapping is what the next round
-builds, and inventing it inside the measurement would grade our own work.
+separate judgement and is NOT made here: the judgement lives in
+`engine/clause_map.py`, next to the checks it is about, and this tool only
+measures it. Inventing the mapping inside the measurement would grade our own
+work with our own answer key.
+
+WHAT THE CLAUSE SECTIONS REPORT
+
+  coverage    per part: how many of the part's clauses ANY shipped check
+              decides. The denominator is the corpus' clause count for that
+              part, which is what the suite covers rather than what the
+              standard contains, so the figure is a floor on the gap and never
+              a ceiling on it. The uncited checks are listed alongside — a
+              coverage figure that hides its own gaps is the thing the map
+              exists to stop.
+  scoring     per cited clause: the cited checks are run over that clause's
+              corpus files and compared to the verdict each file's name
+              declares. Two outcomes are findings rather than scores.
+
+              FLAGGED ON PASS — a cited check fails a file the suite passes.
+              It is a CANDIDATE false alarm and never called one here: a
+              suite's pass verdict is per TEST, so it says the file satisfies
+              the rule that test targets, not that the file satisfies every
+              requirement of the clause the test is filed under. Deciding
+              which of the two a case is takes a person, and the three
+              adjudicated so far are recorded in `engine/clause_map.py` and
+              the punchlist rather than in a counter.
+
+              UNEVIDENCED CITATION — no fire on any of the clause's failing
+              files, so the corpus supports the citation with nothing.
 
 Run: .venv/Scripts/python.exe scripts/pdfa-scoreboard.py [--limit N] [--part PDF/A-1b]
+                                                          [--per-clause N] [--skip-clauses]
 """
 
 from __future__ import annotations
@@ -120,10 +148,179 @@ def _accessibility(path: Path) -> dict:
     }
 
 
+def _clause_coverage(index: dict) -> dict:
+    """Per part: which of its clauses any shipped check decides.
+
+    The denominator is the corpus' clause count for the part — what the suite
+    covers, not what the standard contains. Stated here because a percentage
+    over an unstated denominator is the kind of conformance claim this row
+    exists to remove.
+    """
+    from engine import clause_map
+
+    citations = clause_map.all_citations()
+    by_part: dict[str, dict] = defaultdict(lambda: {"cited": {}, "clauses": 0})
+    for citation in citations:
+        rows = by_part[citation.part]["cited"].setdefault(citation.clause, [])
+        rows.append(citation.to_json())
+
+    out: dict[str, dict] = {}
+    for entry in index["clauses"]:
+        part = entry["part"]
+        out.setdefault(part, {"clauses": 0, "cited_clauses": 0, "cited": {}})
+        out[part]["clauses"] += 1
+        cited = by_part.get(part, {}).get("cited", {}).get(entry["clause"])
+        if cited:
+            out[part]["cited_clauses"] += 1
+            out[part]["cited"][entry["clause"]] = cited
+
+    # A citation naming a clause the corpus does not carry, split by where the
+    # citation came from. For a `held` citation this is ordinary — the suite
+    # simply carries no file for that clause of a standard we can read. For a
+    # `corpus` citation the corpus IS the only source, so a clause it does not
+    # carry means the citation rests on nothing.
+    known = {(e["part"], e["clause"]) for e in index["clauses"]}
+    unsupported: list[dict] = []
+    uncarried: list[dict] = []
+    for citation in citations:
+        if (citation.part, citation.clause) in known:
+            continue
+        (unsupported if citation.source == "corpus" else uncarried).append(citation.to_json())
+
+    return {
+        "by_part": {part: {k: v for k, v in row.items()} for part, row in sorted(out.items())},
+        "uncited_preflight_checks": list(clause_map.unmapped_preflight_checks()),
+        "uncited_accessibility_checks": list(clause_map.unmapped_accessibility_checks()),
+        "citations_with_no_source": unsupported,
+        "held_citations_the_corpus_omits": uncarried,
+    }
+
+
+def _pdfa_clause_scoring(index: dict, per_clause: int, part_filter: str) -> dict:
+    """Run the cited preflight checks over the clauses they cite.
+
+    One profile per part, built by `clause_map.measurement_profile` from the
+    citations' own parameters — this tool never chooses them, so a citation is
+    scored against the rule it actually claimed.
+    """
+    from engine import clause_map
+    from engine.preflight import preflight
+
+    parts: dict[str, list] = defaultdict(list)
+    for citation in clause_map.PREFLIGHT_CLAUSES:
+        parts[citation.part].append(citation)
+
+    files_by_clause: dict[tuple, list] = defaultdict(list)
+    for entry in index["clauses"]:
+        for f in entry["files"]:
+            if f["path"] and f["verdict"] in ("pass", "fail"):
+                files_by_clause[(entry["part"], entry["clause"])].append(f)
+
+    results: dict[str, dict] = {}
+    findings: list[dict] = []
+    for part, citations in sorted(parts.items()):
+        if part_filter and part != part_filter:
+            continue
+        profile = clause_map.measurement_profile(part)
+        by_clause: dict[str, Counter] = defaultdict(Counter)
+        evidence: dict[str, set] = defaultdict(set)
+        for citation in citations:
+            key = (part, citation.clause)
+            rows = files_by_clause.get(key, [])
+            # Bounded on purpose: one clause carries 372 corpus files and the
+            # figure it produces does not improve past a sample.
+            for f in rows[:per_clause] if per_clause else rows:
+                path = CORPUS / f["path"]
+                try:
+                    report = preflight(str(path), profile=profile, gs_path="")
+                except Exception as exc:  # noqa: BLE001 — a reader that dies is our defect
+                    by_clause[citation.clause]["unreadable"] += 1
+                    findings.append({
+                        "kind": "reader_error", "part": part, "clause": citation.clause,
+                        "path": f["path"], "error": f"{type(exc).__name__}: {exc}",
+                    })
+                    continue
+                fired = {
+                    row["id"] for row in report["checks"]
+                    if row["status"] == "fail" and row["id"] == citation.check
+                }
+                if f["verdict"] == "fail":
+                    if fired:
+                        by_clause[citation.clause]["caught"] += 1
+                        evidence[citation.clause].add(citation.check)
+                    else:
+                        by_clause[citation.clause]["missed"] += 1
+                else:
+                    if fired:
+                        by_clause[citation.clause]["flagged on pass"] += 1
+                        findings.append({
+                            "kind": "flagged_on_pass", "part": part,
+                            "clause": citation.clause, "check": citation.check,
+                            "path": f["path"],
+                        })
+                    else:
+                        by_clause[citation.clause]["clean"] += 1
+        for citation in citations:
+            if citation.check not in evidence.get(citation.clause, set()):
+                findings.append({
+                    "kind": "unevidenced_citation", "part": part,
+                    "clause": citation.clause, "check": citation.check,
+                    "coverage": citation.coverage,
+                })
+        results[part] = {clause: dict(counts) for clause, counts in sorted(by_clause.items())}
+    return {"by_part": results, "findings": findings}
+
+
+def _ua_clause_scoring(rows: list) -> dict:
+    """The PDF/UA-1 half, attributed by clause.
+
+    No second run: the accessibility report is already measured per file
+    above, so this only asks whether a check CITED against the file's clause
+    is among the ones that fired. A different check firing is not evidence
+    about this clause and is not counted as one.
+    """
+    from engine import clause_map
+
+    cited: dict[str, set] = defaultdict(set)
+    advisory: dict[str, set] = defaultdict(set)
+    for citation in clause_map.accessibility_clauses():
+        cited[citation.clause].add(citation.check)
+        if citation.coverage == clause_map.PARTIAL:
+            advisory[citation.clause].add(citation.check)
+
+    by_clause: dict[str, Counter] = defaultdict(Counter)
+    for row in rows:
+        if row["part"] != "PDF/UA-1":
+            continue
+        access = row.get("accessibility")
+        if not access or "error" in access:
+            continue
+        owners = cited.get(row["clause"])
+        if not owners:
+            by_clause[row["clause"]]["uncited"] += 1
+            continue
+        fired = owners & set(access["fired"])
+        if row["expected"] == "fail":
+            by_clause[row["clause"]]["caught" if fired else "missed"] += 1
+        elif not fired:
+            by_clause[row["clause"]]["clean"] += 1
+        elif fired <= advisory.get(row["clause"], set()):
+            # Only a `should` fired. A file that declines a recommendation is
+            # conformant, so this is not a finding against the clause.
+            by_clause[row["clause"]]["advisory"] += 1
+        else:
+            by_clause[row["clause"]]["flagged on pass"] += 1
+    return {clause: dict(counts) for clause, counts in sorted(by_clause.items())}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=0, help="stop after N files")
     parser.add_argument("--part", default="", help="only this part, e.g. PDF/A-1b")
+    parser.add_argument("--per-clause", type=int, default=25,
+                        help="cap the files scored per cited clause (0 = all)")
+    parser.add_argument("--skip-clauses", action="store_true",
+                        help="skip the per-clause scoring run (coverage still reported)")
     args = parser.parse_args()
 
     index = _read_index()
@@ -207,6 +404,14 @@ def main() -> int:
         if row["expected"] == "fail" and fired and not row.get("rule"):
             unexplained_passes.append({"path": row["path"], "clause": row["clause"]})
 
+    coverage = _clause_coverage(index)
+    ua_clauses = _ua_clause_scoring(rows)
+    pdfa_clauses = (
+        {"by_part": {}, "findings": [], "skipped": True}
+        if args.skip_clauses
+        else _pdfa_clause_scoring(index, args.per_clause, args.part)
+    )
+
     report = {
         "note": (
             "Generated by scripts/pdfa-scoreboard.py over a gitignored corpus. A "
@@ -218,6 +423,9 @@ def main() -> int:
         "declared": dict(declared.most_common()),
         "by_part": {part: dict(counts) for part, counts in sorted(by_part.items())},
         "agreement": {part: dict(counts) for part, counts in sorted(agreement.items())},
+        "clause_coverage": coverage,
+        "clause_scoring_pdfa": pdfa_clauses,
+        "clause_scoring_pdfua": ua_clauses,
         "false_alarms": false_alarms,
         "unexplained_agreements": unexplained_passes,
         "reader_errors": crashes,
@@ -236,6 +444,30 @@ def main() -> int:
             print(f"  {part:<10} " + "  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
         print(f"  false alarms          {len(false_alarms)} (we flag a file the suite passes)")
         print(f"  unexplained agreements {len(unexplained_passes)} (caught, no stated rule)")
+    print("clause coverage (cited / clauses the corpus carries):")
+    for part, row in coverage["by_part"].items():
+        print(f"  {part:<10} {row['cited_clauses']:>3} / {row['clauses']:<3}")
+    print(f"  preflight checks citing no PDF/A clause      "
+          f"{len(coverage['uncited_preflight_checks'])}")
+    print(f"  accessibility checks citing no PDF/UA clause {len(coverage['uncited_accessibility_checks'])}")
+    print(f"  held citations the corpus carries no file for  "
+          f"{len(coverage['held_citations_the_corpus_omits'])}")
+    if coverage["citations_with_no_source"]:
+        print(f"  CITATIONS RESTING ON NOTHING                 "
+              f"{len(coverage['citations_with_no_source'])}")
+    if ua_clauses:
+        print("PDF/UA-1, per cited clause:")
+        for clause, counts in ua_clauses.items():
+            print(f"  {clause:<10} " + "  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+    if not pdfa_clauses.get("skipped"):
+        print("PDF/A, per cited clause (cited checks only):")
+        for part, clauses in pdfa_clauses["by_part"].items():
+            for clause, counts in clauses.items():
+                print(f"  {part:<9} {clause:<10} "
+                      + "  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+        for finding in pdfa_clauses["findings"]:
+            print(f"  {finding['kind'].upper():<22} {finding.get('part','')} "
+                  f"{finding.get('clause','')} {finding.get('check', finding.get('path',''))}")
     print("declared conformance, top 8:")
     for name, count in list(declared.most_common(8)):
         print(f"    {count:>5}  {name}")

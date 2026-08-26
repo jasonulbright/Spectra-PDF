@@ -276,6 +276,9 @@ export function PrepressPanel(): React.ReactElement {
 
       <div className="border-t border-neutral-800 pt-4 flex flex-col gap-3">
         <p className="text-sm text-neutral-500">{tChrome('panel.prepress.pdfxBlurb')}</p>
+        <p data-testid="pdfx-claim-note" className="text-xs text-neutral-500">
+          {tChrome('panel.prepress.pdfxNote')}
+        </p>
         <label className="flex items-center gap-2 text-sm text-neutral-300">
           <span className="w-28 shrink-0 text-neutral-400">{tChrome('panel.prepress.standard')}</span>
           <select

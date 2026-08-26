@@ -270,12 +270,17 @@ export const PANEL_STRINGS = {
   'panel.pdfa.converting': 'Converting to PDF/A...',
   'panel.pdfa.convertingBtn': 'Converting...',
   'panel.pdfa.convert': 'Convert to PDF/A',
-  'panel.pdfa.done': 'Converted to {{level}} ({{size}} KB)',
+  // What the app can state and no more: the output declares the level, which
+  // is read back out of the file's own metadata. No validator ran, so
+  // "converted to PDF/A-2b" is a claim nothing here verified.
+  'panel.pdfa.done': 'Saved. The file declares {{level}} ({{size}} KB).',
+  'panel.pdfa.claimNote':
+    'The conversion writes the conformance claim and this app reads it back, refusing the result if it says anything else. Whether the file meets the standard is not checked here — no validator runs.',
 
   // The alteration report both standards panels show. Row labels are keyed by
   // the engine's own alteration kinds; an UNDETERMINED row's kind is the fact
   // name the check could not read, so both vocabularies carry a label.
-  'panel.standards.heading': 'What this conversion changed to meet the standard',
+  'panel.standards.heading': 'What this conversion removed or replaced',
   'panel.standards.clean': 'Nothing was removed — every check ran and found the document intact.',
   'panel.standards.undetermined': 'Could not be determined.',
   'panel.standards.notices': 'Notes from the conversion tool, in its own words',
@@ -972,6 +977,11 @@ export const PANEL_STRINGS = {
   'panel.preflight.reportRunAt': 'Checked: {{when}}',
   'panel.preflight.reportFooter':
     'This report states which of 38 checks the document passes against the named profile. It is not a certificate of conformance.',
+  // Emitted only under the three standards profiles. Their names are the
+  // standard's, so the report has to say which of the standard's rules it
+  // actually decided rather than letting the name answer for it.
+  'panel.preflight.reportStandardsNote':
+    'This profile carries the rules of {{standard}} that these checks can decide from the file. It does not cover the whole standard, and a clean report is not a conformance verdict.',
   'panel.preflight.unreadableHeading': 'Parts that could not be read',
 
   'panel.preflight.where.page': 'Page {{page}}',
@@ -1714,7 +1724,9 @@ export const PANEL_STRINGS = {
   'panel.prepress.creatingPdfx': 'Creating PDF/X master…',
   'panel.prepress.working': 'Working…',
   'panel.prepress.createPdfx': 'Create PDF/X',
-  'panel.prepress.pdfxDone': 'Saved {{version}} master{{suffix}}',
+  'panel.prepress.pdfxDone': 'Saved. The file declares {{version}}{{suffix}}',
+  'panel.prepress.pdfxNote':
+    'This writes the conformance marker and the output intent. Nothing here checks the result against the standard — run the matching preflight profile to see which of its rules this app can decide.',
   'panel.prepress.pdfxEmbedded': ' with the destination profile embedded in its output intent',
   'panel.prepress.pdfxNames': ' — output intent names {{identifier}}',
 
@@ -2346,6 +2358,10 @@ export const PANEL_STRINGS = {
     'This installation carries no root-program bundle, so only your other trust sources apply.',
   'panel.sig.msctlProvenance':
     'Bundled {{date}} — {{anchors}} certificate authorities.',
+  'panel.sig.anchorIssuanceCutoff':
+    'identity not trusted — the root-certificate program lists this authority only for certificates issued before {{cutoff}}, and this signer’s was issued {{issued}}.',
+  'panel.sig.anchorIssuanceCutoffTimestamp':
+    'identity not trusted — the root-certificate program lists the timestamp authority only for certificates issued before {{cutoff}}, and this timestamp’s was issued {{issued}}.',
   'panel.sig.trustedViaAnchor': 'identity trusted (your anchor)',
   'panel.sig.trustedViaSystem': 'identity trusted (system store)',
   'panel.sig.trustedViaEutl': 'identity trusted (EU trusted lists)',
@@ -2510,6 +2526,10 @@ export const PANEL_STRINGS = {
   'panel.settings.scanSelectRecognition': 'Recognize text in scanned pages for selection',
   'panel.settings.scanSelectRecognitionHint':
     'Lets you select and highlight words on a scanned page. Recognition runs on this computer and never changes the file; use Scan & OCR to add a searchable text layer.',
+  'panel.settings.scanSelectLanguage': 'Language to recognize scanned pages in',
+  'panel.settings.scanSelectLanguageAuto': 'From the document, or English',
+  'panel.settings.scanSelectLanguageHint':
+    'Choose a language when scanned pages are recognized poorly. Left automatic, the document’s own stated language is used where it names one.',
   'panel.settings.spellCheckAsYouType': 'Underline misspellings while editing text',
   'panel.settings.spellCheckAsYouTypeHint':
     'The paragraph editor marks words that are not in the chosen dictionary. Which dictionary that is, and any words you have added yourself, are set in the Spelling panel.',
