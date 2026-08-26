@@ -11,6 +11,7 @@
 // rather than by a check.
 import {
   JS_TRIGGERS,
+  fieldNameSet,
   isDeclarative,
   refusedCapabilities,
   type JsTrigger,
@@ -76,14 +77,14 @@ function seedValue(field: FormField): string | string[] {
 /** One field's `/AA` bodies under the object model's event names — CUSTOM
  * bodies only. A declarative body is `af-calc`'s and never reaches the
  * sandbox, so seeding one here would run it twice under two evaluators. */
-function seedActions(field: FormField): Record<string, string[]> {
+function seedActions(field: FormField, fieldNames: ReadonlySet<string>): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   const actions = field.actions;
   if (!actions) return out;
   for (const trigger of JS_TRIGGERS) {
     const js = actions[trigger];
     if (typeof js !== 'string' || js.trim() === '') continue;
-    if (isDeclarative(js)) continue;
+    if (isDeclarative(js, fieldNames)) continue;
     out[EVENT_NAME[trigger]] = [js];
   }
   return out;
@@ -103,6 +104,7 @@ export interface SeedInput {
 /** Build the object model's whole world from one read of a document. Pure. */
 export function buildSeed(input: SeedInput): SandboxSeed {
   const objects: Record<string, SandboxFieldSeed[]> = {};
+  const fieldNames = fieldNameSet(input.fields);
   for (const field of input.fields) {
     const page = field.widgets[0]?.pageIndex ?? 0;
     const seed: SandboxFieldSeed = {
@@ -126,7 +128,7 @@ export function buildSeed(input: SeedInput): SandboxSeed {
         : field.type === 'checkbox'
           ? { exportValues: [CHECKBOX_OFF, checkboxOn(field)] }
           : {}),
-      actions: seedActions(field),
+      actions: seedActions(field, fieldNames),
     };
     objects[field.name] = [seed];
   }

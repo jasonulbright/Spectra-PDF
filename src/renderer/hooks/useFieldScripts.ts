@@ -20,7 +20,7 @@ import type {
   FieldScriptSession,
   FieldScriptWorkerFactory,
 } from '../lib/field-js-host';
-import { JS_TRIGGERS, isDeclarative, scriptInventory } from '../lib/field-js-policy';
+import { JS_TRIGGERS, fieldNameSet, isDeclarative, scriptInventory } from '../lib/field-js-policy';
 import type { JsTrigger } from '../lib/field-js-policy';
 import { clearScriptReports, publishScriptReports } from '../lib/field-js-reports';
 import type { EngineCall } from '../lib/engine-call';
@@ -271,9 +271,10 @@ export function useFieldScripts(
     const field = entry.fields.find((f) => f.name === fieldName);
     if (!field) return entry.hasDocumentScripts;
     if (entry.hasDocumentScripts) return true;
+    const names = fieldNameSet(entry.fields);
     return JS_TRIGGERS.some((t) => {
       const js = field.actions?.[t as JsTrigger];
-      return typeof js === 'string' && js.trim() !== '' && !isDeclarative(js);
+      return typeof js === 'string' && js.trim() !== '' && !isDeclarative(js, names);
     });
   }, []);
 

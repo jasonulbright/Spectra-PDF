@@ -366,3 +366,54 @@ describe('the vendored interpreter, loaded and run', () => {
     expect(typeof result.values.get('N')).toBe('string');
   });
 });
+
+// ── a string literal is not Simplified Field Notation ──────────────────────
+//
+// SFN's factor grammar has no string literal: a quoted token is a field name
+// and `event.value` parses as a dotted one. A body assigning a literal is
+// therefore ACCEPTED by the recognizer and, routed to the declarative
+// evaluator, produces arithmetic over fields that do not exist — the assigned
+// string never reaches the document. These bodies belong to the sandbox.
+
+describe('bodies that only look like field notation', () => {
+  it('runs a Calculate that assigns a string literal', async () => {
+    const session = await open({
+      fields: [field('A'), field('T', { C: 'event.value = "N/A";' })],
+      calculationOrder: ['T'],
+    });
+    const result = await session.commit('A', '1');
+    expect(result.reports).toEqual([]);
+    expect(result.values.get('T')).toBe('N/A');
+  });
+
+  it('runs a Format that concatenates a literal onto the value', async () => {
+    const session = await open({
+      fields: [field('Fee', { F: 'event.value = "$" + event.value;' })],
+    });
+    const result = await session.commit('Fee', '12');
+    expect(result.formatted.get('Fee')).toBe('$12');
+  });
+
+  it('runs a Format that assigns a bare literal', async () => {
+    const session = await open({
+      fields: [field('L', { F: 'event.value = "LITERAL";' })],
+    });
+    const result = await session.commit('L', '12');
+    expect(result.formatted.get('L')).toBe('LITERAL');
+  });
+
+  it('leaves a genuine field-notation calculation to the declarative evaluator', async () => {
+    // Every name resolves, so the body is never seeded as a Calculate action.
+    // The calculation-order walk still reports the field's stored value; what
+    // it must not report is a result the sandbox computed from the body.
+    const session = await open({
+      fields: [
+        field('Line Total', undefined, { value: '50' }),
+        field('Half', { C: 'event.value = "Line Total" / 2;' }),
+      ],
+      calculationOrder: ['Half'],
+    });
+    const result = await session.commit('Line Total', '50');
+    expect(result.values.get('Half')).toBe('');
+  });
+});
