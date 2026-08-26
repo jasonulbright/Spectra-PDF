@@ -140,7 +140,10 @@ describe('selecting and highlighting text on a scanned page', () => {
     if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('recognises the page and offers word spans where pdf.js found no text', async () => {
+  it('recognises the page and offers word spans where pdf.js found no text', async function () {
+    // A real Tesseract pass over a rendered page outlasts the 60s mocha
+    // default; the inner waits are bounded by OCR_TIMEOUT.
+    this.timeout(OCR_TIMEOUT * 3);
     await openByPaths([SCANNED]);
     await $('[data-testid="document-view"]').waitForDisplayed({ timeout: 15_000 });
 
@@ -193,7 +196,8 @@ describe('selecting and highlighting text on a scanned page', () => {
     expect(content.items.length).toBe(0);
   });
 
-  it('a page-tier rotate re-recognises rather than serving transposed boxes', async () => {
+  it('a page-tier rotate re-recognises rather than serving transposed boxes', async function () {
+    this.timeout(OCR_TIMEOUT * 4);
     // A quarter-turn changes no bytes, so the pdf.js proxy and the page number
     // are both unchanged while the raster the boxes were measured against has
     // swapped dimensions. Serving the pre-rotation entry transposes every
@@ -227,7 +231,8 @@ describe('selecting and highlighting text on a scanned page', () => {
     await browser.pause(1_000);
   });
 
-  it('preference OFF unmounts the spans on the page already on screen', async () => {
+  it('preference OFF unmounts the spans on the page already on screen', async function () {
+    this.timeout(OCR_TIMEOUT * 3);
     // Flipped with the document OPEN and recognised: "off restores the older
     // behaviour exactly" has to be true immediately, not only after a reopen,
     // a rotate or a zoom rebuilds the layer for some unrelated reason.
