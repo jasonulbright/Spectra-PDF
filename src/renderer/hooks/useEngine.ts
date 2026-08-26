@@ -43,6 +43,10 @@ export interface EngineResult {
   original_version: string;
   target_version: string;
   level: string;
+  /** convert_pdfa: the conformance the OUTPUT declares, read back out of its
+   * own metadata. Not the level that was asked for — the two agree because the
+   * engine refuses and discards the file when they do not. */
+  declared_conformance: string;
   encryption: string;
   encrypted: boolean;
   /** check_encrypted: which credentials open it — "password" | "pubkey". */

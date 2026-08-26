@@ -22,6 +22,14 @@ reach a signer chain. That is the same split ``os_trust`` derives from the
 platform store's per-entry restrictions, and it uses the same two purpose sets,
 so what counts as a signer authority has one definition.
 
+Purpose restrictions are the ones the split can express. An ISSUANCE-DATE
+restriction cannot be: a subject is in the program for everything it signed
+before a stated moment and for nothing it signed after, so the same anchor is
+in force or not depending on the certificate under it. Those cutoffs travel as
+DATA (``msctl-constraints.json``, keyed by the SHA-256 an anchor is identified
+by) and ``constraint_for`` is what the validator asks; dropping such a subject
+instead would refuse signatures the program still vouches for.
+
 This source is ADDITIVE, never a replacement for the platform store read: a
 root an administrator installed locally is in the store and not in the
 published program, and enabling this must not lose it.
@@ -34,6 +42,7 @@ does not apply.
 
 from __future__ import annotations
 
+import datetime
 import json
 from pathlib import Path
 
@@ -47,14 +56,16 @@ _PEM_BY_PURPOSE = {
     TIMESTAMP: "msctl-timestamp.pem",
 }
 _MANIFEST = "msctl-manifest.json"
+_CONSTRAINTS = "msctl-constraints.json"
 
 
 class _Bundle:
-    __slots__ = ("certificates", "provenance")
+    __slots__ = ("certificates", "provenance", "constraints")
 
-    def __init__(self, certificates: dict, provenance: dict | None):
+    def __init__(self, certificates: dict, provenance: dict | None, constraints: dict):
         self.certificates = certificates
         self.provenance = provenance
+        self.constraints = constraints
 
 
 #: Parsed bundles, keyed by the directory they were read from. Keying on the
@@ -91,7 +102,41 @@ def _read_bundle(directory: Path) -> _Bundle:
         provenance = json.loads((directory / _MANIFEST).read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         provenance = None
-    return _Bundle(certificates, provenance)
+    return _Bundle(certificates, provenance, _read_constraints(directory))
+
+
+def _read_constraints(directory: Path) -> dict:
+    """The per-anchor issuance cutoffs, parsed to what a comparison needs.
+
+    An entry that does not parse is DROPPED rather than defaulted, and the
+    absence of the file yields nothing: a cutoff this build cannot read must not
+    turn into a cutoff at some guessed moment, in either direction. That the
+    file is present and complete is proven where it is written, not here.
+    """
+    try:
+        raw = json.loads((directory / _CONSTRAINTS).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    parsed: dict[str, tuple] = {}
+    for fingerprint, entry in raw.items():
+        if not isinstance(entry, dict):
+            continue
+        try:
+            moment = datetime.datetime.fromisoformat(entry["not_before"])
+        except Exception:  # noqa: BLE001
+            continue
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=datetime.timezone.utc)
+        purposes = entry.get("purposes")
+        # None is EVERY purpose, not none of them — the fetch writes null for a
+        # cutoff the list states without narrowing it.
+        parsed[fingerprint.lower()] = (
+            moment,
+            frozenset(purposes) if purposes else None,
+        )
+    return parsed
 
 
 def _bundle() -> _Bundle:
@@ -117,6 +162,29 @@ def anchors(purpose: str) -> list:
     misnames a chain kind must lose the anchors, never gain the other kind's.
     """
     return list(_bundle().certificates.get(purpose, ()))
+
+
+def constraint_for(anchor_sha256: str):
+    """This anchor's issuance cutoff as ``(moment, purposes | None)``, or None.
+
+    ``purposes`` is None when the cutoff applies to every purpose — the common
+    case — and a set of EKU OIDs when the program narrowed it. The caller
+    decides what a chain's purpose is; this module only says what the list
+    states.
+    """
+    return _bundle().constraints.get((anchor_sha256 or "").lower())
+
+
+def constraints() -> dict:
+    """Every issuance cutoff in the bundle, as ``{anchor sha-256 hex: (moment,
+    purposes | None)}``.
+
+    A copy, so a caller holding it across a bundle swap cannot mutate the cached
+    parse; the whole map rather than a per-anchor lookup because the caller
+    checks one chain's anchor against it many times and an empty map is also the
+    caller's cheapest "nothing to enforce".
+    """
+    return dict(_bundle().constraints)
 
 
 def provenance() -> dict:

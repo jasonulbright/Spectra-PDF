@@ -714,6 +714,68 @@ class TestRecognizeRaster:
         assert list(tmp_path.iterdir()) == []
 
 
+class TestRasterLanguage:
+    """The view tier chooses a recognition model, so this door takes one.
+
+    A non-English scan recognised with the English model produces
+    English-shaped guesses, and wrong word boxes are wrong SELECTION geometry
+    -- the sweep snaps to the wrong place. The refusals below are what keeps a
+    bad language a named answer rather than a generic OCR failure on a page
+    that is perfectly recognisable with a model that IS installed.
+    """
+
+    def test_takes_a_lang_parameter_defaulting_to_english(self):
+        import inspect
+
+        param = inspect.signature(recognize_raster).parameters.get("lang")
+        assert param is not None
+        assert param.default == "eng"
+
+    @needs_tesseract
+    def test_refuses_a_malformed_language_by_name(self):
+        import base64
+
+        png = base64.b64encode(_text_png("HELLO")).decode("ascii")
+        with pytest.raises(ValueError) as excinfo:
+            recognize_raster(png, lang="../evil", tesseract_path=str(TESSERACT))
+        # Tesseract treats the value as a filename stem, so the shape guard is
+        # what keeps a separator out of the filesystem.
+        assert "../evil" in str(excinfo.value)
+
+    @needs_tesseract
+    def test_refuses_a_well_formed_language_that_is_not_installed(self):
+        # The shape guard passes `zul` -- it is a real ISO 639-2/T code. What
+        # makes it wrong is that no traineddata is staged for it, and without
+        # this check tesseract's own non-zero exit reaches the user as an OCR
+        # failure that names the page instead of the missing model.
+        import base64
+
+        png = base64.b64encode(_text_png("HELLO")).decode("ascii")
+        with pytest.raises(ValueError) as excinfo:
+            recognize_raster(png, lang="zul", tesseract_path=str(TESSERACT))
+        assert "zul" in str(excinfo.value)
+        assert "not installed" in str(excinfo.value)
+
+    @needs_tesseract
+    def test_refuses_a_multi_model_string_naming_one_missing_model(self):
+        # Every model in a '+'-joined string is loaded, so one missing model
+        # fails the whole run; the refusal names the one that is missing.
+        import base64
+
+        png = base64.b64encode(_text_png("HELLO")).decode("ascii")
+        with pytest.raises(ValueError) as excinfo:
+            recognize_raster(png, lang="eng+zul", tesseract_path=str(TESSERACT))
+        assert "zul" in str(excinfo.value)
+
+    @needs_tesseract
+    def test_accepts_an_installed_model(self):
+        import base64
+
+        png = base64.b64encode(_text_png("BONJOUR LE MONDE")).decode("ascii")
+        out = recognize_raster(png, lang="fra", tesseract_path=str(TESSERACT))
+        assert out["words"], "no word boxes came back for an installed model"
+
+
 class TestConfidenceIsCarried:
     def test_word_rows_carry_tesseract_confidence(self):
         _, words = _parse_tsv(tsv("5\t1\t1\t1\t1\t1\t10\t20\t40\t30\t87\tWord"), 1000, 500)

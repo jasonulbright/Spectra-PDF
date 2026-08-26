@@ -235,6 +235,49 @@ async function readNotice(msg: string): Promise<string> {
   return text;
 }
 
+async function openWebDialog(): Promise<void> {
+  expect(await invokeAppCommand('file.openFromWeb')).toBe(true);
+  await waitFor('[data-testid="open-web-dialog"]', 'the open-from-web dialog never opened');
+}
+
+async function typeUrl(url: string): Promise<void> {
+  await browser.execute((value: string) => {
+    const input = document.querySelector(
+      '[data-testid="open-web-url"]',
+    ) as HTMLInputElement | null;
+    if (!input) return;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, url);
+}
+
+/** Give the active document an unsaved change, so File ▸ Save is enabled at
+ * all — Save is disabled on a document nothing has touched. */
+async function dirtyTheDocument(): Promise<void> {
+  await setView('canvas');
+  const pages = await getWorkspacePageIds();
+  await selectCanvasPages([pages[0]]);
+  await rotateSelectedCanvasPages(90);
+  await browser.waitUntil(async () => (await getState()).activeFile !== null, {
+    timeout: 20_000,
+    timeoutMsg: 'the rotate never settled',
+  });
+}
+
+/** Wait until the driver reports `count` window handles. */
+async function waitForHandles(count: number): Promise<string[]> {
+  let handles: string[] = [];
+  await browser.waitUntil(
+    async () => {
+      handles = await browser.getWindowHandles();
+      return handles.length === count;
+    },
+    { timeout: 30_000, interval: 250, timeoutMsg: `never saw ${count} window handles` },
+  );
+  return handles;
+}
+
 // ── the fixture document ──────────────────────────────────────────────────
 
 /**
@@ -244,9 +287,15 @@ async function readNotice(msg: string): Promise<string> {
  * has to hold for one this app never wrote.
  *
  * `/Flags` 0 is FDF by POST — the format the payload preview shows as text,
- * which is what makes "the exact bytes" assertable.
+ * which is what makes "the exact bytes" assertable. A destination may instead
+ * name its own `/Flags` (PDF 32000-1 table 237: bit 3 ExportFormat, bit 4
+ * GetMethod), which is how the URL-encoded-by-GET shape is authored.
  */
-async function makeSubmitFixture(path: string, destinations: Record<string, string>) {
+type Destination = string | { url: string; flags: number };
+
+const HTML_BY_GET = (1 << 2) | (1 << 3);
+
+async function makeSubmitFixture(path: string, destinations: Record<string, Destination>) {
   const doc = await PDFDocument.create();
   const page = doc.addPage([600, 400]);
   const form = doc.getForm();
@@ -257,7 +306,9 @@ async function makeSubmitFixture(path: string, destinations: Record<string, stri
   name.setText('typed-by-the-user');
 
   let y = 300;
-  for (const [field, url] of Object.entries(destinations)) {
+  for (const [field, destination] of Object.entries(destinations)) {
+    const url = typeof destination === 'string' ? destination : destination.url;
+    const flags = typeof destination === 'string' ? 0 : destination.flags;
     const button = form.createTextField(field);
     button.addToPage(page, { x: 320, y, width: 120, height: 20 });
     y -= 26;
@@ -271,7 +322,7 @@ async function makeSubmitFixture(path: string, destinations: Record<string, stri
           S: PDFName.of('SubmitForm'),
           F: PDFString.of(url),
           Fields: fields,
-          Flags: 0,
+          Flags: flags,
         }),
       ),
     );
@@ -304,6 +355,7 @@ describe('the network doors: form submission and open from a web address', () =>
       SendHtml: `${base}/reply-html`,
       SendBounce: `${base}/bounce`,
       SendMail: 'mailto:forms@example.invalid',
+      SendGet: { url: `${base}/collect`, flags: HTML_BY_GET },
     });
   });
 
@@ -525,26 +577,6 @@ describe('the network doors: form submission and open from a web address', () =>
   // ── 5. open from a web address ─────────────────────────────────────────
 
   describe('open from a web address', () => {
-    async function openWebDialog(): Promise<void> {
-      expect(await invokeAppCommand('file.openFromWeb')).toBe(true);
-      await waitFor('[data-testid="open-web-dialog"]', 'the open-from-web dialog never opened');
-    }
-
-    async function typeUrl(url: string): Promise<void> {
-      await browser.execute((value: string) => {
-        const input = document.querySelector(
-          '[data-testid="open-web-url"]',
-        ) as HTMLInputElement | null;
-        if (!input) return;
-        const setter = Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype,
-          'value',
-        )?.set;
-        setter?.call(input, value);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-      }, url);
-    }
-
     it('warns that the address is plain HTTP before anything is fetched', async () => {
       await closeAllFiles();
       await openWebDialog();
@@ -571,19 +603,6 @@ describe('the network doors: form submission and open from a web address', () =>
       expect(String(fetched.headers['user-agent'] ?? '')).toMatch(/^SpectraPDF\//);
       expect(fetched.headers.cookie).toBeUndefined();
     });
-
-    /** Give the downloaded document an unsaved change, so File ▸ Save is
-     * enabled at all — Save is disabled on a document nothing has touched. */
-    async function dirtyTheDocument(): Promise<void> {
-      await setView('canvas');
-      const pages = await getWorkspacePageIds();
-      await selectCanvasPages([pages[0]]);
-      await rotateSelectedCanvasPages(90);
-      await browser.waitUntil(async () => (await getState()).activeFile !== null, {
-        timeout: 20_000,
-        timeoutMsg: 'the rotate never settled',
-      });
-    }
 
     it('routes Save on the downloaded document to Save As, every time', async () => {
       await dirtyTheDocument();
@@ -662,6 +681,202 @@ describe('the network doors: form submission and open from a web address', () =>
       await waitGone('[data-testid="open-web-dialog"]', 'the re-open never completed');
       expect(fixture.log.length).toBe(before + 1);
       expect(fixture.log[before].url).toBe('/doc.pdf');
+    });
+  });
+
+  // ── 7. GET puts the payload on the URL ─────────────────────────────────
+
+  describe('a GET-method submission', () => {
+    /**
+     * `GetMethod` moves the field data onto the query string. That is a
+     * different DISCLOSURE than a POST body — a query string is logged by
+     * every proxy and server on the path — so the consent dialog has to name
+     * the method, and the request that leaves has to actually carry the data
+     * where the method says it goes. Both halves are asserted here, the
+     * second from the server's own log rather than from the app's account of
+     * what it sent.
+     */
+    before(openForm);
+
+    it('names the method in the consent dialog', async () => {
+      await startCanvasFormAction(form, 'SendGet', 'A');
+      await answerConfirm(true, 'the submit confirm never opened');
+      await waitFor(CONSENT, 'the consent dialog never opened');
+
+      const method = (await textOf('[data-testid="submit-consent-method"]')).toLowerCase();
+      expect(method).toContain('get');
+
+      // Export format follows the flag: URL-encoded, not FDF. The payload
+      // preview is the bytes that will ride the query.
+      expect((await textOf(CONSENT)).toLowerCase()).not.toContain('%fdf');
+      const payload = await valueOf('[data-testid="submit-consent-payload"]');
+      expect(payload).toContain('Name=typed-by-the-user');
+    });
+
+    it('sends the payload in the query string, with no body', async () => {
+      const before = fixture.log.length;
+      await clickEl('[data-testid="submit-consent-submit"]');
+
+      await browser.waitUntil(async () => fixture.log.length > before, {
+        timeout: 30_000,
+        timeoutMsg: 'the server never received the GET submission',
+      });
+      expect(fixture.log.length).toBe(before + 1);
+
+      const sent = fixture.log[before];
+      expect(sent.method).toBe('GET');
+      // The data is ON THE URL — the whole point of the method flag.
+      expect(sent.url).toContain('?');
+      expect(sent.url).toContain('Name=typed-by-the-user');
+      expect(sent.url.split('?')[0]).toBe('/collect');
+      // …and nowhere else. A GET that also carried a body would be sending
+      // the form twice, and a server reading only one would see half of it.
+      expect(sent.body).toBe('');
+      expect(sent.headers['content-type']).toBeUndefined();
+      expect(String(sent.headers['user-agent'] ?? '')).toMatch(/^SpectraPDF\//);
+      expect(sent.headers.cookie).toBeUndefined();
+
+      expect(await readNotice('the GET submission never reported its result')).toContain(
+        `${base}/collect`,
+      );
+    });
+  });
+
+  // ── 8. the private-address split ───────────────────────────────────────
+
+  describe('a private destination', () => {
+    /**
+     * The two doors take OPPOSITE decisions about the same address, and the
+     * difference is who chose it.
+     *
+     *   * A submit destination is DOCUMENT-chosen. A file that arrives by
+     *     mail can name a printer, a router or a service on the user's own
+     *     LAN, and the user never typed that address. It is REFUSED by name.
+     *   * An open address is USER-typed. A private host there is plausibly a
+     *     deliberate LAN fetch, so it is fetched — with the dialog saying
+     *     plainly what kind of address it is first.
+     *
+     * The WARN half is driven end to end below against the loopback fixture,
+     * which is a private address by construction.
+     *
+     * The REFUSE half cannot be driven through this binary: the e2e build
+     * exports `SPECTRAPDF_E2E`, which opens `net.rs`'s `env_allows_private`
+     * carve-out for the whole process — the same carve-out that lets every
+     * other case in this spec reach 127.0.0.1 at all. Turning it off would
+     * take the rest of the file down with it. The refusal itself is proven
+     * against the production policy (`allow_private = false`) by the Rust
+     * unit test `a_submit_to_a_hostname_that_resolves_private_is_refused` in
+     * `src-tauri/src/net.rs`, which asserts the by-name refusal and that no
+     * connection is attempted. What is asserted here is the half this
+     * process can honestly observe.
+     */
+    it('warns that an open address is private, and still opens it', async () => {
+      await closeAllFiles();
+      await openWebDialog();
+      await typeUrl(`${base}/doc.pdf`);
+      await browser.waitUntil(
+        async () => (await textOf('[data-testid="open-web-target"]')).includes(`${base}/doc.pdf`),
+        { timeout: 20_000, timeoutMsg: 'the dialog never showed the address it would fetch' },
+      );
+
+      // Named as private, not merely as insecure: those are two warnings
+      // about two different things and the address is both.
+      expect(await present('[data-testid="open-web-private"]')).toBe(true);
+      expect(await textOf('[data-testid="open-web-private"]')).not.toBe('');
+      expect(await present('[data-testid="open-web-insecure"]')).toBe(true);
+
+      // Warned is not refused: the user typed it, so Open proceeds.
+      const before = fixture.log.length;
+      await clickEl('[data-testid="open-web-open"]');
+      await waitGone('[data-testid="open-web-dialog"]', 'a warned private open never completed');
+
+      expect(fixture.log.length).toBe(before + 1);
+      expect(fixture.log[before].url).toBe('/doc.pdf');
+      const state = await getState();
+      expect(state.fileCount).toBeGreaterThan(0);
+      expect(state.activeFile?.pageCount).toBe(1);
+    });
+  });
+
+  // ── 9. the origin crosses windows ──────────────────────────────────────
+
+  describe('a downloaded document moved to a second window', () => {
+    /**
+     * `webOrigin` is what routes File ▸ Save to Save As: a download has no
+     * home on disk to save back to, and saving over its scratch copy would
+     * discard the user's work into the temp tree. The record lives in Rust
+     * managed state keyed by path, NOT in the renderer, precisely because a
+     * second window is a fresh module scope that starts empty. Move-to-new-
+     * window carries the path and nothing else, so if the second window
+     * re-derived the origin from its own memory it would have none — and
+     * Save there would write over the temp file silently.
+     */
+    let mainHandle = '';
+    let popped = '';
+
+    after(async () => {
+      // Leave the session on one window however this block ended.
+      const handles = await browser.getWindowHandles();
+      if (popped && handles.includes(popped)) {
+        await browser.switchToWindow(popped);
+        await browser.execute(() => {
+          void (window as any).__SPECTRA_TEST__.closeThisWindow();
+        });
+      }
+      if (mainHandle) {
+        await browser.switchToWindow(mainHandle);
+        await waitForHandles(1);
+      }
+    });
+
+    it('downloads a document in the first window', async () => {
+      await closeAllFiles();
+      mainHandle = (await browser.getWindowHandles())[0];
+
+      await openWebDialog();
+      await typeUrl(`${base}/doc.pdf`);
+      await clickEl('[data-testid="open-web-open"]');
+      await waitGone('[data-testid="open-web-dialog"]', 'the download never completed');
+      expect((await getState()).fileCount).toBe(1);
+    });
+
+    it('moves it to a second window, which claims it', async () => {
+      const moved = (await getState()).activeFile!.path;
+      expect(await invokeAppCommand('window.moveToNewWindow')).toBe(true);
+
+      const handles = await waitForHandles(2);
+      popped = handles.find((h) => h !== mainHandle)!;
+
+      await browser.waitUntil(async () => (await getState()).fileCount === 0, {
+        timeout: 30_000,
+        timeoutMsg: 'the moved document never left the first window',
+      });
+
+      await browser.switchToWindow(popped);
+      await waitForHarness(30_000);
+      const state = await getState();
+      expect(state.fileCount).toBe(1);
+      expect(state.activeFile?.path.toLowerCase()).toBe(moved.toLowerCase());
+    });
+
+    it('still routes Save to Save As over there', async () => {
+      const kept = resolve(tmp, 'kept-in-the-second-window.pdf');
+      await dirtyTheDocument();
+      const onTemp = (await getState()).activeFile!.path;
+      await answerNextSaveDialog(kept);
+      expect(await invokeAppCommand('file.save')).toBe(true);
+
+      await browser.waitUntil(async () => existsSync(kept), {
+        timeout: 40_000,
+        timeoutMsg: 'File ▸ Save in the second window never reached the Save As picker',
+      });
+      expect(await takenSaveDialogDefault()).not.toBeNull();
+
+      // Save As wrote a COPY: the download is still on its scratch path, and
+      // nothing was written over it.
+      const state = await getState();
+      expect(state.activeFile?.path).toBe(onTemp);
+      expect(state.activeFile?.path).not.toBe(kept);
     });
   });
 });

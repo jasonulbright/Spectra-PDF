@@ -550,6 +550,7 @@ function FieldRow({
         {label}
         {field.type !== 'button' && (
           <input
+            data-testid={testId}
             type="text"
             disabled
             value={typeof value === 'string' ? value : Array.isArray(value) ? value.join(', ') : ''}

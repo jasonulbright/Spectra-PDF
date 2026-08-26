@@ -191,6 +191,28 @@ def _validated_lang(lang: str) -> str:
     return lang
 
 
+def _installed_lang(lang: str, tessdata: Path) -> str:
+    """The shape guard above, plus: every model named is actually STAGED.
+
+    The shape guard only proves nothing reaches the filesystem that should not.
+    A well-formed stem with no traineddata behind it is the other half: tesseract
+    exits non-zero with its own wording, which reaches the user as an OCR
+    failure on a page that is perfectly recognisable with a model that IS
+    installed. Refuse BY NAME instead, naming the model that is missing, so the
+    answer is actionable rather than a generic failure.
+
+    Applied at the one spawn point rather than per entry point: `recognize`,
+    `recognize_image` and `recognize_raster` all load models from the same
+    staged tessdata, and a check on one door is a check that the other two
+    silently skip.
+    """
+    lang = _validated_lang(lang)
+    for code in lang.split("+"):
+        if not (tessdata / f"{code}.traineddata").is_file():
+            raise ValueError(f"Recognition language is not installed: {code}")
+    return lang
+
+
 def _tessdata_for(exe: Path) -> Path:
     """tessdata sits beside the executable in the vendored tree.
 
@@ -235,6 +257,7 @@ def _run_tesseract(png: Path | bytes, lang: str, exe: Path, tessdata: Path) -> t
     the user has not asked to modify, and a temp file would put their content
     on disk for a read-only gesture.
     """
+    lang = _installed_lang(lang, tessdata)
     from_bytes = isinstance(png, (bytes, bytearray))
     width, height = _png_size_bytes(bytes(png[:24])) if from_bytes else _png_size(png)
     cmd = [

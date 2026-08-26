@@ -15,6 +15,21 @@ export interface SignatureEntry {
    * `trusted` is false, and on a trusted chain whose anchor matched no
    * configured set — reported rather than guessed. */
   trust_source?: 'user' | 'system' | 'eutl' | 'msctl' | null;
+  /** Why an otherwise valid chain is NOT anchored: the source admits this
+   * authority only for certificates issued before `cutoff`, and this chain's
+   * was issued later. Structured rather than a message, so the surface decides
+   * the wording and no caller matches on prose. Null when nothing applies. */
+  anchor_restriction?: {
+    source: 'msctl';
+    /** Which chain the cutoff caught — the signer's or its timestamp's. */
+    chain: 'signer' | 'timestamp';
+    /** ISO instants: when the offending certificate was issued, and the
+     * moment the program's admission stops. */
+    issued: string;
+    cutoff: string;
+    subject: string | null;
+    anchor: string | null;
+  } | null;
   coverage: string;
   covers_whole_document: boolean;
   modified_after_signing: boolean;
@@ -146,6 +161,28 @@ export const SIGNATURE_STATUS_LABEL = {
   modified: 'panel.sig.statusModified',
   valid: 'panel.sig.statusValid',
 } as const satisfies Record<SignatureStatus, string>;
+
+/** Which certificate the cutoff refused, in the sentence's own words. The two
+ *  chains are different claims about different certificates: the signer's, and
+ *  the one inside the RFC-3161 timestamp — a signature whose own chain is fine
+ *  can still be refused on its timestamp's, and telling that user their signing
+ *  certificate was issued too late is a false statement on the one surface
+ *  whose job is answering whether the file can be trusted. */
+export const ANCHOR_RESTRICTION_LABEL = {
+  signer: 'panel.sig.anchorIssuanceCutoff',
+  timestamp: 'panel.sig.anchorIssuanceCutoffTimestamp',
+} as const satisfies Record<'signer' | 'timestamp', string>;
+
+/** The catalog key for a restriction, defaulting to the signer wording — the
+ *  claim that holds for a chain field this build does not know, since a
+ *  restriction is always reported against the signature itself. */
+export function anchorRestrictionLabel(
+  restriction: { chain?: string | null } | null | undefined,
+): (typeof ANCHOR_RESTRICTION_LABEL)[keyof typeof ANCHOR_RESTRICTION_LABEL] {
+  return restriction?.chain === 'timestamp'
+    ? ANCHOR_RESTRICTION_LABEL.timestamp
+    : ANCHOR_RESTRICTION_LABEL.signer;
+}
 
 // Certification is a SECOND axis, orthogonal to validity: a certification
 // signature can be valid, modified or invalid exactly like an approval one,

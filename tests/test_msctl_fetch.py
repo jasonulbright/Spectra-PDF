@@ -56,6 +56,21 @@ def purposes(*oids: str) -> bytes:
     return fetch_msctl._PurposeList(list(oids)).dump()
 
 
+def root_program_flags(qualifier: bytes | None = None) -> bytes:
+    """A property-83 blob in the shape the published list carries: a
+    CertificatePolicies whose one qualifier is the program's flags."""
+    # Hand-built rather than composed through asn1crypto's CertificatePolicies:
+    # the qualifier's type is chosen by its identifier, and this identifier is
+    # not one asn1crypto knows, so the value has to be placed as raw bytes —
+    # which is also how the published list is read back.
+    value = qualifier if qualifier is not None else b"\x03\x02\x00\xc0"
+    info = _tlv(0x30, core.ObjectIdentifier(fetch_msctl.OID_ROOT_PROGRAM_FLAGS).dump() + value)
+    policy = _tlv(
+        0x30, core.ObjectIdentifier("2.23.140.1.1").dump() + _tlv(0x30, info)
+    )
+    return _tlv(0x30, policy)
+
+
 def certificate(common_name: str) -> bytes:
     """A self-signed certificate, as DER. Only its bytes matter here — nothing
     in the tool validates the certificate itself, and it must not: the trust
@@ -487,22 +502,102 @@ class TestDistrustIsModelled:
         assert verdict["signer_anchors"] == [signer]
         assert verdict["timestamp_anchors"] == [stamper]
 
-    def test_an_unmodelled_policy_restriction_anchors_but_is_counted(self):
-        # Property 83 constrains issuance dates, which the validator takes no
-        # per-anchor form of, so the subject anchors normally. The count is what
-        # makes the size of that gap auditable across refreshes instead of only
-        # being a paragraph in the tool's docstring.
+    def test_root_program_policies_anchor_normally_and_are_counted(self):
+        # Property 83 carries the program's own flags and no date, so it
+        # restricts nothing here. The count is what makes a change in that
+        # reading visible across refreshes.
         restricted = certificate("PolicyRestricted")
         plain = certificate("Plain")
         verdict = self._classify([
             (restricted, {
                 fetch_msctl.PROP_ENHANCED_KEY_USAGE: purposes(DOCUMENT_SIGNING),
-                fetch_msctl.PROP_ROOT_PROGRAM_POLICIES: b"\x04\x02\x00\x00",
+                fetch_msctl.PROP_ROOT_PROGRAM_POLICIES: root_program_flags(),
             }),
             (plain, {fetch_msctl.PROP_ENHANCED_KEY_USAGE: purposes(DOCUMENT_SIGNING)}),
         ])
         assert sorted(verdict["signer_anchors"]) == sorted([restricted, plain])
-        assert verdict["unmodelled_policy_restriction"] == 1
+        assert verdict["root_program_policy_subjects"] == 1
+        assert verdict["constraints"] == {}
+
+    def test_a_policy_qualifier_carrying_a_time_refuses(self):
+        # The whole reason property 83 is parsed rather than ignored: the claim
+        # that the issuance constraint lives only in property 126 has to be
+        # re-established against each published list.
+        with pytest.raises(fetch_msctl.Refused, match="carries a time"):
+            fetch_msctl.root_program_policies(
+                root_program_flags(b"\x18\x0f20250101000000Z")
+            )
+
+    def test_an_unknown_policy_qualifier_refuses(self):
+        unknown = _tlv(
+            0x30,
+            _tlv(
+                0x30,
+                core.ObjectIdentifier("2.23.140.1.1").dump()
+                + _tlv(
+                    0x30,
+                    _tlv(
+                        0x30,
+                        core.ObjectIdentifier("1.2.3.4").dump() + b"\x05\x00",
+                    ),
+                ),
+            ),
+        )
+        with pytest.raises(fetch_msctl.Refused, match="unknown qualifier"):
+            fetch_msctl.root_program_policies(unknown)
+
+    def test_an_issuance_cutoff_is_carried_not_applied(self):
+        # The subject stays an authority: it is in the program for everything it
+        # issued before the moment, so dropping it would refuse signatures the
+        # program still vouches for. The cutoff travels as data instead.
+        constrained = certificate("Constrained")
+        cutoff = datetime.datetime(2021, 6, 1, tzinfo=datetime.timezone.utc)
+        verdict = self._classify([
+            (constrained, {
+                fetch_msctl.PROP_ENHANCED_KEY_USAGE: purposes(DOCUMENT_SIGNING),
+                fetch_msctl.PROP_NOT_BEFORE: filetime(cutoff),
+            }),
+        ])
+        assert verdict["signer_anchors"] == [constrained]
+        entry = verdict["constraints"][hashlib.sha256(constrained).hexdigest()]
+        assert entry == {"not_before": cutoff.isoformat(), "purposes": None}
+
+    def test_a_cutoff_narrowed_to_purposes_records_them(self):
+        constrained = certificate("Narrowed")
+        cutoff = datetime.datetime(2022, 1, 1, tzinfo=datetime.timezone.utc)
+        verdict = self._classify([
+            (constrained, {
+                fetch_msctl.PROP_ENHANCED_KEY_USAGE: purposes(DOCUMENT_SIGNING),
+                fetch_msctl.PROP_NOT_BEFORE: filetime(cutoff),
+                fetch_msctl.PROP_NOT_BEFORE_PURPOSES: purposes(EMAIL_PROTECTION),
+            }),
+        ])
+        entry = verdict["constraints"][hashlib.sha256(constrained).hexdigest()]
+        assert entry["purposes"] == [EMAIL_PROTECTION]
+
+    def test_a_subject_with_no_cutoff_records_none(self):
+        plain = certificate("Plain")
+        verdict = self._classify([
+            (plain, {fetch_msctl.PROP_ENHANCED_KEY_USAGE: purposes(DOCUMENT_SIGNING)}),
+        ])
+        assert verdict["constraints"] == {}
+
+    def test_a_dropped_subjects_cutoff_never_reaches_the_output(self):
+        # A subject the disallowed-after moment removed is not an anchor, so a
+        # constraint recorded for it would name a certificate nothing anchors.
+        withdrawn = certificate("Withdrawn")
+        verdict = self._classify([
+            (withdrawn, {
+                fetch_msctl.PROP_ENHANCED_KEY_USAGE: purposes(DOCUMENT_SIGNING),
+                fetch_msctl.PROP_DISALLOWED_AFTER: filetime(
+                    datetime.datetime(2019, 2, 1, tzinfo=datetime.timezone.utc)
+                ),
+                fetch_msctl.PROP_NOT_BEFORE: filetime(
+                    datetime.datetime(2018, 2, 1, tzinfo=datetime.timezone.utc)
+                ),
+            }),
+        ])
+        assert verdict["constraints"] == {}
 
     def test_a_past_disallowed_after_moment_drops_the_subject_entirely(self):
         withdrawn = certificate("Withdrawn")
@@ -699,14 +794,67 @@ class TestTheProof:
         # The published list always carries withdrawn subjects. Excluding none
         # of them means the property stopped being read.
         verdict = {
-            "rows": [{"sha1": "cc", "purposes": "signer,timestamp"}],
+            "rows": [
+                {"sha1": "cc", "sha256": "dd", "purposes": "signer,timestamp",
+                 "issued_before": ""}
+            ],
             "naive_signer": {"cc"},
             "naive_timestamp": {"cc"},
             "dropped_by_date": set(),
+            "constraints": {},
             "excluded": {"disallowed_after_a_past_moment": 0},
         }
         fetch_msctl.prove(verdict)  # fine for a synthetic input
         with pytest.raises(fetch_msctl.Refused, match="not being applied"):
+            fetch_msctl.prove(verdict, require_a_dated_exclusion=True)
+
+    def test_an_anchor_whose_cutoff_went_missing_refuses(self):
+        # The failure this guards: the constraint stops being carried and the
+        # anchor silently widens back to unrestricted.
+        verdict = {
+            "rows": [
+                {"sha1": "cc", "sha256": "dd", "purposes": "signer",
+                 "issued_before": "2021-06-01"}
+            ],
+            "naive_signer": {"cc"},
+            "naive_timestamp": set(),
+            "dropped_by_date": set(),
+            "constraints": {},
+            "excluded": {"disallowed_after_a_past_moment": 1},
+        }
+        with pytest.raises(fetch_msctl.Refused, match="the bundle does not record"):
+            fetch_msctl.prove(verdict)
+
+    def test_a_cutoff_for_something_that_is_not_an_anchor_refuses(self):
+        verdict = {
+            "rows": [
+                {"sha1": "cc", "sha256": "dd", "purposes": "signer",
+                 "issued_before": ""}
+            ],
+            "naive_signer": {"cc"},
+            "naive_timestamp": set(),
+            "dropped_by_date": set(),
+            "constraints": {"ee": {"not_before": "2021-06-01T00:00:00+00:00",
+                                   "purposes": None}},
+            "excluded": {"disallowed_after_a_past_moment": 1},
+        }
+        with pytest.raises(fetch_msctl.Refused, match="is not an anchor"):
+            fetch_msctl.prove(verdict)
+
+    def test_live_data_carrying_no_cutoff_at_all_refuses(self):
+        verdict = {
+            "rows": [
+                {"sha1": "cc", "sha256": "dd", "purposes": "signer,timestamp",
+                 "issued_before": ""}
+            ],
+            "naive_signer": {"cc"},
+            "naive_timestamp": {"cc"},
+            "dropped_by_date": set(),
+            "constraints": {},
+            "excluded": {"disallowed_after_a_past_moment": 1},
+        }
+        fetch_msctl.prove(verdict)
+        with pytest.raises(fetch_msctl.Refused, match="not being read"):
             fetch_msctl.prove(verdict, require_a_dated_exclusion=True)
 
 
