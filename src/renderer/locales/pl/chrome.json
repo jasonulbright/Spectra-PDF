@@ -5952,6 +5952,7 @@
   "refusal.scan.notResponding": "Skaner przestał odpowiadać.",
   "refusal.scan.paperJam": "Usuń zacięty papier i zeskanuj ponownie.",
   "refusal.scan.paperProblem": "Sprawdź papier w podajniku.",
+  "refusal.scan.scratchFull": "Zbyt wiele skanów jest nadal otwartych. Zamknij część z nich lub usuń foldery w {{folder}}, a następnie spróbuj ponownie.",
   "refusal.scan.settingRejected": "Skaner odrzucił jedno z żądanych ustawień.",
   "refusal.symbolSet.builtinId": "„{{id}}” to zestaw wbudowany — nadaj importowanemu zestawowi własny identyfikator.",
   "refusal.symbolSet.duplicateId": "Zestaw używa identyfikatora „{{id}}” dwukrotnie.",

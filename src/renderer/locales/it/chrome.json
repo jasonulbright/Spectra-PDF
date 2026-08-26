@@ -5830,6 +5830,7 @@
   "refusal.scan.notResponding": "Lo scanner ha smesso di rispondere.",
   "refusal.scan.paperJam": "Rimuovi la carta inceppata, poi acquisisci di nuovo.",
   "refusal.scan.paperProblem": "Controlla la carta nell’alimentatore.",
+  "refusal.scan.scratchFull": "Troppe acquisizioni sono ancora aperte. Chiudine alcune oppure elimina le cartelle in {{folder}}, poi riprova.",
   "refusal.scan.settingRejected": "Lo scanner ha rifiutato una delle impostazioni richieste.",
   "refusal.symbolSet.builtinId": "«{{id}}» è un set integrato — assegnare al set importato un ID proprio.",
   "refusal.symbolSet.duplicateId": "Il set usa due volte l’ID «{{id}}».",

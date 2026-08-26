@@ -13,5 +13,6 @@
   "scan.notResponding",
   "scan.paperJam",
   "scan.paperProblem",
+  "scan.scratchFull",
   "scan.settingRejected"
 ]

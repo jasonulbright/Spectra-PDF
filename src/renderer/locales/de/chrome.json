@@ -5708,6 +5708,7 @@
   "refusal.scan.notResponding": "Der Scanner antwortet nicht mehr.",
   "refusal.scan.paperJam": "Beheben Sie den Papierstau und scannen Sie erneut.",
   "refusal.scan.paperProblem": "Prüfen Sie das Papier im Einzug.",
+  "refusal.scan.scratchFull": "Es sind zu viele Scans geöffnet. Schließen Sie einige oder entfernen Sie die Ordner in {{folder}}, und versuchen Sie es erneut.",
   "refusal.scan.settingRejected": "Der Scanner hat eine der angeforderten Einstellungen abgelehnt.",
   "refusal.symbolSet.builtinId": "„{{id}}“ ist ein integrierter Satz – geben Sie dem importierten Satz eine eigene ID.",
   "refusal.symbolSet.duplicateId": "Der Satz verwendet die ID „{{id}}“ zweimal.",

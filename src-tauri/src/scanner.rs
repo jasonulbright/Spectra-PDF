@@ -49,14 +49,16 @@
 #![cfg(windows)]
 
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::fs::OpenOptionsExt;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, Once, OnceLock, Weak};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use windows::core::{implement, Interface, BSTR, GUID, HRESULT, PCWSTR, PWSTR};
 use windows::Win32::Devices::ImageAcquisition::{
@@ -87,7 +89,8 @@ use windows::Win32::System::Com::StructuredStorage::{
     PropVariantClear, PROPSPEC, PROPSPEC_0, PROPSPEC_KIND, PROPVARIANT,
 };
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, IStream, CLSCTX_LOCAL_SERVER,
+    CoCreateInstance, CoInitializeEx, CoTaskMemAlloc, CoTaskMemFree, CoUninitialize, IStream,
+    CLSCTX_LOCAL_SERVER,
     COINIT_APARTMENTTHREADED, STGM_CREATE, STGM_SHARE_EXCLUSIVE, STGM_WRITE, TYMED_FILE,
 };
 use windows::Win32::System::Variant::{
@@ -113,6 +116,13 @@ pub struct ScanRefusal {
     pub message: String,
     /// `0x8021000D` for an unnamed HRESULT; absent for a named row.
     pub code: Option<String>,
+    /// A folder the user can act on, for the rows whose remedy is a path.
+    ///
+    /// Carried as a FIELD rather than left inside `message`: the renderer
+    /// interpolates it into its own catalog sentence, which a surface that had
+    /// to parse the English one could not do.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
 }
 
 impl std::fmt::Display for ScanRefusal {
@@ -127,6 +137,7 @@ impl ScanRefusal {
             key,
             message: message.to_string(),
             code: None,
+            folder: None,
         }
     }
 }
@@ -208,6 +219,7 @@ pub fn refusal_for(hr: HRESULT) -> ScanRefusal {
         key: "scan.failed",
         message: format!("The scanner reported an error ({hex})."),
         code: Some(hex),
+        folder: None,
     }
 }
 
@@ -786,21 +798,27 @@ fn propvariant_i32(value: i32) -> PROPVARIANT {
     var
 }
 
-/// A `VT_CLSID` PROPVARIANT BORROWING `guid`.
+/// A `VT_CLSID` PROPVARIANT whose payload is TASK-ALLOCATED, or `None` when the
+/// allocation fails.
 ///
-/// The variant points at the caller's GUID rather than owning a task-allocated
-/// copy, which is why it must never reach `PropVariantClear`: that would hand
-/// `CoTaskMemFree` a pointer it did not allocate. `WriteMultiple` only reads
-/// the value, so borrowing is enough and the caller keeps `guid` alive across
-/// the call.
-fn propvariant_guid(guid: &mut GUID) -> PROPVARIANT {
+/// `IWiaPropertyStorage::WriteMultiple` clears the variant it is handed, so the
+/// `puuid` payload reaches `CoTaskMemFree`. A payload that is not task-allocated
+/// corrupts the heap at that free — `WIA_IPA_FORMAT` written from a borrowed
+/// stack GUID aborts the process with `STATUS_HEAP_CORRUPTION` before the
+/// transfer starts. Ownership passes to the callee; nothing here frees it.
+fn propvariant_guid(value: GUID) -> Option<PROPVARIANT> {
+    let payload = unsafe { CoTaskMemAlloc(core::mem::size_of::<GUID>()) } as *mut GUID;
+    if payload.is_null() {
+        return None;
+    }
+    unsafe { payload.write(value) };
     let mut var = PROPVARIANT::default();
     unsafe {
         let inner = &mut *var.Anonymous.Anonymous;
         inner.vt = VT_CLSID;
-        inner.Anonymous.puuid = guid as *mut GUID;
+        inner.Anonymous.puuid = payload;
     }
-    var
+    Some(var)
 }
 
 /// # Safety
@@ -873,9 +891,11 @@ unsafe fn write_i32(store: &IWiaPropertyStorage, id: u32, value: i32) -> bool {
 
 /// # Safety
 /// `store` must be a live property storage on the calling apartment.
-unsafe fn write_guid(store: &IWiaPropertyStorage, id: u32, mut value: GUID) -> bool {
+unsafe fn write_guid(store: &IWiaPropertyStorage, id: u32, value: GUID) -> bool {
     let spec = propspec(id);
-    let var = propvariant_guid(&mut value);
+    let Some(var) = propvariant_guid(value) else {
+        return false;
+    };
     unsafe { store.WriteMultiple(1, &spec, &var, 2).is_ok() }
 }
 
@@ -987,6 +1007,10 @@ unsafe fn domain_from(flags: u32, attr: &PROPVARIANT) -> PropertyDomain {
 /// `last_used` is the caller's stored preference; it survives only when it is
 /// still one of the enumerated ids.
 pub fn enumerate(last_used: Option<String>) -> Result<ScannerList, ScanRefusal> {
+    // The scanner subsystem's first use on either surface, so this is where
+    // the scratch sweep is paid for — before a run has anything staged, and
+    // never on a launch that does not scan.
+    sweep_scan_scratch_once();
     let scanners = in_apartment(|| unsafe {
         let manager: IWiaDevMgr2 = CoCreateInstance(&WiaDevMgr2, None, CLSCTX_LOCAL_SERVER)
             .map_err(refusal_from)?;
@@ -1818,6 +1842,7 @@ unsafe fn acquire(
             key: "scan.failed",
             message: format!("Could not create the scan scratch folder: {e}"),
             code: None,
+            folder: None,
         })?;
 
         let state = Arc::new(TransferState {
@@ -1996,24 +2021,176 @@ fn scan_scratch_root() -> PathBuf {
     std::env::temp_dir().join("spectrapdf").join("scan-scratch")
 }
 
-/// A fresh, empty scratch folder for one run.
-pub fn new_scan_scratch() -> Result<PathBuf, ScanRefusal> {
-    let root = scan_scratch_root();
-    for n in 0..10_000u32 {
-        let candidate = root.join(format!("scan-{n}"));
-        if !candidate.exists() {
-            std::fs::create_dir_all(&candidate).map_err(|e| ScanRefusal {
-                key: "scan.failed",
-                message: format!("Could not create the scan scratch folder: {e}"),
-                code: None,
-            })?;
-            return Ok(candidate);
+/// The marker file a live run holds OPEN inside its own scratch folder.
+///
+/// A held handle, never a pid file: a pid can be reused and a crash leaves the
+/// file behind claiming the run is alive, whereas a handle is closed by the
+/// kernel when the owning process dies however it dies. The handle is taken
+/// with no sharing, so a second process — or a second window of this one —
+/// cannot open it while the owner holds it, and neither can delete it. That is
+/// the whole liveness test, and it needs no cross-process bookkeeping.
+const SCRATCH_LOCK: &str = ".live";
+
+/// How long an UNLOCKED run folder survives before the sweeper takes it.
+///
+/// Long enough that no ordinary review session is at risk (a folder is locked
+/// for as long as its run is live, so the age rule only ever governs folders
+/// nothing holds — including those left by a version that had no marker).
+const SCRATCH_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// The lock handles this process holds, keyed by the run folder.
+///
+/// Held here rather than in the caller so a discard can release the handle
+/// before removing the folder — the no-sharing handle blocks its own delete.
+fn scratch_locks() -> &'static Mutex<HashMap<PathBuf, File>> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, File>>> = OnceLock::new();
+    LOCKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Release this process's hold on a run folder's marker.
+///
+/// Compared canonically, for the same reason `inside_scan_scratch` is: the
+/// path arriving from a caller need not be spelled the way it was handed out,
+/// and a handle left held would refuse the folder's own delete.
+fn release_scratch_lock(path: &Path) {
+    if let Ok(mut held) = scratch_locks().lock() {
+        let target = path.canonicalize().ok();
+        held.retain(|dir, _| dir != path && dir.canonicalize().ok() != target);
+    }
+}
+
+/// Take the run folder's liveness marker, failing if it cannot be held.
+fn hold_scratch_lock(dir: &Path) -> std::io::Result<File> {
+    OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .share_mode(0)
+        .open(dir.join(SCRATCH_LOCK))
+}
+
+/// Does a live run still own this folder?
+///
+/// Answered by trying to take the marker exclusively: an open that succeeds
+/// proves nobody holds it, a sharing violation proves somebody does, and a
+/// folder with no marker at all (an older version's, or one whose creation
+/// raced) is not live. Any other error answers LIVE — the sweeper deletes only
+/// what it can prove is abandoned.
+fn scratch_is_live(dir: &Path) -> bool {
+    match OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(dir.join(SCRATCH_LOCK))
+    {
+        Ok(_) => false,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => true,
+    }
+}
+
+/// Delete every abandoned run folder under `root`, and report how many went.
+///
+/// Abandoned means both: no live owner holds its marker, AND it has not been
+/// written to within `max_age`. Either test alone is wrong — the marker alone
+/// would take a folder a crashed run left seconds ago while the user is still
+/// deciding what to do about the crash, and the age alone would take a folder
+/// out from under a long review or a second window's live run.
+///
+/// A symlink is not a directory here (`read_dir`'s file type does not follow
+/// one), so a link planted in the root is skipped rather than followed.
+fn sweep_scratch_root(root: &Path, max_age: Duration) -> usize {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return 0;
+    };
+    let now = SystemTime::now();
+    let mut swept = 0;
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let dir = entry.path();
+        if scratch_is_live(&dir) {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .is_some_and(|age| age >= max_age);
+        if !stale {
+            continue;
+        }
+        if std::fs::remove_dir_all(&dir).is_ok() {
+            swept += 1;
         }
     }
-    Err(ScanRefusal::named(
-        "scan.failed",
-        "Could not allocate a scan scratch folder.",
-    ))
+    swept
+}
+
+/// Sweep the scan scratch root once per process, on first use of the scanner.
+///
+/// On first use rather than at boot: a user who never scans should not pay for
+/// a directory walk, and by the time anything here runs the walk is dwarfed by
+/// opening a device. Failure is silent by design — a scratch that cannot be
+/// swept must not stop a scan.
+fn sweep_scan_scratch_once() {
+    static SWEPT: Once = Once::new();
+    SWEPT.call_once(|| {
+        sweep_scratch_root(&scan_scratch_root(), SCRATCH_MAX_AGE);
+    });
+}
+
+/// The highest run index the allocator will try before refusing.
+const SCRATCH_INDEX_LIMIT: u32 = 10_000;
+
+/// A fresh, empty scratch folder for one run, with its liveness marker held.
+pub fn new_scan_scratch() -> Result<PathBuf, ScanRefusal> {
+    sweep_scan_scratch_once();
+    allocate_scan_scratch(&scan_scratch_root(), SCRATCH_INDEX_LIMIT)
+}
+
+/// The allocator, over an explicit root and ceiling so exhaustion is reachable
+/// in a test without ten thousand folders.
+fn allocate_scan_scratch(root: &Path, limit: u32) -> Result<PathBuf, ScanRefusal> {
+    let create_failed = |e: std::io::Error| ScanRefusal {
+        key: "scan.failed",
+        message: format!("Could not create the scan scratch folder: {e}"),
+        code: None,
+        folder: None,
+    };
+    std::fs::create_dir_all(root).map_err(create_failed)?;
+    for n in 0..limit {
+        let candidate = root.join(format!("scan-{n}"));
+        // `create_dir` is the claim, not a preceding `exists` test: two runs
+        // starting together would both see the same index free.
+        match std::fs::create_dir(&candidate) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(create_failed(e)),
+        }
+        let lock = hold_scratch_lock(&candidate).map_err(|e| {
+            let _ = std::fs::remove_dir_all(&candidate);
+            create_failed(e)
+        })?;
+        scratch_locks()
+            .lock()
+            .expect("the scratch lock table is not poisoned")
+            .insert(candidate.clone(), lock);
+        return Ok(candidate);
+    }
+    // Every index taken AFTER a sweep means ten thousand runs are genuinely
+    // live, which no reclaiming can help. The refusal names the root so the
+    // remedy is something the user can act on rather than a dead end.
+    Err(ScanRefusal {
+        key: "scan.scratchFull",
+        message: format!(
+            "Could not allocate a scan scratch folder: every run folder under {} is in use.",
+            root.display()
+        ),
+        code: None,
+        folder: Some(root.to_string_lossy().to_string()),
+    })
 }
 
 /// Is this path a scan scratch folder this process may delete?
@@ -2036,10 +2213,14 @@ pub fn discard_scan_scratch(path: &Path) -> Result<(), ScanRefusal> {
             "That folder is not a scan scratch folder.",
         ));
     }
+    // The liveness marker is held with no sharing, so it blocks its own
+    // delete: release this process's handle before the folder goes.
+    release_scratch_lock(path);
     std::fs::remove_dir_all(path).map_err(|e| ScanRefusal {
         key: "scan.failed",
         message: format!("Could not remove the scan scratch folder: {e}"),
         code: None,
+        folder: None,
     })
 }
 
@@ -2278,9 +2459,15 @@ pub async fn scan_acquire(
             let _ = on_event.send(event);
         }),
     );
-    if outcome.is_err() {
-        // A failed run leaves nothing worth keeping, and the folder it would
-        // otherwise leave behind is one nothing will ever come back for.
+    // A run nothing can come back for is swept here rather than left for the
+    // age-based sweeper. A failure leaves nothing worth keeping; a run that
+    // completed ZERO pages leaves a folder whose name reaches the caller only
+    // on a staged page, so with no page nothing would ever name it again.
+    let barren = match &outcome {
+        Ok(result) => result.pages.is_empty(),
+        Err(_) => true,
+    };
+    if barren {
         let _ = discard_scan_scratch(&dir);
     }
     outcome
@@ -2985,6 +3172,7 @@ mod tests {
             "scan.busy",
             "scan.cancelledAtDevice",
             "scan.notResponding",
+            "scan.scratchFull",
         ]);
         for key in &produced {
             assert!(
@@ -3051,6 +3239,117 @@ mod tests {
             discard_scan_scratch(&scratch).expect_err("a gone folder refuses").key,
             "scan.failed"
         );
+    }
+
+    /// A scratch root of this test's own, so a sweep here can never reach a
+    /// live run's folder under the real root.
+    fn temp_scratch_root(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir()
+            .join("spectrapdf-scratch-tests")
+            .join(format!("{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a test root is creatable");
+        root
+    }
+
+    #[test]
+    fn the_sweeper_takes_only_folders_that_are_both_unlocked_and_old() {
+        let root = temp_scratch_root("sweep");
+        let live = allocate_scan_scratch(&root, 8).expect("a live run allocates");
+        let abandoned = allocate_scan_scratch(&root, 8).expect("a second run allocates");
+        // The abandoned run's process is gone: its marker is no longer held.
+        release_scratch_lock(&abandoned);
+        // A folder from a version that never wrote a marker is not live
+        // either, and the age rule is the only thing protecting it.
+        let markerless = root.join("scan-legacy");
+        std::fs::create_dir_all(&markerless).expect("a markerless folder");
+        std::fs::write(abandoned.join("page-0000.bmp"), b"staged").expect("stage a page");
+
+        // Young is kept whatever its lock says: nothing here is an hour old.
+        assert_eq!(sweep_scratch_root(&root, Duration::from_secs(3600)), 0);
+        assert!(live.exists() && abandoned.exists() && markerless.exists());
+
+        // Old enough, and now only the lock decides.
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(sweep_scratch_root(&root, Duration::ZERO), 2);
+        assert!(!abandoned.exists(), "an unlocked, old run folder is swept");
+        assert!(!markerless.exists(), "so is one with no marker at all");
+        assert!(live.exists(), "a held folder survives any age");
+
+        release_scratch_lock(&live);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_liveness_marker_dies_with_the_process_that_held_it() {
+        // The reason the marker is a HELD HANDLE and not a pid file: a process
+        // killed outright still releases it, and nothing has to be trusted to
+        // clean up after itself.
+        let root = temp_scratch_root("orphan");
+        let dir = allocate_scan_scratch(&root, 4).expect("a run allocates");
+        release_scratch_lock(&dir);
+        let lock = dir.join(SCRATCH_LOCK).to_string_lossy().to_string();
+        let mut child = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &format!(
+                    "$f=[System.IO.File]::Open('{lock}','Open','ReadWrite','None'); Start-Sleep 120"
+                ),
+            ])
+            .spawn()
+            .expect("a child process can be spawned");
+        // The open is not instant; wait for the hold rather than assuming it.
+        let mut held = false;
+        for _ in 0..100 {
+            if scratch_is_live(&dir) {
+                held = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(held, "the child took the marker");
+        assert_eq!(
+            sweep_scratch_root(&root, Duration::ZERO),
+            0,
+            "a folder another process holds is not swept"
+        );
+
+        child.kill().expect("the child can be killed");
+        child.wait().expect("the child is reaped");
+        // The handle went with the process, with nothing run on its behalf.
+        let mut released = false;
+        for _ in 0..100 {
+            if !scratch_is_live(&dir) {
+                released = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(released, "the killed process released the marker");
+        assert_eq!(sweep_scratch_root(&root, Duration::ZERO), 1);
+        assert!(!dir.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn exhaustion_refuses_by_its_own_key_and_names_the_root() {
+        // Every index taken means live runs, not leaked ones — the sweep has
+        // already run by then. The refusal has to leave the user somewhere to
+        // go, which is why it carries the folder as a FIELD.
+        let root = temp_scratch_root("full");
+        let taken: Vec<PathBuf> = (0..2)
+            .map(|_| allocate_scan_scratch(&root, 2).expect("both indices allocate"))
+            .collect();
+        let refusal = allocate_scan_scratch(&root, 2).expect_err("no index is left");
+        assert_eq!(refusal.key, "scan.scratchFull");
+        assert_eq!(refusal.folder.as_deref(), Some(root.to_string_lossy().as_ref()));
+        assert!(refusal.message.contains(&root.to_string_lossy().to_string()));
+        for dir in &taken {
+            release_scratch_lock(dir);
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

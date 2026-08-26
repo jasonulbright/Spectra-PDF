@@ -5830,6 +5830,7 @@
   "refusal.scan.notResponding": "Le scanner ne répond plus.",
   "refusal.scan.paperJam": "Dégagez le bourrage papier, puis numérisez à nouveau.",
   "refusal.scan.paperProblem": "Vérifiez le papier dans le chargeur.",
+  "refusal.scan.scratchFull": "Trop de numérisations sont encore ouvertes. Fermez-en quelques-unes ou supprimez les dossiers dans {{folder}}, puis réessayez.",
   "refusal.scan.settingRejected": "Le scanner a refusé l’un des réglages demandés.",
   "refusal.symbolSet.builtinId": "« {{id}} » est un jeu intégré — donnez au jeu importé son propre identifiant.",
   "refusal.symbolSet.duplicateId": "Le jeu utilise deux fois l’identifiant « {{id}} ».",

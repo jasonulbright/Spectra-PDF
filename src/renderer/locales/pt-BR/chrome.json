@@ -5830,6 +5830,7 @@
   "refusal.scan.notResponding": "O scanner parou de responder.",
   "refusal.scan.paperJam": "Retire o papel preso e digitalize de novo.",
   "refusal.scan.paperProblem": "Verifique o papel no alimentador.",
+  "refusal.scan.scratchFull": "Há digitalizações demais abertas. Feche algumas ou remova as pastas em {{folder}} e tente novamente.",
   "refusal.scan.settingRejected": "O scanner recusou uma das configurações solicitadas.",
   "refusal.symbolSet.builtinId": "“{{id}}” é um conjunto interno — dê ao conjunto importado um id próprio.",
   "refusal.symbolSet.duplicateId": "O conjunto usa o id “{{id}}” duas vezes.",

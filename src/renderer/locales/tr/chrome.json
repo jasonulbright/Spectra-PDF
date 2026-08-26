@@ -5708,6 +5708,7 @@
   "refusal.scan.notResponding": "Tarayıcı yanıt vermeyi bıraktı.",
   "refusal.scan.paperJam": "Kağıt sıkışmasını giderin, sonra yeniden tarayın.",
   "refusal.scan.paperProblem": "Besleyicideki kağıdı denetleyin.",
+  "refusal.scan.scratchFull": "Çok fazla tarama açık. Bazılarını kapatın veya {{folder}} içindeki klasörleri kaldırın, sonra yeniden deneyin.",
   "refusal.scan.settingRejected": "Tarayıcı istenen ayarlardan birini reddetti.",
   "refusal.symbolSet.builtinId": "\"{{id}}\" yerleşik bir kümedir — içe aktarılan kümeye kendi kimliğini verin.",
   "refusal.symbolSet.duplicateId": "Küme \"{{id}}\" kimliğini iki kez kullanıyor.",

@@ -5708,6 +5708,7 @@
   "refusal.scan.notResponding": "Skanneri lakkasi vastaamasta.",
   "refusal.scan.paperJam": "Poista paperitukos ja skannaa uudelleen.",
   "refusal.scan.paperProblem": "Tarkista syöttölaitteen paperi.",
+  "refusal.scan.scratchFull": "Liian monta skannausta on avoinna. Sulje osa niistä tai poista kansiot sijainnista {{folder}} ja yritä uudelleen.",
   "refusal.scan.settingRejected": "Skanneri hylkäsi yhden pyydetyistä asetuksista.",
   "refusal.symbolSet.builtinId": "”{{id}}” on sisäänrakennettu kokoelma — anna tuodulle kokoelmalle oma tunnus.",
   "refusal.symbolSet.duplicateId": "Kokoelma käyttää tunnusta ”{{id}}” kahdesti.",

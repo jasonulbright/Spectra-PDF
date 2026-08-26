@@ -5586,6 +5586,7 @@
   "refusal.scan.notResponding": "掃描器已停止回應。",
   "refusal.scan.paperJam": "請排除卡紙，然後重新掃描。",
   "refusal.scan.paperProblem": "請檢查送稿機中的紙張。",
+  "refusal.scan.scratchFull": "開啟的掃描過多。請關閉部分掃描，或刪除 {{folder}} 中的資料夾，然後重試。",
   "refusal.scan.settingRejected": "掃描器拒絕了要求的其中一項設定。",
   "refusal.symbolSet.builtinId": "「{{id}}」是內建符號組 — 請為匯入的符號組指定專屬的 id。",
   "refusal.symbolSet.duplicateId": "這個符號組重複使用了 id「{{id}}」兩次。",

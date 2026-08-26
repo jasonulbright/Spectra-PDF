@@ -5952,6 +5952,7 @@
   "refusal.scan.notResponding": "Bralnik se je nehal odzivati.",
   "refusal.scan.paperJam": "Odstranite zagozden papir in znova preberite.",
   "refusal.scan.paperProblem": "Preverite papir v podajalniku.",
+  "refusal.scan.scratchFull": "Odprtih je preveč optičnih branj. Nekatera zaprite ali odstranite mape v {{folder}} in poskusite znova.",
   "refusal.scan.settingRejected": "Bralnik je zavrnil eno od zahtevanih nastavitev.",
   "refusal.symbolSet.builtinId": "»{{id}}« je vgrajen nabor — uvoženemu naboru dajte lastno oznako.",
   "refusal.symbolSet.duplicateId": "Nabor uporablja oznako »{{id}}« dvakrat.",

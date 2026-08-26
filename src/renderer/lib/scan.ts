@@ -111,6 +111,16 @@ export interface ScanRefusal {
   key: string;
   message: string;
   code: string | null;
+  /** A folder the user can act on, for the rows whose remedy is a path. Read
+   * as a field and interpolated into the catalog sentence — the English one is
+   * never parsed for it. */
+  folder?: string;
+}
+
+/** The interpolation a refusal's catalog sentence needs, if any. */
+export function refusalVars(value: unknown): Record<string, string> {
+  if (!isScanRefusal(value) || typeof value.folder !== 'string') return {};
+  return { folder: value.folder };
 }
 
 export type PaperSize = 'auto' | 'letter' | 'legal' | 'tabloid' | 'a3' | 'a4' | 'a5';
@@ -191,6 +201,7 @@ export const SCAN_REFUSAL_KEYS: readonly string[] = [
   'scan.notResponding',
   'scan.paperJam',
   'scan.paperProblem',
+  'scan.scratchFull',
   'scan.settingRejected',
 ];
 

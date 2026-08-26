@@ -6196,6 +6196,7 @@
   "refusal.scan.notResponding": "توقف الماسح الضوئي عن الاستجابة.",
   "refusal.scan.paperJam": "أزل انحشار الورق، ثم امسح مرة أخرى.",
   "refusal.scan.paperProblem": "تحقق من الورق في وحدة التغذية.",
+  "refusal.scan.scratchFull": "هناك عمليات مسح ضوئي مفتوحة أكثر من اللازم. أغلق بعضها أو احذف المجلدات في {{folder}}، ثم أعد المحاولة.",
   "refusal.scan.settingRejected": "رفض الماسح الضوئي أحد الإعدادات المطلوبة.",
   "refusal.symbolSet.builtinId": "المعرّف «{{id}}» يخص مجموعة مدمجة — أعطِ المجموعة المستوردة معرّفًا خاصًا بها.",
   "refusal.symbolSet.duplicateId": "تستخدم المجموعة المعرّف «{{id}}» مرتين.",

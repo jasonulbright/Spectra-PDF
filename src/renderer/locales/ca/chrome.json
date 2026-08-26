@@ -5830,6 +5830,7 @@
   "refusal.scan.notResponding": "L’escàner ha deixat de respondre.",
   "refusal.scan.paperJam": "Retira el paper encallat i torna a escanejar.",
   "refusal.scan.paperProblem": "Comprova el paper de l’alimentador.",
+  "refusal.scan.scratchFull": "Hi ha massa escanejats oberts. Tanqueu-ne alguns o elimineu les carpetes de {{folder}} i torneu-ho a provar.",
   "refusal.scan.settingRejected": "L’escàner ha refusat un dels ajustos demanats.",
   "refusal.symbolSet.builtinId": "«{{id}}» és un conjunt integrat: doneu al conjunt importat un identificador propi.",
   "refusal.symbolSet.duplicateId": "El conjunt usa l'identificador «{{id}}» dues vegades.",
