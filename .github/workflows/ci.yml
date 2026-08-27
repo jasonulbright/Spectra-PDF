@@ -252,7 +252,8 @@ jobs:
         # This does not vendor Ghostscript into Spectra PDF. The clean runner
         # installs the current Chocolatey package like an end user would; the
         # product probe, not this workflow, enforces the minimum version.
-        run: choco install ghostscript -y --no-progress
+        # Retries and the pinned upstream fallback live in the script.
+        run: powershell -ExecutionPolicy Bypass -File scripts/install-ghostscript-test-tool.ps1
         shell: pwsh
 
       - name: Export the test Ghostscript path
@@ -262,8 +263,9 @@ jobs:
         # authority the executable that was actually installed.
         run: |
           $candidates = @(Get-ChildItem "${env:ProgramFiles}\gs\gs*\bin\gswin64c.exe" -File -ErrorAction Stop)
-          if ($candidates.Count -ne 1) { throw "Expected one installed Ghostscript, found $($candidates.Count)" }
-          Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECTRAPDF_GS_PATH=$($candidates[0].FullName)" -Encoding utf8
+          if ($candidates.Count -eq 0) { throw "No installed Ghostscript found" }
+          $selected = ($candidates | Sort-Object { [version]($_.Directory.Parent.Name -replace '^gs', '') } -Descending)[0]
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECTRAPDF_GS_PATH=$($selected.FullName)" -Encoding utf8
         shell: pwsh
 
       - name: Run engine tests (full suite)
@@ -431,7 +433,8 @@ jobs:
         # job installs one the way a user would. Tests may use tools the product
         # does not ship. No version pin: the installer publishes what it
         # publishes, and the capability probe enforces the minimum version.
-        run: choco install ghostscript -y --no-progress
+        # Retries and the pinned upstream fallback live in the script.
+        run: powershell -ExecutionPolicy Bypass -File scripts/install-ghostscript-test-tool.ps1
         shell: pwsh
 
       # Vendoring and staging are separate steps: a failed vendoring in a
