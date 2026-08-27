@@ -5700,6 +5700,7 @@
   "refusal.scan.deviceBusy": "Der Scanner ist belegt. Versuchen Sie es gleich noch einmal.",
   "refusal.scan.deviceGone": "Der Scanner ist nicht mehr angeschlossen.",
   "refusal.scan.deviceLocked": "Ein anderes Programm verwendet den Scanner.",
+  "refusal.scan.deviceLost": "Der Scanner hat während des Scans nicht mehr geantwortet.",
   "refusal.scan.deviceOffline": "Der Scanner ist ausgeschaltet oder nicht erreichbar.",
   "refusal.scan.driverError": "Der Scannertreiber meldet ein Problem.",
   "refusal.scan.failed": "Der Scanner meldet einen Fehler.",

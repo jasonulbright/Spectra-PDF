@@ -5944,6 +5944,7 @@
   "refusal.scan.deviceBusy": "Сканер зайнятий. Спробуйте за мить.",
   "refusal.scan.deviceGone": "Сканер більше не підключено.",
   "refusal.scan.deviceLocked": "Сканер використовує інша програма.",
+  "refusal.scan.deviceLost": "Сканер перестав відповідати під час сканування.",
   "refusal.scan.deviceOffline": "Сканер вимкнено або він недоступний.",
   "refusal.scan.driverError": "Драйвер сканера повідомив про проблему.",
   "refusal.scan.failed": "Сканер повідомив про помилку.",

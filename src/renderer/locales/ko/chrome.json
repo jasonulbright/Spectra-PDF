@@ -5578,6 +5578,7 @@
   "refusal.scan.deviceBusy": "스캐너가 사용 중입니다. 잠시 후 다시 시도하세요.",
   "refusal.scan.deviceGone": "스캐너가 더 이상 연결되어 있지 않습니다.",
   "refusal.scan.deviceLocked": "다른 프로그램이 스캐너를 사용하고 있습니다.",
+  "refusal.scan.deviceLost": "스캔 중에 스캐너가 응답하지 않았습니다.",
   "refusal.scan.deviceOffline": "스캐너가 꺼져 있거나 연결할 수 없습니다.",
   "refusal.scan.driverError": "스캐너 드라이버가 문제를 보고했습니다.",
   "refusal.scan.failed": "스캐너가 오류를 보고했습니다.",

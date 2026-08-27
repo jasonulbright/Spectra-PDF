@@ -5944,6 +5944,7 @@
   "refusal.scan.deviceBusy": "Skener je zaneprázdnený. Skúste to o chvíľu.",
   "refusal.scan.deviceGone": "Skener už nie je pripojený.",
   "refusal.scan.deviceLocked": "Skener používa iný program.",
+  "refusal.scan.deviceLost": "Skener prestal počas skenovania odpovedať.",
   "refusal.scan.deviceOffline": "Skener je vypnutý alebo nedostupný.",
   "refusal.scan.driverError": "Ovládač skenera hlási problém.",
   "refusal.scan.failed": "Skener hlási chybu.",

@@ -5700,6 +5700,7 @@
   "refusal.scan.deviceBusy": "Tarayıcı meşgul. Birazdan yeniden deneyin.",
   "refusal.scan.deviceGone": "Tarayıcı artık bağlı değil.",
   "refusal.scan.deviceLocked": "Tarayıcıyı başka bir program kullanıyor.",
+  "refusal.scan.deviceLost": "Tarayıcı tarama sırasında yanıt vermeyi durdurdu.",
   "refusal.scan.deviceOffline": "Tarayıcı kapalı ya da erişilemiyor.",
   "refusal.scan.driverError": "Tarayıcı sürücüsü bir sorun bildirdi.",
   "refusal.scan.failed": "Tarayıcı bir hata bildirdi.",

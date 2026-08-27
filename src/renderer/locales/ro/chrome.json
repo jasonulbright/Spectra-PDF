@@ -5822,6 +5822,7 @@
   "refusal.scan.deviceBusy": "Scanerul este ocupat. Încearcă din nou într-o clipă.",
   "refusal.scan.deviceGone": "Scanerul nu mai este conectat.",
   "refusal.scan.deviceLocked": "Alt program folosește scanerul.",
+  "refusal.scan.deviceLost": "Scanerul nu a mai răspuns în timpul scanării.",
   "refusal.scan.deviceOffline": "Scanerul este oprit sau inaccesibil.",
   "refusal.scan.driverError": "Driverul scanerului a raportat o problemă.",
   "refusal.scan.failed": "Scanerul a raportat o eroare.",

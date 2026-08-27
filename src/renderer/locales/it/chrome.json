@@ -5822,6 +5822,7 @@
   "refusal.scan.deviceBusy": "Lo scanner è occupato. Riprova tra poco.",
   "refusal.scan.deviceGone": "Lo scanner non è più collegato.",
   "refusal.scan.deviceLocked": "Un altro programma sta usando lo scanner.",
+  "refusal.scan.deviceLost": "Lo scanner ha smesso di rispondere durante la scansione.",
   "refusal.scan.deviceOffline": "Lo scanner è spento o non raggiungibile.",
   "refusal.scan.driverError": "Il driver dello scanner ha segnalato un problema.",
   "refusal.scan.failed": "Lo scanner ha segnalato un errore.",

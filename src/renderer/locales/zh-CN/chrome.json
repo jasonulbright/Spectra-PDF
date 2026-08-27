@@ -5578,6 +5578,7 @@
   "refusal.scan.deviceBusy": "扫描仪正忙。请稍后再试。",
   "refusal.scan.deviceGone": "扫描仪已不再连接。",
   "refusal.scan.deviceLocked": "另一个程序正在使用扫描仪。",
+  "refusal.scan.deviceLost": "扫描过程中扫描仪停止响应。",
   "refusal.scan.deviceOffline": "扫描仪已关闭或无法访问。",
   "refusal.scan.driverError": "扫描仪驱动程序报告了一个问题。",
   "refusal.scan.failed": "扫描仪报告了一个错误。",
