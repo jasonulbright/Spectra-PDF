@@ -1004,20 +1004,53 @@ unsafe fn domain_from(flags: u32, attr: &PROPVARIANT) -> PropertyDomain {
 
 // ── Enumeration ─────────────────────────────────────────────────────────────
 
-/// List the scanners attached to this machine.
+/// List the scanners every backend can see, with their ids namespaced.
 ///
 /// An empty list is the answer, never an error: a machine with no scanner
 /// enumerates zero devices and reports no failure, and that is the state the
 /// dialog's empty screen renders.
 ///
-/// `last_used` is the caller's stored preference; it survives only when it is
-/// still one of the enumerated ids.
+/// `last_used` is the caller's stored preference in either spelling — a
+/// namespaced id or one stored before the namespace existed. It survives only
+/// when it is still one of the enumerated ids, and it comes back namespaced,
+/// which is what rewrites a stored legacy value on the caller's next save.
 pub fn enumerate(last_used: Option<String>) -> Result<ScannerList, ScanRefusal> {
     // The scanner subsystem's first use on either surface, so this is where
     // the scratch sweep is paid for — before a run has anything staged, and
     // never on a launch that does not scan.
     sweep_scan_scratch_once();
-    let scanners = in_apartment(|| unsafe {
+    let mut scanners: Vec<ScannerDevice> = Vec::new();
+    for backend in backends() {
+        let stack = backend.stack();
+        for device in backend.enumerate()? {
+            scanners.push(ScannerDevice {
+                id: DeviceId {
+                    stack,
+                    native: device.id,
+                }
+                .qualified(),
+                name: device.name,
+            });
+        }
+    }
+    scanners.sort_by_key(|d| d.name.to_lowercase());
+    let default = resolve_default(&scanners, last_used);
+    Ok(ScannerList { scanners, default })
+}
+
+/// The preselected device, given what enumerated and what the caller stored.
+///
+/// Split out so the migration is provable without a scanner: a stored id in
+/// either spelling has to preselect the same device, and a stored id that no
+/// longer enumerates has to preselect nothing.
+fn resolve_default(scanners: &[ScannerDevice], last_used: Option<String>) -> Option<String> {
+    let wanted = DeviceId::parse(&last_used?).qualified();
+    scanners.iter().any(|d| d.id == wanted).then_some(wanted)
+}
+
+/// Every WIA scanner, by the id WIA itself knows it by.
+fn wia_enumerate() -> Result<Vec<ScannerDevice>, ScanRefusal> {
+    in_apartment(|| unsafe {
         let manager: IWiaDevMgr2 = CoCreateInstance(&WiaDevMgr2, None, CLSCTX_LOCAL_SERVER)
             .map_err(refusal_from)?;
         let devices = manager
@@ -1045,10 +1078,149 @@ pub fn enumerate(last_used: Option<String>) -> Result<ScannerList, ScanRefusal> 
         }
         scanners.sort_by_key(|d| d.name.to_lowercase());
         Ok(scanners)
-    })?;
+    })
+}
 
-    let default = last_used.filter(|id| scanners.iter().any(|d| &d.id == id));
-    Ok(ScannerList { scanners, default })
+// ── The backend seam ────────────────────────────────────────────────────────
+
+/// Which acquisition stack a device came from.
+///
+/// One stack ships. The seam exists so that a second one is an added
+/// implementation rather than a rewrite of the session store, the commands and
+/// the CLI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ScanStack {
+    Wia,
+}
+
+impl ScanStack {
+    /// The prefix this stack's device ids carry.
+    pub fn prefix(self) -> &'static str {
+        match self {
+            ScanStack::Wia => "wia",
+        }
+    }
+
+    fn from_prefix(prefix: &str) -> Option<Self> {
+        match prefix {
+            "wia" => Some(ScanStack::Wia),
+            _ => None,
+        }
+    }
+}
+
+/// A device id split into the stack that owns it and the id that stack knows.
+///
+/// Every id that crosses a command boundary is namespaced (`wia:<native>`);
+/// the native half never leaves this module. Callers treat ids as opaque —
+/// [`DeviceId::parse`] and [`DeviceId::qualified`] are the only place the
+/// spelling is known.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceId {
+    pub stack: ScanStack,
+    pub native: String,
+}
+
+impl DeviceId {
+    /// Read a raw id from a caller.
+    ///
+    /// An id carrying a known stack prefix keeps that stack. Anything else is
+    /// a value written before the namespace existed, which can only be WIA's:
+    /// that is the migration, and because the qualified form is what goes back
+    /// out, the caller stores the namespaced spelling on its next save.
+    pub fn parse(raw: &str) -> Self {
+        if let Some((prefix, native)) = raw.split_once(':') {
+            if let Some(stack) = ScanStack::from_prefix(prefix) {
+                return DeviceId {
+                    stack,
+                    native: native.to_string(),
+                };
+            }
+        }
+        DeviceId {
+            stack: ScanStack::Wia,
+            native: raw.to_string(),
+        }
+    }
+
+    /// The namespaced spelling — the only id form that leaves this module.
+    pub fn qualified(&self) -> String {
+        format!("{}:{}", self.stack.prefix(), self.native)
+    }
+}
+
+/// One acquisition stack.
+///
+/// Native ids are this trait's currency: the namespace is applied and stripped
+/// at the seam, so an implementation never sees a prefix it would have to know
+/// about.
+pub trait ScanBackend: Send + Sync {
+    fn stack(&self) -> ScanStack;
+
+    /// The devices this stack can see, by native id. An empty list is an
+    /// answer, never an error.
+    fn enumerate(&self) -> Result<Vec<ScannerDevice>, ScanRefusal>;
+
+    /// Open one device. The session owns whatever thread the stack requires
+    /// and releases the device when it drops.
+    fn open(&self, native_id: &str) -> Result<Arc<dyn ScanSession>, ScanRefusal>;
+
+    /// The stack's own device picker. `Ok(None)` is both a cancelled picker
+    /// and a stack with no picker to raise; the returned id is native.
+    fn select_device_dialog(&self, parent: usize) -> Result<Option<String>, ScanRefusal>;
+}
+
+/// A device one backend holds open.
+///
+/// Cancel is a flag rather than a call for the reason the module header gives:
+/// the acquiring thread is inside the driver for the whole run.
+pub trait ScanSession: Send + Sync {
+    fn capabilities(&self) -> Result<ScannerCapabilities, ScanRefusal>;
+    fn acquire(
+        &self,
+        settings: ScanSettings,
+        dir: PathBuf,
+        sink: EventSink,
+    ) -> Result<ScanResult, ScanRefusal>;
+    fn cancel(&self);
+}
+
+/// The WIA 2.0 stack — the only backend this build carries.
+pub struct WiaBackend;
+
+static WIA_BACKEND: WiaBackend = WiaBackend;
+
+impl ScanBackend for WiaBackend {
+    fn stack(&self) -> ScanStack {
+        ScanStack::Wia
+    }
+
+    fn enumerate(&self) -> Result<Vec<ScannerDevice>, ScanRefusal> {
+        wia_enumerate()
+    }
+
+    fn open(&self, native_id: &str) -> Result<Arc<dyn ScanSession>, ScanRefusal> {
+        Ok(Arc::new(Session::open(native_id.to_string())?))
+    }
+
+    fn select_device_dialog(&self, parent: usize) -> Result<Option<String>, ScanRefusal> {
+        wia_select_device_dialog(parent)
+    }
+}
+
+/// Every stack this build carries, in the order their devices are offered.
+pub fn backends() -> &'static [&'static dyn ScanBackend] {
+    static ALL: [&dyn ScanBackend; 1] = [&WIA_BACKEND];
+    &ALL
+}
+
+/// The backend for one stack.
+fn backend_for(stack: ScanStack) -> &'static dyn ScanBackend {
+    backends()
+        .iter()
+        .copied()
+        .find(|backend| backend.stack() == stack)
+        .expect("every stack in ScanStack has a backend")
 }
 
 /// Run `body` on a thread with its own single-threaded apartment, and tear
@@ -1103,7 +1275,6 @@ enum Request {
 struct Session {
     requests: Sender<Request>,
     thread: Option<JoinHandle<()>>,
-    last_used: Instant,
     /// Read by the transfer callback on every tick. Cancel is a flag rather
     /// than a call because the scan thread is inside the driver for the whole
     /// run, and `scan_cancel` arrives on another thread entirely.
@@ -1131,7 +1302,6 @@ impl Session {
             Ok(Ok(())) => Ok(Session {
                 requests,
                 thread: Some(thread),
-                last_used: Instant::now(),
                 cancel: Arc::new(AtomicBool::new(false)),
                 busy: Arc::new(AtomicBool::new(false)),
             }),
@@ -1164,6 +1334,57 @@ impl Session {
                 "The scanner session stopped before it answered.",
             ))
         })
+    }
+}
+
+impl ScanSession for Session {
+    fn capabilities(&self) -> Result<ScannerCapabilities, ScanRefusal> {
+        Session::capabilities(self)
+    }
+
+    /// One run, start to finish. Blocks: the caller releases the session
+    /// store's lock first, so `cancel` and `close` do not wait on the very run
+    /// they are trying to stop.
+    fn acquire(
+        &self,
+        settings: ScanSettings,
+        dir: PathBuf,
+        sink: EventSink,
+    ) -> Result<ScanResult, ScanRefusal> {
+        if self.busy.swap(true, Ordering::SeqCst) {
+            return Err(ScanRefusal::named(
+                "scan.busy",
+                "A scan is already running on this scanner.",
+            ));
+        }
+        self.cancel.store(false, Ordering::SeqCst);
+        let (reply, answer) = mpsc::channel();
+        let sent = self.requests.send(Request::Acquire(AcquireRequest {
+            settings,
+            dir,
+            sink,
+            cancel: self.cancel.clone(),
+            reply,
+        }));
+        let outcome = if sent.is_err() {
+            Err(ScanRefusal::named(
+                "scan.failed",
+                "The scanner session is no longer running.",
+            ))
+        } else {
+            answer.recv().unwrap_or_else(|_| {
+                Err(ScanRefusal::named(
+                    "scan.failed",
+                    "The scanner session stopped during the scan.",
+                ))
+            })
+        };
+        self.busy.store(false, Ordering::SeqCst);
+        outcome
+    }
+
+    fn cancel(&self) {
+        self.cancel.store(true, Ordering::SeqCst);
     }
 }
 
@@ -2405,13 +2626,22 @@ pub fn discard_scan_scratch(path: &Path) -> Result<(), ScanRefusal> {
 
 // ── Session store ───────────────────────────────────────────────────────────
 
-/// The live sessions, one per device id.
+/// One open device, plus the store's own idle bookkeeping.
+///
+/// `last_used` belongs to the store rather than the backend: how long a
+/// session has sat unused is not a fact about the stack that opened it.
+struct Entry {
+    session: Arc<dyn ScanSession>,
+    last_used: Instant,
+}
+
+/// The live sessions, one per namespaced device id.
 ///
 /// Managed Tauri state in the app and a local value in the CLI, so both reach
 /// a device the same way. Dropping the store closes every session it holds,
 /// which is what releases the device locks.
 pub struct ScannerSessions {
-    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    sessions: Arc<Mutex<HashMap<String, Entry>>>,
     /// The reaper starts with the first session, so a process that never
     /// opens a device never grows the thread.
     reaper: std::sync::Once,
@@ -2433,7 +2663,7 @@ impl ScannerSessions {
 
     fn start_reaper(&self) {
         // The reaper holds a weak reference, so it ends when the store does.
-        let watched: Weak<Mutex<HashMap<String, Session>>> = Arc::downgrade(&self.sessions);
+        let watched: Weak<Mutex<HashMap<String, Entry>>> = Arc::downgrade(&self.sessions);
         self.reaper.call_once(move || {
             std::thread::spawn(move || loop {
                 std::thread::sleep(REAP_INTERVAL);
@@ -2443,38 +2673,53 @@ impl ScannerSessions {
                 let Ok(mut open) = sessions.lock() else {
                     return;
                 };
-                open.retain(|_, session| session.last_used.elapsed() < IDLE_TIMEOUT);
+                open.retain(|_, entry| entry.last_used.elapsed() < IDLE_TIMEOUT);
             });
         });
     }
 
     /// One device's capability report, opening a session for it if none is
     /// live.
+    ///
+    /// The report's own `device_id` comes back namespaced, so a caller that
+    /// round-trips it — the checklist runner does — reaches the same device.
     pub fn capabilities(&self, device_id: &str) -> Result<ScannerCapabilities, ScanRefusal> {
+        let id = DeviceId::parse(device_id);
+        let key = id.qualified();
         let mut open = self.sessions.lock().map_err(|_| {
             ScanRefusal::named("scan.failed", "The scanner session store is unusable.")
         })?;
-        if !open.contains_key(device_id) {
-            let session = Session::open(device_id.to_string())?;
+        if !open.contains_key(&key) {
+            let session = backend_for(id.stack).open(&id.native)?;
             self.start_reaper();
-            open.insert(device_id.to_string(), session);
+            open.insert(
+                key.clone(),
+                Entry {
+                    session,
+                    last_used: Instant::now(),
+                },
+            );
         }
-        let session = open.get_mut(device_id).expect("session was just inserted");
-        session.last_used = Instant::now();
-        let report = session.capabilities();
+        let entry = open.get_mut(&key).expect("session was just inserted");
+        entry.last_used = Instant::now();
+        let report = entry.session.capabilities();
         if report.is_err() {
             // A session that failed its own report is not one to keep a
             // device locked with.
-            open.remove(device_id);
+            open.remove(&key);
         }
-        report
+        report.map(|mut caps| {
+            caps.device_id = key;
+            caps
+        })
     }
 
     /// Close the session on one device, releasing its lock now rather than at
     /// the idle timeout.
     pub fn close(&self, device_id: &str) {
+        let key = DeviceId::parse(device_id).qualified();
         if let Ok(mut open) = self.sessions.lock() {
-            open.remove(device_id);
+            open.remove(&key);
         }
     }
 
@@ -2490,55 +2735,31 @@ impl ScannerSessions {
         dir: PathBuf,
         sink: EventSink,
     ) -> Result<ScanResult, ScanRefusal> {
-        let (requests, cancel, busy) = {
+        let id = DeviceId::parse(device_id);
+        let key = id.qualified();
+        let session = {
             let mut open = self.sessions.lock().map_err(|_| {
                 ScanRefusal::named("scan.failed", "The scanner session store is unusable.")
             })?;
-            if !open.contains_key(device_id) {
-                let session = Session::open(device_id.to_string())?;
+            if !open.contains_key(&key) {
+                let session = backend_for(id.stack).open(&id.native)?;
                 self.start_reaper();
-                open.insert(device_id.to_string(), session);
+                open.insert(
+                    key.clone(),
+                    Entry {
+                        session,
+                        last_used: Instant::now(),
+                    },
+                );
             }
-            let session = open.get_mut(device_id).expect("session was just inserted");
-            session.last_used = Instant::now();
-            (
-                session.requests.clone(),
-                session.cancel.clone(),
-                session.busy.clone(),
-            )
+            let entry = open.get_mut(&key).expect("session was just inserted");
+            entry.last_used = Instant::now();
+            entry.session.clone()
         };
-        if busy.swap(true, Ordering::SeqCst) {
-            return Err(ScanRefusal::named(
-                "scan.busy",
-                "A scan is already running on this scanner.",
-            ));
-        }
-        cancel.store(false, Ordering::SeqCst);
-        let (reply, answer) = mpsc::channel();
-        let sent = requests.send(Request::Acquire(AcquireRequest {
-            settings,
-            dir,
-            sink,
-            cancel,
-            reply,
-        }));
-        let outcome = if sent.is_err() {
-            Err(ScanRefusal::named(
-                "scan.failed",
-                "The scanner session is no longer running.",
-            ))
-        } else {
-            answer.recv().unwrap_or_else(|_| {
-                Err(ScanRefusal::named(
-                    "scan.failed",
-                    "The scanner session stopped during the scan.",
-                ))
-            })
-        };
-        busy.store(false, Ordering::SeqCst);
+        let outcome = session.acquire(settings, dir, sink);
         if let Ok(mut open) = self.sessions.lock() {
-            if let Some(session) = open.get_mut(device_id) {
-                session.last_used = Instant::now();
+            if let Some(entry) = open.get_mut(&key) {
+                entry.last_used = Instant::now();
             }
         }
         outcome
@@ -2549,9 +2770,10 @@ impl ScannerSessions {
     /// A device with nothing running is not an error: a cancel that arrives
     /// after the last page is a cancel of nothing.
     pub fn cancel(&self, device_id: &str) {
+        let key = DeviceId::parse(device_id).qualified();
         if let Ok(open) = self.sessions.lock() {
-            if let Some(session) = open.get(device_id) {
-                session.cancel.store(true, Ordering::SeqCst);
+            if let Some(entry) = open.get(&key) {
+                entry.session.cancel();
             }
         }
     }
@@ -2563,10 +2785,23 @@ impl ScannerSessions {
 /// filter drops, such as a multifunction whose scan function reports an
 /// unexpected type.
 ///
-/// Returns the chosen device id; `None` when the user cancels. The id then
-/// flows through the ordinary capability path, so this is a door and not a
-/// second route.
+/// Returns the chosen device id, namespaced; `None` when the user cancels.
+/// The id then flows through the ordinary capability path, so this is a door
+/// and not a second route.
+///
+/// A stack whose devices this picker cannot show is reached through
+/// enumeration, which is why the door belongs to one backend rather than to
+/// the seam.
 pub fn select_device_dialog(parent: usize) -> Result<Option<String>, ScanRefusal> {
+    let backend = backend_for(ScanStack::Wia);
+    let stack = backend.stack();
+    Ok(backend
+        .select_device_dialog(parent)?
+        .map(|native| DeviceId { stack, native }.qualified()))
+}
+
+/// `IWiaDevMgr2::SelectDeviceDlgID`, returning WIA's own device id.
+fn wia_select_device_dialog(parent: usize) -> Result<Option<String>, ScanRefusal> {
     in_apartment(move || unsafe {
         let manager: IWiaDevMgr2 =
             CoCreateInstance(&WiaDevMgr2, None, CLSCTX_LOCAL_SERVER).map_err(refusal_from)?;
@@ -3756,6 +3991,200 @@ mod tests {
             refusal.key.starts_with("scan."),
             "refused with {}",
             refusal.key
+        );
+    }
+
+    // ── The backend seam ────────────────────────────────────────────────
+
+    /// Every stack, so a new one cannot be added without meeting the rules
+    /// below.
+    const EVERY_STACK: &[ScanStack] = &[ScanStack::Wia];
+
+    #[test]
+    fn every_stack_has_a_backend_that_answers_for_it() {
+        for &stack in EVERY_STACK {
+            assert_eq!(backend_for(stack).stack(), stack);
+        }
+        assert_eq!(
+            backends().len(),
+            EVERY_STACK.len(),
+            "a stack without a registered backend cannot open a device"
+        );
+    }
+
+    #[test]
+    fn every_stack_prefix_is_unique_and_readable_back() {
+        let mut seen: Vec<&str> = Vec::new();
+        for &stack in EVERY_STACK {
+            let prefix = stack.prefix();
+            assert!(!seen.contains(&prefix), "two stacks share the prefix {prefix}");
+            seen.push(prefix);
+            assert_eq!(ScanStack::from_prefix(prefix), Some(stack));
+        }
+    }
+
+    #[test]
+    fn a_namespaced_id_round_trips_and_its_native_half_stays_native() {
+        // A WIA device id is a device-path shape, and it survives verbatim:
+        // the native half is what reaches the driver.
+        let native = r"\\?\usb#vid_04a9&pid_1913#0000#{6bdd1fc6-810f-11d0-bec7-08002be2092f}";
+        let id = DeviceId {
+            stack: ScanStack::Wia,
+            native: native.to_string(),
+        };
+        let qualified = id.qualified();
+        assert_eq!(qualified, format!("wia:{native}"));
+        let read = DeviceId::parse(&qualified);
+        assert_eq!(read.stack, ScanStack::Wia);
+        assert_eq!(read.native, native);
+        assert_eq!(read.qualified(), qualified);
+    }
+
+    #[test]
+    fn parsing_a_namespaced_id_twice_does_not_namespace_it_twice() {
+        let once = DeviceId::parse("wia:device-7").qualified();
+        assert_eq!(once, "wia:device-7");
+        assert_eq!(DeviceId::parse(&once).qualified(), once);
+    }
+
+    #[test]
+    fn an_id_stored_before_the_namespace_existed_reads_as_wia() {
+        // The migration: every shipped version wrote a bare WIA id, and there
+        // was no other stack it could have come from.
+        let legacy = "{6BDD1FC6-810F-11D0-BEC7-08002BE2092F}\\0000";
+        let read = DeviceId::parse(legacy);
+        assert_eq!(read.stack, ScanStack::Wia);
+        assert_eq!(read.native, legacy);
+        assert_eq!(read.qualified(), format!("wia:{legacy}"));
+    }
+
+    #[test]
+    fn a_legacy_stored_device_still_preselects_and_comes_back_namespaced() {
+        // The migration end to end, without a scanner: the stored value is
+        // the old spelling, the enumerated id is the new one, and what goes
+        // back is the new one — which is what the caller stores next.
+        let legacy = "{6BDD1FC6-810F-11D0-BEC7-08002BE2092F}\\0000";
+        let scanners = vec![ScannerDevice {
+            id: format!("wia:{legacy}"),
+            name: "A scanner".to_string(),
+        }];
+        assert_eq!(
+            resolve_default(&scanners, Some(legacy.to_string())),
+            Some(format!("wia:{legacy}"))
+        );
+        // And the already-migrated value keeps working unchanged.
+        assert_eq!(
+            resolve_default(&scanners, Some(format!("wia:{legacy}"))),
+            Some(format!("wia:{legacy}"))
+        );
+        // The phantom-default rule holds in both spellings.
+        assert_eq!(resolve_default(&scanners, Some("gone".into())), None);
+        assert_eq!(resolve_default(&scanners, Some("wia:gone".into())), None);
+        assert_eq!(resolve_default(&scanners, None), None);
+    }
+
+    #[test]
+    fn every_enumerated_id_carries_a_stack_that_can_be_read_back() {
+        // Vacuous on a scannerless machine and load-bearing on one with a
+        // device: an id that leaves enumeration unnamespaced would reach the
+        // store as some other stack's.
+        let list = enumerate(None).expect("enumeration is never an error");
+        for device in &list.scanners {
+            let (prefix, _) = device
+                .id
+                .split_once(':')
+                .unwrap_or_else(|| panic!("{} left enumeration unnamespaced", device.id));
+            assert!(
+                ScanStack::from_prefix(prefix).is_some(),
+                "{} names no stack this build carries",
+                device.id
+            );
+        }
+    }
+
+    /// A session belonging to no real device, so the store's routing can be
+    /// tested without one.
+    struct FakeSession {
+        runs: Mutex<Vec<PathBuf>>,
+        cancelled: Arc<AtomicBool>,
+    }
+
+    impl ScanSession for FakeSession {
+        fn capabilities(&self) -> Result<ScannerCapabilities, ScanRefusal> {
+            Err(ScanRefusal::named("scan.failed", "not a real device"))
+        }
+
+        fn acquire(
+            &self,
+            _settings: ScanSettings,
+            dir: PathBuf,
+            _sink: EventSink,
+        ) -> Result<ScanResult, ScanRefusal> {
+            self.runs.lock().expect("test lock").push(dir.clone());
+            Ok(ScanResult {
+                pages: Vec::new(),
+                cancelled: false,
+                scratch: dir.to_string_lossy().into_owned(),
+                dpi: 300,
+                adjusted: Vec::new(),
+                bytes: 0,
+            })
+        }
+
+        fn cancel(&self) {
+            self.cancelled.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn the_store_routes_both_spellings_of_one_id_to_the_same_session() {
+        // Slice A's whole point: the store holds sessions by namespaced id,
+        // and a caller holding either spelling reaches the one session — no
+        // second device lock, and no run started against a stale key.
+        let sessions = ScannerSessions::new();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let fake = Arc::new(FakeSession {
+            runs: Mutex::new(Vec::new()),
+            cancelled: cancelled.clone(),
+        });
+        sessions.sessions.lock().expect("test lock").insert(
+            "wia:fake".to_string(),
+            Entry {
+                session: fake.clone(),
+                last_used: Instant::now(),
+            },
+        );
+
+        // The legacy spelling reaches it…
+        sessions
+            .acquire(
+                "fake",
+                ScanSettings::default(),
+                PathBuf::from("legacy"),
+                Box::new(|_| {}),
+            )
+            .expect("the fake session answers");
+        // …and so does the namespaced one.
+        sessions
+            .acquire(
+                "wia:fake",
+                ScanSettings::default(),
+                PathBuf::from("namespaced"),
+                Box::new(|_| {}),
+            )
+            .expect("the fake session answers");
+        assert_eq!(
+            *fake.runs.lock().expect("test lock"),
+            vec![PathBuf::from("legacy"), PathBuf::from("namespaced")]
+        );
+
+        sessions.cancel("fake");
+        assert!(cancelled.load(Ordering::SeqCst), "cancel reached the session");
+
+        sessions.close("fake");
+        assert!(
+            sessions.sessions.lock().expect("test lock").is_empty(),
+            "the legacy spelling closes the session it opened"
         );
     }
 }
