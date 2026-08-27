@@ -58,6 +58,13 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   { key: 't', ctrl: true, shift: true, command: 'document.insertBlankPage', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
   // Go to page: focus the reading view's page box.
   { key: 'n', ctrl: true, shift: true, command: 'view.goToPage', scope: 'global', editableGuard: true, preventDefault: 'whenEnabled' },
+  // Ctrl+L focuses the toolbar search box — the chord every browser spends on
+  // its own omnibox, and the box is this app's. Ctrl+K, the other chord of
+  // that class, is Preferences above and is not reassigned. Guard-exempt like
+  // Ctrl+F (reaching the search box from a field is the point) and 'always':
+  // the command is enabled whenever the box is mounted, and a webview must
+  // never be handed an unbound Ctrl+L.
+  { key: 'l', ctrl: true, shift: false, alt: false, command: 'view.omniSearch', scope: 'global', editableGuard: false, preventDefault: 'always' },
   // Read Out Loud. The transport's four chords, all guarded against editable
   // targets — Ctrl+Shift+V is a paste chord inside a field and must stay one
   // there. 'whenEnabled': with no document open they mean nothing, and a

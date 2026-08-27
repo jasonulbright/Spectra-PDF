@@ -813,6 +813,7 @@
   "cmd.view.navPanel.search": "Haku",
   "cmd.view.navPanel.signatures": "Allekirjoitukset",
   "cmd.view.navPanel.tags": "Tunnisteet",
+  "cmd.view.omniSearch": "Hae työkaluista ja tekstistä",
   "cmd.view.organizeAll": "Järjestä kaikki asiakirjat",
   "cmd.view.presentation": "Esitys (koko näyttö)",
   "cmd.view.propertiesBar": "Ominaisuuspalkki",

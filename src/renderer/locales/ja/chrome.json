@@ -800,6 +800,7 @@
   "cmd.view.navPanel.search": "検索",
   "cmd.view.navPanel.signatures": "署名",
   "cmd.view.navPanel.tags": "タグ",
+  "cmd.view.omniSearch": "ツールとテキストを検索",
   "cmd.view.organizeAll": "すべての文書を整理",
   "cmd.view.presentation": "プレゼンテーション（全画面）",
   "cmd.view.propertiesBar": "プロパティバー",

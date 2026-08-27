@@ -813,6 +813,7 @@
   "cmd.view.navPanel.search": "Arama",
   "cmd.view.navPanel.signatures": "İmzalar",
   "cmd.view.navPanel.tags": "Etiketler",
+  "cmd.view.omniSearch": "Araçlarda ve metinde ara",
   "cmd.view.organizeAll": "Tüm Belgeleri Düzenle",
   "cmd.view.presentation": "Sunum (Tam Ekran)",
   "cmd.view.propertiesBar": "Özellikler Çubuğu",

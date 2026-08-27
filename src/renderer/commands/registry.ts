@@ -12,6 +12,7 @@ import { NAV_PANEL_IDS, NAV_PANEL_TITLES } from './navpanels';
 import { TOOL_DEFS, TOOL_IDS, toolById, toolForCanvasTool, worksOnPage, type ToolId } from './tools';
 import { OPERATIONS, OPERATION_TITLES, type Operation } from './operations';
 import { openFindWhenCanvasReady } from './find-intent';
+import { focusOmniSearch, omniSearchAvailable } from './omnisearch-focus';
 import { gsBlocked } from '../lib/gs-capability';
 import {
   toggleGrid,
@@ -241,6 +242,7 @@ export const COMMAND_IDS = [
   'view.twoUpCover',
   'view.organizeAll',
   'view.goToPage',
+  'view.omniSearch',
   'view.rotateCW',
   'view.rotateCCW',
   'view.toolsPane',
@@ -920,6 +922,13 @@ export const COMMANDS: Record<CommandId, Command> = {
     when: (ctx) =>
       inCanvas(ctx) && ctx.state.ui.docViewMode === 'document' && ctx.canvas !== null,
     run: (ctx) => void ctx.canvas!.goToPage(),
+  },
+  // Ctrl+L: land the caret in the toolbar's search box. Global — the box is
+  // chrome and answers with tools on every tab, not only over a document.
+  'view.omniSearch': {
+    title: 'Search Tools and Text',
+    when: () => omniSearchAvailable(),
+    run: () => void focusOmniSearch(),
   },
   // Document ▸ Insert Pages ▸ …. Both insert AFTER the page
   // being read (insertAnchor) and both ride the byte-only import machinery,

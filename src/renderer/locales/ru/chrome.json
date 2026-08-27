@@ -839,6 +839,7 @@
   "cmd.view.navPanel.search": "Поиск",
   "cmd.view.navPanel.signatures": "Подписи",
   "cmd.view.navPanel.tags": "Теги",
+  "cmd.view.omniSearch": "Поиск инструментов и текста",
   "cmd.view.organizeAll": "Упорядочить все документы",
   "cmd.view.presentation": "Презентация (полный экран)",
   "cmd.view.propertiesBar": "Панель свойств",

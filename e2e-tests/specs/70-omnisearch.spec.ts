@@ -122,6 +122,27 @@ describe('omnisearch', () => {
     await clearQuery();
   });
 
+  it('Ctrl+L puts the caret in the box from anywhere', async () => {
+    // The only entry used to be a mouse click. Start from the reading view so
+    // the focus really moves, and prove it with a keystroke that only a
+    // focused field could receive.
+    await $('[data-testid="document-view"]').click();
+    const toolBefore = (await getState()).tool;
+    await browser.keys(['Control', 'l']);
+    await browser.keys(['r', 'e', 'd', 'a', 'c', 't']);
+    await $('[data-testid="omnisearch-tool-redact"]').waitForDisplayed({
+      timeout: 10_000,
+      timeoutMsg: 'Ctrl+L did not focus the search box',
+    });
+    expect(await $('[data-testid="omnisearch-input"]').getValue()).toBe('redact');
+    // Focusing arms nothing — the canvas tool is whatever it already was.
+    expect((await getState()).tool).toBe(toolBefore);
+    // Escape clears, a second Escape leaves the box.
+    await browser.keys(['Escape']);
+    await browser.keys(['Escape']);
+    await expect($('[data-testid="omnisearch-results"]')).not.toBeExisting();
+  });
+
   it('keyboard alone can run a result', async () => {
     await typeQuery('optimize');
     await $('[data-testid="omnisearch-tool-optimize"]').waitForDisplayed({ timeout: 10_000 });

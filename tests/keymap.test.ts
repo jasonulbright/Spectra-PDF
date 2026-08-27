@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { KEY_BINDINGS, type KeyBinding } from '../src/renderer/commands/standard-keys';
 import { dispatchKeyEvent, isEditable, resolveBinding, shortcutForCommand } from '../src/renderer/commands/keymap';
 import { COMMANDS } from '../src/renderer/commands/registry';
+import { registerOmniSearchFocus } from '../src/renderer/commands/omnisearch-focus';
 import {
   pushEscapeInterceptor,
   registerAppCommandHandlers,
@@ -79,6 +80,21 @@ describe('table integrity', () => {
       }
     }
     expect(conflicts).toEqual([]);
+  });
+
+  it('Ctrl+L focuses the omnisearch box, from a field too', () => {
+    // The box is chrome and answers on every tab, so the binding is global and
+    // guard-exempt like Ctrl+F — reaching the search box from wherever the
+    // caret happens to be is the point of having a chord for it.
+    const b = resolveBinding(fakeEvent({ key: 'l', ctrl: true }));
+    expect(b?.command).toBe('view.omniSearch');
+    expect(b?.scope).toBe('global');
+    expect(b?.editableGuard).toBe(false);
+    expect(b?.preventDefault).toBe('always');
+    // Alt+L is a mnemonic and Ctrl+Shift+L is unassigned — neither is this.
+    expect(resolveBinding(fakeEvent({ key: 'l', ctrl: true, alt: true }))).toBeNull();
+    expect(resolveBinding(fakeEvent({ key: 'l', ctrl: true, shift: true }))).toBeNull();
+    expect(resolveBinding(fakeEvent({ key: 'l' }))).toBeNull();
   });
 
   it('escape is never a table binding — the chain owns it', () => {
@@ -234,6 +250,25 @@ describe('dispatchKeyEvent', () => {
     } as never);
     dispatchKeyEvent(fakeEvent({ key: 'z', ctrl: true }));
     expect(undo).toHaveBeenCalledOnce();
+  });
+
+  it('Ctrl+L runs the focus command from inside a field, and arms no tool', () => {
+    const { dispatched } = wire(uiState({ focusedTab: { doc: 'x.pdf' } }));
+    // Unregistered: the command is disabled, but the chord is still ours —
+    // an unbound Ctrl+L must never reach the webview.
+    const dead = fakeEvent({ key: 'l', ctrl: true, target: INPUT });
+    dispatchKeyEvent(dead);
+    expect(dead.defaultPrevented).toBe(true);
+
+    const focus = vi.fn(() => true);
+    registerOmniSearchFocus(focus);
+    const e = fakeEvent({ key: 'l', ctrl: true, target: INPUT });
+    dispatchKeyEvent(e);
+    expect(focus).toHaveBeenCalledOnce();
+    expect(e.defaultPrevented).toBe(true);
+    // Focusing is only focusing: the openTool path is never entered.
+    expect(dispatched).toEqual([]);
+    registerOmniSearchFocus(null);
   });
 
   it('the editable guard swallows guarded bindings inside fields', () => {

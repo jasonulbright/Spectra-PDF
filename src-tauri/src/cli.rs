@@ -266,6 +266,8 @@ pub enum CliCommand {
     Scanners(ScannersArgs),
     /// Acquire pages from a scanner straight into a PDF
     Scan(ScanArgs),
+    /// Run the guided scanner checklist and write a report to send back
+    ScanTest(ScanTestArgs),
     /// Apply an edited copy's annotate/fill/add-page changes onto a SIGNED
     /// original as one incremental append (signatures keep verifying)
     IncrementalSave(IncrementalSaveArgs),
@@ -324,6 +326,30 @@ pub struct ScanArgs {
     /// Resolution assumed for a page whose image stores none (dpi)
     #[arg(long, default_value_t = 300.0)]
     pub image_dpi: f64,
+}
+
+#[derive(Args)]
+pub struct ScanTestArgs {
+    /// Device id from `spectrapdf scanners`. With exactly one scanner
+    /// attached it may be omitted; with several the runner asks which one is
+    /// on the desk, because the tester is standing at it.
+    #[arg(long, value_name = "DEVICE_ID")]
+    pub device: Option<String>,
+    /// Run only these checklist rows, e.g. "4,5,6". Every applicable row
+    /// otherwise.
+    #[arg(long, value_name = "ROWS")]
+    pub rows: Option<String>,
+    /// Where the report files are written (the folder is created if needed)
+    #[arg(short, long, default_value = ".")]
+    pub output: PathBuf,
+    /// Print the checklist rows, what hardware each needs and how long each
+    /// takes, without touching a scanner
+    #[arg(long)]
+    pub list: bool,
+    /// OPT-IN: copy the scanned pages beside the report. Off by default —
+    /// the report is diagnosable without them, and they are your documents.
+    #[arg(long)]
+    pub attach_scans: bool,
 }
 
 #[derive(Args)]
@@ -2847,6 +2873,82 @@ impl CliEngine {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Resolve a path to absolute (relative to cwd).
+/// The rows a `--rows` value names, refusing a row this build does not have.
+///
+/// A typo has to refuse rather than silently run nothing: a tester who asked
+/// for row "4" and got an empty run would report that the feeder row does not
+/// work.
+fn parse_scan_test_rows(rows: Option<&str>) -> Result<Vec<String>, String> {
+    let Some(rows) = rows else {
+        return Ok(Vec::new());
+    };
+    let mut wanted = Vec::new();
+    for piece in rows.split(',') {
+        let id = piece.trim();
+        if id.is_empty() {
+            continue;
+        }
+        if crate::scantest::row(id).is_none() {
+            return Err(format!(
+                "There is no checklist row '{id}'. Run `spectrapdf scan-test --list` to see the rows."
+            ));
+        }
+        wanted.push(id.to_string());
+    }
+    Ok(wanted)
+}
+
+/// The guided checklist arm. Returns the process exit code.
+fn run_scan_test(args: &ScanTestArgs) -> i32 {
+    if args.list {
+        println!("{}", crate::scantest::list_rows());
+        return 0;
+    }
+    let rows = match parse_scan_test_rows(args.rows.as_deref()) {
+        Ok(rows) => rows,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            return 2;
+        }
+    };
+    let options = crate::scantest::Options {
+        device: args.device.clone(),
+        rows,
+        out: abs(&args.output),
+        attach_scans: args.attach_scans,
+    };
+    let console = crate::scantest::StdioConsole;
+    let report = match crate::scantest::run(&options, &console) {
+        Ok(report) => report,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            return 1;
+        }
+    };
+    match crate::scantest::write_report(&report, &options.out) {
+        Ok((json, text)) => {
+            println!();
+            println!(
+                "{} passed, {} failed, {} skipped (this scanner cannot do them), {} not run.",
+                report.passed, report.failed, report.skipped, report.not_run
+            );
+            println!("Report written to:");
+            println!("  {}", text.display());
+            println!("  {}", json.display());
+            println!("Read it, then attach BOTH files to a GitHub issue. Nothing was sent anywhere.");
+            if report.failed > 0 {
+                1
+            } else {
+                0
+            }
+        }
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            1
+        }
+    }
+}
+
 /// The device a headless run scans from.
 ///
 /// There is no device-selection dialog headlessly: with exactly one scanner
@@ -3167,6 +3269,13 @@ pub fn run(command: CliCommand, gs_path: Option<String>) -> i32 {
         };
     }
 
+    // The checklist runner is pure WIA plus its own evidence reader: it
+    // judges the staged pages, never an assembled PDF, so it needs no engine
+    // and a tester needs nothing provisioned to run it.
+    if let CliCommand::ScanTest(args) = &command {
+        return run_scan_test(args);
+    }
+
     let mut engine = match CliEngine::start() {
         Ok(e) => e,
         Err(msg) => {
@@ -3286,6 +3395,7 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
         // Handled in run() before the engine spawns.
         CliCommand::Printers(_) => unreachable!("printers is dispatched before engine start"),
         CliCommand::Scanners(_) => unreachable!("scanners is dispatched before engine start"),
+        CliCommand::ScanTest(_) => unreachable!("scan-test is dispatched before engine start"),
 
         CliCommand::Rotate(args) => {
             engine.call(
@@ -5744,6 +5854,53 @@ mod tests {
         }];
         let settings = scan_settings(&caps, &scan_args(&["--pages", "5"])).expect("flatbed row");
         assert_eq!(settings.pages, None);
+    }
+
+    #[test]
+    fn the_checklist_row_selection_refuses_a_row_that_does_not_exist() {
+        assert_eq!(parse_scan_test_rows(None), Ok(Vec::new()));
+        assert_eq!(
+            parse_scan_test_rows(Some("4, 5 ,6")),
+            Ok(vec!["4".to_string(), "5".to_string(), "6".to_string()])
+        );
+        // Silently running nothing would be reported as "the feeder rows do
+        // not work".
+        let refusal = parse_scan_test_rows(Some("4,99")).expect_err("no row 99");
+        assert!(refusal.contains("99"), "{refusal}");
+        assert!(refusal.contains("--list"), "{refusal}");
+    }
+
+    #[test]
+    fn the_checklist_verb_parses_its_flags() {
+        let cli = parse(&[
+            "spectrapdf",
+            "scan-test",
+            "--device",
+            "dev-1",
+            "--rows",
+            "4,5",
+            "-o",
+            "reports",
+            "--attach-scans",
+        ]);
+        match cli.command {
+            Some(CliCommand::ScanTest(args)) => {
+                assert_eq!(args.device.as_deref(), Some("dev-1"));
+                assert_eq!(args.rows.as_deref(), Some("4,5"));
+                assert!(args.attach_scans);
+                assert!(!args.list);
+            }
+            _ => panic!("scan-test should parse"),
+        }
+        // Scans are opt-in: the default must never carry a tester's pages.
+        let bare = parse(&["spectrapdf", "scan-test"]);
+        match bare.command {
+            Some(CliCommand::ScanTest(args)) => {
+                assert!(!args.attach_scans);
+                assert!(args.rows.is_none());
+            }
+            _ => panic!("scan-test should parse"),
+        }
     }
 
     #[test]
