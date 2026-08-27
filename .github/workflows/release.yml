@@ -238,14 +238,16 @@ jobs:
         # Ghostscript remains user-installed and absent from the installer.
         # This unpinned test install proves the minimum-version capability path
         # against the current package available to a Windows user.
-        run: choco install ghostscript -y --no-progress
+        # Retries and the pinned upstream fallback live in the script.
+        run: powershell -ExecutionPolicy Bypass -File scripts/install-ghostscript-test-tool.ps1
         shell: pwsh
 
       - name: Export the test Ghostscript path
         run: |
           $candidates = @(Get-ChildItem "${env:ProgramFiles}\gs\gs*\bin\gswin64c.exe" -File -ErrorAction Stop)
-          if ($candidates.Count -ne 1) { throw "Expected one installed Ghostscript, found $($candidates.Count)" }
-          Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECTRAPDF_GS_PATH=$($candidates[0].FullName)" -Encoding utf8
+          if ($candidates.Count -eq 0) { throw "No installed Ghostscript found" }
+          $selected = ($candidates | Sort-Object { [version]($_.Directory.Parent.Name -replace '^gs', '') } -Descending)[0]
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "SPECTRAPDF_GS_PATH=$($selected.FullName)" -Encoding utf8
         shell: pwsh
 
       - name: Engine tests (full suite)
