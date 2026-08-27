@@ -1,0 +1,191 @@
+name: Release (redo)
+
+# REDO PUBLISHER. Used when a tag's release build failed for a reason that is
+# not in the product: a pinned third-party vendor host was down and the build
+# could never reach the point of producing installers.
+#
+# THE INVARIANT: the product bytes come from the TAG. This workflow checks the
+# tag out in full and overlays exactly ONE file from main --
+# scripts/bundle-libreoffice.ps1 -- which downloads a vendor archive whose
+# SHA-256 is pinned inside it. Nothing that ends up in an installer is taken
+# from main; the overlay can only change WHICH HOST is asked for bytes that are
+# checksum-verified either way. Do not widen the overlay: any other file from
+# main would publish, under the tag's version, code the tag does not contain.
+#
+# The build/sign/publish steps below are a copy of release.yml's `release` job.
+# They are kept in step with it by hand; a change to that job that matters to a
+# republish belongs here too.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to rebuild and publish (e.g. v1.1.15)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Rebuild & publish from tag (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out the tag in full
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+
+      # The one permitted deviation from the tag. Fetch main and take only the
+      # vendor download script, so a dead pinned host can be routed around
+      # without moving or re-cutting the tag.
+      - name: Overlay the vendor download tooling from main
+        shell: pwsh
+        run: |
+          git fetch origin main --depth=1
+          git checkout origin/main -- scripts/bundle-libreoffice.ps1
+          git --no-pager diff --stat HEAD -- scripts/bundle-libreoffice.ps1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Provision embedded Python (vendored)
+        run: powershell -ExecutionPolicy Bypass -File scripts/setup-python-embed.ps1
+        shell: pwsh
+
+      - name: Vendor the ICC colour profiles (committed under vendor/icc)
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-icc.ps1
+        shell: pwsh
+
+      - name: Vendor edit fonts (Liberation family, 12 faces, sha256-pinned)
+        run: powershell -ExecutionPolicy Bypass -File scripts/sync-edit-fonts.ps1
+        shell: pwsh
+
+      - name: Vendor signature script faces (3 faces, OFL 1.1, sha256-pinned)
+        run: powershell -ExecutionPolicy Bypass -File scripts/sync-signature-fonts.ps1
+        shell: pwsh
+
+      - name: Cache the pinned LibreOffice msi
+        id: libreoffice-msi-cache-build
+        uses: actions/cache@v6
+        with:
+          path: .lo-msi-cache
+          key: ${{ runner.os }}-libreoffice-msi-${{ hashFiles('scripts/bundle-libreoffice.ps1') }}
+
+      - name: Vendor LibreOffice (O1 export runtime, MPL-2.0)
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1
+        env:
+          SPECTRAPDF_LO_MSI_CACHE: .lo-msi-cache
+
+      - name: Vendor native Tesseract
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
+
+      - name: Vendor jbig2enc (MRC mask codec, Apache-2.0)
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-jbig2enc.ps1
+
+      - name: Vendor spelling dictionaries
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-dictionaries.ps1
+        shell: pwsh
+
+      - name: Vendor the Finnish morphological analyser
+        # Must run AFTER the dictionaries step, which rebuilds
+        # resources/dictionaries wholesale, and after the Tesseract step, whose
+        # mingw runtime DLLs it copies beside libvoikko-1.dll.
+        run: powershell -ExecutionPolicy Bypass -File scripts/bundle-voikko.ps1
+        shell: pwsh
+
+      - name: Stage OCR language models
+        # Must run AFTER the Tesseract vendoring step, which supplies
+        # tessdata/configs (TSV output) and osd.
+        run: node scripts/sync-ocr-assets.mjs
+        shell: pwsh
+
+      - name: Stage corresponding source archives
+        run: powershell -ExecutionPolicy Bypass -File scripts/stage-corresponding-source.ps1 -OutputDirectory release-sources
+        shell: pwsh
+
+      - name: Build, sign, and publish release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        with:
+          tagName: ${{ inputs.tag }}
+          releaseName: "Spectra PDF ${{ inputs.tag }}"
+          releaseBody: "See CHANGELOG.md for details. The installer is unsigned (no code-signing certificate); SmartScreen may warn on first run -- verify your download against SHA256SUMS.txt, published with this release. Exact corresponding-source archives for the bundled HEIF decoder libraries are attached to this release."
+          releaseDraft: false
+          prerelease: false
+
+      - name: Build the portable zip
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1
+        shell: pwsh
+
+      - name: Verify the portable tree against the installer's staging
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-portable-zip.ps1 -Verify src-tauri/target/release/bundle/portable/tree.staging
+        shell: pwsh
+
+      - name: Publish the portable zip
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $zips = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -ErrorAction Stop)
+          if ($zips.Count -ne 1) { throw "expected one portable zip, found $($zips.Count)" }
+          gh release upload ${{ inputs.tag }} $zips[0].FullName --clobber
+          if ($LASTEXITCODE -ne 0) { throw "failed to upload $($zips[0].Name)" }
+
+      - name: Publish corresponding source archives
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $files = @(Get-ChildItem release-sources -File -ErrorAction Stop)
+          if (-not $files) { throw "no corresponding-source archives were staged" }
+          foreach ($file in $files) {
+            gh release upload ${{ inputs.tag }} $file.FullName --clobber
+            if ($LASTEXITCODE -ne 0) { throw "failed to upload $($file.Name)" }
+          }
+
+      - name: Publish SHA-256 checksums
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $bundle = "src-tauri/target/release/bundle/nsis"
+          $installers = @(Get-ChildItem $bundle -Filter "*-setup.exe" -ErrorAction Stop)
+          if (-not $installers) { throw "no installer found in $bundle to checksum" }
+          $sources = @(Get-ChildItem release-sources -File -ErrorAction Stop)
+          if (-not $sources) { throw "no corresponding-source archives found to checksum" }
+          $portable = @(Get-ChildItem "src-tauri/target/release/bundle/portable" -Filter "*-portable.zip" -ErrorAction Stop)
+          if ($portable.Count -ne 1) { throw "expected one portable zip to checksum, found $($portable.Count)" }
+          $files = @($installers) + @($portable) + @($sources)
+          $lines = foreach ($f in $files) {
+            $h = (Get-FileHash -Algorithm SHA256 $f.FullName).Hash.ToLowerInvariant()
+            "$h  $($f.Name)"
+          }
+          $out = Join-Path $bundle "SHA256SUMS.txt"
+          # ASCII + LF: this file is consumed by `sha256sum -c` as often as by eye.
+          [System.IO.File]::WriteAllText($out, ($lines -join "`n") + "`n", [System.Text.ASCIIEncoding]::new())
+          Get-Content $out
+          gh release upload ${{ inputs.tag }} $out --clobber
