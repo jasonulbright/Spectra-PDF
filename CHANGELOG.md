@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.1.15
+
+*Released 2026-08-26*
+
+### Scan from a scanner
+
+- Create PDF from Scanner is live for flatbed scanning: pick a device, choose resolution, color mode and paper size from what the device actually offers, and scan straight into a new document or an open one — then enhance and OCR through the existing scan tools. Available from the Scan dialog and the command line.
+- Verified against real hardware, failure modes included: a scanner that stops responding mid-scan is reported by name with nothing partial kept, scan working files clean themselves up even after a crash, and recovery after a power cycle needs no restart.
+- Feeder (ADF), duplex, and network-discovery scanning are not yet enabled pending verification on hardware that has them; the controls appear only for capabilities a device reports.
+
+### Organize
+
+- Page reordering now animates: pages visibly travel to their destination when dragged or rearranged, respecting the system's reduced-motion setting and staying instant for large rearrangements.
+- Drops are refused, with the reason shown on the drag ghost, when the target is rendered too small at the current zoom to be deliberate — no more pages landing in a sliver you couldn't see. Space before the first and after the last document always stays available.
+
+### Fixes
+
+- A scan could corrupt the application's memory on every acquisition due to an ownership error in the device property handshake; scanning is now stable.
+- Imported files dropped while zoomed far out no longer report an outcome that didn't happen; the message now states what was actually done.
+
 ## 1.1.14
 
 *Released 2026-08-26*
