@@ -161,23 +161,51 @@ def test_each_cached_runtime_archive_precedes_every_use_of_its_script(
 
 
 def test_the_libreoffice_download_falls_back_across_tdf_hosts() -> None:
-    """The redirector is one host and it can be down as a whole.
+    """A named mirror leads; the redirector is one host and can be down whole.
 
-    A redirector outage failed a release publish and a CI run inside one hour;
-    retrying only re-rolls mirrors while the redirector still answers. The
-    named hosts below are the ones that answer when it does not. Trust does not
+    A redirector outage failed a release publish and a CI run inside one hour
+    while the named osuosl mirror kept serving, so the order below is the
+    contract: named host first, redirector second, archive last. Trust does not
     rest on any of them: the pinned checksum is verified before extraction.
     """
     text = (ROOT / "scripts" / "bundle-libreoffice.ps1").read_text()
-    for host in (
-        "download.documentfoundation.org/libreoffice/stable/",
+    hosts = (
         "ftp.osuosl.org/pub/tdf/libreoffice/stable/",
+        "download.documentfoundation.org/libreoffice/stable/",
         "downloadarchive.documentfoundation.org/libreoffice/old/",
-    ):
+    )
+    positions = []
+    for host in hosts:
         assert host in text
+        positions.append(text.index(f"https://{host}"))
+    assert positions == sorted(positions), (
+        "the download sources must be ordered: " + ", ".join(hosts)
+    )
     assert '$ExpectedSha256 = "F15BA07BFCB0186986CF3171063506F5D207C11F8CC051BA0D135209E9E915F9"' in text
     # The verify gates extraction regardless of which source or cache answered.
     assert text.index("Test-PinnedMsi $Msi") < text.index("msiexec.exe")
+
+
+def test_the_redo_publisher_takes_product_bytes_from_the_tag() -> None:
+    """The redo workflow may overlay download tooling and nothing else.
+
+    It exists so a dead pinned vendor host can be routed around without moving
+    or re-cutting a tag. That is only sound while the ONLY file it takes from
+    main is the vendor download script, whose archive SHA-256 is pinned inside
+    it: any other overlaid file would publish, under the tag's version, code
+    the tag does not contain.
+    """
+    text = (ROOT / ".github" / "workflows" / "release-redo.yml").read_text()
+    assert "ref: refs/tags/${{ inputs.tag }}" in text
+    overlays = [
+        line.strip()
+        for line in text.splitlines()
+        if "git checkout origin/main --" in line
+    ]
+    assert overlays == ["git checkout origin/main -- scripts/bundle-libreoffice.ps1"]
+    assert "permissions:\n  contents: write" in text
+    # The publish steps address the dispatched tag, never a ref the run is on.
+    assert "github.ref_name" not in text
 
 
 def test_scan_fixture_uses_the_ghostscript_authority() -> None:

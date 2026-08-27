@@ -51,18 +51,18 @@ param(
     [switch]$GateOnly
 )
 
-# Sources for the SAME pinned build, tried in order. The first is TDF's
-# redirector, which hands out a volunteer mirror per request and is the only
-# entry that can be down as a whole. The rest are named hosts, so a redirector
-# outage — the failure that killed a release publish and a CI run inside one
-# hour — no longer takes the download with it. Every entry is served by The
-# Document Foundation's own distribution network, and the SHA-256 check below
-# runs on whatever any of them served, so ordering is a liveness choice and
-# never a trust one.
+# Sources for the SAME pinned build, tried in order. The PRIMARY is a named
+# mirror host, because the redirector — which hands out a volunteer mirror per
+# request — is the only entry that can be down as a whole, and it was: a
+# redirector outage killed a release publish and a CI run inside one hour while
+# the named host kept serving. The redirector is now the fallback. Every entry
+# is served by The Document Foundation's own distribution network, and the
+# SHA-256 check below runs on whatever any of them served, so ordering is a
+# liveness choice and never a trust one.
 $MsiUrls = if ($MsiUrl) { @($MsiUrl) } else {
     @(
-        "https://download.documentfoundation.org/libreoffice/stable/$Version/win/x86_64/LibreOffice_${Version}_Win_x86-64.msi",
         "https://ftp.osuosl.org/pub/tdf/libreoffice/stable/$Version/win/x86_64/LibreOffice_${Version}_Win_x86-64.msi",
+        "https://download.documentfoundation.org/libreoffice/stable/$Version/win/x86_64/LibreOffice_${Version}_Win_x86-64.msi",
         "https://downloadarchive.documentfoundation.org/libreoffice/old/$ArchiveVersion/win/x86_64/LibreOffice_${ArchiveVersion}_Win_x86-64.msi"
     )
 }
@@ -249,11 +249,10 @@ if ($CacheFile -and (Test-Path -LiteralPath $CacheFile)) {
     }
 }
 
-# RETRY within a source, because the redirector hands out a different volunteer
-# mirror per request and drawing a dead one used to fail the whole release —
-# retrying re-rolls the mirror. FALL THROUGH between sources, because that only
-# helps while the redirector itself still answers. Safe to do both blindly: the
-# checksum runs on whatever arrived.
+# RETRY within a source, because a source can fail transiently — and on the
+# redirector entry a retry also re-rolls which volunteer mirror answers. FALL
+# THROUGH between sources, because a whole host can be down. Safe to do both
+# blindly: the checksum runs on whatever arrived.
 if (-not $haveMsi) {
     $Attempts = 3
     $failures = @()
