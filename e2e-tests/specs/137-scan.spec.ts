@@ -167,6 +167,27 @@ describe('scan', () => {
     if (tmp && existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
   });
 
+  /** Enumeration has finished when the dialog has left its `looking` phase —
+   * which lands on the empty state or on a populated device picker depending
+   * on what is physically attached to THIS machine. Injection replaces the
+   * device either way, so a wait that insists on the empty state is a wait on
+   * ambient hardware rather than on the dialog being ready. */
+  async function waitForScanEnumerated(): Promise<void> {
+    await browser.waitUntil(
+      async () =>
+        (await $('[data-testid="scan-empty"]').isExisting()) ||
+        (await $('[data-testid="scan-device"]').isExisting()),
+      { timeout: 20_000, timeoutMsg: 'scan dialog never left the looking phase' },
+    );
+  }
+
+  /** Whether this machine has a real scanner attached. The two tests below
+   * assert what a SCANNERLESS machine produces; there is no seam to force an
+   * empty backend, so the premise is established rather than assumed. */
+  async function hasRealScanner(): Promise<boolean> {
+    return (await scanListDevices()).scanners.length > 0;
+  }
+
   afterEach(async () => {
     const dialog = $('[data-testid="scan-dialog"]');
     if (!(await dialog.isExisting())) return;
@@ -178,6 +199,7 @@ describe('scan', () => {
   it('opens to a named empty state on a machine with no scanner', async function () {
     this.timeout(60_000);
     await waitForHarness();
+    if (await hasRealScanner()) this.skip();
     expect(await invokeAppCommand('file.createFromScanner')).toBe(true);
     const dialog = $('[data-testid="scan-dialog"]');
     await dialog.waitForExist({ timeout: 15_000 });
@@ -202,15 +224,19 @@ describe('scan', () => {
   it('answers the command contract: an empty list is a result, an unknown id refuses by name', async function () {
     this.timeout(60_000);
     await waitForHarness();
-    // Enumeration on a scannerless machine RESOLVES with an empty array. A
-    // rejection here would make the empty state unreachable.
+    // Enumeration RESOLVES rather than rejecting. A rejection would make the
+    // empty state unreachable. On a scannerless machine that resolution is an
+    // empty array with no preselected default; the emptiness is the ambient
+    // fact, the resolution is the contract.
     const list = await scanListDevices();
     expect(Array.isArray(list.scanners)).toBe(true);
-    expect(list.scanners.length).toBe(0);
-    // A stored last-used id that no longer enumerates is dropped rather than
-    // preselecting a device that is not there.
-    expect(list.default).toBe(null);
+    if (list.scanners.length === 0) {
+      // A stored last-used id that no longer enumerates is dropped rather than
+      // preselecting a device that is not there.
+      expect(list.default).toBe(null);
+    }
 
+    // The unknown-id refusal is machine-independent and is asserted always.
     const refusal = await scanCapabilitiesRefusal('no-such-device');
     expect(refusal).not.toBe(null);
     // A stable KEY beside its English sentence: the renderer renders the key,
@@ -225,7 +251,7 @@ describe('scan', () => {
     await waitForHarness();
     expect(await invokeAppCommand('file.createFromScanner')).toBe(true);
     await $('[data-testid="scan-dialog"]').waitForExist({ timeout: 15_000 });
-    await $('[data-testid="scan-empty"]').waitForExist({ timeout: 20_000 });
+    await waitForScanEnumerated();
 
     // A flatbed-only device: one source row, no duplex offer anywhere, and no
     // brightness slider because the device reported no brightness property.
@@ -276,7 +302,7 @@ describe('scan', () => {
     await waitForHarness();
     expect(await invokeAppCommand('file.createFromScanner')).toBe(true);
     await $('[data-testid="scan-dialog"]').waitForExist({ timeout: 15_000 });
-    await $('[data-testid="scan-empty"]').waitForExist({ timeout: 20_000 });
+    await waitForScanEnumerated();
 
     // Two of a five-page stack arrived before the run stopped. A cancelled run
     // is a RESULT, so the two are offered.
@@ -297,7 +323,7 @@ describe('scan', () => {
     await waitForHarness();
     expect(await invokeAppCommand('file.createFromScanner')).toBe(true);
     await $('[data-testid="scan-dialog"]').waitForExist({ timeout: 15_000 });
-    await $('[data-testid="scan-empty"]').waitForExist({ timeout: 20_000 });
+    await waitForScanEnumerated();
 
     await scanInjectDevice(FLATBED_ONLY, pages);
     await browser.waitUntil(async () => ((await scanSnapshot())?.pageIds.length ?? 0) === 3, {
@@ -362,7 +388,7 @@ describe('scan', () => {
       timeoutMsg: 'Insert ▸ From Scanner never became available',
     });
     await $('[data-testid="scan-dialog"]').waitForExist({ timeout: 15_000 });
-    await $('[data-testid="scan-empty"]').waitForExist({ timeout: 20_000 });
+    await waitForScanEnumerated();
 
     await scanInjectDevice(FLATBED_ONLY, pages);
     await browser.waitUntil(async () => ((await scanSnapshot())?.pageIds.length ?? 0) === 3, {

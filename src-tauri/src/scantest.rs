@@ -1074,11 +1074,18 @@ impl Report {
 /// The runner's console, behind a trait so a test can script the answers.
 pub trait Console {
     fn say(&self, line: &str);
-    /// One line of input. An empty string is Enter, and end-of-input is also
-    /// an empty string — a runner that blocks forever on a closed stdin would
-    /// be worse than one that treats it as "go on".
-    fn ask(&self, prompt: &str) -> String;
+    /// One line of input. `Some("")` is Enter; `None` is end-of-input or an
+    /// unreadable stdin, which no amount of re-prompting can turn into an
+    /// answer — every prompt treats it as give up, never as a retry.
+    fn ask(&self, prompt: &str) -> Option<String>;
 }
+
+/// Why a row that needed an answer did not get one.
+pub const NO_CONSOLE: &str = "no interactive console";
+
+/// How many unusable answers one question takes before it gives up. A piped
+/// stdin can supply an endless stream of answers that are neither y nor n.
+const MAX_INVALID: u32 = 3;
 
 pub struct StdioConsole;
 
@@ -1086,30 +1093,45 @@ impl Console for StdioConsole {
     fn say(&self, line: &str) {
         println!("{line}");
     }
-    fn ask(&self, prompt: &str) -> String {
+    fn ask(&self, prompt: &str) -> Option<String> {
         print!("{prompt}");
         let _ = std::io::stdout().flush();
         let mut answer = String::new();
         match std::io::stdin().read_line(&mut answer) {
-            Ok(_) => answer.trim().to_string(),
-            Err(_) => String::new(),
+            Ok(0) | Err(_) => None,
+            Ok(_) => Some(answer.trim().to_string()),
         }
     }
 }
 
-fn yes(console: &dyn Console, question: &str) -> bool {
+fn yes(console: &dyn Console, question: &str) -> Option<bool> {
+    let mut invalid = 0;
     loop {
-        let answer = console.ask(&format!("{question} [y/n] "));
+        let answer = console.ask(&format!("{question} [y/n] "))?;
         match answer.to_ascii_lowercase().as_str() {
-            "y" | "yes" => return true,
-            "n" | "no" => return false,
-            _ => console.say("Please answer y or n."),
+            "y" | "yes" => return Some(true),
+            "n" | "no" => return Some(false),
+            _ => {
+                invalid += 1;
+                if invalid >= MAX_INVALID {
+                    console.say("No usable answer; giving up on this question.");
+                    return None;
+                }
+                console.say("Please answer y or n.");
+            }
         }
     }
 }
 
-fn enter(console: &dyn Console, what: &str) {
-    console.ask(&format!("{what} Press Enter when ready. "));
+fn enter(console: &dyn Console, what: &str) -> Option<()> {
+    console.ask(&format!("{what} Press Enter when ready. "))?;
+    Some(())
+}
+
+/// A row that asked the tester something and got no answer at all.
+fn abandoned(record: &mut RowRecord) {
+    record.status = RowStatus::Skipped;
+    record.notes.push(NO_CONSOLE.to_string());
 }
 
 // ── The run ─────────────────────────────────────────────────────────────────
@@ -1227,11 +1249,20 @@ pub fn run(options: &Options, console: &dyn Console) -> Result<Report, String> {
         console.say("");
         console.say(&format!("Row {} — {}", row.id, row.title));
         console.say(&format!("  About {} minutes. {}", row.minutes, row.instruction));
-        if !yes(console, "  Run this row now?") {
-            record.notes.push("the tester skipped this row".to_string());
-            console.say("  Skipped for now.");
-            report.rows.push(record);
-            continue;
+        match yes(console, "  Run this row now?") {
+            Some(true) => {}
+            Some(false) => {
+                record.notes.push("the tester skipped this row".to_string());
+                console.say("  Skipped for now.");
+                report.rows.push(record);
+                continue;
+            }
+            None => {
+                abandoned(&mut record);
+                console.say(&format!("  Skipped: {NO_CONSOLE}."));
+                report.rows.push(record);
+                continue;
+            }
         }
         let started = Instant::now();
         run_row(
@@ -1273,13 +1304,26 @@ fn resolve_device(requested: Option<&str>, console: &dyn Console) -> Result<Stri
             for (i, device) in list.scanners.iter().enumerate() {
                 console.say(&format!("  {}) {}", i + 1, device.name));
             }
+            let mut invalid = 0;
             loop {
-                let answer = console.ask("Which one is this run for? ");
+                let Some(answer) = console.ask("Which one is this run for? ") else {
+                    return Err(format!(
+                        "Several scanners are attached and there is {NO_CONSOLE} to choose one. Re-run with --device."
+                    ));
+                };
                 match answer.trim().parse::<usize>() {
                     Ok(n) if n >= 1 && n <= list.scanners.len() => {
                         return Ok(list.scanners[n - 1].id.clone())
                     }
-                    _ => console.say("Please type one of the numbers above."),
+                    _ => {
+                        invalid += 1;
+                        if invalid >= MAX_INVALID {
+                            return Err(format!(
+                                "No usable answer for which scanner to use ({NO_CONSOLE}). Re-run with --device."
+                            ));
+                        }
+                        console.say("Please type one of the numbers above.");
+                    }
                 }
             }
         }
@@ -1418,7 +1462,9 @@ fn apply(record: &mut RowRecord, verdict: RowVerdict) {
 }
 
 fn ask_confirm(console: &dyn Console, record: &mut RowRecord, question: &str) {
-    let answered = yes(console, &format!("  {question}"));
+    let Some(answered) = yes(console, &format!("  {question}")) else {
+        return abandoned(record);
+    };
     record.tester_answers.push(TesterAnswer {
         question: question.to_string(),
         answer: if answered { "yes" } else { "no" }.to_string(),
@@ -1458,7 +1504,9 @@ fn run_row(
             else {
                 return missing(record);
             };
-            enter(console, "  Page on the glass?");
+            if enter(console, "  Page on the glass?").is_none() {
+                return abandoned(record);
+            }
             let outcome = acquire(sessions, &device, settings, console, options, record, false);
             match outcome {
                 Ok(_) => {
@@ -1485,7 +1533,9 @@ fn run_row(
             ) else {
                 return missing(record);
             };
-            enter(console, "  Page on the glass?");
+            if enter(console, "  Page on the glass?").is_none() {
+                return abandoned(record);
+            }
             match acquire(sessions, &device, settings, console, options, record, false) {
                 Ok(_) => {
                     let mut expect = PageExpectation::new(CountRule::Exactly(1));
@@ -1513,7 +1563,9 @@ fn run_row(
                 else {
                     return missing(record);
                 };
-                enter(console, &format!("  Load {original}."));
+                if enter(console, &format!("  Load {original}.")).is_none() {
+                    return abandoned(record);
+                }
                 match acquire(sessions, &device, settings, console, options, record, false) {
                     Ok(_) => all.extend(record.pages.clone()),
                     Err(_) => {
@@ -1542,7 +1594,9 @@ fn run_row(
             ) else {
                 return missing(record);
             };
-            enter(console, "  Five numbered sheets in the feeder?");
+            if enter(console, "  Five numbered sheets in the feeder?").is_none() {
+                return abandoned(record);
+            }
             match acquire(sessions, &device, settings, console, options, record, false) {
                 Ok(_) => {
                     let verdict =
@@ -1573,7 +1627,9 @@ fn run_row(
             ) else {
                 return missing(record);
             };
-            enter(console, "  Three double-sided sheets in the feeder?");
+            if enter(console, "  Three double-sided sheets in the feeder?").is_none() {
+                return abandoned(record);
+            }
             match acquire(sessions, &device, settings, console, options, record, false) {
                 Ok(_) => {
                     let verdict =
@@ -1604,7 +1660,9 @@ fn run_row(
             ) else {
                 return missing(record);
             };
-            enter(console, "  Five sheets in the feeder?");
+            if enter(console, "  Five sheets in the feeder?").is_none() {
+                return abandoned(record);
+            }
             match acquire(sessions, &device, settings, console, options, record, false) {
                 Ok(_) => {
                     let verdict =
@@ -1633,7 +1691,9 @@ fn run_row(
             ) else {
                 return missing(record);
             };
-            enter(console, "  About ten sheets in the feeder?");
+            if enter(console, "  About ten sheets in the feeder?").is_none() {
+                return abandoned(record);
+            }
             match acquire(sessions, &device, settings, console, options, record, true) {
                 Ok(result) => {
                     let verdict = judge_cancel(10, &result, &record.pages);
@@ -1656,7 +1716,9 @@ fn run_row(
             ) else {
                 return missing(record);
             };
-            enter(console, "  Feeder tray completely empty?");
+            if enter(console, "  Feeder tray completely empty?").is_none() {
+                return abandoned(record);
+            }
             let started = Instant::now();
             let outcome = acquire(sessions, &device, settings, console, options, record, false);
             apply(
@@ -1685,10 +1747,14 @@ fn run_row(
             ) else {
                 return missing(record);
             };
-            enter(
+            if enter(
                 console,
                 "  Sheets loaded so that one will misfeed? Do not force anything.",
-            );
+            )
+            .is_none()
+            {
+                return abandoned(record);
+            }
             let started = Instant::now();
             let outcome = acquire(sessions, &device, settings, console, options, record, false);
             apply(
@@ -1720,10 +1786,14 @@ fn run_row(
             else {
                 return missing(record);
             };
-            enter(
+            if enter(
                 console,
                 "  A page ready to scan? Switch the scanner OFF once it starts moving.",
-            );
+            )
+            .is_none()
+            {
+                return abandoned(record);
+            }
             let started = Instant::now();
             let outcome = acquire(sessions, &device, settings, console, options, record, false);
             apply(
@@ -1748,7 +1818,12 @@ fn run_row(
                 );
             }
             console.say("  Switch the scanner back on and give it a moment to settle.");
-            enter(console, "  Back on?");
+            if enter(console, "  Back on?").is_none() {
+                record
+                    .notes
+                    .push(format!("the recovery scan was not attempted: {NO_CONSOLE}"));
+                return;
+            }
             if let Some(settings) =
                 settings_for(caps, id, ColorMode::Color, 300, PaperSize::Auto, None)
             {
@@ -1805,10 +1880,12 @@ fn run_row(
             );
         }
         "14" => {
-            let network = yes(
+            let Some(network) = yes(
                 console,
                 "  Is this scanner reached over the network rather than by USB?",
-            );
+            ) else {
+                return abandoned(record);
+            };
             record.tester_answers.push(TesterAnswer {
                 question: "Is this scanner reached over the network rather than by USB?".to_string(),
                 answer: if network { "yes" } else { "no" }.to_string(),
@@ -1821,9 +1898,11 @@ fn run_row(
                         .to_string());
                 return;
             }
-            let kind = console.ask(
+            let Some(kind) = console.ask(
                 "  Which kind is it — type 'escl' for AirScan/Mopria, 'wsd' for WSD, or 'unsure': ",
-            );
+            ) else {
+                return abandoned(record);
+            };
             record.tester_answers.push(TesterAnswer {
                 question: "Which kind of network scanner is it?".to_string(),
                 answer: kind,
@@ -1836,7 +1915,9 @@ fn run_row(
             else {
                 return missing(record);
             };
-            enter(console, "  A page ready to scan?");
+            if enter(console, "  A page ready to scan?").is_none() {
+                return abandoned(record);
+            }
             match acquire(sessions, &device, settings, console, options, record, false) {
                 Ok(_) => {
                     let verdict =
@@ -2326,6 +2407,158 @@ mod tests {
         // here at all.
         assert!(json.contains("page-0000.bmp"));
         assert!(!json.contains("scan-scratch"));
+    }
+
+    /// A console whose answers are scripted; `None` once the script runs out,
+    /// which is what a closed stdin looks like.
+    struct ScriptedConsole {
+        answers: std::sync::Mutex<std::collections::VecDeque<String>>,
+        /// A script of one answer that repeats — a pipe that never closes.
+        repeat: Option<String>,
+        said: std::sync::Mutex<Vec<String>>,
+        asked: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ScriptedConsole {
+        fn new(answers: &[&str]) -> Self {
+            Self {
+                answers: std::sync::Mutex::new(
+                    answers.iter().map(|a| a.to_string()).collect(),
+                ),
+                repeat: None,
+                said: std::sync::Mutex::new(Vec::new()),
+                asked: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+        fn eof() -> Self {
+            Self::new(&[])
+        }
+        fn repeating(answer: &str) -> Self {
+            Self {
+                repeat: Some(answer.to_string()),
+                ..Self::new(&[])
+            }
+        }
+        fn asks(&self) -> usize {
+            self.asked.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        fn transcript(&self) -> String {
+            self.said.lock().expect("said").join("\n")
+        }
+    }
+
+    impl Console for ScriptedConsole {
+        fn say(&self, line: &str) {
+            self.said.lock().expect("said").push(line.to_string());
+        }
+        fn ask(&self, _prompt: &str) -> Option<String> {
+            self.asked
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if let Some(answer) = self.repeat.clone() {
+                return Some(answer);
+            }
+            self.answers.lock().expect("answers").pop_front()
+        }
+    }
+
+    fn blank_record() -> RowRecord {
+        RowRecord {
+            id: "4".to_string(),
+            title: "Feeder".to_string(),
+            status: RowStatus::NotRun,
+            notes: Vec::new(),
+            settings: None,
+            pages: Vec::new(),
+            refusal: None,
+            adjustments: Vec::new(),
+            tester_answers: Vec::new(),
+            elapsed_secs: 0,
+            attached_scans: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_closed_stdin_gives_up_on_the_question_instead_of_re_prompting() {
+        let console = ScriptedConsole::eof();
+        assert_eq!(yes(&console, "Run this row now?"), None);
+        assert_eq!(enter(&console, "Page on the glass?"), None);
+        assert_eq!(console.asks(), 2, "each question asks exactly once at EOF");
+        assert!(
+            !console.transcript().contains("Please answer"),
+            "{}",
+            console.transcript()
+        );
+    }
+
+    #[test]
+    fn an_unanswerable_confirmation_marks_the_row_skipped_with_its_reason() {
+        let console = ScriptedConsole::eof();
+        let mut record = blank_record();
+        ask_confirm(&console, &mut record, "Were the five pages in order?");
+        assert_eq!(record.status, RowStatus::Skipped);
+        assert!(record.notes.contains(&NO_CONSOLE.to_string()), "{record:?}");
+        assert!(
+            record.tester_answers.is_empty(),
+            "an answer nobody gave is never recorded"
+        );
+    }
+
+    #[test]
+    fn a_report_of_rows_nobody_could_answer_still_tallies_and_renders() {
+        let console = ScriptedConsole::eof();
+        let mut rows = Vec::new();
+        for id in ["1", "4"] {
+            let mut record = blank_record();
+            record.id = id.to_string();
+            ask_confirm(&console, &mut record, "Did that look right?");
+            rows.push(record);
+        }
+        let mut report = Report {
+            schema: REPORT_SCHEMA,
+            tool: "spectrapdf scan-test".to_string(),
+            app_version: "1.0.0".to_string(),
+            windows_build: "10.0.26200".to_string(),
+            started_unix_secs: 0,
+            device_id: "dev".to_string(),
+            device_name: "Test Scanner".to_string(),
+            capabilities: serde_json::Value::Null,
+            rows,
+            passed: 0,
+            failed: 0,
+            skipped: 0,
+            not_run: 0,
+            privacy: PRIVACY_NOTE.to_string(),
+        };
+        report.tally();
+        assert_eq!((report.passed, report.failed, report.skipped), (0, 0, 2));
+        let text = report.to_text();
+        assert!(text.contains(NO_CONSOLE), "{text}");
+    }
+
+    #[test]
+    fn an_endless_stream_of_unusable_answers_stops_at_the_cap() {
+        let console = ScriptedConsole::repeating("maybe");
+        assert_eq!(yes(&console, "Run this row now?"), None);
+        assert_eq!(console.asks(), MAX_INVALID as usize);
+        let transcript = console.transcript();
+        assert_eq!(
+            transcript.matches("Please answer y or n.").count(),
+            MAX_INVALID as usize - 1,
+            "{transcript}"
+        );
+    }
+
+    #[test]
+    fn a_tester_at_a_terminal_still_answers_y_and_n() {
+        let console = ScriptedConsole::new(&["maybe", "Y", "no", ""]);
+        assert_eq!(yes(&console, "one?"), Some(true));
+        assert_eq!(yes(&console, "two?"), Some(false));
+        assert_eq!(enter(&console, "ready?"), Some(()));
+        let mut record = blank_record();
+        let refusing = ScriptedConsole::new(&["n"]);
+        ask_confirm(&refusing, &mut record, "Did that look right?");
+        assert_eq!(record.status, RowStatus::Fail);
+        assert_eq!(record.tester_answers.len(), 1);
     }
 
     #[test]
