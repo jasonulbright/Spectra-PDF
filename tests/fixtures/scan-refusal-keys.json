@@ -5,6 +5,7 @@
   "scan.deviceBusy",
   "scan.deviceGone",
   "scan.deviceLocked",
+  "scan.deviceLost",
   "scan.deviceOffline",
   "scan.driverError",
   "scan.failed",

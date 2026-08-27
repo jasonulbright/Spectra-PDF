@@ -5700,6 +5700,7 @@
   "refusal.scan.deviceBusy": "Skanneri on varattu. Yritä hetken kuluttua uudelleen.",
   "refusal.scan.deviceGone": "Skanneri ei ole enää liitettynä.",
   "refusal.scan.deviceLocked": "Toinen ohjelma käyttää skanneria.",
+  "refusal.scan.deviceLost": "Skanneri lakkasi vastaamasta kesken skannauksen.",
   "refusal.scan.deviceOffline": "Skanneri on sammutettu tai sitä ei tavoiteta.",
   "refusal.scan.driverError": "Skannerin ajuri ilmoitti ongelmasta.",
   "refusal.scan.failed": "Skanneri ilmoitti virheestä.",

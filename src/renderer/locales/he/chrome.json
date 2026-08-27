@@ -5822,6 +5822,7 @@
   "refusal.scan.deviceBusy": "הסורק עסוק. נסה שוב בעוד רגע.",
   "refusal.scan.deviceGone": "הסורק אינו מחובר עוד.",
   "refusal.scan.deviceLocked": "תוכנית אחרת משתמשת בסורק.",
+  "refusal.scan.deviceLost": "הסורק הפסיק להגיב במהלך הסריקה.",
   "refusal.scan.deviceOffline": "הסורק כבוי או שלא ניתן להגיע אליו.",
   "refusal.scan.driverError": "מנהל ההתקן של הסורק דיווח על תקלה.",
   "refusal.scan.failed": "הסורק דיווח על שגיאה.",

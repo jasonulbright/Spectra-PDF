@@ -5700,6 +5700,7 @@
   "refusal.scan.deviceBusy": "Skannern är upptagen. Försök igen om en stund.",
   "refusal.scan.deviceGone": "Skannern är inte ansluten längre.",
   "refusal.scan.deviceLocked": "Ett annat program använder skannern.",
+  "refusal.scan.deviceLost": "Skannern slutade svara under skanningen.",
   "refusal.scan.deviceOffline": "Skannern är avstängd eller går inte att nå.",
   "refusal.scan.driverError": "Skannerns drivrutin rapporterade ett problem.",
   "refusal.scan.failed": "Skannern rapporterade ett fel.",

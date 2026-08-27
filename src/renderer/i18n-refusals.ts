@@ -174,6 +174,7 @@ export const REFUSAL_STRINGS = {
   'refusal.scan.deviceBusy': 'The scanner is busy. Try again in a moment.',
   'refusal.scan.deviceGone': 'The scanner is no longer connected.',
   'refusal.scan.deviceLocked': 'Another program is using the scanner.',
+  'refusal.scan.deviceLost': 'The scanner stopped responding during the scan.',
   'refusal.scan.deviceOffline': 'The scanner is turned off or cannot be reached.',
   'refusal.scan.driverError': 'The scanner driver reported a problem.',
   'refusal.scan.failed': 'The scanner reported an error.',

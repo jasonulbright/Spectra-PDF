@@ -5944,6 +5944,7 @@
   "refusal.scan.deviceBusy": "Bralnik je zaseden. Poskusite čez trenutek.",
   "refusal.scan.deviceGone": "Bralnik ni več priključen.",
   "refusal.scan.deviceLocked": "Bralnik uporablja drug program.",
+  "refusal.scan.deviceLost": "Bralnik se je med optičnim branjem prenehal odzivati.",
   "refusal.scan.deviceOffline": "Bralnik je izklopljen ali nedosegljiv.",
   "refusal.scan.driverError": "Gonilnik bralnika javlja težavo.",
   "refusal.scan.failed": "Bralnik javlja napako.",

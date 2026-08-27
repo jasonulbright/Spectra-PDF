@@ -5578,6 +5578,7 @@
   "refusal.scan.deviceBusy": "掃描器忙碌中。請稍後再試。",
   "refusal.scan.deviceGone": "掃描器已不再連線。",
   "refusal.scan.deviceLocked": "另一個程式正在使用掃描器。",
+  "refusal.scan.deviceLost": "掃描過程中掃描器停止回應。",
   "refusal.scan.deviceOffline": "掃描器已關機或無法連上。",
   "refusal.scan.driverError": "掃描器驅動程式回報了問題。",
   "refusal.scan.failed": "掃描器回報了錯誤。",

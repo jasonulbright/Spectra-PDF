@@ -193,6 +193,7 @@ export const SCAN_REFUSAL_KEYS: readonly string[] = [
   'scan.deviceBusy',
   'scan.deviceGone',
   'scan.deviceLocked',
+  'scan.deviceLost',
   'scan.deviceOffline',
   'scan.driverError',
   'scan.failed',

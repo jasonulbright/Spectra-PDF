@@ -6188,6 +6188,7 @@
   "refusal.scan.deviceBusy": "الماسح الضوئي مشغول. أعد المحاولة بعد قليل.",
   "refusal.scan.deviceGone": "لم يعد الماسح الضوئي موصولاً.",
   "refusal.scan.deviceLocked": "يستخدم برنامج آخر الماسح الضوئي.",
+  "refusal.scan.deviceLost": "توقف الماسح الضوئي عن الاستجابة أثناء المسح.",
   "refusal.scan.deviceOffline": "الماسح الضوئي مطفأ أو يتعذّر الوصول إليه.",
   "refusal.scan.driverError": "أبلغ برنامج تشغيل الماسح الضوئي عن مشكلة.",
   "refusal.scan.failed": "أبلغ الماسح الضوئي عن خطأ.",

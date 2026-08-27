@@ -70,7 +70,8 @@ use windows::Win32::Devices::ImageAcquisition::{
     WIA_DATA_COLOR, WIA_DATA_GRAYSCALE, WIA_DATA_THRESHOLD, WIA_DEVINFO_ENUM_LOCAL,
     WIA_DIP_DEV_ID, WIA_DIP_DEV_NAME, WIA_DIP_DEV_TYPE,
     WIA_DPS_DOCUMENT_HANDLING_CAPABILITIES, WIA_DPS_MAX_SCAN_TIME, WIA_ERROR_BUSY,
-    WIA_ERROR_COVER_OPEN, WIA_ERROR_DEVICE_LOCKED, WIA_ERROR_EXCEPTION_IN_DRIVER,
+    WIA_ERROR_COVER_OPEN, WIA_ERROR_DEVICE_COMMUNICATION, WIA_ERROR_DEVICE_LOCKED,
+    WIA_ERROR_EXCEPTION_IN_DRIVER,
     WIA_ERROR_INVALID_COMMAND, WIA_ERROR_OFFLINE, WIA_ERROR_PAPER_EMPTY, WIA_ERROR_PAPER_JAM,
     WIA_ERROR_PAPER_PROBLEM, WIA_ERROR_USER_INTERVENTION, WIA_FLAG_NOM, WIA_FLAG_VALUES,
     WIA_IPA_DATATYPE, WIA_IPA_FORMAT,
@@ -162,6 +163,11 @@ const HRESULT_REFUSALS: &[(i32, &str, &str)] = &[
         WIA_ERROR_OFFLINE.0,
         "scan.deviceOffline",
         "The scanner is turned off or cannot be reached.",
+    ),
+    (
+        WIA_ERROR_DEVICE_COMMUNICATION.0,
+        "scan.deviceLost",
+        "The scanner stopped responding during the scan.",
     ),
     (
         WIA_ERROR_BUSY.0,
@@ -1473,6 +1479,134 @@ pub fn chosen_format(listed: &[GUID]) -> (GUID, &'static str) {
     (WiaImgFmt_BMP, "bmp")
 }
 
+// ── Staged-page integrity ───────────────────────────────────────────────────
+
+/// What a staged page's own header says about whether the transfer finished.
+///
+/// A driver that loses its device mid-transfer can still deliver
+/// `WIA_TRANSFER_MSG_END_OF_STREAM` and return `S_OK` from
+/// `IWiaTransfer::Download`, leaving a file whose header promises more bytes
+/// than the file holds. Nothing downstream of the scanner layer can name that
+/// as a device loss — the assembler only sees an unreadable image — so the
+/// check lives here, where the refusal can be named.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PageIntegrity {
+    /// The header's promise is met by the bytes on disk.
+    Complete,
+    /// The file is short of what its own header declares.
+    Truncated { declared: u64, actual: u64 },
+    /// The format carries no self-describing length this check can read; the
+    /// page is passed on rather than refused on a guess.
+    Unverifiable,
+}
+
+/// The bytes a BMP's own headers promise, from `bfSize` when the encoder wrote
+/// one and from the DIB geometry when it did not.
+///
+/// Rows are padded to a four-byte boundary — the format's own rule, and the
+/// reason the row stride is not `width * bits / 8`.
+fn bmp_declared_len(head: &[u8]) -> Option<u64> {
+    if head.len() < 14 || &head[0..2] != b"BM" {
+        return None;
+    }
+    let u32_at = |at: usize| -> u64 {
+        u32::from_le_bytes([head[at], head[at + 1], head[at + 2], head[at + 3]]) as u64
+    };
+    let declared = u32_at(2);
+    if declared >= 14 {
+        return Some(declared);
+    }
+    // `bfSize` of zero is written by some encoders. The DIB header is then the
+    // only witness, and only for an uncompressed image, whose size is exactly
+    // the padded rows.
+    if head.len() < 54 {
+        return None;
+    }
+    let offset = u32_at(10);
+    let width = i32::from_le_bytes([head[18], head[19], head[20], head[21]]) as i64;
+    let height = i32::from_le_bytes([head[22], head[23], head[24], head[25]]) as i64;
+    let bits = u16::from_le_bytes([head[28], head[29]]) as i64;
+    let compression = u32_at(30);
+    if compression != 0 || width <= 0 || height == 0 || bits <= 0 {
+        return None;
+    }
+    let stride = ((width * bits + 31) / 32) * 4;
+    let rows = height.unsigned_abs();
+    Some(offset + (stride as u64) * rows)
+}
+
+/// Whether one staged page holds everything its header promises.
+///
+/// Read from the file rather than from the transfer's byte counter: the counter
+/// records what the callback was told, and a lost device is exactly the case
+/// where that and the file disagree.
+pub fn page_integrity(path: &Path) -> PageIntegrity {
+    let Ok(actual) = std::fs::metadata(path).map(|m| m.len()) else {
+        return PageIntegrity::Truncated {
+            declared: 0,
+            actual: 0,
+        };
+    };
+    let mut head = [0u8; 54];
+    let read = {
+        use std::io::Read;
+        std::fs::File::open(path)
+            .and_then(|mut f| f.read(&mut head))
+            .unwrap_or_default()
+    };
+    let head = &head[..read];
+    if head.starts_with(b"BM") {
+        return match bmp_declared_len(head) {
+            Some(declared) if actual < declared => PageIntegrity::Truncated { declared, actual },
+            Some(_) => PageIntegrity::Complete,
+            None => PageIntegrity::Unverifiable,
+        };
+    }
+    if head.starts_with(PNG_SIGNATURE) {
+        // PNG declares no total length; its terminator is the promise.
+        let mut tail = [0u8; 8];
+        let ended = {
+            use std::io::{Read, Seek, SeekFrom};
+            actual >= 8
+                && std::fs::File::open(path)
+                    .and_then(|mut f| {
+                        f.seek(SeekFrom::End(-8))?;
+                        f.read_exact(&mut tail)?;
+                        Ok(())
+                    })
+                    .is_ok()
+                && &tail[4..8] == b"IEND"
+        };
+        return if ended {
+            PageIntegrity::Complete
+        } else {
+            PageIntegrity::Truncated {
+                declared: 0,
+                actual,
+            }
+        };
+    }
+    // TIFF and anything else: no cheap self-describing total length.
+    if actual == 0 {
+        PageIntegrity::Truncated {
+            declared: 0,
+            actual: 0,
+        }
+    } else {
+        PageIntegrity::Unverifiable
+    }
+}
+
+const PNG_SIGNATURE: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
+/// The first staged page that is short of its own header, if any.
+pub fn first_truncated_page(pages: &[PathBuf]) -> Option<(PathBuf, PageIntegrity)> {
+    pages.iter().find_map(|path| match page_integrity(path) {
+        short @ PageIntegrity::Truncated { .. } => Some((path.clone(), short)),
+        _ => None,
+    })
+}
+
 /// What the dialog (or the CLI) asked for. Every field is optional: a control
 /// the device did not report is a control the dialog did not render, so its
 /// setting is absent rather than guessed.
@@ -1905,41 +2039,15 @@ unsafe fn acquire(
                 let _ = std::fs::remove_file(&path);
             }
         }
-        let pages: Vec<String> = state
-            .pages
-            .lock()
-            .map(|pages| {
-                pages
-                    .iter()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let staged: Vec<PathBuf> = state.pages.lock().map(|pages| pages.clone()).unwrap_or_default();
         let bytes = state.bytes.load(Ordering::SeqCst);
-
-        if timed_out {
-            return Err(ScanRefusal::named(
-                "scan.notResponding",
-                "The scanner stopped responding.",
-            ));
-        }
-        if let Err(e) = outcome {
-            // A cancel we asked for surfaces as S_FALSE or as a cancelled
-            // HRESULT; that is a result with pages, not a failure.
-            if !cancelled {
-                let reported = state.failure.lock().ok().and_then(|f| *f);
-                return Err(refusal_for(reported.unwrap_or_else(|| e.code())));
-            }
-        }
-        // A transfer that ended cleanly with no pages at all is the device's
-        // own Cancel button: indistinguishable from success at the HRESULT
-        // level, wrong as an error and baffling as an empty success.
-        if pages.is_empty() && !cancelled {
-            return Err(ScanRefusal::named(
-                "scan.cancelledAtDevice",
-                "The scan was cancelled at the scanner.",
-            ));
-        }
+        let pages = judge_transfer(TransferOutcome {
+            timed_out,
+            cancelled,
+            download: outcome.err().map(|e| e.code()),
+            reported: state.failure.lock().ok().and_then(|f| *f),
+            staged: &staged,
+        })?;
         Ok(ScanResult {
             pages,
             cancelled,
@@ -1949,6 +2057,77 @@ unsafe fn acquire(
             bytes,
         })
     }
+}
+
+/// Everything a finished transfer is judged on, and nothing that needs a
+/// device: the seam the run's verdict is decided at.
+pub struct TransferOutcome<'a> {
+    /// The watchdog cancelled the run because the driver went silent.
+    pub timed_out: bool,
+    /// The run was cancelled from this side (the user, or the watchdog).
+    pub cancelled: bool,
+    /// What `IWiaTransfer::Download` returned, when it failed.
+    pub download: Option<HRESULT>,
+    /// The last failing status the driver reported through the callback.
+    pub reported: Option<HRESULT>,
+    /// The pages the driver signalled complete, in transfer order.
+    pub staged: &'a [PathBuf],
+}
+
+/// The verdict on one finished transfer: the pages to offer, or the refusal
+/// that names what went wrong.
+///
+/// Truncated pages are deleted here rather than left for the scratch sweep,
+/// so nothing downstream can be handed a page this decided not to offer.
+pub fn judge_transfer(outcome: TransferOutcome<'_>) -> Result<Vec<String>, ScanRefusal> {
+    if outcome.timed_out {
+        return Err(ScanRefusal::named(
+            "scan.notResponding",
+            "The scanner stopped responding.",
+        ));
+    }
+    // A cancel we asked for surfaces as S_FALSE or as a cancelled HRESULT;
+    // that is a result with pages, not a failure.
+    if !outcome.cancelled {
+        // A driver can report a failure through the callback and STILL return
+        // `S_OK` from `Download`. The reported status is the device's own
+        // verdict on the run and outranks the return value.
+        if let Some(status) = outcome.reported.or(outcome.download) {
+            return Err(refusal_for(status));
+        }
+    }
+    // A page whose header promises more bytes than the file holds means the
+    // device stopped mid-stream even though the driver signalled the page
+    // complete — the shape a device losing power takes, since a driver can
+    // deliver end-of-stream and S_OK over a stream that stopped arriving.
+    // The whole run refuses: a truncated raster that reached assembly surfaces
+    // as the assembler's unreadable-image error, which names nothing the user
+    // can act on, and a run that lost its device has no honest partial to
+    // offer.
+    if first_truncated_page(outcome.staged).is_some() {
+        for page in outcome.staged {
+            let _ = std::fs::remove_file(page);
+        }
+        return Err(ScanRefusal::named(
+            "scan.deviceLost",
+            "The scanner stopped responding during the scan.",
+        ));
+    }
+    let pages: Vec<String> = outcome
+        .staged
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+    // A transfer that ended cleanly with no pages at all is the device's own
+    // Cancel button: indistinguishable from success at the HRESULT level,
+    // wrong as an error and baffling as an empty success.
+    if pages.is_empty() && !outcome.cancelled {
+        return Err(ScanRefusal::named(
+            "scan.cancelledAtDevice",
+            "The scan was cancelled at the scanner.",
+        ));
+    }
+    Ok(pages)
 }
 
 /// The largest value a property's own domain allows, which is what an extent
@@ -2552,6 +2731,7 @@ mod tests {
             (WIA_ERROR_USER_INTERVENTION, "scan.needsAttention"),
             (WIA_ERROR_EXCEPTION_IN_DRIVER, "scan.driverError"),
             (WIA_ERROR_INVALID_COMMAND, "scan.settingRejected"),
+            (WIA_ERROR_DEVICE_COMMUNICATION, "scan.deviceLost"),
         ];
         for (hr, key) in rows {
             let refusal = refusal_for(*hr);
@@ -2589,6 +2769,220 @@ mod tests {
             WIA_ERROR_MAXIMUM_PRINTER_ENDORSER_COUNTER.0
         );
         assert_eq!(refusal_for(WIA_S_NO_DEVICE_AVAILABLE).key, "scan.deviceGone");
+    }
+
+    /// A BMP header for a 24-bit uncompressed image, with `bfSize` written or
+    /// left at zero, and the padded row stride the format's own rule gives.
+    fn bmp_header(width: i32, height: i32, declare_size: bool) -> (Vec<u8>, u64) {
+        let stride = (((width as i64) * 24 + 31) / 32) * 4;
+        let total = 54u64 + (stride as u64) * (height.unsigned_abs() as u64);
+        let mut head = vec![0u8; 54];
+        head[0..2].copy_from_slice(b"BM");
+        let declared = if declare_size { total as u32 } else { 0 };
+        head[2..6].copy_from_slice(&declared.to_le_bytes());
+        head[10..14].copy_from_slice(&54u32.to_le_bytes());
+        head[14..18].copy_from_slice(&40u32.to_le_bytes());
+        head[18..22].copy_from_slice(&width.to_le_bytes());
+        head[22..26].copy_from_slice(&height.to_le_bytes());
+        head[26..28].copy_from_slice(&1u16.to_le_bytes());
+        head[28..30].copy_from_slice(&24u16.to_le_bytes());
+        (head, total)
+    }
+
+    /// Stage one page file: a header plus `written` bytes of body, so a page
+    /// cut mid-transfer can be posed without a device.
+    fn stage_page(dir: &Path, name: &str, head: &[u8], written: u64) -> PathBuf {
+        std::fs::create_dir_all(dir).expect("a staging folder");
+        let path = dir.join(name);
+        let mut bytes = head.to_vec();
+        bytes.resize(written.max(head.len() as u64) as usize, 0);
+        std::fs::write(&path, &bytes).expect("a staged page");
+        path
+    }
+
+    #[test]
+    fn a_bmp_short_of_its_declared_size_is_truncated() {
+        // Row 10: the device dies mid-transfer, the driver still signals the
+        // page complete, and the file is short of its own header.
+        let root = temp_scratch_root("integrity-short");
+        let (head, total) = bmp_header(2550, 3300, true);
+        let path = stage_page(&root, "page-0000.bmp", &head, 4096);
+        assert_eq!(
+            page_integrity(&path),
+            PageIntegrity::Truncated {
+                declared: total,
+                actual: 4096
+            }
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_bmp_that_holds_its_declared_size_is_complete() {
+        let root = temp_scratch_root("integrity-whole");
+        let (head, total) = bmp_header(8, 8, true);
+        let path = stage_page(&root, "page-0000.bmp", &head, total);
+        assert_eq!(page_integrity(&path), PageIntegrity::Complete);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_bmp_with_no_declared_size_is_measured_from_its_dib_header() {
+        // `bfSize` of zero is legal enough that some encoders write it; the
+        // geometry is then the only witness, and it still catches a short file.
+        let root = temp_scratch_root("integrity-dib");
+        let (head, total) = bmp_header(64, 64, false);
+        let short = stage_page(&root, "page-0000.bmp", &head, 100);
+        assert_eq!(
+            page_integrity(&short),
+            PageIntegrity::Truncated {
+                declared: total,
+                actual: 100
+            }
+        );
+        let whole = stage_page(&root, "page-0001.bmp", &head, total);
+        assert_eq!(page_integrity(&whole), PageIntegrity::Complete);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_png_is_judged_by_its_terminator() {
+        let root = temp_scratch_root("integrity-png");
+        let mut whole = PNG_SIGNATURE.to_vec();
+        whole.extend_from_slice(&[0, 0, 0, 0]);
+        whole.extend_from_slice(b"IEND");
+        whole.extend_from_slice(&[0xAE, 0x42, 0x60, 0x82]);
+        // The check reads the last eight bytes: length then chunk type.
+        let mut ended = PNG_SIGNATURE.to_vec();
+        ended.extend_from_slice(&[1, 2, 3, 4]);
+        ended.extend_from_slice(&[0, 0, 0, 0]);
+        ended.extend_from_slice(b"IEND");
+        let path = root.join("ended.png");
+        std::fs::create_dir_all(&root).expect("a staging folder");
+        std::fs::write(&path, &ended).expect("a staged page");
+        assert_eq!(page_integrity(&path), PageIntegrity::Complete);
+
+        let cut = root.join("cut.png");
+        std::fs::write(&cut, &whole[..12]).expect("a staged page");
+        assert!(matches!(
+            page_integrity(&cut),
+            PageIntegrity::Truncated { .. }
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_empty_staged_page_is_truncated_whatever_its_format() {
+        let root = temp_scratch_root("integrity-empty");
+        std::fs::create_dir_all(&root).expect("a staging folder");
+        let path = root.join("page-0000.tif");
+        std::fs::write(&path, b"").expect("a staged page");
+        assert!(matches!(
+            page_integrity(&path),
+            PageIntegrity::Truncated { .. }
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_run_with_one_short_page_names_that_page() {
+        // The run-level check the acquire path refuses on: good pages before
+        // the loss do not hide the page the device died inside.
+        let root = temp_scratch_root("integrity-run");
+        let (head, total) = bmp_header(16, 16, true);
+        let good = stage_page(&root, "page-0000.bmp", &head, total);
+        let short = stage_page(&root, "page-0001.bmp", &head, total - 10);
+        assert!(first_truncated_page(std::slice::from_ref(&good)).is_none());
+        let (named, _) = first_truncated_page(&[good, short.clone()])
+            .expect("a run holding a short page is caught");
+        assert_eq!(named, short);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn judged(
+        timed_out: bool,
+        cancelled: bool,
+        download: Option<HRESULT>,
+        reported: Option<HRESULT>,
+        staged: &[PathBuf],
+    ) -> Result<Vec<String>, ScanRefusal> {
+        judge_transfer(TransferOutcome {
+            timed_out,
+            cancelled,
+            download,
+            reported,
+            staged,
+        })
+    }
+
+    #[test]
+    fn a_page_short_of_its_header_refuses_by_the_device_lost_key() {
+        // Checklist row 10, without the hardware: the device loses power, the
+        // driver still signals the page complete and `Download` still returns
+        // S_OK, and the file is short. Before this, the run reported success
+        // and the truncated page reached the assembler, which could only say
+        // the image was unreadable.
+        let root = temp_scratch_root("judge-short");
+        let (head, _) = bmp_header(2550, 3300, true);
+        let short = stage_page(&root, "page-0000.bmp", &head, 8192);
+        let refusal = judged(false, false, None, None, std::slice::from_ref(&short))
+            .expect_err("a short page is a refusal, not a result");
+        assert_eq!(refusal.key, "scan.deviceLost");
+        assert!(refusal.code.is_none());
+        assert!(
+            !short.exists(),
+            "a page the run refused on is never left where assembly could read it"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_whole_page_over_a_silent_transfer_is_a_result() {
+        let root = temp_scratch_root("judge-whole");
+        let (head, total) = bmp_header(16, 16, true);
+        let page = stage_page(&root, "page-0000.bmp", &head, total);
+        let pages = judged(false, false, None, None, std::slice::from_ref(&page)).expect("a whole page passes");
+        assert_eq!(pages, vec![page.to_string_lossy().to_string()]);
+        assert!(page.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_status_reported_through_the_callback_outranks_a_successful_download() {
+        // The second half of the same driver behaviour: a failure reported on
+        // the callback while `Download` returns S_OK was read as a clean run.
+        let refusal = judged(false, false, None, Some(WIA_ERROR_DEVICE_COMMUNICATION), &[])
+            .expect_err("a reported failure is a refusal");
+        assert_eq!(refusal.key, "scan.deviceLost");
+
+        let refusal = judged(false, false, None, Some(WIA_ERROR_OFFLINE), &[])
+            .expect_err("a reported failure is a refusal");
+        assert_eq!(refusal.key, "scan.deviceOffline");
+
+        // And a general error with nothing else to say still names itself.
+        let refusal = judged(false, false, Some(WIA_ERROR_GENERAL_ERROR), None, &[])
+            .expect_err("a failed download is a refusal");
+        assert_eq!(refusal.key, "scan.failed");
+        assert_eq!(refusal.code.as_deref(), Some("0x80210001"));
+    }
+
+    #[test]
+    fn a_cancel_keeps_its_pages_and_the_watchdog_keeps_its_own_key() {
+        let root = temp_scratch_root("judge-cancel");
+        let (head, total) = bmp_header(16, 16, true);
+        let page = stage_page(&root, "page-0000.bmp", &head, total);
+        // A cancel we asked for: the driver's S_FALSE is not a failure.
+        let pages = judged(false, true, Some(HRESULT(1)), None, std::slice::from_ref(&page))
+            .expect("a cancelled run offers what completed");
+        assert_eq!(pages.len(), 1);
+        // The watchdog's own row is not displaced by the new one.
+        let refusal =
+            judged(true, true, None, Some(WIA_ERROR_DEVICE_COMMUNICATION), &[]).expect_err("timed out");
+        assert_eq!(refusal.key, "scan.notResponding");
+        // A clean transfer with no pages is still the device's Cancel button.
+        let refusal = judged(false, false, None, None, &[]).expect_err("no pages, no cancel");
+        assert_eq!(refusal.key, "scan.cancelledAtDevice");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

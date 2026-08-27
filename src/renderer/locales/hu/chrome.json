@@ -5700,6 +5700,7 @@
   "refusal.scan.deviceBusy": "A lapolvasó foglalt. Próbálja újra egy pillanat múlva.",
   "refusal.scan.deviceGone": "A lapolvasó már nincs csatlakoztatva.",
   "refusal.scan.deviceLocked": "A lapolvasót másik program használja.",
+  "refusal.scan.deviceLost": "A lapolvasó a beolvasás közben nem válaszolt tovább.",
   "refusal.scan.deviceOffline": "A lapolvasó ki van kapcsolva, vagy nem érhető el.",
   "refusal.scan.driverError": "A lapolvasó illesztőprogramja hibát jelzett.",
   "refusal.scan.failed": "A lapolvasó hibát jelzett.",

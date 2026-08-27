@@ -5944,6 +5944,7 @@
   "refusal.scan.deviceBusy": "Skaner jest zajęty. Spróbuj za chwilę.",
   "refusal.scan.deviceGone": "Skaner nie jest już podłączony.",
   "refusal.scan.deviceLocked": "Skanera używa inny program.",
+  "refusal.scan.deviceLost": "Skaner przestał odpowiadać podczas skanowania.",
   "refusal.scan.deviceOffline": "Skaner jest wyłączony lub nieosiągalny.",
   "refusal.scan.driverError": "Sterownik skanera zgłosił problem.",
   "refusal.scan.failed": "Skaner zgłosił błąd.",

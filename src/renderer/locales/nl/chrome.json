@@ -5700,6 +5700,7 @@
   "refusal.scan.deviceBusy": "De scanner is bezig. Probeer het zo opnieuw.",
   "refusal.scan.deviceGone": "De scanner is niet meer aangesloten.",
   "refusal.scan.deviceLocked": "Een ander programma gebruikt de scanner.",
+  "refusal.scan.deviceLost": "De scanner reageerde niet meer tijdens het scannen.",
   "refusal.scan.deviceOffline": "De scanner staat uit of is onbereikbaar.",
   "refusal.scan.driverError": "Het scannerstuurprogramma meldde een probleem.",
   "refusal.scan.failed": "De scanner meldde een fout.",
