@@ -141,3 +141,6 @@ tests/softhsm2/
 
 # instruction file for a different tool; not part of this repo
 AGENTS.md
+
+# Verified LibreOffice .msi reused across CI runs (actions/cache path).
+.lo-msi-cache/

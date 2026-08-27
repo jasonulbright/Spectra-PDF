@@ -43,6 +43,17 @@ CACHED_CORPORA = (
 )
 
 
+#: Vendored runtimes fetched as one large pinned archive rather than as a
+#: corpus: the workflow caches the archive itself and the bundle script does
+#: the verifying. Keyed on the bundle SCRIPT because that file carries both the
+#: version and the SHA-256. Same shape as CACHED_CORPORA, different unit — a
+#: runtime has no `--check`, its notice gate runs inside the script.
+CACHED_RUNTIME_ARCHIVES = (
+    ("libreoffice-msi", ".lo-msi-cache", "scripts/bundle-libreoffice.ps1",
+     "SPECTRAPDF_LO_MSI_CACHE"),
+)
+
+
 def _axis_constants() -> set[tuple[str, str]]:
     """Every `*_AXIS_SKIP` constant defined by a tests/ helper module."""
     found: set[tuple[str, str]] = set()
@@ -122,6 +133,51 @@ def test_each_corpus_fetch_is_cached_on_its_pins(
     guard = text.index(f"if: steps.{cache_id}.outputs.cache-hit != 'true'")
     assert cache < guard < check
     assert text[fetch:check].count("cache-hit") == 0
+
+
+@pytest.mark.parametrize("workflow", WORKFLOWS)
+@pytest.mark.parametrize("cache_id,path,script,env_var", CACHED_RUNTIME_ARCHIVES)
+def test_each_cached_runtime_archive_precedes_every_use_of_its_script(
+    workflow: str, cache_id: str, path: str, script: str, env_var: str
+) -> None:
+    """Every invocation of the bundle script gets the cache, not just the first.
+
+    release.yml runs the LibreOffice staging twice (verification job, build
+    job); a cache wired into only one of them leaves the 373 MB download on
+    the path that a tag release actually depends on.
+    """
+    text = (ROOT / ".github" / "workflows" / workflow).read_text()
+    assert f"hashFiles('{script}')" in text
+    assert f"path: {path}" in text
+
+    runs = [i for i in range(len(text)) if text.startswith(f"-File {script}", i)]
+    assert runs, f"{workflow} never runs {script}"
+    caches = [i for i in range(len(text)) if text.startswith(f"id: {cache_id}", i)]
+    envs = [i for i in range(len(text)) if text.startswith(f"{env_var}: {path}", i)]
+    assert len(caches) == len(runs)
+    assert len(envs) == len(runs)
+    for cache, run, env in zip(caches, runs, envs):
+        assert cache < run < env
+
+
+def test_the_libreoffice_download_falls_back_across_tdf_hosts() -> None:
+    """The redirector is one host and it can be down as a whole.
+
+    A redirector outage failed a release publish and a CI run inside one hour;
+    retrying only re-rolls mirrors while the redirector still answers. The
+    named hosts below are the ones that answer when it does not. Trust does not
+    rest on any of them: the pinned checksum is verified before extraction.
+    """
+    text = (ROOT / "scripts" / "bundle-libreoffice.ps1").read_text()
+    for host in (
+        "download.documentfoundation.org/libreoffice/stable/",
+        "ftp.osuosl.org/pub/tdf/libreoffice/stable/",
+        "downloadarchive.documentfoundation.org/libreoffice/old/",
+    ):
+        assert host in text
+    assert '$ExpectedSha256 = "F15BA07BFCB0186986CF3171063506F5D207C11F8CC051BA0D135209E9E915F9"' in text
+    # The verify gates extraction regardless of which source or cache answered.
+    assert text.index("Test-PinnedMsi $Msi") < text.index("msiexec.exe")
 
 
 def test_scan_fixture_uses_the_ghostscript_authority() -> None:
