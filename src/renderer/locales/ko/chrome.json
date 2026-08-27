@@ -800,6 +800,7 @@
   "cmd.view.navPanel.search": "검색",
   "cmd.view.navPanel.signatures": "서명",
   "cmd.view.navPanel.tags": "태그",
+  "cmd.view.omniSearch": "도구 및 텍스트 검색",
   "cmd.view.organizeAll": "모든 문서 정리",
   "cmd.view.presentation": "프레젠테이션(전체 화면)",
   "cmd.view.propertiesBar": "속성 표시줄",

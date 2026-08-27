@@ -13,6 +13,7 @@ pub mod net;
 pub mod gs;
 mod printers;
 pub mod scanner;
+pub mod scantest;
 pub mod app_windows;
 pub mod portable;
 pub mod store_certs;

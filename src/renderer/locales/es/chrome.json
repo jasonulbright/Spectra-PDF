@@ -826,6 +826,7 @@
   "cmd.view.navPanel.search": "Búsqueda",
   "cmd.view.navPanel.signatures": "Firmas",
   "cmd.view.navPanel.tags": "Etiquetas",
+  "cmd.view.omniSearch": "Buscar herramientas y texto",
   "cmd.view.organizeAll": "Organizar todos los documentos",
   "cmd.view.presentation": "Presentación (pantalla completa)",
   "cmd.view.propertiesBar": "Barra de propiedades",

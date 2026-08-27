@@ -813,6 +813,7 @@
   "cmd.view.navPanel.search": "Keresés",
   "cmd.view.navPanel.signatures": "Aláírások",
   "cmd.view.navPanel.tags": "Címkék",
+  "cmd.view.omniSearch": "Keresés eszközök és szöveg között",
   "cmd.view.organizeAll": "Minden dokumentum rendezése",
   "cmd.view.presentation": "Bemutató (teljes képernyő)",
   "cmd.view.propertiesBar": "Tulajdonságsáv",

@@ -813,6 +813,7 @@
   "cmd.view.navPanel.search": "Søk",
   "cmd.view.navPanel.signatures": "Signaturer",
   "cmd.view.navPanel.tags": "Etiketter",
+  "cmd.view.omniSearch": "Søk i verktøy og tekst",
   "cmd.view.organizeAll": "Organiser alle dokumenter",
   "cmd.view.presentation": "Presentasjon (fullskjerm)",
   "cmd.view.propertiesBar": "Egenskapslinje",

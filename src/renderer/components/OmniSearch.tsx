@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppState } from '../state/AppStateProvider';
 import { useSearchContext } from '../search/SearchProvider';
 import { TOOL_DEFS, type ToolId } from '../commands/tools';
-import { rankToolMatches } from '../search/omnisearch-rank';
+import { rankToolMatches, type FrecencyStore } from '../search/omnisearch-rank';
+import { noteToolPick, readFrecency } from '../search/omnisearch-frecency';
+import { registerOmniSearchFocus } from '../commands/omnisearch-focus';
 import { invokeCommand, isCommandEnabled, getCanvasServices } from '../commands/context';
 import { showableDoc } from '../state/selectors';
 import { ToolIcon } from './tool-icons';
@@ -57,6 +59,36 @@ export function OmniSearch(): React.JSX.Element {
   const [active, setActive] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Read once per mount and kept in state: the ranking memo must genuinely
+  // depend on it, so a pick reorders the NEXT query rather than at the next
+  // reload.
+  const [frecency, setFrecency] = useState<FrecencyStore>(() => readFrecency());
+  // Where the caret came from when the shortcut brought it here, so Escape
+  // hands focus back rather than dropping it on the body.
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
+  // The Ctrl+L command's target. Focusing is only focusing — no tool is armed
+  // and no panel opens, so the openTool invariant is untouched.
+  useEffect(() => {
+    registerOmniSearchFocus(() => {
+      const input = inputRef.current;
+      if (!input) return false;
+      const prior = document.activeElement;
+      returnFocusRef.current =
+        prior instanceof HTMLElement && prior !== input ? prior : null;
+      input.focus();
+      input.select();
+      return true;
+    });
+    return () => registerOmniSearchFocus(null);
+  }, []);
+
+  const restoreFocus = useCallback(() => {
+    const prior = returnFocusRef.current;
+    returnFocusRef.current = null;
+    if (prior && prior.isConnected) prior.focus();
+    else inputRef.current?.blur();
+  }, []);
 
   // Same 150ms the Search panel uses — a keystroke must not start a scan.
   useEffect(() => {
@@ -78,6 +110,8 @@ export function OmniSearch(): React.JSX.Element {
           description: tToolDescription(t.id, t.description, language),
         })),
         formattingLocale(language),
+        frecency,
+        Date.now(),
       )
         .slice(0, MAX_TOOL_HITS)
         .map((t) => ({
@@ -87,7 +121,7 @@ export function OmniSearch(): React.JSX.Element {
           description: t.description,
           enabled: isCommandEnabled(`tools.open.${t.id}`),
         })),
-    [debounced, language],
+    [debounced, language, frecency],
   );
 
   const docs = state.workspace.documents;
@@ -146,15 +180,19 @@ export function OmniSearch(): React.JSX.Element {
       if (hit.kind === 'tool') {
         if (!hit.enabled) return;
         invokeCommand(`tools.open.${hit.id}`);
+        // Tools only: a text hit names a page in ONE document, so ranking a
+        // later query by it would carry a closed file's pages into an open
+        // file's results.
+        setFrecency(noteToolPick(hit.id));
       } else {
         getCanvasServices()?.openPageForReading(hit.pageId);
       }
       setQuery('');
       setDebounced('');
       close();
-      inputRef.current?.blur();
+      restoreFocus();
     },
-    [close],
+    [close, restoreFocus],
   );
 
   // Dismiss on an outside pointerdown. Window-level, like the other overlays.
@@ -175,7 +213,7 @@ export function OmniSearch(): React.JSX.Element {
         setDebounced('');
       } else {
         close();
-        inputRef.current?.blur();
+        restoreFocus();
       }
       return;
     }

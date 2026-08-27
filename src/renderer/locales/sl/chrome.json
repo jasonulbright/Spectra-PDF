@@ -839,6 +839,7 @@
   "cmd.view.navPanel.search": "Iskanje",
   "cmd.view.navPanel.signatures": "Podpisi",
   "cmd.view.navPanel.tags": "Oznake",
+  "cmd.view.omniSearch": "Iskanje po orodjih in besedilu",
   "cmd.view.organizeAll": "Uredi vse dokumente",
   "cmd.view.presentation": "Predstavitev (celozaslonsko)",
   "cmd.view.propertiesBar": "Vrstica lastnosti",

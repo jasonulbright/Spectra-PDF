@@ -800,6 +800,7 @@
   "cmd.view.navPanel.search": "搜索",
   "cmd.view.navPanel.signatures": "签名",
   "cmd.view.navPanel.tags": "标签",
+  "cmd.view.omniSearch": "搜索工具和文本",
   "cmd.view.organizeAll": "整理所有文档",
   "cmd.view.presentation": "演示（全屏）",
   "cmd.view.propertiesBar": "属性栏",

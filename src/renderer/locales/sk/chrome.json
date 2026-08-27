@@ -839,6 +839,7 @@
   "cmd.view.navPanel.search": "Hľadanie",
   "cmd.view.navPanel.signatures": "Podpisy",
   "cmd.view.navPanel.tags": "Značky",
+  "cmd.view.omniSearch": "Hľadať nástroje a text",
   "cmd.view.organizeAll": "Usporiadať všetky dokumenty",
   "cmd.view.presentation": "Prezentácia (celá obrazovka)",
   "cmd.view.propertiesBar": "Panel vlastností",
