@@ -36,15 +36,35 @@ param(
     # integrity-checked build with zero manual setup. Override -MsiUrl (and
     # -ExpectedSha256, or "" to skip the check) only to bump the version.
     [string]$Version = "26.2.5",
+    # The archive keeps releases under their four-part build version; the
+    # redirector and the rsync mirrors expose the same bytes under the
+    # three-part release. Both spellings name one build.
+    [string]$ArchiveVersion = "26.2.5.2",
     [string]$MsiUrl = "",
     [string]$ExpectedSha256 = "F15BA07BFCB0186986CF3171063506F5D207C11F8CC051BA0D135209E9E915F9",
+    # A directory holding an already-downloaded, checksum-verified .msi. A file
+    # named for the pinned checksum is reused; a fresh download is written back
+    # here after it verifies. Empty disables the cache.
+    [string]$MsiCacheDir = $env:SPECTRAPDF_LO_MSI_CACHE,
     # Run only the notice gate against -DestDir and exit with its verdict.
     # Nothing is downloaded, copied or removed.
     [switch]$GateOnly
 )
 
-if (-not $MsiUrl) {
-    $MsiUrl = "https://download.documentfoundation.org/libreoffice/stable/$Version/win/x86_64/LibreOffice_${Version}_Win_x86-64.msi"
+# Sources for the SAME pinned build, tried in order. The first is TDF's
+# redirector, which hands out a volunteer mirror per request and is the only
+# entry that can be down as a whole. The rest are named hosts, so a redirector
+# outage — the failure that killed a release publish and a CI run inside one
+# hour — no longer takes the download with it. Every entry is served by The
+# Document Foundation's own distribution network, and the SHA-256 check below
+# runs on whatever any of them served, so ordering is a liveness choice and
+# never a trust one.
+$MsiUrls = if ($MsiUrl) { @($MsiUrl) } else {
+    @(
+        "https://download.documentfoundation.org/libreoffice/stable/$Version/win/x86_64/LibreOffice_${Version}_Win_x86-64.msi",
+        "https://ftp.osuosl.org/pub/tdf/libreoffice/stable/$Version/win/x86_64/LibreOffice_${Version}_Win_x86-64.msi",
+        "https://downloadarchive.documentfoundation.org/libreoffice/old/$ArchiveVersion/win/x86_64/LibreOffice_${ArchiveVersion}_Win_x86-64.msi"
+    )
 }
 
 $ErrorActionPreference = "Stop"
@@ -197,39 +217,83 @@ New-Item -ItemType Directory -Force $Work | Out-Null
 $Msi = Join-Path $Work "libreoffice.msi"
 $Extract = Join-Path $Work "extract"
 
-# RETRY, because the default host is a REDIRECTOR, not a server: it hands out
-# a different volunteer mirror per request, and drawing a dead one fails the
-# whole release. That is exactly what killed the v2.8.4 tag build ("Unable to
-# connect to the remote server") two hours after the identical URL had served
-# v2.8.3 fine. Retrying re-rolls the mirror, so a single bad draw costs seconds
-# instead of a release. Safe to retry blindly: the SHA-256 check below runs on
-# whatever any mirror served, so a corrupt or substituted file still fails.
-Write-Host "No local LibreOffice; downloading $MsiUrl ..."
-$Attempts = 4
-for ($i = 1; $i -le $Attempts; $i++) {
-    try {
-        Invoke-WebRequest -Uri $MsiUrl -OutFile $Msi -UseBasicParsing
-        break
-    } catch {
-        Remove-Item $Msi -Force -ErrorAction SilentlyContinue
-        if ($i -eq $Attempts) {
-            throw "LibreOffice download failed after $Attempts attempts: $($_.Exception.Message)"
-        }
-        $wait = 5 * $i
-        Write-Host "  attempt $i/$Attempts failed ($($_.Exception.Message)); retrying in ${wait}s..."
-        Start-Sleep -Seconds $wait
+$Pinned = if ($ExpectedSha256 -and $ExpectedSha256 -ne "PLACEHOLDER_SHA256") {
+    $ExpectedSha256.ToUpper()
+} else { "" }
+
+# The integrity boundary. Everything upstream of this — which mirror answered,
+# whether the bytes came off a cache — is a liveness detail; nothing downstream
+# runs on a file that did not match the pin.
+function Test-PinnedMsi([string]$path) {
+    if (-not $Pinned) { return $true }
+    if (-not (Test-Path -LiteralPath $path)) { return $false }
+    return (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -eq $Pinned
+}
+
+# The cache entry is NAMED for the checksum, so a stale entry from an earlier
+# pin can never be mistaken for this one, and a truncated restore fails the
+# verify and falls through to a download rather than presenting as a hit.
+$CacheFile = if ($MsiCacheDir -and $Pinned) {
+    Join-Path $MsiCacheDir "LibreOffice_${Version}_Win_x86-64.$($Pinned.ToLower()).msi"
+} else { "" }
+
+$haveMsi = $false
+if ($CacheFile -and (Test-Path -LiteralPath $CacheFile)) {
+    if (Test-PinnedMsi $CacheFile) {
+        Copy-Item -LiteralPath $CacheFile -Destination $Msi -Force
+        Write-Host "Reusing the cached LibreOffice $Version msi (checksum verified)."
+        $haveMsi = $true
+    } else {
+        Write-Warning "Cached msi at $CacheFile does not match the pin; re-downloading."
+        Remove-Item -LiteralPath $CacheFile -Force -ErrorAction SilentlyContinue
     }
 }
 
-# Verify the pinned checksum (skip only if explicitly cleared for a version bump).
-if ($ExpectedSha256 -and $ExpectedSha256 -ne "" -and $ExpectedSha256 -ne "PLACEHOLDER_SHA256") {
-    $actual = (Get-FileHash $Msi -Algorithm SHA256).Hash
-    if ($actual -ne $ExpectedSha256.ToUpper()) {
-        Write-Error "Checksum mismatch for LibreOffice $Version msi.`n  expected: $ExpectedSha256`n  actual:   $actual"
+# RETRY within a source, because the redirector hands out a different volunteer
+# mirror per request and drawing a dead one used to fail the whole release —
+# retrying re-rolls the mirror. FALL THROUGH between sources, because that only
+# helps while the redirector itself still answers. Safe to do both blindly: the
+# checksum runs on whatever arrived.
+if (-not $haveMsi) {
+    $Attempts = 3
+    $failures = @()
+    foreach ($url in $MsiUrls) {
+        Write-Host "No local LibreOffice; downloading $url ..."
+        for ($i = 1; $i -le $Attempts; $i++) {
+            try {
+                Invoke-WebRequest -Uri $url -OutFile $Msi -UseBasicParsing
+                $haveMsi = $true
+                break
+            } catch {
+                Remove-Item $Msi -Force -ErrorAction SilentlyContinue
+                $failures += "$url : $($_.Exception.Message)"
+                if ($i -eq $Attempts) { break }
+                $wait = 5 * $i
+                Write-Host "  attempt $i/$Attempts failed ($($_.Exception.Message)); retrying in ${wait}s..."
+                Start-Sleep -Seconds $wait
+            }
+        }
+        if ($haveMsi) { break }
+        Write-Host "  exhausted $url; trying the next source..."
+    }
+    if (-not $haveMsi) {
+        throw "LibreOffice download failed on every source:`n  " + ($failures -join "`n  ")
+    }
+}
+
+if ($Pinned) {
+    if (-not (Test-PinnedMsi $Msi)) {
+        $actual = (Get-FileHash -LiteralPath $Msi -Algorithm SHA256).Hash
+        Write-Error "Checksum mismatch for LibreOffice $Version msi.`n  expected: $Pinned`n  actual:   $actual"
         exit 1
     }
     Write-Host "Checksum verified."
-} elseif ($ExpectedSha256 -eq "PLACEHOLDER_SHA256") {
+    if ($CacheFile -and -not (Test-Path -LiteralPath $CacheFile)) {
+        New-Item -ItemType Directory -Force (Split-Path $CacheFile -Parent) | Out-Null
+        Copy-Item -LiteralPath $Msi -Destination $CacheFile -Force
+        Write-Host "Cached the verified msi at $CacheFile"
+    }
+} else {
     Write-Warning "No pinned SHA256 for this build -- download NOT integrity-checked. Set -ExpectedSha256."
 }
 

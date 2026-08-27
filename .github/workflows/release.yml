@@ -142,9 +142,22 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/sync-signature-fonts.ps1
         shell: pwsh
 
+      # 373 MB off TDF's mirror network on EVERY run otherwise. The key is the
+      # bundle script because that file IS the pin (version + SHA-256), and the
+      # cached file is named for the checksum, so a restore that does not match
+      # the pin falls through to a download instead of poisoning the tree.
+      - name: Cache the pinned LibreOffice msi
+        id: libreoffice-msi-cache
+        uses: actions/cache@v6
+        with:
+          path: .lo-msi-cache
+          key: ${{ runner.os }}-libreoffice-msi-${{ hashFiles('scripts/bundle-libreoffice.ps1') }}
+
       - name: Stage the shipped LibreOffice runtime for engine tests
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1
         shell: pwsh
+        env:
+          SPECTRAPDF_LO_MSI_CACHE: .lo-msi-cache
 
       - name: Stage the shipped native Tesseract runtime for engine tests
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-tesseract.ps1
@@ -310,12 +323,21 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File scripts/sync-signature-fonts.ps1
         shell: pwsh
 
+      - name: Cache the pinned LibreOffice msi
+        id: libreoffice-msi-cache-build
+        uses: actions/cache@v6
+        with:
+          path: .lo-msi-cache
+          key: ${{ runner.os }}-libreoffice-msi-${{ hashFiles('scripts/bundle-libreoffice.ps1') }}
+
       - name: Vendor LibreOffice (O1 export runtime, MPL-2.0)
         # Self-sufficient: the runner has no LibreOffice, so the script downloads
         # its PINNED, checksum-verified stable .msi (the default in the script).
         # No repo variable, no manual setup. To bump the version, edit
         # $Version/$ExpectedSha256 in the script.
         run: powershell -ExecutionPolicy Bypass -File scripts/bundle-libreoffice.ps1
+        env:
+          SPECTRAPDF_LO_MSI_CACHE: .lo-msi-cache
 
       - name: Vendor native Tesseract
         # Phase 12: recognition is native Tesseract as a subprocess (the GUI, the
