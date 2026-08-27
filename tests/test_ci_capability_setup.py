@@ -21,7 +21,9 @@ WORKFLOWS = ("ci.yml", "release.yml")
 #: provisioning. The zero-skip gate is what makes that mandatory: an axis with
 #: nothing staging it does not skip quietly, it reds the whole run.
 AXIS_PROVISIONING = {
-    ("gs_axis", "PRESENT_AXIS_SKIP"): "choco install ghostscript -y --no-progress",
+    ("gs_axis", "PRESENT_AXIS_SKIP"):
+        "powershell -ExecutionPolicy Bypass -File "
+        "scripts/install-ghostscript-test-tool.ps1",
     ("ghent_corpus", "CORPUS_AXIS_SKIP"): "python scripts/fetch-ghent-suite.py --check",
     ("processing_steps_corpus", "PROCESSING_STEPS_AXIS_SKIP"):
         "python scripts/fetch-processing-steps-suite.py --check",
@@ -77,8 +79,17 @@ def _assert_capabilities_precede_engine_tests(workflow: str) -> None:
         "scripts/setup-test-softhsm.ps1",
     ):
         assert text.index(resource_step) < engine_test
-    assert text.index("choco install ghostscript -y --no-progress") < engine_test
-    assert text.index("SPECTRAPDF_GS_PATH=") < engine_test
+    install = text.index("scripts/install-ghostscript-test-tool.ps1")
+    export = text.index("SPECTRAPDF_GS_PATH=")
+    # The path export reads what the install produced, so the order is part of
+    # the contract: exporting first would publish a stale or absent executable.
+    assert install < export < engine_test
+    # A failed install attempt can leave a version directory behind, so the
+    # export selects the newest rather than requiring exactly one.
+    assert (
+        "Sort-Object { [version]($_.Directory.Parent.Name -replace '^gs', '') }"
+        " -Descending"
+    ) in text
     assert text.index("SPECTRAPDF_REQUIRE_ZERO_SKIPS") > engine_test
     for command in AXIS_PROVISIONING.values():
         assert text.index(command) < engine_test
@@ -117,6 +128,21 @@ def test_scan_fixture_uses_the_ghostscript_authority() -> None:
     text = (ROOT / "tests" / "fixtures" / "make_scans.py").read_text()
     assert "from engine.gs_capability import require" in text
     assert "resources\" / \"ghostscript" not in text
+
+
+def test_the_ghostscript_test_tool_install_retries_and_falls_back_pinned() -> None:
+    """The capability-present axis does not rest on one flaky package feed.
+
+    The primary path stays the unpinned current package (what a user gets);
+    the fallback is a pinned upstream installer, hash-verified before it is
+    executed, so an exhausted retry cannot run an unverified binary.
+    """
+    text = (ROOT / "scripts" / "install-ghostscript-test-tool.ps1").read_text()
+    assert "choco install ghostscript -y --no-progress" in text
+    assert "$attempt -le 3" in text
+    assert "$FallbackSha256 = " in text
+    verify = text.index("$actual -ne $FallbackSha256")
+    assert verify < text.index("Start-Process -FilePath $installer")
 
 
 def test_the_test_hsm_download_is_version_and_hash_pinned() -> None:

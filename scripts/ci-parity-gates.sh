@@ -72,6 +72,13 @@ for suite in fetch-ghent-suite fetch-processing-steps-suite fetch-pdfa-corpus; d
   fi
 done
 
+# --- Workflow-contract tests: the only local reader of .github/workflows/*.
+#     A workflow edit that breaks the contract otherwise surfaces on the runner
+#     (CI #144: the Ghostscript step moved into a script and the contract test's
+#     substring lookup raised). Cheap enough to run on every push. ---
+gate workflow-contract "$R/.venv/Scripts/python.exe" -m pytest \
+  tests/test_ci_capability_setup.py -q
+
 echo "CI-PARITY DONE" >> "$OUT"
 if [ "$fail" -ne 0 ]; then
   echo "CI-PARITY: FAILURES — read ci-parity.*.local.log before pushing." >> "$OUT"
