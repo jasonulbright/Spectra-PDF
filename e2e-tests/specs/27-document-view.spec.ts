@@ -564,13 +564,34 @@ describe('organize board page drags', () => {
     const from = { x: moving.x + moving.w / 2, y: moving.y + moving.h / 2 };
     const to = { x: target.x + target.w / 2, y: target.y + target.h / 2 };
 
-    // Driven in two halves so the state MID-drag is observable. "Nothing
-    // moved" on its own would also be true of a drag that never armed — and
-    // the zoomed-out arm threshold (usePageDrag DRAG_THRESHOLD_ZOOMED_OUT_PX)
-    // is larger than the travel between two cells at this zoom, so that is a
-    // live way for this test to pass for the wrong reason. The refusal chip
-    // only exists while an armed drag is over a refused target, so asserting
-    // it proves both halves: the drag armed, and the gate refused it.
+    // "Nothing moved" on its own would also be true of a drag that never armed
+    // — and the zoomed-out arm threshold (usePageDrag
+    // DRAG_THRESHOLD_ZOOMED_OUT_PX) is larger than the travel between two
+    // cells at this zoom, so that is a live way for this test to pass for the
+    // wrong reason. The ghost and its refusal chip prove both halves: the drag
+    // armed, and the gate refused it.
+    //
+    // Both are observed from INSIDE the page. They exist only while the button
+    // is held, and a driver-side `waitForExist` cannot sample that window: the
+    // poll runs between action chains, by which point WebDriver has reset the
+    // pointer input source and the drag has already torn down. Recording the
+    // mounts as they happen asks the same question at a time the answer exists.
+    await browser.execute(function () {
+      const w = window as unknown as Record<string, unknown>;
+      const seen = { ghost: false, chip: false, chipText: '' };
+      w.__dragProbe = seen;
+      const obs = new MutationObserver(function () {
+        if (document.querySelector('.drag-ghost-card')) seen.ghost = true;
+        const el = document.querySelector('.drag-ghost-refusal');
+        if (el) {
+          seen.chip = true;
+          if (el.textContent) seen.chipText = el.textContent;
+        }
+      });
+      obs.observe(document.body, { childList: true, subtree: true, characterData: true });
+      w.__dragProbeObs = obs;
+    });
+
     await browser
       .action('pointer', { parameters: { pointerType: 'mouse' } })
       .move({ x: Math.round(from.x), y: Math.round(from.y) })
@@ -580,16 +601,21 @@ describe('organize board page drags', () => {
       .pause(50)
       .move({ x: Math.round(to.x), y: Math.round(to.y) })
       .pause(50)
+      .up({ button: 0 })
       .perform();
-    const chip = $('.drag-ghost-refusal');
-    await chip.waitForExist({
-      timeout: 5_000,
-      timeoutMsg: 'the drag ghost never showed the zoom refusal',
-    });
-    expect(await chip.getText()).not.toBe('');
-
-    await browser.action('pointer', { parameters: { pointerType: 'mouse' } }).up({ button: 0 }).perform();
     await browser.releaseActions();
+
+    const seen = await browser.execute(function () {
+      const w = window as unknown as Record<string, unknown>;
+      const obs = w.__dragProbeObs as MutationObserver | undefined;
+      if (obs) obs.disconnect();
+      return w.__dragProbe as { ghost: boolean; chip: boolean; chipText: string };
+    });
+    // The drag armed…
+    expect(seen.ghost).toBe(true);
+    // …and the gate refused it, by name.
+    expect(seen.chip).toBe(true);
+    expect(seen.chipText).not.toBe('');
 
     // Nothing moved, and nothing was split into a new document either.
     await browser.pause(500);

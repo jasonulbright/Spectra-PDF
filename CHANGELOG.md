@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.16
+
+*Released 2026-08-27*
+
+### Search everywhere, faster
+
+- Ctrl+L focuses the universal search box from anywhere — it finds document text and tools in one place, and Escape returns you to where you were.
+- Search results you pick often now rank higher: recently and frequently used tools float to the top within equally good matches.
+
+### Scanner tester program
+
+- A guided hardware checklist ships as `spectrapdf scan-test`: it walks a tester through feeder, duplex, network, and failure-mode scenarios against their own scanner and writes a report file — device details, settings, and page measurements only; scans and document content never leave the machine unless explicitly attached. The accompanying tester guide is in the repository (`docs/TESTER-GUIDE-SCANNING.md`).
+- Run non-interactively, prompts that cannot be answered are recorded as skipped with the reason instead of waiting forever.
+
+### Under the hood
+
+- Scanner support now sits behind a backend seam with namespaced device identifiers, preparing for additional acquisition stacks; a previously saved scanner selection keeps working unchanged.
+
 ## 1.1.15
 
 *Released 2026-08-26*
