@@ -1653,6 +1653,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (interpolált)",
   "dialog.scan.enhance": "Oldalak kiegyenesítése és tisztítása",
   "dialog.scan.enhancing": "Kiegyenesítés és tisztítás…",
+  "dialog.scan.interruptedNote": "Az adagoló menet közben megállt. Az alábbi oldalak korábban elkészültek, és továbbra is menthetők.",
   "dialog.scan.looking": "Lapolvasók keresése…",
   "dialog.scan.noPreview": "Ez az oldal túl nagy ahhoz, hogy itt megjelenjen.",
   "dialog.scan.noneHint": "Ellenőrizze, hogy a lapolvasó be van-e kapcsolva és csatlakoztatva van-e, majd válassza a Frissítés lehetőséget. A hálózati lapolvasónak elérhetőnek is kell lennie erről a számítógépről.",

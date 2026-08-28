@@ -1653,6 +1653,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (interpolert)",
   "dialog.scan.enhance": "Rett opp og rens sidene",
   "dialog.scan.enhancing": "Retter opp og renser…",
+  "dialog.scan.interruptedNote": "Arkmateren stoppet underveis. Sidene nedenfor ble ferdige før den stoppet og kan fortsatt lagres.",
   "dialog.scan.looking": "Leter etter skannere…",
   "dialog.scan.noPreview": "Denne siden er for stor til å vises her.",
   "dialog.scan.noneHint": "Kontroller at skanneren er slått på og tilkoblet, og velg deretter Oppdater. En nettverksskanner må også være tilgjengelig fra denne maskinen.",

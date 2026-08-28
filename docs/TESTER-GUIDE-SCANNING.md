@@ -22,6 +22,15 @@ helps too.
 
 That's it.
 
+## The sheet-order steps
+
+Two steps ask you to number three sheets by hand and then tell the runner what
+each scanned page shows, one page at a time. If your feeder scans both sides,
+write 1F/1B on sheet 1, 2F on sheet 2 with **its back left blank**, and 3F/3B
+on sheet 3; otherwise just number three fronts 1, 2, 3. The blank side is
+deliberate — it catches feeders that quietly skip blank pages — and reading the
+pages back is what proves the order, which counting them cannot.
+
 ## Privacy
 
 Everything runs offline on your machine and nothing is uploaded. The report

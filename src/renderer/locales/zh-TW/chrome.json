@@ -1596,6 +1596,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi（內插）",
   "dialog.scan.enhance": "擺正並清理頁面",
   "dialog.scan.enhancing": "正在擺正並清理…",
+  "dialog.scan.interruptedNote": "送紙器中途停止。下方頁面在停止前已完成，仍可儲存。",
   "dialog.scan.looking": "正在尋找掃描器…",
   "dialog.scan.noPreview": "這一頁太大，無法在此顯示。",
   "dialog.scan.noneHint": "請確認掃描器已開機並已連線，然後選擇「重新整理」。網路掃描器也必須能從這台電腦連上。",

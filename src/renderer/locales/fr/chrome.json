@@ -1710,6 +1710,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} ppp (interpolé)",
   "dialog.scan.enhance": "Redresser et nettoyer les pages",
   "dialog.scan.enhancing": "Redressement et nettoyage…",
+  "dialog.scan.interruptedNote": "Le chargeur s'est arrêté en cours de route. Les pages ci-dessous étaient terminées avant l'arrêt et peuvent encore être enregistrées.",
   "dialog.scan.looking": "Recherche de scanners…",
   "dialog.scan.noPreview": "Cette page est trop grande pour être affichée ici.",
   "dialog.scan.noneHint": "Vérifiez que le scanner est allumé et connecté, puis choisissez Actualiser. Un scanner réseau doit aussi être joignable depuis cet ordinateur.",

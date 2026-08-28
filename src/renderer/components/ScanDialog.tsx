@@ -104,6 +104,10 @@ export function ScanDialog({
   const [progress, setProgress] = useState<Progress | null>(null);
   const [pages, setPages] = useState<ScanPage[]>([]);
   const [cancelled, setCancelled] = useState(false);
+  // The feeder fault a partial batch stopped on. It is not `error`: the run
+  // produced pages, the review below is live, and routing a jam through the
+  // error path would tear that down and lose sheets the device already read.
+  const [interrupted, setInterrupted] = useState<string | null>(null);
   const [adjusted, setAdjusted] = useState<{ property: string; requested: number; actual: number | null }[]>([]);
   const [sizeWarning, setSizeWarning] = useState<number | null>(null);
   const [stopping, setStopping] = useState(false);
@@ -231,6 +235,7 @@ export function ScanDialog({
     setPhase('scanning');
     setError(null);
     setCancelled(false);
+    setInterrupted(null);
     setStopping(false);
     setSizeWarning(null);
     setProgress(null);
@@ -276,6 +281,7 @@ export function ScanDialog({
       setPages((prev) => [...prev, ...pagesFromResult(result)]);
       setCancelled(result.cancelled);
       setAdjusted(result.adjusted);
+      setInterrupted(result.interrupted ? refusalMessage(result.interrupted) : null);
       setScanDpi(result.dpi);
     } catch (e) {
       setError(refusalMessage(e));
@@ -900,6 +906,13 @@ export function ScanDialog({
           <p className="text-xs text-neutral-300" data-testid="scan-cancelled">
             {tChrome('dialog.scan.cancelledNote')}
           </p>
+        )}
+
+        {interrupted && (
+          <div className="text-xs text-amber-400" data-testid="scan-interrupted">
+            <p>{interrupted}</p>
+            <p>{tChrome('dialog.scan.interruptedNote')}</p>
+          </div>
         )}
 
         {error && (

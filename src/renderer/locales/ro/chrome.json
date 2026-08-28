@@ -1710,6 +1710,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (interpolat)",
   "dialog.scan.enhance": "Îndreaptă și curăță paginile",
   "dialog.scan.enhancing": "Se îndreaptă și se curăță…",
+  "dialog.scan.interruptedNote": "Alimentatorul s-a oprit la jumătate. Paginile de mai jos au fost finalizate înainte și pot fi salvate.",
   "dialog.scan.looking": "Se caută scanere…",
   "dialog.scan.noPreview": "Această pagină este prea mare pentru a fi afișată aici.",
   "dialog.scan.noneHint": "Verifică dacă scanerul este pornit și conectat, apoi alege Reîmprospătează. Un scaner de rețea trebuie să fie și accesibil de pe acest calculator.",

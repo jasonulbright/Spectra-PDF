@@ -1653,6 +1653,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (interpolerat)",
   "dialog.scan.enhance": "Räta upp och rensa sidorna",
   "dialog.scan.enhancing": "Rätar upp och rensar…",
+  "dialog.scan.interruptedNote": "Mataren stannade halvvägs. Sidorna nedan blev klara innan den stannade och kan fortfarande sparas.",
   "dialog.scan.looking": "Söker efter skannrar…",
   "dialog.scan.noPreview": "Den här sidan är för stor för att visas här.",
   "dialog.scan.noneHint": "Kontrollera att skannern är påslagen och ansluten och välj sedan Uppdatera. En nätverksskanner måste dessutom gå att nå från den här datorn.",

@@ -1596,6 +1596,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (補間)",
   "dialog.scan.enhance": "ページの傾きを直して汚れを除く",
   "dialog.scan.enhancing": "傾きを直して汚れを除いています…",
+  "dialog.scan.interruptedNote": "フィーダーが途中で停止しました。下のページは停止前に完了したもので、保存できます。",
   "dialog.scan.looking": "スキャナーを検索しています…",
   "dialog.scan.noPreview": "このページは大きすぎるため、ここには表示できません。",
   "dialog.scan.noneHint": "スキャナーの電源が入り、接続されていることを確認してから「更新」を選んでください。ネットワークスキャナーはこのコンピューターから到達できる必要もあります。",

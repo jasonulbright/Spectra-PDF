@@ -1767,6 +1767,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (interpolowane)",
   "dialog.scan.enhance": "Wyprostuj i oczyść strony",
   "dialog.scan.enhancing": "Prostowanie i czyszczenie…",
+  "dialog.scan.interruptedNote": "Podajnik zatrzymał się w trakcie. Strony poniżej zostały ukończone wcześniej i nadal można je zapisać.",
   "dialog.scan.looking": "Szukanie skanerów…",
   "dialog.scan.noPreview": "Ta strona jest zbyt duża, aby pokazać ją tutaj.",
   "dialog.scan.noneHint": "Sprawdź, czy skaner jest włączony i podłączony, a następnie wybierz Odśwież. Skaner sieciowy musi być też osiągalny z tego komputera.",

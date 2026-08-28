@@ -1868,6 +1868,14 @@ pub struct PropertyAdjustment {
 pub struct ScanResult {
     pub pages: Vec<String>,
     pub cancelled: bool,
+    /// The feeder fault that ended the batch early, when one did.
+    ///
+    /// `pages` then holds the sheets that finished before it, and the caller
+    /// assembles exactly those: a jam is a clean partial, not a failure that
+    /// throws away work the user already fed through the machine. A page torn
+    /// by the jam never reaches here — [`judge_transfer`] discards it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interrupted: Option<ScanRefusal>,
     /// The scratch folder holding `pages`, handed back to `scan_discard`.
     pub scratch: String,
     /// The resolution actually in force, read back after the write. This is
@@ -2262,7 +2270,7 @@ unsafe fn acquire(
         }
         let staged: Vec<PathBuf> = state.pages.lock().map(|pages| pages.clone()).unwrap_or_default();
         let bytes = state.bytes.load(Ordering::SeqCst);
-        let pages = judge_transfer(TransferOutcome {
+        let verdict = judge_transfer(TransferOutcome {
             timed_out,
             cancelled,
             download: outcome.err().map(|e| e.code()),
@@ -2270,7 +2278,8 @@ unsafe fn acquire(
             staged: &staged,
         })?;
         Ok(ScanResult {
-            pages,
+            pages: verdict.pages,
+            interrupted: verdict.interrupted,
             cancelled,
             scratch: dir.to_string_lossy().to_string(),
             dpi,
@@ -2295,18 +2304,43 @@ pub struct TransferOutcome<'a> {
     pub staged: &'a [PathBuf],
 }
 
+/// One finished transfer's verdict: what to offer, and what ended the run
+/// early if anything did.
+#[derive(Debug)]
+pub struct TransferVerdict {
+    /// The pages to offer, every one of them integrity-passing.
+    pub pages: Vec<String>,
+    /// The feeder fault the batch stopped on, when the run was a clean
+    /// partial rather than a whole batch.
+    pub interrupted: Option<ScanRefusal>,
+}
+
+/// Whether an HRESULT is a fault in the PAPER PATH rather than in the device.
+///
+/// A jam or a misfeed stops the batch where it is; the sheets already
+/// transferred are whole and are the user's. A device that stopped responding
+/// is the opposite case — nothing it delivered can be trusted — and it is not
+/// in this class. `WIA_ERROR_PAPER_EMPTY` is not here either: an empty tray is
+/// how a feeder reports that the batch ENDED, and treating it as a fault would
+/// name every completed feeder run a partial.
+fn is_feeder_interruption(hr: HRESULT) -> bool {
+    hr == WIA_ERROR_PAPER_JAM || hr == WIA_ERROR_PAPER_PROBLEM
+}
+
 /// The verdict on one finished transfer: the pages to offer, or the refusal
 /// that names what went wrong.
 ///
 /// Truncated pages are deleted here rather than left for the scratch sweep,
 /// so nothing downstream can be handed a page this decided not to offer.
-pub fn judge_transfer(outcome: TransferOutcome<'_>) -> Result<Vec<String>, ScanRefusal> {
+pub fn judge_transfer(outcome: TransferOutcome<'_>) -> Result<TransferVerdict, ScanRefusal> {
     if outcome.timed_out {
         return Err(ScanRefusal::named(
             "scan.notResponding",
             "The scanner stopped responding.",
         ));
     }
+    let mut staged: Vec<PathBuf> = outcome.staged.to_vec();
+    let mut interrupted = None;
     // A cancel we asked for surfaces as S_FALSE or as a cancelled HRESULT;
     // that is a result with pages, not a failure.
     if !outcome.cancelled {
@@ -2314,7 +2348,27 @@ pub fn judge_transfer(outcome: TransferOutcome<'_>) -> Result<Vec<String>, ScanR
         // `S_OK` from `Download`. The reported status is the device's own
         // verdict on the run and outranks the return value.
         if let Some(status) = outcome.reported.or(outcome.download) {
-            return Err(refusal_for(status));
+            let refusal = refusal_for(status);
+            if !is_feeder_interruption(status) {
+                return Err(refusal);
+            }
+            // A jam mid-batch: the sheet in the paper path is discarded and
+            // every sheet that finished before it is kept. The alternative —
+            // refusing the run — throws away pages the device already read
+            // and makes the user feed them again.
+            let mut kept = Vec::with_capacity(staged.len());
+            for page in staged {
+                if matches!(page_integrity(&page), PageIntegrity::Truncated { .. }) {
+                    let _ = std::fs::remove_file(&page);
+                } else {
+                    kept.push(page);
+                }
+            }
+            if kept.is_empty() {
+                return Err(refusal);
+            }
+            staged = kept;
+            interrupted = Some(refusal);
         }
     }
     // A page whose header promises more bytes than the file holds means the
@@ -2325,8 +2379,8 @@ pub fn judge_transfer(outcome: TransferOutcome<'_>) -> Result<Vec<String>, ScanR
     // as the assembler's unreadable-image error, which names nothing the user
     // can act on, and a run that lost its device has no honest partial to
     // offer.
-    if first_truncated_page(outcome.staged).is_some() {
-        for page in outcome.staged {
+    if first_truncated_page(&staged).is_some() {
+        for page in &staged {
             let _ = std::fs::remove_file(page);
         }
         return Err(ScanRefusal::named(
@@ -2334,8 +2388,7 @@ pub fn judge_transfer(outcome: TransferOutcome<'_>) -> Result<Vec<String>, ScanR
             "The scanner stopped responding during the scan.",
         ));
     }
-    let pages: Vec<String> = outcome
-        .staged
+    let pages: Vec<String> = staged
         .iter()
         .map(|p| p.to_string_lossy().to_string())
         .collect();
@@ -2348,7 +2401,7 @@ pub fn judge_transfer(outcome: TransferOutcome<'_>) -> Result<Vec<String>, ScanR
             "The scan was cancelled at the scanner.",
         ));
     }
-    Ok(pages)
+    Ok(TransferVerdict { pages, interrupted })
 }
 
 /// The largest value a property's own domain allows, which is what an extent
@@ -3140,7 +3193,7 @@ mod tests {
         download: Option<HRESULT>,
         reported: Option<HRESULT>,
         staged: &[PathBuf],
-    ) -> Result<Vec<String>, ScanRefusal> {
+    ) -> Result<TransferVerdict, ScanRefusal> {
         judge_transfer(TransferOutcome {
             timed_out,
             cancelled,
@@ -3176,9 +3229,87 @@ mod tests {
         let root = temp_scratch_root("judge-whole");
         let (head, total) = bmp_header(16, 16, true);
         let page = stage_page(&root, "page-0000.bmp", &head, total);
-        let pages = judged(false, false, None, None, std::slice::from_ref(&page)).expect("a whole page passes");
-        assert_eq!(pages, vec![page.to_string_lossy().to_string()]);
+        let verdict = judged(false, false, None, None, std::slice::from_ref(&page))
+            .expect("a whole page passes");
+        assert_eq!(verdict.pages, vec![page.to_string_lossy().to_string()]);
+        assert!(verdict.interrupted.is_none());
         assert!(page.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_jam_mid_batch_keeps_the_good_pages_and_discards_the_torn_one() {
+        // Checklist row 9 at the injected-transfer seam. Three sheets went
+        // through, the fourth tore in the paper path, and the driver reported
+        // a jam. The three whole sheets are the user's work and are offered;
+        // the torn one is deleted so nothing downstream can decode it; the
+        // outcome names the jam rather than reporting a clean success.
+        let root = temp_scratch_root("judge-jam");
+        let (head, total) = bmp_header(64, 64, true);
+        let whole: Vec<PathBuf> = (0..3)
+            .map(|i| stage_page(&root, &format!("page-{i:04}.bmp"), &head, total))
+            .collect();
+        let torn = stage_page(&root, "page-0003.bmp", &head, total - 500);
+        let mut staged = whole.clone();
+        staged.push(torn.clone());
+
+        let verdict = judged(false, false, None, Some(WIA_ERROR_PAPER_JAM), &staged)
+            .expect("a jam over completed sheets is a partial, not a failure");
+        assert_eq!(verdict.pages.len(), 3, "every whole sheet is kept");
+        assert_eq!(
+            verdict.interrupted.as_ref().map(|r| r.key),
+            Some("scan.paperJam"),
+            "the outcome names the jam"
+        );
+        assert!(!torn.exists(), "the torn sheet never reaches assembly");
+        assert!(whole.iter().all(|p| p.exists()));
+
+        // A misfeed the driver calls a paper problem is the same class.
+        let verdict = judged(false, false, None, Some(WIA_ERROR_PAPER_PROBLEM), &whole)
+            .expect("a misfeed over completed sheets is a partial");
+        assert_eq!(verdict.interrupted.map(|r| r.key), Some("scan.paperProblem"));
+
+        // A jam with nothing whole behind it has no honest partial to offer.
+        let refusal = judged(
+            false,
+            false,
+            None,
+            Some(WIA_ERROR_PAPER_JAM),
+            std::slice::from_ref(&torn),
+        )
+            .expect_err("a jam that staged nothing usable refuses");
+        assert_eq!(refusal.key, "scan.paperJam");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_lost_device_is_still_total_and_is_not_a_jam() {
+        // The line between the two: a jam keeps what completed, a device loss
+        // keeps nothing. Same staged pages, different reported status.
+        let root = temp_scratch_root("judge-jam-vs-loss");
+        let (head, total) = bmp_header(64, 64, true);
+        let whole = stage_page(&root, "page-0000.bmp", &head, total);
+        let torn = stage_page(&root, "page-0001.bmp", &head, total - 500);
+        let staged = vec![whole.clone(), torn.clone()];
+
+        let refusal = judged(
+            false,
+            false,
+            None,
+            Some(WIA_ERROR_DEVICE_COMMUNICATION),
+            &staged,
+        )
+        .expect_err("a device loss refuses the whole run");
+        assert_eq!(refusal.key, "scan.deviceLost");
+
+        // And a truncated page with no reported status at all stays total:
+        // every staged page goes, not only the short one.
+        let whole = stage_page(&root, "page-0002.bmp", &head, total);
+        let torn = stage_page(&root, "page-0003.bmp", &head, total - 500);
+        let refusal = judged(false, false, None, None, &[whole.clone(), torn.clone()])
+            .expect_err("a short page with no status is a device loss");
+        assert_eq!(refusal.key, "scan.deviceLost");
+        assert!(!whole.exists() && !torn.exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -3207,9 +3338,10 @@ mod tests {
         let (head, total) = bmp_header(16, 16, true);
         let page = stage_page(&root, "page-0000.bmp", &head, total);
         // A cancel we asked for: the driver's S_FALSE is not a failure.
-        let pages = judged(false, true, Some(HRESULT(1)), None, std::slice::from_ref(&page))
+        let verdict = judged(false, true, Some(HRESULT(1)), None, std::slice::from_ref(&page))
             .expect("a cancelled run offers what completed");
-        assert_eq!(pages.len(), 1);
+        assert_eq!(verdict.pages.len(), 1);
+        assert!(verdict.interrupted.is_none(), "a cancel is not a jam");
         // The watchdog's own row is not displaced by the new one.
         let refusal =
             judged(true, true, None, Some(WIA_ERROR_DEVICE_COMMUNICATION), &[]).expect_err("timed out");
@@ -4124,6 +4256,7 @@ mod tests {
             Ok(ScanResult {
                 pages: Vec::new(),
                 cancelled: false,
+                interrupted: None,
                 scratch: dir.to_string_lossy().into_owned(),
                 dpi: 300,
                 adjusted: Vec::new(),
