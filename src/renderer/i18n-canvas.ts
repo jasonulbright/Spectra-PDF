@@ -488,6 +488,10 @@ export const CANVAS_STRINGS = {
   'canvas.view.noDocuments': 'No documents open',
   'canvas.view.dropHint': 'Drop PDF files anywhere, or open them to lay them out here',
   'canvas.view.openPdf': 'Open PDF',
+  // The engine opened these documents and the renderer cannot draw them. Said
+  // in the canvas, in place, because that is the only thing that is broken:
+  // the documents stay open and the panels keep working.
+  'canvas.unrenderable': 'The pages of {{names}} could not be displayed.',
 
   // Measure re-calibration popover. The CURRENT note is the engine's own
   // formatted measurement and passes through verbatim.

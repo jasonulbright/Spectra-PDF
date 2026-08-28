@@ -8,7 +8,9 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import { useAppState, useAppDispatch } from '../../state/AppStateProvider';
-import { usePdfProxies } from '../../hooks/usePdfProxies';
+import { usePdfProxyState } from '../../hooks/usePdfProxies';
+import { isUnrenderable } from '../../lib/render-health';
+import { tabFiles } from '../../state/selectors';
 import { useFlipReorder } from '../../hooks/useFlipReorder';
 import { computeLayout, computeDropTarget, betweenSlotY, BASE_PAGE_HEIGHT, MIN_DOC_WIDTH } from '../../canvas/layout';
 import { usePageDrag } from '../../canvas/usePageDrag';
@@ -621,7 +623,22 @@ export function WorkspaceCanvasView({
   const state = useAppState();
   const dispatch = useAppDispatch();
   const docs = state.workspace.documents;
-  const proxies = usePdfProxies(state.files);
+  const { proxies, health: renderHealth } = usePdfProxyState(state.files);
+  // The documents on this board whose bytes pdf.js refused. The engine opened
+  // them, so the tab, the page count, the panels and every extraction the
+  // engine can serve stay live — only the drawing is impossible, and that is
+  // what the canvas says, in place.
+  // Read off `files`, NOT the workspace documents: indexing goes through the
+  // same pdf.js load, so a document the renderer refused has no workspace
+  // entry to name it. The file does — it is the tab the user is looking at.
+  const unrenderableNames = useMemo(() => {
+    const names: string[] = [];
+    for (const f of tabFiles(state)) {
+      if (!isUnrenderable(renderHealth, f.path, f.buffer)) continue;
+      if (!names.includes(f.name)) names.push(f.name);
+    }
+    return names;
+  }, [state, renderHealth]);
   const layout = useMemo(() => computeLayout(docs), [docs]);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
@@ -6686,9 +6703,30 @@ export function WorkspaceCanvasView({
 
   const dirty = state.pageDirtyPaths.length > 0;
 
+  // pdf.js refused the bytes the engine opened. In place, not a popup: the
+  // document stays open and everything the engine can still serve keeps
+  // working — this states, once, that the pages will not draw.
+  const unrenderableBanner =
+    unrenderableNames.length > 0 ? (
+      <div
+        data-testid="canvas-unrenderable"
+        role="status"
+        className="shrink-0 border-b border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-200"
+      >
+        {tChrome('canvas.unrenderable', { names: unrenderableNames.join(', ') })}
+      </div>
+    ) : null;
+
+  // Indexing goes through the same pdf.js load, so a board whose only
+  // documents are unrenderable has NO workspace entries and lands here. The
+  // banner must survive that branch: without it the one case it exists for is
+  // the one case it never renders, and the user is told "No documents open"
+  // over a tab that plainly names a file.
   if (docs.length === 0) {
     return (
-      <div className="canvas-view flex-1 flex items-center justify-center">
+      <div className="canvas-view flex-1 flex flex-col">
+        {unrenderableBanner}
+        <div className="flex-1 flex items-center justify-center">
         <div className="text-center">
           <p className="text-lg text-neutral-400 mb-1">
             {tChrome('canvas.view.noDocuments')}
@@ -6702,6 +6740,7 @@ export function WorkspaceCanvasView({
           >
             {tChrome('canvas.view.openPdf')}
           </button>
+        </div>
         </div>
       </div>
     );
@@ -6811,6 +6850,7 @@ export function WorkspaceCanvasView({
           onClose={() => setRecalTarget(null)}
         />
       )}
+      {unrenderableBanner}
       {docViewMode === 'document' && focusedDoc ? (
         (() => {
           // ONE props bundle for the unsplit view and both split panes — the
