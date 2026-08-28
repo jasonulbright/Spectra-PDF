@@ -136,7 +136,7 @@ export function OutputPreviewPanel(): React.ReactElement {
         />
         <span
           aria-hidden
-          className="w-4 h-4 rounded-sm border border-neutral-600 shrink-0"
+          className="w-4 h-4 rounded-sm shrink-0 color-chip"
           style={{ background: swatch(plate.display_rgb) }}
         />
         <span className="text-sm text-neutral-200 min-w-0 truncate flex-1" title={plate.name}>
@@ -189,7 +189,7 @@ export function OutputPreviewPanel(): React.ReactElement {
           {swatch !== undefined && (
             <span
               aria-hidden
-              className="w-4 h-4 rounded-sm border border-neutral-600 shrink-0"
+              className="w-4 h-4 rounded-sm shrink-0 color-chip"
               style={{ background: swatch }}
             />
           )}

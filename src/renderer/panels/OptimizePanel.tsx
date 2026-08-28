@@ -5,7 +5,7 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber } from '../i18n';
-import { byteColumnUnit, formatBytes, formatBytesIn } from '../lib/format-bytes';
+import { byteColumnUnit, byteColumnPlaces, formatBytes, formatBytesIn } from '../lib/format-bytes';
 import {
   accountsForFile,
   knobOf,
@@ -143,11 +143,17 @@ export function OptimizePanel(): React.ReactElement {
 
   const rows = useMemo(() => (report ? ranked(report) : []), [report]);
   const consistent = accountsForFile(report);
-  // The size column is written in ONE unit — see `byteColumnUnit`. The total
-  // is part of the column, so it votes on the unit too.
-  const sizeUnit = useMemo(
-    () => byteColumnUnit([...rows.map((r) => r.bytes), report?.file_size ?? null]),
+  // The size column is written in ONE unit AND at one precision — see
+  // `byteColumnUnit` / `byteColumnPlaces`. The total is part of the column, so
+  // it votes on both.
+  const sizeValues = useMemo(
+    () => [...rows.map((r) => r.bytes), report?.file_size ?? null],
     [rows, report],
+  );
+  const sizeUnit = useMemo(() => byteColumnUnit(sizeValues), [sizeValues]);
+  const sizePlaces = useMemo(
+    () => byteColumnPlaces(sizeValues, sizeUnit),
+    [sizeValues, sizeUnit],
   );
 
   const handleOptimize = useCallback(async () => {
@@ -221,7 +227,7 @@ export function OptimizePanel(): React.ReactElement {
                     data-testid={`space-audit-bytes-${row.id}`}
                     data-bytes={row.bytes}
                   >
-                    {formatBytesIn(row.bytes, sizeUnit)}
+                    {formatBytesIn(row.bytes, sizeUnit, sizePlaces)}
                   </span>
                   <span
                     className="text-end tabular-nums text-neutral-400"
@@ -229,22 +235,31 @@ export function OptimizePanel(): React.ReactElement {
                   >
                     {sharePercent(row)}
                   </span>
-                  <span className="col-span-3 pb-1 ps-3 text-neutral-500">
-                    <span data-testid={`space-audit-knob-${row.id}`}>
-                      {labelOf(
-                        KNOB_LABELS,
-                        knobOf(row) ?? '',
-                        tChrome('panel.optimize.audit.knob.none'),
+                  {/* N16: the sub-line ran knob · objects · Details as inline
+                      text, so the buttons followed variable-length prose and
+                      landed at eleven different x positions, one of them
+                      wrapped onto a second line. The row is a flex line with
+                      the prose taking the slack and the button pinned to the
+                      table's own trailing edge, which is what makes the
+                      buttons a column. */}
+                  <div className="col-span-3 pb-1 ps-3 text-neutral-500 flex items-baseline gap-2">
+                    <span className="min-w-0 flex-1 truncate">
+                      <span data-testid={`space-audit-knob-${row.id}`}>
+                        {labelOf(
+                          KNOB_LABELS,
+                          knobOf(row) ?? '',
+                          tChrome('panel.optimize.audit.knob.none'),
+                        )}
+                      </span>
+                      {row.objects > 0 && (
+                        <span className="ps-2 text-neutral-600">
+                          {tChromeCount('panel.optimize.audit.objects', row.objects)}
+                        </span>
                       )}
                     </span>
-                    {row.objects > 0 && (
-                      <span className="ps-2 text-neutral-600">
-                        {tChromeCount('panel.optimize.audit.objects', row.objects)}
-                      </span>
-                    )}
                     {row.detail.length > 0 && (
                       <button
-                        className="ms-2 quiet-action"
+                        className="flex-none quiet-action"
                         data-testid={`space-audit-details-${row.id}`}
                         onClick={() =>
                           setExpanded((prev) => {
@@ -258,7 +273,9 @@ export function OptimizePanel(): React.ReactElement {
                         {tChrome('panel.optimize.audit.details')}
                       </button>
                     )}
-                    {expanded.has(row.id) && (
+                  </div>
+                  {expanded.has(row.id) && (
+                    <div className="col-span-3 pb-1 ps-3 text-neutral-500">
                       <ul
                         className="pt-0.5 text-neutral-400"
                         data-testid={`space-audit-detail-${row.id}`}
@@ -276,8 +293,8 @@ export function OptimizePanel(): React.ReactElement {
                           </li>
                         )}
                       </ul>
-                    )}
-                  </span>
+                    </div>
+                  )}
                 </React.Fragment>
               ))}
               {/* ONE rule across the table, not a top border per cell. Three
@@ -295,7 +312,7 @@ export function OptimizePanel(): React.ReactElement {
                 data-testid="space-audit-total"
                 data-bytes={report.file_size}
               >
-                {formatBytesIn(report.file_size, sizeUnit)}
+                {formatBytesIn(report.file_size, sizeUnit, sizePlaces)}
               </span>
               <span />
             </div>

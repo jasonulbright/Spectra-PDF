@@ -287,7 +287,9 @@ export const WORKBENCH_STRINGS = {
     'Pages cannot be imported from a file that is open in another window: {{names}}.',
   'app.window.folderBusy':
     'Another window is already writing to this folder: {{folder}}.',
-  'app.window.focusOther': 'Show That Window',
+  // N20: sentence case, like every other button in the product — it was the
+  // last multi-word Title Case label across thirty-six screenshots.
+  'app.window.focusOther': 'Show that window',
 
   // The commit-failure banner. Both messages were built by `+`-concatenating
   // two English halves around the engine's own text — one interpolated key

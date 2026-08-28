@@ -666,7 +666,7 @@ export function PrepareFormPanel(): React.ReactElement {
 
       {candidates.length > 0 && (
         <button
-          className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 rounded px-3 py-1.5 text-sm"
+          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded px-3 py-1.5 text-sm"
           data-testid="prepare-form-create"
           disabled={creating || checkedCount === 0}
           onClick={() => void create()}

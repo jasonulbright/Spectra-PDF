@@ -30,7 +30,18 @@ export type ChromeIconId =
   | 'layers'
   | 'tags'
   | 'hand'
-  | 'cursor';
+  | 'cursor'
+  // Read Out Loud's transport. They are icons rather than the transport
+  // CHARACTERS (⏮ ⏭ ⏸ ⏹) because those characters have an emoji presentation:
+  // the platform resolved two of the four to its colour-emoji face, which
+  // rendered them as white glyphs on a blue rounded plate — a permanently
+  // selected-looking state on two of four peer controls, in a bar whose other
+  // two were monochrome.
+  | 'play'
+  | 'pause'
+  | 'previous'
+  | 'next'
+  | 'stop';
 
 const base = {
   fill: 'none',
@@ -191,6 +202,23 @@ const GLYPHS: Record<ChromeIconId, React.JSX.Element> = {
       <path d="M10.5 10.5l3 3" />
     </>
   ),
+  // Transport, all five on one baseline so the row reads as one control group:
+  // the triangles share an apex inset and the bars share x-height.
+  play: <path d="M8.5 5.5L18 12l-9.5 6.5z" />,
+  pause: <path d="M9.5 5.5v13M14.5 5.5v13" />,
+  previous: (
+    <>
+      <path d="M7 5.5v13" />
+      <path d="M19 5.5L10 12l9 6.5z" />
+    </>
+  ),
+  next: (
+    <>
+      <path d="M5 5.5L14 12l-9 6.5z" />
+      <path d="M17 5.5v13" />
+    </>
+  ),
+  stop: <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" />,
 };
 
 interface ChromeIconProps {

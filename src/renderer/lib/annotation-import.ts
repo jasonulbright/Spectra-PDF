@@ -76,9 +76,21 @@ const DEFAULT_COLOR: Record<string, string> = {
   PolyLine: '#e0393e',
 };
 
+// pdf.js hands `/C` back as a **Uint8ClampedArray**, not an Array, and
+// `Array.isArray` is false for one — so this returned null for EVERY annotation
+// and every imported colour was silently replaced by its subtype's default.
+// Measured on a shipped screenshot: a highlight authored `#f7c948` and an ink
+// stroke authored `#e8503a` came back as `#ffe14a` and `#2f6fed`, the defaults,
+// while the page kept drawing the authored colours from their appearance
+// streams — so the comment list and the page disagreed about every mark.
+// The test is length + numeric members, which is what the function actually
+// needs; `Array.isArray` was asking a question about the container.
 function colorToHex(color: unknown): string | null {
-  if (!Array.isArray(color) || color.length !== 3) return null;
-  const [r, g, b] = color as number[];
+  if (color === null || typeof color !== 'object') return null;
+  const arr = color as ArrayLike<unknown>;
+  if (arr.length !== 3) return null;
+  const [r, g, b] = [arr[0], arr[1], arr[2]];
+  if (typeof r !== 'number' || typeof g !== 'number' || typeof b !== 'number') return null;
   const toHex = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }

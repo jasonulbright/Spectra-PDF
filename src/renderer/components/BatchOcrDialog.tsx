@@ -39,6 +39,7 @@ import type { ScanEnhanceReport } from '../lib/scan-enhance';
 import { TEST_HARNESS_ENABLED, registerBatchOcr } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber, tOcrLanguage } from '../i18n';
+import { ChromeIcon } from './chrome-icons';
 
 // Tools ▸ Batch OCR Folder…:
 // mirror a folder tree into searchable PDFs. Needs NO open document — the
@@ -1385,12 +1386,18 @@ function Shell({ children, onClose }: { children: React.ReactNode; onClose: () =
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800">
           <h3 className="text-sm font-semibold">{tChrome('dialog.batch.title')}</h3>
+          {/* N12: the header slot is a dismiss GLYPH, as it is on every panel.
+              Spelling it "Close" put two controls reading "Close" in one
+              dialog — the header's and the footer's primary button — with no
+              way to tell which one ends the run. */}
           <button
             data-testid="batch-ocr-x"
             onClick={onClose}
-            className="text-neutral-500 hover:text-neutral-300 text-sm"
+            aria-label={tChrome('dialog.common.close')}
+            title={tChrome('dialog.common.close')}
+            className="text-neutral-500 hover:text-neutral-300"
           >
-            {tChrome('dialog.common.close')}
+            <ChromeIcon icon="close" size={13} />
           </button>
         </div>
         <div className="p-5">{children}</div>

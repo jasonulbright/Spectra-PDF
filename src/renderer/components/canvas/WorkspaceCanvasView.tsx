@@ -794,6 +794,10 @@ export function WorkspaceCanvasView({
   // /PageLabels, which keeps every path below on the plain sheet number.
   const [pageLabels, setPageLabels] = useState<string[]>([]);
   const labelsCustom = hasCustomLabels(pageLabels);
+  // The reset below runs on a doc switch and must NOT re-run when the labels
+  // change, so it reads them through a ref rather than depending on them.
+  const pageLabelsRef = useRef<string[]>(pageLabels);
+  pageLabelsRef.current = pageLabels;
   // (the fetch lives below, where the engine handle is in scope)
   useEffect(() => {
     if (!pageBoxFocused.current) setPageBox(labelFor(currentPage, pageLabels));
@@ -813,7 +817,11 @@ export function WorkspaceCanvasView({
   useLayoutEffect(() => {
     if (docViewMode === 'document') {
       setCurrentPage(1);
-      setPageBox('1');
+      // The box is LABEL-addressed whenever the document carries labels — the
+      // total beside it already says so ("[1] (1 of 6)"). Writing the sheet
+      // number here put a '1' in a box whose document calls that page 'i', and
+      // the reader has no way to tell a label from a sheet number by looking.
+      setPageBox(labelFor(1, pageLabelsRef.current));
       pageBoxDirty.current = false;
     }
   }, [docViewMode, focusedDoc?.id]);
@@ -7599,7 +7607,7 @@ export function WorkspaceCanvasView({
               type="text"
               value={nfName}
               onChange={(e) => setNfName(e.target.value)}
-              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500"
+              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -7652,7 +7660,7 @@ export function WorkspaceCanvasView({
                   min={1}
                   value={nfMaxLength}
                   onChange={(e) => setNfMaxLength(e.target.value)}
-                  className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500"
+                  className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
                 />
               </div>
             </>
@@ -7739,7 +7747,7 @@ export function WorkspaceCanvasView({
                 rows={3}
                 placeholder={tChrome('canvas.newfield.optionsPlaceholder')}
                 onChange={(e) => setNfOptions(e.target.value)}
-                className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500 resize-y"
+                className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500 resize-y"
               />
             </div>
           )}
@@ -7758,7 +7766,7 @@ export function WorkspaceCanvasView({
               data-testid="new-field-create"
               onClick={() => void createPlacedField()}
               disabled={creatingField}
-              className="px-2.5 py-1 text-xs text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 rounded font-medium"
+              className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
             >
               {tChrome(creatingField ? 'canvas.newfield.creating' : 'canvas.newfield.create')}
             </button>
@@ -7796,7 +7804,7 @@ export function WorkspaceCanvasView({
                 onClearAddTextPlacement();
               }
             }}
-            className="px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500 resize-y"
+            className="px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500 resize-y"
           />
           <div className="flex items-center gap-1.5 flex-wrap" data-testid="add-text-span-row">
             <span
@@ -7827,14 +7835,14 @@ export function WorkspaceCanvasView({
             <button
               type="button"
               onClick={() => setAtSpanBold((v) => !v)}
-              className={`px-1.5 py-0.5 text-xs font-bold rounded border ${atSpanBold ? 'border-emerald-500 text-emerald-400' : 'border-neutral-700 text-neutral-400'}`}
+              className={`px-1.5 py-0.5 text-xs font-bold rounded border ${atSpanBold ? 'border-blue-500 text-blue-400' : 'border-neutral-700 text-neutral-400'}`}
             >
               {tChrome('canvas.addtext.bold')}
             </button>
             <button
               type="button"
               onClick={() => setAtSpanItalic((v) => !v)}
-              className={`px-1.5 py-0.5 text-xs italic rounded border ${atSpanItalic ? 'border-emerald-500 text-emerald-400' : 'border-neutral-700 text-neutral-400'}`}
+              className={`px-1.5 py-0.5 text-xs italic rounded border ${atSpanItalic ? 'border-blue-500 text-blue-400' : 'border-neutral-700 text-neutral-400'}`}
             >
               {tChrome('canvas.addtext.italic')}
             </button>
@@ -7901,7 +7909,7 @@ export function WorkspaceCanvasView({
                   {s.italic ? tChrome('canvas.addtext.spanItalic') : ''}
                   {s.color ? (
                     <span
-                      className="inline-block w-2.5 h-2.5 rounded-sm"
+                      className="inline-block w-2.5 h-2.5 rounded-sm color-chip"
                       style={{ background: `rgb(${s.color.map((v) => Math.round(v * 255)).join(',')})` }}
                     />
                   ) : null}
@@ -8002,7 +8010,7 @@ export function WorkspaceCanvasView({
                 const v = parseFloat(e.target.value);
                 if (Number.isFinite(v)) setAtSize(Math.max(1, Math.min(1638, v)));
               }}
-              className="w-20 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500"
+              className="w-20 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
             />
             <button
               type="button"
@@ -8021,7 +8029,7 @@ export function WorkspaceCanvasView({
                   return next;
                 })
               }
-              className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:border-emerald-500 disabled:opacity-60"
+              className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:border-blue-500 disabled:opacity-60"
             >
               <span
                 className="inline-block"
@@ -8054,7 +8062,7 @@ export function WorkspaceCanvasView({
                 setAtRotate(next);
                 setAddTextPlacement((pl) => (pl ? { ...pl, rotate: next } : pl));
               }}
-              className="w-20 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500"
+              className="w-20 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
             />
             <button
               type="button"
@@ -8064,8 +8072,8 @@ export function WorkspaceCanvasView({
               onClick={() => setAtBold((b) => !b)}
               className={`px-2 py-1 text-xs font-bold border rounded ${
                 atBold
-                  ? 'bg-emerald-700/40 border-emerald-500'
-                  : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
+                  ? 'bg-blue-600/30 border-blue-500'
+                  : 'bg-neutral-800 border-neutral-700 hover:border-blue-500'
               }`}
             >
               {tChrome('canvas.addtext.bold')}
@@ -8078,8 +8086,8 @@ export function WorkspaceCanvasView({
               onClick={() => setAtKern((k) => !k)}
               className={`px-2 py-1 text-xs border rounded ${
                 atKern
-                  ? 'bg-emerald-700/40 border-emerald-500'
-                  : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
+                  ? 'bg-blue-600/30 border-blue-500'
+                  : 'bg-neutral-800 border-neutral-700 hover:border-blue-500'
               }`}
             >
               {tChrome('canvas.addtext.kern')}
@@ -8092,8 +8100,8 @@ export function WorkspaceCanvasView({
               onClick={() => setAtItalic((i) => !i)}
               className={`px-2 py-1 text-xs italic border rounded ${
                 atItalic
-                  ? 'bg-emerald-700/40 border-emerald-500'
-                  : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
+                  ? 'bg-blue-600/30 border-blue-500'
+                  : 'bg-neutral-800 border-neutral-700 hover:border-blue-500'
               }`}
             >
               {tChrome('canvas.addtext.italic')}
@@ -8113,8 +8121,8 @@ export function WorkspaceCanvasView({
               onClick={() => setAtSmallCaps((s) => !s)}
               className={`px-2 py-1 text-xs border rounded disabled:opacity-60 ${
                 atSmallCaps
-                  ? 'bg-emerald-700/40 border-emerald-500'
-                  : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
+                  ? 'bg-blue-600/30 border-blue-500'
+                  : 'bg-neutral-800 border-neutral-700 hover:border-blue-500'
               }`}
               style={{ fontVariantCaps: 'all-small-caps' }}
             >
@@ -8133,8 +8141,8 @@ export function WorkspaceCanvasView({
               onClick={() => setAtAlternates((a) => !a)}
               className={`px-2 py-1 text-xs border rounded disabled:opacity-60 ${
                 atAlternates
-                  ? 'bg-emerald-700/40 border-emerald-500'
-                  : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
+                  ? 'bg-blue-600/30 border-blue-500'
+                  : 'bg-neutral-800 border-neutral-700 hover:border-blue-500'
               }`}
             >
               {tChrome('canvas.addtext.alternates')}
@@ -8151,7 +8159,7 @@ export function WorkspaceCanvasView({
                 onChange={(e) =>
                   setAtAltIndex(Math.max(0, Math.min(99, Math.trunc(parseFloat(e.target.value) || 0))))
                 }
-                className="w-12 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500"
+                className="w-12 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500"
               />
             )}
             <span className="text-xs text-neutral-400 flex-1 text-end shrink-0">
@@ -8182,7 +8190,7 @@ export function WorkspaceCanvasView({
               data-testid="add-text-create"
               onClick={() => void createPlacedText()}
               disabled={creatingText}
-              className="px-2.5 py-1 text-xs text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 rounded font-medium"
+              className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
             >
               {tChrome(creatingText ? 'canvas.addtext.adding' : 'canvas.addtext.title')}
             </button>

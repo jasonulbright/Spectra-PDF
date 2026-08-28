@@ -4,6 +4,7 @@ import { useSearchContext } from '../search/SearchProvider';
 import { TOOL_DEFS, type ToolId } from '../commands/tools';
 import { rankToolMatches, type FrecencyStore } from '../search/omnisearch-rank';
 import { noteToolPick, readFrecency } from '../search/omnisearch-frecency';
+import { markSnippet } from '../search/search-core';
 import { registerOmniSearchFocus } from '../commands/omnisearch-focus';
 import { invokeCommand, isCommandEnabled, getCanvasServices } from '../commands/context';
 import { showableDoc } from '../state/selectors';
@@ -304,7 +305,23 @@ export function OmniSearch(): React.JSX.Element {
                 onClick={() => run(hit)}
               >
                 <span className="omnisearch-page">p.{hit.pageNumber}</span>
-                <span className="omnisearch-snippet">{hit.snippet || hit.docName}</span>
+                {/* N13: the third result surface, and the same omission — the
+                    term the reader typed was drawn in the body colour, so a
+                    row of context said nothing about WHY it matched. Falls back
+                    to the document name, which has nothing to mark. */}
+                <span className="omnisearch-snippet">
+                  {hit.snippet
+                    ? markSnippet(hit.snippet, debounced).map((seg, i) =>
+                        seg.match ? (
+                          <mark key={i} className="search-hit-mark">
+                            {seg.text}
+                          </mark>
+                        ) : (
+                          <React.Fragment key={i}>{seg.text}</React.Fragment>
+                        ),
+                      )
+                    : hit.docName}
+                </span>
               </button>
             );
           })}

@@ -469,12 +469,14 @@ export function CommentsPanel(): React.ReactElement {
                 key={comment.id}
                 data-testid="comment-item"
                 data-comment-id={comment.id}
-                className="px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded border-s-2"
-                style={{
-                  borderLeftColor: row?.color ?? '#525252',
-                  marginInlineStart: `${depth * 12}px`,
-                }}
+                className="relative px-3 py-2 ps-4 bg-neutral-800/60 border border-neutral-800 rounded"
+                style={{ marginInlineStart: `${depth * 12}px` }}
               >
+                <span
+                  aria-hidden
+                  className="comment-accent color-chip"
+                  style={{ background: row?.color ?? '#525252' }}
+                />
                 <button
                   type="button"
                   data-testid={row ? `comment-jump-${row.annotationId}` : undefined}
@@ -790,9 +792,14 @@ function CommentCard({
     <div
       data-testid="comment-item"
       data-comment-pending={pending ? 'true' : undefined}
-      className="px-3 py-2 bg-neutral-800/60 border border-neutral-800 rounded border-s-2"
-      style={{ borderLeftColor: row.color, marginInlineStart: `${depth * 12}px` }}
+      className="relative px-3 py-2 ps-4 bg-neutral-800/60 border border-neutral-800 rounded"
+      style={{ marginInlineStart: `${depth * 12}px` }}
     >
+      <span
+        aria-hidden
+        className="comment-accent color-chip"
+        style={{ background: row.color }}
+      />
       <button
         type="button"
         data-testid={`comment-jump-${row.annotationId}`}

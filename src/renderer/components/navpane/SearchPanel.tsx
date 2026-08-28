@@ -6,6 +6,7 @@ import { useEngine } from '../../hooks/useEngine';
 import { FindModeToggles } from '../../search/FindModeToggles';
 import { dialog, batch } from '../../lib/tauri-bridge';
 import type { SearchOptions } from '../../search/normalize';
+import { markSnippet } from '../../search/search-core';
 import type { NavPanelComponentProps } from './types';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../../i18n';
@@ -303,7 +304,19 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
                     <span className="search-hit-page">
                       {tChrome('nav.search.page', { page: h.pageNumber })}
                     </span>
-                    {h.snippet && <span className="search-hit-snippet">{h.snippet}</span>}
+                    {h.snippet && (
+                      <span className="search-hit-snippet">
+                        {markSnippet(h.snippet, debounced, options).map((seg, i) =>
+                          seg.match ? (
+                            <mark key={i} className="search-hit-mark">
+                              {seg.text}
+                            </mark>
+                          ) : (
+                            <React.Fragment key={i}>{seg.text}</React.Fragment>
+                          ),
+                        )}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -376,7 +389,19 @@ export function SearchPanel({ activeFile }: NavPanelComponentProps): React.React
                     <span className="search-hit-page">
                       {tChrome('nav.search.page', { page: h.page })}
                     </span>
-                    {h.snippet && <span className="search-hit-snippet">{h.snippet}</span>}
+                    {h.snippet && (
+                      <span className="search-hit-snippet">
+                        {markSnippet(h.snippet, debounced, options).map((seg, i) =>
+                          seg.match ? (
+                            <mark key={i} className="search-hit-mark">
+                              {seg.text}
+                            </mark>
+                          ) : (
+                            <React.Fragment key={i}>{seg.text}</React.Fragment>
+                          ),
+                        )}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>

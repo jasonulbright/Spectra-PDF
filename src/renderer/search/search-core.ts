@@ -59,3 +59,46 @@ export function runCorpusSearch(
   }
   return { hits, error: null };
 }
+
+/** One run of snippet text, flagged as matched or not. */
+export interface SnippetSegment {
+  text: string;
+  match: boolean;
+}
+
+/**
+ * Split a snippet into matched and unmatched runs, so a result list can point
+ * at the term the reader searched for. Both result surfaces rendered the match
+ * in the body colour, which leaves the reader scanning a wall of context for
+ * the one word they typed — and, on a snippet built from a flattened table,
+ * leaves them with no way to tell whether the row is a hit at all.
+ *
+ * It re-runs the SAME compiled matcher over the snippet rather than carrying an
+ * offset through the worker protocol: the snippet is a slice of the very text
+ * the matcher already scanned, so the two can never disagree about what
+ * matched. A snippet clipped mid-word in whole-word mode can legitimately find
+ * nothing; that returns the snippet as one unmatched run rather than guessing.
+ */
+export function markSnippet(
+  snippet: string,
+  query: string,
+  options: SearchOptions = {},
+): SnippetSegment[] {
+  const { regex } = compileMatcher(query, options);
+  if (!regex || snippet.length === 0) return [{ text: snippet, match: false }];
+  const out: SnippetSegment[] = [];
+  let at = 0;
+  regex.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(snippet)) !== null) {
+    if (m[0].length === 0) {
+      regex.lastIndex++;
+      continue;
+    }
+    if (m.index > at) out.push({ text: snippet.slice(at, m.index), match: false });
+    out.push({ text: m[0], match: true });
+    at = m.index + m[0].length;
+  }
+  if (at < snippet.length) out.push({ text: snippet.slice(at), match: false });
+  return out.length ? out : [{ text: snippet, match: false }];
+}

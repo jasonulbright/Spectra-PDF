@@ -17,6 +17,7 @@ import {
   isTransformable,
   isResizable,
   MIN_SIZE_NORM,
+  annotationBodyClasses,
 } from '../src/renderer/lib/annotation-manipulation';
 
 function makeFile(path: string, pageCount: number): OpenFile {
@@ -592,5 +593,40 @@ describe('RECOLOR_ANNOTATIONS / REMOVE_ANNOTATIONS', () => {
     expect(s1.workspace.documents[0].pages[0].removedImportedOriginals).toHaveLength(1);
     const undone = appReducer(s1, { type: 'UNDO_PAGE_OP' });
     expect(annotsOf(undone).map((a) => a.id)).toEqual(['a', 'imp', 'keep']);
+  });
+});
+
+describe('the overlay never paints over an appearance stream it did not draw', () => {
+  // N4, measured off the shipped screenshot: a committed FreeText note rendered
+  // at 1.11:1 on the page (#F8ECE7 text on its own #FAFAF5 ground) while the
+  // SAME note showed at full contrast in the comment panel beside it.
+  //
+  // The appearance stream was innocent — regenerating it emits
+  // `0.909 0.313 0.227 RG ... re S` and the matching `rg` for the text, both
+  // the authored colour. The overlay div was the culprit: it carried
+  // `page-annot-text` unconditionally, whose `rgba(250,250,245,0.92)` ground is
+  // the freetext body's paper when the OVERLAY owns the drawing. Over a
+  // pristine import — where pdf.js draws the appearance and the overlay
+  // deliberately draws no body — that ground covered the stream and left 8% of
+  // it bleeding through.
+  it('withholds the freetext ground from a pristine import', () => {
+    expect(annotationBodyClasses('freetext', false)).toContain('page-annot-text');
+    expect(annotationBodyClasses('freetext', true)).not.toContain('page-annot-text');
+  });
+
+  it('keeps the layout-only classes unconditional', () => {
+    // These carry no paint — `page-annot-ink` is `border: none` and
+    // `page-annot-stamp` is a flex box — so suppressing them would change
+    // geometry for no reason.
+    for (const kind of ['ink', 'measure', 'textmarkup', 'shape', 'callout', 'count', 'countlegend'] as const) {
+      expect(annotationBodyClasses(kind, true)).toContain('page-annot-ink');
+      expect(annotationBodyClasses(kind, false)).toContain('page-annot-ink');
+    }
+    expect(annotationBodyClasses('stamp', true)).toContain('page-annot-stamp');
+    expect(annotationBodyClasses('stamp', false)).toContain('page-annot-stamp');
+  });
+
+  it('always carries the base class', () => {
+    expect(annotationBodyClasses('highlight', true).split(' ')).toEqual(['page-annot']);
   });
 });

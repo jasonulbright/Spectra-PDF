@@ -26,7 +26,14 @@ const base = {
 // union widens for the rare TOOL with no op whose glyph nothing else fits
 // ('measure' — a ruler is not any operation's icon): a superset still covers
 // Operation, and ToolIcon's own prop type follows this key union.
-export type GlyphId = Operation | 'measure';
+// 'edittext', 'snapshot' and 'exportdoc' join 'measure' as TOOL glyphs with no
+// operation of their own. Without them each tile borrowed a neighbour's glyph
+// and the icon column stopped distinguishing the tools: a pixel diff of the
+// all-tools column returned Edit ≡ Watermark (both the droplet) and
+// Crop & Page Boxes ≡ Snapshot (both the crop frame), byte-identical, with
+// Scan & OCR ≡ Export a third pair on the same footing. A tile borrows its
+// first op's glyph only where that glyph is not already somebody's own.
+export type GlyphId = Operation | 'measure' | 'edittext' | 'snapshot' | 'exportdoc';
 const GLYPHS: Record<GlyphId, React.JSX.Element> = {
   // A diagonal ruler with tick marks.
   measure: (
@@ -378,6 +385,35 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <path d="M3 21v-5h5" />
       <path d="M21 8a9 9 0 0 0-15-5.3L3 5.5" />
       <path d="M3 16a9 9 0 0 0 15 5.3l3-2.8" />
+    </>
+  ),
+  // An I-beam caret across a text baseline — editing text in place, which is
+  // what the tool does and what no other glyph in the set shows.
+  edittext: (
+    <>
+      <path d="M6 4h12" />
+      <path d="M12 4v13" />
+      <path d="M9 20h6" />
+      <path d="M12 17v3" />
+      <path d="M3 9v6M21 9v6" strokeWidth="1.2" />
+    </>
+  ),
+  // A dashed marquee with a solid capture corner — a region grabbed off the
+  // page, as against `pagebox`, which is a permanent crop of the sheet.
+  snapshot: (
+    <>
+      <path d="M3 6.5V4a1 1 0 0 1 1-1h2.5M17.5 3H20a1 1 0 0 1 1 1v2.5M21 17.5V20a1 1 0 0 1-1 1h-2.5M6.5 21H4a1 1 0 0 1-1-1v-2.5" />
+      <path d="M10 3h4M3 10v4M21 10v4M10 21h4" strokeDasharray="2 2.5" />
+      <rect x="8" y="8" width="8" height="8" rx="1" strokeWidth="1.4" />
+    </>
+  ),
+  // A page with content leaving it — extraction OUT of the document, as
+  // against `extract_text`, which is the page whose text is being read.
+  exportdoc: (
+    <>
+      <path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7" />
+      <path d="M17 8l4 4-4 4" />
+      <path d="M21 12h-9" />
     </>
   ),
   // Counter-clockwise restore arrow.

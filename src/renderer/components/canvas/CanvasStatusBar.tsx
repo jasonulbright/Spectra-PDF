@@ -358,7 +358,14 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
                 data-testid="forms-fill-btn"
                 disabled={props.fillingForms}
                 onClick={props.onApplyForms}
-                className="canvas-status-action bg-emerald-600 hover:bg-emerald-500 text-white"
+                // The accent family, like every other filled primary in the
+                // product (its own "Apply changes" sibling two rows down
+                // included). White on #009966 measures 3.65:1 and fails AA at
+                // this size; the accent's luminance-chosen foreground measures
+                // 8.56:1. Green also carried no meaning here — a scan of the
+                // status bar found exactly one green filled button, so it was
+                // an outlier rather than a semantic family.
+                className="canvas-status-action bg-blue-600 hover:bg-blue-500 text-white"
               >
                 {props.fillingForms
                   ? tChrome('chrome.status.filling')
