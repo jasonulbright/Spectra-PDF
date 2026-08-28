@@ -60,10 +60,10 @@ export function RepairPanel(): React.ReactElement {
       <div className="text-sm text-neutral-400">{tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span> ({tChromeCount('panel.common.pageCount', activeFile.pageCount)})</div>
       <p className="text-sm text-neutral-500">{tChrome('panel.repair.blurb')}</p>
       <div className="flex gap-2">
-        <button onClick={handleCheck} disabled={busy} className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm font-medium">
+        <button onClick={handleCheck} disabled={busy} className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm font-medium">
           {busyOp === 'check' ? tChrome('panel.repair.checking') : tChrome('panel.repair.validateFirst')}
         </button>
-        <button onClick={handleRepair} disabled={busy} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+        <button onClick={handleRepair} disabled={busy} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">
           {busyOp === 'repair' ? tChrome('panel.repair.busy') : tChrome('panel.repair.repair')}
         </button>
       </div>

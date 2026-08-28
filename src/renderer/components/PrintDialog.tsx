@@ -59,7 +59,7 @@ type Opts = ReturnType<typeof defaultPrintOptions>;
 const selectCls =
   'w-full px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm';
 const inputCls =
-  'px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50';
+  'px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-60';
 const labelCls = 'block text-sm text-neutral-400 mb-1';
 
 const PREVIEW_MAX = 8;
@@ -773,7 +773,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
             data-testid="print-submit"
             disabled={!canPrint}
             onClick={() => void handlePrint()}
-            className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+            className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
           >
             {tChrome(busy ? 'dialog.print.printing' : 'dialog.print.print')}
           </button>
@@ -809,7 +809,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
             aria-label={tChrome('dialog.print.prevSheet')}
             disabled={previewIndex <= 0}
             onClick={() => setPreviewIndex((i) => Math.max(0, i - 1))}
-            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded disabled:opacity-40"
+            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded disabled:opacity-60"
           >
             ‹
           </button>
@@ -832,7 +832,7 @@ export function PrintDialog({ onClose }: PrintDialogProps): React.JSX.Element {
             aria-label={tChrome('dialog.print.nextSheet')}
             disabled={previewIndex >= previewUrls.length - 1}
             onClick={() => setPreviewIndex((i) => Math.min(previewUrls.length - 1, i + 1))}
-            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded disabled:opacity-40"
+            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded disabled:opacity-60"
           >
             ›
           </button>

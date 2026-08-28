@@ -219,7 +219,7 @@ export function TableReviewPanel(): React.ReactElement {
       <button
         type="button"
         data-testid="table-review-detect"
-        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
         disabled={busy}
         onClick={() => void detect()}
       >
@@ -353,7 +353,7 @@ export function TableReviewPanel(): React.ReactElement {
           <button
             type="button"
             data-testid="table-review-export"
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
             disabled={exporting || acceptedCount === 0}
             onClick={() => void runExport()}
           >

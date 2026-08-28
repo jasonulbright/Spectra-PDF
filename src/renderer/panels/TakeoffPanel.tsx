@@ -314,7 +314,7 @@ export function TakeoffPanel(): React.ReactElement {
                       setEditing(null);
                     }}
                     title={tChrome('panel.takeoff.forgetTitle')}
-                    className="self-start text-xs px-1.5 py-0.5 rounded text-neutral-400 hover:bg-red-600 hover:text-white"
+                    className="self-start text-xs danger-action is-quiet"
                   >
                     {tChrome('panel.takeoff.forget')}
                   </button>
@@ -359,7 +359,7 @@ export function TakeoffPanel(): React.ReactElement {
           onClick={placeLegend}
           disabled={busy}
           title={tChrome('panel.takeoff.legendHint')}
-          className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
+          className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm"
         >
           {tChrome('panel.takeoff.placeLegend')}
         </button>
@@ -369,7 +369,7 @@ export function TakeoffPanel(): React.ReactElement {
           onClick={() => void exportCsv()}
           disabled={busy}
           title={tChrome('panel.takeoff.exportHint')}
-          className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
+          className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm"
         >
           {tChrome('panel.takeoff.exportCsv')}
         </button>

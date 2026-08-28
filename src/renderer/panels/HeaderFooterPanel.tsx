@@ -8,6 +8,7 @@ import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import type { PanelKey } from '../i18n-panels';
+import { STAMP_PALETTE } from '../lib/stamp-palette';
 
 // Six placement slots (top/bottom × left/center/right); an empty slot isn't
 // stamped. Text may contain {page}, {pages}, {bates} — the engine substitutes
@@ -21,7 +22,8 @@ const SLOTS: { pos: string; label: PanelKey }[] = [
   { pos: 'br', label: 'panel.hf.slot.br' as PanelKey },
 ];
 
-const COLORS = ['#16161a', '#5b6270', '#e0393e', '#2f6fed'];
+// The shared stamp palette; a header/footer's own default is the near-black.
+const HF_DEFAULT_COLOR = '#16161a';
 
 export function HeaderFooterPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -31,7 +33,7 @@ export function HeaderFooterPanel(): React.ReactElement {
   const [slots, setSlots] = useState<Record<string, string>>({});
   const [fontSize, setFontSize] = useState(10);
   const [margin, setMargin] = useState(24);
-  const [color, setColor] = useState(COLORS[0]);
+  const [color, setColor] = useState(HF_DEFAULT_COLOR);
   const [pageInput, setPageInput] = useState('all');
   const [batesStart, setBatesStart] = useState(1);
   const [batesDigits, setBatesDigits] = useState(6);
@@ -156,7 +158,7 @@ export function HeaderFooterPanel(): React.ReactElement {
         <div>
           <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.hf.color')}</label>
           <div className="flex items-center gap-1.5 py-1.5">
-            {COLORS.map((c) => (
+            {STAMP_PALETTE.map((c) => (
               <button
                 key={c}
                 title={c}
@@ -214,7 +216,7 @@ export function HeaderFooterPanel(): React.ReactElement {
         data-testid="hf-apply"
         onClick={handleApply}
         disabled={busy}
-        className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+        className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
       >
         {busy ? tChrome('panel.hf.applying') : tChrome('panel.hf.apply')}
       </button>

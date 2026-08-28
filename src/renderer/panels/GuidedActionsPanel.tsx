@@ -438,7 +438,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                       [steps[i - 1], steps[i]] = [steps[i], steps[i - 1]];
                       setAction({ ...action, steps });
                     }}
-                    className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded"
+                    className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                   >
                     ↑
                   </button>
@@ -451,7 +451,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                       [steps[i], steps[i + 1]] = [steps[i + 1], steps[i]];
                       setAction({ ...action, steps });
                     }}
-                    className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded"
+                    className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                   >
                     ↓
                   </button>
@@ -461,7 +461,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                     onClick={() =>
                       setAction({ ...action, steps: action.steps.filter((_, j) => j !== i) })
                     }
-                    className="px-1.5 py-0.5 text-xs text-neutral-400 hover:text-red-400"
+                    className="text-xs danger-action is-quiet"
                   >
                     {tChrome('panel.ga.remove')}
                   </button>
@@ -518,7 +518,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                                 };
                                 setAction({ ...action, steps });
                               }}
-                              className="w-full px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs disabled:opacity-40"
+                              className="w-full px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs disabled:opacity-60"
                             >
                               {p.options!.map((o) => (
                                 <option key={o.value} value={o.value}>
@@ -543,7 +543,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                                 };
                                 setAction({ ...action, steps });
                               }}
-                              className="w-full px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs disabled:opacity-40"
+                              className="w-full px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs disabled:opacity-60"
                             />
                           )}
                           <span
@@ -754,7 +754,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             data-testid="folderrun-close"
             disabled={running}
             onClick={() => setView({ kind: 'list' })}
-            className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
+            className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm"
           >
             {tChrome('panel.ga.backToActions')}
           </button>
@@ -809,7 +809,7 @@ export function GuidedActionsPanel(): React.ReactElement {
             data-testid="run-close"
             disabled={running}
             onClick={() => setView({ kind: 'list' })}
-            className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
+            className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm"
           >
             {tChrome('panel.ga.backToActions')}
           </button>
@@ -886,7 +886,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                 disabled={!activeFile || running || openBlocked !== null || gsBlockedMsg !== null}
                 title={openBlocked ?? gsBlockedMsg ?? undefined}
                 onClick={() => void runAction(a)}
-                className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+                className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
               >
                 {tChrome('panel.ga.run')}
               </button>
@@ -896,7 +896,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                 disabled={running || gsBlockedMsg !== null}
                 title={gsBlockedMsg ?? tChrome('panel.ga.folderTitle')}
                 onClick={() => void runActionOnFolder(a)}
-                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
               >
                 {tChrome('panel.ga.folder')}
               </button>
@@ -913,7 +913,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                       setConfirmInPlace(null);
                       void runActionInPlace(a);
                     }}
-                    className="px-2 py-1 text-xs text-white bg-red-700/90 hover:bg-red-600 disabled:opacity-50 rounded"
+                    className="px-2 py-1 text-xs text-white bg-red-700/90 hover:bg-red-600 disabled:opacity-60 rounded"
                   >
                     {tChrome('panel.ga.replace')}
                   </button>
@@ -932,7 +932,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                   disabled={running || inPlaceBlocked !== null || gsBlockedMsg !== null}
                   title={inPlaceBlocked ?? gsBlockedMsg ?? tChrome('panel.ga.inPlaceTitle')}
                   onClick={() => setConfirmInPlace(a.id)}
-                  className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                  className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                 >
                   {tChrome('panel.ga.inPlace')}
                 </button>
@@ -978,7 +978,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                 type="button"
                 data-testid={`action-delete-${a.id}`}
                 onClick={() => persist(actions.filter((x) => x.id !== a.id))}
-                className="px-2 py-1 text-xs text-neutral-400 hover:text-red-400"
+                className="text-xs danger-action is-quiet"
               >
                 {tChrome('panel.ga.delete')}
               </button>

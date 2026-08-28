@@ -537,7 +537,7 @@ export function FolderFormPrepDialog({
                 disabled={!ready}
                 onClick={() => setConfirmInPlace(true)}
                 data-testid="form-prep-inplace-confirm"
-                className="px-4 py-1.5 bg-amber-700 hover:bg-amber-600 disabled:opacity-50 rounded text-sm font-medium"
+                className="px-4 py-1.5 bg-amber-700 hover:bg-amber-600 disabled:opacity-60 rounded text-sm font-medium"
               >
                 {tChrome('dialog.formPrep.inPlaceConfirm')}
               </button>
@@ -547,7 +547,7 @@ export function FolderFormPrepDialog({
                 disabled={!ready}
                 onClick={() => void detect()}
                 data-testid="form-prep-detect"
-                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
               >
                 {tChrome('dialog.formPrep.detect')}
               </button>
@@ -696,7 +696,7 @@ export function FolderFormPrepDialog({
               disabled={selected.size === 0}
               onClick={() => void apply()}
               data-testid="form-prep-apply"
-              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded text-sm font-medium"
+              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 rounded text-sm font-medium"
             >
               {tChromeCount('dialog.formPrep.apply', selected.size)}
             </button>
@@ -833,7 +833,7 @@ function FileGroup({
           type="button"
           onClick={() => onReview(file.abs)}
           data-testid={`form-prep-review-${file.rel}`}
-          className="ms-auto text-xs underline text-neutral-400 hover:text-neutral-200 shrink-0"
+          className="ms-auto text-xs link-action shrink-0"
         >
           {tChrome('dialog.formPrep.reviewInApp')}
         </button>

@@ -100,7 +100,7 @@ export function CustomizeToolbarDialog({ onClose }: CustomizeToolbarDialogProps)
             data-testid="customize-toolbar-reset"
             onClick={() => dispatch({ type: 'UI_SET_TOOLBAR_OVERRIDES', overrides: NO_OVERRIDES })}
             disabled={isDefault}
-            className="px-3 py-1 text-sm bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 rounded"
+            className="px-3 py-1 text-sm bg-neutral-800 hover:bg-neutral-700 disabled:opacity-60 rounded"
           >
             {tChrome('dialog.customize.reset')}
           </button>

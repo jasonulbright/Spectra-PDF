@@ -296,7 +296,7 @@ function GhostscriptSection(): React.ReactElement {
           onClick={browse}
           disabled={checking}
           data-testid="prefs-gs-browse"
-          className="px-3 py-1.5 rounded text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-200 disabled:opacity-50"
+          className="px-3 py-1.5 rounded text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-200 disabled:opacity-60"
         >
           {tChrome('panel.settings.gsBrowse')}
         </button>
@@ -306,7 +306,7 @@ function GhostscriptSection(): React.ReactElement {
             onClick={() => void adopt(undefined)}
             disabled={checking}
             data-testid="prefs-gs-clear"
-            className="px-3 py-1.5 rounded text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-200 disabled:opacity-50"
+            className="px-3 py-1.5 rounded text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-200 disabled:opacity-60"
           >
             {tChrome('panel.settings.gsUseDiscovered')}
           </button>
@@ -316,7 +316,7 @@ function GhostscriptSection(): React.ReactElement {
           onClick={() => void recheck()}
           disabled={checking}
           data-testid="prefs-gs-recheck"
-          className="px-3 py-1.5 rounded text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-200 disabled:opacity-50"
+          className="px-3 py-1.5 rounded text-xs font-medium bg-neutral-700 hover:bg-neutral-600 text-neutral-200 disabled:opacity-60"
         >
           {tChrome(checking ? 'panel.settings.gsChecking' : 'panel.settings.gsRecheck')}
         </button>
@@ -556,7 +556,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             value={String(settings.batchLogRetentionDays)}
             disabled={!settings.batchLogEnabled}
             onChange={(e) => update('batchLogRetentionDays', Number(e.target.value))}
-            className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50"
+            className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-60"
           >
             <option value="7">{tChrome('panel.settings.days7')}</option>
             <option value="30">{tChrome('panel.settings.days30')}</option>
@@ -587,7 +587,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
                 })
                 .catch(() => {});
             }}
-            className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-50 rounded font-medium shrink-0"
+            className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-60 rounded font-medium shrink-0"
           >
             {tChrome('panel.settings.choose')}
           </button>
@@ -789,7 +789,7 @@ export function SettingsPanel({ initialCategory = 'general' }: SettingsPanelProp
             onChange={() =>
               update('runUnrecognizedFieldScripts', !settings.runUnrecognizedFieldScripts)
             }
-            className="rounded bg-neutral-800 border-neutral-700 disabled:opacity-50"
+            className="rounded bg-neutral-800 border-neutral-700 disabled:opacity-60"
           />
           <span className="text-sm text-neutral-400">
             {tChrome('panel.settings.runFieldScripts')}
@@ -917,7 +917,7 @@ function VirtualPrinterBlock(): React.JSX.Element {
                 data-testid="virtual-printer-remove"
                 disabled={vpBusy}
                 onClick={() => void run(() => virtualPrinter.uninstall())}
-                className="px-2.5 py-1 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-50 rounded font-medium"
+                className="px-2.5 py-1 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-60 rounded font-medium"
               >
                 {tChrome('panel.settings.removePrinter')}
               </button>
@@ -927,7 +927,7 @@ function VirtualPrinterBlock(): React.JSX.Element {
                 data-testid="virtual-printer-install"
                 disabled={vpBusy || gsBlocked(gs)}
                 onClick={() => void run(() => virtualPrinter.install())}
-                className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+                className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
               >
                 {tChrome('panel.settings.installPrinter')}
               </button>

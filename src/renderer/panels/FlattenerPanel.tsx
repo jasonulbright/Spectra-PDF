@@ -251,7 +251,7 @@ export function FlattenerPanel(): React.ReactElement {
           data-testid="flattener-apply"
           disabled={applying || busy || !canApply(report, outlines) || gsBlocked(gs)}
           onClick={() => void apply()}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-50"
+          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-60"
         >
           {tChrome('panel.flattener.apply')}
         </button>

@@ -237,7 +237,7 @@ export function PageBoxesPanel(): React.ReactElement {
         data-testid="pagebox-apply"
         onClick={handleApply}
         disabled={busy}
-        className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+        className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
       >
         {busy ? tChrome('panel.pageBoxes.applying') : tChrome('panel.pageBoxes.apply')}
       </button>
@@ -264,7 +264,7 @@ export function PageBoxesPanel(): React.ReactElement {
             data-testid="pagebox-auto-preview"
             onClick={() => void runAuto(true)}
             disabled={busy}
-            className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm font-medium"
+            className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm font-medium"
           >
             {tChrome('panel.pageBoxes.autoPreview')}
           </button>
@@ -272,7 +272,7 @@ export function PageBoxesPanel(): React.ReactElement {
             data-testid="pagebox-auto-apply"
             onClick={() => void runAuto(false)}
             disabled={busy || autoPreview === null || autoPreview.cropped === 0}
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
           >
             {tChrome('panel.pageBoxes.autoApply')}
           </button>

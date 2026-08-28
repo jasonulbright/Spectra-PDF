@@ -136,7 +136,7 @@ export function ReadingOrderPanel(): React.ReactElement {
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={busy || page <= 1}
               aria-label={tChrome('panel.order.prevPage')}
-              className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded"
+              className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
             >
               ‹
             </button>
@@ -160,7 +160,7 @@ export function ReadingOrderPanel(): React.ReactElement {
               onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
               disabled={busy || page >= pageCount}
               aria-label={tChrome('panel.order.nextPage')}
-              className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded"
+              className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
             >
               ›
             </button>
@@ -203,7 +203,7 @@ export function ReadingOrderPanel(): React.ReactElement {
                       disabled={busy || !upOk}
                       title={i === 0 ? tChrome('panel.order.alreadyFirst') : upOk ? tChrome('panel.order.readEarlier') : branchHint}
                       aria-label={tChrome('panel.order.moveEarlier')}
-                      className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded"
+                      className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                     >
                       ↑
                     </button>
@@ -220,7 +220,7 @@ export function ReadingOrderPanel(): React.ReactElement {
                             : branchHint
                       }
                       aria-label={tChrome('panel.order.moveLater')}
-                      className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded"
+                      className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                     >
                       ↓
                     </button>

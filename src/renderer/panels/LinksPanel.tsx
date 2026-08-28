@@ -232,7 +232,7 @@ function LinkEditor({
               <button
                 type="button"
                 data-testid={`${slug}-file-browse`}
-                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded whitespace-nowrap"
+                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded whitespace-nowrap"
                 disabled={disabled}
                 onClick={() => {
                   void (async () => {
@@ -651,7 +651,7 @@ export function LinksPanel(): React.ReactElement {
                 data-testid="link-new-create"
                 onClick={() => void createLink()}
                 disabled={busy || newProblem !== null}
-                className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded"
+                className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded"
               >
                 {tChrome('panel.links.draw.create')}
               </button>
@@ -659,7 +659,7 @@ export function LinksPanel(): React.ReactElement {
                 data-testid="link-new-discard"
                 onClick={() => setPending(null)}
                 disabled={busy}
-                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
               >
                 {tChrome('panel.links.draw.discard')}
               </button>
@@ -700,7 +700,7 @@ export function LinksPanel(): React.ReactElement {
                     data-testid={`link-jump-${l.page}-${l.index}`}
                     onClick={() => getCanvasServices()?.jumpToFilePage(activeFile.path, l.page)}
                     disabled={busy}
-                    className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                    className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                   >
                     {tChrome('panel.links.jump')}
                   </button>
@@ -708,7 +708,7 @@ export function LinksPanel(): React.ReactElement {
                     data-testid={`link-edit-${l.page}-${l.index}`}
                     onClick={() => (isEditing ? setEditing(null) : beginEdit(l))}
                     disabled={busy}
-                    className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                    className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                   >
                     {tChrome('panel.links.edit.open')}
                   </button>
@@ -716,7 +716,7 @@ export function LinksPanel(): React.ReactElement {
                     data-testid={`link-delete-${l.page}-${l.index}`}
                     onClick={() => void deleteLink(l)}
                     disabled={busy}
-                    className="px-2 py-1 text-xs text-neutral-400 hover:text-red-400 disabled:opacity-50"
+                    className="text-xs danger-action is-quiet"
                   >
                     {tChrome('panel.links.delete')}
                   </button>
@@ -757,7 +757,7 @@ export function LinksPanel(): React.ReactElement {
                         data-testid={`link-save-${l.page}-${l.index}`}
                         onClick={() => void applyEdit()}
                         disabled={busy || editProblem !== null}
-                        className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded"
+                        className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded"
                       >
                         {tChrome('panel.links.edit.apply')}
                       </button>
@@ -765,7 +765,7 @@ export function LinksPanel(): React.ReactElement {
                         data-testid={`link-cancel-${l.page}-${l.index}`}
                         onClick={() => setEditing(null)}
                         disabled={busy}
-                        className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                        className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                       >
                         {tChrome('panel.links.edit.cancel')}
                       </button>
@@ -810,7 +810,7 @@ export function LinksPanel(): React.ReactElement {
             data-testid="links-derive-find"
             onClick={() => void findAddresses()}
             disabled={busy}
-            className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+            className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
           >
             {tChrome('panel.links.derive.find')}
           </button>
@@ -818,7 +818,7 @@ export function LinksPanel(): React.ReactElement {
             data-testid="links-derive-create"
             onClick={() => void createDerivedLinks()}
             disabled={busy || found === null || found.count - found.already === 0}
-            className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded"
+            className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded"
           >
             {tChrome('panel.links.derive.create')}
           </button>

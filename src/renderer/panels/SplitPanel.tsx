@@ -180,7 +180,7 @@ export function SplitPanel(): React.ReactElement {
               : tChromeCount('panel.split.bookmarkCount', topLevel)}
         </p>
       )}
-      <button data-testid="split-run" onClick={handleSplit} disabled={disabled} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+      <button data-testid="split-run" onClick={handleSplit} disabled={disabled} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">
         {busy ? tChrome('panel.split.splitting') : tChrome('panel.split.split')}
       </button>
       <StatusBar message={status} busy={busy} />

@@ -405,7 +405,7 @@ export function FormsPanel(): React.ReactElement {
               data-testid="forms-apply"
               onClick={handleApply}
               disabled={busy || editableCount === 0}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
             >
               {busy ? tChrome('panel.forms.applying') : flatten ? tChrome('panel.forms.fillFlatten') : tChrome('panel.forms.fillForm')}
             </button>
@@ -446,7 +446,7 @@ function RefusedScript({
           <button
             type="button"
             data-testid={`forms-script-toggle-${field}-${trigger}`}
-            className="ms-auto text-[11px] text-neutral-400 hover:text-neutral-200 underline shrink-0"
+            className="ms-auto text-[11px] quiet-action shrink-0"
             onClick={() => setOpen((v) => !v)}
           >
             {tChrome(open ? 'panel.forms.scriptHide' : 'panel.forms.scriptShow')}

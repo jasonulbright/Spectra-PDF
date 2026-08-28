@@ -184,7 +184,7 @@ export function EncryptPanel(): React.ReactElement {
         data-testid="encrypt-run"
         onClick={mode === 'password' ? handleEncrypt : handleEncryptCerts}
         disabled={busy}
-        className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+        className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
       >
         {busy ? tChrome('panel.encrypt.encrypting') : tChrome('panel.encrypt.encrypt')}
       </button>

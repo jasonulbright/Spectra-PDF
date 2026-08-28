@@ -297,7 +297,7 @@ function AuthoredFixEditor({
         data-testid={`preflight-fix-${checkId}${suffix}`}
         disabled={busy}
         onClick={onApply}
-        className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+        className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
       >
         {tChrome(`panel.preflight.fixup.${fixup}` as Parameters<typeof tChrome>[0])}
       </button>
@@ -947,7 +947,7 @@ export function PreflightPanel(): React.ReactElement {
             data-testid="preflight-editor-save"
             disabled={busy}
             onClick={() => void saveEdits()}
-            className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+            className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
           >
             {tChrome(
               shippedRule ? 'panel.preflight.saveProfile' : 'panel.preflight.saveEdits',
@@ -1058,7 +1058,7 @@ export function PreflightPanel(): React.ReactElement {
             data-testid="preflight-recheck"
             onClick={() => void run(profileId)}
             disabled={busy}
-            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
           >
             {tChrome('panel.preflight.rerun')}
           </button>
@@ -1068,7 +1068,7 @@ export function PreflightPanel(): React.ReactElement {
             disabled={busy || !report || fixableChecks(
               categories.flatMap((c) => c.checks), carried,
             ).length === 0}
-            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
           >
             {tChrome('panel.preflight.fixAll')}
           </button>
@@ -1076,7 +1076,7 @@ export function PreflightPanel(): React.ReactElement {
             data-testid="preflight-export"
             onClick={() => void exportReport()}
             disabled={busy || !report}
-            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
           >
             {tChrome('panel.preflight.export')}
           </button>
@@ -1104,7 +1104,7 @@ export function PreflightPanel(): React.ReactElement {
           data-testid="preflight-profile-edit"
           onClick={openEditor}
           disabled={busy || !activeProfile}
-          className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+          className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
         >
           {tChrome('panel.preflight.editProfile')}
         </button>
@@ -1112,7 +1112,7 @@ export function PreflightPanel(): React.ReactElement {
           data-testid="preflight-profile-duplicate"
           onClick={duplicateProfile}
           disabled={busy || !activeProfile}
-          className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+          className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
         >
           {tChrome('panel.preflight.duplicateProfile')}
         </button>
@@ -1120,7 +1120,7 @@ export function PreflightPanel(): React.ReactElement {
           data-testid="preflight-profile-import"
           onClick={() => void pickAndImportProfile()}
           disabled={busy}
-          className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+          className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
         >
           {tChrome('panel.preflight.importProfile')}
         </button>
@@ -1128,7 +1128,7 @@ export function PreflightPanel(): React.ReactElement {
           data-testid="preflight-profile-export"
           onClick={() => void pickAndExportProfile()}
           disabled={busy || !activeProfile}
-          className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+          className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
         >
           {tChrome('panel.preflight.exportProfile')}
         </button>
@@ -1137,7 +1137,7 @@ export function PreflightPanel(): React.ReactElement {
             data-testid="preflight-profile-delete"
             onClick={deleteActiveProfile}
             disabled={busy}
-            className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+            className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
           >
             {tChrome('panel.preflight.deleteProfile')}
           </button>
@@ -1245,7 +1245,7 @@ export function PreflightPanel(): React.ReactElement {
                               data-testid={`preflight-fix-${check.id}`}
                               disabled={busy}
                               onClick={() => void applyAutoFix(check.id)}
-                              className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50 shrink-0"
+                              className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60 shrink-0"
                             >
                               {tChrome(
                                 `panel.preflight.fixup.${offer.fixups[0]}` as Parameters<

@@ -389,7 +389,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
                 data-testid="props-save"
                 disabled={busy}
                 onClick={() => void handleSave()}
-                className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+                className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
               >
                 {tChrome('dialog.props.saveAs')}
               </button>
@@ -397,7 +397,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
                 data-testid="props-strip"
                 disabled={busy}
                 onClick={() => void handleStrip()}
-                className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-50 rounded font-medium"
+                className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 disabled:opacity-60 rounded font-medium"
               >
                 {tChrome('dialog.props.removeAll')}
               </button>
@@ -547,7 +547,7 @@ export function PropertiesDialog({ onClose }: PropertiesDialogProps): React.JSX.
               data-testid="props-advanced-apply"
               disabled={busy || advancedDelta === null}
               onClick={handleApplyAdvanced}
-              className="self-start px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+              className="self-start px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
             >
               {tChrome('dialog.props.apply')}
             </button>
@@ -841,7 +841,7 @@ function InitialViewTab({
         data-testid="props-iv-apply"
         disabled={busy || !dirty}
         onClick={onApply}
-        className="self-start px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+        className="self-start px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
       >
         {tChrome('dialog.props.apply')}
       </button>

@@ -203,7 +203,7 @@ export function WebCaptureDialog({
                 min={1}
                 max={MAX_PAGES_CEILING}
                 step={1}
-                className="w-full px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-xs disabled:opacity-40"
+                className="w-full px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-xs disabled:opacity-60"
                 value={maxPages}
                 // A single-page capture cannot use a budget, so the control
                 // does not pretend it can.
@@ -324,7 +324,7 @@ export function WebCaptureDialog({
             <button
               type="button"
               data-testid="web-capture-run"
-              className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+              className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
               disabled={busy || url.trim() === ''}
               onClick={capture}
             >

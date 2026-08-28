@@ -5,7 +5,7 @@ import { NoFileOpen } from '../components/NoFileOpen';
 import { StatusBar } from '../components/StatusBar';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount, tNumber } from '../i18n';
-import { formatBytes } from '../lib/format-bytes';
+import { byteColumnUnit, formatBytes, formatBytesIn } from '../lib/format-bytes';
 import {
   accountsForFile,
   knobOf,
@@ -143,6 +143,12 @@ export function OptimizePanel(): React.ReactElement {
 
   const rows = useMemo(() => (report ? ranked(report) : []), [report]);
   const consistent = accountsForFile(report);
+  // The size column is written in ONE unit — see `byteColumnUnit`. The total
+  // is part of the column, so it votes on the unit too.
+  const sizeUnit = useMemo(
+    () => byteColumnUnit([...rows.map((r) => r.bytes), report?.file_size ?? null]),
+    [rows, report],
+  );
 
   const handleOptimize = useCallback(async () => {
     if (!activeFile) return;
@@ -178,7 +184,7 @@ export function OptimizePanel(): React.ReactElement {
         <div className="flex items-center gap-3">
           <span className="text-sm text-neutral-200">{tChrome('panel.optimize.audit.title')}</span>
           <button
-            className="text-xs underline text-neutral-400"
+            className="text-xs quiet-action"
             data-testid="space-audit-rerun"
             disabled={auditing}
             onClick={() => void refresh()}
@@ -215,7 +221,7 @@ export function OptimizePanel(): React.ReactElement {
                     data-testid={`space-audit-bytes-${row.id}`}
                     data-bytes={row.bytes}
                   >
-                    {formatBytes(row.bytes)}
+                    {formatBytesIn(row.bytes, sizeUnit)}
                   </span>
                   <span
                     className="text-end tabular-nums text-neutral-400"
@@ -238,7 +244,7 @@ export function OptimizePanel(): React.ReactElement {
                     )}
                     {row.detail.length > 0 && (
                       <button
-                        className="ps-2 underline text-neutral-400"
+                        className="ms-2 quiet-action"
                         data-testid={`space-audit-details-${row.id}`}
                         onClick={() =>
                           setExpanded((prev) => {
@@ -274,17 +280,24 @@ export function OptimizePanel(): React.ReactElement {
                   </span>
                 </React.Fragment>
               ))}
-              <span className="border-t border-neutral-700 pt-1 text-neutral-300">
-                {tChrome('panel.optimize.audit.total')}
-              </span>
+              {/* ONE rule across the table, not a top border per cell. Three
+                  bordered cells inside a `gap-x-3` grid draw three disconnected
+                  segments with a gap at each column boundary, and the trailing
+                  one hangs over an empty cell — a broken rule rather than a
+                  total's separator. A full-width row owns the line instead. */}
               <span
-                className="border-t border-neutral-700 pt-1 text-end tabular-nums text-neutral-200"
+                className="col-span-3 mt-1 border-t border-neutral-700"
+                data-testid="space-audit-total-rule"
+              />
+              <span className="text-neutral-300">{tChrome('panel.optimize.audit.total')}</span>
+              <span
+                className="text-end tabular-nums text-neutral-200"
                 data-testid="space-audit-total"
                 data-bytes={report.file_size}
               >
-                {formatBytes(report.file_size)}
+                {formatBytesIn(report.file_size, sizeUnit)}
               </span>
-              <span className="border-t border-neutral-700 pt-1" />
+              <span />
             </div>
             <p className="text-xs text-neutral-500" data-testid="space-audit-revisions">
               {tChromeCount('panel.optimize.audit.revisions', report.revisions)}
@@ -311,7 +324,7 @@ export function OptimizePanel(): React.ReactElement {
         ))}
       </div>
       <button onClick={handleOptimize} disabled={busy || (!linearize && !stripMeta && !compressStreams)}
-        className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+        className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">
         {busy ? tChrome('panel.optimize.optimizing') : tChrome('panel.optimize.optimize')}
       </button>
       <StatusBar message={status} busy={busy} />

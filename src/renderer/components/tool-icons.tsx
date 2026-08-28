@@ -146,8 +146,17 @@ const GLYPHS: Record<GlyphId, React.JSX.Element> = {
       <path d="M15 8l4 4-4 4" />
     </>
   ),
-  // Ink droplet — CMYK prepress conversion.
-  convert_cmyk: <path d="M12 2.5s6 6.5 6 10.5a6 6 0 0 1-12 0c0-4 6-10.5 6-10.5z" />,
+  // Three overlapping process circles — the printer's own mark for separating
+  // one image into inks. It was a droplet, which is what `watermark` is: two
+  // tools four rows apart in the tools list drew the same glyph, so the icon
+  // column stopped distinguishing them at all.
+  convert_cmyk: (
+    <>
+      <circle cx="9.5" cy="9.5" r="5" />
+      <circle cx="14.5" cy="9.5" r="5" />
+      <circle cx="12" cy="14.5" r="5" />
+    </>
+  ),
   // A page with a header rule and a footer rule.
   headerfooter: (
     <>

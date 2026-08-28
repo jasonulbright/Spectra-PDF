@@ -179,7 +179,7 @@ function AuthoredEditor({
         data-testid={`${testId}-apply`}
         disabled={busy || !value.trim()}
         onClick={onApply}
-        className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+        className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
       >
         {tChrome('panel.a11y.apply')}
       </button>
@@ -633,7 +633,7 @@ export function AccessibilityPanel(): React.ReactElement {
             data-testid="a11y-recheck"
             onClick={() => void run()}
             disabled={busy}
-            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
           >
             {tChrome('panel.a11y.recheck')}
           </button>
@@ -641,7 +641,7 @@ export function AccessibilityPanel(): React.ReactElement {
             data-testid="a11y-export"
             onClick={() => void exportReport()}
             disabled={busy || !report}
-            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+            className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
           >
             {tChrome('panel.a11y.export')}
           </button>
@@ -717,10 +717,15 @@ export function AccessibilityPanel(): React.ReactElement {
                             data-testid={`a11y-check-open-${check.id}`}
                             onClick={() => setOpenCheck(isOpen ? null : check.id)}
                           >
-                            <div className="text-sm text-neutral-200">
-                              {checkName(check.id)}{' '}
-                              <span className="text-[10px] text-neutral-500">{check.id}</span>
-                            </div>
+                            {/* The check's NAME, and nothing else. The raw id
+                                (`tagged`, `role_map`, `optional_content_config`)
+                                used to be appended here, so the row read
+                                "Document is tagged tagged" — a machine
+                                identifier presented as if it were a second half
+                                of the sentence, and placed inline on some rows
+                                and on the following line on others. It stays on
+                                `data-testid`, where the tests read it. */}
+                            <div className="text-sm text-neutral-200">{checkName(check.id)}</div>
                             <div className="text-xs text-neutral-500">
                               {verdictLabel(check.status)}
                             </div>
@@ -750,7 +755,7 @@ export function AccessibilityPanel(): React.ReactElement {
                               title={tChrome('panel.a11y.fixTitle')}
                               disabled={busy}
                               onClick={() => void applyAutoFix(check)}
-                              className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50 shrink-0"
+                              className="px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60 shrink-0"
                             >
                               {tChrome('panel.a11y.fix')}
                             </button>
@@ -767,7 +772,7 @@ export function AccessibilityPanel(): React.ReactElement {
                                 disabled={busy}
                                 title={tChrome('panel.a11y.artifactRestTitle')}
                                 onClick={() => void declareRestDecoration(check)}
-                                className="mt-1 px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+                                className="mt-1 px-2 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
                               >
                                 {tChrome('panel.a11y.artifactRest')}
                               </button>

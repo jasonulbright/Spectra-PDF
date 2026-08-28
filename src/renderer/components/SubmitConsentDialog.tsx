@@ -164,7 +164,7 @@ export function SubmitConsentDialog({
             onClick={() => answer('save')}
             disabled={busy}
             data-testid="submit-consent-save"
-            className="me-auto px-3 py-1 text-sm bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium"
+            className="me-auto px-3 py-1 text-sm bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded font-medium"
           >
             {tChrome('dialog.submitConsent.save')}
           </button>
@@ -173,7 +173,7 @@ export function SubmitConsentDialog({
             onClick={() => answer('cancel')}
             disabled={busy}
             data-testid="submit-consent-cancel"
-            className="px-3 py-1 text-sm bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium"
+            className="px-3 py-1 text-sm bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded font-medium"
           >
             {tChrome('dialog.submitConsent.cancel')}
           </button>
@@ -182,7 +182,7 @@ export function SubmitConsentDialog({
             onClick={() => answer('submit')}
             disabled={busy}
             data-testid="submit-consent-submit"
-            className="px-3 py-1 text-sm bg-accent hover:brightness-110 disabled:opacity-50 rounded font-medium text-[var(--accent-text)]"
+            className="px-3 py-1 text-sm bg-accent hover:brightness-110 disabled:opacity-60 rounded font-medium text-[var(--accent-text)]"
           >
             {tChrome('dialog.submitConsent.submit')}
           </button>

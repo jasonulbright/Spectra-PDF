@@ -596,7 +596,7 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
                 disabled={!canSearch}
                 onClick={() => setConfirmInPlace(true)}
                 data-testid="disk-redact-inplace-confirm"
-                className="px-4 py-1.5 bg-amber-700 hover:bg-amber-600 disabled:opacity-50 rounded text-sm font-medium"
+                className="px-4 py-1.5 bg-amber-700 hover:bg-amber-600 disabled:opacity-60 rounded text-sm font-medium"
               >
                 {tChrome('dialog.diskRedact.inPlaceConfirm')}
               </button>
@@ -606,7 +606,7 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
                 disabled={!canSearch}
                 onClick={() => void runSearch()}
                 data-testid="disk-redact-search"
-                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
               >
                 {tChrome('dialog.diskRedact.search')}
               </button>
@@ -749,7 +749,7 @@ export function DiskRedactDialog({ onClose }: DiskRedactDialogProps): React.JSX.
               disabled={selected.size === 0}
               onClick={() => void apply()}
               data-testid="disk-redact-apply"
-              className="px-4 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 rounded text-sm font-medium"
+              className="text-sm danger-action"
             >
               {tChromeCount(
                 marksOnly ? 'dialog.diskRedact.applyMarks' : 'dialog.diskRedact.apply',

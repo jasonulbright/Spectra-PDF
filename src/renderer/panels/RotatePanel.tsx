@@ -70,7 +70,7 @@ export function RotatePanel(): React.ReactElement {
           testIdPrefix="rotate"
         />
       </div>
-      <button data-testid="rotate-apply" onClick={handleRotate} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+      <button data-testid="rotate-apply" onClick={handleRotate} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">
         {busy ? tChrome('panel.rotate.rotating') : tChrome('panel.rotate.rotate')}
       </button>
       <StatusBar message={status} busy={busy} />

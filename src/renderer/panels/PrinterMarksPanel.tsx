@@ -246,7 +246,7 @@ export function PrinterMarksPanel(): React.ReactElement {
           data-testid="printer-marks-add"
           disabled={busy || kinds.length === 0 || tooLarge}
           onClick={() => void addMarks()}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-50"
+          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-60"
         >
           {tChrome('panel.printerMarks.add')}
         </button>
@@ -254,7 +254,7 @@ export function PrinterMarksPanel(): React.ReactElement {
           data-testid="printer-marks-remove"
           disabled={busy}
           onClick={() => void removeMarks()}
-          className="px-3 py-1.5 text-sm bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+          className="px-3 py-1.5 text-sm bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
         >
           {tChrome('panel.printerMarks.remove')}
         </button>

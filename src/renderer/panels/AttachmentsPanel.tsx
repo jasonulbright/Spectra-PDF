@@ -127,7 +127,7 @@ export function AttachmentsPanel(): React.ReactElement {
           data-testid="attach-add"
           onClick={handleAdd}
           disabled={busy}
-          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
         >
           {tChrome('panel.attach.attachFile')}
         </button>
@@ -148,7 +148,7 @@ export function AttachmentsPanel(): React.ReactElement {
                 data-testid={`attach-extract-${a.name}`}
                 onClick={() => handleExtract(a.name)}
                 disabled={busy}
-                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
               >
                 {tChrome('panel.attach.save')}
               </button>
@@ -156,7 +156,7 @@ export function AttachmentsPanel(): React.ReactElement {
                 data-testid={`attach-remove-${a.name}`}
                 onClick={() => handleRemove(a.name)}
                 disabled={busy}
-                className="px-2 py-1 text-xs text-neutral-400 hover:text-red-400 disabled:opacity-50"
+                className="text-xs danger-action is-quiet"
               >
                 {tChrome('panel.attach.remove')}
               </button>

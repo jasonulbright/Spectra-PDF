@@ -227,7 +227,7 @@ export function ExportDocumentDialog({
                   <button
                     type="button"
                     data-testid="export-doc-review-tables"
-                    className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 rounded text-sm"
+                    className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-60 rounded text-sm"
                     disabled={busy}
                     onClick={onReviewTables}
                   >
@@ -281,7 +281,7 @@ export function ExportDocumentDialog({
             type="button"
             onClick={guardedClose}
             disabled={busy}
-            className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 rounded text-sm"
+            className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-60 rounded text-sm"
           >
             {result ? tChrome('dialog.exportDoc.close') : tChrome('dialog.exportDoc.cancel')}
           </button>
@@ -290,7 +290,7 @@ export function ExportDocumentDialog({
             data-testid="export-doc-run"
             onClick={runExport}
             disabled={busy || gsRefused}
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
           >
             {busy ? tChrome('dialog.exportDoc.exporting') : tChrome('dialog.exportDoc.export')}
           </button>

@@ -111,7 +111,7 @@ export function IccLicenseDialog({ onClose }: IccLicenseDialogProps): React.Reac
             onClick={() => answer(false)}
             disabled={busy}
             data-testid="icc-license-decline"
-            className="px-3 py-1 text-sm bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium"
+            className="px-3 py-1 text-sm bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded font-medium"
           >
             {tChrome('dialog.iccLicense.decline')}
           </button>
@@ -122,7 +122,7 @@ export function IccLicenseDialog({ onClose }: IccLicenseDialogProps): React.Reac
             // nobody was shown is not acceptance.
             disabled={busy || unreadable || text === null}
             data-testid="icc-license-accept"
-            className="px-3 py-1 text-sm bg-accent hover:brightness-110 disabled:opacity-50 rounded font-medium text-[var(--accent-text)]"
+            className="px-3 py-1 text-sm bg-accent hover:brightness-110 disabled:opacity-60 rounded font-medium text-[var(--accent-text)]"
           >
             {tChrome('dialog.iccLicense.accept')}
           </button>

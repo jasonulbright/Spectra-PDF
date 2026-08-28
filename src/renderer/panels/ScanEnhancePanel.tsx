@@ -403,7 +403,7 @@ export function ScanEnhancePanel(): React.ReactElement {
           data-testid="scanenhance-measure"
           disabled={busy || problem !== null || gsBlocked(gs)}
           onClick={() => void measure()}
-          className="px-3 py-1.5 text-sm bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+          className="px-3 py-1.5 text-sm bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
         >
           {tChrome('panel.scanEnhance.measure')}
         </button>
@@ -411,7 +411,7 @@ export function ScanEnhancePanel(): React.ReactElement {
           data-testid="scanenhance-apply"
           disabled={busy || problem !== null || counts.changing === 0 || gsBlocked(gs)}
           onClick={() => void apply()}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-50"
+          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-60"
         >
           {tChrome('panel.scanEnhance.apply')}
         </button>

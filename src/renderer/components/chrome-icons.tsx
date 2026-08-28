@@ -70,12 +70,15 @@ const GLYPHS: Record<ChromeIconId, React.JSX.Element> = {
       <path d="M20 12H10a6 6 0 0 0-6 6v1" />
     </>
   ),
-  // Magnifier with plus.
+  // Plus in a frame — NOT a magnifier. The main toolbar carried three
+  // magnifier-shaped things within 40px of each other: zoom in, zoom out, and
+  // Find. A magnifier means "search here" everywhere else in the product, so
+  // the two that do not search give it up; `find` keeps it. The frame is the
+  // viewport being scaled, which is what zoom actually does to it.
   zoomIn: (
     <>
-      <circle cx="11" cy="11" r="7" />
-      <path d="M21 21l-4.3-4.3" />
-      <path d="M11 8v6M8 11h6" />
+      <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+      <path d="M12 8v8M8 12h8" />
     </>
   ),
   // Open palm — the hold-the-paper grip.
@@ -93,12 +96,11 @@ const GLYPHS: Record<ChromeIconId, React.JSX.Element> = {
       <path d="M5 3l7 16 2.2-6.2L20 10.5 5 3z" />
     </>
   ),
-  // Magnifier with minus.
+  // Minus in the same frame, for `zoomIn`'s reason.
   zoomOut: (
     <>
-      <circle cx="11" cy="11" r="7" />
-      <path d="M21 21l-4.3-4.3" />
-      <path d="M8 11h6" />
+      <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+      <path d="M8 12h8" />
     </>
   ),
   // Expand-to-frame corners.
@@ -148,11 +150,15 @@ const GLYPHS: Record<ChromeIconId, React.JSX.Element> = {
   ),
   // Ribbon bookmark.
   bookmarks: <path d="M6 3h12v18l-6-4-6 4z" />,
-  // Signature squiggle over a baseline (nav-pane Signatures panel).
+  // A pen writing a signature onto a baseline (nav-pane Signatures panel).
+  // The bare squiggle-over-a-rule read as a line chart on a plot axis — the
+  // pen is what makes the same stroke a signature. It also matches the tools
+  // list's Signatures glyph, which was already a pen.
   signatures: (
     <>
-      <path d="M3 16c2.5 0 3.5-4 5.5-4s1.5 3 3.5 3 3-5 6-5" />
+      <path d="M3 16c2-0.5 3-3.5 4.5-3.5S9 15 10.5 15s2-3 3.5-4" />
       <path d="M3 20h18" />
+      <path d="M16.5 4.8a1.8 1.8 0 0 1 2.6 2.6L14.8 11.8l-3.3 0.7 0.7-3.3z" />
     </>
   ),
   // Paperclip (nav-pane Attachments panel).

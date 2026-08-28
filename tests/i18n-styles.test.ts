@@ -37,7 +37,9 @@ const PHYSICAL_EXCEPTIONS: Record<string, string> = {
   '.page-annot-recolor': 'page-anchored overlay',
   '.page-edittext-error': 'page-anchored overlay',
   '.page-edittext-convert': 'page-anchored overlay',
-  '.page-crop-label': 'page-anchored overlay',
+  // `.page-crop-label` was here while it hung outside the crop band on `top`
+  // and `left`. It now sits INSIDE the band, pinned with logical properties —
+  // an in-band chip mirrors correctly, so it is no longer an exception.
   // Sits beside .page-annot-x, which is physically anchored for the same
   // reason; mirroring one and not the other would overlap them.
   '.page-snapshot-placement .page-snapshot-save': 'page-anchored overlay',

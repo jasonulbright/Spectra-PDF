@@ -385,7 +385,7 @@ export function SignerSourceFields({
               data-testid={`${idPrefix}-store-refresh`}
               onClick={() => void loadStoreCerts()}
               disabled={storeBusy}
-              className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium"
+              className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded font-medium"
             >
               {tChrome('dialog.signer.storeRefresh')}
             </button>
@@ -563,7 +563,7 @@ export function SignerSourceFields({
               data-testid={`${idPrefix}-generate-apply`}
               onClick={() => void handleGenerate()}
               disabled={genBusy}
-              className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+              className="px-2.5 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
             >
               {tChrome(genBusy ? 'dialog.signer.generating' : 'dialog.signer.generate')}
             </button>
@@ -721,7 +721,7 @@ function CscSignerFields({
     'flex-1 min-w-0 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded focus:outline-none focus:border-blue-500';
   const labelClass = 'text-xs text-neutral-400 w-20 shrink-0';
   const buttonClass =
-    'px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium';
+    'px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded font-medium';
 
   if (draft) {
     return (

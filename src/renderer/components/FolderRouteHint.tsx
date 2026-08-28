@@ -18,7 +18,7 @@ export function FolderRouteHint(): React.ReactElement {
         type="button"
         data-testid="folder-route-open"
         onClick={() => invokeCommand('tools.open.actions')}
-        className="underline text-blue-400 hover:text-blue-300"
+        className="link-action"
       >
         {tChrome('panel.common.folderRouteOpen')}
       </button>

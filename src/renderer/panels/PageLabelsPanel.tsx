@@ -214,7 +214,7 @@ export function PageLabelsPanel(): React.ReactElement {
             <button
               data-testid={`pagelabel-remove-${i}`}
               onClick={() => removeRange(i)}
-              className="px-2 py-1 text-xs text-neutral-400 hover:text-red-400"
+              className="text-xs danger-action is-quiet"
             >
               {tChrome('panel.pageLabels.remove')}
             </button>
@@ -241,7 +241,7 @@ export function PageLabelsPanel(): React.ReactElement {
         data-testid="pagelabel-apply"
         onClick={handleApply}
         disabled={busy}
-        className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+        className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
       >
         {busy ? tChrome('panel.pageLabels.applying') : tChrome('panel.pageLabels.apply')}
       </button>

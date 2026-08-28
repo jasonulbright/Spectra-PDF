@@ -67,7 +67,7 @@ function ToolbarButton({
       title={title}
       aria-label={cmdTitle}
       className={
-        'w-7 h-7 flex items-center justify-center rounded text-neutral-300 hover:bg-neutral-700 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors' +
+        'w-7 h-7 flex items-center justify-center rounded text-neutral-300 hover:bg-neutral-700 hover:text-white disabled:opacity-60 disabled:pointer-events-none transition-colors' +
         (pressed ? ' bg-neutral-700 text-white' : '')
       }
     >

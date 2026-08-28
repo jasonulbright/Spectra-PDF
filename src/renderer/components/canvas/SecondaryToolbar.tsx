@@ -4,7 +4,7 @@ import { invokeCommand } from '../../commands/context';
 import { COMMANDS, SECONDARY_TOOLBAR_ACTIONS, TOOL_TITLES } from '../../commands/registry';
 import { toolById } from '../../commands/tools';
 import type { CanvasTool, ShapeType } from '../../state/types';
-import { ANNOTATION_PALETTE, STAMP_PRESETS } from './PageCell';
+import { ANNOTATION_PALETTE, STAMP_PRESETS, defaultToolColor } from './PageCell';
 import type { StampPreset } from './PageCell';
 import { MEASURE_UNITS, type MeasureScale, type MeasureUnit } from '../../lib/measure';
 import {
@@ -1177,8 +1177,8 @@ export function SecondaryToolbar({
               data-testid={`stamp-new-color-${c.slice(1)}`}
               aria-pressed={newStampColor === c}
               title={c}
-              className="annot-swatch"
-              style={{ backgroundColor: c, outline: newStampColor === c ? `2px solid ${c}` : 'none' }}
+              className={'annot-swatch color-swatch' + (newStampColor === c ? ' is-selected' : '')}
+              style={{ backgroundColor: c }}
               onClick={() => setNewStampColor(c)}
             />
           ))}
@@ -1200,21 +1200,27 @@ export function SecondaryToolbar({
           role="group"
           aria-label={tChrome('canvas.toolbar.colorGroup')}
         >
-          {ANNOTATION_PALETTE.map((c) => (
-            <button
-              key={c}
-              type="button"
-              data-testid={`annot-color-${c.slice(1)}`}
-              aria-pressed={toolColor === c}
-              title={c}
-              className="annot-swatch"
-              onClick={() => onSetToolColor(toolColor === c ? null : c)}
-              style={{
-                backgroundColor: c,
-                outline: toolColor === c ? '2px solid white' : '1px solid rgba(255,255,255,0.3)',
-              }}
-            />
-          ))}
+          {ANNOTATION_PALETTE.map((c) => {
+            // What the mode WILL draw in, not only what the user has clicked:
+            // with no explicit choice the picker still points at the colour the
+            // next mark takes. The ring is the shared swatch idiom (accent,
+            // outside the swatch) — it used to be white here and the swatch's
+            // own colour in the stamp row, where it was invisible by
+            // construction.
+            const effective = toolColor ?? defaultToolColor(tool);
+            return (
+              <button
+                key={c}
+                type="button"
+                data-testid={`annot-color-${c.slice(1)}`}
+                aria-pressed={effective === c}
+                title={c}
+                className={'annot-swatch color-swatch' + (effective === c ? ' is-selected' : '')}
+                onClick={() => onSetToolColor(toolColor === c ? null : c)}
+                style={{ backgroundColor: c }}
+              />
+            );
+          })}
         </div>
       )}
     </div>

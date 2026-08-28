@@ -61,7 +61,7 @@ export function PdfVersionPanel(): React.ReactElement {
           {VERSIONS.map((v) => <option key={v} value={v}>PDF {v}</option>)}
         </select>
       </div>
-      <button onClick={handleSetVersion} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+      <button onClick={handleSetVersion} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">
         {busy ? tChrome('panel.pdfVersion.settingBtn') : tChrome('panel.pdfVersion.set')}
       </button>
       <StatusBar message={status} busy={busy} />

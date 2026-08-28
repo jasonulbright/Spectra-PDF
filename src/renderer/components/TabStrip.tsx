@@ -44,9 +44,16 @@ interface TabStripProps {
   onTabDrop: TabReleaseHandler;
 }
 
+// A tab is as wide as its name until the lane runs out of room, and only then
+// does it shrink. The fixed 220px cap truncated "Quarterly Operations Re…"
+// with 1400px of empty strip beside it, and truncated the ACTIVE tab while a
+// shorter inactive sibling stayed whole — because the cap was never a function
+// of available width. `shrink` plus `min-w` makes the lane distribute the
+// pressure: full names when there is room, even compression when there is not,
+// and the overflow dropdown below once even that is exhausted.
 const tabBase =
   'group relative flex items-center gap-1.5 h-8 px-3 text-[13px] border-r border-neutral-800 ' +
-  'select-none cursor-default max-w-[220px] whitespace-nowrap outline-none';
+  'select-none cursor-default shrink min-w-[104px] max-w-[420px] whitespace-nowrap outline-none';
 const activeCls = 'bg-neutral-900 text-white';
 const idleCls = 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800';
 
@@ -210,7 +217,12 @@ export function TabStrip({ onCloseFile, onTabDrop }: TabStripProps): React.React
       </button>
       {/* The Tools pseudo-tab is retired: ops panels live in
           the right dock (Shift+F4), the tile grid lives on Home. */}
-      <div ref={laneRef} className="flex items-stretch overflow-x-auto app-tab-lane">
+      {/* `overflow-y-hidden` is load-bearing, not tidying: with only
+          `overflow-x-auto` the block axis computes to `auto` too, and the lane
+          grew a vertical scrollbar whose thumb was the unexplained pill beside
+          the last tab. There is nothing to scroll vertically here — the lane is
+          one row of fixed-height tabs. */}
+      <div ref={laneRef} className="flex items-stretch overflow-x-auto overflow-y-hidden app-tab-lane">
         {docPaths.map((path, i) => {
           const f = state.files.get(path);
           if (!f) return null;

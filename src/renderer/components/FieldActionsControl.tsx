@@ -817,7 +817,7 @@ export function FieldDataActionsControl({
           <button
             type="button"
             data-testid={`${idPrefix}-action-${index}-remove`}
-            className="self-start text-[11px] text-neutral-400 hover:text-neutral-200 underline"
+            className="self-start text-[11px] danger-action is-quiet"
             onClick={() => onChange(value.filter((_, i) => i !== index))}
           >
             {tChrome('panel.fieldActions.actionRemove')}
