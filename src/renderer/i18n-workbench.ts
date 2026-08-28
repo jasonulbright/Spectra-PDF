@@ -268,6 +268,16 @@ export const WORKBENCH_STRINGS = {
   'app.exit.unsaved': 'Unsaved changes in: {{names}}. Save before exiting?',
   'app.window.unsaved': 'Unsaved changes in: {{names}}. Save before closing?',
 
+  // A file that never appeared. The reason is the engine's own sentence, its
+  // interpolated clause rather than a glued-on half, and the name is always
+  // the file the USER chose — the engine raises against a temp working copy,
+  // and `lib/open-failure.ts` translates that away before the text gets here.
+  'app.open.failedTitle': 'Could Not Open',
+  'app.open.failedOne': '"{{name}}" could not be opened. {{reason}}',
+  'app.open.failedBatch':
+    'Opened {{opened}} of {{total}} files. These could not be opened: {{failures}}',
+  'app.open.failureItem': '"{{name}}" — {{reason}}.',
+
   // Document ownership across windows. A file is live in at most one window,
   // so the refusal names what it stopped and offers the window that holds it.
   'app.window.claimTitle': 'Open in Another Window',

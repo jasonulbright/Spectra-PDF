@@ -177,7 +177,13 @@ import { useKeymapDispatcher } from './commands/keymap';
 import { useAppModal } from './hooks/useAppModal';
 import type { AppCommandHandlers } from './commands/types';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tChromeCount } from './i18n';
+import { tChrome, tChromeCount, tNumber } from './i18n';
+import {
+  summarizeOpenOutcomes,
+  translateOpenFailure,
+  type OpenOutcome,
+  type OpenSummary,
+} from './lib/open-failure';
 import type { SanitizeRequest } from './lib/sanitize-report';
 
 // The Preferences shell — a component (not inline JSX) so it can carry the
@@ -896,6 +902,37 @@ function AppContent(): React.ReactElement {
     [showNotice, showActionConfirm],
   );
 
+  // ONE notice for a whole open batch, whatever its size. A file that never
+  // appears is the one case where silence is wrong: the user made a request
+  // and the application did nothing visible. Per-file reasons are carried
+  // inside a single message rather than a dialog each, so opening a folder of
+  // damaged files stays one interruption.
+  const reportOpenSummary = useCallback(
+    async (summary: OpenSummary): Promise<void> => {
+      if (summary.kind === 'none') return;
+      const title = tChrome('app.open.failedTitle');
+      if (summary.kind === 'single') {
+        await showNotice(
+          title,
+          tChrome('app.open.failedOne', { name: summary.name, reason: summary.reason }),
+        );
+        return;
+      }
+      const failures = summary.failures
+        .map((f) => tChrome('app.open.failureItem', { name: f.name, reason: f.reason }))
+        .join(' ');
+      await showNotice(
+        title,
+        tChrome('app.open.failedBatch', {
+          opened: tNumber(summary.openedCount),
+          total: tNumber(summary.totalCount),
+          failures,
+        }),
+      );
+    },
+    [showNotice],
+  );
+
   // `index` is a tab position for the opens that have one — a tab dropped in
   // from another window lands at the gap its caret marked, and a batch lands
   // in order from there. Every other open appends; a stale index clamps.
@@ -903,7 +940,18 @@ function AppContent(): React.ReactElement {
   // Web Address). It travels with the open rather than being looked up later:
   // it decides where File ▸ Save goes for that document, and it is the
   // provenance the recent list shows and re-opens by.
-  const openByPaths = useCallback(async (paths: string[], opts?: { focus?: boolean; index?: number; webOrigin?: string }) => {
+  // `reportFailures: false` takes the notice off this funnel and hands the
+  // outcomes back instead — for the one caller that already shows the refusal
+  // in its own surface (Open from Web Address, beside the address it typed).
+  // Everything else gets the notice, because the alternative is the defect
+  // this exists to close: the user picked a file and nothing happened.
+  const openByPaths = useCallback(async (
+    paths: string[],
+    opts?: { focus?: boolean; index?: number; webOrigin?: string; reportFailures?: boolean },
+  ): Promise<OpenSummary> => {
+    // Every file this batch reached a verdict on. A cancelled password prompt
+    // is neither: the user answered the question and the answer was no.
+    const outcomes: OpenOutcome[] = [];
     let recent = stateRef.current.ui.recentFiles;
     let lastOpened: string | null = null;
     let inserted = 0;
@@ -987,8 +1035,10 @@ function AppContent(): React.ReactElement {
         // here precisely because the dedupe above already handles the one case
         // it can't see (a duplicate within this batch, dispatched but not yet
         // flushed).
+        const fileName = filePath.split(/[\\/]/).pop() || filePath;
         const existing = stateRef.current.files.get(filePath);
         if (existing && !existing.importOnly) {
+          outcomes.push({ name: fileName, reason: null });
           dispatch({ type: 'SET_ACTIVE_FILE', path: filePath });
           recent = withRecent(recent, filePath, Date.now(), originFor(filePath)); // only on success — a cancel/throw
           lastOpened = filePath;                  // must not pollute Recent (regression)
@@ -1009,8 +1059,27 @@ function AppContent(): React.ReactElement {
           // which is an INTERNAL_METHOD and so deliberately ungated.
           await runCommitGate();
         }
-        const prepared = await prepareFileBytes(filePath);
+        // THE REFUSAL SEAM. `prepareFileBytes` mints the working copy and runs
+        // the engine's first reads; anything the file is too broken for throws
+        // HERE, and used to propagate out of the funnel into a rejection
+        // nobody caught. A throw is one file's verdict, never the batch's: the
+        // loop continues, the claim on this path is released by the finally,
+        // and the batch reports every outcome once at the end.
+        let prepared: Awaited<ReturnType<typeof prepareFileBytes>>;
+        try {
+          prepared = await prepareFileBytes(filePath);
+        } catch (err) {
+          outcomes.push({
+            name: fileName,
+            reason: translateOpenFailure(err instanceof Error ? err.message : String(err), {
+              name: fileName,
+              path: filePath,
+            }),
+          });
+          continue;
+        }
         if (!prepared) continue; // cancelled encrypted file
+        outcomes.push({ name: fileName, reason: null });
         dispatch({
           type: 'OPEN_FILE',
           path: filePath,
@@ -1040,7 +1109,13 @@ function AppContent(): React.ReactElement {
     if (freshlyOpened && lastOpened === freshlyOpened.path && opts?.focus !== false) {
       await applyInitialView(freshlyOpened.path, freshlyOpened.workingPath);
     }
-  }, [dispatch, prepareFileBytes, applyInitialView, reportClaimRefusal]);
+    const summary = summarizeOpenOutcomes(outcomes);
+    // Unawaited, like every other notice this funnel raises: the notice is
+    // dismissed by the user, and an open that has already done everything it
+    // can must not stay pending until they get to it.
+    if (opts?.reportFailures !== false) void reportOpenSummary(summary);
+    return summary;
+  }, [dispatch, prepareFileBytes, applyInitialView, reportClaimRefusal, reportOpenSummary]);
 
   // Import one or more files' pages INTO an existing document at an index (the
   // add-page ghost and per-position drops). Each file is registered
@@ -1206,7 +1281,14 @@ function AppContent(): React.ReactElement {
   const openDownloadedFile = useCallback(
     async ({ path, url }: OpenFromWebResult): Promise<string | null> => {
       try {
-        await openByPaths([path], { webOrigin: url });
+        // The funnel's own notice is suppressed here and only here: this
+        // dialog shows the refusal beside the address the user typed, and two
+        // surfaces for one refusal is the noise the open path does not have.
+        const summary = await openByPaths([path], { webOrigin: url, reportFailures: false });
+        if (summary.kind === 'single') return summary.reason;
+        if (summary.kind === 'batch' && summary.failures.length > 0) {
+          return summary.failures[0].reason;
+        }
         return null;
       } catch (err) {
         return err instanceof Error ? err.message : String(err);
@@ -2921,7 +3003,7 @@ function AppContent(): React.ReactElement {
     },
     // Pre-filled, never pre-fetched: opening the dialog is not a request.
     openFromWeb: (url) => setOpenWebUrl(url ?? ''),
-    openPath: (path) => openByPaths([path]),
+    openPath: async (path) => { await openByPaths([path]); },
     openPathAtPage: async (path, pageNumber) => {
       await openByPaths([path], { focus: true });
       // The OPEN_FILE dispatch + index update land over the next renders, so
@@ -3344,7 +3426,7 @@ function AppContent(): React.ReactElement {
   useEffect(() => {
     if (!TEST_HARNESS_ENABLED) return;
     installTestHarness({
-      openByPaths: (paths) => openByPaths(paths),
+      openByPaths: async (paths) => { await openByPaths(paths); },
       setView: (v) => harnessSetView(v),
       focusTab: (tab) => dispatch({ type: 'UI_FOCUS_TAB', tab }),
       setActiveOp: (op) => setActiveOp(op as Operation),
@@ -3602,7 +3684,7 @@ function AppContent(): React.ReactElement {
         <ScanDialog
           mode={scanMode}
           onClose={() => setScanMode(null)}
-          onCreated={(path) => openByPaths([path])}
+          onCreated={async (path) => { await openByPaths([path]); }}
           onAppend={insertAnchor(state) ? (path) => insertPagesFromScan(path) : null}
           appendDir={scanAppendDir}
         />
@@ -3623,7 +3705,7 @@ function AppContent(): React.ReactElement {
             setCreatePdfSeed([]);
             setCreatePdfAutoStart(null);
           }}
-          onOpenResult={(path) => openByPaths([path])}
+          onOpenResult={async (path) => { await openByPaths([path]); }}
         />
       )}
       {showCombine && (
@@ -3636,7 +3718,7 @@ function AppContent(): React.ReactElement {
             setShowCombine(false);
             setCombineSeed([]);
           }}
-          onOpenResult={(path) => openByPaths([path])}
+          onOpenResult={async (path) => { await openByPaths([path]); }}
         />
       )}
       {showExportImages && activeFile && (

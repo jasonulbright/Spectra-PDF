@@ -40,6 +40,15 @@ function ComposeSettle(): null {
   return null;
 }
 
+// The safety net, deliberately console-only. A promise nobody caught used to
+// die with no trace at all; it is now logged. It is NOT a user surface: a
+// rejection reaching here has no file, no operation and no recourse to offer,
+// and inventing a message for it would be the noise the open path does not
+// have. The surfaces that CAN say something useful catch at their own seam.
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('Unhandled promise rejection:', event.reason);
+});
+
 stampInitialTheme();
 initBackdrop().finally(() => {
   const root = createRoot(document.getElementById('root')!);
