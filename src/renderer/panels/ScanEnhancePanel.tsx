@@ -264,13 +264,18 @@ export function ScanEnhancePanel(): React.ReactElement {
         </label>
       </div>
 
-      <div className="flex items-center gap-3 flex-wrap">
-        <label className="flex items-center gap-1 text-xs text-neutral-500">
-          {tChrome('panel.scanEnhance.maxSkew')}
+      {/* Two label/control pairs per row on a shared grid. As a wrapping
+          flex row each input started where its own label ended, so three
+          consecutive rows put their control at three x-positions.
+          `contents` on the label keeps the control associated with its
+          text while letting the pair be two grid cells. */}
+      <div className="grid grid-cols-[minmax(0,1fr)_5rem_minmax(0,1fr)_5rem] gap-x-3 gap-y-2 items-center">
+        <label className="contents text-xs text-neutral-500">
+          <span className="text-xs text-neutral-500">{tChrome('panel.scanEnhance.maxSkew')}</span>
           <input
             type="number"
             data-testid="scanenhance-maxskew"
-            className="w-16 px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
+            className="w-full px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
             min={0.1}
             max={45}
             step={0.5}
@@ -278,12 +283,12 @@ export function ScanEnhancePanel(): React.ReactElement {
             onChange={(e) => set('max_skew_deg', Number(e.target.value))}
           />
         </label>
-        <label className="flex items-center gap-1 text-xs text-neutral-500">
-          {tChrome('panel.scanEnhance.speckSize')}
+        <label className="contents text-xs text-neutral-500">
+          <span className="text-xs text-neutral-500">{tChrome('panel.scanEnhance.speckSize')}</span>
           <input
             type="number"
             data-testid="scanenhance-specksize"
-            className="w-20 px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
+            className="w-full px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
             min={0.001}
             max={0.05}
             step={0.002}
@@ -291,12 +296,12 @@ export function ScanEnhancePanel(): React.ReactElement {
             onChange={(e) => set('speck_size_in', Number(e.target.value))}
           />
         </label>
-        <label className="flex items-center gap-1 text-xs text-neutral-500">
-          {tChrome('panel.scanEnhance.strength')}
+        <label className="contents text-xs text-neutral-500">
+          <span className="text-xs text-neutral-500">{tChrome('panel.scanEnhance.strength')}</span>
           <input
             type="number"
             data-testid="scanenhance-strength"
-            className="w-16 px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
+            className="w-full px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
             min={0}
             max={1}
             step={0.05}
@@ -304,24 +309,24 @@ export function ScanEnhancePanel(): React.ReactElement {
             onChange={(e) => set('background_strength', Number(e.target.value))}
           />
         </label>
-        <label className="flex items-center gap-1 text-xs text-neutral-500">
-          {tChrome('panel.scanEnhance.confidence')}
+        <label className="contents text-xs text-neutral-500">
+          <span className="text-xs text-neutral-500">{tChrome('panel.scanEnhance.confidence')}</span>
           <input
             type="number"
             data-testid="scanenhance-confidence"
-            className="w-16 px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
+            className="w-full px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
             min={0}
             step={0.5}
             value={settings.osd_confidence}
             onChange={(e) => set('osd_confidence', Number(e.target.value))}
           />
         </label>
-        <label className="flex items-center gap-1 text-xs text-neutral-500">
-          {tChrome('panel.scanEnhance.quality')}
+        <label className="contents text-xs text-neutral-500">
+          <span className="text-xs text-neutral-500">{tChrome('panel.scanEnhance.quality')}</span>
           <input
             type="number"
             data-testid="scanenhance-quality"
-            className="w-16 px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
+            className="w-full px-1 py-0.5 bg-neutral-900 border border-neutral-700 rounded text-neutral-200"
             min={1}
             max={100}
             step={1}

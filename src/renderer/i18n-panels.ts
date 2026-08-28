@@ -2612,7 +2612,7 @@ export const PANEL_STRINGS = {
   'panel.ga.remove': 'Remove',
   'panel.ga.askedWhenRuns': '{{label}}: asked when the action runs',
   'panel.ga.askTitle': 'Ask for this value each time the action runs',
-  'panel.ga.ask': 'ask',
+  'panel.ga.ask': 'Ask',
   'panel.ga.saveAction': 'Save action',
   'panel.ga.cancel': 'Cancel',
   'panel.ga.beforeRunning': 'Before running “{{name}}”',

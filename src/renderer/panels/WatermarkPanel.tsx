@@ -258,7 +258,11 @@ export function WatermarkPanel(): React.ReactElement {
           <p className="text-xs text-neutral-500 mt-1">{tChrome('panel.watermark.pdfNote')}</p>
         </div>
       )}
-      <div className="flex gap-6 items-end flex-wrap">
+      {/* A shared 3-column grid, the same arithmetic the header/footer slots
+          use. Laid out as a wrapping flex row, each control started wherever
+          the label beside it ended, so four consecutive rows put their second
+          column at four different x-positions. */}
+      <div className="grid grid-cols-3 gap-x-6 gap-y-3 items-end">
         <div>
           <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.opacity', { pct: Math.round(opacity * 100) })}</label>
           <input
@@ -283,7 +287,7 @@ export function WatermarkPanel(): React.ReactElement {
             max={180}
             value={angle}
             onChange={(e) => setAngle(Number(e.target.value))}
-            className="w-20 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
           />
         </div>
         {source === 'text' && (
@@ -322,7 +326,7 @@ export function WatermarkPanel(): React.ReactElement {
                 value={writing}
                 title={tChrome('panel.watermark.writingModeTitle')}
                 onChange={(e) => setWriting(e.target.value as WatermarkWriting)}
-                className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+                className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
               >
                 <option value="horizontal">{tChrome('panel.watermark.writingMode.horizontal')}</option>
                 <option value="vertical">{tChrome('panel.watermark.writingMode.vertical')}</option>
@@ -346,7 +350,7 @@ export function WatermarkPanel(): React.ReactElement {
             data-testid="watermark-layer"
             value={layer}
             onChange={(e) => setLayer(e.target.value as 'over' | 'under')}
-            className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
+            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm"
           >
             <option value="over">{tChrome('panel.watermark.over')}</option>
             <option value="under">{tChrome('panel.watermark.under')}</option>
@@ -360,11 +364,11 @@ export function WatermarkPanel(): React.ReactElement {
             type="text"
             value={pageInput}
             onChange={(e) => setPageInput(e.target.value)}
-            className="w-40 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
           />
         </div>
       </div>
-      <div className="flex gap-6 items-end flex-wrap">
+      <div className="grid grid-cols-3 gap-x-6 gap-y-3 items-end">
         <div>
           <label className="block text-sm text-neutral-400 mb-1" htmlFor="watermark-scale">{tChrome('panel.watermark.scale')}</label>
           <input
@@ -376,7 +380,7 @@ export function WatermarkPanel(): React.ReactElement {
             step={0.05}
             value={scale}
             onChange={(e) => setScale(Number(e.target.value))}
-            className="w-24 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
+            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500"
           />
         </div>
         <div>
@@ -387,7 +391,7 @@ export function WatermarkPanel(): React.ReactElement {
             value={position}
             disabled={tile}
             onChange={(e) => setPosition(e.target.value as (typeof POSITIONS)[number])}
-            className="px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50"
+            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50"
           >
             {POSITIONS.map((p) => (
               <option key={p} value={p}>{tChrome(`panel.watermark.position.${p}` as 'panel.watermark.position.center')}</option>
@@ -405,7 +409,7 @@ export function WatermarkPanel(): React.ReactElement {
             value={margin}
             disabled={tile || position === 'center'}
             onChange={(e) => setMargin(Number(e.target.value))}
-            className="w-24 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50 focus:outline-none focus:border-blue-500"
+            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50 focus:outline-none focus:border-blue-500"
           />
         </div>
         <div>
@@ -430,7 +434,7 @@ export function WatermarkPanel(): React.ReactElement {
             value={tileGap}
             disabled={!tile}
             onChange={(e) => setTileGap(Number(e.target.value))}
-            className="w-24 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50 focus:outline-none focus:border-blue-500"
+            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50 focus:outline-none focus:border-blue-500"
           />
         </div>
       </div>

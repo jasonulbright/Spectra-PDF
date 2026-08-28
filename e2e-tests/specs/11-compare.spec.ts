@@ -49,11 +49,32 @@ describe('compare panel diffs two open PDFs', () => {
     // The two files genuinely differ, so it must not report "identical".
     expect(await summary.getText()).not.toContain('identical');
 
-    // The extra line shows up in the diff (as an add or remove depending on
-    // which file is active — either way DELTA is the change).
     const rows = $('[data-testid="compare-rows"]');
     await rows.waitForDisplayed({ timeout: 20_000 });
     expect(await rows.getText()).toContain('DELTA');
+
+    // The SIGN, not merely the presence of the line. The panel passes the
+    // TARGET as the engine's baseline and the ACTIVE document as the changed
+    // side, so a line present only in the active document is an `add` and a
+    // line present only in the target is a `remove`. Asserting only that
+    // DELTA appears somewhere passes just as happily with the polarity
+    // inverted, which is exactly the bug the wiring above was fixed for.
+    // The expected sign is derived from which file the target select holds,
+    // so the assertion does not depend on which of the two opened first.
+    // Paths are canonicalized at the Rust boundary, so the select's value is
+    // matched by basename rather than by the string this spec wrote.
+    const targetIsA = (await target.getValue()).replace(/\\/g, '/').endsWith('/a.pdf');
+    const expected = targetIsA ? 'add' : 'remove';
+    const deltaRow = $(`[data-testid="compare-rows"] [data-diff-type="${expected}"]`);
+    await deltaRow.waitForDisplayed({ timeout: 10_000 });
+    expect(await deltaRow.getText()).toContain('DELTA');
+    // And it is not ALSO reported with the opposite sign.
+    const opposite = await $$(
+      `[data-testid="compare-rows"] [data-diff-type="${expected === 'add' ? 'remove' : 'add'}"]`,
+    );
+    for (const el of opposite) {
+      expect(await el.getText()).not.toContain('DELTA');
+    }
   });
 
   it('visual mode pixel-diffs the pair and lists differing pages', async () => {

@@ -466,15 +466,21 @@ export function GuidedActionsPanel(): React.ReactElement {
                     {tChrome('panel.ga.remove')}
                   </button>
                 </div>
+                {/* The step's parameters share one grid, so every control
+                    starts at the same column no matter how long its label is.
+                    Laid out as chips they took nine x-positions down nine
+                    rows. `contents` on the label keeps the control associated
+                    with its text while letting the three parts be grid
+                    items. */}
                 {shown.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_auto] gap-x-3 gap-y-1.5 items-center">
                     {shown.map((p) => {
                       // Secrets are never stored: no input, just the fact.
                       if (p.secret) {
                         return (
                           <span
                             key={p.key}
-                            className="text-xs text-neutral-500 px-1.5 py-1 border border-dashed border-neutral-700 rounded"
+                            className="col-span-3 text-xs text-neutral-500 px-1.5 py-1 border border-dashed border-neutral-700 rounded"
                             data-testid={`action-step-${i}-${p.key}-secret`}
                           >
                             {tChrome('panel.ga.askedWhenRuns', { label: tStepParam(def.op, p.key, p.label) })}
@@ -493,10 +499,12 @@ export function GuidedActionsPanel(): React.ReactElement {
                       return (
                         <label
                           key={p.key}
-                          className="flex items-center gap-1 text-xs text-neutral-400"
+                          className="contents text-xs text-neutral-400"
                           title={p.hint ? tStepHint(def.op, p.key, p.hint) : undefined}
                         >
-                          {tStepParam(def.op, p.key, p.label)}
+                          <span className="text-xs text-neutral-400">
+                            {tStepParam(def.op, p.key, p.label)}
+                          </span>
                           {p.kind === 'select' ? (
                             <select
                               data-testid={`action-step-${i}-${p.key}`}
@@ -510,7 +518,7 @@ export function GuidedActionsPanel(): React.ReactElement {
                                 };
                                 setAction({ ...action, steps });
                               }}
-                              className="px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs disabled:opacity-40"
+                              className="w-full px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs disabled:opacity-40"
                             >
                               {p.options!.map((o) => (
                                 <option key={o.value} value={o.value}>
@@ -535,11 +543,11 @@ export function GuidedActionsPanel(): React.ReactElement {
                                 };
                                 setAction({ ...action, steps });
                               }}
-                              className="px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs w-32 disabled:opacity-40"
+                              className="w-full px-1.5 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs disabled:opacity-40"
                             />
                           )}
                           <span
-                            className="flex items-center gap-0.5 text-neutral-500"
+                            className="flex items-center gap-1.5 text-xs text-neutral-500"
                             title={tChrome('panel.ga.askTitle')}
                           >
                             <input
