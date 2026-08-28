@@ -79,6 +79,13 @@ done
 gate workflow-contract "$R/.venv/Scripts/python.exe" -m pytest \
   tests/test_ci_capability_setup.py -q
 
+# --- corpus-pin-vs-index: a tracked PDF added anywhere in the repo joins the
+#     preflight corpus universe; committing one without regenerating the pin
+#     fails only on the runner's full suite (~40 min). Recurred twice
+#     (xfa fixtures, truncated.pdf). Sub-second locally. ---
+gate corpus-pin "$R/.venv/Scripts/python.exe" -m pytest \
+  "tests/test_preflight.py::TestCorpusGate::test_the_corpus_is_the_git_index_not_a_glob" -q
+
 echo "CI-PARITY DONE" >> "$OUT"
 if [ "$fail" -ne 0 ]; then
   echo "CI-PARITY: FAILURES — read ci-parity.*.local.log before pushing." >> "$OUT"
