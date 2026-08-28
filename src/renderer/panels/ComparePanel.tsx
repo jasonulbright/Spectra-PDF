@@ -95,9 +95,15 @@ export function ComparePanel(): React.ReactElement {
       // first, so we compare committed content. No snapshot / UPDATE_FILE.
       if (mode === 'text') {
         setResult(null);
+        // The engine's `file_a` is the BASELINE (its lines are the `remove`
+        // rows) and `file_b` is the changed side (the `add` rows). The header
+        // reads "Comparing <active> against <target>", so the target is the
+        // baseline: passing the active document as `file_a` inverts every
+        // sign. Visual mode has no add/remove polarity — its A/B are labels —
+        // so it keeps active as `file_a`.
         const res = (await call('compare_text', {
-          file_a: activeFile.workingPath,
-          file_b: targetFile.workingPath,
+          file_a: targetFile.workingPath,
+          file_b: activeFile.workingPath,
         })) as unknown as CompareResult;
         setResult(res);
       } else {
