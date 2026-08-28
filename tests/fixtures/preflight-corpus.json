@@ -1654,6 +1654,114 @@
       }
     },
     {
+      "path": "e2e-tests/fixtures/truncated.pdf",
+      "verdicts": {
+        "pdf_version": "pass",
+        "print_permitted": "pass",
+        "structurally_sound": "pass",
+        "output_intent": "not_applicable",
+        "pdfx_claim": "not_applicable",
+        "trapped_declared": "not_applicable",
+        "embedded_files": "not_applicable",
+        "page_size_consistent": "pass",
+        "page_size_expected": "not_applicable",
+        "trim_box": "warn",
+        "bleed_sufficient": "not_applicable",
+        "page_count": "not_applicable",
+        "colour_family": "not_applicable",
+        "grayscale_only": "not_applicable",
+        "device_independent_colour": "not_applicable",
+        "spot_ink_count": "not_applicable",
+        "spot_ink_names": "not_applicable",
+        "ink_coverage_max": "not_applicable",
+        "overprint": "not_applicable",
+        "fonts_embedded": "not_applicable",
+        "fonts_subset": "not_applicable",
+        "type3_fonts": "not_applicable",
+        "min_type_size": "not_applicable",
+        "small_text_k_only": "not_applicable",
+        "image_min_dpi_contone": "not_applicable",
+        "image_min_dpi_bitonal": "not_applicable",
+        "image_max_dpi": "not_applicable",
+        "image_compression": "not_applicable",
+        "image_colour_space": "not_applicable",
+        "live_transparency": "pass",
+        "hairlines_absent": "pass",
+        "optional_content": "not_applicable",
+        "processing_steps": "not_applicable",
+        "printing_annotations": "pass",
+        "interactive_form": "not_applicable",
+        "title_present": "not_applicable",
+        "document_javascript": "not_applicable",
+        "xmp_present": "not_applicable"
+      },
+      "summaries": {
+        "sheetfed_offset": [
+          7,
+          0,
+          1,
+          0,
+          30
+        ],
+        "web_offset_heatset": [
+          7,
+          0,
+          1,
+          0,
+          30
+        ],
+        "newsprint": [
+          7,
+          0,
+          1,
+          0,
+          30
+        ],
+        "digital_printing": [
+          6,
+          0,
+          1,
+          0,
+          31
+        ],
+        "large_format": [
+          6,
+          0,
+          1,
+          0,
+          31
+        ],
+        "pdfx_1a": [
+          13,
+          3,
+          1,
+          0,
+          21
+        ],
+        "pdfx_3": [
+          13,
+          3,
+          1,
+          0,
+          21
+        ],
+        "pdfx_4": [
+          11,
+          3,
+          1,
+          0,
+          23
+        ],
+        "office_print": [
+          4,
+          0,
+          0,
+          0,
+          34
+        ]
+      }
+    },
+    {
       "path": "e2e-tests/fixtures/type3-text.pdf",
       "verdicts": {
         "pdf_version": "pass",
