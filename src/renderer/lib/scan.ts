@@ -160,6 +160,11 @@ export interface PropertyAdjustment {
 export interface ScanResult {
   pages: string[];
   cancelled: boolean;
+  /** The feeder fault that ended the batch early, when one did. `pages` then
+   * holds the sheets that finished before it and the review offers exactly
+   * those — a jam is a clean partial, never a refusal that discards work the
+   * device already read. */
+  interrupted?: ScanRefusal;
   scratch: string;
   /** The resolution actually in force, read back after the write. This is
    * what `create_pdf`'s `image_dpi_default` is set from, so a driver that

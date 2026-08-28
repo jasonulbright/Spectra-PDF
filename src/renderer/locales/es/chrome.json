@@ -1710,6 +1710,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} ppp (interpolado)",
   "dialog.scan.enhance": "Enderezar y limpiar las páginas",
   "dialog.scan.enhancing": "Enderezando y limpiando…",
+  "dialog.scan.interruptedNote": "El alimentador se detuvo a mitad del proceso. Las páginas siguientes se completaron antes y aún se pueden guardar.",
   "dialog.scan.looking": "Buscando escáneres…",
   "dialog.scan.noPreview": "Esta página es demasiado grande para mostrarse aquí.",
   "dialog.scan.noneHint": "Comprueba que el escáner esté encendido y conectado, y elige Actualizar. Un escáner de red también tiene que ser accesible desde este equipo.",

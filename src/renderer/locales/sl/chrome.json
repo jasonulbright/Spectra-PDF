@@ -1767,6 +1767,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (interpolirano)",
   "dialog.scan.enhance": "Poravnaj in očisti strani",
   "dialog.scan.enhancing": "Poravnavanje in čiščenje…",
+  "dialog.scan.interruptedNote": "Podajalnik se je ustavil med potjo. Spodnje strani so bile dokončane prej in jih je še mogoče shraniti.",
   "dialog.scan.looking": "Iskanje optičnih bralnikov…",
   "dialog.scan.noPreview": "Ta stran je prevelika za prikaz tukaj.",
   "dialog.scan.noneHint": "Preverite, ali je optični bralnik vklopljen in priključen, nato izberite Osveži. Omrežni bralnik mora biti tudi dosegljiv s tega računalnika.",

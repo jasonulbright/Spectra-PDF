@@ -1209,6 +1209,8 @@ export const DIALOG_STRINGS = {
   'dialog.scan.adjustedRow': '{{property}}: asked for {{requested}}, using {{actual}}',
   'dialog.scan.adjustedRefused': '{{property}}: {{requested}} was refused',
   'dialog.scan.cancelledNote': 'Scanning stopped. The pages below finished before it stopped.',
+  'dialog.scan.interruptedNote':
+    'The feeder stopped part-way through. The pages below finished before it stopped and can still be saved.',
   'dialog.scan.pageLabel': 'Page {{index}}',
   'dialog.scan.removePage': 'Remove this page',
   'dialog.scan.noPreview': 'This page is too large to show here.',

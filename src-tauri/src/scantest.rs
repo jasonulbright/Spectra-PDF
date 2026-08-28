@@ -28,7 +28,7 @@ use crate::scanner::{
 
 /// The report format's own version, so a report from an older build is
 /// readable rather than merely parseable.
-pub const REPORT_SCHEMA: u32 = 1;
+pub const REPORT_SCHEMA: u32 = 2;
 
 /// What the report says about itself, verbatim, in both renderings.
 pub const PRIVACY_NOTE: &str = "This report carries device metadata, the settings each row asked for, \
@@ -192,6 +192,22 @@ pub const ROWS: &[ChecklistRow] = &[
         needs: RowNeed::Network,
         mode: RowMode::Prompted,
         minutes: 4,
+    },
+    ChecklistRow {
+        id: "16",
+        title: "Feeder, both sides, sheet order confirmed page by page",
+        instruction: "Number THREE sheets: write 1F on the front of sheet 1 and 1B on its back; write 2F on the front of sheet 2 and LEAVE ITS BACK BLANK; write 3F and 3B on sheet 3. Load all three in the feeder, sheet 1 on top, fronts up.",
+        needs: RowNeed::Duplex,
+        mode: RowMode::Prompted,
+        minutes: 8,
+    },
+    ChecklistRow {
+        id: "17",
+        title: "Feeder, one side, sheet order confirmed page by page",
+        instruction: "Number THREE sheets 1, 2 and 3 on the front only. Load all three in the feeder, sheet 1 on top, fronts up.",
+        needs: RowNeed::Feeder,
+        mode: RowMode::Prompted,
+        minutes: 5,
     },
 ];
 
@@ -878,6 +894,188 @@ pub fn judge_refusal(
     }
 }
 
+/// What a sheet-order row expects back, and what the tester may answer.
+///
+/// The duplex plan leaves sheet 2's back blank on purpose: a feeder that
+/// drops blank sides looks correct on three fully printed sheets and is
+/// caught only by a batch that contains one.
+pub struct OrderPlan {
+    /// The marks, in the order the pages must come back.
+    pub expected: &'static [&'static str],
+    /// Every answer the tester may give for one page.
+    pub vocabulary: &'static [&'static str],
+}
+
+/// Three sheets, front and back, sheet 2's back blank.
+pub const DUPLEX_ORDER: OrderPlan = OrderPlan {
+    expected: &["1f", "1b", "2f", "blank", "3f", "3b"],
+    vocabulary: &["1f", "1b", "2f", "2b", "3f", "3b", "blank"],
+};
+
+/// Three numbered sheets, fronts only.
+pub const SIMPLEX_ORDER: OrderPlan = OrderPlan {
+    expected: &["1", "2", "3"],
+    vocabulary: &["1", "2", "3", "blank"],
+};
+
+/// The sequence with every pair swapped: what a feeder that reads the back
+/// before the front produces.
+fn backs_first(expected: &[&str]) -> Vec<String> {
+    expected
+        .chunks(2)
+        .flat_map(|pair| pair.iter().rev().map(|s| s.to_string()))
+        .collect()
+}
+
+/// Is `claimed` `whole` with zero or more entries left out, in order?
+fn is_subsequence(claimed: &[String], whole: &[&str]) -> bool {
+    let mut it = whole.iter();
+    claimed
+        .iter()
+        .all(|want| it.any(|have| have.eq_ignore_ascii_case(want)))
+}
+
+/// The verdict on a sheet-order row: what the tester says each captured page
+/// shows, against what the sheets they loaded must produce.
+///
+/// A mismatch is NAMED where the shape is a known feeder bug — reversed
+/// backs, dropped blanks, only one side per sheet, a reversed batch — because
+/// "the order was wrong" sends a report back that nobody can act on, and the
+/// four shapes are separate bugs with separate fixes.
+pub fn judge_order(plan: &OrderPlan, claimed: &[String]) -> RowVerdict {
+    let expected = plan.expected;
+    let shown = |seq: &[String]| seq.join(", ");
+    let same = |a: &[String], b: &[String]| {
+        a.len() == b.len()
+            && a.iter()
+                .zip(b.iter())
+                .all(|(x, y)| x.eq_ignore_ascii_case(y))
+    };
+    let as_owned = |seq: &[&str]| seq.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let expected_owned = as_owned(expected);
+
+    if same(claimed, &expected_owned) {
+        return RowVerdict::pass(format!(
+            "the pages came back in sheet order: {}",
+            shown(&expected_owned)
+        ));
+    }
+
+    let mut notes = vec![
+        format!("expected: {}", shown(&expected_owned)),
+        format!("the tester read back: {}", shown(claimed)),
+    ];
+    if claimed.len() != expected.len() {
+        notes.push(format!(
+            "{} page(s) came back where {} were expected",
+            claimed.len(),
+            expected.len()
+        ));
+    }
+
+    let reversed: Vec<String> = expected_owned.iter().rev().cloned().collect();
+    let without_blanks: Vec<String> = expected_owned
+        .iter()
+        .filter(|m| !m.eq_ignore_ascii_case("blank"))
+        .cloned()
+        .collect();
+    let fronts: Vec<String> = expected_owned
+        .iter()
+        .step_by(2)
+        .cloned()
+        .collect();
+
+    let named = if same(claimed, &reversed) {
+        Some("REVERSED BATCH: the sheets came back last-to-first".to_string())
+    } else if expected.len() % 2 == 0 && same(claimed, &backs_first(expected)) {
+        Some("REVERSED BACKS: each sheet's back came back before its front".to_string())
+    } else if expected_owned.len() != without_blanks.len() && same(claimed, &without_blanks) {
+        Some("DROPPED BLANKS: the blank side was left out instead of scanned".to_string())
+    } else if expected.len() % 2 == 0 && same(claimed, &fronts) {
+        Some("ONE SIDE PER SHEET: only the fronts came back, so the run scanned simplex".to_string())
+    } else if is_subsequence(claimed, expected) {
+        let missing: Vec<String> = expected_owned
+            .iter()
+            .filter(|m| !claimed.iter().any(|c| c.eq_ignore_ascii_case(m)))
+            .cloned()
+            .collect();
+        Some(format!("DROPPED PAGES: {} never came back", missing.join(", ")))
+    } else {
+        None
+    };
+    notes.push(named.unwrap_or_else(|| {
+        "the order matches no known feeder fault; the two sequences above are the evidence"
+            .to_string()
+    }));
+    RowVerdict {
+        status: RowStatus::Fail,
+        notes,
+    }
+}
+
+/// The verdict on row 9: a jam is a clean partial, never a corrupt success.
+///
+/// Two shapes pass. A jam with nothing whole behind it refuses BY NAME, which
+/// is the same bar row 8 sets. A jam part-way through a batch comes back as a
+/// result whose `interrupted` names the jam and whose pages are the sheets
+/// that finished — every one of them integrity-passing, because the runner
+/// judges the staged pages. What fails is a silent success (a jam the run
+/// never mentions), a hex-carrying `scan.failed`, and any page that came back
+/// torn.
+pub fn judge_jam(
+    accepted: &[&str],
+    outcome: &Result<ScanResult, ScanRefusal>,
+    pages: &[PageEvidence],
+    elapsed_secs: u64,
+    bound_secs: u64,
+) -> RowVerdict {
+    let Ok(result) = outcome else {
+        return judge_refusal(accepted, outcome, elapsed_secs, bound_secs);
+    };
+    let Some(fault) = &result.interrupted else {
+        return RowVerdict::fail(format!(
+            "the run reported a clean success with {} page(s); a jam must be named",
+            result.pages.len()
+        ));
+    };
+    if !accepted.contains(&fault.key) {
+        let code = fault
+            .code
+            .as_deref()
+            .map(|c| format!(" [{c}]"))
+            .unwrap_or_default();
+        return RowVerdict::fail(format!(
+            "the run stopped on {}{code} (\"{}\"), which is not one of the expected feeder faults: {}",
+            fault.key,
+            fault.message,
+            accepted.join(", ")
+        ));
+    }
+    let mut verdict = RowVerdict::pass(format!(
+        "the batch stopped on {} (\"{}\") and kept the {} page(s) that finished first",
+        fault.key,
+        fault.message,
+        pages.len()
+    ));
+    if pages.is_empty() {
+        verdict.status = RowStatus::Fail;
+        verdict.notes.push(
+            "the run reported success with no pages at all; that is a refusal, not a partial"
+                .to_string(),
+        );
+    }
+    for page in pages {
+        if page.integrity.starts_with("truncated") {
+            verdict.status = RowStatus::Fail;
+            verdict.notes.push(format!(
+                "{}: {} — a page the jam tore must never be offered",
+                page.file, page.integrity
+            ));
+        }
+    }
+    verdict
+}
+
 /// The verdict on row 7: a run stopped part-way offers what completed.
 pub fn judge_cancel(loaded: usize, result: &ScanResult, pages: &[PageEvidence]) -> RowVerdict {
     let mut verdict = judge_pages(&PageExpectation::new(CountRule::Between(1, loaded)), pages);
@@ -930,6 +1128,13 @@ pub struct RowRecord {
     pub settings: Option<serde_json::Value>,
     pub pages: Vec<PageEvidence>,
     pub refusal: Option<RefusalRecord>,
+    /// The feeder fault a partial batch stopped on. Distinct from `refusal`:
+    /// this run produced pages and they are in `pages`.
+    pub interrupted: Option<RefusalRecord>,
+    /// A sheet-order row's marks, in the order they had to come back.
+    pub expected_order: Vec<String>,
+    /// What the tester said each captured page actually shows.
+    pub claimed_order: Vec<String>,
     pub adjustments: Vec<serde_json::Value>,
     pub tester_answers: Vec<TesterAnswer>,
     pub elapsed_secs: u64,
@@ -1009,19 +1214,31 @@ impl Report {
             for note in &row.notes {
                 line(&mut out, &format!("    - {note}"));
             }
-            if let Some(refusal) = &row.refusal {
+            for (label, record) in [("refusal", &row.refusal), ("stopped on", &row.interrupted)] {
+                if let Some(refusal) = record {
+                    line(
+                        &mut out,
+                        &format!(
+                            "    {label}: {} \"{}\"{}",
+                            refusal.key,
+                            refusal.message,
+                            refusal
+                                .code
+                                .as_deref()
+                                .map(|c| format!(" [{c}]"))
+                                .unwrap_or_default()
+                        ),
+                    );
+                }
+            }
+            if !row.expected_order.is_empty() {
                 line(
                     &mut out,
-                    &format!(
-                        "    refusal: {} \"{}\"{}",
-                        refusal.key,
-                        refusal.message,
-                        refusal
-                            .code
-                            .as_deref()
-                            .map(|c| format!(" [{c}]"))
-                            .unwrap_or_default()
-                    ),
+                    &format!("    sheet order expected: {}", row.expected_order.join(", ")),
+                );
+                line(
+                    &mut out,
+                    &format!("    sheet order read back: {}", row.claimed_order.join(", ")),
                 );
             }
             for page in &row.pages {
@@ -1234,6 +1451,9 @@ pub fn run(options: &Options, console: &dyn Console) -> Result<Report, String> {
             settings: None,
             pages: Vec::new(),
             refusal: None,
+            interrupted: None,
+            expected_order: Vec::new(),
+            claimed_order: Vec::new(),
             adjustments: Vec::new(),
             tester_answers: Vec::new(),
             elapsed_secs: 0,
@@ -1398,6 +1618,7 @@ fn acquire(
     match &outcome {
         Ok(result) => {
             record.pages = result.pages.iter().map(|p| page_evidence(Path::new(p))).collect();
+            record.interrupted = result.interrupted.as_ref().map(RefusalRecord::from);
             record.adjustments = result
                 .adjusted
                 .iter()
@@ -1456,9 +1677,39 @@ fn attach(pages: &[String], out: &Path, row: &str, console: &dyn Console) -> Vec
     saved
 }
 
+/// Fold one verdict into a row.
+///
+/// A row judged twice — pages first, then the order the tester read back —
+/// keeps the FAIL: a later pass cannot clear an earlier failure, or a row
+/// that came back with a truncated page would report itself green because the
+/// marks were in the right order.
 fn apply(record: &mut RowRecord, verdict: RowVerdict) {
-    record.status = verdict.status;
+    if record.status != RowStatus::Fail || verdict.status == RowStatus::Fail {
+        record.status = verdict.status;
+    }
     record.notes.extend(verdict.notes);
+}
+
+/// One answer out of a fixed vocabulary, case-insensitively, normalised to
+/// the vocabulary's own spelling so the report reads the same however the
+/// tester typed it.
+fn pick(console: &dyn Console, question: &str, allowed: &[&str]) -> Option<String> {
+    let mut invalid = 0;
+    loop {
+        let answer = console.ask(&format!("{question} ({}) ", allowed.join("/")))?;
+        if let Some(hit) = allowed
+            .iter()
+            .find(|a| a.eq_ignore_ascii_case(answer.trim()))
+        {
+            return Some(hit.to_string());
+        }
+        invalid += 1;
+        if invalid >= MAX_INVALID {
+            console.say("No usable answer; giving up on this question.");
+            return None;
+        }
+        console.say(&format!("Please answer one of: {}", allowed.join(", ")));
+    }
 }
 
 fn ask_confirm(console: &dyn Console, record: &mut RowRecord, question: &str) {
@@ -1757,9 +2008,14 @@ fn run_row(
             }
             let started = Instant::now();
             let outcome = acquire(sessions, &device, settings, console, options, record, false);
+            // A jam that comes after a sheet or two has already gone through
+            // is a PARTIAL, not a failure: the run keeps what finished and
+            // names the jam. A jam on the first sheet has nothing to keep and
+            // refuses by name. Both pass; a silent success does not.
+            let pages = record.pages.clone();
             apply(
                 record,
-                judge_refusal(
+                judge_jam(
                     &[
                         "scan.paperJam",
                         "scan.paperProblem",
@@ -1767,6 +2023,7 @@ fn run_row(
                         "scan.deviceLost",
                     ],
                     &outcome,
+                    &pages,
                     started.elapsed().as_secs(),
                     300,
                 ),
@@ -1927,6 +2184,81 @@ fn run_row(
                 Err(_) => {
                     let verdict = refused(record);
                     apply(record, verdict);
+                }
+            }
+        }
+        "16" | "17" => {
+            let (plan, id, sheets) = if row.id == "16" {
+                (&DUPLEX_ORDER, SourceOptionId::Duplex, "three double-sided")
+            } else {
+                (&SIMPLEX_ORDER, SourceOptionId::Feeder, "three numbered")
+            };
+            let Some(settings) =
+                settings_for(caps, id, ColorMode::Color, 300, PaperSize::Auto, Some(0))
+            else {
+                return missing(record);
+            };
+            record.expected_order = plan.expected.iter().map(|m| m.to_string()).collect();
+            if enter(
+                console,
+                &format!("  The {sheets} sheets are in the feeder, sheet 1 on top?"),
+            )
+            .is_none()
+            {
+                return abandoned(record);
+            }
+            if acquire(sessions, &device, settings, console, options, record, false).is_err() {
+                let verdict = refused(record);
+                return apply(record, verdict);
+            }
+            // Blank is an EXPECTED page here (sheet 2's back), so content is
+            // recorded rather than required. The per-page verdicts travel in
+            // the report beside the tester's answers, and the two are checked
+            // against each other below.
+            let mut expect = PageExpectation::new(CountRule::AtLeast(1));
+            expect.require_content = false;
+            let pages = record.pages.clone();
+            apply(record, judge_pages(&expect, &pages));
+
+            console.say(&format!(
+                "  Open the {} page(s) that came back and read each one in turn.",
+                record.pages.len()
+            ));
+            let total = record.pages.len();
+            let mut claimed = Vec::with_capacity(total);
+            for index in 0..total {
+                let Some(answer) = pick(
+                    console,
+                    &format!(
+                        "  Page {} of {total} — which mark is on it?",
+                        index + 1
+                    ),
+                    plan.vocabulary,
+                ) else {
+                    return abandoned(record);
+                };
+                claimed.push(answer);
+            }
+            record.claimed_order = claimed.clone();
+            apply(record, judge_order(plan, &claimed));
+
+            // The histogram already knows which pages carry no ink. A page
+            // the tester called blank that reads as real content (or the
+            // reverse) means one of the two is wrong about which page is
+            // which, which is worth saying out loud in the report.
+            for (index, page) in record.pages.iter().enumerate() {
+                let Some(mark) = claimed.get(index) else { continue };
+                let empty = matches!(
+                    page.content,
+                    ContentVerdict::Blank | ContentVerdict::NearUniform
+                );
+                if mark.eq_ignore_ascii_case("blank") != empty
+                    && page.content != ContentVerdict::Unverifiable
+                {
+                    record.notes.push(format!(
+                        "{}: the tester read it as '{mark}' but its own tones say {:?}",
+                        page.file, page.content
+                    ));
                 }
             }
         }
@@ -2200,12 +2532,141 @@ mod tests {
         let ok: Result<ScanResult, ScanRefusal> = Ok(ScanResult {
             pages: vec!["page-0000.bmp".to_string()],
             cancelled: false,
+            interrupted: None,
             scratch: String::new(),
             dpi: 300,
             adjusted: Vec::new(),
             bytes: 0,
         });
         assert_eq!(judge_refusal(&accepted, &ok, 4, 180).status, RowStatus::Fail);
+    }
+
+    fn partial(interrupted: Option<&'static str>, pages: usize) -> Result<ScanResult, ScanRefusal> {
+        Ok(ScanResult {
+            pages: vec![String::new(); pages],
+            cancelled: false,
+            interrupted: interrupted.map(|key| ScanRefusal {
+                key,
+                message: "Clear the paper jam, then scan again.".to_string(),
+                code: None,
+                folder: None,
+            }),
+            scratch: String::new(),
+            dpi: 300,
+            adjusted: Vec::new(),
+            bytes: 0,
+        })
+    }
+
+    #[test]
+    fn the_jam_judge_takes_a_clean_partial_and_refuses_a_silent_one() {
+        let accepted = ["scan.paperJam", "scan.paperProblem"];
+        let good: Vec<PageEvidence> = (0..3)
+            .map(|_| evidence(2550, 3300, 300.0, 24, ContentVerdict::RealContent))
+            .collect();
+
+        // The row's point: three sheets went through, the fourth jammed, the
+        // three are kept and the jam is named.
+        let verdict = judge_jam(&accepted, &partial(Some("scan.paperJam"), 3), &good, 20, 300);
+        assert_eq!(verdict.status, RowStatus::Pass, "{verdict:?}");
+        assert!(verdict.notes[0].contains("scan.paperJam"), "{verdict:?}");
+
+        // A jam on the very first sheet has nothing to keep and refuses by
+        // name — the same bar row 8 sets.
+        let refused: Result<ScanResult, ScanRefusal> = Err(ScanRefusal {
+            key: "scan.paperJam",
+            message: "Clear the paper jam, then scan again.".to_string(),
+            code: None,
+            folder: None,
+        });
+        assert_eq!(
+            judge_jam(&accepted, &refused, &[], 20, 300).status,
+            RowStatus::Pass
+        );
+
+        // A run that jammed and said nothing about it is the failure this row
+        // exists to catch: pages that stop part-way through, reported as a
+        // complete batch.
+        assert_eq!(
+            judge_jam(&accepted, &partial(None, 3), &good, 20, 300).status,
+            RowStatus::Fail
+        );
+
+        // A jam that named an unexpected key, and one whose kept pages are
+        // torn, both fail.
+        assert_eq!(
+            judge_jam(&accepted, &partial(Some("scan.failed"), 3), &good, 20, 300).status,
+            RowStatus::Fail
+        );
+        let mut torn = good.clone();
+        torn[2].integrity = "truncated: 4000 of 9000 bytes".to_string();
+        let verdict = judge_jam(&accepted, &partial(Some("scan.paperJam"), 3), &torn, 20, 300);
+        assert_eq!(verdict.status, RowStatus::Fail, "{verdict:?}");
+
+        // And a "partial" holding no pages is a refusal wearing a result's
+        // clothes.
+        assert_eq!(
+            judge_jam(&accepted, &partial(Some("scan.paperJam"), 0), &[], 20, 300).status,
+            RowStatus::Fail
+        );
+    }
+
+    fn read_back(marks: &[&str]) -> Vec<String> {
+        marks.iter().map(|m| m.to_string()).collect()
+    }
+
+    #[test]
+    fn the_order_judge_names_each_feeder_bug_rather_than_saying_wrong_order() {
+        // Sheet 2's back is blank on purpose: it is the only sheet that can
+        // catch a feeder dropping blank sides.
+        let right = judge_order(&DUPLEX_ORDER, &read_back(&["1f", "1b", "2f", "blank", "3f", "3b"]));
+        assert_eq!(right.status, RowStatus::Pass, "{right:?}");
+        // However the tester typed it.
+        assert_eq!(
+            judge_order(&DUPLEX_ORDER, &read_back(&["1F", "1B", "2F", "BLANK", "3F", "3B"])).status,
+            RowStatus::Pass
+        );
+
+        let named = |claimed: &[&str], fault: &str| {
+            let verdict = judge_order(&DUPLEX_ORDER, &read_back(claimed));
+            assert_eq!(verdict.status, RowStatus::Fail, "{verdict:?}");
+            assert!(
+                verdict.notes.iter().any(|n| n.contains(fault)),
+                "expected {fault} in {verdict:?}"
+            );
+        };
+        named(&["1b", "1f", "blank", "2f", "3b", "3f"], "REVERSED BACKS");
+        named(&["1f", "1b", "2f", "3f", "3b"], "DROPPED BLANKS");
+        named(&["1f", "2f", "3f"], "ONE SIDE PER SHEET");
+        named(&["3b", "3f", "blank", "2f", "1b", "1f"], "REVERSED BATCH");
+        named(&["1f", "1b", "blank", "3f", "3b"], "DROPPED PAGES");
+        // A shape no known bug produces still reports both sequences rather
+        // than guessing at a cause.
+        let odd = judge_order(&DUPLEX_ORDER, &read_back(&["2f", "1f", "1b", "blank", "3b", "3f"]));
+        assert_eq!(odd.status, RowStatus::Fail);
+        assert!(odd.notes.iter().any(|n| n.contains("no known feeder fault")), "{odd:?}");
+
+        // The simplex variant, for a feeder that scans one side.
+        assert_eq!(
+            judge_order(&SIMPLEX_ORDER, &read_back(&["1", "2", "3"])).status,
+            RowStatus::Pass
+        );
+        let reversed = judge_order(&SIMPLEX_ORDER, &read_back(&["3", "2", "1"]));
+        assert!(
+            reversed.notes.iter().any(|n| n.contains("REVERSED BATCH")),
+            "{reversed:?}"
+        );
+        let dropped = judge_order(&SIMPLEX_ORDER, &read_back(&["1", "3"]));
+        assert!(
+            dropped.notes.iter().any(|n| n.contains("DROPPED PAGES: 2")),
+            "{dropped:?}"
+        );
+        // The count is reported in its own right, so a report says how many
+        // pages came back even when the shape is unclassifiable.
+        assert!(
+            dropped.notes.iter().any(|n| n.contains("2 page(s) came back where 3")),
+            "{dropped:?}"
+        );
     }
 
     #[test]
@@ -2216,6 +2677,7 @@ mod tests {
         let stopped = ScanResult {
             pages: vec![String::new(); 4],
             cancelled: true,
+            interrupted: None,
             scratch: String::new(),
             dpi: 300,
             adjusted: Vec::new(),
@@ -2370,6 +2832,9 @@ mod tests {
                     settings: None,
                     pages: vec![evidence(2550, 3300, 300.0, 24, ContentVerdict::RealContent)],
                     refusal: None,
+                    interrupted: None,
+                    expected_order: Vec::new(),
+                    claimed_order: Vec::new(),
                     adjustments: Vec::new(),
                     tester_answers: Vec::new(),
                     elapsed_secs: 12,
@@ -2383,6 +2848,9 @@ mod tests {
                     settings: None,
                     pages: Vec::new(),
                     refusal: None,
+                    interrupted: None,
+                    expected_order: Vec::new(),
+                    claimed_order: Vec::new(),
                     adjustments: Vec::new(),
                     tester_answers: Vec::new(),
                     elapsed_secs: 0,
@@ -2470,6 +2938,9 @@ mod tests {
             settings: None,
             pages: Vec::new(),
             refusal: None,
+            interrupted: None,
+            expected_order: Vec::new(),
+            claimed_order: Vec::new(),
             adjustments: Vec::new(),
             tester_answers: Vec::new(),
             elapsed_secs: 0,

@@ -1653,6 +1653,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (aradeğerlemeli)",
   "dialog.scan.enhance": "Sayfaları düzelt ve temizle",
   "dialog.scan.enhancing": "Düzeltiliyor ve temizleniyor…",
+  "dialog.scan.interruptedNote": "Besleyici işlem sırasında durdu. Aşağıdaki sayfalar durmadan önce tamamlandı ve kaydedilebilir.",
   "dialog.scan.looking": "Tarayıcılar aranıyor…",
   "dialog.scan.noPreview": "Bu sayfa burada gösterilemeyecek kadar büyük.",
   "dialog.scan.noneHint": "Tarayıcının açık ve bağlı olduğunu doğrulayın, sonra Yenile’yi seçin. Ağ tarayıcısının bu bilgisayardan erişilebilir olması da gerekir.",

@@ -1599,6 +1599,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (interpolated)",
   "dialog.scan.enhance": "Straighten and clean up pages",
   "dialog.scan.enhancing": "Straightening and cleaning up…",
+  "dialog.scan.interruptedNote": "The feeder stopped part-way through. The pages below finished before it stopped and can still be saved.",
   "dialog.scan.looking": "Looking for scanners…",
   "dialog.scan.noneHint": "Check that the scanner is switched on and connected, then choose Refresh. A network scanner also has to be reachable from this computer.",
   "dialog.scan.noneTitle": "No scanners found.",

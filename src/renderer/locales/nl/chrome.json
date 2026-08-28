@@ -1653,6 +1653,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (geïnterpoleerd)",
   "dialog.scan.enhance": "Pagina's rechtzetten en opschonen",
   "dialog.scan.enhancing": "Rechtzetten en opschonen…",
+  "dialog.scan.interruptedNote": "De invoer is halverwege gestopt. De pagina's hieronder waren al klaar en kunnen nog worden opgeslagen.",
   "dialog.scan.looking": "Scanners zoeken…",
   "dialog.scan.noPreview": "Deze pagina is te groot om hier te tonen.",
   "dialog.scan.noneHint": "Controleer of de scanner aanstaat en aangesloten is en kies daarna Vernieuwen. Een netwerkscanner moet ook bereikbaar zijn vanaf deze computer.",

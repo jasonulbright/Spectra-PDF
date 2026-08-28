@@ -1767,6 +1767,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (interpolovane)",
   "dialog.scan.enhance": "Narovnať a vyčistiť strany",
   "dialog.scan.enhancing": "Narovnáva sa a čistí…",
+  "dialog.scan.interruptedNote": "Podávač sa zastavil v priebehu. Strany nižšie sa dokončili predtým a stále ich možno uložiť.",
   "dialog.scan.looking": "Hľadajú sa skenery…",
   "dialog.scan.noPreview": "Táto strana je príliš veľká na zobrazenie tu.",
   "dialog.scan.noneHint": "Overte, že je skener zapnutý a pripojený, a zvoľte Obnoviť. Sieťový skener musí byť navyše dostupný z tohto počítača.",

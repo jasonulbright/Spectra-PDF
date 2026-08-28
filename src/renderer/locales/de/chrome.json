@@ -1653,6 +1653,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (interpoliert)",
   "dialog.scan.enhance": "Seiten gerade richten und säubern",
   "dialog.scan.enhancing": "Wird gerade gerichtet und gesäubert…",
+  "dialog.scan.interruptedNote": "Der Einzug wurde mittendrin gestoppt. Die Seiten unten waren vorher fertig und können weiterhin gespeichert werden.",
   "dialog.scan.looking": "Scanner werden gesucht…",
   "dialog.scan.noPreview": "Diese Seite ist zu groß, um sie hier anzuzeigen.",
   "dialog.scan.noneHint": "Prüfen Sie, ob der Scanner eingeschaltet und angeschlossen ist, und wählen Sie dann Aktualisieren. Ein Netzwerkscanner muss außerdem von diesem Computer aus erreichbar sein.",

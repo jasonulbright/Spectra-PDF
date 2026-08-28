@@ -1596,6 +1596,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi（插值）",
   "dialog.scan.enhance": "摆正并清理页面",
   "dialog.scan.enhancing": "正在摆正并清理…",
+  "dialog.scan.interruptedNote": "送稿器中途停止。下面的页面在停止前已完成，仍可保存。",
   "dialog.scan.looking": "正在查找扫描仪…",
   "dialog.scan.noPreview": "此页面太大，无法在这里显示。",
   "dialog.scan.noneHint": "请确认扫描仪已开机并已连接，然后选择“刷新”。网络扫描仪还必须能从这台计算机访问。",

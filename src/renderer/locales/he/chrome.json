@@ -1710,6 +1710,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (אינטרפולציה)",
   "dialog.scan.enhance": "יישור וניקוי של העמודים",
   "dialog.scan.enhancing": "מיישר ומנקה…",
+  "dialog.scan.interruptedNote": "המזין נעצר באמצע. הדפים שלמטה הושלמו לפני העצירה וניתן עדיין לשמור אותם.",
   "dialog.scan.looking": "מחפש סורקים…",
   "dialog.scan.noPreview": "העמוד הזה גדול מכדי להציגו כאן.",
   "dialog.scan.noneHint": "ודא שהסורק דלוק ומחובר, ואז בחר רענון. סורק רשת צריך להיות גם נגיש מהמחשב הזה.",

@@ -1710,6 +1710,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} ppp (interpolat)",
   "dialog.scan.enhance": "Redreça i neteja les pàgines",
   "dialog.scan.enhancing": "S’està redreçant i netejant…",
+  "dialog.scan.interruptedNote": "L'alimentador s'ha aturat a mig procés. Les pàgines de sota s'havien completat abans i encara es poden desar.",
   "dialog.scan.looking": "S’estan cercant escàners…",
   "dialog.scan.noPreview": "Aquesta pàgina és massa gran per mostrar-la aquí.",
   "dialog.scan.noneHint": "Comprova que l’escàner estigui encès i connectat i tria Actualitza. Un escàner de xarxa també ha de ser accessible des d’aquest ordinador.",

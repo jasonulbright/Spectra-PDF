@@ -1653,6 +1653,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (interpoloitu)",
   "dialog.scan.enhance": "Suorista ja siisti sivut",
   "dialog.scan.enhancing": "Suoristetaan ja siistitään…",
+  "dialog.scan.interruptedNote": "Syöttölaite pysähtyi kesken. Alla olevat sivut valmistuivat ennen pysähtymistä, ja ne voi silti tallentaa.",
   "dialog.scan.looking": "Etsitään skannereita…",
   "dialog.scan.noPreview": "Tämä sivu on liian suuri näytettäväksi tässä.",
   "dialog.scan.noneHint": "Tarkista, että skanneri on kytketty päälle ja liitetty, ja valitse sitten Päivitä. Verkkoskannerin on lisäksi oltava tavoitettavissa tästä tietokoneesta.",

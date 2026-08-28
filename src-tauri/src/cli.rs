@@ -3577,6 +3577,16 @@ fn dispatch(engine: &mut CliEngine, command: &CliCommand) -> Result<Value, Strin
                 let _ = crate::scanner::discard_scan_scratch(&scratch);
                 return Err("The scan produced no pages.".to_string());
             }
+            // A jam stopped the batch early. The sheets that finished are
+            // whole and are assembled; saying so on stderr keeps stdout the
+            // JSON result, and a silent partial would read as a full batch.
+            if let Some(fault) = &result.interrupted {
+                eprintln!(
+                    "{} {} page(s) were captured before that; they are kept and written to the PDF.",
+                    fault.message,
+                    result.pages.len()
+                );
+            }
             let sources: Vec<Value> = result
                 .pages
                 .iter()

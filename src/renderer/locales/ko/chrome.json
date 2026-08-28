@@ -1596,6 +1596,7 @@
   "dialog.scan.dpiInterpolated": "{{dpi}} dpi (보간)",
   "dialog.scan.enhance": "페이지 기울기 보정 및 정리",
   "dialog.scan.enhancing": "기울기를 바로잡고 정리하는 중…",
+  "dialog.scan.interruptedNote": "공급 장치가 도중에 멈췄습니다. 아래 페이지는 멈추기 전에 완료된 것으로 저장할 수 있습니다.",
   "dialog.scan.looking": "스캐너를 찾는 중…",
   "dialog.scan.noPreview": "이 페이지는 너무 커서 여기에 표시할 수 없습니다.",
   "dialog.scan.noneHint": "스캐너가 켜져 있고 연결되어 있는지 확인한 다음 새로 고침을 선택하세요. 네트워크 스캐너는 이 컴퓨터에서 접근할 수 있어야 합니다.",
