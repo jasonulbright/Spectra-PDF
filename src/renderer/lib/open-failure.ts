@@ -43,8 +43,11 @@ function pathPattern(path: string): RegExp {
 // paths above did not match (the engine composed the path differently, or the
 // throw happened before a working path existed). Anchored on the `.pdf`
 // extension so structural text in a qpdf message — `/Root`, `/Pages` — is left
-// alone.
-const ABSOLUTE_PDF_PATH = /(?:[A-Za-z]:[\\/]|\/)(?:[^\s:*?"<>|]*[\\/])*[^\s:*?"<>|]*\.pdf\b/gi;
+// alone. The segment class excludes both separators: a class that matched them
+// would overlap the separator that follows it, and a separator flood in an
+// engine message would then backtrack exponentially.
+const ABSOLUTE_PDF_PATH =
+  /(?:[A-Za-z]:[\\/]|\/)(?:[^\s:*?"<>|\\/]*[\\/])*[^\s:*?"<>|\\/]*\.pdf\b/gi;
 
 /**
  * Rewrites an open failure's message so it names `name` — the file the user
