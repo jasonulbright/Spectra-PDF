@@ -383,7 +383,7 @@ export function CanvasStatusBar(props: CanvasStatusBarProps): React.JSX.Element 
                 data-testid="redact-apply-btn"
                 disabled={props.redacting}
                 onClick={props.onApplyRedact}
-                className="canvas-status-action bg-red-600 hover:bg-red-500 text-white"
+                className="canvas-status-action danger-action"
               >
                 {props.redacting
                   ? tChrome('chrome.status.redacting')

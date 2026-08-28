@@ -269,7 +269,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                       data-testid={`schedule-run-${r.name}`}
                       disabled={busy}
                       onClick={() => void act(tChrome('dialog.schedule.starting'), () => schedule.runNow(r.name))}
-                      className="px-2 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                      className="px-2 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                     >
                       {tChrome('dialog.schedule.runNow')}
                     </button>
@@ -284,7 +284,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                           schedule.setEnabled(r.name, !r.enabled),
                         )
                       }
-                      className="px-2 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                      className="px-2 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                     >
                       {tChrome(r.enabled ? 'dialog.schedule.disable' : 'dialog.schedule.enable')}
                     </button>
@@ -296,7 +296,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                           setPresetId('');
                           setEditing({ ...EMPTY, ...r.profile! });
                         }}
-                        className="px-2 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                        className="px-2 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                       >
                         {tChrome('dialog.schedule.edit')}
                       </button>
@@ -312,7 +312,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                             setConfirmDelete(null);
                             void act(tChrome('dialog.schedule.deleting'), () => schedule.remove(r.name));
                           }}
-                          className="px-2 py-0.5 text-xs bg-red-700/80 hover:bg-red-600 disabled:opacity-50 rounded"
+                          className="text-xs danger-action"
                         >
                           {tChrome('dialog.common.delete')}
                         </button>
@@ -328,7 +328,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
                         data-testid={`schedule-delete-${r.name}`}
                         disabled={busy}
                         onClick={() => setConfirmDelete(r.name)}
-                        className="px-2 py-0.5 text-xs text-neutral-400 hover:text-red-400 disabled:opacity-50"
+                        className="px-2 py-0.5 text-xs text-neutral-400 hover:text-red-400 disabled:opacity-60"
                       >
                         {tChrome('dialog.common.delete')}
                       </button>
@@ -718,7 +718,7 @@ export function ScheduledRunsDialog({ onClose }: ScheduledRunsDialogProps): Reac
               data-testid="schedule-save"
               disabled={busy}
               onClick={() => void save()}
-              className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+              className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
             >
               {tChrome(busy ? 'dialog.common.saving' : 'dialog.schedule.save')}
             </button>

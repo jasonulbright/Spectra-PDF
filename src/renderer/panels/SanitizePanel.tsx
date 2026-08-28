@@ -210,7 +210,7 @@ export function SanitizePanel(): React.ReactElement {
 
       <div className="flex items-center gap-3 text-xs">
         <button
-          className="underline"
+          className="quiet-action"
           data-testid="sanitize-refresh"
           disabled={busy}
           onClick={() => void refresh()}
@@ -255,7 +255,7 @@ export function SanitizePanel(): React.ReactElement {
       {report && (
         <div className="flex items-center gap-3 text-xs">
           <button
-            className="underline"
+            className="quiet-action"
             data-testid="sanitize-select-all"
             disabled={busy || blocked !== null}
             onClick={() =>
@@ -298,7 +298,7 @@ export function SanitizePanel(): React.ReactElement {
                 </span>
                 {category.detail.length > 0 && (
                   <button
-                    className="text-xs underline text-neutral-400"
+                    className="text-xs quiet-action"
                     data-testid={`sanitize-details-${category.id}`}
                     onClick={() => setExpanded(toggle(expanded, category.id))}
                   >
@@ -432,7 +432,7 @@ export function SanitizePanel(): React.ReactElement {
       )}
 
       <button
-        className="rounded bg-red-700 px-3 py-1.5 text-sm hover:bg-red-600 disabled:opacity-50"
+        className="text-sm danger-action"
         data-testid="sanitize-apply"
         disabled={busy || chosen.length === 0 || blocked !== null}
         onClick={() => void apply()}

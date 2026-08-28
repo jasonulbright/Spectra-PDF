@@ -185,7 +185,7 @@ export function ComparePanel(): React.ReactElement {
               data-testid="compare-run"
               onClick={handleCompare}
               disabled={busy || !targetPath || (mode === 'visual' && gsBlocked(gs))}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
             >
               {busy ? tChrome('panel.compare.comparing') : tChrome('panel.compare.compare')}
             </button>

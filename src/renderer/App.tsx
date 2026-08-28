@@ -3545,7 +3545,7 @@ function AppContent(): React.ReactElement {
           <span className="flex-1">{commitError}</span>
           <button
             onClick={() => void commitAndReport()}
-            className="px-2 py-0.5 text-xs bg-red-600 hover:bg-red-500 text-white rounded font-medium"
+            className="px-2 py-0.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded font-medium"
           >
             {tChrome('app.commit.retry')}
           </button>

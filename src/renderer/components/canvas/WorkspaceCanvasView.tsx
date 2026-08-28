@@ -7571,7 +7571,7 @@ export function WorkspaceCanvasView({
               data-testid="canvas-sign-apply"
               onClick={() => void applySignature()}
               disabled={signingBusy}
-              className="px-2.5 py-1 text-xs text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-50 rounded font-medium"
+              className="px-2.5 py-1 text-xs text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-60 rounded font-medium"
             >
               {tChrome(signingBusy ? 'canvas.sign.signing' : 'canvas.sign.apply')}
             </button>
@@ -7758,7 +7758,7 @@ export function WorkspaceCanvasView({
               data-testid="new-field-create"
               onClick={() => void createPlacedField()}
               disabled={creatingField}
-              className="px-2.5 py-1 text-xs text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded font-medium"
+              className="px-2.5 py-1 text-xs text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 rounded font-medium"
             >
               {tChrome(creatingField ? 'canvas.newfield.creating' : 'canvas.newfield.create')}
             </button>
@@ -7930,7 +7930,7 @@ export function WorkspaceCanvasView({
                   : undefined
               }
               onChange={(e) => setAtFamily(e.target.value as 'sans' | 'serif' | 'mono')}
-              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs disabled:opacity-50"
+              className="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs disabled:opacity-60"
             >
               <option value="sans">{tChrome('canvas.addtext.family.sans')}</option>
               <option value="serif">{tChrome('canvas.addtext.family.serif')}</option>
@@ -8021,7 +8021,7 @@ export function WorkspaceCanvasView({
                   return next;
                 })
               }
-              className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:border-emerald-500 disabled:opacity-50"
+              className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:border-emerald-500 disabled:opacity-60"
             >
               <span
                 className="inline-block"
@@ -8111,7 +8111,7 @@ export function WorkspaceCanvasView({
                   : 'canvas.addtext.smallCapsTitle',
               )}
               onClick={() => setAtSmallCaps((s) => !s)}
-              className={`px-2 py-1 text-xs border rounded disabled:opacity-50 ${
+              className={`px-2 py-1 text-xs border rounded disabled:opacity-60 ${
                 atSmallCaps
                   ? 'bg-emerald-700/40 border-emerald-500'
                   : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
@@ -8131,7 +8131,7 @@ export function WorkspaceCanvasView({
                   : 'canvas.addtext.alternatesTitle',
               )}
               onClick={() => setAtAlternates((a) => !a)}
-              className={`px-2 py-1 text-xs border rounded disabled:opacity-50 ${
+              className={`px-2 py-1 text-xs border rounded disabled:opacity-60 ${
                 atAlternates
                   ? 'bg-emerald-700/40 border-emerald-500'
                   : 'bg-neutral-800 border-neutral-700 hover:border-emerald-500'
@@ -8182,7 +8182,7 @@ export function WorkspaceCanvasView({
               data-testid="add-text-create"
               onClick={() => void createPlacedText()}
               disabled={creatingText}
-              className="px-2.5 py-1 text-xs text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded font-medium"
+              className="px-2.5 py-1 text-xs text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 rounded font-medium"
             >
               {tChrome(creatingText ? 'canvas.addtext.adding' : 'canvas.addtext.title')}
             </button>
@@ -8295,7 +8295,7 @@ export function WorkspaceCanvasView({
                   setConfirmRedact(false);
                   void applyMarks();
                 }}
-                className="px-3 py-1 text-xs text-white bg-red-600 hover:bg-red-500 rounded font-medium"
+                className="text-xs danger-action"
               >
                 {tChrome('canvas.redact.apply')}
               </button>

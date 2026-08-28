@@ -51,7 +51,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): React.R
             key={i}
             onClick={() => { item.onClick(); onClose(); }}
             disabled={item.disabled}
-            className={`w-full text-start px-3 py-1.5 text-sm transition-colors disabled:opacity-30
+            className={`w-full text-start px-3 py-1.5 text-sm transition-colors disabled:opacity-60
               ${item.danger ? 'text-red-400 hover:bg-red-900/40' : 'text-neutral-200 hover:bg-neutral-700'}`}
           >
             {item.label}

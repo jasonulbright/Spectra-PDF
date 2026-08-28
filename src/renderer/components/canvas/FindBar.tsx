@@ -174,7 +174,7 @@ export function FindBar({
           disabled={applyingOcr}
           onClick={onApplyOcr}
           title={tChrome('canvas.find.applyOcrTitle')}
-          className="px-2 py-0.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium whitespace-nowrap"
+          className="px-2 py-0.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium whitespace-nowrap"
         >
           {tChrome(applyingOcr ? 'canvas.find.applying' : 'canvas.find.makeSearchable')}
         </button>

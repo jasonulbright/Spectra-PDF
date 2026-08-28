@@ -982,7 +982,7 @@ export function ScanDialog({
             <button
               type="button"
               data-testid="scan-stop"
-              className="px-3 py-1.5 text-xs text-white bg-red-600 hover:bg-red-500 disabled:opacity-50 rounded font-medium"
+              className="text-xs danger-action"
               disabled={stopping}
               onClick={stop}
             >
@@ -992,7 +992,7 @@ export function ScanDialog({
             <button
               type="button"
               data-testid="scan-start"
-              className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+              className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
               disabled={busy || !capabilities}
               onClick={() => void runScan()}
             >
@@ -1003,7 +1003,7 @@ export function ScanDialog({
             <button
               type="button"
               data-testid="scan-append"
-              className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+              className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
               disabled={busy}
               onClick={() => void appendToDocument()}
             >
@@ -1014,7 +1014,7 @@ export function ScanDialog({
             <button
               type="button"
               data-testid="scan-save"
-              className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+              className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
               disabled={busy}
               onClick={() => void saveAsPdf()}
             >

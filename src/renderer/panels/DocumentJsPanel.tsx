@@ -183,7 +183,7 @@ export function DocumentJsPanel(): React.ReactElement {
           data-testid="docjs-add"
           onClick={addScript}
           disabled={busy}
-          className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded font-medium"
+          className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
         >
           {tChrome('panel.docjs.addScript')}
         </button>
@@ -191,7 +191,7 @@ export function DocumentJsPanel(): React.ReactElement {
           data-testid="docjs-save"
           onClick={() => void save()}
           disabled={!dirty || busy}
-          className="px-2.5 py-1 text-xs bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 rounded font-medium"
+          className="px-2.5 py-1 text-xs bg-emerald-700 hover:bg-emerald-600 disabled:opacity-60 rounded font-medium"
         >
           {tChrome('panel.docjs.saveScripts')}
         </button>
@@ -250,7 +250,7 @@ export function DocumentJsPanel(): React.ReactElement {
                   data-testid="docjs-delete"
                   onClick={removeSelected}
                   disabled={busy}
-                  className="px-2.5 py-1 text-xs bg-red-700/70 hover:bg-red-600 disabled:opacity-40 rounded font-medium"
+                  className="text-xs danger-action"
                 >
                   {tChrome('panel.docjs.delete')}
                 </button>

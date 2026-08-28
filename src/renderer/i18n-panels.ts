@@ -5,6 +5,21 @@
 // stock buttons), `panel.<slug>.*` per panel. Grows batch by batch as the
 // sweep proceeds — a panel is either fully threaded or not started, never
 // half-swept (the qps leak sweep, spec 104, widens as batches land).
+//
+// CASING, product-wide. Two registers, and which one a string takes is decided
+// by what the string IS, never by the panel it happens to live in:
+//   - A NAME — an operation, a tool, a panel, a menu entry — is Title Case.
+//     `commands/operations.ts` and `TOOL_TITLES` are that family, and it is
+//     already consistent.
+//   - Everything a person READS — button labels, hints, statuses, headings
+//     inside a panel — is Sentence case.
+// The audit found "Apply Watermark" beside "Apply", "Enhance the scans" and
+// "Detect fields" on adjacent surfaces: three registers for one kind of label,
+// so casing had stopped carrying the name/not-a-name distinction at all. When
+// a button's job IS to run a named operation, its label spells that operation
+// the same way the operation is named ("Detect form fields"), in the button's
+// own register.
+// Ellipses are the character …, never three periods.
 export const PANEL_STRINGS = {
   'panel.common.workingOn': 'Working on:',
   'panel.common.pageCount_one': '{{count}} page',
@@ -47,7 +62,7 @@ export const PANEL_STRINGS = {
   'panel.rotate.pagesAria': 'Pages to rotate',
   'panel.rotate.badPages': 'Error: pages must be e.g. 1,3,5-9 or all',
   'panel.rotate.rotate': 'Rotate',
-  'panel.rotate.rotating': 'Rotating...',
+  'panel.rotate.rotating': 'Rotating…',
   'panel.rotate.done': 'Rotated {{pages}} pages by {{angle}} degrees',
 
   'panel.compress.open': 'Open a PDF to compress',
@@ -90,12 +105,12 @@ export const PANEL_STRINGS = {
   'panel.compress.dpiLabel': 'DPI: {{dpi}}',
   'panel.compress.dpiAria': 'Image resolution in DPI',
   'panel.compress.result': '{{from}} KB → {{to}} KB ({{ratio}}% reduction)',
-  'panel.compress.compressing': 'Compressing...',
+  'panel.compress.compressing': 'Compressing…',
   'panel.compress.compress': 'Compress',
   'panel.compress.thenOptimize': 'Then optimize the result',
   'panel.compress.thenOptimizeHint':
     'Runs the Optimize pass over the compressed file — linearized for fast web view, with its objects packed into streams. It runs as a second operation, with its own entry in the queue.',
-  'panel.compress.optimizing': 'Optimizing...',
+  'panel.compress.optimizing': 'Optimizing…',
   'panel.compress.optimizeResult':
     '{{result}} Then optimized to {{to}} KB ({{ratio}}% total reduction).',
   'panel.compress.optimizeFailed':
@@ -104,14 +119,14 @@ export const PANEL_STRINGS = {
   'panel.decrypt.open': 'Open an encrypted PDF to decrypt',
   'panel.decrypt.password': 'Password',
   'panel.decrypt.passwordPlaceholder': 'Document password',
-  'panel.decrypt.decrypting': 'Decrypting...',
+  'panel.decrypt.decrypting': 'Decrypting…',
   'panel.decrypt.decrypt': 'Decrypt',
   'panel.decrypt.done': 'Decrypted successfully',
 
   'panel.split.open': 'Open a PDF to split',
   'panel.split.enterRanges': 'Enter page ranges.',
   'panel.split.rangesLabel': 'Page ranges (e.g. 1-5,10-15)',
-  'panel.split.splitting': 'Splitting...',
+  'panel.split.splitting': 'Splitting…',
   'panel.split.split': 'Split',
   'panel.split.done': 'Extracted {{count}} pages',
   'panel.split.modeLabel': 'Split by',
@@ -138,8 +153,8 @@ export const PANEL_STRINGS = {
   'panel.recover.open': 'Open a damaged PDF to recover pages',
   'panel.recover.blurb':
     'Salvage recovery for severely damaged PDFs. Extracts each page individually and assembles salvageable pages into a new clean PDF. Reports which pages were lost.',
-  'panel.recover.recovering': 'Recovering pages (Tier 3: per-page salvage)...',
-  'panel.recover.busy': 'Recovering...',
+  'panel.recover.recovering': 'Recovering pages (Tier 3: per-page salvage)…',
+  'panel.recover.busy': 'Recovering…',
   'panel.recover.recover': 'Recover Pages',
   'panel.recover.doneAll': 'Recovered all {{count}} pages successfully.',
   'panel.recover.donePartial':
@@ -153,15 +168,15 @@ export const PANEL_STRINGS = {
   'panel.repair.open': 'Open a PDF to repair',
   'panel.repair.blurb':
     'Light repair using pikepdf/QPDF. Fixes broken xref tables, stream lengths, and page tree corruption. Preserves annotations, bookmarks, and metadata.',
-  'panel.repair.validating': 'Validating PDF structure...',
+  'panel.repair.validating': 'Validating PDF structure…',
   'panel.repair.valid': 'PDF structure is valid. No issues found.',
   'panel.repair.found': 'Found {{errors}} error(s), {{warnings}} warning(s).',
-  'panel.repair.repairing': 'Repairing PDF (Tier 1: QPDF rewrite)...',
+  'panel.repair.repairing': 'Repairing PDF (Tier 1: QPDF rewrite)…',
   'panel.repair.repaired':
     'Repaired: {{from}} KB -> {{to}} KB, {{pages}} pages. {{issues}} issue(s) addressed.',
-  'panel.repair.checking': 'Checking...',
+  'panel.repair.checking': 'Checking…',
   'panel.repair.validateFirst': 'Validate First',
-  'panel.repair.busy': 'Repairing...',
+  'panel.repair.busy': 'Repairing…',
   'panel.repair.repair': 'Repair',
   'panel.repair.reportAria': 'Validation report',
 
@@ -172,7 +187,7 @@ export const PANEL_STRINGS = {
   'panel.optimize.stripMetaHint': 'Removes author, title, timestamps, and other document info',
   'panel.optimize.compressStreams': 'Compress object streams',
   'panel.optimize.compressStreamsHint': 'Reduces file size by compressing internal structures',
-  'panel.optimize.optimizing': 'Optimizing...',
+  'panel.optimize.optimizing': 'Optimizing…',
   'panel.optimize.optimize': 'Optimize',
   'panel.optimize.result': '{{from}} KB → {{to}} KB ({{ratio}}% reduction)',
 
@@ -216,8 +231,11 @@ export const PANEL_STRINGS = {
   'panel.optimize.audit.category.other_objects': 'Unclassified objects',
   'panel.optimize.audit.category.overhead': 'Cross-reference and free space',
   'panel.optimize.audit.knob.compress': 'Compress ▸ resolution',
-  'panel.optimize.audit.knob.compress_streams': 'Compress object streams, below',
-  'panel.optimize.audit.knob.strip_metadata': 'Strip metadata, below',
+  // Every knob line answers one question — WHERE the setting is. The peers
+  // say it as a path (`Surface ▸ control`); ', below' was a sentence fragment
+  // hanging off a noun phrase in a column of paths, and it did not parse.
+  'panel.optimize.audit.knob.compress_streams': 'This panel ▸ Compress object streams',
+  'panel.optimize.audit.knob.strip_metadata': 'This panel ▸ Strip metadata',
   'panel.optimize.audit.knob.sanitize_comments': 'Remove Hidden Information ▸ comments',
   'panel.optimize.audit.knob.sanitize_forms': 'Remove Hidden Information ▸ form fields',
   'panel.optimize.audit.knob.sanitize_embedded_files':
@@ -226,7 +244,7 @@ export const PANEL_STRINGS = {
   'panel.optimize.audit.knob.sanitize_javascript': 'Remove Hidden Information ▸ JavaScript',
   'panel.optimize.audit.knob.sanitize_structure':
     'Remove Hidden Information ▸ document structure (costs accessibility)',
-  'panel.optimize.audit.knob.rewrite': 'Optimize, below — a rewrite reclaims it',
+  'panel.optimize.audit.knob.rewrite': 'This panel ▸ Optimize — a rewrite reclaims it',
   'panel.optimize.audit.knob.none': 'No setting changes this',
   'panel.optimize.audit.part.cross_reference': 'Cross-reference tables',
   'panel.optimize.audit.part.superseded': 'Superseded revisions',
@@ -236,21 +254,21 @@ export const PANEL_STRINGS = {
   'panel.extractText.open': 'Open a PDF to extract text',
   'panel.extractText.pagesLabel': 'Pages (e.g. 1,3 or all)',
   'panel.extractText.pagesAria': 'Pages to extract',
-  'panel.extractText.extracting': 'Extracting text...',
-  'panel.extractText.extractingBtn': 'Extracting...',
+  'panel.extractText.extracting': 'Extracting text…',
+  'panel.extractText.extractingBtn': 'Extracting…',
   'panel.extractText.extract': 'Extract',
   'panel.extractText.copy': 'Copy',
   'panel.extractText.copied': 'Copied to clipboard',
   'panel.extractText.save': 'Save as .txt',
-  'panel.extractText.saving': 'Saving text...',
+  'panel.extractText.saving': 'Saving text…',
   'panel.extractText.saved': 'Saved {{chars}} characters to {{path}}',
   'panel.extractText.done': 'Extracted {{chars}} characters from {{pages}} pages',
   'panel.extractText.doneOne': 'Extracted {{chars}} characters from page {{page}}',
 
   'panel.grayscale.open': 'Open a PDF to convert to grayscale',
   'panel.grayscale.blurb': 'Converts all colors to grayscale. Useful for B&W printing or archival.',
-  'panel.grayscale.converting': 'Converting to grayscale...',
-  'panel.grayscale.convertingBtn': 'Converting...',
+  'panel.grayscale.converting': 'Converting to grayscale…',
+  'panel.grayscale.convertingBtn': 'Converting…',
   'panel.grayscale.convert': 'Convert to Grayscale',
   'panel.grayscale.result': '{{from}} KB → {{to}} KB',
 
@@ -259,16 +277,16 @@ export const PANEL_STRINGS = {
   'panel.pdfVersion.currentLabel': 'Current version:',
   'panel.pdfVersion.target': 'Target Version',
   'panel.pdfVersion.versionAria': 'PDF version',
-  'panel.pdfVersion.setting': 'Setting PDF version...',
-  'panel.pdfVersion.settingBtn': 'Setting version...',
+  'panel.pdfVersion.setting': 'Setting PDF version…',
+  'panel.pdfVersion.settingBtn': 'Setting version…',
   'panel.pdfVersion.set': 'Set Version',
   'panel.pdfVersion.done': 'PDF {{from}} → PDF {{to}}',
 
   'panel.pdfa.open': 'Open a PDF to convert to PDF/A',
   'panel.pdfa.level': 'Conformance Level',
   'panel.pdfa.levelAria': 'PDF/A conformance level',
-  'panel.pdfa.converting': 'Converting to PDF/A...',
-  'panel.pdfa.convertingBtn': 'Converting...',
+  'panel.pdfa.converting': 'Converting to PDF/A…',
+  'panel.pdfa.convertingBtn': 'Converting…',
   'panel.pdfa.convert': 'Convert to PDF/A',
   // What the app can state and no more: the output declares the level, which
   // is read back out of the file's own metadata. No validator ran, so
@@ -367,12 +385,19 @@ export const PANEL_STRINGS = {
   'panel.comments.removed_other': 'Removed {{count}} comments (undo with Ctrl+Z)',
   'panel.comments.kind.highlight': 'Highlight',
   'panel.comments.kind.underline': 'Underline',
-  'panel.comments.kind.strikeout': 'StrikeOut',
+  // The list names each mark with the word the TOOL STRIP used to place it,
+  // not with the format's subtype. A user who pressed "Text" and then read
+  // "FreeText" in the list beside it had to work out they were the same
+  // thing — and /Text, the sticky note's subtype, was ALSO showing as
+  // "Text", so the two were labelled backwards from the user's side. The
+  // subtype is still what the engine and the file carry; it is not a
+  // user-facing name.
+  'panel.comments.kind.strikeout': 'Strikeout',
   'panel.comments.kind.squiggly': 'Squiggly',
-  'panel.comments.kind.freetext': 'FreeText',
-  'panel.comments.kind.ink': 'Ink',
+  'panel.comments.kind.freetext': 'Text',
+  'panel.comments.kind.ink': 'Draw',
   'panel.comments.kind.stamp': 'Stamp',
-  'panel.comments.kind.note': 'Text',
+  'panel.comments.kind.note': 'Sticky note',
   'panel.comments.kind.link': 'Link',
   'panel.comments.kind.measure': 'Measurement',
   'panel.comments.kind.shape': 'Shape',
@@ -551,7 +576,7 @@ export const PANEL_STRINGS = {
   'panel.encrypt.enterPassword': 'Enter at least one password.',
   'panel.encrypt.ownerNeeded': 'Set an owner password to enforce permission restrictions.',
   'panel.encrypt.addRecipientFirst': 'Add at least one recipient certificate.',
-  'panel.encrypt.encrypting': 'Encrypting...',
+  'panel.encrypt.encrypting': 'Encrypting…',
   'panel.encrypt.encrypt': 'Encrypt',
   'panel.encrypt.encryptedWith': 'Encrypted with {{cipher}}{{openSuffix}}{{permsSuffix}}',
   'panel.encrypt.openSuffix': ' (password required to open)',
@@ -841,9 +866,9 @@ export const PANEL_STRINGS = {
   'panel.watermark.open': 'Open a PDF to watermark',
   'panel.watermark.emptyText': 'Error: watermark text is empty',
   'panel.watermark.badPages': 'Error: no valid page numbers — use e.g. 1,3,5 or all',
-  'panel.watermark.applying': 'Applying watermark...',
-  'panel.watermark.applyingBtn': 'Applying...',
-  'panel.watermark.apply': 'Apply Watermark',
+  'panel.watermark.applying': 'Applying the watermark…',
+  'panel.watermark.applyingBtn': 'Applying…',
+  'panel.watermark.apply': 'Apply watermark',
   'panel.watermark.done_one': 'Watermarked {{count}} page',
   'panel.watermark.done_other': 'Watermarked {{count}} pages',
   'panel.watermark.text': 'Text',
@@ -912,8 +937,8 @@ export const PANEL_STRINGS = {
     'Deep rebuild via Ghostscript. Re-renders every page through the GS interpreter into a fresh PDF. Fixes font embedding issues, colorspace problems, and corrupt content streams.',
   'panel.rebuild.note':
     'Note: May lose interactive elements (form fields, JavaScript actions). Use Tier 1 Repair first for lighter fixes.',
-  'panel.rebuild.rebuilding': 'Rebuilding PDF (Tier 2: Ghostscript round-trip)...',
-  'panel.rebuild.rebuildingBtn': 'Rebuilding...',
+  'panel.rebuild.rebuilding': 'Rebuilding PDF (Tier 2: Ghostscript round-trip)…',
+  'panel.rebuild.rebuildingBtn': 'Rebuilding…',
   'panel.rebuild.rebuild': 'Rebuild',
   'panel.rebuild.done': 'Rebuilt: {{from}} KB -> {{to}} KB, {{pages}} pages.',
 
@@ -2270,8 +2295,8 @@ export const PANEL_STRINGS = {
 
   'panel.delete.open': 'Open a PDF to delete pages',
   'panel.delete.enterPages': 'Enter page numbers.',
-  'panel.delete.deleting': 'Deleting pages...',
-  'panel.delete.deletingBtn': 'Deleting...',
+  'panel.delete.deleting': 'Deleting pages…',
+  'panel.delete.deletingBtn': 'Deleting…',
   'panel.delete.delete': 'Delete Pages',
   'panel.delete.done': 'Deleted {{count}} pages, {{remaining}} remaining',
   'panel.delete.pagesLabel': 'Pages to delete (e.g. 2,4,6-8)',
@@ -2880,7 +2905,7 @@ export const PANEL_STRINGS = {
   'panel.prepareForm.pagesPlaceholder': 'e.g. 1,3,5-8',
   'panel.prepareForm.noPages': 'Give at least one page number.',
   'panel.prepareForm.noCanvas': 'Open the document on the page to review suggested fields.',
-  'panel.prepareForm.detect': 'Detect fields',
+  'panel.prepareForm.detect': 'Detect form fields',
   'panel.prepareForm.detecting': 'Looking…',
   'panel.prepareForm.found_one': '{{count}} suggested field.',
   'panel.prepareForm.found_other': '{{count}} suggested fields.',

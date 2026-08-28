@@ -97,11 +97,11 @@ export function ExtractTextPanel({ initialPage, onConsumeInitialPage }: { initia
             aria-label={tChrome('panel.extractText.pagesAria')}
             className="w-48 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500" />
         </div>
-        <button onClick={handleExtract} disabled={busy} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+        <button onClick={handleExtract} disabled={busy} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">
           {busy ? tChrome('panel.extractText.extractingBtn') : tChrome('panel.extractText.extract')}
         </button>
         {text && <button onClick={handleCopy} className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-sm font-medium">{tChrome('panel.extractText.copy')}</button>}
-        <button onClick={handleSave} disabled={busy} data-testid="extract-text-save" className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm font-medium">{tChrome('panel.extractText.save')}</button>
+        <button onClick={handleSave} disabled={busy} data-testid="extract-text-save" className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm font-medium">{tChrome('panel.extractText.save')}</button>
       </div>
       {text && (
         <textarea readOnly value={text} className="flex-1 min-h-[200px] px-3 py-2 bg-neutral-800 border border-neutral-700 rounded text-sm font-mono text-neutral-300 resize-none focus:outline-none" />

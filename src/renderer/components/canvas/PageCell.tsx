@@ -306,6 +306,37 @@ const INK_MERGE_WINDOW_MS = 2500;
 const HIGHLIGHTER_WIDTH_PT = 14;
 const HIGHLIGHTER_OPACITY = 0.4;
 
+/** The colour an armed mode will actually draw in when the user has chosen
+ * none — the value every `annotationColor ?? …` fallback below resolves to.
+ *
+ * Exported so the swatch pickers can show the EFFECTIVE colour as selected.
+ * A picker whose selection state is `toolColor === swatch` reports nothing at
+ * all until the user clicks it: the strip showed six swatches with no ring
+ * beside a page already marked in yellow, which is a picker that cannot say
+ * what it is about to do. */
+export function defaultToolColor(mode: string): string | null {
+  switch (mode) {
+    case 'highlight':
+    case 'inkhighlight':
+      return HIGHLIGHT_COLOR;
+    case 'freetext':
+    case 'callout':
+    case 'note':
+    case 'addtext':
+      return FREETEXT_COLOR;
+    case 'ink':
+      return INK_COLOR;
+    case 'shape':
+      return SHAPE_COLOR;
+    case 'measuredist':
+    case 'measureperim':
+    case 'measurearea':
+      return MEASURE_COLOR;
+    default:
+      return null;
+  }
+}
+
 function defaultColorFor(kind: PageAnnotation['kind']): string {
   if (kind === 'freetext') return FREETEXT_COLOR;
   if (kind === 'ink') return INK_COLOR;

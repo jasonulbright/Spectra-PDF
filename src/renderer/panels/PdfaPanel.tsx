@@ -60,7 +60,7 @@ export function PdfaPanel(): React.ReactElement {
         {tChrome('panel.pdfa.claimNote')}
       </p>
       <GsRequiredNotice capability={gs} testId="pdfa-gs" />
-      <button onClick={handleConvert} disabled={busy || gsBlocked(gs)} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+      <button onClick={handleConvert} disabled={busy || gsBlocked(gs)} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">
         {busy ? tChrome('panel.pdfa.convertingBtn') : tChrome('panel.pdfa.convert')}
       </button>
       <StatusBar message={status} busy={busy} />

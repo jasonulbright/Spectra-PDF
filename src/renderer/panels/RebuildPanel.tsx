@@ -41,7 +41,7 @@ export function RebuildPanel(): React.ReactElement {
       <p className="text-sm text-neutral-500">{tChrome('panel.rebuild.blurb')}</p>
       <p className="text-xs text-amber-500/80">{tChrome('panel.rebuild.note')}</p>
       <GsRequiredNotice capability={gs} testId="rebuild-gs" />
-      <button onClick={handleRebuild} disabled={busy || gsBlocked(gs)} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+      <button onClick={handleRebuild} disabled={busy || gsBlocked(gs)} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">
         {busy ? tChrome('panel.rebuild.rebuildingBtn') : tChrome('panel.rebuild.rebuild')}
       </button>
       <StatusBar message={status} busy={busy} />

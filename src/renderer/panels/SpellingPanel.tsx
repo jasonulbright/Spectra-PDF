@@ -471,7 +471,7 @@ export function SpellingPanel(): React.ReactElement {
       <button
         type="button"
         data-testid="spelling-check"
-        className="self-start px-3 py-1 text-sm bg-neutral-800 border border-neutral-700 rounded text-neutral-100 disabled:opacity-50"
+        className="self-start px-3 py-1 text-sm bg-neutral-800 border border-neutral-700 rounded text-neutral-100 disabled:opacity-60"
         disabled={busy || sources.length === 0}
         onClick={() => void check()}
       >
@@ -567,7 +567,7 @@ export function SpellingPanel(): React.ReactElement {
             <button
               type="button"
               data-testid="spelling-change"
-              className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded text-neutral-100 disabled:opacity-50"
+              className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded text-neutral-100 disabled:opacity-60"
               disabled={busy || !replacement.trim() || selectedIssues.length === 0}
               onClick={() => void runFix(selectedIssues.slice(-1), selected)}
             >
@@ -576,7 +576,7 @@ export function SpellingPanel(): React.ReactElement {
             <button
               type="button"
               data-testid="spelling-change-all"
-              className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded text-neutral-100 disabled:opacity-50"
+              className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded text-neutral-100 disabled:opacity-60"
               disabled={busy || !replacement.trim() || selectedIssues.length === 0}
               onClick={() => void runFix(selectedIssues, selected)}
             >

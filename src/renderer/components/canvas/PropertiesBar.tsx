@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import type { CanvasTool, PageAnnotation } from '../../state/types';
-import { ANNOTATION_PALETTE } from './PageCell';
+import { ANNOTATION_PALETTE, defaultToolColor } from './PageCell';
 import {
   isTransformable,
   isResizable,
@@ -240,7 +240,7 @@ export function PropertiesBar({
               key={`fill-${c}`}
               type="button"
               data-testid={`pbar-fill-${c.slice(1)}`}
-              className={'properties-bar-swatch pbar-fill-swatch' + (styleRef.fillColor === c ? ' active' : '')}
+              className={'properties-bar-swatch color-swatch pbar-fill-swatch' + (styleRef.fillColor === c ? ' is-selected' : '')}
               style={{ backgroundColor: c }}
               title={tChrome('canvas.pbar.fillWith', { color: c })}
               aria-pressed={styleRef.fillColor === c}
@@ -492,7 +492,7 @@ export function PropertiesBar({
                 key={c}
                 type="button"
                 data-testid={`pbar-color-${c.slice(1)}`}
-                className="properties-bar-swatch"
+                className="properties-bar-swatch color-swatch"
                 style={{ backgroundColor: c }}
                 title={tChrome('canvas.pbar.recolorAll', { color: c })}
                 onClick={() => onRecolorGroup(c)}
@@ -535,7 +535,7 @@ export function PropertiesBar({
                 key={c}
                 type="button"
                 data-testid={`pbar-color-${c.slice(1)}`}
-                className={'properties-bar-swatch' + (a.color === c ? ' active' : '')}
+                className={'properties-bar-swatch color-swatch' + (a.color === c ? ' is-selected' : '')}
                 style={{ backgroundColor: c }}
                 title={tChrome('canvas.pbar.recolorTo', { color: c })}
                 aria-pressed={a.color === c}
@@ -571,7 +571,7 @@ export function PropertiesBar({
                 key={c}
                 type="button"
                 data-testid={`pbar-tool-color-${c.slice(1)}`}
-                className={'properties-bar-swatch' + (toolColor === c ? ' active' : '')}
+                className={'properties-bar-swatch color-swatch' + ((toolColor ?? defaultToolColor(tool)) === c ? ' is-selected' : '')}
                 style={{ backgroundColor: c }}
                 title={tChrome('canvas.pbar.useForNew', { color: c })}
                 aria-pressed={toolColor === c}

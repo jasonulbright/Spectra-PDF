@@ -472,7 +472,7 @@ export function CombineDialog({
                       type="button"
                       data-testid="combine-row-up"
                       aria-label={tChrome('dialog.createPdf.moveUp')}
-                      className="px-1 text-neutral-400 hover:text-neutral-200 disabled:opacity-30"
+                      className="px-1 text-neutral-400 hover:text-neutral-200 disabled:opacity-60"
                       disabled={busy || index === 0}
                       onClick={() => setRows((prev) => moveRow(prev, row.id, -1))}
                     >
@@ -482,7 +482,7 @@ export function CombineDialog({
                       type="button"
                       data-testid="combine-row-down"
                       aria-label={tChrome('dialog.createPdf.moveDown')}
-                      className="px-1 text-neutral-400 hover:text-neutral-200 disabled:opacity-30"
+                      className="px-1 text-neutral-400 hover:text-neutral-200 disabled:opacity-60"
                       disabled={busy || index === rows.length - 1}
                       onClick={() => setRows((prev) => moveRow(prev, row.id, 1))}
                     >
@@ -492,7 +492,7 @@ export function CombineDialog({
                       type="button"
                       data-testid="combine-row-remove"
                       aria-label={tChrome('dialog.createPdf.remove')}
-                      className="px-1 text-neutral-400 hover:text-red-400 disabled:opacity-30"
+                      className="px-1 text-neutral-400 hover:text-red-400 disabled:opacity-60"
                       disabled={busy}
                       onClick={() => setRows((prev) => removeRow(prev, row.id))}
                     >
@@ -635,7 +635,7 @@ export function CombineDialog({
           <button
             type="button"
             data-testid="combine-run"
-            className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+            className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
             disabled={blockerKey !== null || busy || psRefused}
             onClick={() => void combine()}
           >

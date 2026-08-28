@@ -462,7 +462,7 @@ export function PrepareFormPanel(): React.ReactElement {
 
       <GsRequiredNotice capability={gs} testId="prepareform-gs" />
       <button
-        className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded px-3 py-1.5 text-sm"
+        className="bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded px-3 py-1.5 text-sm"
         data-testid="prepare-form-detect"
         disabled={busy || creating}
         onClick={() => void detect()}
@@ -474,7 +474,7 @@ export function PrepareFormPanel(): React.ReactElement {
         type="button"
         onClick={() => invokeCommand('tools.formPrepFolder')}
         data-testid="prepare-form-folder"
-        className="self-start text-xs text-neutral-400 hover:text-neutral-200 underline"
+        className="self-start text-xs link-action"
       >
         {tChrome('dialog.formPrep.openPanel')}
       </button>
@@ -510,7 +510,7 @@ export function PrepareFormPanel(): React.ReactElement {
       {candidates.length > 0 && (
         <div className="flex items-center gap-2 text-xs">
           <button
-            className="underline"
+            className="quiet-action"
             data-testid="prepare-form-select-all"
             disabled={truncated}
             onClick={() => publish(setCheckedAll(candidates, allState !== 'all'))}
@@ -562,14 +562,14 @@ export function PrepareFormPanel(): React.ReactElement {
                     onChange={(e) => publish(renameCandidate(candidates, candidate.id, e.target.value))}
                   />
                   <button
-                    className="text-xs underline"
+                    className="text-xs quiet-action"
                     title={tChrome('panel.prepareForm.reveal')}
                     onClick={() => getCanvasServices()?.formCandidates.focus(candidate.id)}
                   >
                     {tChrome('panel.prepareForm.reveal')}
                   </button>
                   <button
-                    className="text-xs underline"
+                    className="text-xs danger-action is-quiet"
                     title={tChrome('panel.prepareForm.discard')}
                     onClick={() => publish(removeCandidate(candidates, candidate.id))}
                   >
@@ -666,7 +666,7 @@ export function PrepareFormPanel(): React.ReactElement {
 
       {candidates.length > 0 && (
         <button
-          className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded px-3 py-1.5 text-sm"
+          className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 rounded px-3 py-1.5 text-sm"
           data-testid="prepare-form-create"
           disabled={creating || checkedCount === 0}
           onClick={() => void create()}
@@ -719,7 +719,7 @@ export function PrepareFormPanel(): React.ReactElement {
                   idPrefix={`prepare-form-sigfield-${field.name}`}
                 />
                 <button
-                  className="self-start bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded px-2 py-1 text-xs"
+                  className="self-start bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded px-2 py-1 text-xs"
                   data-testid={`prepare-form-sigfield-apply-${field.name}`}
                   disabled={!lockDrafts[field.name] || applyingLock !== null}
                   onClick={() => void applyLock(field)}
@@ -766,7 +766,7 @@ export function PrepareFormPanel(): React.ReactElement {
               unauthorable={unauthorableOf(field)}
             />
             <button
-              className="self-start bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded px-2 py-1 text-xs"
+              className="self-start bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded px-2 py-1 text-xs"
               data-testid={`prepare-form-fieldprop-apply-${field.name}`}
               disabled={
                 (!actionDrafts[field.name] && !dataDrafts[field.name]) || applyingActions !== null

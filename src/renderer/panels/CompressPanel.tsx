@@ -286,7 +286,7 @@ export function CompressPanel(): React.ReactElement {
               type="button"
               data-testid="compress-mrc-suggestion-apply"
               onClick={() => handlePresetChange('mrc')}
-              className="underline text-blue-400 hover:text-blue-300"
+              className="link-action"
             >
               {tChrome('panel.compress.mrcSuggestApply')}
             </button>
@@ -381,7 +381,7 @@ export function CompressPanel(): React.ReactElement {
         <p className="text-xs text-neutral-500 max-w-md">{tChrome('panel.compress.thenOptimizeHint')}</p>
       </div>
       <GsRequiredNotice capability={gs} testId="compress-gs" />
-      <button data-testid="compress-run" onClick={handleCompress} disabled={busy || gsBlocked(gs)} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+      <button data-testid="compress-run" onClick={handleCompress} disabled={busy || gsBlocked(gs)} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">
         {busy ? tChrome('panel.compress.compressing') : tChrome('panel.compress.compress')}
       </button>
       <StatusBar message={status} busy={busy} />

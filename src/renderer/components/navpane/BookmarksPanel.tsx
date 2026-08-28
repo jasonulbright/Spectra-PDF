@@ -720,7 +720,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
               data-testid="bookmarks-derive-build"
               disabled={deriving || (derive.tagged && derive.headings === 0)}
               onClick={() => void buildFromStructure(!derive.tagged)}
-              className="bookmark-add-btn disabled:opacity-50"
+              className="bookmark-add-btn disabled:opacity-60"
             >
               {derive.tagged
                 ? tChrome('nav.bookmarks.derive.build')
@@ -741,7 +741,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
           data-testid="bookmark-add"
           onClick={addRoot}
           disabled={!loaded}
-          className="bookmark-add-btn disabled:opacity-50"
+          className="bookmark-add-btn disabled:opacity-60"
         >
           {tChrome('nav.bookmarks.add')}
         </button>
@@ -749,7 +749,7 @@ export function BookmarksPanel({ activeFile }: NavPanelComponentProps): React.Re
           data-testid="bookmarks-from-structure"
           onClick={() => void openDerive()}
           disabled={!loaded || deriving}
-          className="bookmark-add-btn disabled:opacity-50"
+          className="bookmark-add-btn disabled:opacity-60"
         >
           {tChrome('nav.bookmarks.derive.open')}
         </button>

@@ -38,7 +38,7 @@ export function DecryptPanel(): React.ReactElement {
         <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={tChrome('panel.decrypt.passwordPlaceholder')}
           className="w-64 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm focus:outline-none focus:border-blue-500" />
       </div>
-      <button onClick={handleDecrypt} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+      <button onClick={handleDecrypt} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">
         {busy ? tChrome('panel.decrypt.decrypting') : tChrome('panel.decrypt.decrypt')}
       </button>
       <StatusBar message={status} busy={busy} />

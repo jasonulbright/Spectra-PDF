@@ -672,7 +672,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                     <button
                       data-testid="batch-ocr-preset-delete-confirm"
                       onClick={deletePreset}
-                      className="px-2.5 py-1 text-xs bg-red-700/80 hover:bg-red-600 text-white rounded font-medium shrink-0"
+                      className="text-xs danger-action shrink-0"
                     >
                       {tChrome('dialog.common.delete')}
                     </button>
@@ -996,7 +996,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                 <button
                   data-testid="batch-inplace-replace"
                   onClick={() => void startInPlace()}
-                  className="px-3 py-1.5 text-xs text-white bg-red-700/90 hover:bg-red-600 rounded font-medium"
+                  className="text-xs danger-action"
                 >
                   {tChrome('dialog.batch.replaceOriginals')}
                 </button>
@@ -1006,7 +1006,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
                 data-testid="batch-ocr-start"
                 disabled={!canStart}
                 onClick={() => (inPlace ? setConfirmInPlace(true) : void start())}
-                className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+                className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
               >
                 {tChrome('dialog.batch.start')}
               </button>
@@ -1027,7 +1027,7 @@ export function BatchOcrDialog({ onClose }: BatchOcrDialogProps): React.JSX.Elem
               onClick={cancel}
               disabled={stopping || inPlace}
               title={inPlace ? tChrome('dialog.batch.noStopInPlace') : undefined}
-              className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium disabled:opacity-50"
+              className="px-3 py-1.5 text-xs bg-neutral-800 text-neutral-300 border border-neutral-700 hover:bg-neutral-700 rounded font-medium disabled:opacity-60"
             >
               {tChrome(stopping ? 'dialog.batch.stopping' : 'dialog.batch.stop')}
             </button>

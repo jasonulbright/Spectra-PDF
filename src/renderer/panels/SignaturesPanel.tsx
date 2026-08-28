@@ -557,7 +557,7 @@ export function SignaturesPanel(): React.ReactElement {
           data-testid="signatures-recheck"
           onClick={() => void runVerify()}
           disabled={busy}
-          className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium"
+          className="px-2.5 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded font-medium"
         >
           {tChrome('panel.sig.recheck')}
         </button>
@@ -898,7 +898,7 @@ export function SignaturesPanel(): React.ReactElement {
               data-testid="sign-in-place"
               onClick={() => void handleSignInPlace()}
               disabled={signing}
-              className="px-3 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+              className="px-3 py-1 text-xs text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
             >
               {signing ? tChrome('panel.sig.signing') : tChrome('panel.sig.signInPlace')}
             </button>
@@ -906,7 +906,7 @@ export function SignaturesPanel(): React.ReactElement {
               data-testid="sign-apply"
               onClick={() => void handleSign()}
               disabled={signing}
-              className="px-3 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded font-medium"
+              className="px-3 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded font-medium"
             >
               {signing ? tChrome('panel.sig.signing') : tChrome('panel.sig.signSaveCopy')}
             </button>

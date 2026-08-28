@@ -71,9 +71,14 @@
    ONE variable, three theme values, each AA on the surfaces it appears on
    (dark shell #171717/#191919, light #ffffff/#f9fafb, HC #000000). The
    custom components converted onto it used six near-identical greys, four
-   of which measured 2.7:1–4.4:1 on the dark shell. */
-:root { --text-dim: #909098; --surface-2: #303034; --text: #e5e5e5; --border: #45454c; }
-[data-theme="light"] { --text-dim: #6b7280; --surface-2: #ffffff; --text: #111827; --border: #d1d5db; }
+   of which measured 2.7:1–4.4:1 on the dark shell.
+   The value is AA against the LIGHTEST ground the token reaches, not against
+   the shell: dim text also lands on `--surface-2` (dark #303034, light
+   #f3f4f6), where the previous #909098 measured 4.15:1 and #6b7280 4.39:1.
+   `tests/form-controls.test.ts` computes both ratios from these hexes, so a
+   later "quieter" value cannot silently fall back under 4.5:1. */
+:root { --text-dim: #a0a0a8; --surface-2: #303034; --text: #e5e5e5; --border: #45454c; }
+[data-theme="light"] { --text-dim: #616a76; --surface-2: #ffffff; --text: #111827; --border: #d1d5db; }
 [data-theme="high-contrast"] { --text-dim: #d0d0d0; --surface-2: #0d0d0d; --text: #ffffff; --border: #2e2e2e; }
 /* --surface-2/--text/--border were consumed with fallbacks but never
    DEFINED — every consumer (the measure scale controls among them) was
@@ -94,6 +99,13 @@
    bare utility (the same trick as the [data-theme] tables below) while still
    losing to those tables, which come later at equal specificity. */
 :root .text-neutral-500 { color: #a0a0a8; }
+/* neutral-600 (#525252) is the same defect one step darker — 2.0:1 on a panel.
+   It reads as the "even quieter than quiet" step and is used that way (object
+   counts, truncation notes), so it takes a value one step below the -500 hint
+   text that still clears AA on the darkest ground it can land on
+   (`--surface-2` #303034, 4.7:1). Below that step there is no room left: the
+   hierarchy has to be carried by size and position, not by going sub-AA. */
+:root .text-neutral-600 { color: #9a9aa4; }
 
 /* bg-neutral-850 is OUR shade, not Tailwind's — the light/HC tables below
    remap it, but no base utility ever existed, so in dark the "surface" was
@@ -271,7 +283,6 @@
 [data-theme="light"] .properties-bar-note { color: #374151; }
 [data-theme="light"] .properties-bar-action { color: #374151; background: #ffffff; border-color: #d1d5db; }
 [data-theme="light"] .properties-bar-action:hover { background: #e5e7eb; color: #111827; }
-[data-theme="light"] .properties-bar-swatch { border-color: rgba(0, 0, 0, 0.25); }
 
 /* ── System accent color overrides ───────────────────────────────────────
    When --accent is set (System theme), replace hardcoded blue with the
@@ -345,20 +356,45 @@
    composite against a known ground in both looks.
    ──────────────────────────────────────────────────────────────────────── */
 
+/* `--strip-btn-border` is the quiet resting edge of a button that is present
+   but not armed — the tool strip's mode buttons, and any future row of peers
+   where only one is chosen. It is deliberately below `--control-border`: a
+   toolbar of nine equally-boxed buttons has to read as a toolbar without
+   nine borders competing with the one armed pill.
+   `--danger` is the product's ONE destructive idiom (see the `.danger-action`
+   rule): before it, Delete and Remove were bare text beside bordered buttons
+   on four surfaces while a single panel had a real red button. */
 :root {
   --control-bg: #262629;
   --control-border: #55555e;
   --control-border-hover: #7f7f8a;
+  --strip-btn-border: #3a3a40;
+  /* #d9395f — the red the product already used — measures 4.47:1 against its
+     own white label. The darker step clears AA without changing the hue. */
+  --danger: #c62d52;
+  --danger-hover: #d9395f;
+  --danger-fg: #ffffff;
+  --danger-text: #f08ba3;
 }
 [data-theme="light"] {
   --control-bg: #ffffff;
   --control-border: #9ca3af;
   --control-border-hover: #6b7280;
+  --strip-btn-border: #d1d5db;
+  --danger: #b3243c;
+  --danger-hover: #97182f;
+  --danger-fg: #ffffff;
+  --danger-text: #a4172f;
 }
 [data-theme="high-contrast"] {
   --control-bg: #000000;
   --control-border: #ffffff;
   --control-border-hover: #ffffff;
+  --strip-btn-border: #ffffff;
+  --danger: #000000;
+  --danger-hover: #1a1a1a;
+  --danger-fg: #ffffff;
+  --danger-text: #ffffff;
 }
 
 input[type="checkbox"],
@@ -510,6 +546,161 @@ select option {
   padding-inline-end: 22px;
 }
 
+/* ── Text inputs: placeholder vs value, and honest overflow ───────────────
+   Element level, for the same reason the control layer is: a box added later
+   has to inherit both of these or it re-earns the bugs.
+
+   A placeholder must not be readable as a value. Chromium's default is close
+   enough to the value colour that a "—" placeholder in an empty box was
+   indistinguishable from a "—" somebody typed, which is the difference between
+   "no header here" and "a header reading em-dash".
+
+   And a value too long for its box gets an ellipsis rather than being sliced
+   through a glyph. "Northwind Instru" and "Page {page} of {p" read as the
+   stored value; "Northwind Instru…" reads as a value that continues. The
+   property applies only while the box is not focused — a caret needs the whole
+   string to scroll — which is exactly when the reader is judging it. */
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-dim);
+  opacity: 1;
+}
+input[type="text"],
+input[type="search"],
+input:not([type]) {
+  text-overflow: ellipsis;
+}
+
+/* ── Action idioms ────────────────────────────────────────────────────────
+   Three classes, applied where the meaning applies, so that "what happens if
+   I press this" is answered by shape rather than by the panel it lives in.
+   The audit measured the alternative: Delete and Remove as bare text beside
+   bordered buttons on four surfaces, and five surfaces spelling one class of
+   action three ways (a pill, a bordered button, an underlined link).
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* DESTRUCTIVE: removes something the user cannot get back by pressing again.
+   It is a filled button in `--danger`, never bare text — a destructive action
+   with no button box is quieter on screen than the reversible actions beside
+   it, which is exactly backwards. */
+.danger-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--danger);
+  border-radius: 4px;
+  background: var(--danger);
+  color: var(--danger-fg);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.danger-action:hover:not(:disabled) {
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
+}
+/* The quiet register of the same idiom: a per-row Delete inside a list, where
+   a wall of filled red buttons would be its own legibility problem. Still a
+   button box, still `--danger` — the hue and the box are what carry the
+   meaning; only the emphasis differs. */
+.danger-action.is-quiet {
+  background: transparent;
+  color: var(--danger-text);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+.danger-action.is-quiet:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  border-color: var(--danger);
+  color: var(--danger-text);
+}
+
+/* QUIET: a real action on what is already on screen, at low emphasis — re-run
+   the audit, check every row, expand the detail. It is a button box because
+   pressing it does something; it is quiet because it is not what the panel is
+   for. This is the class that used to be spelt as an underlined link, which is
+   how five surfaces ended up with three affordances for one kind of action. */
+.quiet-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border: 1px solid var(--strip-btn-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.quiet-action:hover:not(:disabled) {
+  border-color: var(--control-border-hover);
+  color: var(--text);
+}
+
+/* A LINK navigates or opens something ELSE — another panel, a folder tool, a
+   target outside this view. It is the only thing that gets an underline. An
+   action that changes what is already here is a button, whatever its emphasis:
+   "Check all", "Audit again" and "Details" were links sitting in button rows,
+   so the underline had stopped predicting anything. */
+.link-action {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  color: var(--accent-text, var(--accent, #4cc2ff));
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ONE disabled treatment, product-wide. It has to be legible: a control dimmed
+   to 2:1 reads as absent rather than unavailable, and a reader cannot tell a
+   disabled row from a rendering fault. The `:disabled` element rule sets the
+   floor for controls that declare nothing; the Tailwind `disabled:opacity-60`
+   utility carries the same value where a component declares it, so the two
+   agree instead of racing on specificity. */
+:where(button, select, input, textarea):disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Whole-word: the label is boxed, which is what makes `ab` mean "this exact
+   word" rather than "the letters a and b". The button's own border is the
+   button; this underline is the mark. */
+.find-mode-word > span,
+.find-mode-word {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ── Colour-swatch pickers ────────────────────────────────────────────────
+   ONE picker component's styling, so a swatch row means the same thing in
+   every panel. The selection ring is on the ELEMENT state, not on each
+   panel's own markup: three pickers previously carried two selection
+   behaviours, and the one with none sat beside a page already highlighted in
+   a colour the row could not point at.
+   The ring is drawn OUTSIDE the swatch (outline + offset) because a swatch's
+   whole surface is its value — an inset ring reports a colour the picker
+   would then apply. */
+.color-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  /* A swatch at or near the panel's own colour would otherwise read as a hole
+     in the row rather than as a choice. */
+  box-shadow: inset 0 0 0 1px rgba(127, 127, 137, 0.55);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  cursor: pointer;
+  padding: 0;
+  border: none;
+}
+.color-swatch.is-selected,
+.color-swatch[aria-pressed="true"] {
+  outline-color: var(--accent-text, var(--accent, #0078d4));
+}
+
 /* ── Workbench chrome ─────────────────────────────────────────────────────
    The menu bar, main toolbar, and tab strip all carry `.app-shell-bar`, so
    the Mica frame rules below (keyed on that class) tint them automatically —
@@ -518,7 +709,17 @@ select option {
    show `.app-shell` (bg-neutral-900 / light remap) through, exactly as the
    old single header did, keeping the no-attribute fallback canonical.
    The doc-tab lane scrolls horizontally with a thin, theme-following bar. */
-.app-tab-lane::-webkit-scrollbar { height: 0; }
+/* Both axes, deliberately. `overflow-x: auto` makes the OTHER axis compute to
+   `auto` as well (a `visible` sibling is not representable), so the lane grew a
+   VERTICAL scrollbar the moment its 32px tabs exceeded its 32px box by a
+   border. Zeroing only `height` left that bar's `width` at the platform
+   default, and it painted a ~6x25px light rounded thumb hard against the
+   trailing edge of the last tab — the unlabelled pill in the hero shot, a
+   scroll affordance in a strip with nothing to scroll vertically. The lane
+   also declares `overflow-y: hidden` at its element, so the layout never
+   reserves that gutter in the first place; this rule is the belt for the
+   platforms that draw an overlay bar regardless. */
+.app-tab-lane::-webkit-scrollbar { height: 0; width: 0; }
 
 /* ── Window backdrop (Mica) ──────────────────────────────────────────────
    Set up only when the backend actually applied a backdrop — index.tsx
@@ -905,7 +1106,7 @@ select option {
   border-radius: 4px;
 }
 .signatures-nav-recheck-btn:hover:not(:disabled) { color: #e5e5e5; background: #262626; }
-.signatures-nav-recheck-btn:disabled { opacity: 0.5; }
+.signatures-nav-recheck-btn:disabled { opacity: 0.6; }
 /* Panel-level verify failure — flagged red, distinct from the gray "no
    signatures" empty state (which is plain .navpanel-empty). */
 .signatures-nav-error { color: #f87171; }
@@ -1262,9 +1463,15 @@ select option {
   gap: 2px;
   margin-inline-start: auto;
   align-self: center;
-  /* Keep actions faintly visible so they remain discoverable; hover brightens
-     them to full opacity. */
-  opacity: 0.35;
+  /* Resting emphasis, not near-invisibility. At 0.35 the four glyphs
+     (chevron up, chevron down, export, close) composited to roughly #555 on
+     the strip header's ground — about 2:1, below any usable threshold and
+     invisible to an automated audit because they are SVG rather than text.
+     0.85 on `--ink-soft` keeps them quieter than the document name beside them
+     while staying readable (a glyph is a graphical object, so the applicable
+     threshold is 3:1; this composites to ~4.7:1 dark and ~4.4:1 light).
+     Hover still takes them to full. */
+  opacity: 0.85;
   transition: opacity 0.15s ease;
 }
 
@@ -1287,7 +1494,7 @@ select option {
 }
 
 .canvas-view .icon-btn:disabled {
-  opacity: 0.35;
+  opacity: 0.6;
   cursor: default;
 }
 
@@ -1823,7 +2030,7 @@ select option {
 
 .secondary-toolbar-hint {
   font-size: 11px;
-  color: var(--text-dim, #8a8a92);
+  color: var(--text-dim, #a0a0a8);
   align-self: center;
   padding: 0 4px;
 }
@@ -1939,7 +2146,7 @@ select option {
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: var(--text-dim, #8a8a92);
+  color: var(--text-dim, #a0a0a8);
 }
 .symbol-palette-set-name {
   overflow: hidden;
@@ -1974,7 +2181,7 @@ select option {
 .symbol-palette-item-name {
   font-size: 9px;
   line-height: 1.1;
-  color: var(--text-dim, #8a8a92);
+  color: var(--text-dim, #a0a0a8);
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1983,7 +2190,7 @@ select option {
 .symbol-palette-empty,
 .symbol-palette-status {
   font-size: 11px;
-  color: var(--text-dim, #8a8a92);
+  color: var(--text-dim, #a0a0a8);
   margin: 0;
 }
 .symbol-palette-status.error {
@@ -2045,7 +2252,7 @@ select option {
   border-radius: 50%;
   background: var(--surface-2, #303034);
   border: 1px solid var(--border, #45454c);
-  color: var(--text-dim, #8a8a92);
+  color: var(--text-dim, #a0a0a8);
   opacity: 0;
   transition: opacity 80ms;
 }
@@ -2386,17 +2593,34 @@ select option {
   background: rgba(255, 255, 255, 0.3);
 }
 
+/* Pinned to the mark's top-inline-start corner, not laid out in its flow.
+   In flow it was an inline-block sitting on a line box, so on a mark the
+   height of one text line the inherited line-height pushed it past the mark's
+   own bottom edge: the tag rendered half outside the bottom-left corner, over
+   the line of text underneath, at ~6px — illegible, and read as a rendering
+   fault rather than as a label. Absolute placement takes it out of that line
+   box entirely; the mark itself keeps `overflow: visible` so the remove badge
+   deliberately hanging off its corner is still whole.
+   It also gets its own ground. Red-on-translucent-dark inside a mark that may
+   sit over any page content is not a contrast anyone can predict. */
 .page-redact-label {
-  display: inline-block;
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
   max-width: 100%;
-  max-height: 100%;
   overflow: hidden;
-  padding: 1px 3px;
-  font-size: 8px;
+  padding: 0 3px;
+  border-end-end-radius: 2px;
+  /* Darker than the mark's own border so the white label clears 4.5:1 (6.5:1
+     measured); it is a literal because this is drawn ON the page, where the
+     theme has no say. */
+  background: #b3243c;
+  font-size: 9px;
+  line-height: 13px;
   font-weight: 700;
   letter-spacing: 0.06em;
   white-space: nowrap;
-  color: rgba(255, 122, 126, 0.9);
+  color: #ffffff;
 }
 
 .page-annot-band.band-signature {
@@ -2428,8 +2652,12 @@ select option {
 }
 
 /* Find: matching pages get a ring; OCR'd pages get per-word boxes. */
+/* A ring, taking the selection token's OUTLINE form: a find match is one
+   member of a set, which is exactly what the ring means everywhere else. The
+   literal `rgba(59,130,246,.9)` it used to carry was a blue in no theme's
+   palette and the last page-card idiom still standing outside the token. */
 .page.find-match {
-  outline: 2px solid rgba(59, 130, 246, 0.9);
+  outline: 2px solid color-mix(in srgb, var(--select) 90%, transparent);
   outline-offset: 2px;
 }
 
@@ -2693,14 +2921,26 @@ select option {
   pointer-events: auto;
 }
 
+/* Inside the rectangle it describes, on its own ground. Outside and above it,
+   the label overhung the band's edge (and the page's, on a crop near the
+   margin) as ~6px of amber text with the page showing through — small enough
+   and low-contrast enough to read as an artifact rather than as the word KEEP.
+   The band is unfilled by design, so the chip is the one filled thing in it
+   and cannot be confused with shading the region. */
 .page-crop-label {
   position: absolute;
-  top: -0.95rem;
-  left: 0;
-  font-size: 0.55rem;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0 3px;
+  border-end-end-radius: 2px;
+  background: #9a5b00;
+  font-size: 9px;
+  line-height: 13px;
   letter-spacing: 0.08em;
-  font-weight: 600;
-  color: #f59e0b;
+  font-weight: 700;
+  color: #ffffff;
   white-space: nowrap;
 }
 
@@ -3127,7 +3367,7 @@ select option {
 }
 .omnisearch-row:hover:not(:disabled),
 .omnisearch-row.active { background: #2e2e2e; color: #fff; }
-.omnisearch-row:disabled { opacity: 0.45; }
+.omnisearch-row:disabled { opacity: 0.6; }
 .omnisearch-icon {
   display: flex;
   align-items: center;
@@ -3219,6 +3459,14 @@ select option {
   gap: 10px;
   flex-wrap: wrap;
   padding: 5px 10px;
+  /* The strip's height is a constant, not a function of which tool is armed.
+     Takeoff's count-group buttons carry a symbol glyph beside their label and
+     grew the strip from 28px to 40px, which moved the page top by 13px on
+     every entry into and exit from that tool — the document jumping is the
+     defect, not the taller button. The floor sizes the strip for the tallest
+     control it can hold, so no tool changes it. */
+  min-height: 34px;
+  box-sizing: border-box;
   border-bottom: 1px solid #2e2e2e;
   background: #1f1f1f;
   flex-shrink: 0;
@@ -3274,7 +3522,7 @@ select option {
   border-color: #45454c;
 }
 .home-action:disabled {
-  opacity: 0.4;
+  opacity: 0.6;
   pointer-events: none;
 }
 .home-action-primary {
@@ -3569,7 +3817,7 @@ select option {
   cursor: pointer;
 }
 .canvas-status-action:disabled {
-  opacity: 0.5;
+  opacity: 0.6;
   pointer-events: none;
 }
 .canvas-status-quiet {
@@ -3626,12 +3874,12 @@ select option {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-dim, #8a8a92);
+  color: var(--text-dim, #a0a0a8);
 }
 .properties-bar-meta,
 .properties-bar-empty {
   font-size: 11px;
-  color: var(--text-dim, #8a8a92);
+  color: var(--text-dim, #a0a0a8);
 }
 .properties-bar-note {
   font-size: 11px;
@@ -3646,17 +3894,13 @@ select option {
   gap: 4px;
   align-items: center;
 }
+/* The properties bar's swatches are `.color-swatch` like every other picker;
+   only the size differs, because this bar is 24px tall. Everything else — the
+   edge that keeps a near-background swatch from reading as a hole, and the
+   accent selection ring — comes from the shared rule. */
 .properties-bar-swatch {
   width: 14px;
   height: 14px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  cursor: pointer;
-  padding: 0;
-}
-.properties-bar-swatch.active {
-  outline: 2px solid var(--accent, #3b82f6);
-  outline-offset: 1px;
 }
 .properties-bar-action {
   font-size: 11px;
@@ -3677,7 +3921,7 @@ select option {
   height: 18px;
   line-height: 16px;
   text-align: center;
-  color: var(--text-dim, #8a8a92);
+  color: var(--text-dim, #a0a0a8);
   cursor: pointer;
   border-radius: 3px;
 }
@@ -3783,16 +4027,29 @@ select option {
 /* Actions sit at the far end — "Close Tool" is an exit, not a peer of the
    modes, and putting it next to them invites a misclick mid-markup. */
 .secondary-toolbar-actions { margin-inline-start: auto; }
+/* Every button in the strip carries the same box, armed or not. Only the
+   active item used to get a pill, so the other eight were bare text: the strip
+   read as a breadcrumb trail rather than a toolbar, and the gaps between
+   labels measured 14/20/22/22px because the padding arrived with the pill
+   instead of with the button. The border is on the resting state (transparent
+   on the outline token's own ground would be a second box model), so arming a
+   tool changes its FILL and never its size. */
 .secondary-tool {
-  padding: 3px 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid var(--strip-btn-border, #3a3a40);
   border-radius: 4px;
   font-size: 12px;
+  line-height: 18px;
   color: #a3a3a3;
+  background: transparent;
   cursor: default;
   white-space: nowrap;
 }
-.secondary-tool:hover { background: #262626; color: #e5e5e5; }
-.secondary-tool.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
+.secondary-tool:hover { background: #262626; color: #e5e5e5; border-color: var(--control-border-hover); }
+.secondary-tool.active { background: var(--accent, #0078d4); border-color: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
 .secondary-tool:focus-visible { outline: 2px solid var(--accent-text, #0078d4); outline-offset: 1px; }
 /* The lock is about the modes beside it, not one of them: the rule separates
    it so an armed mode and the lock never read as two active modes.
@@ -3802,11 +4059,11 @@ select option {
    `.active` override below are what keep that true — the shared `.active`
    fill would otherwise put two cyan pills in a strip of nine bare labels with
    nothing to say which is the tool and which is the mode. */
+/* Now that every strip button carries a box, the lock's separator is spacing
+   rather than a borrowed border edge: a half-open box would have been a second
+   box model in a strip whose whole point is that there is one. */
 .secondary-tool-lock {
-  margin-inline-start: 6px;
-  border-inline-start: 1px solid #333333;
-  padding-inline-start: 10px;
-  border-radius: 0 4px 4px 0;
+  margin-inline-start: 10px;
 }
 /* The `.secondary-toolbar` link in the chain is specificity, not scoping: the
    per-theme `.secondary-tool.active` fills are declared later in this file, so
@@ -3814,14 +4071,13 @@ select option {
 :root .secondary-toolbar .secondary-tool-lock.active {
   background: transparent;
   color: var(--accent-text, #0078d4);
+  border-color: var(--accent-text, #0078d4);
   box-shadow: inset 0 0 0 1px var(--accent-text, #0078d4);
 }
 :root .secondary-toolbar .secondary-tool-lock.active:hover {
   background: color-mix(in srgb, var(--accent, #0078d4) 18%, transparent);
   color: var(--accent-text, #0078d4);
 }
-[data-theme="light"] .secondary-tool-lock { border-inline-start-color: #d1d5db; }
-[data-theme="high-contrast"] .secondary-tool-lock { border-inline-start-color: #ffffff; }
 .stamp-preset {
   padding: 1px 7px;
   font-size: 10px;
@@ -3831,11 +4087,10 @@ select option {
   color: var(--text);
   cursor: default;
 }
+/* The tool strip's swatches are `.color-swatch` too — size and cursor only. */
 .annot-swatch {
   width: 15px;
   height: 15px;
-  border-radius: 999px;
-  outline-offset: 1px;
   cursor: default;
 }
 
@@ -3982,7 +4237,7 @@ select option {
   cursor: pointer;
 }
 .recal-popover button:disabled {
-  opacity: 0.5;
+  opacity: 0.6;
   cursor: default;
 }
 .recal-popover button:hover:not(:disabled) {
@@ -4436,7 +4691,7 @@ select option {
   border-radius: 4px;
   color: inherit;
 }
-.canvas-status-snap-select:disabled { opacity: 0.55; }
+.canvas-status-snap-select:disabled { opacity: 0.6; }
 
 /* Flattener preview marks. Each category gets its own tint so the panel's
    counts and the page agree at a glance; a region is the solid frame, because

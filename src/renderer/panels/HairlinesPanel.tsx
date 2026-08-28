@@ -211,7 +211,7 @@ export function HairlinesPanel(): React.ReactElement {
           data-testid="hairlines-measure"
           disabled={busy}
           onClick={() => void measure()}
-          className="px-3 py-1.5 text-sm bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+          className="px-3 py-1.5 text-sm bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
         >
           {tChrome('panel.hairlines.measure')}
         </button>
@@ -219,7 +219,7 @@ export function HairlinesPanel(): React.ReactElement {
           data-testid="hairlines-fix"
           disabled={busy || problem !== null || (report?.count ?? 0) === 0}
           onClick={() => void applyFix()}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-50"
+          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-60"
         >
           {tChrome('panel.hairlines.fix')}
         </button>

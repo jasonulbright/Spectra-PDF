@@ -63,7 +63,7 @@ export function PageRangeField({
           onClick={useSelection}
           disabled={selected.length === 0}
           title={tChrome('panel.common.useSelectionTitle')}
-          className="px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-300 hover:bg-neutral-700 disabled:opacity-40"
+          className="px-2 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-300 hover:bg-neutral-700 disabled:opacity-60"
         >
           {tChrome('panel.common.useSelection')}
         </button>

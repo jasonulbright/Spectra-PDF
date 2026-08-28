@@ -430,7 +430,7 @@ export function TagsPanel(): React.ReactElement {
               onClick={() =>
                 void runMutation('autotag', {}, tChrome('panel.tags.autotagDone'), null)
               }
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
             >
               {tChrome('panel.tags.autotag')}
             </button>
@@ -464,7 +464,7 @@ export function TagsPanel(): React.ReactElement {
               onClick={addTag}
               disabled={busy}
               title={selected ? tChrome('panel.tags.addChildTitle', { type: selected.type }) : tChrome('panel.tags.addTopTitle')}
-              className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+              className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
             >
               {selected ? tChrome('panel.tags.newChild') : tChrome('panel.tags.newTag')}
             </button>
@@ -484,23 +484,23 @@ export function TagsPanel(): React.ReactElement {
                 <button type="button" data-testid="tags-move-up" onClick={() => move('up')}
                   disabled={busy || last === 0}
                   title={tChrome('panel.tags.moveUpTitle')} aria-label={tChrome('panel.tags.moveUp')}
-                  className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded">↑</button>
+                  className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded">↑</button>
                 <button type="button" data-testid="tags-move-down" onClick={() => move('down')}
                   disabled={busy || last >= siblingCount(selected.path) - 1}
                   title={tChrome('panel.tags.moveDownTitle')} aria-label={tChrome('panel.tags.moveDown')}
-                  className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded">↓</button>
+                  className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded">↓</button>
                 <button type="button" data-testid="tags-move-out" onClick={() => move('outdent')}
                   disabled={busy || selected.path.length < 2}
                   title={tChrome('panel.tags.outdentTitle')} aria-label={tChrome('panel.tags.outdent')}
-                  className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded">⇤</button>
+                  className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded">⇤</button>
                 <button type="button" data-testid="tags-move-in" onClick={() => move('indent')}
                   disabled={busy || last === 0}
                   title={tChrome('panel.tags.indentTitle')} aria-label={tChrome('panel.tags.indent')}
-                  className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded">⇥</button>
+                  className="px-1.5 py-0.5 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded">⇥</button>
                 <button type="button" data-testid="tags-delete" onClick={deleteTag}
                   disabled={busy}
                   title={tChrome('panel.tags.deleteTitle')}
-                  className="px-2 py-0.5 text-xs text-neutral-400 hover:text-red-400 disabled:opacity-40">
+                  className="px-2 py-0.5 text-xs text-neutral-400 hover:text-red-400 disabled:opacity-60">
                   {tChrome('panel.tags.delete')}
                 </button>
               </div>
@@ -556,7 +556,7 @@ export function TagsPanel(): React.ReactElement {
               </datalist>
               <div>
                 <button type="button" data-testid="tags-apply" onClick={applyProps} disabled={busy}
-                  className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded">
+                  className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded">
                   {tChrome('panel.tags.apply')}
                 </button>
               </div>

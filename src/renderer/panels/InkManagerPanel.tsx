@@ -229,7 +229,7 @@ export function InkManagerPanel(): React.ReactElement {
                 aria-label={tChrome('panel.inkManager.moveUp')}
                 disabled={index === 0}
                 onClick={() => moveInk(ink.name, -1)}
-                className="px-1.5 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded disabled:opacity-40"
+                className="px-1.5 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded disabled:opacity-60"
               >
                 ↑
               </button>
@@ -238,7 +238,7 @@ export function InkManagerPanel(): React.ReactElement {
                 aria-label={tChrome('panel.inkManager.moveDown')}
                 disabled={index === usable.length - 1}
                 onClick={() => moveInk(ink.name, 1)}
-                className="px-1.5 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded disabled:opacity-40"
+                className="px-1.5 py-0.5 text-xs bg-neutral-800 border border-neutral-700 rounded disabled:opacity-60"
               >
                 ↓
               </button>
@@ -280,7 +280,7 @@ export function InkManagerPanel(): React.ReactElement {
               data-testid="ink-manager-compare"
               disabled={busy || resolveAlias(aliases, current.name) === current.name}
               onClick={() => void compare(current.name, resolveAlias(aliases, current.name))}
-              className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+              className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
             >
               {tChrome('panel.inkManager.compare')}
             </button>
@@ -288,7 +288,7 @@ export function InkManagerPanel(): React.ReactElement {
               data-testid="ink-manager-apply-alias"
               disabled={busy || resolveAlias(aliases, current.name) === current.name}
               onClick={() => void applyAlias(current.name, resolveAlias(aliases, current.name), false)}
-              className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-50"
+              className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-60"
             >
               {tChrome('panel.inkManager.applyAlias')}
             </button>
@@ -299,7 +299,7 @@ export function InkManagerPanel(): React.ReactElement {
               data-testid="ink-manager-apply-anyway"
               disabled={busy}
               onClick={() => void applyAlias(pendingAlias.source, pendingAlias.target, true)}
-              className="self-start px-2 py-1 text-xs bg-amber-700 hover:bg-amber-600 rounded disabled:opacity-50"
+              className="self-start px-2 py-1 text-xs bg-amber-700 hover:bg-amber-600 rounded disabled:opacity-60"
             >
               {tChrome('panel.inkManager.applyAnyway')}
             </button>
@@ -315,7 +315,7 @@ export function InkManagerPanel(): React.ReactElement {
                 data-testid="ink-manager-convert"
                 disabled={busy}
                 onClick={() => void convertToProcess(current.name)}
-                className="self-start px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-50"
+                className="self-start px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-60"
               >
                 {tChrome('panel.inkManager.convert', { name: current.name })}
               </button>

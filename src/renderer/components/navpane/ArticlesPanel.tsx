@@ -381,7 +381,7 @@ export function ArticlesPanel({ activeFile }: NavPanelComponentProps): React.Rea
           data-testid="article-prev"
           onClick={() => walk(-1)}
           disabled={!current || current.beads.length === 0}
-          className="bookmark-add-btn disabled:opacity-50"
+          className="bookmark-add-btn disabled:opacity-60"
           title={tChrome('nav.articles.previousBox')}
         >
           ‹
@@ -390,7 +390,7 @@ export function ArticlesPanel({ activeFile }: NavPanelComponentProps): React.Rea
           data-testid="article-next"
           onClick={() => walk(1)}
           disabled={!current || current.beads.length === 0}
-          className="bookmark-add-btn disabled:opacity-50"
+          className="bookmark-add-btn disabled:opacity-60"
           title={tChrome('nav.articles.nextBox')}
         >
           ›
@@ -399,7 +399,7 @@ export function ArticlesPanel({ activeFile }: NavPanelComponentProps): React.Rea
           data-testid="article-save"
           onClick={() => void save()}
           disabled={busy || !dirty}
-          className="bookmark-add-btn disabled:opacity-50"
+          className="bookmark-add-btn disabled:opacity-60"
         >
           {tChrome('nav.articles.save')}
         </button>

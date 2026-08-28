@@ -17,7 +17,7 @@ import { tChrome, tNumber, tToolTitle } from '../../i18n';
 const OCR_TOOL_TITLE = TOOL_DEFS.find((t) => t.id === 'ocr')?.title ?? '';
 
 const BUTTON =
-  'px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-40 rounded';
+  'px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded';
 
 export function ReadAloudBar({ reader }: { reader: ReadAloudApi }): React.ReactElement {
   useTranslation();

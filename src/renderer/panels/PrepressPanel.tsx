@@ -269,7 +269,7 @@ export function PrepressPanel(): React.ReactElement {
         data-testid="cmyk-convert"
         onClick={handleConvert}
         disabled={busy || gsBlocked(gs) || iccBlocks}
-        className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+        className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
       >
         {busy ? tChrome('panel.prepress.converting') : tChrome('panel.prepress.convertCmyk')}
       </button>
@@ -317,7 +317,7 @@ export function PrepressPanel(): React.ReactElement {
           data-testid="pdfx-convert"
           onClick={handlePdfx}
           disabled={busy || gsBlocked(gs) || iccBlocks}
-          className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+          className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
         >
           {busy ? tChrome('panel.prepress.working') : tChrome('panel.prepress.createPdfx')}
         </button>

@@ -498,7 +498,7 @@ export function SignatureCaptureDialog({
                   data-testid="signature-undo-stroke"
                   disabled={strokes.length === 0}
                   onClick={() => setStrokes(strokes.slice(0, -1))}
-                  className="px-2 py-1 text-xs text-neutral-300 bg-neutral-700 hover:bg-neutral-600 rounded disabled:opacity-40"
+                  className="px-2 py-1 text-xs text-neutral-300 bg-neutral-700 hover:bg-neutral-600 rounded disabled:opacity-60"
                 >
                   {tChrome('dialog.signature.undoStroke')}
                 </button>
@@ -507,7 +507,7 @@ export function SignatureCaptureDialog({
                   data-testid="signature-clear"
                   disabled={strokes.length === 0}
                   onClick={() => setStrokes([])}
-                  className="px-2 py-1 text-xs text-neutral-300 bg-neutral-700 hover:bg-neutral-600 rounded disabled:opacity-40"
+                  className="px-2 py-1 text-xs text-neutral-300 bg-neutral-700 hover:bg-neutral-600 rounded disabled:opacity-60"
                 >
                   {tChrome('dialog.signature.clear')}
                 </button>
@@ -647,7 +647,7 @@ export function SignatureCaptureDialog({
               data-testid="signature-save"
               disabled={!canSave}
               onClick={save}
-              className="px-3 py-1.5 text-xs font-medium text-neutral-100 bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-40"
+              className="px-3 py-1.5 text-xs font-medium text-neutral-100 bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-60"
             >
               {tChrome('dialog.signature.save')}
             </button>

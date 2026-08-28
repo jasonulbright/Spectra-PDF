@@ -291,7 +291,7 @@ export function TrapPresetsPanel(): React.ReactElement {
           data-testid="trap-preset-add"
           disabled={problem !== null}
           onClick={addAssignment}
-          className="self-start px-3 py-1.5 text-sm bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+          className="self-start px-3 py-1.5 text-sm bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
         >
           {tChrome('panel.trapPresets.add')}
         </button>
@@ -362,7 +362,7 @@ export function TrapPresetsPanel(): React.ReactElement {
           data-testid="trap-preset-apply"
           disabled={busy}
           onClick={() => void applyAssignments()}
-          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-50"
+          className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 rounded disabled:opacity-60"
         >
           {tChrome('panel.trapPresets.apply')}
         </button>
@@ -370,7 +370,7 @@ export function TrapPresetsPanel(): React.ReactElement {
           data-testid="trap-preset-export"
           disabled={busy || gsBlocked(gs)}
           onClick={() => void exportPostscript()}
-          className="px-3 py-1.5 text-sm bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-50"
+          className="px-3 py-1.5 text-sm bg-neutral-800 border border-neutral-700 rounded hover:bg-neutral-700 disabled:opacity-60"
         >
           {tChrome('panel.trapPresets.export')}
         </button>

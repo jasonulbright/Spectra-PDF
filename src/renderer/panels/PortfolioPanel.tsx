@@ -322,7 +322,7 @@ export function PortfolioPanel(): React.ReactElement {
           data-testid="portfolio-create"
           onClick={handleCreate}
           disabled={busy}
-          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
         >
           {tChrome('panel.portfolio.pickAndCreate')}
         </button>
@@ -359,7 +359,7 @@ export function PortfolioPanel(): React.ReactElement {
               data-testid="portfolio-convert"
               onClick={handleConvert}
               disabled={busy}
-              className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
+              className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm"
             >
               {tChrome('panel.portfolio.convert')}
             </button>
@@ -380,7 +380,7 @@ export function PortfolioPanel(): React.ReactElement {
               data-testid="portfolio-add"
               onClick={handleAddMember}
               disabled={busy}
-              className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium"
+              className="px-2.5 py-1 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded font-medium"
             >
               {tChrome('panel.portfolio.addFile')}
             </button>
@@ -412,7 +412,7 @@ export function PortfolioPanel(): React.ReactElement {
                       data-testid={`portfolio-open-${m.name}`}
                       onClick={() => handleOpenMember(m.name)}
                       disabled={busy}
-                      className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                      className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                     >
                       {tChrome('panel.portfolio.openBtn')}
                     </button>
@@ -422,7 +422,7 @@ export function PortfolioPanel(): React.ReactElement {
                       title={tChrome('panel.portfolio.openOsTitle')}
                       onClick={() => handleOpenMemberExternal(m.name)}
                       disabled={busy}
-                      className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                      className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                     >
                       {tChrome('panel.portfolio.openBtn')}
                     </button>
@@ -431,7 +431,7 @@ export function PortfolioPanel(): React.ReactElement {
                     data-testid={`portfolio-save-${m.name}`}
                     onClick={() => handleSaveMember(m.name)}
                     disabled={busy}
-                    className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                    className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                   >
                     {tChrome('panel.portfolio.saveBtn')}
                   </button>
@@ -439,7 +439,7 @@ export function PortfolioPanel(): React.ReactElement {
                     data-testid={`portfolio-update-${m.name}`}
                     onClick={() => handleUpdateMember(m.name)}
                     disabled={busy}
-                    className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded"
+                    className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded"
                     title={tChrome('panel.portfolio.updateTitle')}
                   >
                     {tChrome('panel.portfolio.updateBtn')}
@@ -448,7 +448,7 @@ export function PortfolioPanel(): React.ReactElement {
                     data-testid={`portfolio-remove-${m.name}`}
                     onClick={() => handleRemoveMember(m.name)}
                     disabled={busy}
-                    className="px-2 py-1 text-xs text-neutral-400 hover:text-red-400 disabled:opacity-50"
+                    className="px-2 py-1 text-xs text-neutral-400 hover:text-red-400 disabled:opacity-60"
                   >
                     {tChrome('panel.portfolio.removeBtn')}
                   </button>

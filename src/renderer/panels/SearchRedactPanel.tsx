@@ -497,7 +497,7 @@ export function SearchRedactPanel(): React.ReactElement {
           onClick={() => void runSearch()}
           disabled={busy}
           data-testid="search-redact-run"
-          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
         >
           {busy ? tChrome('panel.searchRedact.searching') : tChrome('panel.searchRedact.search')}
         </button>
@@ -506,7 +506,7 @@ export function SearchRedactPanel(): React.ReactElement {
           onClick={() => void markChecked()}
           disabled={busy || selected.size === 0 || stale}
           data-testid="search-redact-mark"
-          className="px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 rounded text-sm font-medium"
+          className="text-sm danger-action"
         >
           {tChromeCount('panel.searchRedact.markChecked', selected.size)}
         </button>
@@ -524,7 +524,7 @@ export function SearchRedactPanel(): React.ReactElement {
         type="button"
         onClick={() => invokeCommand('tools.diskRedact')}
         data-testid="search-redact-folder"
-        className="self-start text-xs text-neutral-400 hover:text-neutral-200 underline"
+        className="self-start text-xs link-action"
       >
         {tChrome('dialog.diskRedact.openPanel')}
       </button>

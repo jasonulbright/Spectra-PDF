@@ -42,7 +42,7 @@ export function RecoverPanel(): React.ReactElement {
     <div className="flex flex-col gap-4">
       <div className="text-sm text-neutral-400">{tChrome('panel.common.workingOn')} <span className="text-neutral-200">{activeFile.name}</span> ({tChromeCount('panel.common.pageCount', activeFile.pageCount)})</div>
       <p className="text-sm text-neutral-500">{tChrome('panel.recover.blurb')}</p>
-      <button onClick={handleRecover} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium">
+      <button onClick={handleRecover} disabled={busy} className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium">
         {busy ? tChrome('panel.recover.busy') : tChrome('panel.recover.recover')}
       </button>
       {report && report.lost_pages && report.lost_pages.length > 0 && (

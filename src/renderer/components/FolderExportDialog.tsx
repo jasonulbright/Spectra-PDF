@@ -542,7 +542,7 @@ export function FolderExportDialog({ onClose }: FolderExportDialogProps): React.
               disabled={!ready}
               onClick={() => void run()}
               data-testid="folder-export-run"
-              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
             >
               {tChrome('dialog.folderExport.run')}
             </button>

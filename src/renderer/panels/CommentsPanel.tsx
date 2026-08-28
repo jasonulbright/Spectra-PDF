@@ -576,7 +576,7 @@ export function CommentsPanel(): React.ReactElement {
                 data-testid="comments-delete-confirm"
                 onClick={() => void deleteAll()}
                 disabled={busy}
-                className="px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 rounded text-sm font-medium"
+                className="text-sm danger-action"
               >
                 {tChrome('panel.comments.deleteAllBtn')}
               </button>
@@ -593,7 +593,7 @@ export function CommentsPanel(): React.ReactElement {
                 data-testid="comments-delete-all"
                 onClick={() => setConfirming(true)}
                 disabled={busy}
-                className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
+                className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm"
               >
                 {tChrome('panel.comments.deleteAll')}
               </button>
@@ -605,7 +605,7 @@ export function CommentsPanel(): React.ReactElement {
                 }}
                 disabled={busy || !model || model.count === 0}
                 title={tChrome('panel.comments.summaryHint')}
-                className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
+                className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm"
               >
                 {tChrome('panel.comments.summaryBtn')}
               </button>
@@ -614,7 +614,7 @@ export function CommentsPanel(): React.ReactElement {
                 onClick={() => void exportXfdf()}
                 disabled={busy}
                 title={tChrome('panel.comments.exportTitle')}
-                className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
+                className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm"
               >
                 {tChrome('panel.comments.exportBtn')}
               </button>
@@ -623,7 +623,7 @@ export function CommentsPanel(): React.ReactElement {
                 onClick={() => void importXfdf()}
                 disabled={busy}
                 title={tChrome('panel.comments.importTitle')}
-                className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 rounded text-sm"
+                className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded text-sm"
               >
                 {tChrome('panel.comments.importBtn')}
               </button>
@@ -753,7 +753,7 @@ function RowActions({
       <button
         type="button"
         data-testid={`comment-delete-${row.annotationId}`}
-        className="ms-auto text-xs px-1.5 py-0.5 rounded text-neutral-400 hover:bg-red-600 hover:text-white"
+        className="ms-auto text-xs danger-action is-quiet"
         onClick={() =>
           dispatch({
             type: 'REMOVE_ANNOTATION',

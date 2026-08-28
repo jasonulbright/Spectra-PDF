@@ -8,6 +8,7 @@ import { StatusBar } from '../components/StatusBar';
 import { TEST_HARNESS_ENABLED, registerWatermark } from '../testHarness';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
+import { STAMP_PALETTE } from '../lib/stamp-palette';
 import {
   resolvedColumns,
   writingParams,
@@ -17,7 +18,8 @@ import {
 
 // Muted set for stamp text — full-strength annotation colors read as marker
 // ink, not a watermark.
-const WATERMARK_COLORS = ['#808080', '#e0393e', '#2f6fed', '#2fbf71'];
+// The shared stamp palette; a watermark's own default is the mid grey.
+const WATERMARK_DEFAULT_COLOR = '#808080';
 
 const POSITIONS = [
   'center',
@@ -43,7 +45,7 @@ export function WatermarkPanel(): React.ReactElement {
   const [pdfPage, setPdfPage] = useState(1);
   const [opacity, setOpacity] = useState(0.15);
   const [angle, setAngle] = useState(45);
-  const [color, setColor] = useState(WATERMARK_COLORS[0]);
+  const [color, setColor] = useState(WATERMARK_DEFAULT_COLOR);
   const [layer, setLayer] = useState<'over' | 'under'>('over');
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState<(typeof POSITIONS)[number]>('center');
@@ -294,7 +296,7 @@ export function WatermarkPanel(): React.ReactElement {
           <div>
             <label className="block text-sm text-neutral-400 mb-1">{tChrome('panel.watermark.color')}</label>
             <div className="flex items-center gap-1.5 py-1.5">
-              {WATERMARK_COLORS.map((c) => (
+              {STAMP_PALETTE.map((c) => (
                 <button
                   key={c}
                   title={c}
@@ -391,7 +393,7 @@ export function WatermarkPanel(): React.ReactElement {
             value={position}
             disabled={tile}
             onChange={(e) => setPosition(e.target.value as (typeof POSITIONS)[number])}
-            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50"
+            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-60"
           >
             {POSITIONS.map((p) => (
               <option key={p} value={p}>{tChrome(`panel.watermark.position.${p}` as 'panel.watermark.position.center')}</option>
@@ -409,7 +411,7 @@ export function WatermarkPanel(): React.ReactElement {
             value={margin}
             disabled={tile || position === 'center'}
             onChange={(e) => setMargin(Number(e.target.value))}
-            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50 focus:outline-none focus:border-blue-500"
+            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-60 focus:outline-none focus:border-blue-500"
           />
         </div>
         <div>
@@ -434,7 +436,7 @@ export function WatermarkPanel(): React.ReactElement {
             value={tileGap}
             disabled={!tile}
             onChange={(e) => setTileGap(Number(e.target.value))}
-            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-50 focus:outline-none focus:border-blue-500"
+            className="w-full px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded text-sm disabled:opacity-60 focus:outline-none focus:border-blue-500"
           />
         </div>
       </div>
@@ -442,7 +444,7 @@ export function WatermarkPanel(): React.ReactElement {
         data-testid="watermark-apply"
         onClick={handleApply}
         disabled={busy}
-        className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-sm font-medium"
+        className="self-start px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
       >
         {busy ? tChrome('panel.watermark.applyingBtn') : tChrome('panel.watermark.apply')}
       </button>

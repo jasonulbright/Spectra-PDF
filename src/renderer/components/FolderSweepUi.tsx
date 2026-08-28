@@ -88,7 +88,7 @@ export function RunningView({
           onClick={onStop}
           disabled={stopping}
           data-testid={stopTestid}
-          className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 rounded text-sm"
+          className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-60 rounded text-sm"
         >
           {stopping ? tChrome('dialog.batch.stopping') : tChrome('dialog.batch.stop')}
         </button>
