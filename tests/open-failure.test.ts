@@ -58,6 +58,26 @@ describe('translateOpenFailure', () => {
     const out = translateOpenFailure(`${USER}: damaged`, { name: NAME, path: USER });
     expect(out).toBe('damaged');
   });
+
+  // The engine's text is influenced by the document, so a hostile file can
+  // choose it. A path matcher whose segment class also matched the separator
+  // backtracked exponentially on a separator flood — ~5s at 30 separators,
+  // doubling every two more — hanging the renderer.
+  it('completes on a separator flood instead of backtracking', () => {
+    const flood = `error reading C:\\${'/'.repeat(30)}! while opening`;
+    const started = performance.now();
+    const out = translateOpenFailure(flood, { name: NAME });
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(out).toBe(flood);
+  });
+
+  it('scrubs a very long path in linear time', () => {
+    const deep = `C:\\${'seg/'.repeat(1250)}report.pdf`;
+    const started = performance.now();
+    const out = translateOpenFailure(`error reading ${deep} while opening`, { name: NAME });
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(out).toBe(`error reading ${NAME} while opening`);
+  });
 });
 
 describe('summarizeOpenOutcomes', () => {
