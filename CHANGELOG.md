@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.17
+
+*Released 2026-08-28*
+
+### Honest failures
+
+- A file that cannot be opened now says so: one message naming your file and the reason, aggregated across multi-file drops. Previously a failed open did nothing at all.
+- A document that opens but cannot be displayed now says so in the canvas instead of presenting a healthy-looking tab over blank pages; panels that can still read the document keep working, and the message clears if display later succeeds.
+
+### Scanner tester checklist, round two
+
+- Two new guided steps verify page ORDER through a feeder: three hand-numbered sheets (duplex and simplex variants, one back deliberately blank) are read back page by page, and the report names the fault class — reversed backs, dropped blanks, one side per sheet, reversed batch, or dropped pages.
+- A paper jam mid-batch now keeps the sheets that scanned cleanly and offers them as a partial document, naming the jam; a page torn by the jam is discarded, never assembled. A scanner that disappears entirely still discards everything, unchanged.
+
 ## 1.1.16
 
 *Released 2026-08-27*
