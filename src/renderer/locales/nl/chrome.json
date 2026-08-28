@@ -696,7 +696,7 @@
   "cmd.tools.count": "Tellen",
   "cmd.tools.cropdraw": "Bijsnijden tekenen",
   "cmd.tools.diskRedact": "Map doorzoeken en zwartlakken…",
-  "cmd.tools.edit": "Afbeelding selecteren",
+  "cmd.tools.edit": "Selecteren en bewerken",
   "cmd.tools.flattenpreview": "Voorbeeld afvlakken",
   "cmd.tools.folderCreatePdf": "Eén PDF per map…",
   "cmd.tools.folderExport": "Een map exporteren…",

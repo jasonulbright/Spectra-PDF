@@ -696,7 +696,7 @@
   "cmd.tools.count": "Zählen",
   "cmd.tools.cropdraw": "Zuschnitt zeichnen",
   "cmd.tools.diskRedact": "Ordner durchsuchen und schwärzen…",
-  "cmd.tools.edit": "Bild auswählen",
+  "cmd.tools.edit": "Auswählen und bearbeiten",
   "cmd.tools.flattenpreview": "Vorschau der Transparenzreduzierung",
   "cmd.tools.folderCreatePdf": "Ein PDF je Ordner…",
   "cmd.tools.folderExport": "Ordner exportieren…",

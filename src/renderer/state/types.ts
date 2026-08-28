@@ -67,9 +67,12 @@ export interface ImportedAnnotationFingerprint {
 }
 
 // Native PDF text-markup subtypes (quad-based) — imported from a foreign PDF as
-// first-class editable annotations. Distinct from `kind: 'highlight'`,
-// which authors a /Square rectangle; a native /Highlight must round-trip as
-// /Highlight + /QuadPoints, never be converted to a Square.
+// first-class editable annotations. `kind: 'highlight'` is the box highlight
+// dragged on canvas; it authors a /Highlight whose single quad is that box,
+// so the file types it as a highlight rather than a rectangle. The one
+// exception is a box that ARRIVED as a foreign /Square: it re-authors as a
+// /Square, because an imported annotation is never converted. A native
+// /Highlight round-trips as /Highlight + /QuadPoints.
 export type TextMarkupType = 'highlight' | 'underline' | 'strikeout' | 'squiggly';
 
 // Drawing-shape figures. Rectangles and ellipses are box-defined (x/y/w/h);

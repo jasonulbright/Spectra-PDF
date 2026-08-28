@@ -1167,12 +1167,22 @@ function addAnnotations(
           Resources: { ExtGState: { GS0: gsRef } },
         }),
       );
+      // An app-authored box highlight is a /Highlight carrying its box as one
+      // /QuadPoints quad — the subtype the reader, the by-type summary and
+      // every other tool then report. Writing it as a /Square typed it as a
+      // rectangle the moment it round-tripped through the file. A /Square
+      // that ARRIVED as a /Square keeps its subtype: an imported foreign
+      // annotation is re-authored, never converted.
+      const carriedSquare = a.importedOriginal?.subtype === 'Square';
       annot = context.obj({
         Type: 'Annot',
-        Subtype: 'Square',
+        Subtype: carriedSquare ? 'Square' : 'Highlight',
         Rect: [x0, y0, x1, y1],
+        // UL, UR, LL, LR — the order text-markup readers expect.
+        ...(carriedSquare ? {} : { QuadPoints: [x0, y1, x1, y1, x0, y0, x1, y0] }),
         C: [r, g, b],
-        IC: [r, g, b],
+        // /IC is interior colour for a /Square; a /Highlight has no interior.
+        ...(carriedSquare ? { IC: [r, g, b] } : {}),
         CA: HIGHLIGHT_ALPHA,
         F: 4, // print
         AP: { N: ap },

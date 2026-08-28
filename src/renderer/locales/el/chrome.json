@@ -696,7 +696,7 @@
   "cmd.tools.count": "Καταμέτρηση",
   "cmd.tools.cropdraw": "Σχεδίαση περικοπής",
   "cmd.tools.diskRedact": "Αναζήτηση και μαύρισμα σε φάκελο…",
-  "cmd.tools.edit": "Επιλογή εικόνας",
+  "cmd.tools.edit": "Επιλογή και επεξεργασία",
   "cmd.tools.flattenpreview": "Προεπισκόπηση ισοπέδωσης",
   "cmd.tools.folderCreatePdf": "Ένα PDF ανά φάκελο…",
   "cmd.tools.folderExport": "Εξαγωγή φακέλου…",

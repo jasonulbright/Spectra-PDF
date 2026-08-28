@@ -709,7 +709,7 @@
   "cmd.tools.count": "Contar",
   "cmd.tools.cropdraw": "Desenhar o corte",
   "cmd.tools.diskRedact": "Pesquisar e censurar numa pasta…",
-  "cmd.tools.edit": "Selecionar imagem",
+  "cmd.tools.edit": "Selecionar e editar",
   "cmd.tools.flattenpreview": "Pré-visualização do achatamento",
   "cmd.tools.folderCreatePdf": "Um PDF por pasta…",
   "cmd.tools.folderExport": "Exportar uma pasta…",

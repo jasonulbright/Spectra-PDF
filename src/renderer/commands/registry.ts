@@ -158,7 +158,7 @@ export const TOOL_TITLES: Record<CanvasTool, string> = {
   select: 'Select', hand: 'Hand', highlight: 'Highlight', freetext: 'Text', ink: 'Draw',
   inkhighlight: 'Freehand Highlight',
   stamp: 'Stamp', redact: 'Redact', signature: 'Sign', forms: 'Fill Fields',
-  formfields: 'Add Field', edit: 'Select Image', addtext: 'Add Text',
+  formfields: 'Add Field', edit: 'Select & Edit', addtext: 'Add Text',
   addimage: 'Add Image',
   measuredist: 'Distance', measureperim: 'Perimeter', measurearea: 'Area', measurecal: 'Calibrate',
   shape: 'Shape', callout: 'Callout', note: 'Sticky Note', inkerase: 'Eraser',

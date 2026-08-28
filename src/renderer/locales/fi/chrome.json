@@ -696,7 +696,7 @@
   "cmd.tools.count": "Laske",
   "cmd.tools.cropdraw": "Piirrä rajaus",
   "cmd.tools.diskRedact": "Etsi ja peitä kansiossa…",
-  "cmd.tools.edit": "Valitse kuva",
+  "cmd.tools.edit": "Valitse ja muokkaa",
   "cmd.tools.flattenpreview": "Yksitasoistuksen esikatselu",
   "cmd.tools.folderCreatePdf": "Yksi PDF kansiota kohden…",
   "cmd.tools.folderExport": "Vie kansio…",

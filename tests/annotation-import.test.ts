@@ -407,6 +407,62 @@ describe('imported annotation commit round trip', () => {
     await pdf.loadingTask.destroy();
   });
 
+  it('a committed box highlight is typed /Highlight in the file, and reimports as one', async () => {
+    // Regression: the box highlight committed as a /Square, so the round trip
+    // through the file retyped it — the comments list read the file's subtype
+    // and called a highlight a Square.
+    const source = await PDFDocument.create();
+    source.addPage([300, 400]);
+    const bytes = await source.save();
+    const file = makeFile('a.pdf', bytes);
+    const workspace: Workspace = {
+      documents: [
+        makeDoc('a#0', file, [
+          {
+            ...pageRef('a.pdf'),
+            annotations: [
+              { id: 'h1', kind: 'highlight', x: 0.1, y: 0.1, w: 0.4, h: 0.05, color: '#ffe14a', note: 'marked' },
+            ],
+          },
+        ]),
+      ],
+    };
+    const [plan] = planCommit(workspace, new Map([['a.pdf', file]]), ['a.pdf']);
+    const committed = await buildCommitBytes(plan);
+    const rebuilt = await loadPdf(committed);
+    const annots = (await (await rebuilt.getPage(1)).getAnnotations()) as {
+      subtype: string;
+      quadPoints?: unknown;
+    }[];
+    expect(annots).toHaveLength(1);
+    expect(annots[0].subtype).toBe('Highlight');
+    expect(annots[0].quadPoints).toBeTruthy();
+    const reimported = await importPageAnnotations(await rebuilt.getPage(1));
+    expect(reimported).toHaveLength(1);
+    expect(reimported[0].kind).toBe('textmarkup');
+    expect(reimported[0].markupType).toBe('highlight');
+    expect(reimported[0].note).toBe('marked');
+    await rebuilt.loadingTask.destroy();
+  });
+
+  it('a box that ARRIVED as a foreign /Square re-commits as a /Square, never converted', async () => {
+    const bytes = await makeForeignAnnotatedPdf();
+    const pdf = await loadPdf(bytes);
+    const imported = await importPageAnnotations(await pdf.getPage(1));
+    await pdf.loadingTask.destroy();
+    expect(imported[0].kind).toBe('highlight');
+    const file = makeFile('a.pdf', bytes);
+    const workspace: Workspace = {
+      documents: [makeDoc('a#0', file, [{ ...pageRef('a.pdf'), annotations: imported }])],
+    };
+    const [plan] = planCommit(workspace, new Map([['a.pdf', file]]), ['a.pdf']);
+    const rebuilt = await loadPdf(await buildCommitBytes(plan));
+    const annots = (await (await rebuilt.getPage(1)).getAnnotations()) as { subtype: string }[];
+    expect(annots).toHaveLength(1);
+    expect(annots[0].subtype).toBe('Square');
+    await rebuilt.loadingTask.destroy();
+  });
+
   it('imports and re-commits correctly on a page with a CropBox distinct from its MediaBox', async () => {
     // Import reads pdf.js's page.view (crop-intersected); the builder must
     // map against the SAME box (copied.getCropBox(), not getMediaBox()) or

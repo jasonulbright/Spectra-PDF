@@ -722,7 +722,7 @@
   "cmd.tools.count": "Подсчёт",
   "cmd.tools.cropdraw": "Нарисовать обрезку",
   "cmd.tools.diskRedact": "Найти и вымарать в папке…",
-  "cmd.tools.edit": "Выбрать изображение",
+  "cmd.tools.edit": "Выбрать и редактировать",
   "cmd.tools.flattenpreview": "Просмотр сведения прозрачности",
   "cmd.tools.folderCreatePdf": "По одному PDF на папку…",
   "cmd.tools.folderExport": "Экспортировать папку…",

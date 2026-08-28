@@ -683,7 +683,7 @@
   "cmd.tools.count": "計數",
   "cmd.tools.cropdraw": "畫出裁切範圍",
   "cmd.tools.diskRedact": "搜尋並遮蔽資料夾…",
-  "cmd.tools.edit": "選取影像",
+  "cmd.tools.edit": "選取與編輯",
   "cmd.tools.flattenpreview": "透明度平面化預覽",
   "cmd.tools.folderCreatePdf": "每個資料夾一個 PDF…",
   "cmd.tools.folderExport": "匯出資料夾…",

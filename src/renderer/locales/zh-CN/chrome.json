@@ -683,7 +683,7 @@
   "cmd.tools.count": "计数",
   "cmd.tools.cropdraw": "绘制裁剪框",
   "cmd.tools.diskRedact": "搜索并密文处理文件夹…",
-  "cmd.tools.edit": "选择图像",
+  "cmd.tools.edit": "选择和编辑",
   "cmd.tools.flattenpreview": "拼合预览",
   "cmd.tools.folderCreatePdf": "每个文件夹一个 PDF…",
   "cmd.tools.folderExport": "导出文件夹…",
