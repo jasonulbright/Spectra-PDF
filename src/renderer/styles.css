@@ -313,9 +313,6 @@
 :root[style*="--accent"] .bg-blue-500 { color: var(--accent-fg, #ffffff); }
 :root[style*="--accent"] .hover\:bg-blue-500:hover { color: var(--accent-fg, #ffffff); }
 
-/* The canvas selection color is hardcoded per theme; under System theme it
-   follows the accent like every other selection surface. */
-:root[style*="--accent"] .canvas-view { --select: var(--accent); }
 
 /* Disabled buttons drop their semantic or accent color entirely. The tokens keep
    this right in every theme; placed after the accent rules so it wins the
@@ -326,6 +323,191 @@
   background-color: var(--surface-2);
   border-color: var(--border);
   color: var(--text-dim);
+}
+
+/* ── Native form controls ─────────────────────────────────────────────────
+   ONE element-level layer themes every checkbox, radio and select in the
+   product. The rules are ELEMENT selectors, not a class, because a control
+   added later must be themed by construction: a per-panel opt-in is what
+   produced #FFFFFF boxes on a #1a1a1a surface across ten surfaces, where an
+   unstyled native control is the highest-contrast object on the panel and
+   pulls the eye to the least important thing on screen.
+
+   `color-scheme` alone does not do it: it darkens the box but leaves the
+   checked fill at Chromium's #0075FF, a colour that is in no theme's palette.
+   So the box is drawn from scratch (`appearance: none`) and its checked fill
+   is the accent — the same token the armed-tool pill and every other selected
+   surface uses. A checkbox is a selection, and it says so in the selection
+   colour.
+
+   No backdrop variant: every surface these controls sit on is opaque under
+   Mica (`.app-content` repaints #171717 / #ffffff), so the control tokens
+   composite against a known ground in both looks.
+   ──────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --control-bg: #262629;
+  --control-border: #55555e;
+  --control-border-hover: #7f7f8a;
+}
+[data-theme="light"] {
+  --control-bg: #ffffff;
+  --control-border: #9ca3af;
+  --control-border-hover: #6b7280;
+}
+[data-theme="high-contrast"] {
+  --control-bg: #000000;
+  --control-border: #ffffff;
+  --control-border-hover: #ffffff;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  inline-size: 14px;
+  block-size: 14px;
+  margin: 0;
+  vertical-align: -2px;
+  background: var(--control-bg);
+  border: 1px solid var(--control-border);
+  border-radius: 3px;
+  cursor: default;
+}
+
+input[type="radio"] {
+  border-radius: 50%;
+}
+
+input[type="checkbox"]:hover:not(:disabled),
+input[type="radio"]:hover:not(:disabled) {
+  border-color: var(--control-border-hover);
+}
+
+/* The glyph is a scaled-to-zero child rather than a toggled one, so the box
+   never reflows between states. */
+input[type="checkbox"]::before,
+input[type="radio"]::before {
+  content: "";
+  transform: scale(0);
+  background: var(--accent-fg, #ffffff);
+}
+
+input[type="checkbox"]::before {
+  inline-size: 10px;
+  block-size: 10px;
+  clip-path: polygon(14% 47%, 0 61%, 39% 100%, 100% 22%, 85% 10%, 37% 72%);
+}
+
+input[type="radio"]::before {
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+}
+
+input[type="checkbox"]:checked::before,
+input[type="radio"]:checked::before {
+  transform: scale(1);
+}
+
+/* An indeterminate box is a THIRD state, not a dimmer checked one: the dash
+   replaces the tick rather than fading it, or a partly-checked group reads as
+   a checked group with a rendering fault. */
+input[type="checkbox"]:indeterminate::before {
+  transform: scale(1);
+  clip-path: none;
+  inline-size: 8px;
+  block-size: 2px;
+  border-radius: 1px;
+}
+
+input[type="checkbox"]:checked,
+input[type="radio"]:checked,
+input[type="checkbox"]:indeterminate {
+  background: var(--accent, #0078d4);
+  border-color: var(--accent, #0078d4);
+}
+
+[data-theme="high-contrast"] input[type="checkbox"]:checked,
+[data-theme="high-contrast"] input[type="radio"]:checked,
+[data-theme="high-contrast"] input[type="checkbox"]:indeterminate {
+  background: #ffffff;
+}
+[data-theme="high-contrast"] input[type="checkbox"]::before,
+[data-theme="high-contrast"] input[type="radio"]::before {
+  background: #000000;
+}
+
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
+  background: var(--surface-2);
+  border-color: var(--border);
+  opacity: 0.55;
+}
+
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent-text, #0078d4);
+  outline-offset: 1px;
+}
+
+/* The chevron travels with the text direction: it is drawn as a background
+   image (the element has no room for a pseudo-element beside its option list),
+   so the one position keyword this layer carries is the logical `end`. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--control-bg);
+  color: var(--text);
+  border: 1px solid var(--control-border);
+  border-radius: 4px;
+  padding-block: 3px;
+  padding-inline: 8px 22px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23909098' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-size: 9px;
+  background-position: center end 7px;
+}
+
+select:hover:not(:disabled) {
+  border-color: var(--control-border-hover);
+}
+
+select:disabled {
+  color: var(--text-dim);
+  opacity: 0.6;
+}
+
+/* The option list is drawn by the OS, so its colours are set on the option
+   itself rather than inherited from the panel. */
+select option {
+  background: var(--control-bg);
+  color: var(--text);
+}
+
+/* Document-drawn controls are page CONTENT, not chrome: a form widget on the
+   canvas reproduces the file's own appearance stream, so it keeps the native
+   rendering the stream describes and takes neither the chrome chevron nor the
+   chrome's padding. */
+:root .page-form-select,
+:root .page-editpara-ctl select {
+  appearance: auto;
+  -webkit-appearance: auto;
+  background-image: none;
+  padding: revert;
+}
+
+/* Panel selects carry Tailwind padding utilities (`px-2`), and a class always
+   outranks a bare element rule — the label would run under the chevron on
+   every one of them. Only the GUTTER is lifted over a single class, so the
+   chevron always owns its own column while a panel keeps control of the rest
+   of the select's surface. */
+:root select {
+  padding-inline-end: 22px;
 }
 
 /* ── Workbench chrome ─────────────────────────────────────────────────────
@@ -488,7 +670,7 @@
   padding: 4px 0;
 }
 .thumb-row:hover { background: #1f1f1f; }
-.thumb-row.selected { background: rgba(0, 120, 212, 0.22); }
+.thumb-row.selected { background: color-mix(in srgb, var(--accent, #0078d4) 22%, transparent); }
 /* The page being READ. Deliberately NOT the selection's fill: "you are here" and
    "this is a delete/rotate target" are different claims, and the two can be true
    of different pages at once (or the same one — hence a marker that composes
@@ -807,7 +989,23 @@
   --ink: rgba(255, 255, 245, 0.92);
   --ink-soft: rgba(255, 255, 245, 0.6);
   --ink-faint: rgba(255, 255, 245, 0.4);
-  --select: #0078D4;
+  /* ── The canonical selection idiom ─────────────────────────────────────
+     ONE token carries "selected" everywhere, in one of two forms, and the
+     form is the meaning:
+       FILL (`--accent` / `--select` as a background)  — the single thing in
+         use right now: the armed tool, the chosen mode of a segmented
+         control, the row being read.
+       OUTLINE / RING in the same colour — a MEMBER of a multi-selection: a
+         picked page, a picked annotation. Many can be true at once, so the
+         treatment has to compose rather than dominate.
+     A "you are here" marker is a THIRD thing and never borrows either: it is
+     an edge rule (`.thumb-row.current`), because position and selection can
+     be true of different items at the same time.
+     The audit found five idioms — cyan fill, teal border, blue top band,
+     grey fill, bold text — because each surface picked its own literal. A
+     new surface takes this token in one of these two forms; a literal here
+     is how a sixth idiom is born. */
+  --select: var(--accent, #0078d4);
   --hover: rgba(255, 255, 255, 0.08);
   --group-bg: rgba(255, 255, 255, 0.05);
   --page-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.36);
@@ -3325,11 +3523,19 @@
   border-bottom: 1px solid #2e2e2e;
   flex-shrink: 0;
 }
+/* The dock's own scroll box. The end padding is larger than the start's on
+   purpose: a scroll container whose content ends flush with the window edge
+   slices its last row mid-glyph, and the reader cannot tell a cut row from a
+   short one. `scroll-padding-block-end` makes the same allowance for anything
+   scrolled INTO view (a focused control, a panel's `scrollIntoView`), which a
+   padding alone does not cover. */
 .tool-dock-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px;
+  padding-inline: 12px;
+  padding-block: 12px 28px;
+  scroll-padding-block-end: 28px;
 }
 /* The grid reflows into the narrow dock: single column, tighter tiles. */
 .tool-dock-body .tools-grid {
@@ -3589,12 +3795,30 @@
 .secondary-tool.active { background: var(--accent, #0078d4); color: var(--accent-fg, #ffffff); }
 .secondary-tool:focus-visible { outline: 2px solid var(--accent-text, #0078d4); outline-offset: 1px; }
 /* The lock is about the modes beside it, not one of them: the rule separates
-   it so an armed mode and the lock never read as two active modes. */
+   it so an armed mode and the lock never read as two active modes.
+   THE RULE, product-wide: a FILL means "this is the thing you are using"; an
+   OUTLINE in the same accent means "a mode that qualifies it is on". A strip
+   therefore carries at most one filled pill, and the separator rule plus the
+   `.active` override below are what keep that true — the shared `.active`
+   fill would otherwise put two cyan pills in a strip of nine bare labels with
+   nothing to say which is the tool and which is the mode. */
 .secondary-tool-lock {
   margin-inline-start: 6px;
   border-inline-start: 1px solid #333333;
   padding-inline-start: 10px;
   border-radius: 0 4px 4px 0;
+}
+/* The `.secondary-toolbar` link in the chain is specificity, not scoping: the
+   per-theme `.secondary-tool.active` fills are declared later in this file, so
+   the outline has to outrank them rather than merely follow them. */
+:root .secondary-toolbar .secondary-tool-lock.active {
+  background: transparent;
+  color: var(--accent-text, #0078d4);
+  box-shadow: inset 0 0 0 1px var(--accent-text, #0078d4);
+}
+:root .secondary-toolbar .secondary-tool-lock.active:hover {
+  background: color-mix(in srgb, var(--accent, #0078d4) 18%, transparent);
+  color: var(--accent-text, #0078d4);
 }
 [data-theme="light"] .secondary-tool-lock { border-inline-start-color: #d1d5db; }
 [data-theme="high-contrast"] .secondary-tool-lock { border-inline-start-color: #ffffff; }

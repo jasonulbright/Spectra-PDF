@@ -3921,7 +3921,7 @@
   "panel.forms.xfaDynamic": "This is a dynamic XML form (XFA): it builds its own pages from an XML template, so its fields cannot be filled here. The fields below are read-only.",
   "panel.forms.xfaStatic": "This is an XML form (XFA). Values you fill are saved into both its XML form data and its standard form fields, so every reader shows the same answers.",
   "panel.ga.addStep": "Add step",
-  "panel.ga.ask": "ask",
+  "panel.ga.ask": "Ask",
   "panel.ga.askedWhenRuns": "{{label}}: asked when the action runs",
   "panel.ga.askTitle": "Ask for this value each time the action runs",
   "panel.ga.backToActions": "Back to actions",

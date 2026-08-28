@@ -173,7 +173,7 @@ export function ComparePanel(): React.ReactElement {
                   onClick={() => setMode(m)}
                   className={`px-3 py-1.5 text-sm font-medium ${
                     mode === m
-                      ? 'bg-neutral-600 text-neutral-100'
+                      ? 'bg-blue-600 text-white'
                       : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
                   }`}
                 >
@@ -275,7 +275,7 @@ function DiffRow({ row }: { row: CompareRow }): React.ReactElement {
   const segCls = row.type === 'add' ? 'bg-green-500/40' : 'bg-red-500/40';
   const sign = row.type === 'add' ? '+' : row.type === 'remove' ? '−' : ' ';
   return (
-    <div className={`flex gap-2 px-3 py-0.5 ${cls}`}>
+    <div className={`flex gap-2 px-3 py-0.5 ${cls}`} data-diff-type={row.type}>
       <span className="w-8 shrink-0 text-end text-neutral-600 select-none">
         {row.page != null ? `p${row.page}` : ''}
       </span>
