@@ -400,7 +400,14 @@ function addAnnotations(
         F: 4, // print
         AP: { N: ap },
       });
-      annot.set(PDFName.of('DA'), PDFHexString.fromText(`${r} ${g} ${b} rg /Helv ${FREETEXT_FONT_SIZE} Tf`));
+      // A /DA is a text string whose CONTENT is content-stream syntax, so it is
+      // written as a LITERAL string. A UTF-16BE hex string encodes it
+      // with a BOM, and a parser then reads NUL bytes between every digit —
+      // pdf.js reports `parseDefaultAppearance ... Invalid number: (charCode
+      // 0)` and falls back to its own default appearance, so a viewer that
+      // regenerates the appearance draws the note in a colour and size this
+      // file never asked for.
+      annot.set(PDFName.of('DA'), PDFString.of(`${r} ${g} ${b} rg /Helv ${FREETEXT_FONT_SIZE} Tf`));
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(text));
     } else if (a.kind === 'ink') {
       // Rung 2's shared style edit reaches ink too: width + opacity (default
@@ -770,7 +777,14 @@ function addAnnotations(
       );
       annot.set(PDFName.of('LE'), PDFName.of(a.lineEndings?.[0] ?? 'OpenArrow'));
       if (a.opacity !== undefined && a.opacity < 1) annot.set(PDFName.of('CA'), context.obj(a.opacity));
-      annot.set(PDFName.of('DA'), PDFHexString.fromText(`${r} ${g} ${b} rg /Helv ${FREETEXT_FONT_SIZE} Tf`));
+      // A /DA is a text string whose CONTENT is content-stream syntax, so it is
+      // written as a LITERAL string. A UTF-16BE hex string encodes it
+      // with a BOM, and a parser then reads NUL bytes between every digit —
+      // pdf.js reports `parseDefaultAppearance ... Invalid number: (charCode
+      // 0)` and falls back to its own default appearance, so a viewer that
+      // regenerates the appearance draws the note in a colour and size this
+      // file never asked for.
+      annot.set(PDFName.of('DA'), PDFString.of(`${r} ${g} ${b} rg /Helv ${FREETEXT_FONT_SIZE} Tf`));
       annot.set(PDFName.of('Contents'), PDFHexString.fromText(text));
     } else if (a.kind === 'count') {
       // A TAKEOFF COUNT MARK — a real /Stamp, so it survives save/reload as an

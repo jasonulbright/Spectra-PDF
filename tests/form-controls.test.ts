@@ -262,6 +262,122 @@ describe('colour-swatch pickers speak one language', () => {
       ruleBody(CSS, ['.color-swatch.is-selected', '.color-swatch[aria-pressed="true"]']),
     ).toMatch(/outline-color:\s*var\(--accent-text, var\(--accent/);
   });
+
+  it('clears the 3:1 boundary floor for a swatch on every ground it lands on', () => {
+    // N3: the palette black measured 1.10:1 with a 1.88:1 ring, and the Black
+    // ink chip 1.01:1 with a 2.09:1 border — both read as an EMPTY swatch,
+    // which in an ink list is a different claim from "black". The FILL is the
+    // value and cannot carry a floor, so the BOUNDARY carries it, and it does
+    // so against the panel ground rather than as an alpha over it. WCAG 1.4.11
+    // sets the number at 3:1 for a UI component boundary.
+    const grounds: [string, string[]][] = [
+      [':root', ['#171717', '#1f1f1f', '#202020', '#232327', '#262629']],
+      ['[data-theme="light"]', ['#ffffff', '#f9fafb', '#f3f4f6']],
+      ['[data-theme="high-contrast"]', ['#000000', '#0d0d0d']],
+    ];
+    for (const [selector, surfaces] of grounds) {
+      const edge = tokensIn(ruleBody(CSS, [selector]))['--swatch-edge'];
+      expect(edge, `no --swatch-edge in ${selector}`).toBeDefined();
+      for (const ground of surfaces) {
+        expect(
+          contrast(edge, ground),
+          `--swatch-edge ${edge} on ${ground} (${selector})`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
+    // And every chip takes it from the one token rather than re-deciding.
+    expect(ruleBody(CSS, ['.color-chip'])).toMatch(
+      /box-shadow:\s*inset 0 0 0 1px var\(--swatch-edge\)/,
+    );
+    expect(ruleBody(CSS, ['.color-swatch'])).toMatch(/inset 0 0 0 1px var\(--swatch-edge\)/);
+    expect(
+      ruleBody(CSS, [".page-editpara-ctl input[type='color']"]),
+      'the colour well went back to a hairline border',
+    ).toMatch(/inset 0 0 0 1px var\(--swatch-edge\)/);
+  });
+});
+
+describe('the select layer positions its own chevron', () => {
+  it('places the chevron physically, because background-position has no logical keywords', () => {
+    // N1, ten of thirty-six screenshots: `center end 7px` parses as nothing,
+    // the declaration is dropped, and the chevron falls back to `0% 0%` — top
+    // left, clipped by the control's own top border, on EVERY select.
+    const body = ruleBody(CSS, ['select']);
+    expect(body, 'the element-level select rule is gone').not.toBeNull();
+    expect(body).toMatch(/background-position:\s*right 7px center/);
+    expect(body, 'a logical keyword came back to background-position').not.toMatch(
+      /background-position:[^;]*\b(end|start)\b/,
+    );
+    // The chevron travels with the reading direction as a second physical rule.
+    expect(ruleBody(CSS, ['[dir="rtl"] select'])).toMatch(
+      /background-position:\s*left 7px center/,
+    );
+  });
+
+  it('ellipsises an overlong select value rather than slicing a glyph', () => {
+    // N2: "Over conten" and "Keep each source's own s" read as stored values.
+    const body = ruleBody(CSS, ['select']) ?? '';
+    expect(body).toMatch(/text-overflow:\s*ellipsis/);
+    expect(body).toMatch(/overflow:\s*hidden/);
+    expect(body).toMatch(/white-space:\s*nowrap/);
+    // The ellipsis must land BEFORE the chevron, not under it.
+    expect(ruleBody(CSS, [':root select'])).toMatch(/padding-inline-end:/);
+  });
+
+  it('keeps only the document-drawn control on the native side of the layer', () => {
+    // A form widget on the canvas reproduces the FILE's own appearance stream,
+    // so it keeps the native rendering. The paragraph editor's restyle toolbar
+    // does not: it names the app's own commands and has no presence in the
+    // file. Grouping it with page content is what left a light #EEF2F7 panel of
+    // native OS controls floating inside a dark app across three audits.
+    expect(ruleBody(CSS, [':root .page-form-select'])).toMatch(/appearance:\s*auto/);
+    expect(
+      CSS,
+      'the paragraph toolbar is back on the native side of the control layer',
+    ).not.toMatch(/\.page-editpara-ctl select\s*\{[^}]*appearance:\s*auto/);
+    const toolbar = ruleBody(CSS, ['.page-editpara-toolbar']) ?? '';
+    expect(toolbar).toMatch(/background:\s*var\(--surface-2\)/);
+    expect(toolbar).toMatch(/color:\s*var\(--text\)/);
+    expect(
+      ruleBody(CSS, [".page-editpara-ctl input[type='number']"]),
+    ).toMatch(/background:\s*var\(--control-bg\)/);
+  });
+});
+
+describe('informational text on the signature card', () => {
+  it('takes the product muted token rather than a private outlier', () => {
+    // N8: #6b7280 measured 3.53:1 on #1c1c1c at ~10px, on three lines of real
+    // information (integrity, field name, claimed time), while the same class
+    // of text everywhere else runs 6.94:1.
+    const body = ruleBody(CSS, ['.signature-nav-detail']) ?? '';
+    expect(body).toMatch(/color:\s*var\(--text-dim\)/);
+    expect(body, 'a literal grey came back').not.toMatch(/color:\s*#/);
+  });
+});
+
+describe('a measurement drawn on the page carries its own contrast', () => {
+  it('gives the committed dimension label a legible ground and the casing a floor', () => {
+    // N8: a 1px amber hairline on white measured 1.79:1, under the 3:1 a
+    // graphical object that carries information owes, with no label, no ticks
+    // and no endpoints. Drawn ON the page, so the colours are literals.
+    const body = ruleBody(CSS, ['.measure-annot-label']);
+    expect(body, 'the committed measurement lost its value chip').not.toBeNull();
+    const bg = '#171717'; // rgba(23,23,23,.92) over any page ground, near enough
+    const fg = (body ?? '').match(/color:\s*(#[0-9a-fA-F]{6})/)?.[1];
+    expect(fg, 'the label colour is no longer a plain hex').toBeDefined();
+    expect(contrast(fg!, bg)).toBeGreaterThanOrEqual(4.5);
+    // The casing is what clears the non-text floor against page white.
+    const src = readFileSync(
+      join(resolve(__dirname, '../src/renderer'), 'components/canvas/PageCell.tsx'),
+      'utf8',
+    );
+    const casing = src.match(/MEASURE_CASING = 'rgba\((\d+), (\d+), (\d+)/);
+    expect(casing, 'the measurement casing is gone').not.toBeNull();
+    const hex =
+      '#' +
+      [1, 2, 3].map((i) => Number(casing![i]).toString(16).padStart(2, '0')).join('');
+    expect(contrast(hex, '#ffffff')).toBeGreaterThanOrEqual(3);
+  });
 });
 
 describe('the tab lane has no phantom scrollbar', () => {

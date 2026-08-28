@@ -78,7 +78,7 @@
   "app.startupEntry.stale": "Ezt a példányt az „Indítás a Windowsszal” bekapcsolása óta áthelyezték, és a bejegyzést nem sikerült frissíteni, ezért az alkalmazás nem indul el a Windowszal. Kapcsolja ki, majd újra be a beállítást a Beállítások között. ({{detail}})",
   "app.startupEntry.staleTitle": "Az „Indítás a Windowsszal” figyelmet igényel",
   "app.window.claimTitle": "Másik ablakban van megnyitva",
-  "app.window.focusOther": "Ablak megjelenítése",
+  "app.window.focusOther": "Az adott ablak megjelenítése",
   "app.window.folderBusy": "Egy másik ablak már ír ebbe a mappába: {{folder}}.",
   "app.window.importElsewhere": "Másik ablakban megnyitott fájlból nem lehet oldalakat importálni: {{names}}.",
   "app.window.openElsewhere": "Már meg van nyitva egy másik ablakban: {{names}}. Egy fájl egyszerre csak egy ablakban szerkeszthető.",

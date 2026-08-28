@@ -78,7 +78,7 @@
   "app.startupEntry.stale": "This copy has moved since \"Start with Windows\" was switched on, and the entry could not be updated, so the application will not start with Windows. Switch the setting off and on again in Preferences. ({{detail}})",
   "app.startupEntry.staleTitle": "Start with Windows needs attention",
   "app.window.claimTitle": "Open in Another Window",
-  "app.window.focusOther": "Show That Window",
+  "app.window.focusOther": "Show that window",
   "app.window.folderBusy": "Another window is already writing to this folder: {{folder}}.",
   "app.window.importElsewhere": "Pages cannot be imported from a file that is open in another window: {{names}}.",
   "app.window.openElsewhere": "Already open in another window: {{names}}. A file can be edited in one window at a time.",

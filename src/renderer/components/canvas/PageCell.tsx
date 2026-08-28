@@ -136,6 +136,7 @@ import {
   paddedPointsBbox,
   eraseFromStrokes,
   strokesBbox,
+  annotationBodyClasses,
   type AnnotationTransform,
   type ResizeHandle,
 } from '../../lib/annotation-manipulation';
@@ -146,6 +147,18 @@ import i18next, { tChrome, tNumber, type UiKey } from '../../i18n';
 // Measure overlays draw in amber — legible over both white paper and the
 // annotation palette's blues/yellows, and distinct from ink's default.
 const MEASURE_COLOR = '#f59e0b';
+/** The dimension's stroke weight in POINTS — the same 2pt the committed
+ *  appearance strokes (`pdfx-build` MEASURE_STROKE_WIDTH), so screen and paper
+ *  are one mark rather than two. */
+const MEASURE_STROKE_PT = 2;
+/** The casing under the coloured core, per side, in device px. Amber at any
+ *  weight is under the 3:1 floor on page white; the casing is what clears it,
+ *  and it is a literal because it is drawn ON the page, where the theme has no
+ *  say (the `.page-redact-label` precedent). */
+const MEASURE_CASING = 'rgba(23, 23, 23, 0.9)';
+const MEASURE_CASING_PX = 1;
+/** Half-length of an end tick, device px. */
+const MEASURE_TICK_PX = 6;
 
 // The closest two grid lines may be drawn, in CSS pixels. Below
 // this the grid is a grey wash over the drawing rather than a reading aid, so
@@ -3424,15 +3437,7 @@ function PageCellImpl({
           key={a.id}
           data-annot-id={a.id}
           className={
-            'page-annot' +
-            (a.kind === 'freetext' ? ' page-annot-text' : '') +
-            (a.kind === 'ink' || a.kind === 'measure' ? ' page-annot-ink' : '') +
-            (a.kind === 'textmarkup' ? ' page-annot-ink' : '') + // SVG body, no default border
-            (a.kind === 'shape' || a.kind === 'callout' ? ' page-annot-ink' : '') + // SVG bodies too
-            // The count symbol and the legend table are their own
-            // bodies — no default box chrome around either.
-            (a.kind === 'count' || a.kind === 'countlegend' ? ' page-annot-ink' : '') +
-            (a.kind === 'stamp' ? ' page-annot-stamp' : '') +
+            annotationBodyClasses(a.kind, pristineImport) +
             (selectedAnnotationIds.includes(a.id) ? ' page-annot-selected' : '')
           }
           title={a.kind === 'highlight' || a.kind === 'ink' || a.kind === 'measure' || a.kind === 'textmarkup' || a.kind === 'note' || a.kind === 'shape' || a.kind === 'count' ? a.note : undefined}
@@ -3588,7 +3593,79 @@ function PageCellImpl({
               </div>
             </div>
           )}
-          {(a.kind === 'ink' || a.kind === 'measure') && !pristineImport && (
+          {a.kind === 'measure' && !pristineImport && (() => {
+            // A DIMENSION, not a stroke. It draws in the body's PIXEL space
+            // (like shapes) rather than in the normalized 0..1 viewBox, because
+            // end ticks are perpendicular to the line and a non-uniform viewBox
+            // shears them.
+            //
+            // Three things the audit measured as absent, all of them what makes
+            // a measurement readable rather than decorative:
+            //  · CONTRAST. A 1px amber hairline on white measured 1.79:1,
+            //    under the 3:1 floor a graphical object that carries
+            //    information owes. The line is drawn as a dark CASING with the
+            //    amber core on top, so the mark clears the floor against page
+            //    white and against dark page content alike — the casing is what
+            //    carries the contrast, the colour is what says "measurement".
+            //  · END TICKS. Without them the line has no endpoints, so what is
+            //    being measured is a guess.
+            //  · THE VALUE, ON THE LINE. The only readout sat in the top
+            //    ribbon, which is ambiguous the moment a page carries two
+            //    measurements.
+            const bw = Math.max(1, da.w * displayWidth);
+            const bh = Math.max(1, da.h * pageHeight);
+            const pts = da.points ?? [];
+            const px = (nx: number): number => (da.w > 0 ? ((nx - da.x) / da.w) * bw : bw / 2);
+            const py = (ny: number): number => (da.h > 0 ? ((ny - da.y) / da.h) * bh : bh / 2);
+            const xy: [number, number][] = [];
+            for (let i = 0; i + 1 < pts.length; i += 2) xy.push([px(pts[i]), py(pts[i + 1])]);
+            if (xy.length < 2) return null;
+            const core = Math.max(1.5, (a.strokeWidth ?? MEASURE_STROKE_PT) * (pageHeight / measDispH));
+            const path = xy.map(([x2, y2]) => `${x2},${y2}`).join(' ');
+            // A tick is perpendicular to the segment it terminates, which for a
+            // closed area ring is still the first/last drawn segment.
+            const tick = (from: [number, number], to: [number, number]): string => {
+              const dx = to[0] - from[0];
+              const dy = to[1] - from[1];
+              const len = Math.hypot(dx, dy) || 1;
+              const nx = (-dy / len) * MEASURE_TICK_PX;
+              const ny = (dx / len) * MEASURE_TICK_PX;
+              return `M${to[0] - nx},${to[1] - ny} L${to[0] + nx},${to[1] + ny}`;
+            };
+            const ticks =
+              `${tick(xy[1], xy[0])} ${tick(xy[xy.length - 2], xy[xy.length - 1])}`;
+            // Midpoint of the whole run by vertex count — good enough to sit
+            // the chip ON the measurement rather than beside it.
+            const mid = xy[Math.floor((xy.length - 1) / 2)];
+            const midNext = xy[Math.min(xy.length - 1, Math.floor((xy.length - 1) / 2) + 1)];
+            const label = a.note?.trim();
+            return (
+              <>
+                <svg className="page-annot-shape-svg" viewBox={`0 0 ${bw} ${bh}`}>
+                  <g fill="none" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline
+                      points={path}
+                      stroke={MEASURE_CASING}
+                      strokeWidth={core + MEASURE_CASING_PX * 2}
+                    />
+                    <path d={ticks} stroke={MEASURE_CASING} strokeWidth={core + MEASURE_CASING_PX * 2} />
+                    <polyline points={path} stroke={a.color} strokeWidth={core} />
+                    <path d={ticks} stroke={a.color} strokeWidth={core} />
+                  </g>
+                </svg>
+                {label && (
+                  <span
+                    className="measure-annot-label"
+                    data-testid="measure-annot-label"
+                    style={{ left: (mid[0] + midNext[0]) / 2, top: (mid[1] + midNext[1]) / 2 }}
+                  >
+                    {label}
+                  </span>
+                )}
+              </>
+            );
+          })()}
+          {a.kind === 'ink' && !pristineImport && (
             <svg
               className="page-annot-ink-svg"
               viewBox="0 0 1 1"
@@ -3601,9 +3678,8 @@ function PageCellImpl({
                 ...(a.inkStyle === 'highlighter' ? { mixBlendMode: 'multiply' as const } : {}),
               }}
             >
-              {/* Ink draws one polyline PER STROKE (da.strokes); measure
-                  keeps its single vertex path (da.points). */}
-              {(a.kind === 'ink' ? (da.strokes ?? []) : [da.points ?? []]).map((stroke, si) => (
+              {/* One polyline PER PEN LIFT. */}
+              {(da.strokes ?? []).map((stroke, si) => (
                 <polyline
                   key={si}
                   points={stroke

@@ -1,12 +1,14 @@
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { PDFDocument, PDFName, PDFHexString, degrees } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFHexString, PDFRawStream, PDFString, degrees } from 'pdf-lib';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { importPageAnnotations } from '../src/renderer/lib/annotation-import';
 import { readRawAnnotationStyles } from '../src/renderer/lib/annotation-raw-style';
 import { planCommit, buildCommitBytes } from '../src/renderer/lib/workspace-commit';
+import { buildPdf } from '../src/renderer/lib/pdfx-build';
+import type { ExportPage } from '../src/renderer/lib/pdfx-format';
 import { appReducer, initialState } from '../src/renderer/state/reducer';
 import type { OpenDocument, OpenFile, PageRef, Workspace } from '../src/renderer/state/types';
 
@@ -723,5 +725,105 @@ describe('Native /Text sticky notes', () => {
     expect(annots).toHaveLength(1);
     expect(annots[0].contentsObj?.str).toBe('edited sticky');
     await rebuilt.loadingTask.destroy();
+  });
+});
+
+describe('the FreeText appearance carries the authored colour', () => {
+  // The other half of N4's pair. The on-page note measured 1.11:1 while the
+  // panel showed it at full contrast, which reads as a broken appearance
+  // stream; the stream was in fact correct and the overlay was painting over
+  // it (pinned in annotation-manipulation.test.ts). This pins the half that
+  // was proved innocent, so a later edit here cannot quietly become the cause.
+  it('strokes the border and fills the text in the note colour, not the ground', async () => {
+    const doc = await PDFDocument.create();
+    doc.addPage([612, 792]);
+    const page: ExportPage = {
+      bytes: await doc.save(),
+      sourceKey: 'src',
+      pageIndex: 0,
+      annotations: [
+        {
+          kind: 'freetext',
+          x: 0.62,
+          y: 0.288,
+          w: 0.31,
+          h: 0.062,
+          color: '#e8503a',
+          note: 'Redact before circulation',
+        },
+      ],
+    };
+    const out = await PDFDocument.load(await buildPdf([page], undefined, 'src'));
+    const annots = out.getPage(0).node.lookupMaybe(PDFName.of('Annots'), PDFArray)!;
+    let ft: PDFDict | null = null;
+    for (let i = 0; i < annots.size(); i++) {
+      const a = annots.lookupMaybe(i, PDFDict);
+      if (a && String(a.lookup(PDFName.of('Subtype'))) === '/FreeText') ft = a;
+    }
+    expect(ft, 'no FreeText annotation was emitted').not.toBeNull();
+    const ap = ft!.lookupMaybe(PDFName.of('AP'), PDFDict)!;
+    const content = new TextDecoder().decode(
+      (ap.lookup(PDFName.of('N')) as PDFRawStream).getContents(),
+    );
+    // #e8503a as PDF operands, to three places — enough to be unmistakably the
+    // authored colour and not the near-white ground beside it.
+    const rgb = /0\.909\d* 0\.313\d* 0\.227\d*/;
+    expect(content, 'the border is no longer stroked in the note colour').toMatch(
+      new RegExp(`${rgb.source} RG`),
+    );
+    expect(content, 'the text is no longer filled in the note colour').toMatch(
+      new RegExp(`${rgb.source} rg`),
+    );
+    // The ground stays the pale paper the body is read against.
+    expect(content).toMatch(/0\.98 0\.98 0\.96 rg/);
+    // And the /DA is a LITERAL string. Its content IS content-stream syntax, so
+    // a UTF-16BE hex string puts a NUL between every digit and a reader that
+    // regenerates the appearance parses none of it — pdf.js reports
+    // `parseDefaultAppearance ... Invalid number: (charCode 0)` and falls back
+    // to a colour and size this file never asked for.
+    const da = ft!.lookup(PDFName.of('DA'));
+    expect(da, 'the FreeText /DA is not a literal string').toBeInstanceOf(PDFString);
+    expect((da as PDFString).decodeText()).toMatch(new RegExp(`${rgb.source} rg`));
+  });
+});
+
+describe('an imported annotation keeps the colour the file carries', () => {
+  // Found while verifying N4 against the shipped screenshot: every accent bar
+  // in the comment list was a SUBTYPE DEFAULT. A highlight authored `#f7c948`
+  // came back `#ffe14a` and an ink stroke authored `#e8503a` came back
+  // `#2f6fed`, while the page kept drawing the authored colours out of their
+  // appearance streams — so the list and the page disagreed about every mark.
+  //
+  // Cause: pdf.js hands `/C` back as a **Uint8ClampedArray**, and
+  // `Array.isArray` is false for one, so the reader returned null every time
+  // and the default took over. The container was never the question.
+  it('reads a Uint8ClampedArray /C, which is what pdf.js actually hands back', async () => {
+    const doc = await PDFDocument.create();
+    doc.addPage([612, 792]);
+    const page: ExportPage = {
+      bytes: await doc.save(),
+      sourceKey: 'src',
+      pageIndex: 0,
+      annotations: [
+        { kind: 'highlight', x: 0.1, y: 0.3, w: 0.4, h: 0.02, color: '#f7c948', note: 'h' },
+        {
+          kind: 'ink',
+          x: 0.1,
+          y: 0.4,
+          w: 0.3,
+          h: 0.03,
+          color: '#e8503a',
+          strokes: [[0.1, 0.41, 0.35, 0.42]],
+        },
+      ],
+    };
+    const bytes = await buildPdf([page], undefined, "src");
+    const pdf = await loadPdf(bytes);
+    const imported = await importPageAnnotations(await pdf.getPage(1));
+    await pdf.loadingTask.destroy();
+    const byKind = new Map(imported.map((a) => [a.kind, a.color]));
+    // A committed highlight round-trips as a native /Highlight text markup.
+    expect(byKind.get('textmarkup'), 'the highlight fell back to its default').toBe('#f7c948');
+    expect(byKind.get('ink'), 'the ink fell back to its default').toBe('#e8503a');
   });
 });

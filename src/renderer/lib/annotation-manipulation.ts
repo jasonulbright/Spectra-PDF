@@ -877,3 +877,32 @@ export function nudgeDelta(
       return { dx: 0, dy: step / pageHeight };
   }
 }
+
+/** The body classes an annotation's overlay div carries.
+ *
+ * A PRISTINE IMPORT is drawn by pdf.js from the file's own appearance stream,
+ * so the overlay contributes geometry and hit-testing only — it must add no
+ * paint of its own. `page-annot-text` paints an opaque near-white plate
+ * (`rgba(250,250,245,0.92)`), which is the freetext body's ground when the
+ * overlay OWNS the drawing; over a pristine import it covered the appearance
+ * stream and left 8% of it bleeding through — the note rendered at 1.11:1 on
+ * the page while the same note showed at full contrast in the comment panel.
+ * The stamp and ink classes carry layout only, so they are unconditional.
+ *
+ * Extracted from the component so the rule is testable: there is no DOM test
+ * environment, and the pairing of "who draws the body" with "who paints the
+ * ground" is exactly the kind of thing that regresses silently. */
+export function annotationBodyClasses(
+  kind: PageAnnotation['kind'],
+  pristineImport: boolean,
+): string {
+  return (
+    'page-annot' +
+    (kind === 'freetext' && !pristineImport ? ' page-annot-text' : '') +
+    (kind === 'ink' || kind === 'measure' ? ' page-annot-ink' : '') +
+    (kind === 'textmarkup' ? ' page-annot-ink' : '') +
+    (kind === 'shape' || kind === 'callout' ? ' page-annot-ink' : '') +
+    (kind === 'count' || kind === 'countlegend' ? ' page-annot-ink' : '') +
+    (kind === 'stamp' ? ' page-annot-stamp' : '')
+  );
+}

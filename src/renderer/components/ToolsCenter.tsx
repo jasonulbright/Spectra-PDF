@@ -76,7 +76,7 @@ export function ToolsCenter({ onOpenTool, embedded }: ToolsCenterProps): React.J
 export const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = {
   organize: 'rotate',
   comment: 'comments',
-  edit: 'watermark',
+  edit: 'edittext',
   fillsign: 'signatures',
   prepareform: 'forms',
   redact: 'delete',
@@ -91,9 +91,7 @@ export const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = 
   watermark: 'watermark',
   headerfooter: 'headerfooter',
   pagebox: 'pagebox',
-  // The capture is of a page region, so the tile borrows the crop glyph —
-  // the one op whose picture is a rectangle drawn on a page.
-  snapshot: 'pagebox',
+  snapshot: 'snapshot',
   pagelabels: 'pagelabels',
   attachments: 'attachments',
   portfolio: 'portfolio',
@@ -101,5 +99,5 @@ export const TILE_GLYPH: Record<ToolId, Parameters<typeof ToolIcon>[0]['op']> = 
   accessibility: 'accessibility',
   printproduction: 'preflight',
   links: 'links',
-  export: 'extract_text',
+  export: 'exportdoc',
 };

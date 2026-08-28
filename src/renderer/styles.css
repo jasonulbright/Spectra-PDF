@@ -491,9 +491,21 @@ select:focus-visible {
   outline-offset: 1px;
 }
 
-/* The chevron travels with the text direction: it is drawn as a background
-   image (the element has no room for a pseudo-element beside its option list),
-   so the one position keyword this layer carries is the logical `end`. */
+/* The chevron is drawn as a background image (the element has no room for a
+   pseudo-element beside its option list).
+
+   `background-position` HAS NO LOGICAL KEYWORDS. `center end 7px` parses as
+   nothing, the whole declaration is dropped, and the chevron falls back to the
+   initial `0% 0%` — top-left, clipped by the control's own top border, on every
+   select in the product. It is therefore written physically, and the RTL case
+   is a second physical rule rather than a keyword the property does not have.
+
+   A value wider than the box gets an ellipsis, not a slice through a glyph:
+   `<select>` with `appearance: none` is an ordinary inline box for this
+   purpose, and "Over conten" reads as a stored value while "Over conten…"
+   reads as a value that continues. The chevron owns its own column
+   (`padding-inline-end`), so the ellipsis lands before it rather than under
+   it. */
 select {
   appearance: none;
   -webkit-appearance: none;
@@ -506,7 +518,14 @@ select {
   background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23909098' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-size: 9px;
-  background-position: center end 7px;
+  background-position: right 7px center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+[dir="rtl"] select {
+  background-position: left 7px center;
 }
 
 select:hover:not(:disabled) {
@@ -529,12 +548,14 @@ select option {
    canvas reproduces the file's own appearance stream, so it keeps the native
    rendering the stream describes and takes neither the chrome chevron nor the
    chrome's padding. */
-:root .page-form-select,
-:root .page-editpara-ctl select {
+:root .page-form-select {
   appearance: auto;
   -webkit-appearance: auto;
   background-image: none;
   padding: revert;
+  /* The UA draws its own chevron INSIDE the box; a clipping box can cut it. */
+  overflow: revert;
+  text-overflow: revert;
 }
 
 /* Panel selects carry Tailwind padding utilities (`px-2`), and a class always
@@ -683,18 +704,58 @@ input:not([type]) {
    The ring is drawn OUTSIDE the swatch (outline + offset) because a swatch's
    whole surface is its value — an inset ring reports a colour the picker
    would then apply. */
+/* ── The swatch visibility floor ──────────────────────────────────────────
+   THE RULE: a swatch's boundary is a UI component boundary (WCAG 1.4.11), so
+   it clears 3:1 against the panel ground in EVERY theme, and it does so with
+   ONE token — never with an alpha over the panel colour, which is what makes
+   the floor a function of whatever surface the swatch happens to land on.
+
+   It is the boundary that carries the floor, never the fill: the fill IS the
+   value. A near-black swatch on the dark shell measured 1.10:1 with a 1.88:1
+   ring, and the Black ink chip 1.01:1 with a 2.09:1 border — both read as an
+   EMPTY swatch, which in an ink list is a different claim from "black".
+   `--swatch-edge` is chosen to clear 3:1 against both the dark shell and the
+   light card surfaces, so one value answers every ground the swatch reaches.
+   Every colour chip in the product takes it: the pickers below, the ink and
+   plate chips, and the comment cards' accent bar. */
+:root { --swatch-edge: #8a8a94; }
+[data-theme="light"] { --swatch-edge: #6b7280; }
+[data-theme="high-contrast"] { --swatch-edge: #ffffff; }
+
+/* The shared chip: any element whose BACKGROUND is a document or annotation
+   colour. It is a class rather than a repeated utility string so a chip added
+   later inherits the floor instead of re-earning the bug. */
+.color-chip {
+  box-shadow: inset 0 0 0 1px var(--swatch-edge);
+}
+
 .color-swatch {
   width: 18px;
   height: 18px;
   border-radius: 999px;
   /* A swatch at or near the panel's own colour would otherwise read as a hole
      in the row rather than as a choice. */
-  box-shadow: inset 0 0 0 1px rgba(127, 127, 137, 0.55);
+  box-shadow: inset 0 0 0 1px var(--swatch-edge);
   outline: 2px solid transparent;
   outline-offset: 2px;
   cursor: pointer;
   padding: 0;
   border: none;
+}
+
+/* The comment card's accent bar: the annotation's own colour, drawn as a chip
+   along the card's inline-start edge rather than as a border, so the floor
+   above reaches it. As a border it was invisible at #16161A — the row simply
+   had no accent while its neighbours did. Inline-start rather than a physical
+   side: the bar follows the reading direction the card's text does. */
+.comment-accent {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 3px;
+  border-start-start-radius: inherit;
+  border-end-start-radius: inherit;
+  pointer-events: none;
 }
 .color-swatch.is-selected,
 .color-swatch[aria-pressed="true"] {
@@ -1049,6 +1110,17 @@ input:not([type]) {
 [data-theme="light"] .search-hit:hover { background: #f3f4f6; }
 [data-theme="light"] .search-hit-page { color: #1f2937; }
 [data-theme="light"] .search-hit-snippet { color: #6b7280; }
+/* N13: both result surfaces drew the matched term in the body colour, so a
+   snippet was a wall of context with the searched word hidden in it. The mark
+   is the SAME wash the canvas paints a find hit with, so "this is your match"
+   looks the same in the list and on the page. `<mark>`'s UA colours are
+   overridden outright — its default is a light-theme yellow. */
+.search-hit-mark {
+  background: color-mix(in srgb, var(--accent, #0078d4) 35%, transparent);
+  color: var(--text);
+  border-radius: 2px;
+  padding: 0 1px;
+}
 
 /* Signatures nav panel — compact status read-view of verify_signatures. */
 .signatures-nav-count {
@@ -1080,7 +1152,10 @@ input:not([type]) {
   text-overflow: ellipsis;
 }
 .signature-nav-status { font-size: 11px; color: #a3a3a3; }
-.signature-nav-detail { font-size: 10px; color: #6b7280; }
+/* The product's ONE muted-text token. #6b7280 measured 3.53:1 here — an
+   outlier below AA on a line of real information (integrity, field name,
+   claimed time), while the same class of text everywhere else runs 6.94:1. */
+.signature-nav-detail { font-size: 10px; color: var(--text-dim); }
 .signature-nav-error { font-size: 10px; color: #f87171; }
 .signatures-nav-caveat {
   margin: 4px 8px 8px;
@@ -2396,7 +2471,21 @@ input:not([type]) {
   text-underline-offset: 2px;
   text-decoration-line: spelling-error;
 }
-/* Restyle toolbar: a compact size + colour row above the textarea. */
+/* Restyle toolbar: a compact size + colour row above the paragraph editor.
+   It is CHROME, not page content — it names the app's own commands, it has no
+   presence in the file, and it disappears when the edit is committed. The
+   earlier reading ("drawn on the page, which is white in every theme") put it
+   on the content side of the control layer's exception and produced the one
+   surface that most visibly contradicts "themed controls everywhere": a light
+   #EEF2F7 panel holding a native OS select, a native colour well and square
+   white default inputs, floating inside a dark app.
+
+   Only `.page-form-select` stays on the content side, and for the reason the
+   exception was written: a form widget on the canvas reproduces the FILE's own
+   appearance stream.
+
+   The row stays OPAQUE — it sits over the paragraph's own glyphs, and a
+   translucent ground lets document text read through the controls. */
 .page-editpara-toolbar {
   display: flex;
   align-items: center;
@@ -2406,16 +2495,13 @@ input:not([type]) {
   flex-wrap: wrap;
   gap: 4px 10px;
   margin-bottom: 3px;
-  padding: 3px 6px;
-  /* OPAQUE: the row sits over the paragraph's own glyphs, so a translucent
-     ground lets document text read through the controls. */
-  background: #eef2f7;
-  border: 1px solid rgba(120, 120, 120, 0.5);
+  padding: 4px 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
   border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   font-size: 11px;
-  /* Drawn on the page, which is white in every theme — a shell token here
-     would re-tint a control that sits on document paper. */
-  color: #111;
+  color: var(--text);
 }
 .page-editpara-ctl {
   display: inline-flex;
@@ -2425,28 +2511,40 @@ input:not([type]) {
 .page-editpara-ctl input[type='number'] {
   width: 46px;
   padding: 1px 3px;
-  border: 1px solid rgba(120, 120, 120, 0.5);
-  border-radius: 2px;
-  background: #fff;
-  color: #111;
+  border: 1px solid var(--control-border);
+  border-radius: 3px;
+  background: var(--control-bg);
+  color: var(--text);
 }
+/* The colour WELL. The picker itself is the OS's — that is the platform
+   affordance and correct — but the well is a swatch, so it takes the swatch
+   boundary floor rather than an alpha hairline that vanishes on a dark ground
+   when the chosen colour is dark. */
 .page-editpara-ctl input[type='color'] {
   width: 26px;
   height: 18px;
   padding: 0;
-  border: 1px solid rgba(120, 120, 120, 0.5);
-  border-radius: 2px;
+  border: none;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--swatch-edge);
   background: none;
   cursor: pointer;
 }
-/* Family swap: the substitute-face dropdown beside size/colour. */
+.page-editpara-ctl input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+.page-editpara-ctl input[type='color']::-webkit-color-swatch {
+  border: none;
+  border-radius: 1px;
+}
+/* Family swap: the substitute-face dropdown beside size/colour. It takes the
+   element-level select layer (chevron, dark ground, ellipsis) — only the
+   compact metrics are local. */
 .page-editpara-ctl select {
-  padding: 1px 3px;
-  border: 1px solid rgba(120, 120, 120, 0.5);
-  border-radius: 2px;
-  background: #fff;
-  color: #111;
+  padding-block: 1px;
+  padding-inline: 5px 20px;
   font-size: 11px;
+  max-width: 140px;
 }
 /* Image adjustments: the crop band + the armed crop quad + the opacity
    slider row. */
@@ -2531,10 +2629,10 @@ input:not([type]) {
   min-width: 20px;
   height: 20px;
   padding: 0 4px;
-  border: 1px solid rgba(120, 120, 120, 0.5);
-  border-radius: 2px;
-  background: #fff;
-  color: #111;
+  border: 1px solid var(--strip-btn-border);
+  border-radius: 3px;
+  background: var(--control-bg);
+  color: var(--text);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
@@ -2544,10 +2642,13 @@ input:not([type]) {
   font-weight: 400;
   font-style: italic;
 }
+.page-editpara-style:hover:not(:disabled) {
+  border-color: var(--control-border-hover);
+}
 .page-editpara-style.pressed {
   background: var(--accent, #3b82f6);
   border-color: var(--accent, #3b82f6);
-  color: #fff;
+  color: var(--accent-fg, #ffffff);
 }
 .page-edittext-editor input {
   width: 100%;
@@ -3122,6 +3223,27 @@ input:not([type]) {
 [data-theme="light"] .measure-live-label {
   background: rgba(255, 255, 255, 0.95);
   color: #92400e;
+}
+
+/* The COMMITTED dimension's value, riding the middle of its own line. The live
+   chip above answers "what am I drawing"; this one answers "what is this line",
+   which the top-ribbon readout could not the moment a page carried two
+   measurements. Drawn ON the page, so its colours are literals in every theme
+   — same reason `.page-redact-label`'s are. White on #171717 measures 15.9:1. */
+.measure-annot-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(23, 23, 23, 0.92);
+  border: 1px solid #f59e0b;
+  color: #ffffff;
+  font-size: 10px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 4;
 }
 
 /* Stamps: fixed-footprint bordered box with a centered bold label. */
@@ -4800,19 +4922,34 @@ input:not([type]) {
 .page-table-region.is-selected {
   border-color: var(--accent, #3b82f6);
 }
+/* The region's NAME, above the region's top edge — never inside it. Drawn in
+   the normal flow it sat on the table's own first header cell, overlapping that
+   cell's text and clipping itself against the first column's right border
+   ("Instrument schedul|e"), so the one label that says which table this is was
+   the least readable thing in the frame.
+   It also gets its own ground, for the reason `.page-redact-label` does: a
+   region can be drawn over any page content, and pale cyan on unknown content
+   is not a contrast anyone can predict. */
 .page-table-label {
-  display: inline-block;
+  position: absolute;
+  inset-block-end: 100%;
+  inset-inline-start: 0;
+  margin-block-end: 2px;
   max-width: 100%;
   overflow: hidden;
-  padding: 1px 3px;
-  font-size: 8px;
+  text-overflow: ellipsis;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: rgba(23, 23, 23, 0.92);
+  font-size: 9px;
+  line-height: 13px;
   font-weight: 700;
   white-space: nowrap;
-  color: rgba(120, 225, 215, 0.95);
+  color: #7ce1d7;
   pointer-events: none;
 }
 .page-table-region.is-selected .page-table-label {
-  color: var(--accent, #3b82f6);
+  color: var(--accent-text, var(--accent, #4cc2ff));
 }
 .page-table-accept {
   position: absolute;

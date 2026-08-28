@@ -210,16 +210,22 @@ export function actionsToDraft(actions: FieldActions | null): FieldActionsDraft 
 
 function labelled(text: string, body: React.ReactNode): React.ReactElement {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 min-w-0">
       <span className="text-xs text-neutral-400 w-24 shrink-0">{text}</span>
       {body}
     </div>
   );
 }
 
+// `min-w-0` is load-bearing, not tidying: a flex item's `min-width` defaults to
+// `auto`, which is its CONTENT width, so `flex-1` alone cannot shrink a control
+// below what its value wants. Rows whose value happened to be long ran past the
+// card, lost their right border and slid under the scroll gutter — the
+// "Largest" row every time, while "Plain text" and "Not calculated" beside it
+// showed their rounded right corners. It repeated on every field row.
 const INPUT =
-  'flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-emerald-500';
-const SELECT = 'flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs';
+  'flex-1 min-w-0 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs focus:outline-none focus:border-blue-500';
+const SELECT = 'flex-1 min-w-0 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-xs';
 
 export function FieldActionsControl({
   value,
@@ -419,7 +425,7 @@ export function FieldActionsControl({
 
       {labelled(
         tChrome('panel.fieldActions.validate'),
-        <div className="flex-1 flex items-center gap-1.5">
+        <div className="flex-1 min-w-0 flex items-center gap-1.5">
           <input
             data-testid={`${idPrefix}-min`}
             type="text"

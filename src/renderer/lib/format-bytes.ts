@@ -32,20 +32,45 @@ export function byteColumnUnit(values: readonly (number | null)[]): ByteUnit {
   return 'bytes';
 }
 
-/** One byte count written in a unit chosen for its whole column.
+/** Places needed to keep the SMALLEST non-zero value in a column non-zero,
+ *  in that column's unit — never more than three.
  *
- * Sub-unit values keep a decimal place rather than collapsing to "0.0": a row
- * that reclaims 70 bytes reclaims something, and rounding it to zero is the
- * table reporting a wrong result, not a tidier one. */
-export function formatBytesIn(n: number | null, unit: ByteUnit): string {
+ * Precision, like the unit, is a property of the COLUMN. Deciding it per value
+ * put `0.000 MB` next to `0.0 MB` on adjacent rows, which reads as two
+ * different measurements rather than as one column; deciding it once for the
+ * column keeps every figure at the same resolution while still refusing to
+ * round a row that reclaimed something down to zero. */
+export function byteColumnPlaces(values: readonly (number | null)[], unit: ByteUnit): number {
+  if (unit === 'bytes') return 0;
+  const divisor = unit === 'kilobytes' ? 1024 : 1024 * 1024;
+  let places = 1;
+  for (const v of values) {
+    if (v === null || v === 0) continue;
+    const scaled = v / divisor;
+    const need = scaled >= 0.1 ? 1 : scaled >= 0.01 ? 2 : 3;
+    if (need > places) places = need;
+  }
+  return places;
+}
+
+/** One byte count written in a unit — and at a precision — chosen for its
+ * whole column.
+ *
+ * Sub-unit values keep enough decimal places to stay non-zero: a row that
+ * reclaims 70 bytes reclaims something, and rounding it to zero is the table
+ * reporting a wrong result, not a tidier one. Pass `places` from
+ * `byteColumnPlaces` so every row in a column agrees; omitted, the value
+ * decides for itself, which is right for a lone figure. */
+export function formatBytesIn(n: number | null, unit: ByteUnit, places?: number): string {
   if (n === null) return tChrome('dialog.props.unknown');
   if (unit === 'bytes') return tChromeCount('dialog.props.bytes', n);
   const divisor = unit === 'kilobytes' ? 1024 : 1024 * 1024;
   const scaled = n / divisor;
-  // Below the unit's own resolution, show enough places to keep a non-zero
-  // value non-zero — never more than three.
-  const places = n === 0 || scaled >= 0.1 ? 1 : scaled >= 0.01 ? 2 : 3;
-  const size = tNumber(scaled, { minimumFractionDigits: places, maximumFractionDigits: places });
+  const digits = places ?? (n === 0 || scaled >= 0.1 ? 1 : scaled >= 0.01 ? 2 : 3);
+  const size = tNumber(scaled, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
   return tChrome(unit === 'kilobytes' ? 'dialog.props.kilobytes' : 'dialog.props.megabytes', {
     size,
   });

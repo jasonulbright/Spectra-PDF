@@ -8,6 +8,7 @@ import { FindModeToggles } from '../search/FindModeToggles';
 import { getCanvasServices, invokeCommand } from '../commands/context';
 import { tChrome, tChromeCount } from '../i18n';
 import type { SearchOptions } from '../search/normalize';
+import { markSnippet } from '../search/search-core';
 import { batch, dialog } from '../lib/tauri-bridge';
 import {
   EXPAND_MODES,
@@ -622,8 +623,24 @@ export function SearchRedactPanel(): React.ReactElement {
                             title={tChrome('panel.searchRedact.jump')}
                           >
                             <span className="text-neutral-200">{hit.text}</span>
+                            {/* N13: the context repeated the match in the body
+                                colour, so the row gave the reader no way to see
+                                WHERE in the line the mark will land — which on a
+                                snippet flattened out of a table is the only
+                                thing that says whether the row is a hit at all.
+                                The match is a literal here, so it marks by
+                                itself; the wash is the one the canvas paints a
+                                find hit with. */}
                             <span className="block text-xs text-neutral-500 truncate">
-                              {hit.context}
+                              {markSnippet(hit.context, hit.text).map((seg, i) =>
+                                seg.match ? (
+                                  <mark key={i} className="search-hit-mark">
+                                    {seg.text}
+                                  </mark>
+                                ) : (
+                                  <React.Fragment key={i}>{seg.text}</React.Fragment>
+                                ),
+                              )}
                             </span>
                           </button>
                           <span className="text-[10px] text-neutral-500 mt-1 shrink-0">

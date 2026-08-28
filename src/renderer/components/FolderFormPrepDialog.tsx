@@ -696,7 +696,7 @@ export function FolderFormPrepDialog({
               disabled={selected.size === 0}
               onClick={() => void apply()}
               data-testid="form-prep-apply"
-              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 rounded text-sm font-medium"
+              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded text-sm font-medium"
             >
               {tChromeCount('dialog.formPrep.apply', selected.size)}
             </button>

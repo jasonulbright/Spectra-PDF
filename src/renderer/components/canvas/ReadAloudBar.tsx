@@ -11,13 +11,20 @@ import { READ_ALOUD_RATES } from '../../lib/read-aloud';
 import { TOOL_DEFS } from '../../commands/tools';
 import type { ReadAloudApi } from '../../hooks/useReadAloud';
 import { tChrome, tNumber, tToolTitle } from '../../i18n';
+import { ChromeIcon } from '../chrome-icons';
 
 // The English fallback tToolTitle needs, taken from the tool table itself so
 // the two can never name the tool differently.
 const OCR_TOOL_TITLE = TOOL_DEFS.find((t) => t.id === 'ocr')?.title ?? '';
 
+// The four transport controls draw from the app's own icon set rather than
+// from the transport CHARACTERS. ⏮ and ⏭ carry an emoji presentation, and the
+// platform resolved them to its colour-emoji face: two of four peer buttons
+// rendered as white glyphs on a blue rounded plate, which reads as a
+// permanently active state, while ⏸/⏹ resolved to the monochrome face.
+// Equal-sized icon buttons also make the four read as one group.
 const BUTTON =
-  'px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded';
+  'inline-flex items-center justify-center w-7 h-6 bg-neutral-700 hover:bg-neutral-600 disabled:opacity-60 rounded';
 
 export function ReadAloudBar({ reader }: { reader: ReadAloudApi }): React.ReactElement {
   useTranslation();
@@ -64,7 +71,7 @@ export function ReadAloudBar({ reader }: { reader: ReadAloudApi }): React.ReactE
         title={tChrome(speaking ? 'canvas.readAloud.pause' : 'canvas.readAloud.resume')}
         onClick={() => (speaking ? reader.pause() : reader.resume())}
       >
-        {speaking ? '❚❚' : '▶'}
+        <ChromeIcon icon={speaking ? 'pause' : 'play'} size={13} />
       </button>
       <button
         data-testid="read-aloud-prev"
@@ -74,7 +81,7 @@ export function ReadAloudBar({ reader }: { reader: ReadAloudApi }): React.ReactE
         title={tChrome('canvas.readAloud.previous')}
         onClick={reader.previous}
       >
-        ⏮
+        <ChromeIcon icon="previous" size={13} />
       </button>
       <button
         data-testid="read-aloud-next"
@@ -84,7 +91,7 @@ export function ReadAloudBar({ reader }: { reader: ReadAloudApi }): React.ReactE
         title={tChrome('canvas.readAloud.next')}
         onClick={reader.next}
       >
-        ⏭
+        <ChromeIcon icon="next" size={13} />
       </button>
       <button
         data-testid="read-aloud-stop"
@@ -93,7 +100,7 @@ export function ReadAloudBar({ reader }: { reader: ReadAloudApi }): React.ReactE
         title={tChrome('canvas.readAloud.stop')}
         onClick={reader.stop}
       >
-        ■
+        <ChromeIcon icon="stop" size={13} />
       </button>
 
       <span
