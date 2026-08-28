@@ -694,7 +694,7 @@ export const PANEL_STRINGS = {
   'panel.compare.openAnother': 'Open another…',
   'panel.compare.openAnotherTitle': 'Open another PDF into the workspace',
   'panel.compare.identical': 'The text of these PDFs is identical.',
-  'panel.compare.similar': '{{pct}}% similar',
+  'panel.compare.similar': '{{pct}}% of lines unchanged',
   'panel.compare.added': '+{{count}} added',
   'panel.compare.removed': '−{{count}} removed',
   'panel.compare.pagesChanged': 'pages: {{a}} → {{b}}',
@@ -858,7 +858,8 @@ export const PANEL_STRINGS = {
   'panel.watermark.under': 'Behind content',
   'panel.watermark.pagesLabel': 'Pages (e.g. 1,3,5 or all)',
   'panel.watermark.pagesAria': 'Pages to watermark',
-  'panel.watermark.scriptsNote': "Latin, Cyrillic, and Greek supported; other scripts (e.g. CJK) aren't yet.",
+  'panel.watermark.scriptsNote':
+    'Latin, Cyrillic, Greek, Hebrew, Arabic and CJK supported; other scripts (e.g. Devanagari, Thai) are not.',
   // The vertical note REPLACES the horizontal one rather than joining it: a
   // vertical stamp embeds the bundled vertical face, so the script coverage
   // the horizontal sentence describes is not the coverage in force.
@@ -2777,11 +2778,12 @@ export const PANEL_STRINGS = {
   'panel.searchRedact.found_other': '{{count}} matches',
   'panel.searchRedact.hitCount_one': '{{count}} match',
   'panel.searchRedact.hitCount_other': '{{count}} matches',
-  'panel.searchRedact.markChecked_one': 'Mark {{count}} for redaction',
-  'panel.searchRedact.markChecked_other': 'Mark {{count}} for redaction',
-  'panel.searchRedact.pending_one': '{{count}} mark pending',
-  'panel.searchRedact.pending_other': '{{count}} marks pending',
-  'panel.searchRedact.marked': 'Marked {{added}} ({{duplicates}} already marked, {{skipped}} skipped).',
+  'panel.searchRedact.markChecked_one': 'Mark checked results ({{count}})',
+  'panel.searchRedact.markChecked_other': 'Mark checked results ({{count}})',
+  'panel.searchRedact.pending_one': '{{count}} mark already on the page',
+  'panel.searchRedact.pending_other': '{{count}} marks already on the page',
+  'panel.searchRedact.marked':
+    'Added {{added}} ({{duplicates}} already marked, {{skipped}} skipped).',
   'panel.searchRedact.page': 'Page {{page}}',
   'panel.searchRedact.jump': 'Go to this page',
   'panel.searchRedact.alreadyMarked': 'Already marked for redaction.',
