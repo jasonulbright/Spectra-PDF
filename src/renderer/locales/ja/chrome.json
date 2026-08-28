@@ -683,7 +683,7 @@
   "cmd.tools.count": "カウント",
   "cmd.tools.cropdraw": "トリミング枠を描く",
   "cmd.tools.diskRedact": "フォルダーを検索して墨消し…",
-  "cmd.tools.edit": "画像を選択",
+  "cmd.tools.edit": "選択と編集",
   "cmd.tools.flattenpreview": "分割・統合プレビュー",
   "cmd.tools.folderCreatePdf": "フォルダーごとに 1 つの PDF…",
   "cmd.tools.folderExport": "フォルダーを書き出し…",

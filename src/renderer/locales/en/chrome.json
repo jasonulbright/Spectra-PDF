@@ -696,7 +696,7 @@
   "cmd.tools.count": "Count",
   "cmd.tools.cropdraw": "Draw Crop",
   "cmd.tools.diskRedact": "Search & Redact Folder…",
-  "cmd.tools.edit": "Select Image",
+  "cmd.tools.edit": "Select & Edit",
   "cmd.tools.flattenpreview": "Flattener Preview",
   "cmd.tools.folderCreatePdf": "One PDF per Folder…",
   "cmd.tools.folderExport": "Export a Folder…",

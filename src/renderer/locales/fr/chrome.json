@@ -709,7 +709,7 @@
   "cmd.tools.count": "Compter",
   "cmd.tools.cropdraw": "Tracer un rognage",
   "cmd.tools.diskRedact": "Rechercher et caviarder un dossier…",
-  "cmd.tools.edit": "Sélectionner une image",
+  "cmd.tools.edit": "Sélectionner et modifier",
   "cmd.tools.flattenpreview": "Aperçu de l’aplatissement",
   "cmd.tools.folderCreatePdf": "Un PDF par dossier…",
   "cmd.tools.folderExport": "Exporter un dossier…",

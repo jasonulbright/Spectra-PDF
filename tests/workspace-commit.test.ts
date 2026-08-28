@@ -190,7 +190,7 @@ describe('carriesManifest', () => {
 });
 
 describe('annotations round-trip', () => {
-  // Non-circular validation: read the written /Square rect back with pdf.js
+  // Non-circular validation: read the written /Highlight rect back with pdf.js
   // and re-project it through the page's own viewport — the result must land
   // on the display-normalized rect we authored.
   async function roundTrip(rotation: 0 | 90 | 180 | 270) {
@@ -215,7 +215,7 @@ describe('annotations round-trip', () => {
       contentsObj?: { str: string };
     }[];
     expect(annots).toHaveLength(1);
-    expect(annots[0].subtype).toBe('Square');
+    expect(annots[0].subtype).toBe('Highlight');
     expect(annots[0].contentsObj?.str).toBe('check this');
     const viewport = page.getViewport({ scale: 1 }); // includes the committed rotation
     const [rx0, ry0, rx1, ry1] = annots[0].rect;

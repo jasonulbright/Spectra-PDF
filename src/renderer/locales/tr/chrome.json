@@ -696,7 +696,7 @@
   "cmd.tools.count": "Sayım",
   "cmd.tools.cropdraw": "Kırpma Çiz",
   "cmd.tools.diskRedact": "Klasörde Ara ve Karart…",
-  "cmd.tools.edit": "Görüntü Seç",
+  "cmd.tools.edit": "Seç ve Düzenle",
   "cmd.tools.flattenpreview": "Düzleştirici Önizlemesi",
   "cmd.tools.folderCreatePdf": "Her klasör için bir PDF…",
   "cmd.tools.folderExport": "Klasörü Dışa Aktar…",

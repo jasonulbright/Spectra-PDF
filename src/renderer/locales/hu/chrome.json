@@ -696,7 +696,7 @@
   "cmd.tools.count": "Számlálás",
   "cmd.tools.cropdraw": "Levágás rajzolása",
   "cmd.tools.diskRedact": "Keresés és kitakarás mappában…",
-  "cmd.tools.edit": "Kép kijelölése",
+  "cmd.tools.edit": "Kijelölés és szerkesztés",
   "cmd.tools.flattenpreview": "Simítási előnézet",
   "cmd.tools.folderCreatePdf": "Mappánként egy PDF…",
   "cmd.tools.folderExport": "Mappa exportálása…",

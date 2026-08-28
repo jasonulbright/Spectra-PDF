@@ -722,7 +722,7 @@
   "cmd.tools.count": "Zliczanie",
   "cmd.tools.cropdraw": "Narysuj przycięcie",
   "cmd.tools.diskRedact": "Znajdź i zaczernij w folderze…",
-  "cmd.tools.edit": "Zaznacz obraz",
+  "cmd.tools.edit": "Zaznacz i edytuj",
   "cmd.tools.flattenpreview": "Podgląd spłaszczania przezroczystości",
   "cmd.tools.folderCreatePdf": "Jeden PDF na folder…",
   "cmd.tools.folderExport": "Eksportuj folder…",
