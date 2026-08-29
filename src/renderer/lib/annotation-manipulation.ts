@@ -119,6 +119,27 @@ export function resized(
   py: number,
   keepAspect: boolean,
 ): { x: number; y: number; w: number; h: number; points?: number[]; strokes?: number[][] } {
+  const out = resizedRect(a, handle, px, py, keepAspect);
+  return {
+    ...out,
+    ...(a.points ? { points: scaledPoints(a, out) } : {}),
+    ...(a.strokes ? { strokes: scaledStrokes(a, out) } : {}),
+    ...(a.calloutBox ? { calloutBox: scaledCalloutBox(a, out) } : {}),
+  };
+}
+
+/** The box half of `resized`, on a bare rect: every banded overlay that
+ * resizes (an annotation, the crop band) shares this one derivation, so a
+ * corner drag cannot mean two different things on the same page. Normalized
+ * 0..1, clamped to the page, floored at MIN_SIZE_NORM per axis. */
+export function resizedRect(
+  box: { x: number; y: number; w: number; h: number },
+  handle: ResizeHandle,
+  px: number,
+  py: number,
+  keepAspect: boolean,
+): { x: number; y: number; w: number; h: number } {
+  const a = box;
   // Anchor = the box corner/edge opposite the dragged handle; it never moves.
   const left = a.x;
   const top = a.y;
@@ -169,13 +190,7 @@ export function resized(
     y1 = y0 + h;
   }
 
-  const out = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
-  return {
-    ...out,
-    ...(a.points ? { points: scaledPoints(a, out) } : {}),
-    ...(a.strokes ? { strokes: scaledStrokes(a, out) } : {}),
-    ...(a.calloutBox ? { calloutBox: scaledCalloutBox(a, out) } : {}),
-  };
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
 /** Scale a callout's text sub-rect with the same box mapping scaledPoints

@@ -24,6 +24,8 @@
  * landscape scan trims the wrong two edges.
  */
 
+import { resizedRect, type ResizeHandle } from './annotation-manipulation';
+
 export interface NormRect {
   x: number;
   y: number;
@@ -36,6 +38,39 @@ export interface CropInsets {
   bottom: number;
   left: number;
   right: number;
+}
+
+/**
+ * Drag one handle of an existing crop band to a new pointer position, in the
+ * display frame the band is currently shown in.
+ *
+ * The box derivation is the annotation resize's (`resizedRect`) rather than a
+ * second one: same clamp to the page box, same per-axis floor, so the crop
+ * band and an annotation answer a corner drag identically. The floor is above
+ * `insetsFromBand`'s no-area threshold, so a resize can never collapse a band
+ * into a rect the panel refuses.
+ */
+export function resizeCropBand(
+  band: NormRect,
+  handle: ResizeHandle,
+  px: number,
+  py: number,
+  keepAspect = false,
+): NormRect {
+  return resizedRect(band, handle, px, py, keepAspect);
+}
+
+/** Whether a drag actually moved the band, at the precision the panel's
+ * fields carry — a handle pressed and released without travel republishes
+ * nothing, so the fields the user has since typed into survive. */
+export function cropBandChanged(before: NormRect, after: NormRect): boolean {
+  const same = (a: number, b: number): boolean => Math.abs(a - b) < 1e-6;
+  return !(
+    same(before.x, after.x) &&
+    same(before.y, after.y) &&
+    same(before.w, after.w) &&
+    same(before.h, after.h)
+  );
 }
 
 /** Points-per-edge insets for a band drawn on a page displayed at
