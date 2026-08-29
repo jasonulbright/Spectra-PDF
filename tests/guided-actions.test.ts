@@ -17,6 +17,8 @@ import {
   newStep,
   parseActionFile,
   saveGuidedActions,
+  stepConfigCue,
+  stepConfigProblem,
   unattendedBlocker,
   validateAction,
   validateRunValues,
@@ -213,6 +215,47 @@ describe('validation', () => {
     const enc = newStep('encrypt');
     expect(validateRunValues(enc, {})).toMatch(/open or an owner password/);
     expect(validateRunValues(enc, { owner_password: 's3cret' })).toBeNull();
+  });
+
+  it('the editor cue and the save refusal read ONE condition', () => {
+    // Every catalog step, at its defaults: a step the cue calls incomplete is
+    // exactly a step a one-step action cannot be saved with.
+    for (const def of STEP_CATALOG) {
+      const step = newStep(def.op);
+      const cued = stepConfigProblem(step) !== null;
+      const refused = validateAction({ id: '1', name: 'A', steps: [step] }) !== null;
+      expect(cued).toBe(refused);
+      expect(stepConfigCue(step) === null).toBe(!cued);
+    }
+  });
+
+  it('stepConfigProblem distinguishes none-set from both-set, and defers asked params', () => {
+    const wm = newStep('watermark');
+    expect(stepConfigProblem(wm)).toEqual({
+      kind: 'missingOneOf',
+      params: ['text', 'image', 'pdf_source'],
+    });
+    expect(stepConfigCue(wm)).toMatch(/one of Text \/ Image file \/ PDF file/);
+
+    wm.params.text = 'DRAFT';
+    expect(stepConfigProblem(wm)).toBeNull();
+    expect(stepConfigCue(wm)).toBeNull();
+
+    wm.params.image = 'logo.png';
+    expect(stepConfigProblem(wm)?.kind).toBe('conflictOneOf');
+    expect(stepConfigCue(wm)).toMatch(/only one/);
+
+    // Asked at run time: the pre-run form's problem, so no cue on the step.
+    const asked = newStep('watermark');
+    asked.ask = ['text'];
+    expect(stepConfigProblem(asked)).toBeNull();
+
+    // A plain required param, empty.
+    const hf = newStep('add_header_footer');
+    expect(stepConfigProblem(hf)).toEqual({ kind: 'missingParam', param: 'text' });
+    expect(stepConfigCue(hf)).toMatch(/needs Text/);
+    hf.params.text = 'Page {page}';
+    expect(stepConfigProblem(hf)).toBeNull();
   });
 
   it('buildStepParams merges ask-at-run overrides BEFORE coercion clamps', () => {

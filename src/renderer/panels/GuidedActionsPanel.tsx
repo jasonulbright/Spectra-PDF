@@ -23,6 +23,7 @@ import {
   openDocumentBlocker,
   parseActionFile,
   saveGuidedActions,
+  stepConfigCue,
   stepDefFor,
   terminalOutputName,
   validateAction,
@@ -426,6 +427,7 @@ export function GuidedActionsPanel(): React.ReactElement {
           {action.steps.map((step, i) => {
             const def = stepDefFor(step.op);
             const shown = editorParams(step);
+            const stepCue = stepConfigCue(step);
             return (
               <div
                 key={i}
@@ -574,6 +576,19 @@ export function GuidedActionsPanel(): React.ReactElement {
                       );
                     })}
                   </div>
+                )}
+                {/* Non-blocking: the step stays editable and the action stays
+                    saveable-looking until Save refuses. Both read
+                    `stepConfigProblem`, so this line and that refusal name the
+                    same steps. */}
+                {stepCue !== null && (
+                  <p
+                    className="text-xs text-amber-400"
+                    data-testid={`action-step-${i}-cue`}
+                    aria-live="polite"
+                  >
+                    {stepCue}
+                  </p>
                 )}
               </div>
             );

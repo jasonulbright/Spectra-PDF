@@ -1178,6 +1178,64 @@ export function buildStepParams(
   return def.mapParams ? def.mapParams(out) : out;
 }
 
+/**
+ * What is missing or contradictory in ONE step's stored params, as data.
+ *
+ * `validateAction` and the editor's inline cue both read this, so a step the
+ * editor marks incomplete and a step the save path refuses are the same set
+ * by construction — never two conditions that can drift apart.
+ */
+export type StepConfigProblem =
+  | { kind: 'missingParam'; param: string }
+  | { kind: 'missingOneOf'; params: readonly string[] }
+  | { kind: 'conflictOneOf'; params: readonly string[] };
+
+/** The per-step half of `validateAction`, in the same order it checks. An
+ * asked/secret param's emptiness belongs to the PRE-RUN form, so it is not a
+ * problem here. An unknown op reports nothing — `validateAction` names it. */
+export function stepConfigProblem(step: GuidedStep): StepConfigProblem | null {
+  const def = STEP_CATALOG.find((d) => d.op === step.op);
+  if (!def) return null;
+  const asked = new Set(askedParamKeys(step));
+  for (const p of def.params) {
+    if (p.required && !asked.has(p.key) && !String(step.params[p.key] ?? '').trim()) {
+      return { kind: 'missingParam', param: p.key };
+    }
+  }
+  if (def.requireOneOf) {
+    const askedEither = def.requireOneOf.some((k) => asked.has(k));
+    const set = def.requireOneOf.filter((k) => String(step.params[k] ?? '').trim());
+    if (!askedEither && set.length !== 1) {
+      return {
+        kind: set.length === 0 ? 'missingOneOf' : 'conflictOneOf',
+        params: def.requireOneOf,
+      };
+    }
+  }
+  return null;
+}
+
+/** The step editor's inline cue for an incomplete step, or null. Shorter than
+ * the save refusal and carrying no step number, because it is rendered ON the
+ * step; the CONDITION is `stepConfigProblem`, which the save path also reads. */
+export function stepConfigCue(step: GuidedStep): string | null {
+  const problem = stepConfigProblem(step);
+  if (!problem) return null;
+  const def = stepDefFor(step.op);
+  const name = (key: string): string =>
+    tStepParam(def.op, key, def.params.find((p) => p.key === key)?.label ?? key);
+  if (problem.kind === 'missingParam') {
+    return tChrome('refusal.action.stepCueMissingParam', { param: name(problem.param) });
+  }
+  const params = problem.params.map(name).join(' / ');
+  return tChrome(
+    problem.kind === 'missingOneOf'
+      ? 'refusal.action.stepCueMissingOneOf'
+      : 'refusal.action.stepCueConflictOneOf',
+    { params },
+  );
+}
+
 /** null when valid; else the first human-readable problem.
  *
  * Every refusal is ONE interpolated catalog key, and the STEP
@@ -1191,31 +1249,27 @@ export function validateAction(action: GuidedAction): string | null {
     const step = action.steps[i];
     const def = STEP_CATALOG.find((d) => d.op === step.op);
     if (!def) return tChrome('refusal.action.unknownOp', { index: i + 1 });
-    const asked = new Set(askedParamKeys(step));
-    for (const p of def.params) {
-      // An asked/secret param's emptiness is the PRE-RUN form's problem.
-      if (p.required && !asked.has(p.key) && !String(step.params[p.key] ?? '').trim()) {
-        return tChrome('refusal.action.paramRequired', {
-          index: i + 1,
-          step: tStepTitle(def.op, def.title),
-          param: tStepParam(def.op, p.key, p.label),
-        });
-      }
+    // The param half comes from `stepConfigProblem` — the same read the
+    // editor's inline cue makes, so the cue and this refusal cannot disagree
+    // about which steps are incomplete. An asked/secret param's emptiness is
+    // the PRE-RUN form's problem and is not reported by either.
+    const problem = stepConfigProblem(step);
+    if (problem?.kind === 'missingParam') {
+      const p = def.params.find((x) => x.key === problem.param)!;
+      return tChrome('refusal.action.paramRequired', {
+        index: i + 1,
+        step: tStepTitle(def.op, def.title),
+        param: tStepParam(def.op, p.key, p.label),
+      });
     }
-    if (def.requireOneOf) {
-      // An asked key's value is the PRE-RUN form's problem, so an asked pair
-      // is left to `validateRunValues`.
-      const askedEither = def.requireOneOf.some((k) => asked.has(k));
-      const set = def.requireOneOf.filter((k) => String(step.params[k] ?? '').trim());
-      if (!askedEither && set.length !== 1) {
-        return tChrome('refusal.action.paramOneOf', {
-          index: i + 1,
-          step: tStepTitle(def.op, def.title),
-          params: def.requireOneOf
-            .map((k) => tStepParam(def.op, k, def.params.find((p) => p.key === k)?.label ?? k))
-            .join(' / '),
-        });
-      }
+    if (problem) {
+      return tChrome('refusal.action.paramOneOf', {
+        index: i + 1,
+        step: tStepTitle(def.op, def.title),
+        params: problem.params
+          .map((k) => tStepParam(def.op, k, def.params.find((p) => p.key === k)?.label ?? k))
+          .join(' / '),
+      });
     }
     // A terminal step never mutates the open doc, so nothing may follow it.
     if (def.terminalOutput && i < action.steps.length - 1) {
