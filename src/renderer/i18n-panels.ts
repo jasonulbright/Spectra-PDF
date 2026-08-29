@@ -895,7 +895,11 @@ export const PANEL_STRINGS = {
   // the horizontal sentence describes is not the coverage in force.
   'panel.watermark.scriptsNoteVertical':
     'A vertical stamp draws through the bundled vertical face, which covers CJK.',
-  'panel.watermark.writingMode': 'Direction',
+  // Names the axis the TEXT runs along, not the stamp's rotation: a bare
+  // "Direction" beside the Angle field reads as a second way to say the same
+  // thing, and the two are independent (a vertical column is still turned by
+  // the angle).
+  'panel.watermark.writingMode': 'Text direction',
   'panel.watermark.writingMode.horizontal': 'Horizontal',
   'panel.watermark.writingMode.vertical': 'Vertical',
   'panel.watermark.writingModeTitle':
@@ -1625,7 +1629,10 @@ export const PANEL_STRINGS = {
   'panel.scanEnhance.strength': 'Whitening strength',
   'panel.scanEnhance.speckSize': 'Largest speck (in)',
   'panel.scanEnhance.maxSkew': 'Search up to (°)',
-  'panel.scanEnhance.confidence': 'Turn the page when at least',
+  // The orientation detector's own score, which is dimensionless — so the
+  // noun completes the sentence where the numeric siblings above carry a
+  // parenthesised unit instead.
+  'panel.scanEnhance.confidence': 'Turn the page when confidence is at least',
   'panel.scanEnhance.quality': 'Re-encode quality',
   'panel.scanEnhance.nothingProblem': 'Choose at least one correction.',
   'panel.scanEnhance.maxSkewProblem': 'The skew search must be between 0.1° and 45°.',
@@ -3090,7 +3097,12 @@ export const PANEL_STRINGS = {
   'panel.tableReview.accepted_other': '{{count}} checked',
   'panel.tableReview.acceptAria': 'Include this table',
   'panel.tableReview.pageHead': 'Page {{page}}',
-  'panel.tableReview.shape': '{{rows}}×{{columns}}, {{cells}} cells',
+  // The count is the cells that HOLD something (`_cell_count` sums the
+  // non-empty ones), which rows×columns does not equal — a grid with an empty
+  // total row reports fewer cells than the shape multiplies to. The bare noun
+  // read as the product of the two numbers beside it.
+  'panel.tableReview.shape_one': '{{rows}}×{{columns}}, {{count}} non-empty cell',
+  'panel.tableReview.shape_other': '{{rows}}×{{columns}}, {{count}} non-empty cells',
   'panel.tableReview.show': 'Show the tables on the page',
   'panel.tableReview.adjustHint':
     'Drag a frame to change what a table covers, drag a rule to move a column, double-click inside to add one, double-click a rule to remove it.',

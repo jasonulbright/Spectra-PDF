@@ -278,10 +278,9 @@ export function TableReviewPanel(): React.ReactElement {
                       {region.caption ?? tChrome('canvas.tableReview.untitled')}
                     </button>
                     <span className="text-xs text-neutral-500">
-                      {tChrome('panel.tableReview.shape', {
+                      {tChromeCount('panel.tableReview.shape', region.cells, {
                         rows: tNumber(region.rows.length),
                         columns: tNumber(region.columns.length),
-                        cells: tNumber(region.cells),
                       })}
                     </span>
                   </div>
