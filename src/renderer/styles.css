@@ -2458,6 +2458,26 @@ input:not([type]) {
 .page-editpara-rich.invalid {
   border-color: #dc2626;
 }
+/* Both edit surfaces carry `resize: both`, and the corner grip is the ONE
+   native control chrome left in the product after the control layer replaced
+   the checkboxes, radios and selects: Chromium paints its own grey hatch,
+   which on the white page reads as an artefact rather than as part of the box
+   it resizes. Drawn instead as a corner in the box's own border colour, so
+   the grip belongs to the edit box and follows it into the invalid state. The
+   colours are literals for `.page-editpara`'s reason — this is drawn ON the
+   page, where the theme has no say. */
+.page-editpara-editor textarea::-webkit-resizer,
+.page-editpara-rich::-webkit-resizer {
+  background: linear-gradient(
+    135deg,
+    transparent 0 55%,
+    var(--accent, #3b82f6) 55% 100%
+  );
+}
+.page-editpara-editor textarea.invalid::-webkit-resizer,
+.page-editpara-rich.invalid::-webkit-resizer {
+  background: linear-gradient(135deg, transparent 0 55%, #dc2626 55% 100%);
+}
 /* A misspelled word inside the rich surface. The editor draws this itself
    rather than letting the webview mark the box, because the webview's checker
    cannot see the chosen dictionary or the words the user has added.

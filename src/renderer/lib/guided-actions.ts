@@ -714,7 +714,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
       },
       {
         key: 'osd_confidence',
-        label: 'Turn the page when at least',
+        label: 'Turn the page when confidence is at least',
         kind: 'number',
         defaultValue: 2,
         min: 0,
