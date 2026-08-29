@@ -31,7 +31,14 @@ import {
   type GuidedStepOp,
 } from '../lib/guided-actions';
 import { useTranslation } from 'react-i18next';
-import { tChrome, tStepTitle, tStepParam, tStepOption, tStepHint } from '../i18n';
+import {
+  tChrome,
+  tStepTitle,
+  tStepParam,
+  tStepOption,
+  tStepHint,
+  tStepPlaceholder,
+} from '../i18n';
 
 // Guided actions are named sequences of existing gated engine operations,
 // authored in a compact editor and
@@ -531,6 +538,11 @@ export function GuidedActionsPanel(): React.ReactElement {
                               type={p.kind === 'number' ? 'number' : p.kind}
                               data-testid={`action-step-${i}-${p.key}`}
                               value={String(step.params[p.key] ?? p.defaultValue)}
+                              placeholder={
+                                p.placeholder
+                                  ? tStepPlaceholder(def.op, p.key, p.placeholder)
+                                  : undefined
+                              }
                               min={p.min}
                               max={p.max}
                               step={p.step}
@@ -670,6 +682,9 @@ export function GuidedActionsPanel(): React.ReactElement {
                           type={p.kind === 'number' ? 'number' : p.kind}
                           data-testid={`prerun-${i}-${key}`}
                           value={String(values[i]?.[key] ?? '')}
+                          placeholder={
+                            p.placeholder ? tStepPlaceholder(def.op, p.key, p.placeholder) : undefined
+                          }
                           min={p.min}
                           max={p.max}
                           step={p.step}

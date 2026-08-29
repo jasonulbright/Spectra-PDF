@@ -542,6 +542,8 @@ export const tStepOption = (op: string, key: string, value: string, english: str
     : i18next.t(`gaction.opt.${op}.${key}.${value}`, { defaultValue: english });
 export const tStepHint = (op: string, key: string, english: string): string =>
   i18next.t(`gaction.hint.${op}.${key}`, { defaultValue: english });
+export const tStepPlaceholder = (op: string, key: string, english: string): string =>
+  i18next.t(`gaction.ph.${op}.${key}`, { defaultValue: english });
 
 /**
  * Does this status line say "something failed"? The panels format every

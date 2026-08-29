@@ -80,6 +80,8 @@ export interface StepParamDef {
   secret?: boolean;
   /** Editor hint under the input (token syntax etc.). */
   hint?: string;
+  /** Example value shown in an empty input. Text-kind params only. */
+  placeholder?: string;
   min?: number;
   max?: number;
   step?: number;
@@ -375,6 +377,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
         kind: 'text',
         defaultValue: '',
         hint: 'Comma-separated. Combined with the search term and the patterns.',
+        placeholder: 'e.g. Smith, Acme',
       },
       {
         key: 'patterns',
@@ -382,6 +385,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
         kind: 'text',
         defaultValue: '',
         hint: 'Comma-separated: phone, email, credit_card, ssn, date, iban, nhs_uk, sin_ca, url',
+        placeholder: 'e.g. email, ssn',
       },
       {
         key: 'expand',
@@ -410,6 +414,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
         kind: 'text',
         defaultValue: '',
         hint: 'Drawn over each box — e.g. an exemption code. Empty draws a plain box.',
+        placeholder: '(b)(6)',
       },
       {
         key: 'signed',
@@ -456,6 +461,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
         kind: 'text',
         defaultValue: '',
         hint: 'Comma-separated: text, checkbox, radio, signature. Empty adds every type it finds.',
+        placeholder: 'e.g. text, checkbox',
       },
       {
         key: 'scan',
@@ -505,13 +511,14 @@ export const STEP_CATALOG: readonly StepDef[] = [
     needsFontDir: true,
     requireOneOf: ['text', 'image', 'pdf_source'],
     params: [
-      { key: 'text', label: 'Text', kind: 'text', defaultValue: '' },
+      { key: 'text', label: 'Text', kind: 'text', defaultValue: '', placeholder: 'DRAFT' },
       {
         key: 'image',
         label: 'Image file',
         kind: 'text',
         defaultValue: '',
         hint: 'Full path to a picture. Set exactly one source.',
+        placeholder: 'C:\\Stamps\\logo.png',
       },
       {
         key: 'pdf_source',
@@ -519,6 +526,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
         kind: 'text',
         defaultValue: '',
         hint: 'Full path to a PDF whose page is stamped as vector artwork. Set exactly one source.',
+        placeholder: 'C:\\Stamps\\seal.pdf',
       },
       {
         key: 'pdf_page',
@@ -768,6 +776,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
         defaultValue: '',
         required: true,
         hint: 'Tokens: {page}, {pages}, {bates}. One position per step — stack steps for more.',
+        placeholder: 'Page {page} of {pages}',
       },
       { key: 'font_size', label: 'Size', kind: 'number', defaultValue: 10, min: 4, max: 72, step: 1 },
     ],
@@ -815,6 +824,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
         kind: 'text',
         defaultValue: '',
         hint: 'Blank is every page. Read by the text, spreadsheet and presentation targets only.',
+        placeholder: 'All',
       },
       {
         key: 'layout',
@@ -901,6 +911,7 @@ export const STEP_CATALOG: readonly StepDef[] = [
         kind: 'text',
         defaultValue: '',
         hint: 'Blank is every page. Ranges like 1-3,5 are read as written.',
+        placeholder: 'All',
       },
       { key: 'dpi', label: 'Resolution (dpi)', kind: 'number', defaultValue: 150, min: 18, max: 1200, step: 1 },
       {
