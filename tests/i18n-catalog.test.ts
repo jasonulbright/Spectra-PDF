@@ -245,6 +245,7 @@ function expectedCatalog(): Record<string, string> {
     for (const p of def.params) {
       out[`gaction.param.${def.op}.${p.key}`] = p.label;
       if (p.hint) out[`gaction.hint.${def.op}.${p.key}`] = p.hint;
+      if (p.placeholder) out[`gaction.ph.${def.op}.${p.key}`] = p.placeholder;
       // A recognition-language list is excluded wherever it appears: those
       // names come from Intl.DisplayNames, and deriving 47 keys per step that
       // offers one would author by hand what the platform already knows.
