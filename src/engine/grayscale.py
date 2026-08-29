@@ -18,6 +18,7 @@ def grayscale(
     output: str,
     gs_path: str = "",
     font_dir: str = "",
+    drop_encryption: bool = False,
 ) -> dict:
     """Convert a PDF to grayscale using Ghostscript.
 
@@ -29,11 +30,16 @@ def grayscale(
             of a widget that carries none whose value is outside the form
             font's encoding. Without it such a field keeps the appearance the
             producer synthesizes; every other field is unaffected.
+        drop_encryption: The user was told the conversion cannot keep the
+            document's protection and chose to proceed. The output is
+            unprotected and says so as `encryption_removed`.
     """
     info = validate_pdf(file)
     # The conversion runs in a renderer subprocess that reads the document and
     # writes a new one, so the source's encryption cannot ride through.
-    refuse_encrypted_source(file)
+    encryption_removed = refuse_encrypted_source(
+        file, drop_encryption=drop_encryption
+    )
 
     input_path = Path(file)
     output_path = Path(output)
@@ -93,4 +99,5 @@ def grayscale(
         "output": str(output_path),
         "original_size": original_size,
         "output_size": output_path.stat().st_size,
+        "encryption_removed": encryption_removed,
     }

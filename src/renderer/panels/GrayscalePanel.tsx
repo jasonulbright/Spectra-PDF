@@ -10,6 +10,7 @@ import { app } from '../lib/tauri-bridge';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import { suffixedOutputName } from '../lib/output-names';
+import { CONSENT_DECLINED, useEncryptionConsent } from '../hooks/useEncryptionConsent';
 
 export function GrayscalePanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -19,6 +20,7 @@ export function GrayscalePanel(): React.ReactElement {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const gs = useGsCapability();
+  const { runWithConsent, consentDialog } = useEncryptionConsent();
 
   const handleGrayscale = useCallback(async () => {
     if (!activeFile) return;
@@ -26,18 +28,21 @@ export function GrayscalePanel(): React.ReactElement {
     if (!output) return;
     setBusy(true); setStatus(tChrome('panel.grayscale.converting'));
     try {
-      const r = await call('grayscale', {
-        file: activeFile.workingPath,
-        output,
-        gs_path: await requireGsPath(),
-        font_dir: await app.getEditFontPath(),
-      });
+      const gs_path = await requireGsPath();
+      const font_dir = await app.getEditFontPath();
+      // The conversion cannot carry a protected document's encryption; the
+      // engine refuses, and the consent dialog is what re-runs it.
+      const r = await runWithConsent((drop_encryption) => call('grayscale', {
+        file: activeFile.workingPath, output, gs_path, font_dir, drop_encryption,
+      }));
+      if (r === CONSENT_DECLINED) { setStatus(''); return; }
       const orig = (r.original_size / 1024).toFixed(0);
       const out = (r.output_size / 1024).toFixed(0);
-      setStatus(tChrome('panel.grayscale.result', { from: orig, to: out }));
+      const line = tChrome('panel.grayscale.result', { from: orig, to: out });
+      setStatus(r.encryption_removed ? tChrome('panel.common.resultUnprotected', { result: line }) : line);
     } catch (e: unknown) { setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) })); }
     finally { setBusy(false); }
-  }, [activeFile, call, saveFile]);
+  }, [activeFile, call, saveFile, runWithConsent]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.grayscale.open')} />;
 
@@ -50,6 +55,7 @@ export function GrayscalePanel(): React.ReactElement {
         {busy ? tChrome('panel.grayscale.convertingBtn') : tChrome('panel.grayscale.convert')}
       </button>
       <StatusBar message={status} busy={busy} />
+      {consentDialog}
     </div>
   );
 }

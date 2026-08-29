@@ -50,6 +50,7 @@ def compress(
     jbig2_path: str = "",
     tesseract_path: str = "",
     font_dir: str = "",
+    drop_encryption: bool = False,
 ) -> dict:
     """Compress a PDF using Ghostscript, or MRC-layer its scanned pages.
 
@@ -75,12 +76,22 @@ def compress(
             of a widget that carries none whose value is outside the form
             font's encoding. Without it such a field keeps the appearance the
             producer synthesizes; every other field is unaffected.
+        drop_encryption: The user was told the compression cannot keep the
+            document's protection and chose to proceed. The output is
+            unprotected and says so as `encryption_removed`.
 
     The `mrc_*` arguments are ignored on the Ghostscript branch, and `dpi` is
     meaningless on the MRC branch (its whole point is that the stencil stays
     at the scan's own resolution) — asking for both refuses rather than
     quietly dropping one.
     """
+    # Ahead of the branch: BOTH arms rewrite the document in a renderer
+    # subprocess that reads it and writes a new one, so neither output can
+    # carry the source's encryption.
+    encryption_removed = refuse_encrypted_source(
+        file, drop_encryption=drop_encryption
+    )
+
     if str(quality).strip().lower() == MRC_QUALITY:
         from .mrc import mrc_compress
 
@@ -89,7 +100,7 @@ def compress(
                 "MRC compression has no DPI setting — the text stays at the scan's own "
                 "resolution, which is the point of it. Choose a preset instead."
             )
-        return mrc_compress(
+        report = mrc_compress(
             file,
             output,
             preset=mrc_preset,
@@ -103,12 +114,11 @@ def compress(
             gs_path=gs_path,
             jbig2_path=jbig2_path,
         )
+        report["encryption_removed"] = encryption_removed
+        return report
 
     # Pre-flight: validate PDF structure before passing to Ghostscript
     info = validate_pdf(file)
-    # The compression runs in a renderer subprocess that reads the document and
-    # writes a new one, so the source's encryption cannot ride through.
-    refuse_encrypted_source(file)
 
     input_path = Path(file)
     output_path = Path(output)
@@ -184,4 +194,5 @@ def compress(
         "compressed_size": output_path.stat().st_size,
         "quality": quality,
         "dpi": dpi,
+        "encryption_removed": encryption_removed,
     }

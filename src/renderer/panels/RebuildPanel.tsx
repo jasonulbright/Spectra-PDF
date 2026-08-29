@@ -9,6 +9,7 @@ import { GsRequiredNotice } from '../components/GsRequiredNotice';
 import { useTranslation } from 'react-i18next';
 import { tChrome, tChromeCount } from '../i18n';
 import { suffixedOutputName } from '../lib/output-names';
+import { CONSENT_DECLINED, useEncryptionConsent } from '../hooks/useEncryptionConsent';
 
 export function RebuildPanel(): React.ReactElement {
   // Re-render on language change; strings resolve via tChrome.
@@ -18,6 +19,7 @@ export function RebuildPanel(): React.ReactElement {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const gs = useGsCapability();
+  const { runWithConsent, consentDialog } = useEncryptionConsent();
 
   const handleRebuild = useCallback(async () => {
     if (!activeFile) return;
@@ -25,13 +27,20 @@ export function RebuildPanel(): React.ReactElement {
     if (!output) return;
     setBusy(true); setStatus(tChrome('panel.rebuild.rebuilding'));
     try {
-      const r = await call('rebuild', { file: activeFile.workingPath, output, gs_path: await requireGsPath() });
+      const gs_path = await requireGsPath();
+      // The rebuild cannot carry a protected document's encryption; the engine
+      // refuses, and the consent dialog is what re-runs it.
+      const r = await runWithConsent((drop_encryption) => call('rebuild', {
+        file: activeFile.workingPath, output, gs_path, drop_encryption,
+      }));
+      if (r === CONSENT_DECLINED) { setStatus(''); return; }
       const orig = (r.original_size / 1024).toFixed(0);
       const out = (r.rebuilt_size / 1024).toFixed(0);
-      setStatus(tChrome('panel.rebuild.done', { from: orig, to: out, pages: r.pages }));
+      const line = tChrome('panel.rebuild.done', { from: orig, to: out, pages: r.pages });
+      setStatus(r.encryption_removed ? tChrome('panel.common.resultUnprotected', { result: line }) : line);
     } catch (e: unknown) { setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) })); }
     finally { setBusy(false); }
-  }, [activeFile, call, saveFile]);
+  }, [activeFile, call, saveFile, runWithConsent]);
 
   if (!activeFile) return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.rebuild.open')} />;
 
@@ -45,6 +54,7 @@ export function RebuildPanel(): React.ReactElement {
         {busy ? tChrome('panel.rebuild.rebuildingBtn') : tChrome('panel.rebuild.rebuild')}
       </button>
       <StatusBar message={status} busy={busy} />
+      {consentDialog}
     </div>
   );
 }
