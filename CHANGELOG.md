@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.1.19
+
+*Released 2026-08-29*
+
+### Protected documents, on your terms
+
+- Compress, Grayscale and Rebuild work on a password-protected document again. The operation is attempted first and asks only where the protection is genuinely in the way: a dialog names the trade — what it writes is an unprotected copy, without the password and without the permission restrictions, and the document you started from is not changed — with Cancel focused. Proceed writes that copy and the result line says it is unprotected. Cancel runs nothing.
+- Documents whose permissions are held by an owner password, and documents encrypted to certificate recipients, still refuse: no answer given here can supply a password nobody holds or reauthor a recipient list.
+- Consent is per document. Watched folders, scheduled runs and batch keep refusing, because a folder run has nobody at the screen to ask.
+- Fixed alongside: choosing the MRC quality preset ran the compression before the protection check, so that one path was still quietly returning an unprotected file. The check now runs ahead of both compression paths.
+
+### Crop rectangles can be adjusted
+
+- A drawn crop rectangle now carries the same eight handles every other resizable object has, with the same gesture: Alt suspends snapping, Shift holds the aspect ratio, and Escape abandons a drag without committing it. Correcting a crop no longer means drawing it over again, and a crop on a turned page still trims the edges you pointed at. Nothing reaches the document until you apply it from Page Boxes.
+
+### Counts read as real sentences
+
+- Scan & Enhance's measurement and result lines are written with each language's own plural grammar instead of a count-invariant "page(s)" frame: pages to straighten, whiten or turn upright, specks removed, pages enhanced, and the pages the orientation check was unsure about or would not treat. Languages with dual, few and many forms carry the case their verb governs rather than a phrasing chosen to avoid the number, in all 28 shipped languages.
+- The table review's shape line said "cells" for a number that counts only the cells holding text, read directly beside the rows and columns it does not multiply to. It now says "non-empty", and is counted rather than framed.
+
+### Guided Actions tells you what a step needs
+
+- Ten empty inputs across Watermark, Search & Redact, Prepare Forms, Header & Footer and the two export page ranges now show an example of what belongs in them, in the same convention the panels already use. Values a field literally accepts — pattern names, field types, the page tokens — stay verbatim in every language; only the wording around them is translated.
+- A step that cannot run as configured now says so on the step while you configure it: a Watermark with no text, image or PDF set, one with two of them set, or a Header & Footer with an empty text names what is missing or conflicting, instead of being accepted and refused at Save. The cue is the same condition Save enforces, so the two can never disagree, and it does not block editing.
+
+### Smaller corrections
+
+- "Turn the page when at least" now reads "Turn the page when confidence is at least" — the value is the orientation detector's own score, and the sentence had no object.
+- The watermark's "Direction" is now "Text direction": it sets the axis the text runs along, which is independent of the Angle field beside it.
+- The paragraph editor's resize corner is drawn as part of the edit box rather than as the browser's own grey hatch, which on the page read as a rendering artefact.
+
 ## 1.1.18
 
 *Released 2026-08-28*
