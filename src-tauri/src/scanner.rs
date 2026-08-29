@@ -4050,27 +4050,31 @@ mod tests {
         let dir = allocate_scan_scratch(&root, 4).expect("a run allocates");
         release_scratch_lock(&dir);
         let lock = dir.join(SCRATCH_LOCK).to_string_lossy().to_string();
+        // The child retries its open and then announces the hold on stdout:
+        // process start is unbounded in wall time, so a fixed poll budget
+        // decides on the machine's speed rather than on the marker, and the
+        // liveness probe's own exclusive open can lose a single attempt to a
+        // sharing violation the child would never retry.
         let mut child = std::process::Command::new("powershell")
             .args([
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
                 &format!(
-                    "$f=[System.IO.File]::Open('{lock}','Open','ReadWrite','None'); Start-Sleep 120"
+                    "while($true){{try{{$f=[System.IO.File]::Open('{lock}','Open','ReadWrite','None');break}}\
+                     catch{{Start-Sleep -Milliseconds 20}}}}; Write-Output 'HELD'; Start-Sleep 120"
                 ),
             ])
+            .stdout(std::process::Stdio::piped())
             .spawn()
             .expect("a child process can be spawned");
-        // The open is not instant; wait for the hold rather than assuming it.
-        let mut held = false;
-        for _ in 0..100 {
-            if scratch_is_live(&dir) {
-                held = true;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        assert!(held, "the child took the marker");
+        let mut announced = String::new();
+        let mut out = std::io::BufReader::new(child.stdout.take().expect("the child's stdout"));
+        // A dead child closes the pipe, so this ends in a failed assertion
+        // rather than a hang.
+        let _ = std::io::BufRead::read_line(&mut out, &mut announced);
+        assert_eq!(announced.trim(), "HELD", "the child took the marker");
+        assert!(scratch_is_live(&dir), "the announced hold is visible here");
         assert_eq!(
             sweep_scratch_root(&root, Duration::ZERO),
             0,

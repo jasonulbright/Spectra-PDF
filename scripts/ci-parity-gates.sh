@@ -8,8 +8,8 @@
 # which the old local battery ran. Six hours of runner time in two days went to
 # failures a five-second local check would have caught.
 #
-# This is NOT the full battery (tsc/lint/vitest/cargo test/pytest — run those
-# too). This is the set of CI gates the battery historically OMITTED. Run BOTH.
+# This is NOT the full battery (tsc/lint/vitest/pytest — run those too). This
+# is the set of CI gates the battery historically OMITTED. Run BOTH.
 #
 # Exit non-zero on any gate failure. Each gate logs to its own *.local.log.
 R="$(cd "$(dirname "$0")/.." && pwd)"
@@ -85,6 +85,12 @@ gate workflow-contract "$R/.venv/Scripts/python.exe" -m pytest \
 #     (xfa fixtures, truncated.pdf). Sub-second locally. ---
 gate corpus-pin "$R/.venv/Scripts/python.exe" -m pytest \
   "tests/test_preflight.py::TestCorpusGate::test_the_corpus_is_the_git_index_not_a_glob" -q
+
+# --- CI job: Verify runs the Rust suite. Warm it is a few seconds, and the
+#     Rust tests exercise process-, handle-, and window-level behaviour whose
+#     failures are runner-timing sensitive — the class that only ever appeared
+#     on CI. Cheap enough to belong here. ---
+gate cargo-test sh -c 'cd src-tauri && cargo test'
 
 echo "CI-PARITY DONE" >> "$OUT"
 if [ "$fail" -ne 0 ]; then
