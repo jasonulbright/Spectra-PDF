@@ -693,7 +693,8 @@ def _tag_optional_content_groups(source: str, out_dir: Path):
             if not off_keys:
                 return None, set()
             tagged = out_dir / "octagged.pdf"
-            save_pdf(src, tagged)
+            # An intermediate consumed by the renderer, never a user output.
+            save_pdf(src, tagged, drop_encryption=True)
         return tagged, off_keys
     except (OSError, pikepdf.PdfError, ValueError):
         return None, set()

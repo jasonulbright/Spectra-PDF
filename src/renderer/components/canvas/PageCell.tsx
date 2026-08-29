@@ -145,8 +145,13 @@ import { useTranslation } from 'react-i18next';
 import i18next, { tChrome, tNumber, type UiKey } from '../../i18n';
 
 // Measure overlays draw in amber — legible over both white paper and the
-// annotation palette's blues/yellows, and distinct from ink's default.
-const MEASURE_COLOR = '#f59e0b';
+// annotation palette's blues/yellows, and distinct from ink's default. The
+// hue is the amber; the LUMINANCE is what carries the 3:1 a graphical object
+// owes against page white (WCAG 1.4.11). #f59e0b measured 2.15:1 there, so the
+// line itself failed the floor even with the casing under it — the casing
+// covers the ground the line does not, not the line's own reading. This value
+// holds the hue (37.5° against 37.7°) at 3.65:1 on white.
+const MEASURE_COLOR = '#b9780c';
 /** The dimension's stroke weight in POINTS — the same 2pt the committed
  *  appearance strokes (`pdfx-build` MEASURE_STROKE_WIDTH), so screen and paper
  *  are one mark rather than two. */

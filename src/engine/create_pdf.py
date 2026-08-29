@@ -485,7 +485,9 @@ def _subset(src: Path, dest: Path, spec: str, label: str) -> int:
         renames = dict(copied.renamed_fields)
         renames.update({r["from"]: r["to"] for r in pure})
         carry_doc_form_extras(out, pdf, renames)
-        save_pdf(out, str(dest))
+        # A staging file for the assembly, never a user output; the assembled
+        # document is newly authored and carries no member's protection.
+        save_pdf(out, str(dest), drop_encryption=True)
     return len(indices)
 
 

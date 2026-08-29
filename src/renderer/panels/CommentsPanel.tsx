@@ -739,7 +739,7 @@ function RowActions({
           type="button"
           aria-label={tChrome('panel.comments.recolourTo', { color: c })}
           title={tChrome('panel.comments.recolour')}
-          className="w-3.5 h-3.5 rounded-sm border border-black/30"
+          className={'color-swatch w-3.5 h-3.5' + (row.color === c ? ' is-selected' : '')}
           style={{ background: c }}
           onClick={() =>
             dispatch({

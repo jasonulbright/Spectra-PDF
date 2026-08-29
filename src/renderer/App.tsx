@@ -126,7 +126,15 @@ import { HairlinesPanel } from './panels/HairlinesPanel';
 import { FlattenerPanel } from './panels/FlattenerPanel';
 import { TrapPresetsPanel } from './panels/TrapPresetsPanel';
 import { SettingsPanel, getSettings, type PrefCategory } from './panels/SettingsPanel';
-import { gsPathIfAvailable, registerGsSetupOpener, requireGsPath } from './lib/gs-capability';
+import {
+  ensureGsCapability,
+  gsPathIfAvailable,
+  registerGsSetupOpener,
+  requireGsPath,
+  takeGsLaunchPrompt,
+} from './lib/gs-capability';
+import { GsMissingDialog } from './components/GsMissingDialog';
+import { isPrimaryWindow } from './lib/window-label';
 import { MenuBar } from './components/MenuBar';
 import { MainToolbar } from './components/MainToolbar';
 import { TabStrip } from './components/TabStrip';
@@ -286,6 +294,18 @@ function AppContent(): React.ReactElement {
   useEffect(() => {
     registerGsSetupOpener(() => setShowSettings('engine'));
     return () => registerGsSetupOpener(null);
+  }, []);
+  // The Ghostscript launch offer. Once per launch, on the PRIMARY window
+  // alone: a second window is a second workspace, not a second install, and
+  // the answer being offered is machine-wide. `takeGsLaunchPrompt` is what
+  // makes "once" true — a remount cannot re-ask, and neither can the second
+  // window if it ever becomes the one that mounts first.
+  const [showGsMissing, setShowGsMissing] = useState(false);
+  useEffect(() => {
+    if (!isPrimaryWindow()) return;
+    void ensureGsCapability().then((capability) => {
+      if (takeGsLaunchPrompt(capability)) setShowGsMissing(true);
+    });
   }, []);
   const [showAbout, setShowAbout] = useState(false);
   // The colour-profile licence. It opens BY ITSELF exactly once — on a
@@ -3758,6 +3778,7 @@ function AppContent(): React.ReactElement {
       })()}
       {showAbout && <AboutDialog version={appVersion} onClose={() => setShowAbout(false)} />}
       {showIccLicense && <IccLicenseDialog onClose={() => setShowIccLicense(false)} />}
+      {showGsMissing && <GsMissingDialog onClose={() => setShowGsMissing(false)} />}
       {showCustomizeToolbar && (
         <CustomizeToolbarDialog onClose={() => setShowCustomizeToolbar(false)} />
       )}

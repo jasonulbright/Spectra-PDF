@@ -295,6 +295,26 @@ describe('colour-swatch pickers speak one language', () => {
       'the colour well went back to a hairline border',
     ).toMatch(/inset 0 0 0 1px var\(--swatch-edge\)/);
   });
+
+  // The floor is only worth the token if every picker in the product takes it.
+  // The comment card's recolour row was the call site the first pass missed: it
+  // carried a private `border-black/30` edge instead, and the palette black
+  // measured 1.10:1 on the card ground with no ring at all — an invisible hole
+  // in a row of choices, which is the exact defect the token exists to end.
+  // Pinned per call site rather than by a CSS rule, because the defect is a
+  // markup opt-out, and a rule-level assertion cannot see one.
+  it.each([
+    'panels/CommentsPanel.tsx',
+    'panels/HeaderFooterPanel.tsx',
+    'panels/WatermarkPanel.tsx',
+    'components/canvas/PropertiesBar.tsx',
+    'components/canvas/SecondaryToolbar.tsx',
+  ])('takes the shared swatch class at the %s picker', (file) => {
+    const src = readFileSync(join(resolve(__dirname, '../src/renderer'), file), 'utf8');
+    const privateEdges = src.match(/className=[^\n]*\bborder-black\/\d+/g) ?? [];
+    expect(privateEdges, `${file} still draws a private swatch edge`).toEqual([]);
+    expect(src, `${file} has no shared swatch`).toMatch(/color-swatch/);
+  });
 });
 
 describe('the select layer positions its own chevron', () => {
@@ -377,6 +397,16 @@ describe('a measurement drawn on the page carries its own contrast', () => {
       '#' +
       [1, 2, 3].map((i) => Number(casing![i]).toString(16).padStart(2, '0')).join('');
     expect(contrast(hex, '#ffffff')).toBeGreaterThanOrEqual(3);
+
+    // And the LINE, not only the casing under it. The casing covers the ground
+    // the line does not; it cannot lend the line its own reading, and #f59e0b
+    // measured 2.15:1 on page white with the casing already in place.
+    const line = src.match(/MEASURE_COLOR = '(#[0-9a-fA-F]{6})'/)?.[1];
+    expect(line, 'the measure colour is no longer a plain hex').toBeDefined();
+    expect(
+      contrast(line!, '#ffffff'),
+      `MEASURE_COLOR ${line} on page white`,
+    ).toBeGreaterThanOrEqual(3);
   });
 });
 

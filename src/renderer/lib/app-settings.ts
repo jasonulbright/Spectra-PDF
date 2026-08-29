@@ -30,6 +30,15 @@ export interface Settings {
    * deployments, or suppress it machine-wide with the DisableAutoUpdate
    * policy, which still wins over this preference. */
   checkUpdatesOnLaunch: boolean;
+  /** Offer the Ghostscript set-up route at launch when nothing answers.
+   *
+   * Default ON. Ghostscript is a user-supplied prerequisite the distribution
+   * ships none of, so a copy that has never had one gated ten features
+   * silently until the user opened Settings ▸ Engine on their own. The
+   * dialog's "Don't ask again" clears this; Settings ▸ Engine is the way
+   * back. Off changes nothing else — the per-surface notices still name the
+   * prerequisite where it is needed. */
+  promptGhostscriptOnLaunch: boolean;
   /** Reopen the windows and documents that were open at the last quit.
    *
    * Default OFF, and mirrored into the Rust-readable startup config because
@@ -135,6 +144,7 @@ export const DEFAULTS: Settings = {
   startMinimized: false,
   singleKeyAccelerators: false,
   checkUpdatesOnLaunch: true,
+  promptGhostscriptOnLaunch: true,
   restoreWindowsOnLaunch: false,
   batchLogEnabled: true,
   batchLogRetentionDays: 30,

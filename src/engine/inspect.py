@@ -31,7 +31,8 @@ def unlock(file: str, password: str) -> dict:
     os.close(fd)
     try:
         with pikepdf.open(file, password=password) as pdf:
-            save_pdf(pdf, tmp_path)
+            # Removing the protection IS the operation.
+            save_pdf(pdf, tmp_path, drop_encryption=True)
         os.replace(tmp_path, file)
     except Exception:
         if os.path.exists(tmp_path):

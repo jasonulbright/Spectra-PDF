@@ -20,7 +20,7 @@
 // subscription every surface re-renders on when a probe lands.
 
 import { app } from './tauri-bridge';
-import { loadSettings } from './app-settings';
+import { loadSettings, saveSettings } from './app-settings';
 
 /** The named reasons, mirroring `src-tauri/src/gs.rs` and
  * `engine/gs_capability.py`. Control flow matches these, never a message. */
@@ -232,6 +232,44 @@ export function gsStateKey(capability: GsCapability = current): string | null {
   }
 }
 
+// ── The launch offer ────────────────────────────────────────────────────
+//
+// A copy with no Ghostscript anywhere gates ten features, and nothing said
+// so until the user opened Settings ▸ Engine unprompted. The offer is made
+// ONCE per launch and only where resolution failed EVERYWHERE — a path the
+// user chose themselves is an answer they already know about, and re-asking
+// about it would be arguing with a decision rather than reporting a gap.
+
+let launchPromptTaken = false;
+
+/**
+ * Should the launch offer open?
+ *
+ * False while pending — a launch must not flash a question the landing probe
+ * is about to withdraw. False once taken, so a remount cannot ask twice.
+ */
+export function gsNeedsLaunchPrompt(capability: GsCapability = current): boolean {
+  if (!gsBlocked(capability)) return false;
+  if (loadSettings().gsPath.trim() !== '') return false;
+  return loadSettings().promptGhostscriptOnLaunch;
+}
+
+/**
+ * Claim the one offer this launch gets. True exactly once, for the caller
+ * that may open the dialog; every later caller gets false.
+ */
+export function takeGsLaunchPrompt(capability: GsCapability = current): boolean {
+  if (launchPromptTaken) return false;
+  if (!gsNeedsLaunchPrompt(capability)) return false;
+  launchPromptTaken = true;
+  return true;
+}
+
+/** Persist the dialog's "Don't ask again". */
+export function suppressGsLaunchPrompt(): void {
+  saveSettings({ ...loadSettings(), promptGhostscriptOnLaunch: false });
+}
+
 // ── The set-up affordance ────────────────────────────────────────────────
 //
 // The module-level slot idiom the command context uses: App registers the
@@ -285,4 +323,5 @@ export function resetGsCapability(): void {
   pinned = null;
   listeners.clear();
   setupOpener = null;
+  launchPromptTaken = false;
 }

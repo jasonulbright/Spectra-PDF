@@ -2540,6 +2540,9 @@ export const PANEL_STRINGS = {
   'panel.settings.gsWhereToGet': 'Ghostscript is available from ghostscript.com.',
   'panel.settings.gsLicense':
     'Ghostscript is not part of Spectra PDF. It is a separate program under its own license (AGPL-3.0, or a commercial license from Artifex), which you install and license yourself. Spectra PDF runs it as a separate program and ships no copy of it.',
+  'panel.settings.gsPromptOnLaunch': 'Tell me at startup when Ghostscript is missing',
+  'panel.settings.gsPromptOnLaunchHint':
+    'Shown once per startup, and only when no Ghostscript is found on this PC. Turning it off changes nothing else — the features that need Ghostscript still say so where they are used.',
   'panel.settings.categoriesAria': 'Preferences categories',
   'panel.settings.version': 'Version {{version}}',
   'panel.settings.vendor': 'Vendor: {{vendor}}',

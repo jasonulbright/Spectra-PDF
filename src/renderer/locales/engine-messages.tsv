@@ -333,6 +333,7 @@ links.unknownLinkTarget	pattern	links	unknown link target {{v0}}
 links.unknownLinkViewMode	pattern	links	unknown link view mode {{mode}}
 links.urlMustEmpty	exact	links	url must not be empty
 links.webAddressesEmailAddresses	exact	links	No web addresses or email addresses were found in the text.
+merge.theseDocumentsCannotCombined	exact	merge	These documents cannot be combined without changing their protection: they do not all carry the same encryption and permissions, and one combined document can only have one. Give them matching protection, or decrypt them first.
 mrc.everyScannedPageFailed	exact	mrc	every scanned page failed mask verification — no MRC output was written
 mrc.everyScannedPageFailedText	exact	mrc	every scanned page failed text verification — no MRC output was written, because a page whose words did not survive is not an output worth having. Try the archival preset, which keeps thin strokes.
 mrc.ghostscriptCouldRenderPage	pattern	mrc	Ghostscript could not render the page image: {{detail}}
@@ -436,6 +437,9 @@ page_vectors.vectorObjectBboxDegenerate	exact	page_vectors	vector object bbox is
 page_vectors.vectorObjectSTransform	exact	page_vectors	vector object's transform matrix is degenerate and cannot be transformed
 page_vectors.vectorObjectSpansUnbalanced	exact	page_vectors	vector object spans unbalanced q/Q graphics-state frames and cannot be edited as one unit
 pdf_fonts.fontCannotEncode	pattern	pdf_fonts,text_paragraphs	font cannot encode {{ch}}
+pdf_save.documentSEncryptionCannot	exact	pdf_save	This document's encryption cannot be kept through this operation, which will not hand back an unprotected copy of a protected document. Decrypt it first if that is what you want.
+pdf_save.documentSEncryptionCannot2	exact	pdf_save	This document's encryption cannot be kept through this operation: it is encrypted to certificate recipients, whose list cannot be rewritten. Decrypt the document first if you want an unprotected copy.
+pdf_save.documentSEncryptionCannot3	exact	pdf_save	This document's encryption cannot be kept through this operation: its permissions are held by an owner password, which cannot be read back out of the file. Open it with that password, or decrypt the document first if you want an unprotected copy.
 pdfa.ghostscriptPdfConversionDid	pattern	pdfa	Ghostscript PDF/A conversion did not produce {{requested}}: the output declares {{declared}}.
 pdfa.ghostscriptPdfConversionFailed	pattern	pdfa	Ghostscript PDF/A conversion failed: {{v0}}
 pdfa.outputDeclaresPdfConformance	pattern	pdfa	The output declares no PDF/A conformance at all, so {{requested}} was not produced.

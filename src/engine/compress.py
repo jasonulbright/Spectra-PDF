@@ -15,6 +15,7 @@ from pathlib import Path
 from . import budget
 from .acroform import reattach_forms_file
 from .inplace import is_same_file, staged_write_if
+from .pdf_save import refuse_encrypted_source
 from .validate import validate_pdf
 from .widget_faces import (harvest_appearances, regenerate_appearances_file,
                            stage_appearances_file)
@@ -105,6 +106,9 @@ def compress(
 
     # Pre-flight: validate PDF structure before passing to Ghostscript
     info = validate_pdf(file)
+    # The compression runs in a renderer subprocess that reads the document and
+    # writes a new one, so the source's encryption cannot ride through.
+    refuse_encrypted_source(file)
 
     input_path = Path(file)
     output_path = Path(output)

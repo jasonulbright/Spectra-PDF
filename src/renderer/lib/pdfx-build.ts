@@ -1396,8 +1396,20 @@ async function assemblePages(
     const ownPairs = pairsByKey.get(ownSourceKey);
     if (own && ownPairs && ownPairs.length > 0) {
       carryDocumentCatalog(output, { doc: own.doc, pairs: ownPairs });
+      carryInfoDates(output, own.doc);
     }
   }
+}
+
+/** /CreationDate and /ModDate travel from the source document, never the run's
+ * clock: a clock-stamped Info dict puts different bytes in the file on every
+ * commit of the same document, which breaks byte-identity between an in-place
+ * save and its control. A source with no date leaves the output with none. */
+function carryInfoDates(output: PDFDocument, source: PDFDocument): void {
+  const created = source.getCreationDate();
+  if (created) output.setCreationDate(created);
+  const modified = source.getModificationDate();
+  if (modified) output.setModificationDate(modified);
 }
 
 export async function buildPdf(
@@ -1408,7 +1420,11 @@ export async function buildPdf(
   // A zero-page PDF is invalid; pdf-lib would happily save one. buildPdfx
   // skips empty documents for the same reason.
   if (pages.length === 0) throw new Error('buildPdf: cannot build a PDF with no pages');
-  const output = await PDFDocument.create();
+  // updateMetadata:false: pdf-lib's constructor otherwise stamps /ModDate and
+  // /CreationDate from `new Date()`, so two builds of the same input differ
+  // whenever they straddle a second boundary. Dates travel from the source
+  // (carryInfoDates); /Producer is set explicitly below.
+  const output = await PDFDocument.create({ updateMetadata: false });
   await assemblePages(output, pages, ownSourceKey);
   // Document-level catalog trees (/Names /EmbeddedFiles, /Collection) are not
   // page subtrees — without this carry a committed page edit deleted every
@@ -1424,7 +1440,7 @@ export async function buildPdfx(
   ownBytes?: Uint8Array,
   ownSourceKey?: string,
 ): Promise<Uint8Array> {
-  const output = await PDFDocument.create();
+  const output = await PDFDocument.create({ updateMetadata: false });
   const manifest: PdfxManifest = { pdfx: PDFX_VERSION, title, documents: [] };
 
   const nonEmpty = documents.filter((doc) => doc.pages.length > 0);
@@ -1439,9 +1455,9 @@ export async function buildPdfx(
 
   await output.attach(new TextEncoder().encode(JSON.stringify(manifest, null, 2)), MANIFEST_NAME, {
     mimeType: 'application/json',
+    // No creationDate/modificationDate: the manifest is generated, and a
+    // clock-stamped file spec is the same nondeterminism as the Info dates.
     description: 'PDFX manifest describing the documents in this collection',
-    creationDate: new Date(),
-    modificationDate: new Date(),
   });
 
   output.setTitle(title);

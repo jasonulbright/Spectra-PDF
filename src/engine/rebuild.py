@@ -8,6 +8,7 @@ Slower than Tier 1, may lose interactive elements (form fields, JS actions).
 from pathlib import Path
 
 from . import budget
+from .pdf_save import refuse_encrypted_source
 
 
 def rebuild(
@@ -31,6 +32,10 @@ def rebuild(
 
     if not input_path.exists():
         raise FileNotFoundError(f"File not found: {file}")
+
+    # The rebuild runs in a renderer subprocess that reads the document and
+    # writes a new one, so the source's encryption cannot ride through.
+    refuse_encrypted_source(file)
 
     original_size = input_path.stat().st_size
 
