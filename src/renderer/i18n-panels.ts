@@ -1631,19 +1631,33 @@ export const PANEL_STRINGS = {
   'panel.scanEnhance.scanCount_one': '{{count}} scanned page in scope.',
   'panel.scanEnhance.scanCount_other': '{{count}} scanned pages in scope.',
   'panel.scanEnhance.noScans': 'No page in scope is a scanned image.',
-  'panel.scanEnhance.changing': '{{count}} page(s) would change.',
-  'panel.scanEnhance.deskewRow': 'Straighten {{count}} page(s); the worst leans {{angle}}°.',
-  'panel.scanEnhance.despeckleRow': 'Remove {{specks}} speck(s) from {{count}} page(s).',
-  'panel.scanEnhance.whitenRow': 'Whiten {{count}} page(s).',
-  'panel.scanEnhance.rotateRow': 'Turn {{count}} page(s) upright.',
-  'panel.scanEnhance.uncertain':
-    'Page(s) {{pages}} look turned, but not confidently enough to act on.',
-  'panel.scanEnhance.refused': 'Page(s) {{pages}} are not scanned images.',
+  'panel.scanEnhance.changing_one': '{{count}} page would change.',
+  'panel.scanEnhance.changing_other': '{{count}} pages would change.',
+  'panel.scanEnhance.deskewRow_one': 'Straighten {{count}} page; it leans {{angle}}°.',
+  'panel.scanEnhance.deskewRow_other': 'Straighten {{count}} pages; the worst leans {{angle}}°.',
+  // Counts the SPECKS; the page phrase arrives already counted and inflected
+  // from `panel.common.pageCount`, so a language whose page noun is governed
+  // by this verb is not asked to agree with a number it cannot see.
+  'panel.scanEnhance.despeckleRow_one': 'Remove {{count}} speck from {{pages}}.',
+  'panel.scanEnhance.despeckleRow_other': 'Remove {{count}} specks from {{pages}}.',
+  'panel.scanEnhance.whitenRow_one': 'Whiten {{count}} page.',
+  'panel.scanEnhance.whitenRow_other': 'Whiten {{count}} pages.',
+  'panel.scanEnhance.rotateRow_one': 'Turn {{count}} page upright.',
+  'panel.scanEnhance.rotateRow_other': 'Turn {{count}} pages upright.',
+  // `count` selects the form from the length of the page list; the list
+  // itself interpolates as {{pages}} and the number is never drawn.
+  'panel.scanEnhance.uncertain_one':
+    'Page {{pages}} looks turned, but not confidently enough to act on.',
+  'panel.scanEnhance.uncertain_other':
+    'Pages {{pages}} look turned, but not confidently enough to act on.',
+  'panel.scanEnhance.refused_one': 'Page {{pages}} is not a scanned image.',
+  'panel.scanEnhance.refused_other': 'Pages {{pages}} are not scanned images.',
   'panel.scanEnhance.measure': 'Measure again',
   'panel.scanEnhance.measuring': 'Measuring the pages…',
   'panel.scanEnhance.apply': 'Enhance the scans',
   'panel.scanEnhance.applying': 'Enhancing the scanned pages…',
-  'panel.scanEnhance.applied': 'Enhanced {{count}} page(s).',
+  'panel.scanEnhance.applied_one': 'Enhanced {{count}} page.',
+  'panel.scanEnhance.applied_other': 'Enhanced {{count}} pages.',
   'panel.scanEnhance.nothingToDo': 'Every scanned page is already square, clean and upright.',
 
   'panel.flattener.open': 'Open a PDF to preview its transparency flattening',
