@@ -7,6 +7,7 @@ preserves annotations, bookmarks, metadata.
 
 import pikepdf
 from pathlib import Path
+from engine.acroform import strip_signatures
 from engine.pdf_save import save_pdf
 
 
@@ -66,13 +67,19 @@ def repair(file: str, output: str) -> dict:
         if pdf.is_linearized:
             issues_found.append("Linearization data present (will be rewritten)")
 
+        signatures_removed = strip_signatures(pdf)
+        if signatures_removed:
+            issues_found.append(
+                f"Removed {signatures_removed} signature(s) the rewrite invalidates"
+            )
+
         # Save with full rewrite -- this is the actual repair step.
         # QPDF rewrites all objects, fixing xref, stream lengths, etc.
         save_pdf(
             pdf,
             str(output_path),
             linearize=False,  # Clean output, no web-optimization artifacts
-            object_stream_mode=pikepdf.ObjectStreamMode.generate,
+            object_stream_mode=pikepdf.ObjectStreamMode.preserve,
             compress_streams=True,
             recompress_flate=True,
         )
@@ -85,5 +92,6 @@ def repair(file: str, output: str) -> dict:
         "original_size": original_size,
         "repaired_size": output_size,
         "issues_found": issues_found,
+        "signatures_removed": signatures_removed,
         "tier": "repair",
     }

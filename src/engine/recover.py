@@ -7,6 +7,7 @@ which were lost.
 
 import pikepdf
 from pathlib import Path
+from engine.acroform import strip_signatures
 from engine.pdf_save import save_pdf
 
 
@@ -94,12 +95,14 @@ def recover(file: str, output: str) -> dict:
                 "No pages could be recovered. File is completely unreadable."
             )
 
+        signatures_removed = strip_signatures(dest)
+
         save_pdf(
             dest,
             str(output_path),
             encryption_source=source,
             compress_streams=True,
-            object_stream_mode=pikepdf.ObjectStreamMode.generate,
+            object_stream_mode=pikepdf.ObjectStreamMode.preserve,
         )
         dest.close()
 
@@ -114,5 +117,6 @@ def recover(file: str, output: str) -> dict:
         "lost_pages": lost_pages,
         "original_size": original_size,
         "recovered_size": output_size,
+        "signatures_removed": signatures_removed,
         "tier": "recover",
     }
