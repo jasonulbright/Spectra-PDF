@@ -165,7 +165,7 @@ export function ScanEnhancePanel(): React.ReactElement {
         setStatus('');
         return;
       }
-      setStatus(tChrome('panel.scanEnhance.applied', { count: counts.changing }));
+      setStatus(tChromeCount('panel.scanEnhance.applied', counts.changing));
     } catch (e: unknown) {
       setStatus(
         tChrome('panel.common.error', {
@@ -352,45 +352,43 @@ export function ScanEnhancePanel(): React.ReactElement {
           <div className="text-xs text-neutral-400" data-testid="scanenhance-changing">
             {counts.changing === 0
               ? tChrome('panel.scanEnhance.nothingToDo')
-              : tChrome('panel.scanEnhance.changing', { count: counts.changing })}
+              : tChromeCount('panel.scanEnhance.changing', counts.changing)}
           </div>
         )}
         {counts.deskew > 0 && skew !== null && (
           <div className="text-xs text-neutral-400" data-testid="scanenhance-deskew-row">
-            {tChrome('panel.scanEnhance.deskewRow', {
-              count: counts.deskew,
+            {tChromeCount('panel.scanEnhance.deskewRow', counts.deskew, {
               angle: skew.toFixed(2),
             })}
           </div>
         )}
         {counts.despeckle > 0 && (
           <div className="text-xs text-neutral-400" data-testid="scanenhance-despeckle-row">
-            {tChrome('panel.scanEnhance.despeckleRow', {
-              count: counts.despeckle,
-              specks: counts.specks,
+            {tChromeCount('panel.scanEnhance.despeckleRow', counts.specks, {
+              pages: tChromeCount('panel.common.pageCount', counts.despeckle),
             })}
           </div>
         )}
         {counts.whiten > 0 && (
           <div className="text-xs text-neutral-400" data-testid="scanenhance-whiten-row">
-            {tChrome('panel.scanEnhance.whitenRow', { count: counts.whiten })}
+            {tChromeCount('panel.scanEnhance.whitenRow', counts.whiten)}
           </div>
         )}
         {counts.rotate > 0 && (
           <div className="text-xs text-neutral-400" data-testid="scanenhance-rotate-row">
-            {tChrome('panel.scanEnhance.rotateRow', { count: counts.rotate })}
+            {tChromeCount('panel.scanEnhance.rotateRow', counts.rotate)}
           </div>
         )}
         {uncertain.length > 0 && (
           <div className="text-xs text-amber-400" data-testid="scanenhance-uncertain">
-            {tChrome('panel.scanEnhance.uncertain', {
+            {tChromeCount('panel.scanEnhance.uncertain', uncertain.length, {
               pages: uncertain.map((r) => r.page).join(', '),
             })}
           </div>
         )}
         {refused.length > 0 && (
           <div className="text-xs text-neutral-500" data-testid="scanenhance-refused">
-            {tChrome('panel.scanEnhance.refused', {
+            {tChromeCount('panel.scanEnhance.refused', refused.length, {
               pages: refused.map((r) => r.page).join(', '),
             })}
           </div>
