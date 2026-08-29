@@ -531,3 +531,126 @@ class TestCheckType3Policy:
         assert result["info"]["fonts_embedded"] == 0
         assert result["info"]["fonts_not_embedded"] == 0
         assert result["info"]["fonts_unreadable"] == 1
+
+
+# ── Conformance-preserving rewrite ────────────────────────────────────────
+
+
+def _xmp(part: int) -> bytes:
+    return (
+        b'<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+        b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF '
+        b'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        b'<rdf:Description rdf:about="" '
+        b'xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/" '
+        b'pdfaid:part="' + str(part).encode() + b'" pdfaid:conformance="B"/>'
+        b"</rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>"
+    )
+
+
+def _pdfa_source(path: str, part: int) -> None:
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(200, 200))
+    pdf.Root["/Metadata"] = pdf.make_stream(_xmp(part))
+    pdf.save(path, object_stream_mode=pikepdf.ObjectStreamMode.disable,
+             force_version="1.4" if part == 1 else "1.7")
+    pdf.close()
+
+
+def _signed_source(path: str) -> None:
+    pdf = pikepdf.new()
+    page = pdf.add_blank_page(page_size=(200, 200))
+    value = pdf.make_indirect(pikepdf.Dictionary(
+        Type=pikepdf.Name.Sig,
+        Filter=pikepdf.Name("/Adobe.PPKLite"),
+        SubFilter=pikepdf.Name("/adbe.pkcs7.detached"),
+        ByteRange=pikepdf.Array([0, 1022, 4862, 6654]),
+        Contents=pikepdf.String("\x00" * 16),
+    ))
+    field = pdf.make_indirect(pikepdf.Dictionary(
+        FT=pikepdf.Name.Sig,
+        T=pikepdf.String("Signature1"),
+        V=value,
+        Type=pikepdf.Name.Annot,
+        Subtype=pikepdf.Name.Widget,
+        Rect=pikepdf.Array([0, 0, 100, 50]),
+        P=page.obj,
+        F=4,
+    ))
+    page.obj["/Annots"] = pikepdf.Array([field])
+    pdf.Root["/AcroForm"] = pdf.make_indirect(pikepdf.Dictionary(
+        Fields=pikepdf.Array([field]), SigFlags=3
+    ))
+    pdf.save(path)
+    pdf.close()
+
+
+class TestRepairConformance:
+    """A rewrite must not silently trade the input's declared conformance for
+    a smaller file. PDF/A-1 is a PDF 1.4 profile: object streams and the
+    cross-reference stream they force do not exist below PDF 1.5."""
+
+    def test_pdfa1_keeps_classic_xref_and_header(self, tmp_dir):
+        src = os.path.join(tmp_dir, "pdfa1.pdf")
+        out = os.path.join(tmp_dir, "pdfa1-out.pdf")
+        _pdfa_source(src, 1)
+
+        repair(file=src, output=out)
+
+        data = open(out, "rb").read()
+        assert data.startswith(b"%PDF-1.4")
+        assert b"/ObjStm" not in data
+        assert b"/Type /XRef" not in data and b"/Type/XRef" not in data
+        assert b"\nxref" in data or data.startswith(b"xref")
+        assert b'pdfaid:part="1"' in data
+
+    def test_pdfa1_claim_forces_the_mode_at_the_save_seam(self, tmp_dir):
+        from engine.pdf_save import declared_pdfa_part, save_pdf
+
+        src = os.path.join(tmp_dir, "pdfa1-seam.pdf")
+        out = os.path.join(tmp_dir, "pdfa1-seam-out.pdf")
+        _pdfa_source(src, 1)
+        with pikepdf.open(src) as pdf:
+            assert declared_pdfa_part(pdf) == 1
+            save_pdf(pdf, out,
+                     object_stream_mode=pikepdf.ObjectStreamMode.generate)
+        assert b"/ObjStm" not in open(out, "rb").read()
+
+    def test_pdfa2_may_use_object_streams(self, tmp_dir):
+        from engine.pdf_save import declared_pdfa_part, save_pdf
+
+        src = os.path.join(tmp_dir, "pdfa2.pdf")
+        out = os.path.join(tmp_dir, "pdfa2-out.pdf")
+        _pdfa_source(src, 2)
+        with pikepdf.open(src) as pdf:
+            assert declared_pdfa_part(pdf) == 2
+            save_pdf(pdf, out,
+                     object_stream_mode=pikepdf.ObjectStreamMode.generate)
+        assert b"/ObjStm" in open(out, "rb").read()
+
+
+class TestRepairSignedDocument:
+    """A whole-file rewrite renumbers every object, so a carried /ByteRange
+    no longer spans the bytes its digest was computed over (ISO 32000-2
+    12.8.1). The signature is removed and the removal reported."""
+
+    def test_rewrite_removes_the_invalidated_signature(self, tmp_dir):
+        src = os.path.join(tmp_dir, "signed.pdf")
+        out = os.path.join(tmp_dir, "signed-out.pdf")
+        _signed_source(src)
+
+        result = repair(file=src, output=out)
+
+        assert result["signatures_removed"] == 1
+        assert any("signature" in row.lower() for row in result["issues_found"])
+        data = open(out, "rb").read()
+        assert b"/ByteRange" not in data
+        assert b"/SigFlags" not in data
+        with pikepdf.open(out) as pdf:
+            assert pdf.Root.get("/AcroForm") is None
+            assert len(pdf.pages[0].get("/Annots") or []) == 0
+
+    def test_an_unsigned_document_is_untouched(self, tmp_dir, sample_pdf):
+        out = os.path.join(tmp_dir, "plain-out.pdf")
+        result = repair(file=sample_pdf, output=out)
+        assert result["signatures_removed"] == 0

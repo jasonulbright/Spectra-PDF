@@ -1,8 +1,51 @@
 """The one document write, with a content-derived file identifier."""
 
+import re
+
 import pikepdf
 
 _SENTINEL = object()
+
+_PDFAID_PART = re.compile(
+    rb"pdfaid:part\s*=\s*[\"'](\d+)[\"']|<pdfaid:part>\s*(\d+)\s*</pdfaid:part>"
+)
+
+
+def declared_pdfa_part(pdf):
+    """The PDF/A part the document claims in its XMP, or None.
+
+    Read from the raw `/Metadata` bytes: opening the XMP through a parser is
+    a mutation risk on a write path, and the claim is a single scalar.
+    """
+    try:
+        meta = pdf.Root.get("/Metadata")
+        if meta is None:
+            return None
+        raw = bytes(meta.read_bytes())
+    except Exception:
+        return None
+    match = _PDFAID_PART.search(raw)
+    if match is None:
+        return None
+    try:
+        return int(match.group(1) or match.group(2))
+    except (TypeError, ValueError):
+        return None
+
+
+def _conformance_object_stream_mode(pdf, requested):
+    """The object-stream mode a PDF/A claim permits.
+
+    A PDF/A-1 file is a PDF 1.4 file: object streams and the cross-reference
+    stream they force do not exist below PDF 1.5, and generating them turns a
+    conformant input into a non-conformant output with no other change to it.
+    Later parts are built on PDF 1.7/2.0 and permit both.
+    """
+    if declared_pdfa_part(pdf) != 1:
+        return requested
+    if requested in (None, pikepdf.ObjectStreamMode.disable):
+        return requested
+    return pikepdf.ObjectStreamMode.disable
 
 
 def _standard_encrypt_dict(pdf):
@@ -142,6 +185,9 @@ def save_pdf(
     they straddle a boundary. Deriving the identifier from the written
     bytes instead makes an operation's output a function of its input.
 
+    A requested object-stream mode is constrained by what the document's own
+    PDF/A claim permits (see `_conformance_object_stream_mode`).
+
     An encrypted output keeps qpdf's default: the encryption key derives
     from the identifier, so an identifier derived from the encrypted
     bytes is not computable and qpdf refuses it.
@@ -162,4 +208,10 @@ def save_pdf(
                 kwargs["encryption"] = encryption
     if not kwargs.get("encryption"):
         kwargs["deterministic_id"] = True
+    if "object_stream_mode" in kwargs:
+        mode = _conformance_object_stream_mode(pdf, kwargs["object_stream_mode"])
+        if mode is None:
+            kwargs.pop("object_stream_mode")
+        else:
+            kwargs["object_stream_mode"] = mode
     pdf.save(target, **kwargs)

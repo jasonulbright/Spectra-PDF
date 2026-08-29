@@ -559,6 +559,103 @@ def refresh_sig_flags(pdf: pikepdf.Pdf) -> None:
         del acro["/SigFlags"]
 
 
+def _signed_terminals(node, inherited_ft, depth: int, out: list) -> bool:
+    """Collect terminal signature fields carrying a signature value.
+
+    Returns whether ``node`` itself is such a field. An unsigned /FT /Sig
+    placeholder is not collected: it has no /ByteRange and survives a
+    re-serialization intact.
+    """
+    if depth > MAX_FIELD_DEPTH or not isinstance(node, Dictionary):
+        return False
+    ft = node.get("/FT")
+    if ft is None:
+        ft = inherited_ft
+    kids = node.get("/Kids")
+    if kids is not None and isinstance(kids, Array) and len(kids) > 0:
+        keep = []
+        for kid in kids:
+            if _signed_terminals(kid, ft, depth + 1, out):
+                continue
+            keep.append(kid)
+        if len(keep) != len(kids):
+            node["/Kids"] = Array(keep)
+        return len(keep) == 0
+    if ft != Name.Sig:
+        return False
+    value = node.get("/V")
+    if not isinstance(value, Dictionary) or value.get("/ByteRange") is None:
+        return False
+    out.append(node)
+    return True
+
+
+def _drop_widgets(pdf: pikepdf.Pdf, dropped) -> None:
+    targets = set()
+    for node in dropped:
+        targets.add(node.objgen)
+        kids = node.get("/Kids")
+        if kids is not None and isinstance(kids, Array):
+            for kid in kids:
+                try:
+                    targets.add(kid.objgen)
+                except Exception:
+                    continue
+    for page in pdf.pages:
+        annots = page.get("/Annots")
+        if annots is None or not isinstance(annots, Array):
+            continue
+        keep = []
+        for annot in annots:
+            try:
+                if annot.objgen in targets:
+                    continue
+            except Exception:
+                pass
+            keep.append(annot)
+        if len(keep) != len(annots):
+            page["/Annots"] = Array(keep)
+
+
+def strip_signatures(pdf: pikepdf.Pdf) -> int:
+    """Remove signature fields whose signature a full rewrite has invalidated.
+
+    A whole-file re-serialization renumbers and re-lays out every object, so a
+    carried /ByteRange no longer spans the bytes it was computed over (ISO
+    32000-2 12.8.1: the digest covers the whole file except the signature
+    value itself). Carrying the dict forward emits a document that still
+    presents a signature while the signature can no longer verify — worse than
+    either refusing or removing it, so the rewrite removes it and reports the
+    removal. A document whose signature must survive edits by incremental
+    append instead (``engine/incremental.py``).
+
+    Returns the number of signature fields removed.
+    """
+    fields = _fields_of(pdf)
+    if fields is None or len(fields) == 0:
+        return 0
+    dropped: list = []
+    keep = []
+    for field in fields:
+        if _signed_terminals(field, None, 0, dropped):
+            continue
+        keep.append(field)
+    if not dropped:
+        return 0
+    acro = pdf.Root.get("/AcroForm")
+    if keep:
+        acro["/Fields"] = Array(keep)
+    else:
+        del pdf.Root["/AcroForm"]
+    _drop_widgets(pdf, dropped)
+    if keep:
+        refresh_sig_flags(pdf)
+    for key in ("/Perms", "/DocMDP"):
+        if pdf.Root.get(key) is not None:
+            del pdf.Root[key]
+    return len(dropped)
+
+
 def _strip_p(node, depth: int = 0) -> None:
     if depth > MAX_FIELD_DEPTH or not isinstance(node, Dictionary):
         return
