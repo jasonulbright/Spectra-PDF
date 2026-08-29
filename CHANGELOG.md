@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.1.18
+
+*Released 2026-08-28*
+
+### Your protection is never silently removed
+
+- A password-protected document keeps its protection through the operations that rewrite it whole — repair, recover, rotate, merge, split and imposition now hand back a file with the source's own encryption, cipher and permission bits, where before they wrote out a decrypted copy with print, copy and modify permissions quietly discarded.
+- Where the protection genuinely cannot be carried, the operation refuses and says why instead of degrading the file: a document whose permissions are held by an owner password (that password cannot be read back out of the file — open it with the password, or decrypt it first), and a document encrypted to certificate recipients (the recipient list cannot be reauthored). Combining documents that do not all carry the same protection refuses for the same reason: one combined document can only have one.
+- Compress, Grayscale and Rebuild refuse on an encrypted document rather than returning it unprotected. Conversion to PDF/A still drops encryption, because the standard forbids an encrypted PDF/A file, and reports the drop as it always has.
+
+### Archival documents stay conformant
+
+- Repair, Recover and Optimize no longer break a PDF/A-1 document by rewriting it. A file that declares part 1 is written without object streams and without the cross-reference stream and version bump they force; parts 2, 3 and 4 keep the layout you asked for. Across a 2,907-file corpus this turned 866 conformance regressions into none, and left 45 more files valid than before.
+- Repair and Recover now preserve a document's own object-stream layout instead of imposing one, so an ordinary file's structure is not silently upgraded either.
+- Repairing or recovering a signed document removes signatures the rewrite would invalidate, and reports how many — a rewritten file cannot satisfy a signature's byte range, and presenting one that can never verify is worse than removing it. Documents whose signatures must survive editing continue to take the append-only path, unchanged.
+
+### A more consistent interface
+
+- Menus and dropdowns are themed throughout: the chevron sits where it belongs at every size and in right-to-left layouts, and a value too long for its control ends in an ellipsis instead of being cut mid-word.
+- Colour swatches everywhere — highlight palettes, comment colours, ink chips, the object inspector, the paragraph editor's colour well — draw one shared boundary that stays visible in every theme, so a black swatch reads as black rather than as an empty one, and the row shows which colour is selected.
+- Text and controls that fell below the contrast floor were fixed rather than recoloured by hand: primary buttons take one accent treatment across the product, the signature pane's detail lines are legible, and Read Out Loud's five transport controls are one matched set instead of two of them rendering as coloured emoji plates.
+- The measurement tool's default line colour now meets the contrast floor on white paper, in the same hue, and the same colour is used on screen, in the preview and in the mark written to the file. A colour you pick yourself is unchanged.
+- Measurements are drawn as real dimensions — end ticks and the value on a chip riding the line — so a page with two measurements is no longer ambiguous.
+- Search results highlight the matched term in all three places you can search from: the toolbar search box, the Search panel and Search & Redact.
+- Size columns are written in one unit and one precision per column, chosen from the column's own values, so rows can be compared at a glance and a row that reclaimed 70 bytes never rounds to zero.
+- Smaller corrections: a region name in Export no longer prints on top of the table's first cell, field-action rows no longer overflow their panel, the page box resets to the document's own page label rather than a literal "1", Batch OCR's header shows a dismiss glyph instead of a second Close, "Invisible" reads as the width value it describes, Details buttons line up on one edge, and Edit Text, Snapshot and Export have their own icons instead of borrowing a neighbour's.
+
+### Ghostscript set-up
+
+- A copy with no Ghostscript available now says so once at launch, on the primary window, and offers to open Settings ▸ Engine, where the path is set. Cancel dismisses it, "Don't ask again" turns it off for good, and a checkbox in Settings ▸ Engine turns it back on. A copy where you configured a path yourself is never prompted — that is an answer you already gave. Nothing else changes: the per-feature notices still name the prerequisite where it is needed.
+
+### Under the hood
+
+- Committing a signed document twice from the same input now produces the same bytes: the document's own creation and modification dates travel into the output instead of the clock at the moment of the run.
+- Engine refusal messages are translated in every shipped language.
+- The README's screenshots were re-shot from the current interface, with new images for the workbench pane, a second window, unified search, Read Out Loud, Batch OCR, Create PDF, web capture and the object inspector.
+
 ## 1.1.17
 
 *Released 2026-08-28*
