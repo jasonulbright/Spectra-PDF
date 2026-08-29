@@ -49,6 +49,11 @@ export interface EngineResult {
   declared_conformance: string;
   encryption: string;
   encrypted: boolean;
+  /** compress/grayscale/rebuild: the run wrote an UNPROTECTED copy of a
+   * protected document, because the user consented to losing the protection
+   * the operation cannot carry. False on every run that kept or never had
+   * any (`engine/pdf_save.py` `refuse_encrypted_source`). */
+  encryption_removed: boolean;
   /** check_encrypted: which credentials open it — "password" | "pubkey". */
   kind: string;
   /** encrypt_pubkey: how many recipient certificates the file is locked to. */

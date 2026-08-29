@@ -97,6 +97,19 @@ export const DIALOG_STRINGS = {
     'Choose OK to open Settings ▸ Engine ▸ Ghostscript, where you can point Spectra PDF at an installed copy.',
   'dialog.gsMissing.dontAsk': 'Don’t ask again',
 
+  // The consent for an operation that cannot keep a document's protection
+  // (Compress, Grayscale, Rebuild — each rewrites the document through a
+  // renderer subprocess, which cannot carry encryption). The copy names the
+  // consequence rather than the mechanism: what comes out is an unprotected
+  // copy, and the protected document itself is untouched either way.
+  'dialog.encryptionConsent.aria': 'This operation cannot keep the document’s protection',
+  'dialog.encryptionConsent.title': 'Protection cannot be kept',
+  'dialog.encryptionConsent.blurb':
+    'This document is protected, and this operation cannot carry that protection into what it writes.',
+  'dialog.encryptionConsent.consequence':
+    'Proceeding writes an unprotected copy: its password and its permission restrictions are gone. The document you started from is not changed.',
+  'dialog.encryptionConsent.proceed': 'Write an unprotected copy',
+
   // The form-submission consent dialog — the one surface in the app from
   // which an outbound form post can start. The address is shown whole and the
   // payload is shown as itself; nothing here summarizes what will be sent

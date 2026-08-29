@@ -58,6 +58,44 @@ def _standard_encrypt_dict(pdf):
         return None
 
 
+def _encryption_reproducibility(pdf):
+    """`(certificate, owner_gated)` for `pdf`, or None when it is unencrypted.
+
+    `certificate` — the recipient list cannot be reauthored. `owner_gated` —
+    the owner password is not empty, so it cannot be read back out of the
+    file. Either one makes the source's own protection unreproducible; the
+    facts are returned rather than raised so a caller that must read them
+    inside a `try` can refuse outside it.
+    """
+    enc = _standard_encrypt_dict(pdf)
+    if enc is None:
+        return None
+    filter_name = enc.get("/Filter")
+    certificate = filter_name is not None and str(filter_name) != "/Standard"
+    return certificate, not pdf.owner_password_matched
+
+
+def _refuse_unreproducible_encryption(certificate: bool, owner_gated: bool) -> None:
+    """Refuse where the source's protection cannot be reauthored at all.
+
+    Consent cannot reach these two: no answer the user gives supplies a
+    password nobody holds or a recipient list nobody can rewrite.
+    """
+    if certificate:
+        raise ValueError(
+            "This document's encryption cannot be kept through this operation: it "
+            "is encrypted to certificate recipients, whose list cannot be "
+            "rewritten. Decrypt the document first if you want an unprotected copy."
+        )
+    if owner_gated:
+        raise ValueError(
+            "This document's encryption cannot be kept through this operation: its "
+            "permissions are held by an owner password, which cannot be read back "
+            "out of the file. Open it with that password, or decrypt the document "
+            "first if you want an unprotected copy."
+        )
+
+
 def source_encryption(pdf):
     """The `pikepdf.Encryption` that re-applies `pdf`'s own protection.
 
@@ -80,21 +118,7 @@ def source_encryption(pdf):
     if enc is None:
         return None
 
-    filter_name = enc.get("/Filter")
-    if filter_name is not None and str(filter_name) != "/Standard":
-        raise ValueError(
-            "This document's encryption cannot be kept through this operation: it "
-            "is encrypted to certificate recipients, whose list cannot be "
-            "rewritten. Decrypt the document first if you want an unprotected copy."
-        )
-
-    if not pdf.owner_password_matched:
-        raise ValueError(
-            "This document's encryption cannot be kept through this operation: its "
-            "permissions are held by an owner password, which cannot be read back "
-            "out of the file. Open it with that password, or decrypt the document "
-            "first if you want an unprotected copy."
-        )
+    _refuse_unreproducible_encryption(*_encryption_reproducibility(pdf))
 
     info = pdf.encryption
     revision = int(info.R)
@@ -146,27 +170,42 @@ def encryption_profile(pdf):
     )
 
 
-def refuse_encrypted_source(file) -> None:
-    """Refuse an encrypted document.
+def refuse_encrypted_source(file, *, drop_encryption: bool = False) -> bool:
+    """Refuse an encrypted document, or drop its protection by consent.
 
     For a rewrite that runs OUTSIDE pikepdf — a renderer subprocess reads the
     document and writes a new one — where the output cannot carry the source's
     protection by construction. Silently handing back an unprotected copy is
     the failure this prevents.
+
+    `drop_encryption` is the CONSENT hatch: the caller has told the user that
+    the operation cannot keep the document's protection and the user chose to
+    proceed anyway. It reaches only the case the operation can actually
+    perform — an unreproducible source (certificate recipients, a non-empty
+    owner password) refuses whatever the answer was, because no consent
+    supplies the password it would need.
+
+    Returns True when protection was dropped by consent, for the caller to
+    report in its result.
     """
     try:
         with pikepdf.open(file) as pdf:
-            encrypted = _standard_encrypt_dict(pdf) is not None
+            state = _encryption_reproducibility(pdf)
     except pikepdf.PasswordError:
         raise
     except Exception:
-        return
-    if encrypted:
-        raise ValueError(
-            "This document's encryption cannot be kept through this operation, "
-            "which will not hand back an unprotected copy of a protected document. "
-            "Decrypt it first if that is what you want."
-        )
+        return False
+    if state is None:
+        return False
+    # Outside the try: the refusals below are the answer, not a read failure.
+    _refuse_unreproducible_encryption(*state)
+    if drop_encryption:
+        return True
+    raise ValueError(
+        "This document's encryption cannot be kept through this operation, "
+        "which will not hand back an unprotected copy of a protected document. "
+        "Decrypt it first if that is what you want."
+    )
 
 
 def save_pdf(

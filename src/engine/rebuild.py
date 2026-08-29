@@ -15,6 +15,7 @@ def rebuild(
     file: str,
     output: str,
     gs_path: str = "",
+    drop_encryption: bool = False,
 ) -> dict:
     """Rebuild a PDF by round-tripping through Ghostscript pdfwrite.
 
@@ -26,6 +27,9 @@ def rebuild(
         file: Input PDF path.
         output: Output PDF path.
         gs_path: Path to the Ghostscript executable.
+        drop_encryption: The user was told the rebuild cannot keep the
+            document's protection and chose to proceed. The output is
+            unprotected and says so as `encryption_removed`.
     """
     input_path = Path(file)
     output_path = Path(output)
@@ -35,7 +39,9 @@ def rebuild(
 
     # The rebuild runs in a renderer subprocess that reads the document and
     # writes a new one, so the source's encryption cannot ride through.
-    refuse_encrypted_source(file)
+    encryption_removed = refuse_encrypted_source(
+        file, drop_encryption=drop_encryption
+    )
 
     original_size = input_path.stat().st_size
 
@@ -77,4 +83,5 @@ def rebuild(
         "original_size": original_size,
         "rebuilt_size": output_size,
         "tier": "rebuild",
+        "encryption_removed": encryption_removed,
     }

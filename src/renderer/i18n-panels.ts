@@ -26,6 +26,11 @@ export const PANEL_STRINGS = {
   'panel.common.pageCount_other': '{{count}} pages',
   'panel.common.error': 'Error: {{message}}',
   'panel.common.working': 'Working…',
+  // The outcome line an operation carries when the user consented to losing
+  // the document's protection. ONE interpolated sentence, never the result
+  // line with a second one glued to it.
+  'panel.common.resultUnprotected':
+    '{{result}} The copy is unprotected: the original document’s password and permission restrictions are not in it.',
   'panel.common.folderRouteHint':
     'This works on the open document. To run the same steps over every document in a folder, build an action.',
   'panel.common.folderRouteOpen': 'Open Guided Actions',

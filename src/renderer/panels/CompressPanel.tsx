@@ -32,6 +32,7 @@ import {
 import { ImageResolutionSummary } from '../components/ImageResolutionSummary';
 import { suffixedOutputName } from '../lib/output-names';
 import { FolderRouteHint } from '../components/FolderRouteHint';
+import { CONSENT_DECLINED, useEncryptionConsent } from '../hooks/useEncryptionConsent';
 
 const PRESET_DPI: Record<string, number> = { screen: 72, ebook: 150, printer: 300, prepress: 300 };
 
@@ -87,6 +88,7 @@ export function CompressPanel(): React.ReactElement {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const gs = useGsCapability();
+  const { runWithConsent, consentDialog } = useEncryptionConsent();
 
   const [imageRes, setImageRes] = useState<ImageResolution | null>(null);
   const [imageResError, setImageResError] = useState<string | null>(null);
@@ -162,13 +164,23 @@ export function CompressPanel(): React.ReactElement {
         } else {
           params.quality = quality;
         }
-        const r = await call('compress', params);
+        // The compression cannot carry a protected document's encryption
+        // (either arm rewrites it through a renderer subprocess); the engine
+        // refuses, and the consent dialog is what re-runs it.
+        const r = await runWithConsent((drop_encryption) =>
+          call('compress', { ...params, drop_encryption }));
+        // Declining ran nothing, so it is neither an outcome nor a failure —
+        // the same empty answer as "no document".
+        if (r === CONSENT_DECLINED) { setStatus(''); return ''; }
         const line = tChrome('panel.compress.result', {
           from: (r.original_size / 1024).toFixed(0),
           to: (r.compressed_size / 1024).toFixed(0),
           ratio: ((1 - r.compressed_size / r.original_size) * 100).toFixed(1),
         });
-        const compressed = mrc ? `${line} ${describeMrc(r as unknown as MrcReport)}` : line;
+        const reported = mrc ? `${line} ${describeMrc(r as unknown as MrcReport)}` : line;
+        const compressed = r.encryption_removed
+          ? tChrome('panel.common.resultUnprotected', { result: reported })
+          : reported;
         setStatus(compressed);
         if (!thenOptimize) return 'ok';
 
@@ -215,7 +227,7 @@ export function CompressPanel(): React.ReactElement {
         setBusy(false);
       }
     },
-    [activeFile, quality, dpi, mrc, mrcPreset, pdfaSafe, verifyText, verifyLangs, thenOptimize, call],
+    [activeFile, quality, dpi, mrc, mrcPreset, pdfaSafe, verifyText, verifyLangs, thenOptimize, call, runWithConsent],
   );
 
   const handleCompress = useCallback(async () => {
@@ -385,6 +397,7 @@ export function CompressPanel(): React.ReactElement {
         {busy ? tChrome('panel.compress.compressing') : tChrome('panel.compress.compress')}
       </button>
       <StatusBar message={status} busy={busy} />
+      {consentDialog}
       <FolderRouteHint />
     </div>
   );

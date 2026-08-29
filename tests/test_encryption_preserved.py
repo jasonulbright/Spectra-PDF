@@ -14,6 +14,7 @@ import pytest
 
 from engine.compress import compress
 from engine.encrypt import decrypt
+from engine.grayscale import grayscale
 from engine.inspect import unlock
 from engine.merge import merge
 from engine.print_layout import impose_poster
@@ -154,10 +155,52 @@ def test_merge_refuses_to_pick_one_protection(encrypted_pdf, sample_pdf, tmp_dir
 
 
 def test_renderer_backed_rewrites_refuse(encrypted_pdf, tmp_dir):
-    for op, name in ((rebuild, "rebuilt"), (compress, "compressed")):
+    for op, name in ((rebuild, "rebuilt"), (compress, "compressed"), (grayscale, "gray")):
         out = os.path.join(tmp_dir, f"{name}.pdf")
         with pytest.raises(ValueError, match="encryption"):
             op(encrypted_pdf, out)
+
+
+# ── the consent hatch ─────────────────────────────────────────────────────
+#
+# The three renderer-backed ops cannot carry the source's protection by
+# construction, so the panel names that consequence and offers to proceed.
+# `drop_encryption` is what the answer reaches; it is the ONLY thing that
+# turns the refusal above into an unprotected output, and it reaches only the
+# case the operation can actually perform.
+
+
+@pytest.mark.parametrize(
+    "op,size_key",
+    [
+        pytest.param(rebuild, "rebuilt_size", id="rebuild"),
+        pytest.param(compress, "compressed_size", id="compress"),
+        pytest.param(grayscale, "output_size", id="grayscale"),
+    ],
+)
+def test_consent_writes_an_unprotected_copy(
+    encrypted_pdf, tmp_dir, gs_path, op, size_key
+):
+    out = os.path.join(tmp_dir, "consented.pdf")
+    result = op(encrypted_pdf, out, gs_path=gs_path, drop_encryption=True)
+    assert result["encryption_removed"] is True
+    assert result[size_key] > 0
+    assert_decrypted(out)
+
+
+def test_consent_does_not_reach_an_owner_gated_document(
+    owner_gated_pdf, tmp_dir, gs_path
+):
+    for op, name in ((rebuild, "rebuilt"), (compress, "compressed"), (grayscale, "gray")):
+        out = os.path.join(tmp_dir, f"{name}.pdf")
+        with pytest.raises(ValueError, match="owner password"):
+            op(owner_gated_pdf, out, gs_path=gs_path, drop_encryption=True)
+        assert not os.path.exists(out) or not os.path.getsize(out)
+
+
+def test_unencrypted_input_reports_no_removal(sample_pdf, tmp_dir, gs_path):
+    out = os.path.join(tmp_dir, "plain-rebuilt.pdf")
+    assert rebuild(sample_pdf, out, gs_path=gs_path)["encryption_removed"] is False
 
 
 # ── deliberately unprotected ──────────────────────────────────────────────
