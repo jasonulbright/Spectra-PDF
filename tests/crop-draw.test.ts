@@ -6,6 +6,8 @@ import {
   subscribeDrawnCrop,
   consumeDrawnCrop,
   __resetDrawnCrop,
+  resizeCropBand,
+  cropBandChanged,
   type DrawnCrop,
 } from '../src/renderer/lib/crop-draw';
 
@@ -141,5 +143,66 @@ describe('the drawn-crop channel', () => {
     publishDrawnCrop(crop);
     publishDrawnCrop({ ...crop, page: 7 });
     expect(consumeDrawnCrop()?.page).toBe(7);
+  });
+});
+
+describe('resizeCropBand', () => {
+  const band = { x: 0.2, y: 0.2, w: 0.4, h: 0.4 };
+
+  it('moves only the dragged edge, anchoring the opposite one', () => {
+    const out = resizeCropBand(band, 'e', 0.8, 0.5);
+    expect(out.x).toBeCloseTo(0.2, 6);
+    expect(out.y).toBeCloseTo(0.2, 6);
+    expect(out.w).toBeCloseTo(0.6, 6);
+    expect(out.h).toBeCloseTo(0.4, 6);
+  });
+
+  it('moves both axes from a corner', () => {
+    const out = resizeCropBand(band, 'nw', 0.1, 0.05);
+    expect(out.x).toBeCloseTo(0.1, 6);
+    expect(out.y).toBeCloseTo(0.05, 6);
+    expect(out.x + out.w).toBeCloseTo(0.6, 6);
+    expect(out.y + out.h).toBeCloseTo(0.6, 6);
+  });
+
+  it('clamps to the page box — a crop can never leave the page', () => {
+    const out = resizeCropBand(band, 'se', 4, -3);
+    expect(out.x + out.w).toBeLessThanOrEqual(1);
+    expect(out.y).toBeGreaterThanOrEqual(0);
+    expect(out.y + out.h).toBeLessThanOrEqual(1);
+  });
+
+  it('a crossed drag floors instead of flipping', () => {
+    const out = resizeCropBand(band, 'w', 0.95, 0.5);
+    expect(out.w).toBeGreaterThan(0);
+    expect(out.x + out.w).toBeCloseTo(0.6, 6);
+  });
+
+  // The floor must clear insetsFromBand's own no-area threshold, or a
+  // resize could produce a band the panel refuses as a click.
+  it('never collapses into a band insetsFromBand rejects', () => {
+    for (const h of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const) {
+      const out = resizeCropBand(band, h, 0.4, 0.4);
+      expect(insetsFromBand(out, W, H)).not.toBeNull();
+    }
+  });
+
+  it('holds the aspect when asked', () => {
+    const wide = { x: 0.1, y: 0.1, w: 0.4, h: 0.2 };
+    const out = resizeCropBand(wide, 'se', 0.9, 0.15, true);
+    expect(out.w / out.h).toBeCloseTo(2, 6);
+  });
+});
+
+describe('cropBandChanged', () => {
+  const band = { x: 0.2, y: 0.2, w: 0.4, h: 0.4 };
+
+  it('a press with no travel changes nothing', () => {
+    expect(cropBandChanged(band, { ...band })).toBe(false);
+  });
+
+  it('any moved edge counts', () => {
+    expect(cropBandChanged(band, { ...band, w: 0.41 })).toBe(true);
+    expect(cropBandChanged(band, { ...band, y: 0.19 })).toBe(true);
   });
 });

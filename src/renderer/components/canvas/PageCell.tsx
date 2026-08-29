@@ -4,6 +4,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { PageAnnotation, PageRef } from '../../state/types';
 import { displayWidthAt, displayWidthOf, BASE_PAGE_HEIGHT } from '../../canvas/layout';
 import { projectMarkRect, rotateNormalizedPoints, rotateNormalizedRect } from '../../lib/redaction';
+import { cropBandChanged, resizeCropBand } from '../../lib/crop-draw';
 import type { RedactionMark } from '../../lib/redaction';
 import type { FieldCandidate } from '../../lib/form-candidates';
 import FieldCandidateOverlay from './FieldCandidateOverlay';
@@ -2115,6 +2116,81 @@ function PageCellImpl({
           ...(note !== undefined ? { note } : {}),
         },
       ]);
+    };
+    const onUp = (): void => finish(true);
+    const onCancel = (): void => finish(false);
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') {
+        ev.stopPropagation();
+        finish(false);
+      }
+    };
+    const onBlur = (): void => finish(false);
+    cancelManip.current = onCancel;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('blur', onBlur);
+  };
+
+  /**
+   * The crop band's own resize preview, in the VIEW frame — the frame the
+   * card is drawn in. Local state rather than a placement update per pointer
+   * sample: the placement's owner re-reads page geometry to republish insets,
+   * so driving it from the drag would run one async geometry read per move.
+   */
+  const [cropResizePreview, setCropResizePreview] = useState<AnnotationRect | null>(null);
+
+  /** Drag one handle of the crop band. The annotation resize's pointer
+   * discipline (window-level native listeners, Escape/blur cancels without
+   * committing) over the crop band's own geometry. Nothing reaches the
+   * document: the release republishes insets to the Page Boxes panel, which
+   * still owns Apply. */
+  const handleCropResizeDown = (
+    band: SignaturePlacement,
+    handle: ResizeHandle,
+    e: React.PointerEvent<HTMLElement>,
+  ): void => {
+    if (e.button !== 0 || manipActive.current) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const cell = cellElOf(e);
+    if (!cell) return;
+    const viewBand = projectMarkRect(band, page.rotation);
+    let activated = false;
+    let last: AnnotationRect | null = null;
+
+    const applyAt = (ev: PointerEvent): void => {
+      const p = pagePoint(cell, ev.clientX, ev.clientY, { suspend: ev.altKey });
+      last = resizeCropBand(viewBand, handle, p.x, p.y, ev.shiftKey);
+      setCropResizePreview(last);
+    };
+    const onMove = (ev: PointerEvent): void => {
+      if (!activated) {
+        activated = true;
+        manipActive.current = true;
+        gestureLive.current = true;
+      }
+      applyAt(ev);
+    };
+    const finish = (commit: boolean): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('blur', onBlur);
+      cancelManip.current = null;
+      endSnapGesture();
+      if (!activated) return;
+      manipActive.current = false;
+      setCropResizePreview(null);
+      swallowNextClick();
+      if (!commit || !last || !cropBandChanged(viewBand, last)) return;
+      // The band was resized in the frame shown now, so it re-enters through
+      // the draw path's own entry with THIS frame as its rotation — the same
+      // contract a fresh band commits under.
+      onSetCropRect(docId, page.id, last, page.rotation);
     };
     const onUp = (): void => finish(true);
     const onCancel = (): void => finish(false);
@@ -4678,7 +4754,7 @@ function PageCellImpl({
           // Follows in-memory rotation like every other placement: the rect
           // was stored in the frame it was drawn in, projectMarkRect puts it
           // back in the frame shown now.
-          const r = projectMarkRect(cropPlacement, page.rotation);
+          const r = cropResizePreview ?? projectMarkRect(cropPlacement, page.rotation);
           return (
             <div
               data-testid="crop-placement"
@@ -4691,6 +4767,14 @@ function PageCellImpl({
               }}
             >
               <span className="page-crop-label">{tChrome('canvas.mark.keep')}</span>
+              {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const).map((h) => (
+                <div
+                  key={h}
+                  className={`annot-handle annot-handle-${h}`}
+                  data-testid={`crop-handle-${h}`}
+                  onPointerDown={(ev) => handleCropResizeDown(cropPlacement, h, ev)}
+                />
+              ))}
               <button
                 className="page-annot-x"
                 title={tChrome('canvas.mark.cropRemove')}

@@ -3022,6 +3022,14 @@ input:not([type]) {
   pointer-events: auto;
 }
 
+/* The band's handles carry the band's own hue, not the annotation accent —
+   two differently coloured resize affordances on one page would read as two
+   different objects. The label ground is the darker of the band's two ambers
+   and clears 3:1 on page white (WCAG 1.4.11), so it is what the edge uses. */
+.page-crop-placement .annot-handle {
+  border-color: #9a5b00;
+}
+
 /* Inside the rectangle it describes, on its own ground. Outside and above it,
    the label overhung the band's edge (and the page's, on a crop near the
    margin) as ~6px of amber text with the page showing through — small enough
