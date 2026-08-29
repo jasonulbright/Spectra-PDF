@@ -11,7 +11,7 @@ from engine.acroform import (
     refresh_sig_flags,
     refuse_if_xfa,
 )
-from engine.pdf_save import save_pdf
+from engine.pdf_save import encryption_profile, save_pdf
 
 
 def merge(files: list[str], output: str) -> dict:
@@ -31,10 +31,16 @@ def merge(files: list[str], output: str) -> dict:
 
     total_pages = 0
     renamed: list[dict] = []
+    protected_sources: list = []
+    profiles: set = set()
     with ExitStack() as stack:
         for file_path in files:
             pdf = stack.enter_context(pikepdf.open(file_path))
             refuse_if_xfa(pdf, file_path, "merging")
+            profile = encryption_profile(pdf)
+            profiles.add(profile)
+            if profile is not None:
+                protected_sources.append(pdf)
             result = merged.add_pages_from(pdf)
             renamed.extend({"from": old, "to": new} for old, new in result.renamed_fields.items())
             pure_renames = carry_pure_data_fields(merged, pdf)
@@ -47,10 +53,24 @@ def merge(files: list[str], output: str) -> dict:
             carry_doc_form_extras(merged, pdf, source_renames)
             total_pages += result.pages_added
         refresh_sig_flags(merged)
+        # One combined document can only carry one encryption, so a merge that
+        # mixes protections has no faithful answer and refuses rather than
+        # picking one. Where every input agrees, that agreement IS the answer.
+        if len(profiles) > 1:
+            raise ValueError(
+                "These documents cannot be combined without changing their "
+                "protection: they do not all carry the same encryption and "
+                "permissions, and one combined document can only have one. "
+                "Give them matching protection, or decrypt them first."
+            )
         # Sources stay open through the save — qpdf resolves foreign copies
         # lazily, so a source closed before the destination is saved risks
         # reading freed data (the old per-file `with` closed each one early).
-        save_pdf(merged, output_path)
+        save_pdf(
+            merged,
+            output_path,
+            encryption_source=protected_sources[0] if protected_sources else None,
+        )
 
     result_dict = {
         "output": str(output_path),

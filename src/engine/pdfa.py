@@ -30,6 +30,11 @@ def convert_pdfa(
     one thing this op must never do is leave a file whose formal, machine-
     readable claim outlives every chance to correct it.
 
+    Encryption does NOT survive this conversion, and must not: ISO 19005
+    forbids a PDF/A file from being encrypted, so an encrypted source cannot
+    have a conformant encrypted output. The drop is reported like every other
+    one, as an ``encryption_removed`` row.
+
     Interactive form fields do NOT survive this conversion (gs pdfwrite drops
     them) — and unlike compress/grayscale, they are deliberately NOT
     reattached here: our field appearance streams reference unembedded

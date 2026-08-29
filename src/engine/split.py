@@ -73,7 +73,10 @@ def _render_part(file: str, page_indices: list[int]) -> bytes:
         renames.update({r["from"]: r["to"] for r in pure_renames})
         carry_doc_form_extras(result, pdf, renames)
         buf = io.BytesIO()
-        save_pdf(result, buf)
+        # Every part is the source document minus pages, so each part carries
+        # the source's own encryption; `result` is a fresh Pdf and knows
+        # nothing about it.
+        save_pdf(result, buf, encryption_source=pdf)
         return buf.getvalue()
 
 

@@ -97,6 +97,7 @@ def recover(file: str, output: str) -> dict:
         save_pdf(
             dest,
             str(output_path),
+            encryption_source=source,
             compress_streams=True,
             object_stream_mode=pikepdf.ObjectStreamMode.generate,
         )

@@ -12,8 +12,13 @@ def _save(pdf, file: str, output_path: Path, encryption=None) -> None:
     """A same-file write stages beside the document and swaps the directory
     entry, so a write that dies leaves the input whole. The Pdf is closed
     inside the block because the destination cannot be replaced while it is
-    held open."""
-    kwargs = {} if encryption is None else {"encryption": encryption}
+    held open.
+
+    No `encryption` means an unprotected output is the intent, so the
+    source's own protection is deliberately not carried forward."""
+    kwargs = (
+        {"drop_encryption": True} if encryption is None else {"encryption": encryption}
+    )
     if is_same_file(file, str(output_path)):
         with staged_write(output_path) as staged:
             save_pdf(pdf, staged, **kwargs)

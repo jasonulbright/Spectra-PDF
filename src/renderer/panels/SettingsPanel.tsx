@@ -201,6 +201,7 @@ function GhostscriptSection(): React.ReactElement {
   const capability = useGsCapability();
   const [configured, setConfigured] = useState(() => loadSettings().gsPath);
   const [candidate, setCandidate] = useState<GsAnswer | null>(null);
+  const [promptOnLaunch, setPromptOnLaunch] = useState(() => loadSettings().promptGhostscriptOnLaunch);
   const [checking, setChecking] = useState(false);
 
   // A candidate is probed through the bridge rather than the shared store:
@@ -321,6 +322,21 @@ function GhostscriptSection(): React.ReactElement {
           {tChrome(checking ? 'panel.settings.gsChecking' : 'panel.settings.gsRecheck')}
         </button>
       </div>
+      <label className="flex items-center gap-2 cursor-pointer mt-3">
+        <input
+          type="checkbox"
+          data-testid="prefs-gs-prompt"
+          checked={promptOnLaunch}
+          onChange={() => {
+            const next = !promptOnLaunch;
+            saveSettings({ ...loadSettings(), promptGhostscriptOnLaunch: next });
+            setPromptOnLaunch(next);
+          }}
+          className="rounded bg-neutral-800 border-neutral-700"
+        />
+        <span className="text-sm text-neutral-400">{tChrome('panel.settings.gsPromptOnLaunch')}</span>
+      </label>
+      <p className="text-xs text-neutral-500 mt-1.5">{tChrome('panel.settings.gsPromptOnLaunchHint')}</p>
       <p className="text-xs text-neutral-500 mt-2">{tChrome('panel.settings.gsUsedFor')}</p>
       <p className="text-xs text-neutral-500 mt-1">{tChrome('panel.settings.gsWhereToGet')}</p>
       <p className="text-xs text-neutral-500 mt-1">{tChrome('panel.settings.gsLicense')}</p>

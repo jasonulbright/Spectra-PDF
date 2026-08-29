@@ -28,8 +28,11 @@ import {
   openGsSetup,
   refreshGsCapability,
   registerGsSetupOpener,
+  gsNeedsLaunchPrompt,
   requireGsPath,
   resetGsCapability,
+  suppressGsLaunchPrompt,
+  takeGsLaunchPrompt,
   subscribeGsCapability,
 } from '../src/renderer/lib/gs-capability';
 
@@ -199,5 +202,57 @@ describe('the set-up affordance', () => {
     registerGsSetupOpener(null);
     openGsSetup(); // an unmounted App is a no-op, never a throw
     expect(open).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The launch offer. A copy with no Ghostscript anywhere is told once — and
+// only where resolution failed EVERYWHERE, because a path the user chose
+// themselves is an answer they already know about.
+describe('the launch offer', () => {
+  const settle = async (answer: typeof absent) => {
+    probe.mockResolvedValue(answer);
+    return ensureGsCapability();
+  };
+
+  it('offers once, and never again in the same session', async () => {
+    const capability = await settle(absent);
+    expect(gsNeedsLaunchPrompt(capability)).toBe(true);
+    expect(takeGsLaunchPrompt(capability)).toBe(true);
+    expect(takeGsLaunchPrompt(capability)).toBe(false);
+  });
+
+  it('says nothing while the probe is still pending', () => {
+    expect(gsCapability().pending).toBe(true);
+    expect(gsNeedsLaunchPrompt()).toBe(false);
+    expect(takeGsLaunchPrompt()).toBe(false);
+  });
+
+  it('says nothing when Ghostscript is usable', async () => {
+    probe.mockResolvedValue(ready);
+    const capability = await ensureGsCapability();
+    expect(gsNeedsLaunchPrompt(capability)).toBe(false);
+    expect(takeGsLaunchPrompt(capability)).toBe(false);
+  });
+
+  it('says nothing about a path the user chose themselves', async () => {
+    const chosen = 'C:\\gs\\gswin64c.exe';
+    store.set('spectra-settings', JSON.stringify({ gsPath: chosen }));
+    const capability = await settle({
+      ...absent,
+      reason: GS_NOT_EXECUTABLE,
+      path: chosen,
+    });
+    expect(gsBlocked(capability)).toBe(true);
+    expect(gsNeedsLaunchPrompt(capability)).toBe(false);
+  });
+
+  it('“Don’t ask again” persists, and is honoured at the next launch', async () => {
+    const capability = await settle(absent);
+    suppressGsLaunchPrompt();
+    expect(JSON.parse(store.get('spectra-settings') ?? '{}').promptGhostscriptOnLaunch).toBe(false);
+    // A fresh session reading the same stored settings.
+    resetGsCapability();
+    expect(gsNeedsLaunchPrompt(capability)).toBe(false);
+    expect(takeGsLaunchPrompt(capability)).toBe(false);
   });
 });

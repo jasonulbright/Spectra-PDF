@@ -83,6 +83,20 @@ export const DIALOG_STRINGS = {
   'dialog.iccLicense.recordFailed':
     'The answer could not be saved: {{detail}}',
 
+  // The Ghostscript launch offer, shown once per launch on a copy where
+  // resolution found nothing anywhere. The copy states a GAP, never a fault:
+  // the product is fully usable without Ghostscript, and every other feature
+  // is unaffected.
+  'dialog.gsMissing.aria': 'Ghostscript was not found',
+  'dialog.gsMissing.title': 'Ghostscript was not found',
+  'dialog.gsMissing.blurb':
+    'Ghostscript is a separate program that Spectra PDF does not include. Everything else works without it.',
+  'dialog.gsMissing.usedFor':
+    'Installing it adds Compress, Grayscale, PDF/A and PDF/X, printing, page rasterization and image export, visual comparison, OCR and scan enhancement, transparency flattening, Rebuild, and PostScript conversion.',
+  'dialog.gsMissing.route':
+    'Choose OK to open Settings ▸ Engine ▸ Ghostscript, where you can point Spectra PDF at an installed copy.',
+  'dialog.gsMissing.dontAsk': 'Don’t ask again',
+
   // The form-submission consent dialog — the one surface in the app from
   // which an outbound form post can start. The address is shown whole and the
   // payload is shown as itself; nothing here summarizes what will be sent

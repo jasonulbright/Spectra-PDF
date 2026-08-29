@@ -419,7 +419,9 @@ def impose_sheets(
             page.Contents = out.make_stream(" ".join(content).encode("ascii"))
             page.obj["/Resources"] = resources
         n = len(sheets)
-        save_pdf(out, dst)
+        # The imposed sheets carry the source's pages, so they carry its
+        # protection; `out` is a fresh Pdf and knows nothing about it.
+        save_pdf(out, dst, encryption_source=src_pdf)
     return n
 
 
@@ -515,7 +517,7 @@ def impose_poster(
                     page.Contents = out.make_stream(" ".join(content).encode("ascii"))
                     page.obj["/Resources"] = resources
                     sheets += 1
-        save_pdf(out, dst)
+        save_pdf(out, dst, encryption_source=src_pdf)
     return {"sheets": sheets, "grid": grids}
 
 
