@@ -35,6 +35,60 @@ pub struct Cli {
     pub gs_path: Option<String>,
 }
 
+/// How a given argv should be dispatched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchMode {
+    /// Launch the GUI without letting the argument parser see argv.
+    Gui,
+    /// Hand argv to the argument parser (subcommand, `--help`, `--version`,
+    /// bare GUI launch, or a genuine usage error).
+    Parse,
+}
+
+/// Classify argv before parsing.
+///
+/// Shell verbs (Open with, double-click, Send to) invoke the exe with bare file
+/// paths, which the parser rejects as unknown subcommands and which — with no
+/// console attached — exits silently. The first non-option argument decides: it
+/// is a subcommand only when it matches a subcommand name or alias exactly, and
+/// anything else is a document for the GUI. A file literally named `compress`
+/// (no extension) is therefore still read as the subcommand; a subcommand name
+/// is never spelled with an extension or a path separator.
+///
+/// Options are skipped, `--gs-path` consuming its separated value so that value
+/// is never mistaken for the first positional. `--` introduces positionals,
+/// which only the GUI accepts.
+pub fn classify_launch(args: &[String]) -> LaunchMode {
+    let command = <Cli as clap::CommandFactory>::command();
+    let is_subcommand = |token: &str| {
+        command.get_subcommands().any(|sub| {
+            sub.get_name() == token || sub.get_all_aliases().any(|alias| alias == token)
+        })
+    };
+
+    let mut index = 1;
+    while index < args.len() {
+        let token = args[index].as_str();
+        if token == "--" {
+            return if index + 1 < args.len() {
+                LaunchMode::Gui
+            } else {
+                LaunchMode::Parse
+            };
+        }
+        if token.starts_with('-') && token != "-" {
+            index += if token == "--gs-path" { 2 } else { 1 };
+            continue;
+        }
+        return if is_subcommand(token) {
+            LaunchMode::Parse
+        } else {
+            LaunchMode::Gui
+        };
+    }
+    LaunchMode::Parse
+}
+
 #[derive(Subcommand)]
 pub enum CliCommand {
     /// Compress a PDF using Ghostscript
@@ -5734,6 +5788,83 @@ mod tests {
 
     fn parse(args: &[&str]) -> Cli {
         Cli::try_parse_from(args).expect("should parse")
+    }
+
+    fn classify(args: &[&str]) -> LaunchMode {
+        let owned: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        classify_launch(&owned)
+    }
+
+    #[test]
+    fn file_arguments_launch_the_gui() {
+        assert_eq!(
+            classify(&["spectrapdf.exe", r"C:\docs\file.pdf"]),
+            LaunchMode::Gui
+        );
+        assert_eq!(
+            classify(&["spectrapdf.exe", "--merge", "a.pdf", "b.pdf"]),
+            LaunchMode::Gui
+        );
+        assert_eq!(
+            classify(&["spectrapdf.exe", "--minimized", "a.pdf"]),
+            LaunchMode::Gui
+        );
+        // A path whose stem collides with a subcommand name.
+        assert_eq!(
+            classify(&["spectrapdf.exe", "compress.pdf"]),
+            LaunchMode::Gui
+        );
+        assert_eq!(
+            classify(&["spectrapdf.exe", r"C:\out\compress"]),
+            LaunchMode::Gui
+        );
+        assert_eq!(
+            classify(&["spectrapdf.exe", "--", "compress"]),
+            LaunchMode::Gui
+        );
+    }
+
+    #[test]
+    fn subcommands_still_parse() {
+        assert_eq!(
+            classify(&["spectrapdf.exe", "compress", "in.pdf", "-o", "out.pdf"]),
+            LaunchMode::Parse
+        );
+        assert_eq!(
+            classify(&["spectrapdf.exe", "extract-text", "in.pdf"]),
+            LaunchMode::Parse
+        );
+        assert_eq!(classify(&["spectrapdf.exe", "printers"]), LaunchMode::Parse);
+        // A separated --gs-path value is not the first positional.
+        assert_eq!(
+            classify(&[
+                "spectrapdf.exe",
+                "--gs-path",
+                r"C:\gs\gswin64c.exe",
+                "compress",
+                "in.pdf"
+            ]),
+            LaunchMode::Parse
+        );
+        assert_eq!(
+            classify(&["spectrapdf.exe", "--gs-path=C:/gs.exe", "compress", "in.pdf"]),
+            LaunchMode::Parse
+        );
+    }
+
+    #[test]
+    fn flag_only_and_bare_launches_parse() {
+        assert_eq!(classify(&["spectrapdf.exe"]), LaunchMode::Parse);
+        assert_eq!(classify(&["spectrapdf.exe", "--help"]), LaunchMode::Parse);
+        assert_eq!(classify(&["spectrapdf.exe", "--version"]), LaunchMode::Parse);
+        assert_eq!(
+            classify(&["spectrapdf.exe", "--minimized"]),
+            LaunchMode::Parse
+        );
+        assert_eq!(
+            classify(&["spectrapdf.exe", "--not-a-flag"]),
+            LaunchMode::Parse
+        );
     }
 
     fn scan_capabilities() -> crate::scanner::ScannerCapabilities {

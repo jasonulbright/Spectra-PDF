@@ -3,7 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use clap::Parser;
-use spectrapdf_lib::cli::Cli;
+use spectrapdf_lib::cli::{classify_launch, Cli, LaunchMode};
 
 fn main() {
     // Handle /? before anything else — show a GUI help dialog.
@@ -17,6 +17,16 @@ fn main() {
     // --help and --version output is visible when invoked from a terminal.
     // (windows_subsystem = "windows" starts with no console attached.)
     attach_parent_console();
+
+    // Document arguments reach the GUI without passing through the parser,
+    // which has no positional to hold them and would exit 2 with no console to
+    // print to. `spectrapdf_lib::run` reads argv itself for paths, `--merge`
+    // and `--minimized`.
+    let args: Vec<String> = std::env::args().collect();
+    if classify_launch(&args) == LaunchMode::Gui {
+        spectrapdf_lib::run();
+        return;
+    }
 
     let cli = Cli::parse();
 
