@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.20
+
+*Released 2026-08-31*
+
+### Double-clicking a PDF opens it again
+
+- With Spectra PDF set as the default viewer, double-clicking a PDF — or choosing it from Open with — launched nothing when the app was not already running: the command-line parser rejected the file path Windows passes on launch and exited before the window appeared. The launcher now recognizes a file path and opens the app with the document, while the headless command-line subcommands, `--help`, `--version` and exit codes behave exactly as before.
+
 ## 1.1.19
 
 *Released 2026-08-29*
