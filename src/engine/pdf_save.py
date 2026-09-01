@@ -1,36 +1,145 @@
 """The one document write, with a content-derived file identifier."""
 
 import re
+from xml.etree import ElementTree
 
 import pikepdf
 
 _SENTINEL = object()
 
-_PDFAID_PART = re.compile(
-    rb"pdfaid:part\s*=\s*[\"'](\d+)[\"']|<pdfaid:part>\s*(\d+)\s*</pdfaid:part>"
+ABSENT = "absent"
+UNREADABLE = "unreadable"
+
+_PDFA_ID_NS = "http://www.aiim.org/pdfa/ns/id/"
+
+_XML_DECL_ENCODING = re.compile(
+    rb"""<\?xml[^>]*?\bencoding\s*=\s*["']([A-Za-z0-9._-]+)["']"""
+)
+
+_BOMS = (
+    (b"\x00\x00\xfe\xff", "utf-32-be"),
+    (b"\xff\xfe\x00\x00", "utf-32-le"),
+    (b"\xef\xbb\xbf", "utf-8-sig"),
+    (b"\xfe\xff", "utf-16-be"),
+    (b"\xff\xfe", "utf-16-le"),
+)
+
+_PDFAID_PART_TEXT = re.compile(
+    r"""[\w.-]+:part\s*=\s*["'](\d+)["']|<[\w.-]+:part>\s*(\d+)\s*</[\w.-]+:part>"""
 )
 
 
-def declared_pdfa_part(pdf):
-    """The PDF/A part the document claims in its XMP, or None.
+def _decode_xmp(raw: bytes):
+    """The XMP packet as text, or None when its encoding cannot be settled.
 
-    Read from the raw `/Metadata` bytes: opening the XMP through a parser is
-    a mutation risk on a write path, and the claim is a single scalar.
+    An XMP packet is not ASCII by construction: ISO 16684-1 admits UTF-8,
+    UTF-16 and UTF-32, and the wide encodings carry a byte order mark. A byte
+    regex run over UTF-16 matches nothing, which reads as "no claim" — the
+    same answer an unmarked file gives, and the reason this returns None for
+    an undecidable packet rather than an empty string.
+    """
+    for bom, encoding in _BOMS:
+        if raw.startswith(bom):
+            try:
+                return raw.decode(encoding)
+            except (UnicodeDecodeError, LookupError):
+                return None
+    declared = _XML_DECL_ENCODING.search(raw[:512])
+    if declared is not None:
+        try:
+            return raw.decode(declared.group(1).decode("ascii"))
+        except (UnicodeDecodeError, LookupError, AttributeError):
+            return None
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+_XML_PROLOG = re.compile(r"^\s*<\?xml\b[^>]*\?>")
+
+
+def _parseable(text: str) -> str:
+    """`text` with its XML declaration removed.
+
+    The declaration names an encoding, and the encoding has already been
+    applied by the time the packet is text; a parser handed both refuses the
+    contradiction rather than ignoring it.
+    """
+    return _XML_PROLOG.sub("", text, count=1)
+
+
+def _part_from_tree(text: str):
+    """The `pdfaid:part` in the packet's XML, `UNREADABLE`, or None.
+
+    Namespace-qualified rather than prefix-matched: the prefix is the
+    document's to choose, and a packet that binds the PDF/A identification
+    namespace to any other prefix still declares a part. None means the
+    packet did not parse or carries no part; `UNREADABLE` means it carries
+    one that is not a number, which is a claim nobody can act on.
+    """
+    try:
+        root = ElementTree.fromstring(_parseable(text))
+    except (ElementTree.ParseError, ValueError):
+        return None
+    qualified = f"{{{_PDFA_ID_NS}}}part"
+    for node in root.iter():
+        value = node.get(qualified)
+        if value is None and node.tag == qualified:
+            value = node.text or ""
+        if value is None:
+            continue
+        try:
+            return int(value.strip())
+        except ValueError:
+            return UNREADABLE
+    return None
+
+
+def pdfa_claim(pdf):
+    """The document's PDF/A part claim: an int, `ABSENT`, or `UNREADABLE`.
+
+    `UNREADABLE` is a metadata stream that exists and could not be read to a
+    verdict — undecodable bytes, or XML that no parse and no scan resolves.
+    Callers that relax a constraint on the strength of "not PDF/A" must treat
+    it as a claim, not as its absence.
     """
     try:
         meta = pdf.Root.get("/Metadata")
         if meta is None:
-            return None
+            return ABSENT
         raw = bytes(meta.read_bytes())
     except Exception:
-        return None
-    match = _PDFAID_PART.search(raw)
+        return UNREADABLE
+    text = _decode_xmp(raw)
+    if text is None:
+        return UNREADABLE
+    part = _part_from_tree(text)
+    if part is not None:
+        return part
+    match = _PDFAID_PART_TEXT.search(text)
     if match is None:
-        return None
+        # A packet that parsed and declares no part is a document that is not
+        # PDF/A; one that did neither cannot be reasoned about.
+        return ABSENT if _parses(text) else UNREADABLE
     try:
         return int(match.group(1) or match.group(2))
     except (TypeError, ValueError):
-        return None
+        return UNREADABLE
+
+
+def _parses(text: str) -> bool:
+    try:
+        ElementTree.fromstring(_parseable(text))
+    except (ElementTree.ParseError, ValueError):
+        return False
+    return True
+
+
+def declared_pdfa_part(pdf):
+    """The PDF/A part the document claims in its XMP, or None."""
+    claim = pdfa_claim(pdf)
+    return claim if isinstance(claim, int) else None
 
 
 def _conformance_object_stream_mode(pdf, requested):
@@ -40,8 +149,14 @@ def _conformance_object_stream_mode(pdf, requested):
     stream they force do not exist below PDF 1.5, and generating them turns a
     conformant input into a non-conformant output with no other change to it.
     Later parts are built on PDF 1.7/2.0 and permit both.
+
+    Metadata that cannot be read to a verdict is treated as PDF/A-1: the cost
+    of disabling object streams on a file that turns out not to be PDF/A is
+    size, and the cost of the opposite is a conformance claim broken by a
+    write that changed nothing else.
     """
-    if declared_pdfa_part(pdf) != 1:
+    claim = pdfa_claim(pdf)
+    if claim != 1 and claim != UNREADABLE:
         return requested
     if requested in (None, pikepdf.ObjectStreamMode.disable):
         return requested

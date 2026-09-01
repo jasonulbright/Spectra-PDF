@@ -17,6 +17,7 @@ from engine.encrypt import decrypt
 from engine.grayscale import grayscale
 from engine.inspect import unlock
 from engine.merge import merge
+from engine.prepress import convert_cmyk, convert_pdfx
 from engine.print_layout import impose_poster
 from engine.rebuild import rebuild
 from engine.recover import recover
@@ -161,6 +162,25 @@ def test_renderer_backed_rewrites_refuse(encrypted_pdf, tmp_dir):
             op(encrypted_pdf, out)
 
 
+# The prepress conversions are renderer-backed rewrites too: Ghostscript reads
+# the document and writes a new one, and it accepts an empty-user-password
+# source without a word, so both once returned an unprotected copy of a
+# protected document. The refusal runs before the profile is resolved, so
+# neither Ghostscript nor the bundled profiles are needed to prove it.
+@pytest.mark.parametrize(
+    "run",
+    [
+        pytest.param(lambda src, out: convert_cmyk(src, out), id="convert_cmyk"),
+        pytest.param(lambda src, out: convert_pdfx(src, out), id="convert_pdfx"),
+    ],
+)
+def test_prepress_conversions_refuse(encrypted_pdf, tmp_dir, run):
+    out = os.path.join(tmp_dir, "prepress.pdf")
+    with pytest.raises(ValueError, match="encryption"):
+        run(encrypted_pdf, out)
+    assert not os.path.exists(out) or not os.path.getsize(out)
+
+
 # ── the consent hatch ─────────────────────────────────────────────────────
 #
 # The three renderer-backed ops cannot carry the source's protection by
@@ -198,6 +218,43 @@ def test_consent_does_not_reach_an_owner_gated_document(
         assert not os.path.exists(out) or not os.path.getsize(out)
 
 
+@pytest.mark.parametrize(
+    "op", [pytest.param(convert_cmyk, id="convert_cmyk"),
+           pytest.param(convert_pdfx, id="convert_pdfx")]
+)
+def test_prepress_consent_writes_an_unprotected_copy(
+    encrypted_pdf, tmp_dir, gs_path, icc_dir, op
+):
+    out = os.path.join(tmp_dir, "consented-prepress.pdf")
+    result = op(encrypted_pdf, out, gs_path=gs_path, icc_dir=icc_dir,
+                drop_encryption=True)
+    assert result["encryption_removed"] is True
+    assert result["output_size"] > 0
+    assert_decrypted(out)
+
+
+@pytest.mark.parametrize(
+    "op", [pytest.param(convert_cmyk, id="convert_cmyk"),
+           pytest.param(convert_pdfx, id="convert_pdfx")]
+)
+def test_prepress_consent_does_not_reach_an_owner_gated_document(
+    owner_gated_pdf, tmp_dir, gs_path, icc_dir, op
+):
+    out = os.path.join(tmp_dir, "owner-gated-prepress.pdf")
+    with pytest.raises(ValueError, match="owner password"):
+        op(owner_gated_pdf, out, gs_path=gs_path, icc_dir=icc_dir,
+           drop_encryption=True)
+    assert not os.path.exists(out) or not os.path.getsize(out)
+
+
+def test_prepress_unencrypted_input_reports_no_removal(
+    sample_pdf, tmp_dir, gs_path, icc_dir
+):
+    out = os.path.join(tmp_dir, "plain-cmyk.pdf")
+    result = convert_cmyk(sample_pdf, out, gs_path=gs_path, icc_dir=icc_dir)
+    assert result["encryption_removed"] is False
+
+
 def test_unencrypted_input_reports_no_removal(sample_pdf, tmp_dir, gs_path):
     out = os.path.join(tmp_dir, "plain-rebuilt.pdf")
     assert rebuild(sample_pdf, out, gs_path=gs_path)["encryption_removed"] is False
@@ -221,3 +278,89 @@ def test_unencrypted_input_stays_unencrypted(sample_pdf, tmp_dir):
     out = os.path.join(tmp_dir, "plain-repair.pdf")
     repair(sample_pdf, out)
     assert_decrypted(out)
+
+
+# ── The save seam is the only door ────────────────────────────────────────
+
+
+def _pikepdf_saves(path):
+    """Every `X.save(...)` in `path` whose receiver is a pikepdf document.
+
+    Read from the SOURCE rather than from a list kept beside it: a list can go
+    stale the moment someone adds a write, and this cannot.
+    """
+    import ast
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    constructors = {
+        "pikepdf.open", "pikepdf.new",
+        "pikepdf.Pdf.open", "pikepdf.Pdf.new",
+        "Pdf.open", "Pdf.new",
+    }
+    found = set()
+    for scope in ast.walk(tree):
+        if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        documents = set()
+        for node in ast.walk(scope):
+            if isinstance(node, ast.withitem):
+                call = node.context_expr
+                if (isinstance(call, ast.Call)
+                        and ast.unparse(call.func) in constructors
+                        and isinstance(node.optional_vars, ast.Name)):
+                    documents.add(node.optional_vars.id)
+            elif (isinstance(node, ast.Assign)
+                    and isinstance(node.value, ast.Call)
+                    and ast.unparse(node.value.func) in constructors):
+                documents.update(
+                    t.id for t in node.targets if isinstance(t, ast.Name)
+                )
+        for node in ast.walk(scope):
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "save"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id in documents):
+                found.add((path.name, scope.name, node.func.value.id))
+    return found
+
+
+# Each row writes an artifact that is NOT the user's document: a scratch file
+# staged for the renderer, a new document built from nothing, or a rewrite of
+# what the renderer just produced. Nothing else may write a PDF without going
+# through `save_pdf`, which is where an encrypted source's protection is put
+# back.
+DIRECT_SAVE_ALLOWED = {
+    # A new document built object by object; it has no source to carry.
+    ("object_inspector.py", "_isolation_pdf", "out"),
+    # Scratch input staged for Ghostscript, consumed and deleted.
+    ("prepress.py", "_stage_carve_out", "pdf"),
+    ("widget_faces.py", "regenerate_appearances_file", "pdf"),
+    ("widget_faces.py", "stage_appearances_file", "pdf"),
+    ("widget_faces.py", "harvest_appearances", "src"),
+    # An extracted single page staged for the profile conversion.
+    ("separations.py", "_carry_off_configuration", "pdf"),
+    # A rewrite of the renderer's own output, which the renderer produced
+    # unencrypted by construction.
+    ("prepress.py", "_restore_carve_out", "converted"),
+    ("prepress.py", "_rebase_appearances", "pdf"),
+    ("widget_faces.py", "harvest_appearances", "converted"),
+}
+
+
+def test_no_engine_module_saves_a_document_outside_the_save_seam():
+    """`Pdf.save` writes a DECRYPTED copy of an encrypted document — qpdf
+    decrypts on open, and only `pdf_save.save_pdf` puts the protection back.
+    A new direct save is either whitelisted here with its reason or it is a
+    document silently losing its encryption."""
+    import pathlib
+
+    engine = pathlib.Path(__file__).resolve().parents[1] / "src" / "engine"
+    found = set()
+    for module in sorted(engine.glob("*.py")):
+        if module.name == "pdf_save.py":
+            continue  # the seam itself
+        found |= _pikepdf_saves(module)
+    assert found - DIRECT_SAVE_ALLOWED == set()
+    # And the whitelist does not outlive the sites it names.
+    assert DIRECT_SAVE_ALLOWED - found == set()

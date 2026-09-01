@@ -12,6 +12,13 @@
 import { formattingLocale, tChrome } from '../i18n';
 
 const KEY = 'spectra-recent';
+// Clear Recent is the only removal, and it has to survive a cross-window
+// merge that otherwise keeps the newest record of every path. A generation
+// stamp says WHEN the list was emptied, so a window still holding the pre-clear
+// list mirrors nothing back and a file opened after the clear still counts.
+// Its own key: the list stays a plain array, so a build that predates this
+// reads it unchanged.
+const CLEARED_KEY = 'spectra-recent-cleared';
 const MAX = 10;
 
 export interface RecentEntry {
@@ -70,15 +77,31 @@ function readStored(): RecentEntry[] {
   }
 }
 
-/** What this window last put on the key. Entries on the key that are NOT in
- * it arrived from another window; entries in it that this window has since
- * dropped were removed here and must not come back. */
+function readClearedAt(): number {
+  try {
+    const raw = Number(localStorage.getItem(CLEARED_KEY));
+    return Number.isFinite(raw) && raw > 0 ? raw : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** What this window last put on the key — the only thing that distinguishes an
+ * empty list this window CLEARED from an empty list it never had. */
 let lastWritten: RecentEntry[] | null = null;
 
 export function readRecent(): RecentEntry[] {
-  const list = readStored();
+  const list = survivingClear(readStored(), readClearedAt());
   lastWritten = list;
   return list;
+}
+
+/** Entries a clear at `clearedAt` did not remove: everything opened after it.
+ * An entry with no recorded time cannot be shown to postdate the clear, and a
+ * clear removes what it cannot distinguish rather than keeping it. */
+export function survivingClear(entries: RecentEntry[], clearedAt: number): RecentEntry[] {
+  if (clearedAt <= 0) return entries;
+  return entries.filter((e) => e.openedAt !== null && e.openedAt > clearedAt);
 }
 
 /**
@@ -87,16 +110,35 @@ export function readRecent(): RecentEntry[] {
  *
  * The key is shared by every window, and the list is hydrated once at boot and
  * mirrored back WHOLE — so a plain write erases every open the other window
- * recorded in between. Read-modify-write against this window's own last write
- * is what separates "another window added this" from "this window removed it",
- * which a blind union cannot tell apart and which is what makes Clear Recent
- * work at all.
+ * recorded in between. The fold is PER ENTRY, not per path-presence: another
+ * window re-opening a path this window already knows produces a newer record
+ * for it, and treating only unknown paths as foreign overwrites that with this
+ * window's stale timestamp and stale provenance.
+ *
+ * Removal cannot ride on the fold, because a merge that keeps the newest record
+ * of every path can never drop one. Clear Recent therefore stamps a generation
+ * (`CLEARED_KEY`) and every window folds against it.
  */
 export function persistRecent(next: RecentEntry[]): RecentEntry[] {
   const stored = readStored();
-  const known = new Set((lastWritten ?? stored).map((e) => e.path));
-  const foreign = stored.filter((e) => !known.has(e.path));
-  const merged = mergeRecent(next, foreign);
+  const clearedAt = readClearedAt();
+  if (next.length === 0 && (lastWritten?.length ?? 0) > 0) {
+    // Clear Recent. The stamp is strictly monotonic so two windows clearing in
+    // the same millisecond still produce distinct generations.
+    const generation = Math.max(clearedAt + 1, Date.now());
+    try {
+      localStorage.setItem(CLEARED_KEY, String(generation));
+      localStorage.setItem(KEY, '[]');
+    } catch {
+      // storage full / unavailable — the list is best-effort
+    }
+    lastWritten = [];
+    return [];
+  }
+  const merged = mergeRecent(
+    survivingClear(next, clearedAt),
+    survivingClear(stored, clearedAt),
+  );
   try {
     localStorage.setItem(KEY, JSON.stringify(merged));
   } catch {
@@ -158,7 +200,14 @@ export function mergeRecent(a: RecentEntry[], b: RecentEntry[]): RecentEntry[] {
     }
     const heldAt = held.openedAt;
     const at = entry.openedAt;
-    if (heldAt === null || (at !== null && at > heldAt)) best.set(entry.path, entry);
+    const winner = heldAt === null || (at !== null && at > heldAt) ? entry : held;
+    const loser = winner === entry ? held : entry;
+    // Provenance is never lost to a merge, for the same reason a re-open does
+    // not drop it: `path` is a temp copy of a web download, and an entry with
+    // no way back to its address re-opens a path that may be gone. The newer
+    // record still overrides an older address when it carries one.
+    const sourceUrl = winner.sourceUrl ?? loser.sourceUrl;
+    best.set(entry.path, sourceUrl === winner.sourceUrl ? winner : { ...winner, sourceUrl });
   }
   return [...best.values()]
     .sort((x, y) => (y.openedAt ?? -1) - (x.openedAt ?? -1))

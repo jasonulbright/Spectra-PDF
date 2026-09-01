@@ -469,7 +469,10 @@ jobs:
         shell: pwsh
 
       - name: Build Tauri binary (debug, frontend embedded, no installer)
-        run: npx tauri build --debug --no-bundle
+        # --features e2e-net-private compiles in the loopback carve-out the
+        # network spec needs. It is a build-time switch precisely so a release
+        # artifact cannot carry it: see src-tauri/Cargo.toml.
+        run: npx tauri build --debug --no-bundle --features e2e-net-private
         env:
           VITE_E2E: "1"
 

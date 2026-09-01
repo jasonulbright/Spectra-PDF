@@ -628,6 +628,68 @@ class TestRepairConformance:
                      object_stream_mode=pikepdf.ObjectStreamMode.generate)
         assert b"/ObjStm" in open(out, "rb").read()
 
+    @pytest.mark.parametrize("encoding, bom", [
+        ("utf-16-le", b"\xff\xfe"),
+        ("utf-16-be", b"\xfe\xff"),
+    ])
+    def test_a_utf16_pdfa1_claim_is_read_through_the_save(self, tmp_dir, encoding, bom):
+        """ISO 16684-1 admits UTF-16 for an XMP packet. A byte scan for an
+        ASCII `pdfaid:part` finds nothing in one, which reads exactly like a
+        document that never claimed PDF/A — and the save then generates the
+        object streams a PDF/A-1 file may not carry."""
+        from engine.pdf_save import declared_pdfa_part, save_pdf
+
+        src = os.path.join(tmp_dir, f"pdfa1-{encoding}.pdf")
+        out = os.path.join(tmp_dir, f"pdfa1-{encoding}-out.pdf")
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(200, 200))
+        pdf.Root["/Metadata"] = pdf.make_stream(
+            bom + _xmp(1).decode("ascii").encode(encoding)
+        )
+        pdf.save(src, object_stream_mode=pikepdf.ObjectStreamMode.disable,
+                 force_version="1.4")
+        pdf.close()
+
+        with pikepdf.open(src) as opened:
+            assert declared_pdfa_part(opened) == 1
+            save_pdf(opened, out,
+                     object_stream_mode=pikepdf.ObjectStreamMode.generate)
+        data = open(out, "rb").read()
+        assert b"/ObjStm" not in data
+        assert b"/Type /XRef" not in data and b"/Type/XRef" not in data
+
+    def test_metadata_that_cannot_be_read_fails_safe(self, tmp_dir):
+        """A claim that cannot be reasoned about is not the absence of one."""
+        from engine.pdf_save import UNREADABLE, pdfa_claim, save_pdf
+
+        out = os.path.join(tmp_dir, "garbled-out.pdf")
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(200, 200))
+        # A UTF-16 byte order mark over bytes that are not UTF-16: no encoding
+        # reading of this packet reaches a verdict.
+        pdf.Root["/Metadata"] = pdf.make_stream(b"\xff\xfe<x:xmpmeta")
+        assert pdfa_claim(pdf) is UNREADABLE
+        save_pdf(pdf, out, object_stream_mode=pikepdf.ObjectStreamMode.generate)
+        pdf.close()
+        assert b"/ObjStm" not in open(out, "rb").read()
+
+    def test_a_document_with_no_metadata_still_uses_object_streams(self, tmp_dir):
+        """The fail-safe reaches unreadable metadata, never absent metadata."""
+        from engine.pdf_save import ABSENT, pdfa_claim, save_pdf
+
+        src = os.path.join(tmp_dir, "plain.pdf")
+        out = os.path.join(tmp_dir, "plain-out.pdf")
+        pdf = pikepdf.new()
+        pdf.add_blank_page(page_size=(200, 200))
+        pdf.save(src)
+        pdf.close()
+
+        with pikepdf.open(src) as opened:
+            assert pdfa_claim(opened) is ABSENT
+            save_pdf(opened, out,
+                     object_stream_mode=pikepdf.ObjectStreamMode.generate)
+        assert b"/ObjStm" in open(out, "rb").read()
+
 
 class TestRepairSignedDocument:
     """A whole-file rewrite renumbers every object, so a carried /ByteRange

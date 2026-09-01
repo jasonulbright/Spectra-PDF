@@ -469,3 +469,50 @@ class TestNothingIsInventedForTheUser:
         src = _build(tmp_dir, "no_lang")
         apply_accessibility_fixes(src, src)
         assert _statuses(src)["lang"] == "fail"
+
+
+class TestEncryptedInputKeepsItsProtection:
+    """qpdf decrypts on open, so a fix that saves through pikepdf's own
+    `Pdf.save` writes an UNPROTECTED copy of a protected document — the
+    permission bits the author set are gone and nothing says so. Both fixes
+    that write the file themselves are pinned here."""
+
+    @staticmethod
+    def _encrypt(path):
+        import pikepdf
+
+        allow = pikepdf.Permissions(
+            accessibility=True,
+            extract=False,
+            modify_annotation=False,
+            modify_assembly=False,
+            modify_form=False,
+            modify_other=False,
+            print_lowres=False,
+            print_highres=False,
+        )
+        with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+            pdf.save(path, encryption=pikepdf.Encryption(
+                owner="", user="", R=6, aes=True, allow=allow))
+        return path
+
+    @staticmethod
+    def _assert_protected(path):
+        import pikepdf
+
+        with pikepdf.open(path) as pdf:
+            assert pdf.is_encrypted
+            assert pdf.allow.accessibility
+            assert not pdf.allow.extract
+
+    def test_clearing_the_suspects_flag(self, tmp_dir):
+        src = self._encrypt(_build(tmp_dir, "suspects_flag"))
+        apply_accessibility_fixes(src, src, ["suspects"])
+        assert _statuses(src)["suspects"] in _BENIGN
+        self._assert_protected(src)
+
+    def test_naming_an_embedded_file(self, tmp_dir):
+        src = self._encrypt(_build(tmp_dir, "embedded_file_no_unicode_name"))
+        apply_accessibility_fixes(src, src, ["embedded_file_names"])
+        assert _statuses(src)["embedded_file_names"] in _BENIGN
+        self._assert_protected(src)

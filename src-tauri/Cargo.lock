@@ -3993,6 +3993,7 @@ dependencies = [
  "tauri-plugin-webdriver",
  "tempfile",
  "tokio",
+ "url",
  "uuid",
  "webview2-com",
  "window-vibrancy 0.8.0",

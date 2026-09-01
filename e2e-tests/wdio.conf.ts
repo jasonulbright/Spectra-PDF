@@ -19,7 +19,12 @@
  *   cargo install --git https://github.com/chippers/msedgedriver-tool
  *
  * Build the app harness with (from the repo root):
- *   VITE_E2E=1 npx tauri build --debug --no-bundle
+ *   VITE_E2E=1 npx tauri build --debug --no-bundle --features e2e-net-private
+ *
+ * The feature compiles in the loopback carve-out the network spec needs
+ * (src-tauri/src/net.rs); a build without it ignores SPECTRA_NET_ALLOW_PRIVATE
+ * and SPECTRAPDF_E2E for network policy, which is how a release artifact is
+ * kept incapable of the bypass.
  *
  * NOT with a bare `cargo build`: tauri-build re-runs whenever dist changes,
  * and outside the tauri CLI it bakes a DEV context into the binary — the

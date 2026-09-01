@@ -286,9 +286,18 @@ export function createFieldScriptSession(
   // so the deadline measures the SCRIPT rather than the load, and a load that
   // failed is answered as a named not-run instead of silence.
   let ready: Promise<{ ok: boolean; error: string }> | null = null;
+  // The resolver behind `ready`, held so a teardown can SETTLE the load's
+  // verdict rather than dropping the promise: a dispatch that arrived before
+  // the interpreter did awaits this, and a dropped promise leaves it pending
+  // for the life of the page.
+  let settleReady: ((state: { ok: boolean; error: string }) => void) | null = null;
+  /** A dispatch whose sandbox went away under it. Distinct from a timeout
+   * (`null`): nothing hung, so nothing is reported against a script. */
+  const CANCELLED = 'cancelled';
+  type DispatchReply = SandboxMessage[] | null | typeof CANCELLED;
   const pending = new Map<
     number,
-    { resolve: (messages: SandboxMessage[] | null) => void; timer: ReturnType<typeof setTimeout> }
+    { resolve: (messages: DispatchReply) => void; timer: ReturnType<typeof setTimeout> }
   >();
   // Emissions that arrived outside a dispatch (a script's own setTimeout) are
   // folded into the next result rather than dropped: they are the same class of
@@ -306,6 +315,8 @@ export function createFieldScriptSession(
     // going away: carrying it into the next dispatch would attribute values
     // from a stale seed to a different event.
     unsolicited = [];
+    settleReady?.({ ok: false, error: 'the sandbox stopped responding' });
+    settleReady = null;
     ready = null;
     worker?.terminate();
     worker = null;
@@ -325,6 +336,7 @@ export function createFieldScriptSession(
     ready = new Promise((resolve) => {
       settle = resolve;
     });
+    settleReady = settle;
     created.onmessage = ({ data }: { data: WorkerResponse }): void => {
       if (data.type === 'ready') {
         settle(data.ok ? { ok: true, error: '' } : { ok: false, error: data.error });
@@ -461,14 +473,19 @@ export function createFieldScriptSession(
     // `Open` pass, and losing it loses every document-level helper the field
     // scripts call.
     const state = await (ready ?? Promise.resolve({ ok: true, error: '' }));
-    if (!state.ok) return loadFailureResult(state.error, event);
+    // Teardown is checked BEFORE the verdict: a session torn down while its
+    // first dispatch was still waiting for the interpreter has no scripts left
+    // to report against, and answering it as a load failure would attribute
+    // the teardown to the document's own bodies.
     if (disposed || worker !== w) return emptyResult();
+    if (!state.ok) return loadFailureResult(state.error, event);
     const id = ++seq;
-    const messages = await new Promise<SandboxMessage[] | null>((resolve) => {
+    const messages = await new Promise<DispatchReply>((resolve) => {
       const timer = setTimeout(kill, timeoutMs);
       pending.set(id, { resolve, timer });
       w.postMessage({ type: 'dispatch', id, event });
     });
+    if (messages === CANCELLED) return emptyResult();
     const carried = unsolicited;
     unsolicited = [];
     const result = collect(messages === null ? null : [...carried, ...messages], event);
@@ -504,10 +521,22 @@ export function createFieldScriptSession(
     open: () => dispatch({ id: 'doc', name: 'Open' }),
     dispose() {
       disposed = true;
+      // Every promise this session handed out is SETTLED before the worker
+      // goes: a caller awaiting a dispatch (the fill's in-flight keystroke,
+      // whose commit waits on it) has no other way to learn the sandbox is
+      // gone, and a dropped promise strands that commit for the life of the
+      // page. Cancellation answers with an empty result — no values, no
+      // reports, nothing attributed to a script that never ran.
+      settleReady?.({ ok: false, error: 'the sandbox was closed' });
+      settleReady = null;
       ready = null;
       unsolicited = [];
-      for (const entry of pending.values()) clearTimeout(entry.timer);
+      const victims = [...pending.values()];
       pending.clear();
+      for (const entry of victims) {
+        clearTimeout(entry.timer);
+        entry.resolve(CANCELLED);
+      }
       try {
         worker?.postMessage({ type: 'dispose' });
       } catch {

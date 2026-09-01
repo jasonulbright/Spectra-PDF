@@ -239,11 +239,14 @@ forms.acroformFieldTreeNested	exact	forms	AcroForm field tree nested too deeply
 forms.couldnTRegenerateAppearance	pattern	forms	couldn't regenerate the appearance for {{v0}}: {{exc}}
 forms.dynamicXmlFormXfa	pattern	forms	{{v0}} is a dynamic XML form (XFA): it builds its own pages from an XML template, so its fields cannot be filled here.
 forms.fieldWritesVerticallyFallback	exact	forms	this field writes vertically and no fallback font is available
+forms.formCarriesXmlForm	exact	forms	This form carries XML form data (XFA) with no datasets packet to write into, so filling it would store each value in the PDF field alone and leave the form's own data saying something else. No file was written.
+forms.formSXmlData	exact	forms	This form's XML data (XFA) datasets packet cannot be read by this build, so a fill cannot keep it consistent with the PDF fields. No file was written.
 forms.nameFormDataFile	exact	forms	Name the form-data file to import.
 forms.nameFormFieldsShow	exact	forms	Name the form fields to show or hide.
 forms.optionContainsCharactersAvailable	pattern	forms	option {{line}} contains characters no available font can render ({{pretty}})
 forms.optionListWritesVertically	exact	forms	this option list writes vertically and no fallback font is available
 forms.optionOutsideFormFont	pattern	forms	option {{line}} is outside the form font's encoding (WinAnsi) and no fallback font is available
+forms.theseFieldsNodeForm	pattern	forms	These fields have no node in this form's XML data (XFA) and none could be created, so filling them would publish one value in the PDF field and another in the form: {{names}}. No file was written.
 forms.unknownSubmissionFormatExpected	pattern	forms	unknown submission format {{fmt}}; expected one of {{v1}}
 forms.valueContainsCharactersOutside	exact	forms	value contains characters outside the form font's encoding (WinAnsi)
 glyph_outlines.fontProgramProducedCurve	exact	glyph_outlines	A font program produced a curve segment with an unexpected number of points.

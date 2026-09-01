@@ -43,6 +43,7 @@ from engine.doc_properties import (
     set_page_tab_order,
 )
 from engine.encrypt import grant_accessibility_permission
+from engine.pdf_save import save_pdf
 from engine.struct_fix import set_table_headers
 from engine.struct_tree import set_struct_props
 from engine.tag_content import tag_page_content
@@ -166,7 +167,7 @@ def _fix_suspects(source: str, output: str, report: dict, allow_signed: bool) ->
         if mark_info is None:
             return 0
         mark_info[pikepdf.Name("/Suspects")] = False
-        pdf.save(output)
+        save_pdf(pdf, output)
     return 1
 
 
@@ -350,7 +351,7 @@ def _fix_embedded_file_names(source: str, output: str, report: dict,
                 obj[pikepdf.Name("/UF")] = pikepdf.String(text)
                 applied += 1
         if applied:
-            pdf.save(output)
+            save_pdf(pdf, output)
     return applied
 
 

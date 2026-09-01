@@ -1,7 +1,7 @@
 // Recent-files list helpers. parseRecent must never let a
 // JSON-valid-but-wrong-shaped localStorage value through as a non-array —
 // that would crash HomeTab's recentFiles.map on the first render.
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatOpenedAt, parseRecent, withRecent } from '../src/renderer/lib/recent-files';
 
 describe('parseRecent', () => {
@@ -113,5 +113,112 @@ describe('formatOpenedAt (the Home opened-when column)', () => {
 
   it('a legacy entry with no recorded time reads as an em dash — never a fabricated date', () => {
     expect(formatOpenedAt(null, now)).toBe('—');
+  });
+});
+
+// ── the shared key, two windows ────────────────────────────────────────────
+//
+// `spectra-recent` is shared by every window and each mirrors its whole list
+// back. The fold used to treat only UNKNOWN paths as foreign, so window B's
+// re-open of a path window A already knew — a newer timestamp, a new download
+// address — was overwritten by A's stale write. Removal cannot ride on a fold
+// that keeps the newest record of every path, so Clear Recent stamps a
+// generation and every window folds against it.
+
+function fakeStorage(): Storage {
+  const map = new Map<string, string>();
+  return {
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => void map.set(k, String(v)),
+    removeItem: (k: string) => void map.delete(k),
+    clear: () => map.clear(),
+    key: (i: number) => [...map.keys()][i] ?? null,
+    get length() {
+      return map.size;
+    },
+  } as Storage;
+}
+
+/** A second window: a fresh module scope over the SAME storage. */
+async function newWindow(): Promise<typeof import('../src/renderer/lib/recent-files')> {
+  vi.resetModules();
+  return import('../src/renderer/lib/recent-files');
+}
+
+describe('cross-window recent merge', () => {
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', fakeStorage());
+  });
+
+  it('keeps window B s newer re-open of a path window A already knew', async () => {
+    const A = await newWindow();
+    const B = await newWindow();
+    // Both windows boot on the same list.
+    A.persistRecent([{ path: 'x.pdf', openedAt: 1000 }]);
+    const bList = B.readRecent();
+    expect(bList).toEqual([{ path: 'x.pdf', openedAt: 1000 }]);
+    // B re-opens x.pdf.
+    B.persistRecent(B.withRecent(bList, 'x.pdf', 2000));
+    // A mirrors its own (now stale) list back. B's newer record survives.
+    const merged = A.persistRecent([{ path: 'x.pdf', openedAt: 1000 }]);
+    expect(merged).toEqual([{ path: 'x.pdf', openedAt: 2000 }]);
+  });
+
+  it('keeps a provenance change made in the other window', async () => {
+    const A = await newWindow();
+    const B = await newWindow();
+    A.persistRecent([{ path: 'tmp.pdf', openedAt: 1000 }]);
+    B.readRecent();
+    B.persistRecent(B.withRecent([], 'tmp.pdf', 2000, 'https://example.test/a.pdf'));
+    const merged = A.persistRecent([{ path: 'tmp.pdf', openedAt: 1000 }]);
+    expect(merged).toEqual([
+      { path: 'tmp.pdf', openedAt: 2000, sourceUrl: 'https://example.test/a.pdf' },
+    ]);
+  });
+
+  it('never loses an address to a merge that a newer record did not re-supply', async () => {
+    const A = await newWindow();
+    expect(
+      A.mergeRecent(
+        [{ path: 'tmp.pdf', openedAt: 2000 }],
+        [{ path: 'tmp.pdf', openedAt: 1000, sourceUrl: 'https://example.test/a.pdf' }],
+      ),
+    ).toEqual([{ path: 'tmp.pdf', openedAt: 2000, sourceUrl: 'https://example.test/a.pdf' }]);
+  });
+
+  it('a clear in one window is not undone by the other window mirroring its list back', async () => {
+    const A = await newWindow();
+    const B = await newWindow();
+    A.persistRecent([
+      { path: 'x.pdf', openedAt: 1000 },
+      { path: 'y.pdf', openedAt: 900 },
+    ]);
+    const bList = B.readRecent();
+    expect(bList).toHaveLength(2);
+    expect(A.persistRecent([])).toEqual([]);
+    // B still holds the pre-clear list and mirrors it back.
+    expect(B.persistRecent(bList)).toEqual([]);
+    expect(B.readRecent()).toEqual([]);
+  });
+
+  it('keeps a file opened AFTER the clear, in either window', async () => {
+    const A = await newWindow();
+    const B = await newWindow();
+    A.persistRecent([{ path: 'x.pdf', openedAt: 1000 }]);
+    const bList = B.readRecent();
+    A.persistRecent([]);
+    const afterClear = Date.now() + 60_000;
+    // B opens something new; its stale x.pdf still goes.
+    const merged = B.persistRecent(B.withRecent(bList, 'z.pdf', afterClear));
+    expect(merged.map((e) => e.path)).toEqual(['z.pdf']);
+  });
+
+  it('does not read an empty boot list as a clear', async () => {
+    const A = await newWindow();
+    A.persistRecent([{ path: 'x.pdf', openedAt: 1000 }]);
+    const B = await newWindow();
+    // B never read or wrote: an empty list from it is "nothing yet", not a
+    // removal, and A's entry survives.
+    expect(B.persistRecent([])).toEqual([{ path: 'x.pdf', openedAt: 1000 }]);
   });
 });

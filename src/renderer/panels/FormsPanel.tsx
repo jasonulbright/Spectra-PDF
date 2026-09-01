@@ -8,6 +8,7 @@ import { StatusBar } from '../components/StatusBar';
 import { readFormFields } from '../lib/forms';
 import { fillClosure, formCalculation } from '../lib/form-overlay';
 import { mergeUntouched } from '../lib/late-read';
+import { classifyFillResult } from '../lib/fill-result';
 import type { FormField, FormFieldValue, XFAKind } from '../lib/forms';
 import {
   ACTION_KIND_LABEL,
@@ -252,16 +253,24 @@ export function FormsPanel(): React.ReactElement {
       // FILE (undoable via the snapshot). `call` is commit-gated (never
       // callRaw). Page count is unchanged by a fill/flatten.
       const snapshotPath = await file.snapshot(activeFile.workingPath);
-      await call('fill_form_fields', {
+      const fillReport = await call('fill_form_fields', {
         file: activeFile.workingPath,
         output: activeFile.workingPath,
         edits,
         flatten,
         font_dir: await app.getEditFontPath(),
       });
+      // The engine refuses an inconsistent fill atomically, so a thrown error
+      // is already an error here. What is left is the report on the success
+      // path, which is the only evidence the write covered what was named —
+      // announcing success without reading it is announcing the request.
+      const outcome = classifyFillResult(fillReport, changedCount);
       // Written: these values ARE the file's now, so the re-read the dispatch
       // below triggers should reseed everything. (On the error path `touched`
       // deliberately stands — nothing was written, so the typing must survive.)
+      // A report that does not add up is still a document that changed on
+      // disk, so the reload runs either way — it IS the re-read the notice
+      // tells the user to trust instead of the panel's own state.
       touched.current.clear();
       const buffer = await file.readBuffer(activeFile.workingPath);
       dispatch({
@@ -271,6 +280,20 @@ export function FormsPanel(): React.ReactElement {
         buffer,
         snapshotPath,
       });
+      if (outcome.kind === 'refused') {
+        setStatus(
+          tChrome('panel.common.error', {
+            message:
+              outcome.refusal.kind === 'incomplete'
+                ? tChrome('panel.forms.fillIncomplete', {
+                    named: outcome.refusal.requested,
+                    written: outcome.refusal.filled,
+                  })
+                : tChrome('panel.forms.fillUnverified'),
+          }),
+        );
+        return;
+      }
       setStatus(
         flatten
           ? tChrome('panel.forms.filledFlattened')

@@ -157,49 +157,118 @@ impl AddrClass {
     }
 }
 
-fn classify_v4(a: Ipv4Addr) -> AddrClass {
-    let o = a.octets();
-    if a.is_loopback() {
-        AddrClass::Loopback
-    } else if a.is_unspecified() || o[0] == 0 {
-        AddrClass::Unspecified
-    } else if a.is_private() {
-        AddrClass::Private
-    } else if a.is_link_local() {
-        AddrClass::LinkLocal
-    } else if o[0] == 100 && (o[1] & 0xc0) == 64 {
-        // 100.64.0.0/10 — carrier-grade NAT, not internet-routable.
-        AddrClass::OtherNonGlobal
-    } else if o[0] == 192 && o[1] == 0 && o[2] == 0 {
-        // 192.0.0.0/24 — IETF protocol assignments.
-        AddrClass::OtherNonGlobal
-    } else if a.is_broadcast() || o[0] >= 224 {
-        // 255.255.255.255, and 224.0.0.0+ multicast/reserved.
-        AddrClass::OtherNonGlobal
-    } else {
-        AddrClass::Global
-    }
+/// Whether `a` falls inside `network/bits`.
+///
+/// `bits` is the prefix length; a zero-length prefix matches everything, which
+/// no entry below uses but which the shift would otherwise make undefined.
+fn in_v4_net(a: Ipv4Addr, network: [u8; 4], bits: u32) -> bool {
+    let mask: u32 = if bits == 0 { 0 } else { u32::MAX << (32 - bits) };
+    (u32::from_be_bytes(a.octets()) & mask) == (u32::from_be_bytes(network) & mask)
 }
 
-fn classify_v6(a: Ipv6Addr) -> AddrClass {
-    if a.is_loopback() {
-        AddrClass::Loopback
-    } else if a.is_unspecified() {
-        AddrClass::Unspecified
-    } else if let Some(v4) = a.to_ipv4_mapped() {
-        // ::ffff:a.b.c.d carries a v4 address and is classified as one.
-        classify_v4(v4)
-    } else {
-        let seg = a.segments();
-        if (seg[0] & 0xffc0) == 0xfe80 {
-            AddrClass::LinkLocal // fe80::/10
-        } else if (seg[0] & 0xfe00) == 0xfc00 {
-            AddrClass::UniqueLocal // fc00::/7
-        } else if (seg[0] & 0xff00) == 0xff00 {
-            AddrClass::OtherNonGlobal // ff00::/8 multicast
-        } else {
-            AddrClass::Global
+/// Every IPv4 prefix in the IANA IPv4 Special-Purpose Address Registry, plus
+/// multicast and the reserved 240/4 block.
+///
+/// The table is exhaustive BY CONSTRUCTION rather than by a handful of hand-
+/// picked ranges: a prefix that is not listed here and is not ordinary unicast
+/// space cannot reach `Global` by having been forgotten. Entries whose registry
+/// row says "Globally Reachable: True" (192.0.0.9/32, 192.0.0.10/32,
+/// 192.31.196.0/24, 192.52.193.0/24, 192.175.48.0/24) are still classified
+/// non-global here: they name anycast infrastructure, never a destination a
+/// document or a typed address has business submitting to.
+const V4_SPECIAL: &[([u8; 4], u32, AddrClass)] = &[
+    ([0, 0, 0, 0], 8, AddrClass::Unspecified),        // "this network"
+    ([10, 0, 0, 0], 8, AddrClass::Private),           // RFC1918
+    ([100, 64, 0, 0], 10, AddrClass::OtherNonGlobal), // shared address space (CGNAT)
+    ([127, 0, 0, 0], 8, AddrClass::Loopback),
+    ([169, 254, 0, 0], 16, AddrClass::LinkLocal), // incl. 169.254.169.254
+    ([172, 16, 0, 0], 12, AddrClass::Private),   // RFC1918
+    ([192, 0, 0, 0], 24, AddrClass::OtherNonGlobal), // IETF protocol assignments
+    ([192, 0, 2, 0], 24, AddrClass::OtherNonGlobal), // TEST-NET-1
+    ([192, 31, 196, 0], 24, AddrClass::OtherNonGlobal), // AS112-v4
+    ([192, 52, 193, 0], 24, AddrClass::OtherNonGlobal), // AMT
+    ([192, 88, 99, 0], 24, AddrClass::OtherNonGlobal), // deprecated 6to4 relay anycast
+    ([192, 168, 0, 0], 16, AddrClass::Private),  // RFC1918
+    ([192, 175, 48, 0], 24, AddrClass::OtherNonGlobal), // direct delegation AS112
+    ([198, 18, 0, 0], 15, AddrClass::OtherNonGlobal), // benchmarking
+    ([198, 51, 100, 0], 24, AddrClass::OtherNonGlobal), // TEST-NET-2
+    ([203, 0, 113, 0], 24, AddrClass::OtherNonGlobal), // TEST-NET-3
+    ([224, 0, 0, 0], 4, AddrClass::OtherNonGlobal), // multicast
+    ([240, 0, 0, 0], 4, AddrClass::OtherNonGlobal), // reserved, incl. 255.255.255.255
+];
+
+fn classify_v4(a: Ipv4Addr) -> AddrClass {
+    for (network, bits, class) in V4_SPECIAL {
+        if in_v4_net(a, *network, *bits) {
+            return *class;
         }
+    }
+    AddrClass::Global
+}
+
+/// Whether `a` falls inside `network/bits`, both as 128-bit numbers.
+fn in_v6_net(a: Ipv6Addr, network: u128, bits: u32) -> bool {
+    let mask: u128 = if bits == 0 { 0 } else { u128::MAX << (128 - bits) };
+    (u128::from(a) & mask) == (network & mask)
+}
+
+/// The IPv6 special-purpose prefixes that are NOT ordinary global unicast.
+///
+/// The v6 default is inverted relative to v4: only `2000::/3` was ever
+/// delegated as global unicast, so anything outside it is non-global without
+/// needing a row, and the rows below carve the special-purpose prefixes back
+/// out of `2000::/3` (and name the ones inside `fc00::/7` and `fe80::/10` so a
+/// refusal can say which).
+const V6_SPECIAL: &[(u128, u32, AddrClass)] = &[
+    (0x0000_0000_0000_0000_0000_0000_0000_0000, 128, AddrClass::Unspecified), // ::
+    (0x0000_0000_0000_0000_0000_0000_0000_0001, 128, AddrClass::Loopback),    // ::1
+    (0x0064_ff9b_0001_0000_0000_0000_0000_0000, 48, AddrClass::OtherNonGlobal), // local-use translation
+    (0x0100_0000_0000_0000_0000_0000_0000_0000, 64, AddrClass::OtherNonGlobal), // discard-only
+    (0x2001_0000_0000_0000_0000_0000_0000_0000, 23, AddrClass::OtherNonGlobal), // IETF protocol assignments (Teredo, ORCHID, benchmarking)
+    (0x2001_0db8_0000_0000_0000_0000_0000_0000, 32, AddrClass::OtherNonGlobal), // documentation
+    (0x3fff_0000_0000_0000_0000_0000_0000_0000, 20, AddrClass::OtherNonGlobal), // documentation (RFC 9637)
+    (0xfc00_0000_0000_0000_0000_0000_0000_0000, 7, AddrClass::UniqueLocal),
+    (0xfe80_0000_0000_0000_0000_0000_0000_0000, 10, AddrClass::LinkLocal),
+    (0xfec0_0000_0000_0000_0000_0000_0000_0000, 10, AddrClass::OtherNonGlobal), // deprecated site-local
+    (0xff00_0000_0000_0000_0000_0000_0000_0000, 8, AddrClass::OtherNonGlobal),  // multicast
+];
+
+/// `2000::/3` — the only IPv6 space delegated as global unicast.
+const V6_GLOBAL_UNICAST: (u128, u32) = (0x2000_0000_0000_0000_0000_0000_0000_0000, 3);
+
+fn classify_v6(a: Ipv6Addr) -> AddrClass {
+    // A v6 address that CARRIES a v4 address is classified as that address:
+    // ::ffff:169.254.169.254, 64:ff9b::169.254.169.254 (the NAT64 well-known
+    // prefix) and 2002:a9fe:a9fe:: (6to4) all name the same host, and a
+    // classifier that only understood the mapped form would let the other two
+    // through.
+    if let Some(v4) = a.to_ipv4_mapped() {
+        return classify_v4(v4);
+    }
+    let seg = a.segments();
+    if in_v6_net(a, 0x0064_ff9b_0000_0000_0000_0000_0000_0000, 96) {
+        let o = a.octets();
+        return classify_v4(Ipv4Addr::new(o[12], o[13], o[14], o[15]));
+    }
+    if seg[0] == 0x2002 {
+        return classify_v4(Ipv4Addr::new(
+            (seg[1] >> 8) as u8,
+            (seg[1] & 0xff) as u8,
+            (seg[2] >> 8) as u8,
+            (seg[2] & 0xff) as u8,
+        ));
+    }
+    for (network, bits, class) in V6_SPECIAL {
+        if in_v6_net(a, *network, *bits) {
+            return *class;
+        }
+    }
+    if in_v6_net(a, V6_GLOBAL_UNICAST.0, V6_GLOBAL_UNICAST.1) {
+        AddrClass::Global
+    } else {
+        // Unallocated or reserved space defaults to non-global rather than
+        // falling through to an allow.
+        AddrClass::OtherNonGlobal
     }
 }
 
@@ -307,15 +376,26 @@ fn hop_decision(
     }
 }
 
-/// The test-only escape that lets the suite reach loopback. Honored ONLY when
-/// the environment sets it, so production (which never does) always blocks. The
-/// e2e binary already exports `SPECTRAPDF_E2E`; that is honored here too so the
-/// end-to-end network spec, which binds `127.0.0.1`, needs no second flag.
+/// The carve-out that lets the end-to-end suite reach loopback.
+///
+/// COMPILE-time gated, not environment-gated: the whole environment lookup
+/// exists only in a build that enabled the `e2e-net-private` Cargo feature, so
+/// a release artifact carries no code that can be talked into allowing a
+/// private destination. The e2e harness builds with the feature and already
+/// exports `SPECTRAPDF_E2E`, so its network spec — which binds `127.0.0.1` —
+/// needs no second flag. Rust tests do not go through this at all; they call
+/// `fetch_with_policy` and pin the policy directly.
+#[cfg(feature = "e2e-net-private")]
 fn env_allows_private() -> bool {
     matches!(
         std::env::var("SPECTRA_NET_ALLOW_PRIVATE").as_deref(),
         Ok("1") | Ok("true") | Ok("TRUE")
     ) || std::env::var("SPECTRAPDF_E2E").is_ok()
+}
+
+#[cfg(not(feature = "e2e-net-private"))]
+fn env_allows_private() -> bool {
+    false
 }
 
 /// Append an already-encoded query string to a URL, before any fragment.
@@ -334,8 +414,13 @@ fn append_query(url: &str, query: &str) -> String {
 /// Split an http(s) address into (normalized url, scheme, authority).
 ///
 /// The authority keeps its port, because `example.com` and `example.com:8443`
-/// are different origins. Userinfo is dropped from the comparison key so a
-/// credential-bearing redirect cannot pose as the same host.
+/// are different origins.
+///
+/// A credential-bearing address is REFUSED here rather than normalized away.
+/// Dropping the userinfo from the comparison key alone left the original string
+/// to go to the transport, which turns `user:pass@host` into an `Authorization`
+/// header — the ambient authority this module exists to not have, handed to
+/// whatever host a document named. The refusal names the reason.
 pub fn validate_http_url(raw: &str) -> Result<(String, String, String), String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -344,7 +429,7 @@ pub fn validate_http_url(raw: &str) -> Result<(String, String, String), String> 
     if trimmed.contains(char::is_whitespace) {
         return Err(format!("{trimmed} is not a web address"));
     }
-    let (scheme, rest) = trimmed
+    let (scheme, _) = trimmed
         .split_once("://")
         .ok_or_else(|| format!("{trimmed} does not name http or https"))?;
     let scheme = scheme.to_ascii_lowercase();
@@ -353,16 +438,28 @@ pub fn validate_http_url(raw: &str) -> Result<(String, String, String), String> 
             "Only http and https addresses can be used, not {scheme}"
         ));
     }
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    let authority = authority.rsplit('@').next().unwrap_or(authority);
-    if authority.is_empty() {
-        return Err(format!("{trimmed} names no host"));
+    let parsed = url::Url::parse(trimmed).map_err(|e| format!("{trimmed} is not a web address: {e}"))?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(format!(
+            "{trimmed} carries a user name or password in the address. This app does not send sign-in credentials with a request, so nothing was sent."
+        ));
     }
-    Ok((
-        trimmed.to_string(),
-        scheme,
-        authority.to_ascii_lowercase(),
-    ))
+    let host = parsed
+        .host_str()
+        .filter(|h| !h.is_empty())
+        .ok_or_else(|| format!("{trimmed} names no host"))?;
+    // An IPv6 host serializes with its brackets; strip them once so the
+    // bracketed form is rebuilt exactly one way whether or not a port is
+    // written.
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    let bracketed = bare.contains(':');
+    let authority = match (parsed.port(), bracketed) {
+        (Some(port), true) => format!("[{bare}]:{port}"),
+        (Some(port), false) => format!("{bare}:{port}"),
+        (None, true) => format!("[{bare}]"),
+        (None, false) => bare.to_string(),
+    };
+    Ok((trimmed.to_string(), scheme, authority.to_ascii_lowercase()))
 }
 
 /// Resolve a `Location` header against the URL it arrived from.
@@ -396,33 +493,27 @@ pub fn resolve_location(base: &str, location: &str) -> Result<String, String> {
     if location.is_empty() {
         return Err("The redirect named no address".to_string());
     }
-    let (_, scheme, authority) = validate_http_url(base)?;
-    // Absolute means a real scheme at position 0 (`scheme://`), NOT the mere
-    // presence of `://` anywhere: a same-origin `Location: /login?next=https://x`
-    // carries `://` in its query and is root-relative, and treating it as
-    // absolute would send the chain to `https://x` — the address inside the
-    // return-URL parameter, which no one chose.
-    if starts_with_scheme(location) {
-        return Ok(location.to_string());
-    }
-    if let Some(rest) = location.strip_prefix("//") {
-        return Ok(format!("{scheme}://{rest}"));
-    }
-    if location.starts_with('/') {
-        return Ok(format!("{scheme}://{authority}{location}"));
-    }
-    // Path-relative: replace the last segment of the base path.
-    let after_authority = &base[scheme.len() + 3..];
-    let path = match after_authority.find(['/', '?', '#']) {
-        Some(i) => &after_authority[i..],
-        None => "/",
-    };
-    let path = path.split(['?', '#']).next().unwrap_or("/");
-    let dir = match path.rfind('/') {
-        Some(i) => &path[..=i],
-        None => "/",
-    };
-    Ok(format!("{scheme}://{authority}{dir}{location}"))
+    // The base is validated first, so a credential-bearing or non-http base
+    // never reaches the join.
+    validate_http_url(base)?;
+    let parsed_base =
+        url::Url::parse(base).map_err(|e| format!("{base} is not a web address: {e}"))?;
+    // RFC 3986 reference resolution, done by the URL parser rather than by
+    // hand. Hand-resolution got the reference forms that carry NO path wrong:
+    // a query-only `?step=2` and a fragment-only `#frag` each keep the base's
+    // full path, and dropping the filename to reach `/forms/?step=2` is a
+    // different resource. Dot segments and percent-encoding are the parser's
+    // job for the same reason.
+    let target = parsed_base
+        .join(location)
+        .map_err(|e| format!("The redirect to {location} is not a web address: {e}"))?;
+    // The join can land on any scheme the header names; the result goes back
+    // through the same http-only, credential-free gate as a first hop, and its
+    // origin and resolved addresses are checked by the caller exactly as an
+    // absolute redirect's are.
+    let target = target.to_string();
+    validate_http_url(&target)?;
+    Ok(target)
 }
 
 /// Whether a redirect target may be followed: same scheme AND same authority
@@ -842,10 +933,52 @@ mod tests {
     }
 
     #[test]
-    fn the_authority_carries_the_port_and_drops_userinfo() {
-        let (_, scheme, authority) = validate_http_url("https://u:p@Example.com:8443/a").unwrap();
+    fn the_authority_carries_the_port() {
+        let (_, scheme, authority) = validate_http_url("https://Example.com:8443/a").unwrap();
         assert_eq!(scheme, "https");
         assert_eq!(authority, "example.com:8443");
+    }
+
+    #[test]
+    fn an_address_carrying_credentials_is_refused_by_name() {
+        // Stripping the userinfo from the COMPARISON key and then handing the
+        // original string to the transport is what turned `user:pass@host`
+        // into an `Authorization` header. The address is refused instead.
+        for bad in [
+            "https://u:p@example.com:8443/a",
+            "https://u@example.com/a",
+            "http://user:@example.com/a",
+            "https://:pass@example.com/a",
+        ] {
+            let error = validate_http_url(bad).unwrap_err();
+            assert!(error.contains("user name or password"), "{bad}: {error}");
+        }
+        // An `@` that is not userinfo (in a path or a query) is untouched.
+        assert!(validate_http_url("https://example.com/mail@host").is_ok());
+        assert!(validate_http_url("https://example.com/a?to=x@y.test").is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_credentialed_url_emits_no_request() {
+        // The proof the refusal is at the boundary: a live loopback server,
+        // the carve-out open, and still not one byte on the wire.
+        let server = TestServer::start(vec![body_reply("text/plain", "unreached")]);
+        let url = format!("http://user:secret@127.0.0.1:{}/submit", server.port);
+        let error = fetch_with_policy(&get_req(url), true).await.unwrap_err();
+        assert!(error.contains("user name or password"), "{error}");
+        assert!(server.requests().is_empty(), "nothing was connected to");
+    }
+
+    #[tokio::test]
+    async fn a_redirect_to_a_credentialed_url_is_refused() {
+        let server = TestServer::start(vec![
+            "HTTP/1.1 302 Found\r\nLocation: http://user:secret@127.0.0.1:1/a\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string(),
+        ]);
+        let error = fetch_with_policy(&get_req(server.url("/submit")), true)
+            .await
+            .unwrap_err();
+        assert!(error.contains("user name or password"), "{error}");
+        assert_eq!(server.requests().len(), 1);
     }
 
     #[test]
@@ -868,6 +1001,68 @@ mod tests {
             "https://example.com/forms/thanks"
         );
         assert!(resolve_location(base, "").is_err());
+    }
+
+    #[test]
+    fn a_location_with_no_path_keeps_the_base_resource() {
+        // A query-only or fragment-only reference replaces only that
+        // component. Hand-resolution dropped the filename and pointed the
+        // chain at the directory, which is a different resource.
+        let base = "https://example.com/forms/submit?x=1";
+        assert_eq!(
+            resolve_location(base, "?step=2").unwrap(),
+            "https://example.com/forms/submit?step=2"
+        );
+        assert_eq!(
+            resolve_location(base, "#frag").unwrap(),
+            "https://example.com/forms/submit?x=1#frag"
+        );
+    }
+
+    #[test]
+    fn a_location_resolves_dot_segments_and_encoding() {
+        let base = "https://example.com/forms/inner/submit";
+        assert_eq!(
+            resolve_location(base, "../thanks").unwrap(),
+            "https://example.com/forms/thanks"
+        );
+        assert_eq!(
+            resolve_location(base, "./thanks").unwrap(),
+            "https://example.com/forms/inner/thanks"
+        );
+        // Dot segments cannot climb above the root.
+        assert_eq!(
+            resolve_location(base, "../../../../thanks").unwrap(),
+            "https://example.com/thanks"
+        );
+        // Percent-encoding is preserved rather than decoded — `%2F` is not a
+        // path separator, and a resolver that decoded it would change the
+        // resource that gets fetched.
+        assert_eq!(
+            resolve_location(base, "a%2Fb/c").unwrap(),
+            "https://example.com/forms/inner/a%2Fb/c"
+        );
+        assert_eq!(
+            resolve_location(base, "/p?q=a%20b#f%2Fg").unwrap(),
+            "https://example.com/p?q=a%20b#f%2Fg"
+        );
+    }
+
+    #[test]
+    fn a_resolved_location_is_still_origin_checked() {
+        // Every reference form goes back through the same origin gate; the
+        // path-less forms are the ones a hand resolver got wrong, so they are
+        // named here alongside a genuinely off-origin one.
+        let base = "https://example.com/forms/submit";
+        for location in ["?step=2", "#frag", "../thanks", "/thanks"] {
+            let target = resolve_location(base, location).unwrap();
+            assert!(
+                same_origin(&target, "https", "example.com"),
+                "{location} -> {target}"
+            );
+        }
+        let off = resolve_location(base, "//evil.test/a").unwrap();
+        assert!(!same_origin(&off, "https", "example.com"), "{off}");
     }
 
     #[test]
@@ -966,6 +1161,157 @@ mod tests {
         }
     }
 
+    /// Every IPv4 special-purpose prefix, walked at its edges: the address
+    /// below the first, the first, the last, and the address above the last.
+    /// The finding was a range reaching `Global` by not having been written
+    /// down (198.18.0.0/15 benchmarking); a boundary walk is what catches the
+    /// next one.
+    #[test]
+    fn every_reserved_v4_prefix_is_non_global_at_both_edges() {
+        fn v4(n: u32) -> IpAddr {
+            IpAddr::V4(Ipv4Addr::from(n))
+        }
+        for (network, bits, class) in V4_SPECIAL {
+            let base = u32::from_be_bytes(*network);
+            let size = 1u64 << (32 - bits);
+            let last = base + (size as u32 - 1);
+            assert_eq!(classify_ip(v4(base)), *class, "first of /{bits}");
+            assert_eq!(classify_ip(v4(last)), *class, "last of /{bits}");
+            assert!(!class.is_global(), "/{bits} must not be global");
+            // Just outside each edge: an address that no row in the table
+            // claims is ordinary public space. This is what proves the mask
+            // does not over-cover — a too-wide prefix would pull a neighbour
+            // in and this would read non-global.
+            let covered = |n: u32| {
+                V4_SPECIAL
+                    .iter()
+                    .any(|(net, b, _)| in_v4_net(Ipv4Addr::from(n), *net, *b))
+            };
+            if base > 0 && !covered(base - 1) {
+                assert!(
+                    classify_ip(v4(base - 1)).is_global(),
+                    "the address below /{bits} leaked into a reserved class"
+                );
+            }
+            if last < u32::MAX && !covered(last + 1) {
+                assert!(
+                    classify_ip(v4(last + 1)).is_global(),
+                    "the address above /{bits} leaked into a reserved class"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_ranges_the_hand_written_classifier_missed_are_non_global() {
+        use std::str::FromStr;
+        for ip in [
+            "198.18.0.0",      // benchmarking, first
+            "198.18.5.5",      // benchmarking, middle
+            "198.19.255.255",  // benchmarking, last
+            "192.0.2.1",       // TEST-NET-1
+            "198.51.100.1",    // TEST-NET-2
+            "203.0.113.1",     // TEST-NET-3
+            "192.88.99.1",     // deprecated 6to4 relay anycast
+            "192.31.196.1",    // AS112-v4
+            "192.52.193.1",    // AMT
+            "192.175.48.1",    // direct delegation AS112
+            "240.0.0.1",       // reserved
+            "255.255.255.255", // broadcast
+            "224.0.0.1",       // multicast
+            "192.0.0.9",       // IETF protocol assignments
+        ] {
+            let got = classify_ip(IpAddr::from_str(ip).unwrap());
+            assert!(!got.is_global(), "{ip} classified {got:?}");
+        }
+        // The addresses immediately outside the benchmarking block are
+        // ordinary public space and must stay reachable.
+        assert!(classify_ip(IpAddr::from_str("198.17.255.255").unwrap()).is_global());
+        assert!(classify_ip(IpAddr::from_str("198.20.0.0").unwrap()).is_global());
+    }
+
+    #[test]
+    fn v6_special_purpose_prefixes_are_non_global_at_both_edges() {
+        for (network, bits, class) in V6_SPECIAL {
+            let size_mask: u128 = if *bits == 128 {
+                0
+            } else {
+                u128::MAX >> bits
+            };
+            let first = *network;
+            let last = network | size_mask;
+            assert_eq!(
+                classify_ip(IpAddr::V6(Ipv6Addr::from(first))),
+                *class,
+                "first of /{bits}"
+            );
+            assert_eq!(
+                classify_ip(IpAddr::V6(Ipv6Addr::from(last))),
+                *class,
+                "last of /{bits}"
+            );
+            assert!(!class.is_global(), "/{bits} must not be global");
+        }
+    }
+
+    #[test]
+    fn v6_defaults_to_non_global_outside_global_unicast() {
+        use std::str::FromStr;
+        for (ip, want_global) in [
+            ("2000::1", true),          // first of 2000::/3
+            ("3ffe::1", true),          // inside 2000::/3
+            ("3fff::1", false),         // documentation (RFC 9637)
+            ("3fff:0fff::1", false),    // last of 3fff::/20
+            ("3fff:1000::1", true),     // just above it
+            ("4000::1", false),         // unallocated: default non-global
+            ("1fff::1", false),         // below 2000::/3
+            ("5f00::1", false),         // SRv6 segment routing
+            ("0100::1", false),         // discard-only
+            ("2001:db8::1", false),     // documentation
+            ("2001::1", false),         // Teredo / IETF protocol assignments
+            ("2001:2::1", false),       // benchmarking
+            ("2001:1ff:ffff::1", false), // last of 2001::/23
+            ("2001:200::1", true),      // just above 2001::/23 — ordinary space
+            ("fec0::1", false),         // deprecated site-local
+            ("ff02::1", false),         // multicast
+        ] {
+            let got = classify_ip(IpAddr::from_str(ip).unwrap());
+            assert_eq!(got.is_global(), want_global, "{ip} classified {got:?}");
+        }
+    }
+
+    #[test]
+    fn a_v6_address_carrying_a_v4_address_is_classified_as_that_address() {
+        use std::str::FromStr;
+        // The cloud-metadata endpoint, spelled three ways.
+        for ip in [
+            "::ffff:169.254.169.254", // v4-mapped
+            "64:ff9b::169.254.169.254", // NAT64 well-known prefix
+            "2002:a9fe:a9fe::1",      // 6to4
+        ] {
+            assert_eq!(
+                classify_ip(IpAddr::from_str(ip).unwrap()),
+                AddrClass::LinkLocal,
+                "{ip}"
+            );
+        }
+        assert_eq!(
+            classify_ip(IpAddr::from_str("64:ff9b::10.0.0.1").unwrap()),
+            AddrClass::Private
+        );
+        assert_eq!(
+            classify_ip(IpAddr::from_str("2002:7f00:1::1").unwrap()),
+            AddrClass::Loopback
+        );
+        // A 6to4 address wrapping a public v4 address is global.
+        assert!(classify_ip(IpAddr::from_str("2002:0808:0808::1").unwrap()).is_global());
+        // The local-use translation prefix is not the well-known one.
+        assert_eq!(
+            classify_ip(IpAddr::from_str("64:ff9b:1::1").unwrap()),
+            AddrClass::OtherNonGlobal
+        );
+    }
+
     #[test]
     fn the_hop_policy_splits_submit_from_open() {
         // Submit refuses any non-global hop, first or not.
@@ -1004,20 +1350,33 @@ mod tests {
         );
     }
 
+    /// The carve-out is COMPILED IN or it is not there at all: with both
+    /// variables set, `env_allows_private` answers exactly whether the
+    /// `e2e-net-private` feature is on. A release artifact — built without it —
+    /// therefore has no environment-controlled network policy.
     #[test]
-    fn the_private_carve_out_is_env_gated() {
+    fn the_private_carve_out_is_compiled_in_not_env_controlled() {
         let allow = std::env::var("SPECTRA_NET_ALLOW_PRIVATE").ok();
         let e2e = std::env::var("SPECTRAPDF_E2E").ok();
+        let compiled_in = cfg!(feature = "e2e-net-private");
         std::env::remove_var("SPECTRAPDF_E2E");
         std::env::remove_var("SPECTRA_NET_ALLOW_PRIVATE");
-        assert!(!env_allows_private(), "off by default");
+        assert!(!env_allows_private(), "off with nothing set");
         std::env::set_var("SPECTRA_NET_ALLOW_PRIVATE", "1");
-        assert!(env_allows_private(), "on when set to 1");
+        assert_eq!(
+            env_allows_private(),
+            compiled_in,
+            "SPECTRA_NET_ALLOW_PRIVATE=1 opens the carve-out only in a feature build"
+        );
         std::env::set_var("SPECTRA_NET_ALLOW_PRIVATE", "0");
         assert!(!env_allows_private(), "off when not 1/true");
         std::env::remove_var("SPECTRA_NET_ALLOW_PRIVATE");
         std::env::set_var("SPECTRAPDF_E2E", "1");
-        assert!(env_allows_private(), "the e2e flag also opens the carve-out");
+        assert_eq!(
+            env_allows_private(),
+            compiled_in,
+            "SPECTRAPDF_E2E opens the carve-out only in a feature build"
+        );
         std::env::remove_var("SPECTRAPDF_E2E");
         // Restore whatever the harness set.
         if let Some(v) = allow {

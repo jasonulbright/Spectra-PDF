@@ -132,7 +132,7 @@ pub fn run() {
                 let files: Vec<String> = argv
                     .iter()
                     .skip(1)
-                    .filter(|a| !a.starts_with('-') && a.to_lowercase().ends_with(".pdf"))
+                    .filter(|a| commands::is_openable_document_path(a))
                     // The path-identity gate: argv is the wild-west
                     // producer — Explorer, scripts and shells spell the same
                     // file every way there is.
@@ -378,7 +378,7 @@ pub fn run() {
             let files: Vec<String> = args
                 .iter()
                 .skip(1)
-                .filter(|a| !a.starts_with('-') && a.to_lowercase().ends_with(".pdf"))
+                .filter(|a| commands::is_openable_document_path(a))
                 .map(|a| commands::canonical_path(a))
                 .collect();
             let merge = args.iter().any(|a| a == "--merge");
@@ -519,5 +519,54 @@ mod tests {
         assert_eq!(crate::commands::canonical_path(&ghost_str), ghost_str);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn openable_document_paths_cover_both_extensions() {
+        use crate::commands::is_openable_document_path;
+        for good in [
+            r"C:\docs\file.pdf",
+            r"C:\docs\file.PDF",
+            r"C:\docs\file.pdfx",
+            r"C:\docs\file.PdfX",
+            "relative/report.pdf",
+            "portfolio.pdfx",
+        ] {
+            assert!(is_openable_document_path(good), "{good}");
+        }
+        for bad in [
+            "--merge",
+            "-minimized",
+            r"C:\docs\file.txt",
+            r"C:\docs\file.pdf.exe",
+            r"C:\docs\pdf",
+            r"C:\docs\.pdf",
+            "/.pdfx",
+            "",
+        ] {
+            assert!(!is_openable_document_path(bad), "{bad}");
+        }
+    }
+
+    /// Both argv doors — first launch and the second-instance forward — filter
+    /// with the shared predicate, so `.pdfx` reaches the app from a shell
+    /// association or Open With exactly as `.pdf` does.
+    #[test]
+    fn both_argv_doors_accept_pdfx() {
+        let argv = [
+            "spectrapdf.exe".to_string(),
+            "--merge".to_string(),
+            r"C:\docs\a.pdf".to_string(),
+            r"C:\docs\b.PDFX".to_string(),
+            r"C:\docs\notes.txt".to_string(),
+        ];
+        let files: Vec<&str> = argv
+            .iter()
+            .skip(1)
+            .filter(|a| crate::commands::is_openable_document_path(a))
+            .map(|a| a.as_str())
+            .collect();
+        assert_eq!(files, vec![r"C:\docs\a.pdf", r"C:\docs\b.PDFX"]);
+        assert!(argv.iter().any(|a| a == "--merge"));
     }
 }

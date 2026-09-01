@@ -23,6 +23,7 @@ import type {
 import { JS_TRIGGERS, fieldNameSet, isDeclarative, scriptInventory } from '../lib/field-js-policy';
 import type { JsTrigger } from '../lib/field-js-policy';
 import { clearScriptReports, publishScriptReports } from '../lib/field-js-reports';
+import { pruneScriptValues, resultIsCurrent, staleScriptPaths } from '../lib/field-script-values';
 import type { EngineCall } from '../lib/engine-call';
 import type { FormField, FormFieldValue } from '../lib/forms';
 import type { FileFormInfo } from './useWorkspaceForms';
@@ -110,6 +111,16 @@ export function useFieldScripts(
   const correctRef = useRef(onCorrectValue);
   correctRef.current = onCorrectValue;
 
+  /** Drop every derived value and display string recorded for `paths`. A
+   * script-calculated Total and a Format action's display string are answers
+   * from ONE read of ONE document; when that read is gone they describe a
+   * document nobody is looking at, and drawing them over the next one shows a
+   * number this file never computed. */
+  const forget = useCallback((keep: ReadonlySet<string>, drop: ReadonlySet<string>): void => {
+    setValues((prev) => pruneScriptValues(prev, keep, drop));
+    setFormatted((prev) => pruneScriptValues(prev, keep, drop));
+  }, []);
+
   // A session belongs to ONE read of ONE document: the seed carries the
   // document's fields and its /CO, so a re-read (new bytes, a commit, a
   // rename) invalidates every value the old sandbox holds. Rebuilding is
@@ -127,14 +138,23 @@ export function useFieldScripts(
       return;
     }
     let alive = true;
-    for (const [path, entry] of [...sessions.current]) {
-      const info = workspaceForms.get(path);
-      if (!info || info.fields !== entry.fields) {
-        entry.session.dispose();
-        sessions.current.delete(path);
-        clearScriptReports(path);
-      }
+    // A path whose field identity changed, or that is no longer a form this
+    // workspace holds, loses its sandbox AND everything that sandbox derived.
+    const stale = staleScriptPaths(
+      new Map([...sessions.current].map(([path, entry]) => [path, entry.fields])),
+      new Map([...workspaceForms].map(([path, info]) => [path, info.fields])),
+    );
+    for (const path of stale) {
+      const entry = sessions.current.get(path);
+      if (!entry) continue;
+      entry.session.dispose();
+      sessions.current.delete(path);
+      clearScriptReports(path);
     }
+    // Values can outlive their session: a file closed between renders leaves no
+    // session to walk, so the purge keeps only paths the CURRENT form set
+    // holds rather than trusting what happened to be in the session map.
+    forget(new Set(workspaceForms.keys()), stale);
     void (async () => {
       for (const [path, info] of workspaceForms) {
         if (sessions.current.has(path)) continue;
@@ -189,7 +209,7 @@ export function useFieldScripts(
     return () => {
       alive = false;
     };
-  }, [workspaceForms, enabled, call, makeWorker, timeoutMs]);
+  }, [workspaceForms, enabled, call, makeWorker, timeoutMs, forget]);
 
   // Unmount: the worker outlives React otherwise.
   useEffect(() => {
@@ -215,6 +235,12 @@ export function useFieldScripts(
       if (!entry) return Promise.resolve(undefined);
       let accepted: FormFieldValue | undefined;
       return dispatch(entry.session).then((result) => {
+        // The session that answered must still BE this path's session. A
+        // dispatch outlives a reread, and a late answer from a disposed
+        // sandbox repopulating `values` puts the previous document's computed
+        // numbers back over the new one — the purge above would be undone by
+        // the very result it was purging.
+        if (!resultIsCurrent(sessions.current, path, entry)) return undefined;
         publishScriptReports(path, result.reports);
         for (const text of result.alerts) alertRef.current?.(text);
         if (gestured !== undefined) {

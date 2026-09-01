@@ -558,3 +558,80 @@ class TestSignedDocuments:
         assert TEMPLATE not in appended
         assert CONNECTION_SET not in appended
         assert b"Hopper" in appended
+
+
+# The field name addresses a data GROUP: it holds element children rather
+# than a value, so no value can be written there and none can be created
+# beside it.
+GROUP_AT_THE_LEAF_DATASETS = (
+    b'<xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"'
+    b"><xfa:data"
+    b"><topmostSubform><name1><sub>Ada</sub></name1></topmostSubform>"
+    b"</xfa:data></xfa:datasets>"
+)
+
+
+def _without_datasets(path):
+    """The same hybrid form with its datasets packet removed from `/XFA`."""
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        entry = pdf.Root.AcroForm.XFA
+        kept = []
+        skip = False
+        for i in range(0, len(entry), 2):
+            if str(entry[i]) == "datasets":
+                skip = True
+                continue
+            kept += [entry[i], entry[i + 1]]
+        assert skip
+        pdf.Root.AcroForm["/XFA"] = pikepdf.Array(kept)
+        pdf.save(path)
+    return path
+
+
+class TestFillIsAtomic:
+    """ISO 32000-2 Annex K requires the XFA values and the corresponding /V
+    entries to be consistent. A fill that cannot write both writes NEITHER:
+    the alternative is a file on disk holding two different answers for one
+    field, under a result that reported success."""
+
+    def test_an_absent_datasets_packet_refuses_and_writes_nothing(self, tmp_path):
+        src = _without_datasets(_hybrid(tmp_path / "a.pdf"))
+        out = str(tmp_path / "out.pdf")
+        with pytest.raises(ValueError, match="no datasets packet"):
+            fill_form_fields(
+                src, out, {"topmostSubform[0].Page1[0].name2[0]": "Hopper"}
+            )
+        assert not os.path.exists(out)
+
+    def test_an_unreadable_datasets_packet_refuses_and_writes_nothing(self, tmp_path):
+        src = _hybrid(tmp_path / "u.pdf", datasets=b"<xfa:data><a></xfa:data>")
+        out = str(tmp_path / "out.pdf")
+        with pytest.raises(ValueError, match="cannot be read"):
+            fill_form_fields(
+                src, out, {"topmostSubform[0].Page1[0].name2[0]": "Hopper"}
+            )
+        assert not os.path.exists(out)
+
+    def test_an_unbound_field_refuses_by_name_and_writes_nothing(self, tmp_path):
+        """The field's data node is a group holding elements, so the value
+        has nowhere to go and /V would be the only place it landed."""
+        src = _hybrid(tmp_path / "b.pdf", datasets=GROUP_AT_THE_LEAF_DATASETS)
+        out = str(tmp_path / "out.pdf")
+        with pytest.raises(ValueError, match="name1"):
+            fill_form_fields(
+                src, out, {"topmostSubform[0].Page1[0].name1[0]": "Hopper"}
+            )
+        assert not os.path.exists(out)
+
+    def test_a_consistent_fill_writes_both_v_and_the_datasets_leaf(self, tmp_path):
+        src = _hybrid(tmp_path / "c.pdf")
+        out = str(tmp_path / "out.pdf")
+        result = fill_form_fields(
+            src, out, {"topmostSubform[0].Page1[0].name2[0]": "Hopper"}
+        )
+        assert result["xfa_datasets_updated"] == 1
+        with pikepdf.open(out) as pdf:
+            assert str(pdf.Root.AcroForm.Fields[1].get("/V")) == "Hopper"
+        assert DatasetsPacket(_datasets_bytes(out)).get(
+            "topmostSubform[0].Page1[0].name2[0]"
+        ) == "Hopper"
