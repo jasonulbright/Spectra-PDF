@@ -25,6 +25,7 @@ from pikepdf import Dictionary, Name
 
 from . import budget, icc_profiles, standards_report
 from .acroform import reattach_forms_file
+from .pdf_save import refuse_encrypted_source
 from .trapping import DEFAULT_TRAPPED, TRAPPED_VALUES
 from .validate import validate_pdf
 from .widget_faces import (IDENTITY, box_of, compose, face_box,
@@ -632,6 +633,7 @@ def convert_cmyk(
     gs_path: str = "",
     font_dir: str = "",
     icc_dir: str = "",
+    drop_encryption: bool = False,
 ) -> dict:
     """Convert a PDF's colour to DeviceCMYK using Ghostscript's ICC engine.
 
@@ -650,8 +652,16 @@ def convert_cmyk(
             font's encoding. Without it such a field keeps the appearance the
             producer synthesizes; every other field is unaffected.
         icc_dir: The bundled colour-profile directory.
+        drop_encryption: The user was told the conversion cannot keep the
+            document's protection and chose to proceed. The output is
+            unprotected and says so as `encryption_removed`.
     """
     info = validate_pdf(file)
+    # The conversion runs in a renderer subprocess that reads the document and
+    # writes a new one, so the source's encryption cannot ride through.
+    encryption_removed = refuse_encrypted_source(
+        file, drop_encryption=drop_encryption
+    )
     intent = _RENDER_INTENTS.get(str(render_intent).strip().lower())
     if intent is None:
         raise ValueError(
@@ -737,6 +747,7 @@ def convert_cmyk(
         "dest_profile": profile.description,
         "original_size": input_path.stat().st_size,
         "output_size": output_path.stat().st_size,
+        "encryption_removed": encryption_removed,
         **_colour_report(source_inks, output_path, rasterized,
                          result.stdout, result.stderr),
     }
@@ -831,6 +842,7 @@ def convert_pdfx(
     gs_path: str = "",
     trapped: str = DEFAULT_TRAPPED,
     icc_dir: str = "",
+    drop_encryption: bool = False,
 ) -> dict:
     """Produce a PDF/X print master with a real output intent (tail).
 
@@ -849,6 +861,12 @@ def convert_pdfx(
     named. Nothing here invents a registry name for a profile that carries
     none.
 
+    ``drop_encryption`` is the consent hatch: the conversion runs in a renderer
+    subprocess that reads the document and writes a new one, so the source's
+    protection cannot ride through. An encrypted source is refused unless the
+    user was told that and chose to proceed, and the output then says so as
+    ``encryption_removed``.
+
     Deliberate non-carrier: like PDF/A, the output does NOT get the original's
     interactive form fields transplanted back — a PDF/X master is a print
     exchange file, and conformance limits interactive content (the same
@@ -864,6 +882,9 @@ def convert_pdfx(
     reaching conformance cost (see engine/standards_report.py).
     """
     validate_pdf(file)
+    encryption_removed = refuse_encrypted_source(
+        file, drop_encryption=drop_encryption
+    )
     version = int(version)
     if version not in _PDFX_VERSIONS:
         raise ValueError("version must be 1 (X-1a), 3 (X-3), or 4 (X-4).")
@@ -995,6 +1016,7 @@ def convert_pdfx(
         "embedded_profile": True,
         "dest_profile": profile.description,
         "output_condition_identifier": identifier,
+        "encryption_removed": encryption_removed,
         "original_size": input_path.stat().st_size,
         "output_size": output_path.stat().st_size,
         **report,

@@ -16,6 +16,7 @@ import { tChrome, tChromeCount } from '../i18n';
 import type { PanelKey } from '../i18n-panels';
 import { suffixedOutputName } from '../lib/output-names';
 import type { StandardsReport } from '../lib/standards-report';
+import { CONSENT_DECLINED, useEncryptionConsent } from '../hooks/useEncryptionConsent';
 
 // ICC-managed CMYK conversion for prepress (Ghostscript). Like
 // grayscale/pdfa it writes a new file (the "Optimize" tool group's pattern);
@@ -76,6 +77,7 @@ export function PrepressPanel(): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const gs = useGsCapability();
   const icc = useIccAssent();
+  const { runWithConsent, consentDialog } = useEncryptionConsent();
   const [report, setReport] = useState<StandardsReport | null>(null);
   const [renderIntent, setRenderIntent] = useState('relative');
   const [profile, setProfile] = useState<ProfileChoice>({ kind: 'default' });
@@ -135,18 +137,26 @@ export function PrepressPanel(): React.ReactElement {
     // A report left on screen would describe a file this action did not write.
     setReport(null);
     try {
-      const r = await call('convert_cmyk', {
+      const gs_path = await requireGsPath();
+      const font_dir = await app.getEditFontPath();
+      const icc_dir = await app.getIccPath();
+      // The conversion cannot carry a protected document's encryption; the
+      // engine refuses, and the consent dialog is what re-runs it.
+      const r = await runWithConsent((drop_encryption) => call('convert_cmyk', {
         file: activeFile.workingPath,
         output,
         render_intent: renderIntent,
         dest_profile: profileParam(profile),
-        gs_path: await requireGsPath(),
-        font_dir: await app.getEditFontPath(),
-        icc_dir: await app.getIccPath(),
-      });
+        gs_path,
+        font_dir,
+        icc_dir,
+        drop_encryption,
+      }));
+      if (r === CONSENT_DECLINED) { setStatus(''); return; }
       const orig = (r.original_size / 1024).toFixed(0);
       const out = (r.output_size / 1024).toFixed(0);
-      setStatus(tChrome('panel.prepress.cmykDone', { from: orig, to: out }));
+      const line = tChrome('panel.prepress.cmykDone', { from: orig, to: out });
+      setStatus(r.encryption_removed ? tChrome('panel.common.resultUnprotected', { result: line }) : line);
       // A colour conversion can destroy a printing plate while every mark
       // stays on the page, so its own report is drawn beside the result.
       setReport(r);
@@ -155,7 +165,7 @@ export function PrepressPanel(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [activeFile, call, saveFile, renderIntent, profile]);
+  }, [activeFile, call, saveFile, renderIntent, profile, runWithConsent]);
 
   const handlePdfx = useCallback(async () => {
     if (!activeFile) return;
@@ -165,7 +175,11 @@ export function PrepressPanel(): React.ReactElement {
     setStatus(tChrome('panel.prepress.creatingPdfx'));
     setReport(null);
     try {
-      const r = await call('convert_pdfx', {
+      const gs_path = await requireGsPath();
+      const icc_dir = await app.getIccPath();
+      // As with the CMYK conversion: the rewrite cannot keep the source's
+      // protection, so the refusal is answered by consent rather than shown.
+      const r = await runWithConsent((drop_encryption) => call('convert_pdfx', {
         file: activeFile.workingPath,
         output,
         version: pdfxVersion,
@@ -174,24 +188,25 @@ export function PrepressPanel(): React.ReactElement {
         // sending a placeholder would declare a condition the press does not.
         condition,
         identifier,
-        gs_path: await requireGsPath(),
-        icc_dir: await app.getIccPath(),
+        gs_path,
+        icc_dir,
+        drop_encryption,
+      }));
+      if (r === CONSENT_DECLINED) { setStatus(''); return; }
+      const line = tChrome('panel.prepress.pdfxDone', {
+        version: r.pdfx_version,
+        suffix: r.embedded_profile
+          ? tChrome('panel.prepress.pdfxEmbedded')
+          : tChrome('panel.prepress.pdfxNames', { identifier }),
       });
-      setStatus(
-        tChrome('panel.prepress.pdfxDone', {
-          version: r.pdfx_version,
-          suffix: r.embedded_profile
-            ? tChrome('panel.prepress.pdfxEmbedded')
-            : tChrome('panel.prepress.pdfxNames', { identifier }),
-        }),
-      );
+      setStatus(r.encryption_removed ? tChrome('panel.common.resultUnprotected', { result: line }) : line);
       setReport(r);
     } catch (e: unknown) {
       setStatus(tChrome('panel.common.error', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
     }
-  }, [activeFile, call, saveFile, pdfxVersion, profile, condition, identifier]);
+  }, [activeFile, call, saveFile, pdfxVersion, profile, condition, identifier, runWithConsent]);
 
   if (!activeFile)
     return <NoFileOpen onOpen={openNewFiles} message={tChrome('panel.prepress.open')} />;
@@ -324,6 +339,7 @@ export function PrepressPanel(): React.ReactElement {
       </div>
       <StatusBar message={status} busy={busy} />
       <StandardsAlterations report={report} />
+      {consentDialog}
     </div>
   );
 }

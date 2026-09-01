@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getDocumentProxy } from '../lib/pdfDocCache';
 import {
+  pruneProxyEntries,
+  visibleProxies,
+  withProxyEntry,
+  type ProxyEntries,
+} from '../lib/pdf-proxy-entries';
+import {
   EMPTY_RENDER_HEALTH,
   markRenderFailed,
   markRenderSucceeded,
@@ -16,9 +22,11 @@ export interface PdfProxyState {
   readonly health: RenderHealth;
 }
 
-// Resolved pdf.js proxies for the canvas, keyed by files-map key. Pages render
-// placeholders until their file's proxy lands; when a buffer changes the map
-// entry is swapped once the new proxy resolves.
+// Resolved pdf.js proxies for the canvas, keyed by files-map key and pinned to
+// the buffer each was loaded from. Pages render placeholders until their file's
+// proxy lands; a path whose buffer changed exposes nothing until the NEW bytes
+// load, so a failed reload cannot leave the previous document on the canvas
+// while the panels and saves address the new one.
 export function usePdfProxies(files: Map<string, OpenFile>): Map<string, PDFDocumentProxy> {
   return usePdfProxyState(files).proxies;
 }
@@ -27,7 +35,7 @@ export function usePdfProxies(files: Map<string, OpenFile>): Map<string, PDFDocu
 // here is the ONLY honest signal that a document the engine opened will never
 // draw — there is no timer heuristic behind it and no second attempt implied.
 export function usePdfProxyState(files: Map<string, OpenFile>): PdfProxyState {
-  const [proxies, setProxies] = useState<Map<string, PDFDocumentProxy>>(() => new Map());
+  const [entries, setEntries] = useState<ProxyEntries>(() => new Map());
   const [health, setHealth] = useState<RenderHealth>(EMPTY_RENDER_HEALTH);
 
   useEffect(() => {
@@ -37,26 +45,16 @@ export function usePdfProxyState(files: Map<string, OpenFile>): PdfProxyState {
 
   useEffect(() => {
     let cancelled = false;
-    setProxies((prev) => {
-      let changed = false;
-      const next = new Map(prev);
-      for (const key of next.keys()) {
-        if (!files.has(key)) {
-          next.delete(key);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
+    // The stale entry goes the moment the buffer changes — not when the new
+    // load answers, which for a rejection is never.
+    setEntries((prev) => pruneProxyEntries(prev, files));
     for (const [path, f] of files) {
       const buffer = f.buffer;
       if (!buffer) continue;
       getDocumentProxy(path, buffer)
         .then((proxy) => {
           if (cancelled) return;
-          setProxies((prev) =>
-            prev.get(path) === proxy ? prev : new Map(prev).set(path, proxy),
-          );
+          setEntries((prev) => withProxyEntry(prev, path, buffer, proxy, files));
           setHealth((prev) => markRenderSucceeded(prev, path));
         })
         .catch(() => {
@@ -71,5 +69,6 @@ export function usePdfProxyState(files: Map<string, OpenFile>): PdfProxyState {
     };
   }, [files]);
 
+  const proxies = useMemo(() => visibleProxies(entries, files), [entries, files]);
   return useMemo(() => ({ proxies, health }), [proxies, health]);
 }

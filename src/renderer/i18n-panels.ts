@@ -664,6 +664,14 @@ export const PANEL_STRINGS = {
   'panel.forms.filledFlattened': 'Form filled and flattened (fields locked)',
   'panel.forms.filled_one': 'Filled {{count}} field',
   'panel.forms.filled_other': 'Filled {{count}} fields',
+  // The fill's own report, read rather than assumed. It refuses atomically, so
+  // a report that does not account for every named field — or that this build
+  // cannot read — is not a success, and saying so is the only way the user
+  // learns the document and the panel disagree.
+  'panel.forms.fillIncomplete':
+    'This fill named {{named}} fields but the document reported {{written}} written. Re-read the form before trusting the values it shows.',
+  'panel.forms.fillUnverified':
+    'This fill produced no report this app can read, so what landed in the document cannot be confirmed. Re-read the form before trusting the values it shows.',
   'panel.forms.errorReading': 'Error reading fields: {{message}}',
   'panel.forms.required': 'required',
   'panel.forms.readOnly': 'read-only',

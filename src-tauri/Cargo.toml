@@ -25,6 +25,17 @@ tauri-build = { version = "2", features = [] }
 # upstream README is explicit -- "Never include it in production builds."
 webdriver = ["tauri-plugin-webdriver"]
 
+# The end-to-end network carve-out: lets `SPECTRA_NET_ALLOW_PRIVATE` /
+# `SPECTRAPDF_E2E` allow a loopback destination so the e2e network spec can
+# talk to its own 127.0.0.1 server.
+#
+# A FEATURE, not an environment check compiled into every binary: without it
+# `net::env_allows_private` is a `false` constant, so a release artifact
+# contains no code path that reads either variable and cannot be talked out of
+# the private-address policy. The e2e harness builds with it (see
+# e2e-tests/wdio.conf.ts and the CI e2e job); nothing else does.
+e2e-net-private = []
+
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-webdriver = { version = "0.2", optional = true }
@@ -79,6 +90,10 @@ clap = { version = "4", features = ["derive"] }
 # charset guessing are not wanted here, and taking the crate's defaults would
 # pull dependencies the rest of the graph does not already resolve.
 reqwest = { version = "0.13", default-features = false, features = ["default-tls"] }
+# RFC 3986 reference resolution and userinfo detection for the outbound client.
+# Already in the graph under reqwest; named directly because net.rs resolves a
+# `Location` with `Url::join` rather than by hand.
+url = "2"
 
 [dev-dependencies]
 # `#[tokio::test]` for the network client's tests, which drive an in-process

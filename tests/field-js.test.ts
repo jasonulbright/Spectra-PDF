@@ -575,3 +575,52 @@ describe('script report store', () => {
     expect(scriptReportsFor('a.pdf')).toEqual([]);
   });
 });
+
+// ── teardown settles what it handed out ────────────────────────────────────
+//
+// `dispose` used to CLEAR the pending map and drop the readiness promise. Both
+// leave a caller waiting forever: `useFieldScripts` disposes a session on every
+// reread, and its commit path awaits the in-flight keystroke before it runs.
+
+describe('session teardown', () => {
+  it('settles a dispatch that was still waiting for the interpreter when disposed', async () => {
+    const fake = fakeWorker(() => [{ kind: 'value', id: 'a', value: '1' }], 'defer');
+    const session = createFieldScriptSession({
+      seed: SEED,
+      wasmUrl: 'about:blank',
+      makeWorker: () => fake.worker,
+    });
+    const pending = session.commit('a', 'x');
+    session.dispose();
+    const result = await Promise.race([
+      pending,
+      new Promise((_r, reject) => setTimeout(() => reject(new Error('never settled')), 200)),
+    ]);
+    // Nothing ran, so nothing is attributed to a script: no values, no reports.
+    expect(result).toMatchObject({ timedOut: false });
+    expect((result as { values: Map<string, unknown> }).values.size).toBe(0);
+    expect((result as { reports: unknown[] }).reports).toEqual([]);
+  });
+
+  it('settles a dispatch the worker had already accepted when disposed', async () => {
+    const fake = fakeWorker(() => 'hang');
+    const session = createFieldScriptSession({
+      seed: SEED,
+      wasmUrl: 'about:blank',
+      makeWorker: () => fake.worker,
+    });
+    const pending = session.commit('a', 'x');
+    // Let the readiness verdict and the post land before tearing down.
+    await Promise.resolve();
+    await Promise.resolve();
+    session.dispose();
+    const result = await Promise.race([
+      pending,
+      new Promise((_r, reject) => setTimeout(() => reject(new Error('never settled')), 200)),
+    ]);
+    // A cancellation is NOT a timeout: nothing hung, so no script is named.
+    expect(result).toMatchObject({ timedOut: false });
+    expect((result as { reports: unknown[] }).reports).toEqual([]);
+    expect(fake.terminated()).toBe(1);
+  });
+});

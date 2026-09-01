@@ -109,6 +109,7 @@ import { initialViewPlan, parseInitialView, planIsInert } from './lib/initial-vi
 import { readFormFields } from './lib/forms';
 import type { FormFieldValue } from './lib/forms';
 import { fillClosure, formCalculation, resolveFillTargets } from './lib/form-overlay';
+import { classifyFillResult } from './lib/fill-result';
 import { addFormFields } from './lib/form-authoring';
 import type { NewFieldSpec } from './lib/form-authoring';
 import { choiceAppearanceFields, verticalFontCalls } from './lib/form-writing';
@@ -1866,12 +1867,20 @@ function AppContent(): React.ReactElement {
       // `resolveFillTargets`' fingerprint/rename-family machinery is unchanged.
       // The snapshot already flushed pending edits, and `call` is commit-gated
       // for `fill_form_fields`, so the engine reads the committed bytes.
-      await call('fill_form_fields', {
+      const fillReport = await call('fill_form_fields', {
         file: f.workingPath,
         output: f.workingPath,
         edits: resolved,
         font_dir: await app.getEditFontPath(),
       });
+      // The fill's own report, read rather than discarded. The engine refuses
+      // an inconsistent fill atomically, so what is left to check is that the
+      // success path accounts for every field this call named — the on-canvas
+      // fill has no other evidence, and a silent shortfall is announced as a
+      // completed fill.
+      const outcome = classifyFillResult(fillReport, Object.keys(resolved).length);
+      // The reload runs on both paths: the document changed on disk, and the
+      // refreshed bytes are what the refusal tells the caller to trust.
       const result = await reloadFile(path);
       if (!result) throw new Error(tChrome('refusal.file.noLongerOpen'));
       dispatch({
@@ -1881,6 +1890,16 @@ function AppContent(): React.ReactElement {
         buffer: result.buffer,
         snapshotPath,
       });
+      if (outcome.kind === 'refused') {
+        throw new Error(
+          outcome.refusal.kind === 'incomplete'
+            ? tChrome('panel.forms.fillIncomplete', {
+                named: outcome.refusal.requested,
+                written: outcome.refusal.filled,
+              })
+            : tChrome('panel.forms.fillUnverified'),
+        );
+      }
     },
     [state.files, reloadFile, dispatch, call, confirmEditOfSignedDoc],
   );

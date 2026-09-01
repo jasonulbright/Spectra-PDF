@@ -25,6 +25,32 @@ pub(crate) fn canonical_path(p: &str) -> String {
         .unwrap_or_else(|_| p.to_string())
 }
 
+/// The document extensions this app opens, lowercase, without the dot.
+///
+/// One list, so the native dialog filter and the two argv paths (shell
+/// association, Open With, second-instance forwarding) cannot disagree about
+/// what the product opens.
+pub(crate) const OPENABLE_DOCUMENT_EXTENSIONS: [&str; 2] = ["pdf", "pdfx"];
+
+/// Whether an argv token names a document this app opens.
+///
+/// Case-insensitive on the extension, and a bare `.pdf` with no stem is not a
+/// document. Option-looking tokens are excluded here rather than at each call
+/// site so a single predicate answers "is this argument a file to open".
+pub(crate) fn is_openable_document_path(arg: &str) -> bool {
+    if arg.starts_with('-') {
+        return false;
+    }
+    let Some((stem, extension)) = arg.rsplit_once('.') else {
+        return false;
+    };
+    if stem.is_empty() || stem.ends_with(['/', '\\', ':']) {
+        return false;
+    }
+    let extension = extension.to_ascii_lowercase();
+    OPENABLE_DOCUMENT_EXTENSIONS.contains(&extension.as_str())
+}
+
 /// Renderer-callable form, for paths that arrive THROUGH the webview (file
 /// drops) rather than from a Rust producer.
 #[tauri::command]

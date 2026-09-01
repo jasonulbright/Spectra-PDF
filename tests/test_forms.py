@@ -687,12 +687,13 @@ class TestFlatten:
 
 
 class TestXfa:
-    def test_xfa_survives_a_fill_and_the_absent_packet_is_reported(self, tmp_dir):
-        """Superseded behaviour: the fill USED to delete /XFA (pdf-lib
-        parity). ISO 32000-2 Annex K asks a writer to keep the XFA resource
-        consistent with /V instead, so the packets now survive — and an /XFA
-        entry carrying no datasets packet is reported rather than dropped.
-        Full coverage of the static-XFA path is `tests/test_xfa.py`."""
+    def test_a_fill_refuses_an_xfa_form_with_no_datasets_packet(self, tmp_dir):
+        """Superseded twice. The fill USED to delete /XFA (pdf-lib parity),
+        then kept it and reported the missing packet as a result key. ISO
+        32000-2 Annex K requires the XFA values and /V to be consistent, and a
+        form with no datasets packet cannot be filled consistently — so the
+        fill refuses and writes nothing. Full coverage of the static-XFA path
+        is `tests/test_xfa.py`."""
         src = os.path.join(tmp_dir, "xfa.pdf")
         with pikepdf.open(PDFLIB_FORM) as pdf:
             pdf.Root["/AcroForm"]["/XFA"] = pikepdf.Array([])
@@ -701,11 +702,9 @@ class TestXfa:
         assert read["has_xfa"] is True
         assert read["xfa"] == "static"
         out = os.path.join(tmp_dir, "out.pdf")
-        r = fill_form_fields(src, out, {"applicant.name": "x"})
-        assert r["xfa_stripped"] is False
-        assert r["xfa_datasets_absent"] is True
-        with pikepdf.open(out) as pdf:
-            assert "/XFA" in pdf.Root["/AcroForm"]
+        with pytest.raises(ValueError, match="no datasets packet"):
+            fill_form_fields(src, out, {"applicant.name": "x"})
+        assert not os.path.exists(out)
 
 
 class TestReviewFindings2l:

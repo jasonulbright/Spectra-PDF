@@ -147,21 +147,64 @@ def _xfa_text_for(field: "_Field", ftype: str, value, current: str | None):
     return str(value)
 
 
+def _datasets_already_says(packet, name: str, text) -> bool:
+    """Whether the packet already holds `text` for `name`.
+
+    A write that reports no change is either the value already being there —
+    consistent, and nothing to do — or a node that could not take it. Only the
+    second is an inconsistency, so the two are told apart by reading the
+    packet back rather than by why the write declined. An absent node reads as
+    the empty value: a field the form never stored and a fill that stores
+    nothing agree.
+    """
+    if isinstance(text, list):
+        return (packet.get_list(name) or []) == text
+    current = packet.get(name)
+    if current is None:
+        return packet.resolve(name) is None and not text
+    return current == text
+
+
 def _write_xfa_datasets(pdf: pikepdf.Pdf, edits: list) -> dict:
     """Write each filled value into the XFA datasets packet (Annex K).
 
-    Returns the report keys the fill result carries. The stream is replaced
-    only when its bytes actually changed, so a fill that lands the value the
-    packet already held cannot perturb it.
+    ATOMIC by contract: either every edit reaches a datasets node, or this
+    raises and the caller writes no output at all. ISO 32000-2 Annex K
+    requires the XFA values and the corresponding `/V` entries to be
+    consistent, so a document holding one value in its field object and
+    another (or none) in its XML data is a document with two answers for one
+    field. That is a refusal, not a line in a report — a caller that saw the
+    file appear has no reason to read a key saying part of the fill did not
+    land, and the fields the reader shows are then not the fields the fill
+    reported.
+
+    Returns the report keys the fill result carries on the ONE outcome that
+    is not a refusal: every named field written. The structured shape is
+    unchanged for the surfaces that consume it. The stream is replaced only
+    when its bytes actually changed, so a fill that lands the value the packet
+    already held cannot perturb it.
+
+    Raises:
+        ValueError: the packet is absent, unreadable by this build, or has no
+            node for a field and none could be created.
     """
     kind = xfa.classify(pdf)
     if kind == xfa.NONE:
         return {}
     stream, packet = _open_datasets(pdf)
     if stream is None:
-        return {"xfa": kind, "xfa_datasets_absent": True}
+        raise ValueError(
+            "This form carries XML form data (XFA) with no datasets packet to "
+            "write into, so filling it would store each value in the PDF field "
+            "alone and leave the form's own data saying something else. No file "
+            "was written."
+        )
     if packet is None:
-        return {"xfa": kind, "xfa_datasets_unreadable": True}
+        raise ValueError(
+            "This form's XML data (XFA) datasets packet cannot be read by this "
+            "build, so a fill cannot keep it consistent with the PDF fields. No "
+            "file was written."
+        )
     written = 0
     unbound: list[str] = []
     for field, ftype, value in edits:
@@ -170,16 +213,21 @@ def _write_xfa_datasets(pdf: pikepdf.Pdf, edits: list) -> dict:
             continue
         if packet.set(field.name, text, create=True):
             written += 1
-        elif packet.resolve(field.name) is None:
+        elif not _datasets_already_says(packet, field.name, text):
             unbound.append(field.name)
+    if unbound:
+        # Raised before the stream is replaced and before anything is saved,
+        # so the packet's part-applied in-memory state is discarded with the
+        # document.
+        names = ", ".join(unbound)
+        raise ValueError(
+            f"These fields have no node in this form's XML data (XFA) and none "
+            f"could be created, so filling them would publish one value in the "
+            f"PDF field and another in the form: {names}. No file was written."
+        )
     if packet.changed():
         stream.write(packet.bytes())
-    report = {"xfa": kind, "xfa_datasets_updated": written}
-    if unbound:
-        # Named, never silent: these fields' values live in /V alone because
-        # the packet has no node for them and none could be attached.
-        report["xfa_datasets_unbound"] = unbound
-    return report
+    return {"xfa": kind, "xfa_datasets_updated": written}
 
 
 class _Field:
