@@ -5,7 +5,7 @@
 *Released 2026-08-31*
 
 ### Fixes
-- **File-association launch** — double-clicking a PDF (or Open with) with the app not running opened nothing: the command-line parser rejected the file path Windows passes and exited before the window appeared; the launcher now accepts a file path and opens the document. Headless subcommands, `--help`, `--version` and exit codes unchanged
+- Various bug fixes.
 
 ## 1.1.19
 
