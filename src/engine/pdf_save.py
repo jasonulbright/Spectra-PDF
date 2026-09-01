@@ -173,6 +173,24 @@ def _standard_encrypt_dict(pdf):
         return None
 
 
+def _effective_encrypt_metadata(enc, revision: int) -> bool:
+    """Whether `enc` encrypts the document's metadata, as a decided boolean.
+
+    R2/R3 have no metadata-encryption switch, so metadata is never encrypted
+    there. From R4 the switch is optional and its absence means True.
+
+    Both the re-encryption and the compatibility profile read the policy from
+    here: a source whose metadata is exposed and one whose metadata is
+    encrypted must not compare equal, or a merge adopts whichever came first.
+    """
+    if revision < 4:
+        return False
+    value = enc.get("/EncryptMetadata")
+    if value is None:
+        return True
+    return bool(value)
+
+
 def _encryption_reproducibility(pdf):
     """`(certificate, owner_gated)` for `pdf`, or None when it is unencrypted.
 
@@ -247,33 +265,34 @@ def source_encryption(pdf):
         print_lowres=bool(pdf.allow.print_lowres),
         print_highres=bool(pdf.allow.print_highres),
     )
-    kwargs = dict(
+    return pikepdf.Encryption(
         owner="",
         user="",
         R=revision,
         aes=revision >= 5 or str(info.stream_method).endswith("aes"),
         allow=allow,
+        metadata=_effective_encrypt_metadata(enc, revision),
     )
-    # R2/R3 have no metadata-encryption switch at all, and pikepdf refuses the
-    # default rather than ignoring it.
-    if revision < 4:
-        kwargs["metadata"] = False
-    else:
-        encrypt_metadata = enc.get("/EncryptMetadata")
-        if encrypt_metadata is not None:
-            kwargs["metadata"] = bool(encrypt_metadata)
-    return pikepdf.Encryption(**kwargs)
 
 
 def encryption_profile(pdf):
-    """A hashable summary of `pdf`'s protection, for comparing two sources."""
+    """A hashable summary of `pdf`'s protection, for comparing two sources.
+
+    Every characteristic `source_encryption` recreates appears here. Two
+    sources that compare equal are ones whose protection the same
+    `pikepdf.Encryption` reproduces, so an operation that can carry only one
+    protection may adopt either; a characteristic recreated but not compared
+    would be silently taken from whichever source is reached first.
+    """
     enc = _standard_encrypt_dict(pdf)
     if enc is None:
         return None
     info = pdf.encryption
+    revision = int(info.R)
     return (
-        int(info.R),
+        revision,
         str(info.stream_method),
+        _effective_encrypt_metadata(enc, revision),
         bool(pdf.allow.accessibility),
         bool(pdf.allow.extract),
         bool(pdf.allow.modify_annotation),

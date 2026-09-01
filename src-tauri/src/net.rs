@@ -398,6 +398,17 @@ fn env_allows_private() -> bool {
     false
 }
 
+/// Whether this binary compiled in the loopback carve-out above.
+///
+/// The end-to-end network spec binds `127.0.0.1`; without the feature every
+/// one of its requests is refused as a private destination, which reads as a
+/// product failure rather than as a build that omitted a flag. The harness
+/// probes this once per session and refuses to run on a `false`.
+#[tauri::command]
+pub async fn net_private_carveout_compiled() -> bool {
+    cfg!(feature = "e2e-net-private")
+}
+
 /// Append an already-encoded query string to a URL, before any fragment.
 fn append_query(url: &str, query: &str) -> String {
     if query.is_empty() {

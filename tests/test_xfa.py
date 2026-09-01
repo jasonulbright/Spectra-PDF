@@ -635,3 +635,97 @@ class TestFillIsAtomic:
         assert DatasetsPacket(_datasets_bytes(out)).get(
             "topmostSubform[0].Page1[0].name2[0]"
         ) == "Hopper"
+
+
+class TestFlattenDoesNotNeedTheDatasetsPacket:
+    """Flattening deletes /AcroForm, and /XFA with it, so the document that
+    gets written has no XML data left to disagree with its fields. The
+    consistency requirement binds nothing there: refusing a flatten because
+    the packet is absent, unreadable, or missing a node refuses to write a
+    file whose XFA the same call was about to remove."""
+
+    @staticmethod
+    def _assert_flattened(out, *, baked=False):
+        with pikepdf.open(out) as pdf:
+            assert "/AcroForm" not in pdf.Root
+            page = pdf.pages[0]
+            assert not any(
+                str(a.get("/Subtype")) == "/Widget" for a in page.obj.get("/Annots", [])
+            )
+            if baked:
+                # The field's appearance now draws from the page's own content.
+                names = list(page.obj.Resources.XObject.keys())
+                assert any(n.startswith("/FlatW") for n in names), names
+
+    def test_an_absent_datasets_packet_flattens(self, tmp_path):
+        src = _without_datasets(_hybrid(tmp_path / "a.pdf"))
+        out = str(tmp_path / "out.pdf")
+        result = fill_form_fields(src, out, {}, flatten=True)
+        assert os.path.exists(out)
+        assert result["flattened"] is True
+        assert result["xfa_stripped"] is True
+        assert result["xfa"] == "static"
+        assert result["xfa_datasets_updated"] == 0
+        self._assert_flattened(out)
+
+    def test_an_unreadable_datasets_packet_flattens(self, tmp_path):
+        src = _hybrid(tmp_path / "u.pdf", datasets=b"<xfa:data><a></xfa:data>")
+        out = str(tmp_path / "out.pdf")
+        result = fill_form_fields(src, out, {}, flatten=True)
+        assert result["xfa_stripped"] is True
+        assert "xfa_datasets_unreadable" not in result
+        self._assert_flattened(out)
+
+    def test_an_unbound_field_flattens_with_its_edit_baked_in(self, tmp_path):
+        """The value has nowhere to go in the XML data — and after the flatten
+        there is no XML data, only the appearance the value produced."""
+        src = _hybrid(tmp_path / "b.pdf", datasets=GROUP_AT_THE_LEAF_DATASETS)
+        out = str(tmp_path / "out.pdf")
+        result = fill_form_fields(
+            src, out, {"topmostSubform[0].Page1[0].name1[0]": "Hopper"}, flatten=True
+        )
+        assert result["filled"] == 1
+        assert result["xfa_stripped"] is True
+        self._assert_flattened(out, baked=True)
+
+    def test_an_absent_datasets_packet_flattens_with_an_edit(self, tmp_path):
+        src = _without_datasets(_hybrid(tmp_path / "e.pdf"))
+        out = str(tmp_path / "out.pdf")
+        result = fill_form_fields(
+            src, out, {"topmostSubform[0].Page1[0].name2[0]": "Hopper"}, flatten=True
+        )
+        assert result["filled"] == 1
+        assert result["xfa_stripped"] is True
+        self._assert_flattened(out, baked=True)
+
+    def test_a_readable_form_flattens_and_reports_the_strip(self, tmp_path):
+        src = _hybrid(tmp_path / "n.pdf")
+        out = str(tmp_path / "out.pdf")
+        result = fill_form_fields(
+            src, out, {"topmostSubform[0].Page1[0].name2[0]": "Hopper"}, flatten=True
+        )
+        assert result["xfa_stripped"] is True
+        self._assert_flattened(out, baked=True)
+
+    def test_a_form_without_xfa_reports_no_strip(self, tmp_path):
+        """`xfa_stripped` reports what the document actually lost, so a
+        flatten of a document that never carried XFA reports False."""
+        src = _hybrid(tmp_path / "p.pdf")
+        with pikepdf.open(src, allow_overwriting_input=True) as pdf:
+            del pdf.Root.AcroForm["/XFA"]
+            pdf.save(src)
+        out = str(tmp_path / "out.pdf")
+        result = fill_form_fields(src, out, {}, flatten=True)
+        assert result["flattened"] is True
+        assert result["xfa_stripped"] is False
+        assert "xfa" not in result
+
+    def test_a_fill_without_flatten_still_refuses(self, tmp_path):
+        """The atomic refusal is unchanged where nothing removes the XFA."""
+        src = _without_datasets(_hybrid(tmp_path / "r.pdf"))
+        out = str(tmp_path / "out.pdf")
+        with pytest.raises(ValueError, match="no datasets packet"):
+            fill_form_fields(
+                src, out, {"topmostSubform[0].Page1[0].name2[0]": "Hopper"}
+            )
+        assert not os.path.exists(out)

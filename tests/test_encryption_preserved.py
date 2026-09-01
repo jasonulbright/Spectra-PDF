@@ -17,6 +17,11 @@ from engine.encrypt import decrypt
 from engine.grayscale import grayscale
 from engine.inspect import unlock
 from engine.merge import merge
+from engine.pdf_save import (
+    _effective_encrypt_metadata,
+    encryption_profile,
+    source_encryption,
+)
 from engine.prepress import convert_cmyk, convert_pdfx
 from engine.print_layout import impose_poster
 from engine.rebuild import rebuild
@@ -153,6 +158,161 @@ def test_merge_refuses_to_pick_one_protection(encrypted_pdf, sample_pdf, tmp_dir
     out = os.path.join(tmp_dir, "mixed.pdf")
     with pytest.raises(ValueError, match="protection"):
         merge([encrypted_pdf, sample_pdf], out)
+
+
+def _write_metadata_policy(path, *, metadata: bool):
+    """An R4 document carrying metadata, encrypted under the given policy."""
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    pdf.Root["/Metadata"] = pdf.make_stream(b"<x:xmpmeta xmlns:x='adobe:ns:meta/'/>")
+    pdf.save(
+        str(path),
+        encryption=pikepdf.Encryption(
+            owner="", user="", R=4, aes=True, allow=LOCKED, metadata=metadata
+        ),
+    )
+    pdf.close()
+    return str(path)
+
+
+def _encrypt_metadata_of(path) -> bool:
+    with pikepdf.open(str(path)) as pdf:
+        return bool(pdf.trailer.Encrypt.get("/EncryptMetadata", True))
+
+
+@pytest.mark.parametrize("policy", [True, False])
+def test_merge_keeps_a_shared_metadata_policy(policy, tmp_dir):
+    first = _write_metadata_policy(os.path.join(tmp_dir, f"m1-{policy}.pdf"), metadata=policy)
+    second = _write_metadata_policy(os.path.join(tmp_dir, f"m2-{policy}.pdf"), metadata=policy)
+    out = os.path.join(tmp_dir, f"m-out-{policy}.pdf")
+    merge([first, second], out)
+    assert_still_protected(out, revision=4)
+    assert _encrypt_metadata_of(out) is policy
+
+
+@pytest.mark.parametrize("order", ["clear-first", "encrypted-first"])
+def test_merge_refuses_mixed_metadata_policies_in_either_order(order, tmp_dir):
+    """Two documents identical but for whether their metadata is encrypted.
+    Adopting either policy exposes or conceals metadata the other document's
+    author decided about, and which one wins would be source order."""
+    clear = _write_metadata_policy(os.path.join(tmp_dir, "clear.pdf"), metadata=False)
+    sealed = _write_metadata_policy(os.path.join(tmp_dir, "sealed.pdf"), metadata=True)
+    files = [clear, sealed] if order == "clear-first" else [sealed, clear]
+    out = os.path.join(tmp_dir, f"mixed-{order}.pdf")
+    with pytest.raises(ValueError, match="protection"):
+        merge(files, out)
+    assert not os.path.exists(out) or not os.path.getsize(out)
+
+
+@pytest.mark.parametrize(
+    "revision,entry,expected",
+    [
+        pytest.param(2, None, False, id="r2-has-no-switch"),
+        pytest.param(3, None, False, id="r3-has-no-switch"),
+        pytest.param(4, None, True, id="r4-absent-means-encrypted"),
+        pytest.param(4, True, True, id="r4-stated-true"),
+        pytest.param(4, False, False, id="r4-stated-false"),
+        pytest.param(6, None, True, id="r6-absent-means-encrypted"),
+        pytest.param(6, False, False, id="r6-stated-false"),
+    ],
+)
+def test_the_effective_metadata_policy_defaults_to_encrypted_from_revision_4(
+    revision, entry, expected
+):
+    """/EncryptMetadata is optional from R4 and its absence means the metadata
+    IS encrypted, so a document that omits it and one that states True carry
+    the same policy and must not refuse each other. R2/R3 have no switch."""
+    enc = pikepdf.Dictionary() if entry is None else pikepdf.Dictionary(EncryptMetadata=entry)
+    assert _effective_encrypt_metadata(enc, revision) is expected
+
+
+_PERMISSION_NAMES = [
+    "accessibility",
+    "extract",
+    "modify_annotation",
+    "modify_assembly",
+    "modify_form",
+    "modify_other",
+    "print_lowres",
+    "print_highres",
+]
+
+
+def _permissions(**overrides):
+    values = {name: True for name in _PERMISSION_NAMES}
+    values.update(overrides)
+    return pikepdf.Permissions(**values)
+
+
+def _write_variant(path, *, revision=4, aes=True, metadata=True, allow=None):
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    pdf.Root["/Metadata"] = pdf.make_stream(b"<x:xmpmeta xmlns:x='adobe:ns:meta/'/>")
+    pdf.save(
+        str(path),
+        encryption=pikepdf.Encryption(
+            owner="",
+            user="",
+            R=revision,
+            aes=aes,
+            metadata=metadata,
+            allow=_permissions() if allow is None else allow,
+        ),
+    )
+    pdf.close()
+    return str(path)
+
+
+# Each pair differs in exactly one characteristic that `source_encryption`
+# puts back. RC4 cannot leave metadata unencrypted, so the stream-method pair
+# holds `metadata=False` on both sides rather than varying two things at once.
+_VARIANTS = [
+    pytest.param({"revision": 4}, {"revision": 6}, id="revision"),
+    pytest.param(
+        {"aes": True, "metadata": False}, {"aes": False, "metadata": False}, id="stream-method"
+    ),
+    pytest.param({"metadata": True}, {"metadata": False}, id="encrypt-metadata"),
+    *(
+        pytest.param({}, {"allow": _permissions(**{name: False})}, id=f"permission-{name}")
+        for name in _PERMISSION_NAMES
+    ),
+]
+
+
+@pytest.mark.parametrize("base_kwargs,other_kwargs", _VARIANTS)
+def test_every_characteristic_the_rewrite_recreates_separates_two_profiles(
+    base_kwargs, other_kwargs, tmp_dir, request
+):
+    """`encryption_profile` decides whether two sources may share one output
+    encryption, so everything `source_encryption` puts back has to separate
+    them - a recreated characteristic left out of the comparison is taken
+    from whichever source came first.
+
+    Some permission bits qpdf normalizes away (a document cannot forbid
+    low-resolution printing while allowing high, and from R4 the accessibility
+    bit is not stored). Where the two documents came back carrying the same
+    permissions, there is no characteristic to separate and nothing to
+    compare; the profiles are then required to AGREE.
+    """
+    label = "".join(c if c.isalnum() else "-" for c in request.node.name)
+    base = _write_variant(os.path.join(tmp_dir, f"base-{label}.pdf"), **base_kwargs)
+    other = _write_variant(os.path.join(tmp_dir, f"other-{label}.pdf"), **other_kwargs)
+    with pikepdf.open(base) as a, pikepdf.open(other) as b:
+        assert source_encryption(a) is not None
+        assert encryption_profile(a) == encryption_profile(a)
+        differs = (
+            int(a.encryption.R) != int(b.encryption.R)
+            or str(a.encryption.stream_method) != str(b.encryption.stream_method)
+            or _encrypt_metadata_of(base) != _encrypt_metadata_of(other)
+            or any(
+                bool(getattr(a.allow, n)) != bool(getattr(b.allow, n))
+                for n in _PERMISSION_NAMES
+            )
+        )
+        if differs:
+            assert encryption_profile(a) != encryption_profile(b)
+        else:
+            assert encryption_profile(a) == encryption_profile(b)
 
 
 def test_renderer_backed_rewrites_refuse(encrypted_pdf, tmp_dir):
