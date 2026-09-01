@@ -7,7 +7,9 @@ output and nothing says so. These tests pin both halves of the answer: the
 rewrite preserves what it can, and refuses where it cannot.
 """
 
+import io
 import os
+import re
 
 import pikepdf
 import pytest
@@ -18,6 +20,7 @@ from engine.grayscale import grayscale
 from engine.inspect import unlock
 from engine.merge import merge
 from engine.pdf_save import (
+    _descriptor,
     _effective_encrypt_metadata,
     encryption_profile,
     source_encryption,
@@ -279,6 +282,17 @@ _VARIANTS = [
 ]
 
 
+def _recreated(pdf):
+    """The protection `source_encryption` would write back, as a comparable."""
+    enc = source_encryption(pdf)
+    return (
+        enc.R,
+        enc.aes,
+        enc.metadata,
+        tuple(bool(getattr(enc.allow, name)) for name in _PERMISSION_NAMES),
+    )
+
+
 @pytest.mark.parametrize("base_kwargs,other_kwargs", _VARIANTS)
 def test_every_characteristic_the_rewrite_recreates_separates_two_profiles(
     base_kwargs, other_kwargs, tmp_dir, request
@@ -300,15 +314,13 @@ def test_every_characteristic_the_rewrite_recreates_separates_two_profiles(
     with pikepdf.open(base) as a, pikepdf.open(other) as b:
         assert source_encryption(a) is not None
         assert encryption_profile(a) == encryption_profile(a)
-        differs = (
-            int(a.encryption.R) != int(b.encryption.R)
-            or str(a.encryption.stream_method) != str(b.encryption.stream_method)
-            or _encrypt_metadata_of(base) != _encrypt_metadata_of(other)
-            or any(
-                bool(getattr(a.allow, n)) != bool(getattr(b.allow, n))
-                for n in _PERMISSION_NAMES
-            )
-        )
+        # The oracle is the RECREATION, not a second reading of the source.
+        # Re-deriving "what differs" here once re-implemented the very bug the
+        # profile had (both read only the stream cipher), so the two agreed on
+        # a document they were both wrong about. What the profile owes is that
+        # it separates exactly the sources the rewrite would protect
+        # differently, so ask the rewrite.
+        differs = _recreated(a) != _recreated(b)
         if differs:
             assert encryption_profile(a) != encryption_profile(b)
         else:
@@ -524,3 +536,187 @@ def test_no_engine_module_saves_a_document_outside_the_save_seam():
     assert found - DIRECT_SAVE_ALLOWED == set()
     # And the whitelist does not outlive the sites it names.
     assert DIRECT_SAVE_ALLOWED - found == set()
+
+
+# ── crypt filters that differ per data class ──────────────────────────────
+#
+# ISO 32000-2 Table 20: from /V 4 an encryption dictionary names a crypt
+# filter per data class — /StmF for streams, /StrF for strings, /EFF for
+# embedded file streams (absent /EFF follows /StmF). Each may name a
+# DIFFERENT filter, so one document can hold AES strings beside unencrypted
+# streams. `pikepdf.Encryption` has one `aes` flag and writes all three the
+# same, so a rewrite that reduced the source to one cipher silently rewrote
+# the other two — including AES down to RC4, through the seam almost every
+# engine operation saves through.
+#
+# pikepdf cannot WRITE such a document, so the fixtures below patch the
+# encryption dictionary after the fact. /CF, /StmF, /StrF and /EFF take no
+# part in the file encryption key (7.6.3.2 derives it from /O, /U, /P, the
+# file identifier and /EncryptMetadata), so an equal-length substitution
+# leaves the document openable with the same empty password. Where bytes are
+# added, the encryption dictionary is the last object in the file, so only
+# the `startxref` offset moves.
+
+
+def _encrypted_bytes(**kwargs) -> bytes:
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    out = io.BytesIO()
+    pdf.save(out, encryption=pikepdf.Encryption(owner="", user="", allow=LOCKED, **kwargs))
+    pdf.close()
+    return out.getvalue()
+
+
+def _substitute(data: bytes, old: bytes, new: bytes) -> bytes:
+    assert len(old) == len(new), "the substitution must not move any offset"
+    assert data.count(old) == 1, f"{old!r} is not a unique anchor"
+    return data.replace(old, new)
+
+
+def _add_to_encrypt_dict(data: bytes, entry: bytes) -> bytes:
+    start = data.index(b"/Filter /Standard")
+    end = data.index(b" >>\nendobj", start)
+    grown = data[:end] + b" " + entry + data[end:]
+    offset = re.search(rb"startxref\n(\d+)\n", grown)
+    moved = str(int(offset.group(1)) + len(entry) + 1).encode()
+    return grown[: offset.start(1)] + moved + grown[offset.end(1) :]
+
+
+def _write_bytes(path, data: bytes) -> str:
+    with open(path, "wb") as handle:
+        handle.write(data)
+    return str(path)
+
+
+_STANDARD_FILTERS = b"/StmF /StdCF /StrF /StdCF"
+
+# Streams pass through unencrypted while strings are AES (the shape the
+# downgrade probe caught, where the rewrite wrote RC4 over both), and the
+# other direction, which no single-cipher reading tells from plain AES.
+_MIXED = {
+    "streams-clear": b"/StmF/Identity/StrF/StdCF",
+    "strings-clear": b"/StmF/StdCF/StrF/Identity",
+}
+
+
+def _mixed_filter_pdf(path, direction: str) -> str:
+    data = _encrypted_bytes(R=4, aes=True, metadata=False)
+    return _write_bytes(path, _substitute(data, _STANDARD_FILTERS, _MIXED[direction]))
+
+
+def _embedded_files_clear_pdf(path) -> str:
+    """Streams and strings AES, embedded file streams passed through."""
+    data = _add_to_encrypt_dict(_encrypted_bytes(R=4, aes=True), b"/EFF /Identity")
+    return _write_bytes(path, data)
+
+
+def _rc4_with_encrypted_metadata_pdf(path) -> str:
+    """R4 under RC4 with its metadata encrypted.
+
+    Legal, and the combination pikepdf refuses to write ("Cannot encrypt
+    metadata unless AES encryption is enabled"). /CFM is not part of the key
+    derivation, so writing the AES form and renaming the method produces it.
+    """
+    data = _encrypted_bytes(R=4, aes=True, metadata=True)
+    return _write_bytes(path, _substitute(data, b"/CFM /AESV2", b"/CFM /V2   "))
+
+
+@pytest.mark.parametrize("direction", sorted(_MIXED))
+def test_a_rewrite_refuses_a_document_whose_ciphers_differ(direction, tmp_dir):
+    src = _mixed_filter_pdf(os.path.join(tmp_dir, f"mixed-{direction}.pdf"), direction)
+    out = os.path.join(tmp_dir, f"mixed-{direction}-out.pdf")
+    with pytest.raises(ValueError, match="different ciphers"):
+        repair(src, out)
+    assert not os.path.exists(out)
+
+
+def test_the_source_really_did_carry_two_ciphers(tmp_dir):
+    """Without this the refusal above could be passing for the wrong reason."""
+    for direction, expected in (
+        ("streams-clear", ("none", "aes")),
+        ("strings-clear", ("aes", "none")),
+    ):
+        src = _mixed_filter_pdf(os.path.join(tmp_dir, f"proof-{direction}.pdf"), direction)
+        with pikepdf.open(src) as pdf:
+            found = (
+                str(pdf.encryption.stream_method).rsplit(".", 1)[-1],
+                str(pdf.encryption.string_method).rsplit(".", 1)[-1],
+            )
+        assert found == expected
+
+
+def test_a_rewrite_refuses_when_only_embedded_files_differ(tmp_dir):
+    src = _embedded_files_clear_pdf(os.path.join(tmp_dir, "eff.pdf"))
+    with pikepdf.open(src) as pdf:
+        assert str(pdf.encryption.stream_method).endswith("aes")
+        assert str(pdf.encryption.file_method).endswith("none")
+    out = os.path.join(tmp_dir, "eff-out.pdf")
+    with pytest.raises(ValueError, match="different ciphers"):
+        repair(src, out)
+    assert not os.path.exists(out)
+
+
+def test_revision_4_rc4_with_encrypted_metadata_refuses_by_name(tmp_dir):
+    """pikepdf rejects that combination with a raw ValueError of its own, in
+    words no catalog carries and no user asked for. The refusal has to be
+    ours, and has to happen before anything is written."""
+    src = _rc4_with_encrypted_metadata_pdf(os.path.join(tmp_dir, "rc4-meta.pdf"))
+    out = os.path.join(tmp_dir, "rc4-meta-out.pdf")
+    with pytest.raises(ValueError) as caught:
+        repair(src, out)
+    assert "unless AES encryption is enabled" not in str(caught.value)
+    assert "cannot be kept through this operation" in str(caught.value)
+    assert "metadata" in str(caught.value)
+    assert not os.path.exists(out)
+
+
+@pytest.mark.parametrize("direction", sorted(_MIXED))
+@pytest.mark.parametrize("order", ["mixed-first", "ordinary-first"])
+def test_merge_separates_a_mixed_cipher_source_in_either_order(
+    direction, order, tmp_dir
+):
+    """The mixed source and an ordinary AES source agree on revision, key
+    length, metadata policy and every permission bit — they differ only in
+    which cipher reaches one data class. Comparing one cipher made them
+    equal, and the merge then took whichever protection came first."""
+    label = f"{direction}-{order}"
+    mixed = _mixed_filter_pdf(os.path.join(tmp_dir, f"mm-{label}.pdf"), direction)
+    ordinary = _write_bytes(
+        os.path.join(tmp_dir, f"mo-{label}.pdf"),
+        _encrypted_bytes(R=4, aes=True, metadata=False),
+    )
+    with pikepdf.open(mixed) as a, pikepdf.open(ordinary) as b:
+        assert encryption_profile(a) != encryption_profile(b)
+    files = [mixed, ordinary] if order == "mixed-first" else [ordinary, mixed]
+    out = os.path.join(tmp_dir, f"m-{label}-out.pdf")
+    with pytest.raises(ValueError, match="protection"):
+        merge(files, out)
+    assert not os.path.exists(out)
+
+
+@pytest.mark.parametrize("direction", sorted(_MIXED))
+def test_merge_of_agreeing_mixed_cipher_sources_still_refuses(direction, tmp_dir):
+    """Agreement is not reproducibility: two sources can carry the same
+    protection and it still be one the writer cannot express."""
+    first = _mixed_filter_pdf(os.path.join(tmp_dir, f"ma-{direction}.pdf"), direction)
+    second = _mixed_filter_pdf(os.path.join(tmp_dir, f"mb-{direction}.pdf"), direction)
+    out = os.path.join(tmp_dir, f"ma-{direction}-out.pdf")
+    with pytest.raises(ValueError, match="different ciphers"):
+        merge([first, second], out)
+    assert not os.path.exists(out)
+
+
+def test_the_descriptor_is_the_profile(tmp_dir):
+    """One derivation, two consumers. A second reading is what drifted."""
+    src = _write_bytes(
+        os.path.join(tmp_dir, "descriptor.pdf"),
+        _encrypted_bytes(R=4, aes=True, metadata=False),
+    )
+    with pikepdf.open(src) as pdf:
+        profile = encryption_profile(pdf)
+        assert profile == _descriptor(pdf)
+        assert profile.stream_method == "aes"
+        assert profile.string_method == "aes"
+        assert profile.file_method == "aes"
+        assert (profile.revision, profile.version, profile.bits) == (4, 4, 128)
+        assert profile.encrypt_metadata is False
