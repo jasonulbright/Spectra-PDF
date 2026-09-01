@@ -32,12 +32,19 @@ From the repo root:
 
 ```powershell
 $env:VITE_E2E = "1"
-npx tauri build --debug --no-bundle
+npx tauri build --debug --no-bundle --features e2e-net-private
 ```
+
+(or `npm run build:app` from `e2e-tests/`, which runs exactly that.)
 
 `tauri build --debug` embeds the production frontend into the binary, so
 the suite exercises the same renderer path as a release build.
 `--no-bundle` skips the NSIS installer step.
+`--features e2e-net-private` compiles in the loopback carve-out
+(`src-tauri/src/net.rs`) that the network spec needs to reach `127.0.0.1`;
+a release artifact is built without it and so carries no bypass. A binary
+missing the feature is rejected at session start by the `before` probe in
+`wdio.conf.ts`, not left to fail as a spec.
 
 The output is `src-tauri/target/debug/spectrapdf.exe`.
 

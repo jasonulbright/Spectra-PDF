@@ -192,6 +192,34 @@ export const config: WebdriverIO.Config = {
       // Give tauri-driver a moment to bind the port before WDIO connects.
       setTimeout(resolveSession, 1500);
     }),
+  before: async () => {
+    // The binary under test must carry the `e2e-net-private` feature: without
+    // it every request the network spec makes to 127.0.0.1 is refused as a
+    // private destination, which reads as a product defect rather than as a
+    // build that omitted a flag. The command is compiled unconditionally and
+    // answers what the feature did, so a `false` is a build verdict.
+    const compiled = await browser.execute(async () => {
+      const invoke = (window as unknown as {
+        __TAURI_INTERNALS__?: { invoke: (cmd: string, args?: unknown) => Promise<unknown> };
+      }).__TAURI_INTERNALS__?.invoke;
+      if (!invoke) return 'no-ipc';
+      try {
+        return (await invoke('net_private_carveout_compiled')) === true;
+      } catch (err) {
+        return `probe-failed: ${String(err)}`;
+      }
+    });
+    if (compiled !== true) {
+      throw new Error(
+        `The app binary at ${APP_BINARY} was not built with the \`e2e-net-private\` Cargo ` +
+          `feature (probe answered ${JSON.stringify(compiled)}). Rebuild with ` +
+          '`npm run build:app` (VITE_E2E=1 npx tauri build --debug --no-bundle ' +
+          '--features e2e-net-private) — without it the loopback carve-out in ' +
+          'src-tauri/src/net.rs is compiled out and every network spec request to ' +
+          '127.0.0.1 is refused as a private destination.',
+      );
+    }
+  },
   afterSession: () =>
     new Promise<void>((resolveDone) => {
       if (tauriDriver && !tauriDriver.killed) {

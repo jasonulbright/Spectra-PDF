@@ -2619,7 +2619,20 @@ def fill_form_fields(
         # and left the datasets packet holding the old value would publish two
         # answers for one field, so the packet is written in the same pass.
         # Its bytes are spliced, never re-serialized (`engine/xfa_datasets`).
-        xfa_report = _write_xfa_datasets(pdf, [*plan, *derived])
+        #
+        # A flatten removes /AcroForm and with it /XFA, so the document that
+        # gets written has no XML data to disagree with its fields and the
+        # consistency requirement has nothing to bind. Synchronizing first
+        # would refuse documents whose packet is absent, unreadable by this
+        # build, or missing a node — refusing to write a file whose XFA the
+        # same call was about to delete.
+        xfa_kind = xfa.classify(pdf)
+        if flatten:
+            xfa_report = (
+                {} if xfa_kind == xfa.NONE else {"xfa": xfa_kind, "xfa_datasets_updated": 0}
+            )
+        else:
+            xfa_report = _write_xfa_datasets(pdf, [*plan, *derived])
 
         filled = 0
         fonts_substituted: list[str] = []
@@ -2742,9 +2755,11 @@ def fill_form_fields(
             del acro["/NeedAppearances"]
 
         flattened = False
+        xfa_stripped = False
         if flatten:
             _flatten_fields(pdf)
             flattened = True
+            xfa_stripped = xfa_kind != xfa.NONE and not _has_xfa(pdf)
 
         if same_file:
             # The preservation reads the input at its own path, so it runs
@@ -2761,10 +2776,11 @@ def fill_form_fields(
         "output": str(output_path),
         "filled": filled,
         "flattened": flattened,
-        # Retained at False: the fill no longer strips /XFA (it updates the
-        # datasets packet instead), and a reader of this key learns that the
-        # packets survived rather than finding the key gone.
-        "xfa_stripped": False,
+        # A fill alone never strips /XFA — it updates the datasets packet, so
+        # the key stays present and False to say the packets survived. A
+        # flatten deletes /AcroForm, and /XFA with it; reported from what the
+        # document actually lost, not from the request.
+        "xfa_stripped": xfa_stripped,
         **xfa_report,
         # Fields whose /DA named a font missing from /DR — their appearances
         # render (honestly) in Helvetica. Surfaced, never silent.
