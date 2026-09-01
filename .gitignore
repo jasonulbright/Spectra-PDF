@@ -97,6 +97,7 @@ project-manifest.json
 # never reach the public repo.
 CLAUDE.md
 docs/PUNCHLIST.md
+docs/audit/
 docs/architecture/
 docs/reviews/
 # The doc map, archived tracker history, and external-baseline reference
